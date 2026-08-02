@@ -23,6 +23,8 @@ public class FundingProperties {
     private Settlement settlement = new Settlement();
     @Valid
     private Coordination coordination = new Coordination();
+    @Valid
+    private Wal wal = new Wal();
 
     /** 启动时拒绝未隔离的资金费 Topic 配置。 */
     @PostConstruct
@@ -62,12 +64,33 @@ public class FundingProperties {
         this.coordination = coordination;
     }
 
+    public Wal getWal() {
+        return wal;
+    }
+
+    public void setWal(Wal wal) {
+        this.wal = wal;
+    }
+
+    public static class Wal {
+        private String directory = "data/funding-wal";
+
+        public String getDirectory() {
+            return directory;
+        }
+
+        public void setDirectory(String directory) {
+            this.directory = directory;
+        }
+    }
+
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         private boolean productTopicsEnabled;
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String cacheGroupId = "surprising-funding-rate-cache-local";
+        private String accountStateSnapshotGroupId = "surprising-funding-account-state-v1";
         private int concurrency = 1;
         private int commandResultsConcurrency = 4;
         private int maxPollRecords = 500;
@@ -132,6 +155,22 @@ public class FundingProperties {
 
         public String getCommandResultsGroupId() {
             return ProductTopicNames.of(productLine).consumerGroup("funding-account-results");
+        }
+
+        public String getAccountStateEventsTopic() {
+            return productTopicsEnabled
+                    ? ProductTopicNames.of(productLine).accountStateEventsTopic()
+                    : "surprising.account.state.events.v1";
+        }
+
+        public String getAccountStateSnapshotGroupId() {
+            return productTopicsEnabled
+                    ? ProductTopicNames.of(productLine).consumerGroup("funding-account-state")
+                    : accountStateSnapshotGroupId;
+        }
+
+        public void setAccountStateSnapshotGroupId(String accountStateSnapshotGroupId) {
+            this.accountStateSnapshotGroupId = accountStateSnapshotGroupId;
         }
 
         public int getConcurrency() {

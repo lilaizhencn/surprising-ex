@@ -1,5 +1,6 @@
 package com.surprising.funding.provider.repository;
 
+import com.surprising.account.api.cache.PerpetualAccountStateSnapshotCache;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingPaymentCursor;
@@ -9,89 +10,61 @@ import com.surprising.funding.provider.service.FundingMath;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.MarginMode;
-import com.surprising.trading.api.model.PositionSide;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
 
 /**
- * 读取单页资金费结算候选持仓。
+ * 从账户完整 JVM 快照读取一页资金费结算候选持仓。
  *
- * <p>结算金额只把 account_positions 中的业务状态与本地不可变合约快照、资产精度快照组合计算；
- * 数据库不再读取合约表。该查询只用于在线结算，不提供后台时间线、资金对账或运营报表。</p>
+ * <p>数据库中的 account_positions 只是异步投影，不能参与资金费在线裁决。账户快照未追赶到
+ * Kafka 最新位点、合约快照缺失或修订发生间隙时直接失败关闭，等待恢复后重试。</p>
  */
 @Repository
 public class FundingPaymentCandidateRepository {
 
-    private final JdbcTemplate jdbcTemplate;
     private final FundingProperties properties;
-    private final InstrumentSnapshotCache snapshotCache;
+    private final InstrumentSnapshotCache instrumentSnapshotCache;
+    private final PerpetualAccountStateSnapshotCache accountStateSnapshotCache;
 
-    public FundingPaymentCandidateRepository(JdbcTemplate jdbcTemplate, FundingProperties properties) {
-        this(jdbcTemplate, properties, null);
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public FundingPaymentCandidateRepository(JdbcTemplate jdbcTemplate,
-                                             FundingProperties properties,
-                                             @org.springframework.beans.factory.annotation.Qualifier("fundingInstrumentSnapshotCache")
-                                             InstrumentSnapshotCache snapshotCache) {
-        this.jdbcTemplate = jdbcTemplate;
+    @Autowired
+    public FundingPaymentCandidateRepository(
+            FundingProperties properties,
+            @Qualifier("fundingInstrumentSnapshotCache") InstrumentSnapshotCache instrumentSnapshotCache,
+            @Qualifier("fundingAccountStateSnapshotCache")
+            PerpetualAccountStateSnapshotCache accountStateSnapshotCache) {
         this.properties = properties;
-        this.snapshotCache = snapshotCache;
+        this.instrumentSnapshotCache = instrumentSnapshotCache;
+        this.accountStateSnapshotCache = accountStateSnapshotCache;
     }
 
     public FundingPaymentPage findPage(FundingSettlementWork settlement, int limit) {
-        Optional<ProductLine> fundingProductLine = currentFundingProductLine();
-        if (fundingProductLine.isEmpty()) {
+        ProductLine productLine = currentFundingProductLine();
+        if (productLine == null) {
             return FundingPaymentPage.empty(settlement.cursor());
         }
-        ProductLine productLine = fundingProductLine.get();
-        if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
+        if (!accountStateSnapshotCache.ready()) {
+            throw new IllegalStateException("资金费账户 JVM 快照尚未追赶到最新位点");
+        }
+        if (!instrumentSnapshotCache.initialized(productLine)) {
             throw new IllegalStateException("资金费合约 JVM 快照尚未就绪");
         }
-        return findPageFromSnapshot(settlement, productLine, limit);
-    }
-
-    private FundingPaymentPage findPageFromSnapshot(FundingSettlementWork settlement,
-                                                     ProductLine productLine,
-                                                     int limit) {
         int safeLimit = Math.max(1, limit);
-        List<PositionRow> rows = jdbcTemplate.query("""
-                SELECT p.user_id, p.symbol, p.margin_mode, p.position_side,
-                       p.instrument_version, p.signed_quantity_steps
-                  FROM account_positions p
-                 WHERE p.symbol = ?
-                   AND p.product_line = ?
-                   AND p.instrument_version = ?
-                   AND p.signed_quantity_steps <> 0
-                   AND (p.user_id, p.margin_mode, p.position_side) > (?, ?, ?)
-                 ORDER BY p.user_id ASC, p.margin_mode ASC, p.position_side ASC
-                 LIMIT ?
-                """, (rs, rowNum) -> new PositionRow(
-                rs.getLong("user_id"), rs.getString("symbol"),
-                MarginMode.fromNullableDbValue(rs.getString("margin_mode")),
-                PositionSide.fromNullableDbValue(rs.getString("position_side")),
-                rs.getLong("instrument_version"), rs.getLong("signed_quantity_steps")),
-                settlement.symbol(), productLine.name(), settlement.instrumentVersion(),
-                settlement.cursor().userId(), settlement.cursor().marginMode(), settlement.cursor().positionSide(),
-                safeLimit + 1);
-        List<FundingPaymentCandidate> candidates = rows.stream().map(row -> {
-            var instrument = snapshotCache.version(productLine, row.symbol(), row.instrumentVersion())
-                    .orElseThrow(() -> new IllegalStateException("资金费合约快照不存在: " + row.symbol()));
-            long settleScale = snapshotCache.scale(productLine, instrument.settleAsset())
-                    .orElseThrow(() -> new IllegalStateException("资金费资产精度不存在: " + instrument.settleAsset()));
-            long notionalUnits = PerpetualContractMath.notionalUnits(
-                    instrument.contractType(), row.signedQuantitySteps(), settlement.markPriceTicks(),
-                    instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), settleScale);
-            return new FundingPaymentCandidate(row.userId(), row.symbol(), row.marginMode(), row.positionSide(),
-                    instrument.settleAsset(), row.signedQuantitySteps(), notionalUnits,
-                    settlement.fundingRatePpm(),
-                    FundingMath.paymentAmount(row.signedQuantitySteps(), notionalUnits,
-                            settlement.fundingRatePpm()));
-        }).toList();
+        FundingPaymentCursor cursor = settlement.cursor();
+        List<FundingPaymentCandidate> candidates = accountStateSnapshotCache.states().stream()
+                .flatMap(state -> state.positions().stream()
+                        .filter(position -> position.signedQuantitySteps() != 0L)
+                        .filter(position -> position.symbol().equalsIgnoreCase(settlement.symbol()))
+                        .filter(position -> position.instrumentVersion() == settlement.instrumentVersion())
+                        .map(position -> toCandidate(productLine, state.userId(), position, settlement)))
+                .filter(candidate -> after(candidate, cursor))
+                .sorted(Comparator.comparingLong(FundingPaymentCandidate::userId)
+                        .thenComparing(candidate -> candidate.marginMode().name())
+                        .thenComparing(candidate -> candidate.positionSide().name()))
+                .limit((long) safeLimit + 1L)
+                .toList();
         boolean hasMore = candidates.size() > safeLimit;
         List<FundingPaymentCandidate> items = hasMore
                 ? List.copyOf(candidates.subList(0, safeLimit)) : List.copyOf(candidates);
@@ -100,18 +73,38 @@ public class FundingPaymentCandidateRepository {
         return new FundingPaymentPage(items, nextCursor, hasMore);
     }
 
-    private Optional<ProductLine> currentFundingProductLine() {
-        ProductLine productLine = properties.getKafka().isProductTopicsEnabled()
-                ? properties.getKafka().getProductLine()
-                : ProductLine.LINEAR_PERPETUAL;
-        return productLine.isFundingProduct() ? Optional.of(productLine) : Optional.empty();
+    private FundingPaymentCandidate toCandidate(ProductLine productLine,
+                                                long userId,
+                                                com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent.Position position,
+                                                FundingSettlementWork settlement) {
+        var instrument = instrumentSnapshotCache.version(productLine, position.symbol(), position.instrumentVersion())
+                .orElseThrow(() -> new IllegalStateException("资金费合约快照不存在: " + position.symbol()));
+        long settleScale = instrumentSnapshotCache.scale(productLine, instrument.settleAsset())
+                .orElseThrow(() -> new IllegalStateException("资金费资产精度不存在: " + instrument.settleAsset()));
+        long notionalUnits = PerpetualContractMath.notionalUnits(
+                instrument.contractType(), position.signedQuantitySteps(), settlement.markPriceTicks(),
+                instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), settleScale);
+        return new FundingPaymentCandidate(userId, position.symbol(), position.marginMode(), position.positionSide(),
+                instrument.settleAsset(), position.signedQuantitySteps(), notionalUnits,
+                settlement.fundingRatePpm(), FundingMath.paymentAmount(position.signedQuantitySteps(), notionalUnits,
+                        settlement.fundingRatePpm()));
     }
 
-    private record PositionRow(long userId,
-                               String symbol,
-                               MarginMode marginMode,
-                               PositionSide positionSide,
-                               long instrumentVersion,
-                               long signedQuantitySteps) {
+    private boolean after(FundingPaymentCandidate candidate, FundingPaymentCursor cursor) {
+        int userComparison = Long.compare(candidate.userId(), cursor.userId());
+        if (userComparison != 0) {
+            return userComparison > 0;
+        }
+        int marginComparison = candidate.marginMode().name().compareTo(cursor.marginMode());
+        if (marginComparison != 0) {
+            return marginComparison > 0;
+        }
+        return candidate.positionSide().name().compareTo(cursor.positionSide()) > 0;
+    }
+
+    private ProductLine currentFundingProductLine() {
+        ProductLine productLine = properties.getKafka().isProductTopicsEnabled()
+                ? properties.getKafka().getProductLine() : ProductLine.LINEAR_PERPETUAL;
+        return productLine.isFundingProduct() ? productLine : null;
     }
 }

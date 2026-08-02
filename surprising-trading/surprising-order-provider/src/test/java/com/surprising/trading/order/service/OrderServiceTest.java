@@ -24,6 +24,7 @@ import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
+import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
 import com.surprising.trading.api.model.AdminCursorPage;
 import com.surprising.trading.api.model.BatchAmendOrdersRequest;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
@@ -37,6 +38,7 @@ import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -88,6 +90,9 @@ class OrderServiceTest {
 
     @Mock
     private OrderFeeSnapshotLookup feeSnapshotLookup;
+
+    @Mock
+    private OrderUserStateService orderUserStateService;
 
     @Mock
     private OrderMarginRepository orderMarginRepository;
@@ -934,11 +939,11 @@ class OrderServiceTest {
 
     @Test
     void adminCancelPreviewReturnsImpactAndSampleOrders() {
-        OrderService service = service();
+        OrderService service = userStateService();
         OrderRecord first = order(9001L, "preview-1", OrderStatus.ACCEPTED, null);
-        when(orderRepository.adminCancelableImpact(1001L, "BTC-USDT"))
-                .thenReturn(new OrderRepository.CancelableOrderImpact(3, 25L, 2, 1));
-        when(orderRepository.adminCancelableOrders(1001L, "BTC-USDT", 2)).thenReturn(java.util.List.of(first));
+        when(orderUserStateService.adminCancelPreview(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 2))
+                .thenReturn(new AdminCancelOrdersPreviewResponse(1001L, "BTC-USDT", 3, 1, 25L, 2, 1,
+                        List.of(toResponse(first))));
 
         var response = service.adminCancelPreview(1001L, "btc-usdt", 2);
 
@@ -950,16 +955,17 @@ class OrderServiceTest {
         assertThat(response.buyOrders()).isEqualTo(2);
         assertThat(response.sellOrders()).isEqualTo(1);
         assertThat(response.orders()).extracting("orderId").containsExactly(9001L);
+        verify(orderUserStateService).adminCancelPreview(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 2);
     }
 
     @Test
     void adminOrdersDelegatesCursorAndSort() {
-        OrderService service = service();
+        OrderService service = userStateService();
         OrderRecord row = order(9001L, "admin-page", OrderStatus.ACCEPTED, null);
-        when(orderRepository.adminOrderPage(1001L, "BTC-USDT", OrderStatus.ACCEPTED, 9001L, 25,
-                "cursor-1", "createdAt.asc"))
-                .thenReturn(new AdminCursorPage.CursorPage<>(java.util.List.of(row),
-                        "cursor-2", true, "createdAt.asc", 25));
+        when(orderUserStateService.adminOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                OrderStatus.ACCEPTED, 9001L, 25, "cursor-1", "createdAt.asc"))
+                .thenReturn(new OrderQueryResponse(1, List.of(toResponse(row)), "cursor-2", true,
+                        "createdAt.asc", 25));
 
         var response = service.adminOrders(1001L, "btc-usdt", "accepted", 9001L, 25,
                 "cursor-1", "createdAt.asc");
@@ -969,25 +975,25 @@ class OrderServiceTest {
         assertThat(response.hasMore()).isTrue();
         assertThat(response.sort()).isEqualTo("createdAt.asc");
         assertThat(response.limit()).isEqualTo(25);
-        verify(orderRepository).adminOrderPage(1001L, "BTC-USDT", OrderStatus.ACCEPTED, 9001L, 25,
-                "cursor-1", "createdAt.asc");
+        verify(orderUserStateService).adminOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                OrderStatus.ACCEPTED, 9001L, 25, "cursor-1", "createdAt.asc");
     }
 
     @Test
     void adminOrdersDelegatesProductLineAsContractType() {
-        OrderService service = service();
+        OrderService service = userStateService(ProductLine.LINEAR_DELIVERY);
         OrderRecord row = order(9001L, "admin-product-line", OrderStatus.ACCEPTED, null);
-        when(orderRepository.adminOrderPage(1001L, "BTC-USDT", OrderStatus.ACCEPTED, 9001L, 25,
-                "LINEAR_DELIVERY", "cursor-1", "createdAt.asc"))
-                .thenReturn(new AdminCursorPage.CursorPage<>(java.util.List.of(row),
-                        "cursor-2", true, "createdAt.asc", 25));
+        when(orderUserStateService.adminOrders(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
+                OrderStatus.ACCEPTED, 9001L, 25, "cursor-1", "createdAt.asc"))
+                .thenReturn(new OrderQueryResponse(1, List.of(toResponse(row)), "cursor-2", true,
+                        "createdAt.asc", 25));
 
         var response = service.adminOrders(1001L, "btc-usdt", "accepted", 9001L, 25,
                 "cursor-1", "createdAt.asc", ProductLine.LINEAR_DELIVERY);
 
         assertThat(response.orders()).extracting("orderId").containsExactly(9001L);
-        verify(orderRepository).adminOrderPage(1001L, "BTC-USDT", OrderStatus.ACCEPTED, 9001L, 25,
-                "LINEAR_DELIVERY", "cursor-1", "createdAt.asc");
+        verify(orderUserStateService).adminOrders(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
+                OrderStatus.ACCEPTED, 9001L, 25, "cursor-1", "createdAt.asc");
     }
 
     @Test
@@ -1049,6 +1055,33 @@ class OrderServiceTest {
                 reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
                 orderMarginRepository,
                 spotOrderReservationRepository, outboxRepository, null, null, feeSnapshotLookup);
+    }
+
+    private OrderService userStateService() {
+        return userStateService(new TradingOrderProperties());
+    }
+
+    private OrderService userStateService(ProductLine productLine) {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setProductLine(productLine);
+        return userStateService(properties);
+    }
+
+    private OrderService userStateService(TradingOrderProperties properties) {
+        return new OrderService(new ObjectMapper(), properties, orderValidator,
+                reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
+                orderMarginRepository, spotOrderReservationRepository, outboxRepository, null, null,
+                feeSnapshotLookup, orderUserStateService);
+    }
+
+    private com.surprising.trading.api.model.OrderResponse toResponse(OrderRecord order) {
+        return new com.surprising.trading.api.model.OrderResponse(
+                order.orderId(), order.userId(), order.clientOrderId(), order.symbol(), order.instrumentVersion(),
+                order.side(), order.orderType(), order.timeInForce(), order.priceTicks(), order.quantitySteps(),
+                order.executedQuantitySteps(), order.remainingQuantitySteps(), order.marginMode(), order.positionSide(),
+                order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.reduceOnly(), order.postOnly(),
+                order.status(), order.rejectReason(), order.createdAt(), order.updatedAt());
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

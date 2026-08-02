@@ -60,6 +60,13 @@ public class FundingKafkaConfiguration {
                 properties, properties.getKafka().getInstrumentSnapshotGroupId()));
     }
 
+    @Bean
+    public ConsumerFactory<String, String> fundingAccountStateSnapshotConsumerFactory(
+            FundingProperties properties) {
+        return new DefaultKafkaConsumerFactory<>(consumerProperties(
+                properties, properties.getKafka().getAccountStateSnapshotGroupId()));
+    }
+
     private Map<String, Object> consumerProperties(FundingProperties properties, String groupId) {
         Map<String, Object> config = new HashMap<>();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
@@ -104,6 +111,21 @@ public class FundingKafkaConfiguration {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setCommonErrorHandler(new org.springframework.kafka.listener.DefaultErrorHandler(
+                new org.springframework.util.backoff.FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
+
+    @Bean(name = "fundingAccountStateSnapshotKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String>
+    fundingAccountStateSnapshotKafkaListenerContainerFactory(
+            @Qualifier("fundingAccountStateSnapshotConsumerFactory")
+            ConsumerFactory<String, String> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
         factory.setCommonErrorHandler(new org.springframework.kafka.listener.DefaultErrorHandler(
                 new org.springframework.util.backoff.FixedBackOff(1_000L, Long.MAX_VALUE)));
         return factory;

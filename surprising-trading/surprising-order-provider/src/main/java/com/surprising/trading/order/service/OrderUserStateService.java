@@ -33,6 +33,7 @@ import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.OrderUserEvent;
 import com.surprising.trading.order.model.OrderUserState;
 import com.surprising.trading.api.model.AlgoOrderResponse;
+import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.security.MessageDigest;
@@ -539,13 +540,20 @@ public class OrderUserStateService {
     }
 
     public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
+        return findByClientOrderId(userId, clientOrderId)
+                .orElseThrow(() -> new IllegalStateException("order not found for clientOrderId: " + clientOrderId));
+    }
+
+    /**
+     * 读取用户分区中的公开幂等键，不把“未找到”与事实流损坏、分区不可用混为一谈。
+     */
+    public Optional<OrderResponse> findByClientOrderId(long userId, String clientOrderId) {
         UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
         return lane.execute(partition, () -> {
             applyPartition(partition);
             return state(partition).orders().stream()
-                    .filter(value -> clientOrderId.equals(value.clientOrderId())).findFirst()
-                    .map(this::toResponse)
-                    .orElseThrow(() -> new IllegalStateException("order not found for clientOrderId: " + clientOrderId));
+                    .filter(value -> clientOrderId.equals(value.clientOrderId()))
+                    .findFirst().map(this::toResponse);
         });
     }
 
@@ -569,6 +577,75 @@ public class OrderUserStateService {
         String cursor = more ? Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(("order:" + page.getLast().orderId()).getBytes(StandardCharsets.UTF_8)) : null;
         return new OrderQueryResponse(page.size(), page, cursor, more, "orderId.desc", limit);
+    }
+
+    /** 管理查询也只扫描用户分区快照，数据库订单投影不参与在线裁决。 */
+    public OrderQueryResponse adminOrders(ProductLine productLine,
+                                           Long userId,
+                                           String symbol,
+                                           OrderStatus status,
+                                           Long orderId,
+                                           int limit,
+                                           String cursor,
+                                           String sort) {
+        requireCurrentProductLine(productLine);
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
+        long beforeOrderId = OrderService.decodeOpenOrderCursor(cursor);
+        boolean ascending = sort != null && sort.toLowerCase(java.util.Locale.ROOT).contains("asc");
+        List<OrderResponse> rows = orderedPartitions(productLine).stream()
+                .flatMap(partition -> lane.execute(partition, () -> stateAfterApply(partition).orders().stream()
+                        .filter(order -> userId == null || order.userId() == userId)
+                        .filter(order -> normalizedSymbol == null || order.symbol().equals(normalizedSymbol))
+                        .filter(order -> status == null || order.status() == status)
+                        .filter(order -> orderId == null || order.orderId() == orderId)
+                        .filter(order -> ascending ? order.orderId() > beforeOrderId
+                                : order.orderId() < beforeOrderId)
+                        .map(this::toResponse)
+                        .toList()).stream())
+                .sorted((left, right) -> ascending
+                        ? Long.compare(left.orderId(), right.orderId())
+                        : Long.compare(right.orderId(), left.orderId()))
+                .limit((long) limit + 1L)
+                .toList();
+        boolean more = rows.size() > limit;
+        List<OrderResponse> page = more ? rows.subList(0, limit) : rows;
+        String nextCursor = more && !page.isEmpty()
+                ? OrderService.encodeOpenOrderCursor(page.getLast().orderId()) : null;
+        return new OrderQueryResponse(page.size(), page, nextCursor, more,
+                ascending ? "orderId.asc" : "orderId.desc", limit);
+    }
+
+    /** 管理撤单预览只读取本地快照，预览与实际撤单使用同一份状态来源。 */
+    public AdminCancelOrdersPreviewResponse adminCancelPreview(ProductLine productLine,
+                                                                Long userId,
+                                                                String symbol,
+                                                                int limit) {
+        requireCurrentProductLine(productLine);
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
+        List<OrderResponse> candidates = orderedPartitions(productLine).stream()
+                .flatMap(partition -> lane.execute(partition, () -> stateAfterApply(partition).orders().stream()
+                        .filter(order -> userId == null || order.userId() == userId)
+                        .filter(order -> normalizedSymbol == null || order.symbol().equals(normalizedSymbol))
+                        .filter(order -> order.status() != OrderStatus.CANCELED
+                                && order.status() != OrderStatus.REJECTED
+                                && order.status() != OrderStatus.FILLED
+                                && order.status() != OrderStatus.CANCEL_REQUESTED)
+                        .map(this::toResponse)
+                        .toList()).stream())
+                .sorted(java.util.Comparator.comparingLong(OrderResponse::orderId))
+                .toList();
+        List<OrderResponse> sample = candidates.stream().limit(limit).toList();
+        long totalRemaining = candidates.stream().mapToLong(OrderResponse::remainingQuantitySteps).sum();
+        int buyOrders = Math.toIntExact(candidates.stream().filter(order -> order.side() == OrderSide.BUY).count());
+        int sellOrders = Math.toIntExact(candidates.stream().filter(order -> order.side() == OrderSide.SELL).count());
+        return new AdminCancelOrdersPreviewResponse(userId, normalizedSymbol, candidates.size(), sample.size(),
+                totalRemaining, buyOrders, sellOrders, sample);
+    }
+
+    private void requireCurrentProductLine(ProductLine productLine) {
+        if (productLine == null || productLine != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("订单产品线与当前订单节点不一致");
+        }
     }
 
     public List<OrderResponse> cancelOpenOrders(long userId, String symbol, int limit) {

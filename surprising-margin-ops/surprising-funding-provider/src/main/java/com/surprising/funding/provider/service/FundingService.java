@@ -12,7 +12,6 @@ import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingPaymentPage;
 import com.surprising.funding.provider.model.FundingPaymentWrite;
 import com.surprising.funding.provider.model.FundingSettlementWork;
-import com.surprising.funding.provider.repository.FundingAccountCommandOutboxRepository;
 import com.surprising.funding.provider.repository.FundingDueRateRepository;
 import com.surprising.funding.provider.repository.FundingLeaseRepository;
 import com.surprising.funding.provider.repository.FundingPaymentCandidateRepository;
@@ -38,7 +37,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
-    public class FundingService {
+public class FundingService {
 
     private static final Logger log = LoggerFactory.getLogger(FundingService.class);
 
@@ -51,7 +50,7 @@ import org.springframework.transaction.support.TransactionTemplate;
     private final FundingSettlementRepository settlementRepository;
     private final FundingPaymentCandidateRepository paymentCandidateRepository;
     private final FundingPaymentRepository paymentRepository;
-    private final FundingAccountCommandOutboxRepository accountCommandOutboxRepository;
+    private final FundingAccountCommandWalService accountCommandWalService;
     private final LatestFundingRateCache latestFundingRateCache;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -67,7 +66,7 @@ import org.springframework.transaction.support.TransactionTemplate;
                           FundingSettlementRepository settlementRepository,
                           FundingPaymentCandidateRepository paymentCandidateRepository,
                           FundingPaymentRepository paymentRepository,
-                          FundingAccountCommandOutboxRepository accountCommandOutboxRepository,
+                          FundingAccountCommandWalService accountCommandWalService,
                           LatestFundingRateCache latestFundingRateCache,
                           @Qualifier("fundingKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                           tools.jackson.databind.ObjectMapper objectMapper,
@@ -81,7 +80,7 @@ import org.springframework.transaction.support.TransactionTemplate;
         this.settlementRepository = settlementRepository;
         this.paymentCandidateRepository = paymentCandidateRepository;
         this.paymentRepository = paymentRepository;
-        this.accountCommandOutboxRepository = accountCommandOutboxRepository;
+        this.accountCommandWalService = accountCommandWalService;
         this.latestFundingRateCache = latestFundingRateCache;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
@@ -140,10 +139,15 @@ import org.springframework.transaction.support.TransactionTemplate;
                 continue;
             }
             try {
-                Boolean completed = transactionTemplate.execute(
+                SettlementPageResult pageResult = transactionTemplate.execute(
                         status -> settlePage(settlement.settlementId(), Instant.now()));
+                if (pageResult != null) {
+                    // 只有资金费支付记录和结算游标提交成功后，才把账户命令写入本地 WAL。
+                    // 进程在两次提交之间崩溃时由恢复任务根据 PENDING 支付记录补写。
+                    accountCommandWalService.append(pageResult.commands());
+                }
                 remainingPages--;
-                if (!Boolean.TRUE.equals(completed)) {
+                if (pageResult != null && !pageResult.completed()) {
                     settlements.addLast(settlement);
                 }
             } catch (Exception ex) {
@@ -188,12 +192,28 @@ import org.springframework.transaction.support.TransactionTemplate;
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    private boolean settlePage(long settlementId, Instant now) {
+    /**
+     * 恢复数据库已提交、本地资金费 WAL 尚未落盘的账户命令。
+     *
+     * <p>这是唯一允许资金费模块读取 pending 支付表的在线任务；读取结果只用于重建相同命令，
+     * 不重新计算候选、不重复插入支付，也不直接修改账户余额。</p>
+     */
+    public void recoverPendingCommands() {
+        if (!properties.getSettlement().isEnabled()) {
+            return;
+        }
+        for (FundingPaymentRepository.PendingPayment payment : paymentRepository.pendingCommands(
+                properties.getSettlement().getReconcileBatchSize())) {
+            accountCommandWalService.append(toCommand(payment));
+        }
+    }
+
+    private SettlementPageResult settlePage(long settlementId, Instant now) {
         FundingSettlementWork settlement = settlementRepository
                 .lockProcessing(settlementId)
                 .orElse(null);
         if (settlement == null) {
-            return true;
+            return new SettlementPageResult(List.of(), true);
         }
         FundingPaymentPage page = paymentCandidateRepository.findPage(
                 settlement, Math.max(1, properties.getSettlement().getPaymentPageSize()));
@@ -202,32 +222,50 @@ import org.springframework.transaction.support.TransactionTemplate;
                 .toList();
         List<FundingPaymentWrite> writes =
                 paymentRepository.insert(settlementId, payable, now);
-        List<FundingAccountCommandOutboxRepository.FundingAccountCommandWrite> commands =
-                new ArrayList<>(writes.size());
+        List<AccountUserCommand> commands = new ArrayList<>(writes.size());
         for (FundingPaymentWrite write : writes) {
             FundingPaymentCandidate payment = write.payment();
-            FundingSettlementAccountCommand payload = new FundingSettlementAccountCommand(
-                    settlementId, write.paymentId(), payment.symbol(), payment.marginMode(),
-                    payment.positionSide(), payment.asset(), payment.signedQuantitySteps(),
-                    payment.notionalUnits(), payment.fundingRatePpm(), payment.amountUnits());
-            AccountUserCommand command = new AccountUserCommand(
-                    AccountUserCommand.CURRENT_SCHEMA_VERSION,
-                    write.commandId(),
-                    properties.getKafka().getProductLine(),
-                    payment.userId(),
-                    AccountUserCommandType.FUNDING_SETTLE,
-                    "FUNDING",
-                    Long.toString(write.paymentId()),
-                    null,
-                    objectMapper.writeValueAsString(payload),
-                    now,
-                    null);
-            commands.add(new FundingAccountCommandOutboxRepository.FundingAccountCommandWrite(
-                    write.paymentId(), command));
+            commands.add(toCommand(settlementId, write.paymentId(), write.commandId(), payment, now));
         }
-        accountCommandOutboxRepository.enqueueBatch(commands, now);
         settlementRepository.advancePage(settlementId, page, writes, now);
-        return !page.hasMore();
+        return new SettlementPageResult(List.copyOf(commands), !page.hasMore());
+    }
+
+    private record SettlementPageResult(List<AccountUserCommand> commands, boolean completed) {
+        private SettlementPageResult {
+            commands = List.copyOf(commands == null ? List.of() : commands);
+        }
+    }
+
+    private AccountUserCommand toCommand(FundingPaymentRepository.PendingPayment payment) {
+        FundingPaymentCandidate candidate = new FundingPaymentCandidate(payment.userId(), payment.symbol(),
+                payment.marginMode(), payment.positionSide(), payment.asset(), payment.signedQuantitySteps(),
+                payment.notionalUnits(), payment.fundingRatePpm(), payment.amountUnits());
+        return toCommand(payment.settlementId(), payment.paymentId(), payment.commandId(), candidate,
+                Instant.now());
+    }
+
+    private AccountUserCommand toCommand(long settlementId,
+                                         long paymentId,
+                                         String commandId,
+                                         FundingPaymentCandidate payment,
+                                         Instant occurredAt) {
+        FundingSettlementAccountCommand payload = new FundingSettlementAccountCommand(
+                settlementId, paymentId, payment.symbol(), payment.marginMode(), payment.positionSide(),
+                payment.asset(), payment.signedQuantitySteps(), payment.notionalUnits(), payment.fundingRatePpm(),
+                payment.amountUnits());
+        return new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                commandId,
+                properties.getKafka().getProductLine(),
+                payment.userId(),
+                AccountUserCommandType.FUNDING_SETTLE,
+                "FUNDING",
+                Long.toString(paymentId),
+                null,
+                objectMapper.writeValueAsString(payload),
+                occurredAt,
+                null);
     }
 
     private boolean ownsSymbol(String symbol) {

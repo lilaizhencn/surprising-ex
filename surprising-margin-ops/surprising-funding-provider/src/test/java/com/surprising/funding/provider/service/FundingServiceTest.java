@@ -16,7 +16,6 @@ import com.surprising.funding.provider.model.FundingPaymentPage;
 import com.surprising.funding.provider.model.FundingPaymentWrite;
 import com.surprising.funding.provider.model.FundingRateInput;
 import com.surprising.funding.provider.model.FundingSettlementWork;
-import com.surprising.funding.provider.repository.FundingAccountCommandOutboxRepository;
 import com.surprising.funding.provider.repository.FundingDueRateRepository;
 import com.surprising.funding.provider.repository.FundingLeaseRepository;
 import com.surprising.funding.provider.repository.FundingPaymentCandidateRepository;
@@ -132,11 +131,11 @@ class FundingServiceTest {
         verify(fixture.settlementRepository).advancePage(eq(77L), eq(page), eq(writes), any(Instant.class));
         assertThat(transactionManager.commits).isEqualTo(2);
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<FundingAccountCommandOutboxRepository.FundingAccountCommandWrite>> commands =
+        ArgumentCaptor<List<com.surprising.account.api.model.AccountUserCommand>> commands =
                 ArgumentCaptor.forClass(List.class);
-        verify(fixture.outboxRepository).enqueueBatch(commands.capture(), any(Instant.class));
+        verify(fixture.accountCommandWalService).append(commands.capture());
         assertThat(commands.getValue()).hasSize(2);
-        assertThat(commands.getValue()).extracting(item -> item.command().partitionKey())
+        assertThat(commands.getValue()).extracting(item -> item.partitionKey())
                 .containsExactly("LINEAR_PERPETUAL:1001", "LINEAR_PERPETUAL:1002");
     }
 
@@ -159,8 +158,8 @@ class FundingServiceTest {
         private final FundingPaymentCandidateRepository paymentCandidateRepository =
                 mock(FundingPaymentCandidateRepository.class);
         private final FundingPaymentRepository paymentRepository = mock(FundingPaymentRepository.class);
-        private final FundingAccountCommandOutboxRepository outboxRepository =
-                mock(FundingAccountCommandOutboxRepository.class);
+        private final FundingAccountCommandWalService accountCommandWalService =
+                mock(FundingAccountCommandWalService.class);
         @SuppressWarnings("unchecked")
         private final KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
         private final LatestFundingRateCache cache;
@@ -171,7 +170,7 @@ class FundingServiceTest {
             cache = new LatestFundingRateCache(properties);
             service = new FundingService(properties, leaseRepository, sequenceRepository,
                     rateInputRepository, rateRepository, dueRateRepository, settlementRepository,
-                    paymentCandidateRepository, paymentRepository, outboxRepository, cache, kafka,
+                    paymentCandidateRepository, paymentRepository, accountCommandWalService, cache, kafka,
                     new ObjectMapper(), transactionManager);
         }
     }

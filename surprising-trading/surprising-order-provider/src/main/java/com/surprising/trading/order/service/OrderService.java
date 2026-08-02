@@ -330,13 +330,11 @@ public class OrderService {
         requireLocalAccountProductLine(productLine);
         String traceId = TraceContext.currentOrCreate();
         if (hasClientOrderId(normalized)) {
-            try {
-                OrderResponse existing = orderUserStateService.getByClientOrderId(
-                        normalized.userId(), normalized.clientOrderId());
-                requireSameClientOrderIntent(normalized, existing);
-                return existing;
-            } catch (IllegalStateException ignored) {
-                // 本地分区尚无该幂等键，继续构造首个事实事件。
+            var existing = orderUserStateService.findByClientOrderId(
+                    normalized.userId(), normalized.clientOrderId());
+            if (existing.isPresent()) {
+                requireSameClientOrderIntent(normalized, existing.get());
+                return existing.get();
             }
         }
         PositionMode positionMode = productLine == ProductLine.LINEAR_PERPETUAL
@@ -554,13 +552,11 @@ public class OrderService {
                 original.orderType(), replacementTif, replacementPriceTicks, replacementQuantitySteps,
                 original.marginMode(), original.positionSide(), original.reduceOnly(), replacementPostOnly);
         if (replacement.clientOrderId() != null && !replacement.clientOrderId().isBlank()) {
-            try {
-                OrderResponse existing = orderUserStateService.getByClientOrderId(normalized.userId(),
-                        replacement.clientOrderId());
-                requireSameClientOrderIntent(replacement, existing);
-                return new AmendOrderResponse(original, existing, false, "replacement order already exists");
-            } catch (IllegalStateException ignored) {
-                // 本地用户分区没有替代订单，继续执行改单事实。
+            var existing = orderUserStateService.findByClientOrderId(normalized.userId(),
+                    replacement.clientOrderId());
+            if (existing.isPresent()) {
+                requireSameClientOrderIntent(replacement, existing.get());
+                return new AmendOrderResponse(original, existing.get(), false, "replacement order already exists");
             }
         }
         OrderResponse canceled = orderUserStateService.cancel(original.userId(), original.orderId(),
@@ -671,8 +667,8 @@ public class OrderService {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         ProductLine productLine = currentProductLine();
-        placementStateService.lockUserPositionMode(productLine, request.userId());
-        PositionMode positionMode = placementStateService.positionMode(productLine, request.userId());
+        // 平仓读取账户用户分区快照；不再为一次校验打开数据库锁事务。
+        PositionMode positionMode = placementStateService.localPositionMode(productLine, request.userId());
         if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
             throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
         }
@@ -1035,16 +1031,9 @@ public class OrderService {
         OrderStatus normalizedStatus = status == null || status.isBlank()
                 ? null
                 : OrderStatus.valueOf(status.trim().toUpperCase());
-        String contractType = contractType(productLine);
-        var page = contractType == null
-                ? orderRepository.adminOrderPage(userId, normalizedSymbol, normalizedStatus, orderId, limit, cursor, sort)
-                : orderRepository.adminOrderPage(
-                        userId, normalizedSymbol, normalizedStatus, orderId, limit, contractType, cursor, sort);
-        List<OrderResponse> rows = page.items()
-                .stream()
-                .map(this::toResponse)
-                .toList();
-        return new OrderQueryResponse(rows.size(), rows, page.nextCursor(), page.hasMore(), page.sort(), page.limit());
+        ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
+        return orderUserStateService.adminOrders(resolvedProductLine, userId, normalizedSymbol, normalizedStatus,
+                orderId, limit, cursor, sort);
     }
 
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason) {
@@ -1122,25 +1111,8 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        String contractType = contractType(productLine);
-        var impact = contractType == null
-                ? orderRepository.adminCancelableImpact(userId, normalizedSymbol)
-                : orderRepository.adminCancelableImpact(userId, normalizedSymbol, contractType);
-        var sample = (contractType == null
-                ? orderRepository.adminCancelableOrders(userId, normalizedSymbol, limit)
-                : orderRepository.adminCancelableOrders(userId, normalizedSymbol, contractType, limit))
-                .stream()
-                .map(this::toResponse)
-                .toList();
-        return new AdminCancelOrdersPreviewResponse(
-                userId,
-                normalizedSymbol,
-                impact.matched(),
-                sample.size(),
-                impact.totalRemainingQuantitySteps(),
-                impact.buyOrders(),
-                impact.sellOrders(),
-                sample);
+        ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
+        return orderUserStateService.adminCancelPreview(resolvedProductLine, userId, normalizedSymbol, limit);
     }
 
     public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request) {
