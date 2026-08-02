@@ -67,7 +67,6 @@ import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -923,7 +922,6 @@ public class OrderService {
     }
 
     /** 仅供未装配用户分区状态机的历史测试；生产入口不会进入此方法。 */
-    @Transactional
     private OrderBatchResponse cancelOpenOrdersFromDatabase(CancelOpenOrdersRequest request) {
         int limit = request.limit() == null ? 1000 : request.limit();
         String symbol = request.symbol() == null || request.symbol().isBlank()
@@ -1150,7 +1148,6 @@ public class OrderService {
         return adminCancelBySymbol(request, null);
     }
 
-    @Transactional
     public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request, ProductLine productLine) {
         if (request == null) {
             throw new IllegalArgumentException("request is required");
