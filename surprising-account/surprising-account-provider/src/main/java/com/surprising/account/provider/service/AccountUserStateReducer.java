@@ -2,11 +2,15 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.BalanceAdjustmentAccountCommand;
 import com.surprising.account.api.model.DeficitReservationAccountCommand;
 import com.surprising.account.api.model.FundingSettlementAccountCommand;
 import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
+import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
+import com.surprising.account.api.model.PositionModeUpdateRequest;
+import com.surprising.account.api.model.ProductBalanceAdjustmentAccountCommand;
 import com.surprising.account.api.model.TradeParticipantRole;
 import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.model.ContractSpec;
@@ -179,6 +183,10 @@ public class AccountUserStateReducer {
             case ADL_DEFICIT_RESERVE, INSURANCE_DEFICIT_RESERVE -> deficitReserve(current, command);
             case ADL_DEFICIT_FINALIZE, INSURANCE_DEFICIT_FINALIZE -> deficitFinalize(current, command);
             case ADL_DEFICIT_RELEASE, INSURANCE_DEFICIT_RELEASE -> deficitRelease(current, command);
+            case BALANCE_ADJUST -> balanceAdjust(current, command);
+            case PRODUCT_BALANCE_ADJUST -> productBalanceAdjust(current, command);
+            case POSITION_MODE_UPDATE -> positionModeUpdate(current, command);
+            case POSITION_MARGIN_ADJUST -> positionMarginAdjust(current, command);
             default -> new Reduction(ApplyStatus.UNSUPPORTED, null, "COMMAND_NOT_REDUCED", current);
         };
         return reduction;
@@ -232,6 +240,192 @@ public class AccountUserStateReducer {
         }
         stateStore.apply(partition, sequence, serialize(reduction.nextState()));
         states.put(partition, reduction.nextState());
+    }
+
+    /** 账户管理员余额调整也必须进入同一用户分区，不能另开数据库事务写余额。 */
+    private Reduction balanceAdjust(AccountUserReducerState current, AccountUserCommand command) {
+        BalanceAdjustmentAccountCommand request = readPayload(command, BalanceAdjustmentAccountCommand.class);
+        if (request.request().userId() != command.userId()) {
+            throw new AccountCommandPoisonPillException("余额调整用户与账户命令不一致");
+        }
+        if (command.productLine() != ProductLine.LINEAR_PERPETUAL || request.request().amountUnits() == 0L) {
+            return rejected(current, "BALANCE_ADJUSTMENT_INVALID", "永续余额调整参数无效");
+        }
+        String asset = normalizeAsset(request.request().asset());
+        AccountUserReducerState updated;
+        try {
+            updated = applyBalanceDelta(current, asset, request.request().amountUnits());
+        } catch (AccountCommandRejectedException ex) {
+            return rejected(current, ex.errorCode(), ex.getMessage());
+        }
+        AccountUserReducerState next = advanceSnapshot(updated, current.snapshot());
+        PerpetualAccountStateUpdatedEvent.Balance balance = findBalance(next.snapshot(), asset);
+        return new Reduction(ApplyStatus.APPLIED,
+                jsonResult(Map.of(
+                        "userId", command.userId(),
+                        "asset", asset,
+                        "availableUnits", balance.availableUnits(),
+                        "lockedUnits", balance.lockedUnits(),
+                        "equityUnits", Math.addExact(balance.availableUnits(), balance.lockedUnits()),
+                        "updatedAt", next.snapshot().eventTime())),
+                null, next);
+    }
+
+    /** 当前永续产品的 product balance 与统一账户余额相同，仍由同一个 reducer 原子变更。 */
+    private Reduction productBalanceAdjust(AccountUserReducerState current, AccountUserCommand command) {
+        ProductBalanceAdjustmentAccountCommand request =
+                readPayload(command, ProductBalanceAdjustmentAccountCommand.class);
+        if (request.request().userId() != command.userId()) {
+            throw new AccountCommandPoisonPillException("产品余额调整用户与账户命令不一致");
+        }
+        if (request.request().accountType() != AccountType.USDT_PERPETUAL) {
+            return new Reduction(ApplyStatus.UNSUPPORTED, null, "PRODUCT_LINE_UNSUPPORTED", current);
+        }
+        if (request.request().amountUnits() == 0L) {
+            return rejected(current, "BALANCE_ADJUSTMENT_INVALID", "产品余额调整金额不能为零");
+        }
+        String asset = normalizeAsset(request.request().asset());
+        AccountUserReducerState updated;
+        try {
+            updated = applyBalanceDelta(current, asset, request.request().amountUnits());
+        } catch (AccountCommandRejectedException ex) {
+            return rejected(current, ex.errorCode(), ex.getMessage());
+        }
+        AccountUserReducerState next = advanceSnapshot(updated, current.snapshot());
+        PerpetualAccountStateUpdatedEvent.Balance balance = findBalance(next.snapshot(), asset);
+        return new Reduction(ApplyStatus.APPLIED,
+                jsonResult(Map.of(
+                        "userId", command.userId(),
+                        "accountType", AccountType.USDT_PERPETUAL,
+                        "asset", asset,
+                        "availableUnits", balance.availableUnits(),
+                        "lockedUnits", balance.lockedUnits(),
+                        "equityUnits", Math.addExact(balance.availableUnits(), balance.lockedUnits()),
+                        "updatedAt", next.snapshot().eventTime())),
+                null, next);
+    }
+
+    /** 仓位模式只允许在本地快照确认没有持仓、预占和挂单时切换。 */
+    private Reduction positionModeUpdate(AccountUserReducerState current, AccountUserCommand command) {
+        PositionModeUpdateRequest request = readPayload(command, PositionModeUpdateRequest.class);
+        if (request.userId() != command.userId()
+                || request.productLine() != null && request.productLine() != ProductLine.LINEAR_PERPETUAL) {
+            return rejected(current, "PRODUCT_LINE_UNSUPPORTED", "仓位模式产品线不匹配");
+        }
+        var mode = com.surprising.trading.api.model.PositionMode.defaultIfNull(request.positionMode());
+        if (current.snapshot().positionMode() == mode) {
+            return new Reduction(ApplyStatus.APPLIED,
+                    jsonResult(Map.of("productLine", ProductLine.LINEAR_PERPETUAL,
+                            "userId", command.userId(), "positionMode", mode,
+                            "updatedAt", current.snapshot().eventTime())), null, current);
+        }
+        boolean hasOpenPosition = current.snapshot().positions().stream()
+                .anyMatch(position -> position.signedQuantitySteps() != 0L);
+        if (hasOpenPosition || !current.reservations().isEmpty()) {
+            return rejected(current, "POSITION_MODE_SWITCH_BLOCKED", "存在持仓或订单预占，不能切换仓位模式");
+        }
+        PerpetualAccountStateUpdatedEvent previous = current.snapshot();
+        PerpetualAccountStateUpdatedEvent changed = new PerpetualAccountStateUpdatedEvent(
+                previous.schemaVersion(), previous.eventId(), previous.accountRevision(), previous.productLine(),
+                previous.userId(), previous.accountType(), previous.balances(), previous.deficits(),
+                previous.positions(), previous.positionMargins(), previous.orderLocks(), mode,
+                previous.eventTime(), previous.traceId());
+        AccountUserReducerState next = advanceSnapshot(
+                new AccountUserReducerState(changed, current.reservations(), current.settledTradeIds(),
+                        current.settledFundingPaymentIds()), previous);
+        return new Reduction(ApplyStatus.APPLIED,
+                jsonResult(Map.of("productLine", ProductLine.LINEAR_PERPETUAL,
+                        "userId", command.userId(), "positionMode", mode,
+                        "updatedAt", next.snapshot().eventTime())), null, next);
+    }
+
+    /** isolated 保证金增减与余额锁定在同一用户分区内原子完成。 */
+    private Reduction positionMarginAdjust(AccountUserReducerState current, AccountUserCommand command) {
+        PositionMarginAdjustmentRequest request = readPayload(command, PositionMarginAdjustmentRequest.class);
+        if (request.userId() != command.userId()) {
+            throw new AccountCommandPoisonPillException("保证金调整用户与账户命令不一致");
+        }
+        if (request.marginMode() != MarginMode.ISOLATED || request.amountUnits() == 0L) {
+            return rejected(current, "POSITION_MARGIN_ADJUSTMENT_INVALID", "只允许调整 isolated 保证金且金额不能为零");
+        }
+        String symbol = normalizeSymbol(request.symbol());
+        PositionSide side = PositionSide.defaultIfNull(request.positionSide());
+        PerpetualAccountStateUpdatedEvent.Position position = findPosition(
+                current.snapshot(), symbol, request.marginMode(), side);
+        if (position == null || position.signedQuantitySteps() == 0L) {
+            return rejected(current, "POSITION_NOT_FOUND", "isolated 持仓不存在");
+        }
+        String asset = current.snapshot().positionMargins().stream()
+                .filter(margin -> margin.symbol().equalsIgnoreCase(symbol)
+                        && margin.marginMode() == request.marginMode() && margin.positionSide() == side)
+                .map(PerpetualAccountStateUpdatedEvent.PositionMargin::asset)
+                .findFirst()
+                .orElseGet(() -> contractSpec(symbol, position.instrumentVersion()).settleAsset());
+        long amount = Math.absExact(request.amountUnits());
+        AccountUserReducerState updated;
+        long nextMargin;
+        if (request.amountUnits() > 0L) {
+            BalanceMutation mutation = moveBalance(current.snapshot(), asset, amount, true);
+            if (!mutation.accepted()) {
+                return rejected(current, "INSUFFICIENT_AVAILABLE_BALANCE", "可用余额不足");
+            }
+            updated = addPositionMargin(new AccountUserReducerState(mutation.snapshot(), current.reservations(),
+                    current.settledTradeIds(), current.settledFundingPaymentIds()), symbol, asset,
+                    request.marginMode(), side, amount);
+            nextMargin = Math.addExact(positionMargin(current.snapshot(), symbol, asset,
+                    request.marginMode(), side), amount);
+        } else {
+            long existing = positionMargin(current.snapshot(), symbol, asset, request.marginMode(), side);
+            if (existing < amount) {
+                return rejected(current, "POSITION_MARGIN_INSUFFICIENT", "持仓保证金不足");
+            }
+            updated = reducePositionMargin(current, symbol, asset, request.marginMode(), side, amount);
+            updated = applyBalanceTransfer(updated, asset, amount, true);
+            nextMargin = Math.subtractExact(existing, amount);
+        }
+        AccountUserReducerState next = advanceSnapshot(updated, current.snapshot());
+        PerpetualAccountStateUpdatedEvent.Balance balance = findBalance(next.snapshot(), asset);
+        return new Reduction(ApplyStatus.APPLIED,
+                jsonResult(Map.ofEntries(
+                        Map.entry("userId", command.userId()), Map.entry("symbol", symbol),
+                        Map.entry("asset", asset), Map.entry("marginMode", request.marginMode()),
+                        Map.entry("positionSide", side), Map.entry("amountUnits", request.amountUnits()),
+                        Map.entry("positionMarginUnits", nextMargin),
+                        Map.entry("availableUnits", balance.availableUnits()),
+                        Map.entry("lockedUnits", balance.lockedUnits()),
+                        Map.entry("equityUnits", Math.addExact(balance.availableUnits(), balance.lockedUnits())),
+                        Map.entry("referenceId", request.referenceId()),
+                        Map.entry("updatedAt", next.snapshot().eventTime()))),
+                null, next);
+    }
+
+    private AccountUserReducerState advanceSnapshot(AccountUserReducerState state,
+                                                     PerpetualAccountStateUpdatedEvent previous) {
+        return new AccountUserReducerState(nextSnapshot(state.snapshot(), previous.accountRevision()),
+                state.reservations(), state.settledTradeIds(), state.settledFundingPaymentIds());
+    }
+
+    private PerpetualAccountStateUpdatedEvent.Balance findBalance(
+            PerpetualAccountStateUpdatedEvent snapshot, String asset) {
+        return snapshot.balances().stream()
+                .filter(balance -> balance.asset().equalsIgnoreCase(asset))
+                .findFirst()
+                .orElseThrow(() -> new AccountCommandRejectedException("ACCOUNT_ASSET_NOT_FOUND",
+                        "账户资产不存在"));
+    }
+
+    private String normalizeAsset(String asset) {
+        if (asset == null || asset.isBlank()) {
+            throw new AccountCommandPoisonPillException("账户资产不能为空");
+        }
+        return asset.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private String normalizeSymbol(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new AccountCommandPoisonPillException("账户合约不能为空");
+        }
+        return symbol.trim().toUpperCase(java.util.Locale.ROOT);
     }
 
     private Reduction reserve(AccountUserReducerState current, AccountUserCommand command) {
@@ -907,6 +1101,10 @@ public class AccountUserStateReducer {
         result.put(key, value);
         result.put(secondKey, secondValue);
         return objectMapper.writeValueAsString(result);
+    }
+
+    private String jsonResult(Map<String, Object> values) {
+        return objectMapper.writeValueAsString(new LinkedHashMap<>(values));
     }
 
     private <T> T readPayload(AccountUserCommand command, Class<T> type) {

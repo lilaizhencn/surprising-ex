@@ -59,7 +59,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -68,7 +67,8 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>该类保留迁移期间的原有调用入口和资金事务语义，跨表操作在这里编排，
  * 单表读写逐步委托给对应的 Repository。</p>
  */
-@Service
+/** 旧数据库结算实现，仅保留迁移测试和历史数据处理代码；生产账户写入统一进入用户分区事实流。 */
+@Deprecated(forRemoval = true)
 public class AccountSettlementService {
 
     private static final long PPM = 1_000_000L;

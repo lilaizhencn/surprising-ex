@@ -15,7 +15,6 @@ import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import java.time.Instant;
-import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -24,7 +23,8 @@ import tools.jackson.databind.ObjectMapper;
  * <p>所有事件都在调用方现有事务内完成构造和持久化，Repository 只负责
  * {@code account_outbox_events} 表。</p>
  */
-@Service
+/** 旧数据库账户 outbox 写入实现；生产事实流直接写本地 WAL 后发布 Kafka。 */
+@Deprecated(forRemoval = true)
 public class AccountOutboxService {
 
     private final AccountOutboxRepository outboxRepository;

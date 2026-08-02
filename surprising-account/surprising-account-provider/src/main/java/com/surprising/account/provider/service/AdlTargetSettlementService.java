@@ -21,12 +21,11 @@ import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.product.api.ProductLine;
 import java.math.BigInteger;
 import java.time.Instant;
-import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 在满足快照条件时结算 ADL 盈利目标侧。 */
-@Service
+@Deprecated(forRemoval = true)
 public class AdlTargetSettlementService {
 
     private final AccountSequenceRepository sequenceRepository;

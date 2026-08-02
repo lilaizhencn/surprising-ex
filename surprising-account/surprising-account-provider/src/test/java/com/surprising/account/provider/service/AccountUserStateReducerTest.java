@@ -5,14 +5,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.BalanceAdjustmentAccountCommand;
+import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
+import com.surprising.account.api.model.PositionModeUpdateRequest;
 import com.surprising.account.api.model.FundingSettlementAccountCommand;
 import com.surprising.account.api.model.TradeParticipantRole;
 import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.eventstore.UserPartitionCommandLane;
+import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.product.api.ProductLine;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
@@ -29,6 +33,40 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 class AccountUserStateReducerTest {
+
+    @Test
+    void accountApiAdjustmentsUseTheSameOrderedLocalState() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-api-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, store, new UserPartitionCommandLane());
+            reducer.initialize(snapshot());
+
+            AccountUserCommand adjustment = command("balance-adjust-1", AccountUserCommandType.BALANCE_ADJUST,
+                    objectMapper.writeValueAsString(new BalanceAdjustmentAccountCommand(
+                            new BalanceAdjustmentRequest(1001L, "USDT", -200L, "admin-ref-1", "测试扣减"),
+                            "admin-1", "管理员")));
+            AccountUserStateReducer.Reduction adjusted = reducer.apply(adjustment, 1L);
+
+            assertThat(adjusted.status()).isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            assertThat(reducer.state(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L))
+                    .orElseThrow().snapshot().balances())
+                    .containsExactly(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 800L, 0L));
+
+            AccountUserCommand mode = command("position-mode-1", AccountUserCommandType.POSITION_MODE_UPDATE,
+                    objectMapper.writeValueAsString(new PositionModeUpdateRequest(
+                            1001L, ProductLine.LINEAR_PERPETUAL,
+                            PositionMode.HEDGE, "mode-ref-1")));
+            AccountUserStateReducer.Reduction switched = reducer.apply(mode, 2L);
+
+            assertThat(switched.status()).isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            assertThat(reducer.state(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L))
+                    .orElseThrow().snapshot().positionMode()).isEqualTo(PositionMode.HEDGE);
+            assertThat(store.lastAppliedSequence(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L)))
+                    .isEqualTo(2L);
+        }
+    }
 
     @Test
     void reserveAndReleaseOnlyChangeTheLocalUserStateInOrder() throws Exception {

@@ -9,9 +9,9 @@ import com.surprising.account.provider.repository.SpotOrderReservationRepository
 import com.surprising.trading.api.model.OrderSide;
 import java.math.BigInteger;
 import java.time.Instant;
-import org.springframework.stereotype.Service;
 
-@Service
+/** 旧数据库现货结算实现；现货接入本地账户 reducer 前禁止注册为生产 Bean。 */
+@Deprecated(forRemoval = true)
 public class SpotTradeSettlementService {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);

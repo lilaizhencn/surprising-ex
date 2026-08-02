@@ -1,6 +1,7 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountCommandStatus;
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.api.model.BalanceAdjustmentAccountCommand;
@@ -57,14 +58,14 @@ public class AccountCommandGateway {
     public ProductBalanceResponse adjustProductBalance(ProductBalanceAdjustmentRequest request,
                                                         String adminUserId,
                                                         String adminUsername) {
+        requirePerpetualProductAccount(request.accountType(), "产品余额调整");
         return execute(AccountUserCommandType.PRODUCT_BALANCE_ADJUST, request.userId(), request.referenceId(),
                 new ProductBalanceAdjustmentAccountCommand(request, adminUserId, adminUsername),
                 ProductBalanceResponse.class);
     }
 
     public ProductTransferResponse transfer(ProductTransferRequest request) {
-        return execute(AccountUserCommandType.PRODUCT_TRANSFER, request.userId(), request.referenceId(),
-                request, ProductTransferResponse.class);
+        throw new IllegalStateException("资金账户转账尚未接入用户分区多账户快照，禁止回退数据库");
     }
 
     public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
@@ -128,5 +129,12 @@ public class AccountCommandGateway {
             throw new IllegalArgumentException("referenceId is required");
         }
         return value.trim();
+    }
+
+    private void requirePerpetualProductAccount(AccountType accountType, String operation) {
+        if (properties.getKafka().getProductLine() != ProductLine.LINEAR_PERPETUAL
+                || accountType != AccountType.USDT_PERPETUAL) {
+            throw new IllegalStateException(operation + "当前只支持永续账户快照");
+        }
     }
 }

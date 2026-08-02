@@ -5,10 +5,10 @@ import com.surprising.account.provider.repository.PositionModeRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.PositionMode;
 import java.time.Instant;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-@Service
+/** 旧数据库仓位模式写入实现；生产更新统一提交账户用户分区命令。 */
+@Deprecated(forRemoval = true)
 public class PositionModeCommandService {
 
     private final PositionModeRepository positionModeRepository;

@@ -12,10 +12,10 @@ import com.surprising.account.provider.repository.ProductLedgerRepository;
 import com.surprising.account.provider.repository.ProductTransferRepository;
 import java.time.Instant;
 import java.util.Objects;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-@Service
+/** 旧数据库余额写入实现；生产余额调整统一提交账户用户分区命令。 */
+@Deprecated(forRemoval = true)
 public class AccountBalanceCommandService {
 
     private final AccountSequenceRepository sequenceRepository;

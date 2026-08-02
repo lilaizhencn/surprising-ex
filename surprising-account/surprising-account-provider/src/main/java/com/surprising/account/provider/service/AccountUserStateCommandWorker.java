@@ -161,12 +161,10 @@ public class AccountUserStateCommandWorker {
     private AccountUserStateReducer.Reduction reduce(AccountUserCommand command, long sequence) {
         AccountUserStateReducer.Reduction reduction = reducer.reduce(command, sequence);
         if (reduction.status() == AccountUserStateReducer.ApplyStatus.UNSUPPORTED) {
-            if ("INSTRUMENT_SNAPSHOT_UNAVAILABLE".equals(reduction.errorCode())) {
-                throw new IllegalStateException("账户合约快照尚未就绪 commandId=" + command.commandId());
-            }
-            return reducer.rejectWithoutCommit(command, sequence,
-                    reduction.errorCode() == null ? "COMMAND_NOT_REDUCED" : reduction.errorCode(),
-                    "账户本地 reducer 尚未支持该产品线或命令类型");
+            // 资金命令尚未有本地 reducer 时必须停住用户分区，不能把未执行伪装成拒绝并越过序号。
+            throw new IllegalStateException("账户本地 reducer 尚未支持命令 commandId="
+                    + command.commandId() + " type=" + command.commandType()
+                    + " code=" + reduction.errorCode());
         }
         return reduction;
     }

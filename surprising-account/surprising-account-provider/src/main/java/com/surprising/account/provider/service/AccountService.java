@@ -23,6 +23,7 @@ import com.surprising.account.api.model.ProductLedgerQueryResponse;
 import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.ContractSpec;
 import com.surprising.account.provider.model.LiquidationFeeContext;
@@ -45,6 +46,7 @@ import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLineConfiguration;
+import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
@@ -59,6 +61,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -80,6 +83,9 @@ public class AccountService {
     private final AccountOutboxService outboxService;
     private final RedisPositionCache positionCache;
     private final PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer;
+    private final AccountUserStateReducer userStateReducer;
+    private final PerpetualAccountStateSnapshotService snapshotService;
+    private final AccountCommandGateway commandGateway;
     private final BoundedLocalCache<ContractSpecKey, ContractSpec> contractSpecCache;
     private final BoundedLocalCache<ContractSpecKey, InstrumentType> instrumentTypeCache;
     private final BoundedLocalCache<ContractSpecKey, SpotInstrumentSpec> spotInstrumentSpecCache;
@@ -88,7 +94,7 @@ public class AccountService {
 
     public AccountService(AccountSettlementService accountSettlementService, PositionCalculator positionCalculator) {
         this(accountSettlementService, positionCalculator, new AccountProperties(), null, null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public AccountService(AccountSettlementService accountSettlementService,
@@ -96,7 +102,7 @@ public class AccountService {
                            AccountProperties properties,
                            AccountOutboxService outboxService) {
         this(accountSettlementService, positionCalculator, properties, outboxService, null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public AccountService(AccountSettlementService accountSettlementService,
@@ -105,25 +111,28 @@ public class AccountService {
                            AccountOutboxService outboxService,
                            RedisPositionCache positionCache) {
         this(accountSettlementService, positionCalculator, properties, outboxService, positionCache, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
-    public AccountService(AccountSettlementService accountSettlementService,
+    public AccountService(@Nullable AccountSettlementService accountSettlementService,
                            PositionCalculator positionCalculator,
                            AccountProperties properties,
-                           AccountOutboxService outboxService,
+                           @Nullable AccountOutboxService outboxService,
                            RedisPositionCache positionCache,
                            PositionCacheAfterCommitSynchronizer positionCacheAfterCommitSynchronizer,
                            AccountQueryService accountQueryService,
-                           AccountBalanceCommandService accountBalanceCommandService,
+                           @Nullable AccountBalanceCommandService accountBalanceCommandService,
                            AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository,
                            PositionModeRepository positionModeRepository,
                            TradeSettlementSideRepository tradeSettlementSideRepository,
-                           PositionModeCommandService positionModeCommandService,
+                           @Nullable PositionModeCommandService positionModeCommandService,
                            PositionRepository positionRepository,
                            PositionQueryService positionQueryService,
-                           SpotTradeSettlementService spotTradeSettlementService) {
+                           @Nullable SpotTradeSettlementService spotTradeSettlementService,
+                           AccountUserStateReducer userStateReducer,
+                           PerpetualAccountStateSnapshotService snapshotService,
+                           AccountCommandGateway commandGateway) {
         this.accountSettlementService = accountSettlementService;
         this.accountQueryService = accountQueryService;
         this.accountBalanceCommandService = accountBalanceCommandService;
@@ -139,6 +148,9 @@ public class AccountService {
         this.outboxService = outboxService;
         this.positionCache = positionCache;
         this.positionCacheAfterCommitSynchronizer = positionCacheAfterCommitSynchronizer;
+        this.userStateReducer = userStateReducer;
+        this.snapshotService = snapshotService;
+        this.commandGateway = commandGateway;
         AccountProperties.Cache cacheProperties = properties.getCache() == null
                 ? new AccountProperties.Cache()
                 : properties.getCache();
@@ -149,21 +161,25 @@ public class AccountService {
                 cacheProperties.getLiquidationFeeContextMaxEntries());
     }
 
-    @Transactional
     public BalanceResponse adjustBalance(BalanceAdjustmentRequest request) {
         if (request.amountUnits() == 0) {
             throw new IllegalArgumentException("amountUnits must not be zero");
+        }
+        if (commandGateway != null) {
+            return commandGateway.adjustBalance(request, null, null);
         }
         return adjustBalance(request.userId(), normalizeAsset(request.asset()), request.amountUnits(),
                 normalizeReferenceId(request.referenceId()), request.reason());
     }
 
-    @Transactional
     public BalanceResponse adminAdjustBalance(String adminUserId,
                                               String adminUsername,
                                               BalanceAdjustmentRequest request) {
         if (request.amountUnits() == 0) {
             throw new IllegalArgumentException("amountUnits must not be zero");
+        }
+        if (commandGateway != null) {
+            return commandGateway.adjustBalance(request, adminUserId, adminUsername);
         }
         long normalizedAdminUserId = normalizeAdminUserId(adminUserId);
         String normalizedAsset = normalizeAsset(request.asset());
@@ -178,6 +194,17 @@ public class AccountService {
 
     public BalanceResponse balance(long userId, String asset) {
         String normalizedAsset = normalizeAsset(asset);
+        if (localStateEnabled()) {
+            PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
+            PerpetualAccountStateUpdatedEvent.Balance balance = snapshot.balances().stream()
+                    .filter(row -> row.asset().equalsIgnoreCase(normalizedAsset))
+                    .findFirst()
+                    .orElse(null);
+            return balance == null
+                    ? new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.EPOCH)
+                    : new BalanceResponse(userId, normalizedAsset, balance.availableUnits(), balance.lockedUnits(),
+                    Math.addExact(balance.availableUnits(), balance.lockedUnits()), snapshot.eventTime());
+        }
         return (accountQueryService == null
                 ? accountSettlementService.balance(userId, normalizedAsset)
                 : accountQueryService.balance(userId, normalizedAsset))
@@ -185,28 +212,41 @@ public class AccountService {
     }
 
     public BalanceQueryResponse balances(long userId) {
+        if (localStateEnabled()) {
+            PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
+            List<BalanceResponse> rows = snapshot.balances().stream()
+                    .map(balance -> new BalanceResponse(userId, balance.asset(), balance.availableUnits(),
+                            balance.lockedUnits(), Math.addExact(balance.availableUnits(), balance.lockedUnits()),
+                            snapshot.eventTime()))
+                    .toList();
+            return new BalanceQueryResponse(rows.size(), rows);
+        }
         List<BalanceResponse> rows = accountQueryService == null
                 ? accountSettlementService.balances(userId)
                 : accountQueryService.balances(userId);
         return new BalanceQueryResponse(rows.size(), rows);
     }
 
-    @Transactional
     public ProductBalanceResponse adjustProductBalance(ProductBalanceAdjustmentRequest request) {
         if (request.amountUnits() == 0) {
             throw new IllegalArgumentException("amountUnits must not be zero");
+        }
+        if (commandGateway != null) {
+            return commandGateway.adjustProductBalance(request, null, null);
         }
         AccountType accountType = normalizeScopedProductAccountType(request.accountType());
         return adjustProductBalance(request.userId(), accountType, normalizeAsset(request.asset()),
                 request.amountUnits(), normalizeReferenceId(request.referenceId()), request.reason());
     }
 
-    @Transactional
     public ProductBalanceResponse adminAdjustProductBalance(String adminUserId,
                                                             String adminUsername,
                                                             ProductBalanceAdjustmentRequest request) {
         if (request.amountUnits() == 0) {
             throw new IllegalArgumentException("amountUnits must not be zero");
+        }
+        if (commandGateway != null) {
+            return commandGateway.adjustProductBalance(request, adminUserId, adminUsername);
         }
         long normalizedAdminUserId = normalizeAdminUserId(adminUserId);
         AccountType accountType = normalizeScopedProductAccountType(request.accountType());
@@ -223,6 +263,12 @@ public class AccountService {
     public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
         AccountType normalizedType = normalizeScopedProductAccountType(accountType);
         String normalizedAsset = normalizeAsset(asset);
+        if (localStateEnabled()) {
+            requirePerpetualAccountType(normalizedType);
+            BalanceResponse balance = balance(userId, normalizedAsset);
+            return new ProductBalanceResponse(userId, normalizedType, normalizedAsset,
+                    balance.availableUnits(), balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
+        }
         return (accountQueryService == null
                 ? accountSettlementService.productBalance(userId, normalizedType, normalizedAsset)
                 : accountQueryService.productBalance(userId, normalizedType, normalizedAsset))
@@ -232,6 +278,15 @@ public class AccountService {
 
     public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
         AccountType scopedAccountType = scopedProductAccountType(accountType);
+        if (localStateEnabled()) {
+            requirePerpetualAccountType(scopedAccountType);
+            List<ProductBalanceResponse> rows = balances(userId).balances().stream()
+                    .map(balance -> new ProductBalanceResponse(userId, scopedAccountType, balance.asset(),
+                            balance.availableUnits(), balance.lockedUnits(), balance.equityUnits(),
+                            balance.updatedAt()))
+                    .toList();
+            return new ProductBalanceQueryResponse(rows.size(), rows);
+        }
         List<ProductBalanceResponse> rows = accountQueryService == null
                 ? accountSettlementService.productBalances(userId, scopedAccountType)
                 : accountQueryService.productBalances(userId, scopedAccountType);
@@ -345,7 +400,6 @@ public class AccountService {
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    @Transactional
     public ProductTransferResponse transfer(ProductTransferRequest request) {
         AccountType source = normalizeAccountType(request.sourceAccountType());
         AccountType target = normalizeAccountType(request.targetAccountType());
@@ -353,6 +407,9 @@ public class AccountService {
             throw new IllegalArgumentException("sourceAccountType and targetAccountType must be different");
         }
         requireScopedProductTransfer(source, target);
+        if (commandGateway != null) {
+            return commandGateway.transfer(request);
+        }
         if (accountBalanceCommandService == null) {
             return accountSettlementService.transferProductBalance(request.userId(), source, target,
                     normalizeAsset(request.asset()), request.amountUnits(),
@@ -373,6 +430,11 @@ public class AccountService {
         }
         ProductLine resolvedProductLine = currentProductLineRequired();
         ProductLineConfiguration.requireSame(resolvedProductLine, productLine, "account.position-mode");
+        if (localStateEnabled()) {
+            PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
+            return new PositionModeResponse(resolvedProductLine, userId, snapshot.positionMode(),
+                    snapshot.eventTime());
+        }
         if (positionModeRepository == null) {
             return accountSettlementService.positionMode(resolvedProductLine, userId);
         }
@@ -389,6 +451,9 @@ public class AccountService {
         }
         ProductLineConfiguration.requireSame(currentProductLineRequired(), request.productLine(),
                 "account.position-mode");
+        if (commandGateway != null) {
+            return commandGateway.updatePositionMode(request);
+        }
         if (positionModeCommandService != null) {
             return positionModeCommandService.update(
                     request.productLine(), request.userId(), request.positionMode(), Instant.now());
@@ -409,6 +474,11 @@ public class AccountService {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
         PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
+        if (localStateEnabled()) {
+            return localPosition(userId, normalizedSymbol, normalizedMarginMode, normalizedPositionSide)
+                    .orElse(new PositionResponse(userId, normalizedSymbol, 0L, normalizedMarginMode,
+                            normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
+        }
         if (positionCache != null) {
             return positionCache.position(positionCacheProductLine(), userId, normalizedSymbol,
                     normalizedMarginMode, normalizedPositionSide);
@@ -424,6 +494,11 @@ public class AccountService {
     public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
+        if (localStateEnabled()) {
+            return localPositionMargin(userId, normalizedSymbol, normalizedMarginMode, PositionSide.NET)
+                    .orElse(new PositionMarginResponse(userId, normalizedSymbol, "", normalizedMarginMode,
+                            PositionSide.NET, 0L, Instant.EPOCH));
+        }
         if (positionCache != null) {
             return positionCache.positionMargin(positionCacheProductLine(), userId, normalizedSymbol,
                     normalizedMarginMode, PositionSide.NET);
@@ -456,6 +531,14 @@ public class AccountService {
         PositionSide normalizedPositionSide = positionSide == null || positionSide.isBlank()
                 ? null
                 : normalizePositionSide(positionSide);
+        if (localStateEnabled()) {
+            List<PositionResponse> rows = localSnapshot(userId).positions().stream()
+                    .filter(position -> normalizedPositionSide == null
+                            || position.positionSide() == normalizedPositionSide)
+                    .map(position -> toPositionResponse(userId, position))
+                    .toList();
+            return new PositionQueryResponse(rows.size(), rows);
+        }
         if (positionCache != null) {
             List<PositionResponse> rows = positionCache.positions(
                     positionCacheProductLine(), userId, normalizedPositionSide);
@@ -470,6 +553,11 @@ public class AccountService {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
         PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
+        if (localStateEnabled()) {
+            return localPosition(userId, normalizedSymbol, normalizedMarginMode, normalizedPositionSide)
+                    .orElse(new PositionResponse(userId, normalizedSymbol, 0L, normalizedMarginMode,
+                            normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
+        }
         ProductLine productLine = positionCacheProductLine();
         return findPosition(productLine, userId, normalizedSymbol, normalizedMarginMode, normalizedPositionSide)
                 .orElse(new PositionResponse(userId, normalizedSymbol, 0L, normalizedMarginMode,
@@ -480,12 +568,19 @@ public class AccountService {
         PositionSide normalizedPositionSide = positionSide == null || positionSide.isBlank()
                 ? null
                 : normalizePositionSide(positionSide);
+        if (localStateEnabled()) {
+            List<PositionResponse> rows = localSnapshot(userId).positions().stream()
+                    .filter(position -> normalizedPositionSide == null
+                            || position.positionSide() == normalizedPositionSide)
+                    .map(position -> toPositionResponse(userId, position))
+                    .toList();
+            return new PositionQueryResponse(rows.size(), rows);
+        }
         List<PositionResponse> rows = findPositions(
                 positionCacheProductLine(), userId, normalizedPositionSide);
         return new PositionQueryResponse(rows.size(), rows);
     }
 
-    @Transactional
     public PositionMarginAdjustmentResponse adjustPositionMargin(PositionMarginAdjustmentRequest request) {
         if (request.amountUnits() == 0) {
             throw new IllegalArgumentException("amountUnits must not be zero");
@@ -494,6 +589,9 @@ public class AccountService {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         if (marginMode != MarginMode.ISOLATED) {
             throw new IllegalArgumentException("position margin adjustment only supports ISOLATED margin mode");
+        }
+        if (commandGateway != null) {
+            return commandGateway.adjustPositionMargin(request);
         }
         ProductLine productLine = currentProductLineFilter();
         PositionMarginAdjustmentResponse response = productLine == null
@@ -526,6 +624,65 @@ public class AccountService {
     private ProductLine currentProductLineFilter() {
         AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
         return kafka != null && kafka.isProductTopicsEnabled() ? kafka.getProductLine() : null;
+    }
+
+    /** 生产账户查询只读取用户 reducer；缺失用户时允许一次启动恢复，之后不再查询数据库。 */
+    private boolean localStateEnabled() {
+        return userStateReducer != null && snapshotService != null && properties != null
+                && properties.getKafka() != null
+                && properties.getKafka().getProductLine() == ProductLine.LINEAR_PERPETUAL;
+    }
+
+    private PerpetualAccountStateUpdatedEvent localSnapshot(long userId) {
+        if (userId <= 0L) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, userId);
+        return userStateReducer.snapshot(partition).orElseGet(() -> {
+            userStateReducer.initialize(snapshotService.snapshot(ProductLine.LINEAR_PERPETUAL, userId));
+            return userStateReducer.snapshot(partition)
+                    .orElseThrow(() -> new AccountStateUnavailableException("账户 JVM 快照不存在: " + userId));
+        });
+    }
+
+    private Optional<PositionResponse> localPosition(long userId,
+                                                      String symbol,
+                                                      MarginMode marginMode,
+                                                      PositionSide positionSide) {
+        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
+        return snapshot.positions().stream()
+                .filter(position -> position.symbol().equalsIgnoreCase(symbol))
+                .filter(position -> position.marginMode() == marginMode)
+                .filter(position -> position.positionSide() == positionSide)
+                .map(position -> toPositionResponse(userId, position))
+                .findFirst();
+    }
+
+    private Optional<PositionMarginResponse> localPositionMargin(long userId,
+                                                                  String symbol,
+                                                                  MarginMode marginMode,
+                                                                  PositionSide positionSide) {
+        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(userId);
+        return snapshot.positionMargins().stream()
+                .filter(margin -> margin.symbol().equalsIgnoreCase(symbol))
+                .filter(margin -> margin.marginMode() == marginMode)
+                .filter(margin -> margin.positionSide() == positionSide)
+                .map(margin -> new PositionMarginResponse(userId, margin.symbol(), margin.asset(),
+                        margin.marginMode(), margin.positionSide(), margin.marginUnits(), snapshot.eventTime()))
+                .findFirst();
+    }
+
+    private PositionResponse toPositionResponse(long userId,
+                                                PerpetualAccountStateUpdatedEvent.Position position) {
+        return new PositionResponse(userId, position.symbol(), position.instrumentVersion(), position.marginMode(),
+                position.positionSide(), position.signedQuantitySteps(), position.entryPriceTicks(),
+                position.realizedPnlUnits(), position.updatedAt());
+    }
+
+    private void requirePerpetualAccountType(AccountType accountType) {
+        if (accountType != AccountType.USDT_PERPETUAL) {
+            throw new IllegalStateException("本地永续账户快照不支持账户类型: " + accountType);
+        }
     }
 
     /** 获取当前账户服务实例的唯一产品线，禁止读取其它产品线的账户状态。 */
@@ -593,6 +750,7 @@ public class AccountService {
     }
 
     public List<UserExpiringSettlementPlan> planDeliverySettlement(DeliverySettlementEvent event) {
+        requireLocalLifecycleReducer("交割结算");
         if (event == null) {
             throw new IllegalArgumentException("delivery settlement event is required");
         }
@@ -622,6 +780,7 @@ public class AccountService {
     }
 
     public List<UserExpiringSettlementPlan> planOptionExercise(OptionExerciseEvent event) {
+        requireLocalLifecycleReducer("期权行权");
         if (event == null) {
             throw new IllegalArgumentException("option exercise event is required");
         }
@@ -656,6 +815,7 @@ public class AccountService {
             long userId,
             String commandId,
             ExpiringPositionSettlementAccountCommand command) {
+        requireLocalLifecycleReducer("到期持仓结算");
         PositionSettlementState position = lockOpenPositionStatesForSettlement(
                 productLine, command.symbol()).stream()
                 .filter(candidate -> candidate.userId() == userId
@@ -711,6 +871,7 @@ public class AccountService {
     public void processTradeSide(ProductLine commandProductLine,
                                  String commandId,
                                  TradeSideSettlementCommand sideCommand) {
+        requireLocalLifecycleReducer("成交结算");
         MatchTradeEvent trade = sideCommand.trade();
         TradeParticipantRole role = sideCommand.participantRole();
         InstrumentType takerInstrumentType = instrumentType(trade.symbol(), trade.takerInstrumentVersion());
@@ -800,6 +961,12 @@ public class AccountService {
         }
         Duration window = settlementProperties.getSettlementPriceWindow();
         return window == null || window.isNegative() ? Duration.ZERO : window;
+    }
+
+    private void requireLocalLifecycleReducer(String operation) {
+        if (accountSettlementService == null) {
+            throw new IllegalStateException(operation + "尚未接入用户分区账户事实流，禁止回退数据库");
+        }
     }
 
     private Instant settlementTime(Instant deliveryTime, Instant eventTime) {

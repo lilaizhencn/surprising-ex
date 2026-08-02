@@ -9,10 +9,10 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-@Service
+/** 旧数据库持仓/未平仓量写入实现；生产由账户状态事件异步投影。 */
+@Deprecated(forRemoval = true)
 public class PositionOpenInterestService {
 
     private final PositionRepository positionRepository;

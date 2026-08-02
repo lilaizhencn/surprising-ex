@@ -10,11 +10,10 @@ import com.surprising.account.provider.repository.ProductDeficitRepository;
 import com.surprising.account.provider.repository.ProductLedgerRepository;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 管理保险基金与 ADL 之间无需跨用户锁的亏空预留。 */
-@Service
+@Deprecated(forRemoval = true)
 public class DeficitSettlementService {
 
     private final AccountSequenceRepository sequenceRepository;
