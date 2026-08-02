@@ -995,7 +995,6 @@ delete_surprising_topics() {
       topics+="surprising.instrument.events.v1"$'\n'
       topics+="surprising.account.position.events.v1"$'\n'
       topics+="surprising.account.liquidation-fee.events.v1"$'\n'
-      topics+="surprising.account.risk-wallet.events.v1"$'\n'
       topics+="surprising.account.state.events.v1"$'\n'
       topics+="surprising.risk.account.events.v1"$'\n'
       topics+="surprising.risk.position.events.v1"

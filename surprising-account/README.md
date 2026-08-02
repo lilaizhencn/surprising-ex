@@ -15,9 +15,8 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - `AccountBalanceCommandService` 编排余额调整和产品账户划转，事务内按固定顺序调用余额、流水和划转 Repository。
 - `PositionRepository`、`PositionMarginRepository`、`PositionModeRepository` 和
   `TradeSettlementSideRepository` 分别只负责持仓、持仓保证金、持仓模式和成交侧结算表。
-- `PositionQueryService` 聚合持仓、合约结算资产和持仓保证金查询；`PositionModeCommandService`
-  负责持仓模式切换编排；`PositionOpenInterestService` 在同一事务中分别调用持仓与分片未平仓量
-  的单表 Repository，任一写入失败都会整体回滚。
+- `AccountQueryService` 和持仓快照服务只聚合恢复/查询所需的单表 Repository；交易命令不再通过同步
+  数据库服务编排，而是进入用户分区 WAL，由本地 reducer 串行执行。
 - account-provider 通过 `/internal/v1/accounts/open-interest/snapshot` 提供当前产品线未平仓量启动快照；
   持仓或 ADL 调整在同一事务写入 outbox，发布带分片修订号的 Kafka 绝对值事件，其他模块不直接读取该表。
 - 账户启动时通过 Instrument 内部聚合 RPC 加载本产品线完整 JVM 快照，并消费
@@ -25,18 +24,16 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
   只从本地快照取得合约正文、结算资产与精度，不再读取 Instrument 相关表。
 - `SpotOrderReservationRepository` 只负责现货订单预占表；`AccountOrderReservationService`
   聚合预占、余额、成交侧审计和指令结果，`SpotTradeSettlementService` 编排现货余额与流水结算。
-- ADL、亏空回补和资金费分别由 `AdlTargetSettlementService`、`DeficitSettlementService`
-  和 `FundingSettlementService` 聚合单表 Repository；ADL 的持仓、合约版本、资产精度、保证金、
-  余额、亏空和流水不再由 Service 直接写 SQL。
+- ADL、亏空回补和资金费统一提交账户用户分区命令；账户 reducer 是唯一资金写者，数据库只保留异步投影、
+  启动恢复和审计入口。
 - `PositionCacheProjectionService` 只负责启动重建页和事务提交前最终快照；在线持仓读取直接使用 Redis
   事件投影，`PositionCacheProjectionRepository` 不参与普通查询。
-  的最终状态快照；`AccountOutboxService` 编排事件、序列号和 outbox 写入，
-  `AccountOutboxRepository` 只持久化账户 outbox 表。
+  的最终状态快照；账户状态事件由用户分区 WAL 在本地提交后直接发布 Kafka，数据库不再作为热路径 outbox。
 - 账户持仓事件同时进入按产品线隔离的 `PositionSnapshotCache`，按精确持仓键进行 revision 防回退。
   该 JVM 快照当前用于迁移影子和恢复准备，尚未取代 PostgreSQL 资金事实源；正式切换必须遵循
   [永续 JVM 单写者迁移计划](../docs/linear-perpetual-jvm-migration-plan.md)。
-- `AccountSettlementService` 只保留交易事务、幂等、锁顺序和资金计算编排，不再包含业务 SQL，
-  也不在生产代码中构造 JDBC Repository；单元测试专用装配统一放在 `src/test`。
+- 账户用户分区执行器只保留命令幂等、顺序、资金守恒和崩溃恢复编排，不在生产热路径构造 JDBC Repository；
+  数据库写入由独立异步投影器完成。
 - 只有在线正确性无法拆分的路径允许多表 Repository，并必须写明 `不可拆原因`：
   余额与亏空的联合锁、余额变更与幂等流水的单语句快速路径、持仓模式切换前的未结算成交检查，
   以及 Redis 最终状态投影。这些路径都禁止复用于后台时间线、财务对账或运营报表。
@@ -235,15 +232,11 @@ surprising:
 
 - `contract-spec-max-entries` 按 `(symbol, instrumentVersion)` 缓存合约数学配置。
 
-余额、持仓、保证金冻结、命令幂等、ledger 和 outbox 状态仍以 PostgreSQL 为准。Redis 持仓只作为
-带 revision 的可重放查询投影。永续账户命令成功后，账户事务还会在同一 outbox 中写入
-`PerpetualAccountStateUpdatedEvent` 到 `account.state.events.v1`；该事件当前用于影子迁移和下游 JVM
-快照重建，不能在账户版本栅栏完成前直接替代账户写入校验。
+余额、持仓、保证金冻结、命令幂等和账本事实由用户分区本地 WAL/状态库维护；PostgreSQL 只作为异步
+投影、启动恢复和审计存储。永续账户命令成功后发布 `PerpetualAccountStateUpdatedEvent` 到
+`account.state.events.v1`，下游按用户修订号建立 JVM 快照。
 
-account outbox 发布不改变 Kafka key，并按 `topic + event_key` claim 有界连续到期前缀。
-普通事件 Topic 会按 id 顺序一次提交最多 `send-window-size` 条，只把连续 ACK 成功的前缀批量确认为已发布。
-account user command Topic 固定使用窗口 1，保证同一用户后一条资金指令不会越过尚未确认的前一条。
-每轮成功 id 使用一条 SQL 批量确认。
+Kafka 发布沿用用户分区 key；发布失败时本地结果库和 WAL 保留待重试状态，不提交后续用户分区序号。
 
 `TRADE_SIDE_SETTLE` 仍会在 `account_commands` 中保留持久终态，但不再产生没有消费者的 command-result
 outbox；订单冻结和资金费结算仍会为各自消费者发送结果事件。

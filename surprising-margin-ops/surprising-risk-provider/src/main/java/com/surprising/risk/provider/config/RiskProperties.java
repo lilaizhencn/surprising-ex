@@ -96,7 +96,6 @@ public class RiskProperties {
         private boolean productTopicsEnabled;
         private String groupId = "surprising-risk-v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
-        private String accountRiskWalletEventsTopic = "surprising.account.risk-wallet.events.v1";
         private String accountStateEventsTopic = "surprising.account.state.events.v1";
         private String accountRiskEventsTopic = "surprising.risk.account.events.v1";
         private String positionRiskEventsTopic = "surprising.risk.position.events.v1";
@@ -144,15 +143,6 @@ public class RiskProperties {
             this.positionEventsTopic = positionEventsTopic;
         }
 
-        public String getAccountRiskWalletEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountRiskWalletEventsTopic()
-                    : accountRiskWalletEventsTopic;
-        }
-
-        public void setAccountRiskWalletEventsTopic(String accountRiskWalletEventsTopic) {
-            this.accountRiskWalletEventsTopic = accountRiskWalletEventsTopic;
-        }
-
         public String getAccountStateEventsTopic() {
             return productTopicsEnabled ? productTopics().accountStateEventsTopic() : accountStateEventsTopic;
         }
@@ -195,11 +185,6 @@ public class RiskProperties {
 
         public int getMaxPollRecords() {
             return maxPollRecords;
-        }
-
-        public String getAccountRiskWalletGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("risk-account-wallet")
-                    : groupId + "-account-wallet";
         }
 
         public String getAccountStateGroupId() {

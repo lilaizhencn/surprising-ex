@@ -20,11 +20,8 @@
 
 当前账户命令由 [`AccountUserCommandProcessor`](../surprising-account/surprising-account-provider/src/main/java/com/surprising/account/provider/service/AccountUserCommandProcessor.java) 在一个 PostgreSQL 事务中处理，先注册 `account_commands`，再调用 `AccountService`、`AccountSettlementService` 和各 Repository 修改余额、保证金、持仓、账本和未平仓量。单用户 Kafka key 已经是 `LINEAR_PERPETUAL:userId`，这是后续单写者的基础。
 
-账户事务还会生成 `account.risk-wallet.events.v1`。事件中的钱包值由账户侧统一聚合
-`account_balances`、`account_deficits`、`account_position_margins` 和隔离订单冻结，
-并带有 `account_risk_state_revisions` 的用户修订号。风险服务通过独立消费组维护 JVM/Redis
-风险组；风险实时路径缺失快照时失败关闭，不再回查账户库。该数据库聚合是迁移过渡层，后续替换为
-账户单写者内存状态时不改变事件协议。
+账户单写者只生成 `account.state.events.v1` 完整状态事件。风险服务从同一事件中的余额、欠款、持仓保证金
+和订单冻结计算钱包，并通过 JVM/Redis 风险组消费；风险实时路径缺失快照时失败关闭，不再回查账户库。
 
 成交侧由 [`AccountService`](../surprising-account/surprising-account-provider/src/main/java/com/surprising/account/provider/service/AccountService.java) 依次执行锁仓、盈亏、保证金、手续费、仓位更新和结算侧完成记录。`PositionUpdatedEvent` 当前由 `AccountOutboxService` 读取数据库事务内最终快照后写入 outbox，revision 来自 PostgreSQL。
 
@@ -34,9 +31,9 @@
 
 Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis 供 API、WebSocket 和后台查询，但投影输入必须统一来自账户事件，不能再由业务模块直接写入。
 
-风险持仓事件和钱包事件都在 `RedisRiskStateStore.replace` 的风险组租约内重新读取完整状态后合并，
-避免不同 Kafka 消费线程或不同节点用旧的另一半字段覆盖新状态。钱包事件的 `accountRevision` 只接受
-更大的修订号；相同事件重放是幂等的。
+风险持仓事件和完整账户状态事件都在 `RedisRiskStateStore.replace` 的风险组租约内合并，避免不同 Kafka
+消费线程或不同节点用旧的另一半字段覆盖新状态。账户状态的 `accountRevision` 只接受更大的修订号；
+相同事件重放是幂等的。
 
 #### Redis 持仓投影、风控和强平的影响
 

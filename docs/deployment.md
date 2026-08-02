@@ -41,7 +41,6 @@ RF=3 时按实际 Topic 数量计算副本。
 | 产品线 | `funding.rate.v1` | 32 | `symbol` |
 | 产品线 | `account.position.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `account.liquidation-fee.events.v1` | 32 | 结算资产 |
-| 产品线 | `account.risk-wallet.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `account.state.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `risk.account.events.v1` | 32 | `<userId>:<accountType>:<asset>` |
 | 产品线 | `risk.position.events.v1` | 32 | `symbol` |

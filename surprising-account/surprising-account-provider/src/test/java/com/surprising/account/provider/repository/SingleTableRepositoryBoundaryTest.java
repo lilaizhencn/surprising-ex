@@ -77,24 +77,6 @@ class SingleTableRepositoryBoundaryTest {
     }
 
     @Test
-    void accountOutboxRepositoryOnlyWritesOutboxTable() {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
-        AccountOutboxRepository repository = new AccountOutboxRepository(jdbcTemplate);
-
-        repository.insert("LINEAR_PERPETUAL", "POSITION", 101L, "position-topic",
-                "LINEAR_PERPETUAL:1001", "POSITION_UPDATED", "{}", Instant.parse("2026-07-30T00:00:00Z"));
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
-        assertThat(sql.getValue())
-                .contains("INSERT INTO account_outbox_events")
-                .doesNotContain("account_positions")
-                .doesNotContain("account_position_margins")
-                .doesNotContain("instruments");
-    }
-
-    @Test
     void accountBalanceRepositoryOnlyQueriesAccountBalanceTable() {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         AccountBalanceRepository repository = new AccountBalanceRepository(jdbcTemplate);

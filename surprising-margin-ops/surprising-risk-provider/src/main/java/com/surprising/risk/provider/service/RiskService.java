@@ -1,7 +1,7 @@
 package com.surprising.risk.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
-import com.surprising.account.api.model.AccountRiskWalletUpdatedEvent;
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateEvent;
@@ -73,6 +73,8 @@ import tools.jackson.databind.ObjectMapper;
     private String projectionGeneration;
     /** 事件快速路径使用的本地风险组；Redis 仍负责跨节点投影和协调。 */
     private final ConcurrentMap<LocalGroupKey, CachedRiskGroup> localGroups = new ConcurrentHashMap<>();
+    /** 完整账户快照先到、持仓事件后到时暂存钱包修订，保证两条 Kafka 流最终汇合。 */
+    private final ConcurrentMap<WalletKey, WalletSnapshot> pendingWallets = new ConcurrentHashMap<>();
 
     @Autowired
     public RiskService(ObjectMapper objectMapper,
@@ -224,7 +226,8 @@ import tools.jackson.databind.ObjectMapper;
                 ProjectionUpdate base = refreshState(productLine, key, true);
                 CachedRiskGroup state = stateStore.replace(productLine, key, () -> {
                     CachedRiskGroup current = stateStore.read(productLine, key);
-                    return mergePositionEvents(current == null ? base.state() : current, eventGroup);
+                    CachedRiskGroup merged = mergePositionEvents(current == null ? base.state() : current, eventGroup);
+                    return applyPendingWallet(key, merged);
                 }).state();
                 localGroups.put(new LocalGroupKey(productLine, key), state);
                 states.add(state);
@@ -240,47 +243,57 @@ import tools.jackson.databind.ObjectMapper;
     }
 
     /**
-     * 账户余额、订单冻结、欠款或隔离保证金变化后的钱包快照快速路径。
-     * 事件已经由账户单写者在同一事务中计算完成，风险服务不再回查账户库或 trading_orders。
+     * 账户单写者发布完整状态后更新风险钱包。
+     * 钱包值直接由同一份完整 JVM 快照计算，不再维护单独的风险钱包事件和数据库聚合服务。
      */
-    public void scanAccountWalletUpdates(List<AccountRiskWalletUpdatedEvent> events) {
+    public void scanAccountStateUpdates(List<PerpetualAccountStateUpdatedEvent> events) {
         if (!properties.getCalculation().isEnabled() || events == null || events.isEmpty()) {
             return;
         }
-        Map<RiskGroupKey, AccountRiskWalletUpdatedEvent> latest = new LinkedHashMap<>();
+        Map<WalletKey, WalletSnapshot> latest = new LinkedHashMap<>();
         ProductLine productLine = properties.getKafka().getProductLine();
-        for (AccountRiskWalletUpdatedEvent event : events) {
+        for (PerpetualAccountStateUpdatedEvent event : events) {
             if (event.productLine() != productLine) {
-                throw new IllegalArgumentException("风险钱包事件产品线不一致");
+                throw new IllegalArgumentException("完整账户状态产品线不一致");
             }
-            RiskGroupKey key = new RiskGroupKey(event.userId(), event.accountType(), event.settleAsset());
-            AccountRiskWalletUpdatedEvent previous = latest.putIfAbsent(key, event);
-            if (previous != null && event.accountRevision() > previous.accountRevision()) {
-                latest.put(key, event);
-            } else if (previous != null && event.accountRevision() == previous.accountRevision()
-                    && event.walletBalanceUnits() != previous.walletBalanceUnits()) {
-                throw new IllegalStateException("同一账户修订号对应多个风险钱包值: " + key);
+            Set<String> existingAssets = localGroups.keySet().stream()
+                    .filter(group -> group.productLine() == productLine
+                            && group.key().userId() == event.userId()
+                            && group.key().accountType().equals(event.accountType()))
+                    .map(group -> group.key().settleAsset())
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            for (Map.Entry<String, Long> wallet : walletByAsset(event, existingAssets).entrySet()) {
+                WalletKey key = new WalletKey(event.userId(), event.accountType(), wallet.getKey());
+                WalletSnapshot snapshot = new WalletSnapshot(wallet.getValue(), event.accountRevision());
+                WalletSnapshot previous = latest.putIfAbsent(key, snapshot);
+                if (previous != null && snapshot.revision() > previous.revision()) {
+                    latest.put(key, snapshot);
+                } else if (previous != null && snapshot.revision() == previous.revision()
+                        && snapshot.balanceUnits() != previous.balanceUnits()) {
+                    throw new IllegalStateException("同一账户修订号对应多个风险钱包值: " + key);
+                }
             }
         }
         requireRedisState();
         if (!stateStore.ready(productLine)) {
-            throw new IllegalStateException("风险 JVM/Redis 快照尚未完成恢复，暂停钱包事件计算");
+            throw new IllegalStateException("风险 JVM/Redis 快照尚未完成恢复，暂停账户状态计算");
         }
         List<CachedRiskGroup> states = new ArrayList<>(latest.size());
         try {
-            for (Map.Entry<RiskGroupKey, AccountRiskWalletUpdatedEvent> entry : latest.entrySet()) {
-                RiskGroupKey key = entry.getKey();
-                AccountRiskWalletUpdatedEvent event = entry.getValue();
-                refreshState(productLine, key, true);
-                CachedRiskGroup state = stateStore.replace(productLine, key, () -> {
-                    CachedRiskGroup current = stateStore.read(productLine, key);
-                    if (current == null) {
-                        throw new IllegalStateException("Redis 风险组快照缺失: " + key);
-                    }
-                    return event.accountRevision() > current.walletRevision()
-                            ? current.withWallet(event.walletBalanceUnits(), event.accountRevision(), Instant.now())
-                            : current;
-                }).state();
+            for (Map.Entry<WalletKey, WalletSnapshot> entry : latest.entrySet()) {
+                pendingWallets.merge(entry.getKey(), entry.getValue(), (oldValue, newValue) ->
+                        newValue.revision() >= oldValue.revision() ? newValue : oldValue);
+                RiskGroupKey key = entry.getKey().riskGroupKey();
+                CachedRiskGroup current = localGroups.get(new LocalGroupKey(productLine, key));
+                if (current == null) {
+                    current = stateStore.read(productLine, key);
+                }
+                if (current == null) {
+                    // 账户状态可能先于持仓事件到达；钱包先暂存，持仓事件到达后再创建风险组。
+                    continue;
+                }
+                CachedRiskGroup next = applyPendingWallet(key, current);
+                CachedRiskGroup state = stateStore.replace(productLine, key, () -> next).state();
                 localGroups.put(new LocalGroupKey(productLine, key), state);
                 states.add(state);
             }
@@ -292,6 +305,52 @@ import tools.jackson.databind.ObjectMapper;
         if (initialProjectionComplete) {
             stateStore.markReady(productLine);
         }
+    }
+
+    /** 按完整账户状态计算各结算资产的钱包余额，必须与账户单写者的扣减口径一致。 */
+    private Map<String, Long> walletByAsset(PerpetualAccountStateUpdatedEvent event,
+                                             Set<String> additionalAssets) {
+        Map<String, Long> balances = new LinkedHashMap<>();
+        event.balances().forEach(row -> balances.merge(row.asset(), Math.addExact(row.availableUnits(), row.lockedUnits()), Math::addExact));
+        Map<String, Long> deficits = new LinkedHashMap<>();
+        event.deficits().forEach(row -> deficits.merge(row.asset(), row.deficitUnits(), Math::addExact));
+        Map<String, Long> margins = new LinkedHashMap<>();
+        event.positionMargins().forEach(row -> margins.merge(row.asset(), row.marginUnits(), Math::addExact));
+        Map<String, Long> locks = new LinkedHashMap<>();
+        event.orderLocks().forEach(row -> locks.merge(row.asset(), row.lockedUnits(), Math::addExact));
+        Set<String> assets = new java.util.LinkedHashSet<>(margins.keySet());
+        assets.addAll(additionalAssets);
+        if (event.positions().stream().anyMatch(position -> !marginAsset(event, position).isPresent())) {
+            throw new IllegalStateException("完整账户状态的持仓缺少保证金资产");
+        }
+        event.positions().forEach(position -> marginAsset(event, position).ifPresent(assets::add));
+        Map<String, Long> result = new LinkedHashMap<>();
+        for (String asset : assets) {
+            long wallet = balances.getOrDefault(asset, 0L);
+            wallet = Math.subtractExact(wallet, deficits.getOrDefault(asset, 0L));
+            wallet = Math.subtractExact(wallet, margins.getOrDefault(asset, 0L));
+            wallet = Math.subtractExact(wallet, locks.getOrDefault(asset, 0L));
+            result.put(asset, wallet);
+        }
+        return result;
+    }
+
+    private java.util.Optional<String> marginAsset(PerpetualAccountStateUpdatedEvent event,
+                                                     PerpetualAccountStateUpdatedEvent.Position position) {
+        return event.positionMargins().stream()
+                .filter(margin -> margin.symbol().equals(position.symbol())
+                        && margin.marginMode() == position.marginMode()
+                        && margin.positionSide() == position.positionSide())
+                .map(PerpetualAccountStateUpdatedEvent.PositionMargin::asset)
+                .findFirst();
+    }
+
+    private CachedRiskGroup applyPendingWallet(RiskGroupKey key, CachedRiskGroup state) {
+        WalletSnapshot wallet = pendingWallets.get(new WalletKey(key.userId(), key.accountType(), key.settleAsset()));
+        if (wallet == null || wallet.revision() <= state.walletRevision()) {
+            return state;
+        }
+        return state.withWallet(wallet.balanceUnits(), wallet.revision(), Instant.now());
     }
 
     public void scanMarkPrice(MarkPriceEvent markPrice) {
@@ -1048,6 +1107,16 @@ import tools.jackson.databind.ObjectMapper;
     }
 
     private record LocalGroupKey(ProductLine productLine, RiskGroupKey key) {
+    }
+
+    private record WalletKey(long userId, String accountType, String settleAsset) {
+
+        private RiskGroupKey riskGroupKey() {
+            return new RiskGroupKey(userId, accountType, settleAsset);
+        }
+    }
+
+    private record WalletSnapshot(long balanceUnits, long revision) {
     }
 
     private record VersionedPositionTarget(long revision, PositionRiskTarget target) {

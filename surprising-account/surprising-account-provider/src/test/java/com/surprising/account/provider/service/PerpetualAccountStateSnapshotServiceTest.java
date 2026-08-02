@@ -2,16 +2,14 @@ package com.surprising.account.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountDeficitRepository;
 import com.surprising.account.provider.repository.AccountOrderLockRepository;
-import com.surprising.account.provider.repository.AccountOutboxRepository;
+import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
 import com.surprising.account.provider.repository.PositionModeRepository;
@@ -24,12 +22,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
 
 class PerpetualAccountStateSnapshotServiceTest {
 
     @Test
-    void publishesOneCompleteVersionedUserSnapshot() {
+    void restoresOneCompleteVersionedUserSnapshotFromDatabase() {
         AccountBalanceRepository balances = mock(AccountBalanceRepository.class);
         AccountDeficitRepository deficits = mock(AccountDeficitRepository.class);
         AccountOrderLockRepository orderLocks = mock(AccountOrderLockRepository.class);
@@ -37,7 +34,7 @@ class PerpetualAccountStateSnapshotServiceTest {
         PositionRepository positions = mock(PositionRepository.class);
         PositionModeRepository modes = mock(PositionModeRepository.class);
         AccountSequenceRepository sequences = mock(AccountSequenceRepository.class);
-        AccountOutboxRepository outbox = mock(AccountOutboxRepository.class);
+        AccountRiskStateRevisionRepository revisions = mock(AccountRiskStateRevisionRepository.class);
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
         when(balances.findByUser(1001L)).thenReturn(List.of(
                 new AccountBalanceRepository.BalanceRow(1001L, "USDT", 90L, 10L, now)));
@@ -55,18 +52,15 @@ class PerpetualAccountStateSnapshotServiceTest {
         when(modes.find(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(
                 java.util.Optional.of(new PositionModeRepository.PositionModeRow(PositionMode.ONE_WAY, now)));
         when(sequences.nextAccountStateEventId()).thenReturn(88L);
+        when(revisions.current(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(7L);
 
         var service = new PerpetualAccountStateSnapshotService(
-                balances, deficits, orderLocks, margins, positions, modes, sequences, outbox, new ObjectMapper());
-        var event = service.publish(ProductLine.LINEAR_PERPETUAL, 1001L, 7L,
-                "surprising.linear-perp.account.state.events.v1", now, "trace");
+                balances, deficits, orderLocks, margins, positions, modes, sequences, revisions);
+        var event = service.snapshot(ProductLine.LINEAR_PERPETUAL, 1001L);
 
         assertThat(event.eventId()).isEqualTo(88L);
         assertThat(event.accountRevision()).isEqualTo(7L);
         assertThat(event.positions()).hasSize(1);
         assertThat(event.orderLocks().getFirst().lockedUnits()).isEqualTo(30L);
-        verify(outbox).insert(eq("LINEAR_PERPETUAL"), eq("ACCOUNT_STATE"), eq(88L),
-                eq("surprising.linear-perp.account.state.events.v1"),
-                eq("LINEAR_PERPETUAL:1001"), eq("ACCOUNT_STATE_UPDATED"), contains("\"accountRevision\":7"), eq(now));
     }
 }

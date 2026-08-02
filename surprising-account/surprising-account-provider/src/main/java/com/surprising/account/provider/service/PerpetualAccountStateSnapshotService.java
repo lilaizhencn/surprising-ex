@@ -5,7 +5,6 @@ import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountDeficitRepository;
 import com.surprising.account.provider.repository.AccountOrderLockRepository;
-import com.surprising.account.provider.repository.AccountOutboxRepository;
 import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
@@ -19,7 +18,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
 
 /**
  * 构造永续用户账户的启动恢复快照。
@@ -41,24 +39,6 @@ public class PerpetualAccountStateSnapshotService {
     private final PositionModeRepository positionModeRepository;
     private final AccountSequenceRepository sequenceRepository;
     private final AccountRiskStateRevisionRepository revisionRepository;
-    private final AccountOutboxRepository outboxRepository;
-    private final ObjectMapper objectMapper;
-
-    /**
-     * 保留旧测试和嵌入式调用方构造签名；生产 Spring 容器必须使用下面包含修订号仓储的构造函数。
-     */
-    public PerpetualAccountStateSnapshotService(AccountBalanceRepository balanceRepository,
-                                                AccountDeficitRepository deficitRepository,
-                                                AccountOrderLockRepository orderLockRepository,
-                                                PositionMarginRepository positionMarginRepository,
-                                                PositionRepository positionRepository,
-                                                PositionModeRepository positionModeRepository,
-                                                AccountSequenceRepository sequenceRepository,
-                                                AccountOutboxRepository outboxRepository,
-                                                ObjectMapper objectMapper) {
-        this(balanceRepository, deficitRepository, orderLockRepository, positionMarginRepository,
-                positionRepository, positionModeRepository, sequenceRepository, null, outboxRepository, objectMapper);
-    }
 
     @Autowired
     public PerpetualAccountStateSnapshotService(AccountBalanceRepository balanceRepository,
@@ -68,9 +48,7 @@ public class PerpetualAccountStateSnapshotService {
                                                 PositionRepository positionRepository,
                                                 PositionModeRepository positionModeRepository,
                                                 AccountSequenceRepository sequenceRepository,
-                                                AccountRiskStateRevisionRepository revisionRepository,
-                                                AccountOutboxRepository outboxRepository,
-                                                ObjectMapper objectMapper) {
+                                                AccountRiskStateRevisionRepository revisionRepository) {
         this.balanceRepository = balanceRepository;
         this.deficitRepository = deficitRepository;
         this.orderLockRepository = orderLockRepository;
@@ -79,27 +57,6 @@ public class PerpetualAccountStateSnapshotService {
         this.positionModeRepository = positionModeRepository;
         this.sequenceRepository = sequenceRepository;
         this.revisionRepository = revisionRepository;
-        this.outboxRepository = outboxRepository;
-        this.objectMapper = objectMapper;
-    }
-
-    /** 仅发布永续快照；调用方必须在账户命令事务中执行。 */
-    public PerpetualAccountStateUpdatedEvent publish(ProductLine productLine,
-                                                     long userId,
-                                                     long accountRevision,
-                                                     String topic,
-                                                     Instant eventTime,
-                                                     String traceId) {
-        if (productLine != ProductLine.LINEAR_PERPETUAL) {
-            return null;
-        }
-        if (userId <= 0L || accountRevision <= 0L || eventTime == null) {
-            throw new IllegalArgumentException("userId, accountRevision and eventTime are required");
-        }
-        PerpetualAccountStateUpdatedEvent event = build(productLine, userId, accountRevision, eventTime, traceId);
-        outboxRepository.insert(productLine.name(), "ACCOUNT_STATE", event.eventId(), topic,
-                event.partitionKey(), "ACCOUNT_STATE_UPDATED", objectMapper.writeValueAsString(event), eventTime);
-        return event;
     }
 
     /**

@@ -11,7 +11,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AccountProperties {
 
     private Kafka kafka = new Kafka();
-    private Outbox outbox = new Outbox();
     private Cache cache = new Cache();
     private PositionCache positionCache = new PositionCache();
     private PositionMargin positionMargin = new PositionMargin();
@@ -32,14 +31,6 @@ public class AccountProperties {
 
     public void setKafka(Kafka kafka) {
         this.kafka = kafka;
-    }
-
-    public Outbox getOutbox() {
-        return outbox;
-    }
-
-    public void setOutbox(Outbox outbox) {
-        this.outbox = outbox;
     }
 
     public Cache getCache() {
@@ -109,7 +100,6 @@ public class AccountProperties {
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
         private String liquidationFeeEventsTopic = "surprising.account.liquidation-fee.events.v1";
-        private String riskWalletEventsTopic = "surprising.account.risk-wallet.events.v1";
         private String accountStateEventsTopic = "surprising.account.state.events.v1";
         private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
         private String deliverySettlementsTopic = "surprising.linear-delivery.delivery.settlements.v1";
@@ -197,14 +187,6 @@ public class AccountProperties {
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
             this.liquidationFeeEventsTopic = liquidationFeeEventsTopic;
-        }
-
-        public String getRiskWalletEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountRiskWalletEventsTopic() : riskWalletEventsTopic;
-        }
-
-        public void setRiskWalletEventsTopic(String riskWalletEventsTopic) {
-            this.riskWalletEventsTopic = riskWalletEventsTopic;
         }
 
         public String getAccountStateEventsTopic() {
@@ -319,123 +301,6 @@ public class AccountProperties {
 
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);
-        }
-    }
-
-    public static class Outbox {
-        private int batchSize = 1_000;
-        private long publishDelayMs = 20L;
-        private Duration sendTimeout = Duration.ofSeconds(3);
-        private boolean asyncEnabled = true;
-        private int maxInFlight = 32;
-        private int maxRowsPerKey = 32;
-        private int sendWindowSize = 5;
-        private Duration retention = Duration.ofDays(7);
-        private long cleanupDelayMs = 60_000L;
-        private int cleanupBatchSize = 10_000;
-        private int cleanupMaxBatches = 10;
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
-        }
-
-        public Duration getSendTimeout() {
-            return sendTimeout;
-        }
-
-        public void setSendTimeout(Duration sendTimeout) {
-            this.sendTimeout = sendTimeout;
-        }
-
-        public boolean isAsyncEnabled() {
-            return asyncEnabled;
-        }
-
-        public void setAsyncEnabled(boolean asyncEnabled) {
-            this.asyncEnabled = asyncEnabled;
-        }
-
-        public int getMaxInFlight() {
-            return maxInFlight;
-        }
-
-        public void setMaxInFlight(int maxInFlight) {
-            this.maxInFlight = maxInFlight;
-        }
-
-        public int getMaxRowsPerKey() {
-            return maxRowsPerKey;
-        }
-
-        public void setMaxRowsPerKey(int maxRowsPerKey) {
-            this.maxRowsPerKey = maxRowsPerKey;
-        }
-
-        public int getSendWindowSize() {
-            return sendWindowSize;
-        }
-
-        public void setSendWindowSize(int sendWindowSize) {
-            if (sendWindowSize < 1 || sendWindowSize > 5) {
-                throw new IllegalArgumentException("account outbox sendWindowSize must be in [1, 5]");
-            }
-            this.sendWindowSize = sendWindowSize;
-        }
-
-        public Duration getRetention() {
-            return retention;
-        }
-
-        public void setRetention(Duration retention) {
-            if (retention == null || retention.isZero() || retention.isNegative()) {
-                throw new IllegalArgumentException("account outbox retention must be positive");
-            }
-            this.retention = retention;
-        }
-
-        public long getCleanupDelayMs() {
-            return cleanupDelayMs;
-        }
-
-        public void setCleanupDelayMs(long cleanupDelayMs) {
-            if (cleanupDelayMs <= 0) {
-                throw new IllegalArgumentException("account outbox cleanupDelayMs must be positive");
-            }
-            this.cleanupDelayMs = cleanupDelayMs;
-        }
-
-        public int getCleanupBatchSize() {
-            return cleanupBatchSize;
-        }
-
-        public void setCleanupBatchSize(int cleanupBatchSize) {
-            if (cleanupBatchSize <= 0) {
-                throw new IllegalArgumentException("account outbox cleanupBatchSize must be positive");
-            }
-            this.cleanupBatchSize = cleanupBatchSize;
-        }
-
-        public int getCleanupMaxBatches() {
-            return cleanupMaxBatches;
-        }
-
-        public void setCleanupMaxBatches(int cleanupMaxBatches) {
-            if (cleanupMaxBatches <= 0) {
-                throw new IllegalArgumentException("account outbox cleanupMaxBatches must be positive");
-            }
-            this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }
 

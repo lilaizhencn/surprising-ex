@@ -32,14 +32,24 @@ public class AccountStateSnapshotConsumer {
     private final ObjectMapper objectMapper;
     private final RiskProperties properties;
     private final PerpetualAccountStateSnapshotCache snapshotCache;
+    private final RiskService riskService;
 
     public AccountStateSnapshotConsumer(ObjectMapper objectMapper,
                                        RiskProperties properties,
                                        @Qualifier("riskAccountStateSnapshot")
-                                       PerpetualAccountStateSnapshotCache snapshotCache) {
+                                       PerpetualAccountStateSnapshotCache snapshotCache,
+                                       RiskService riskService) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.snapshotCache = snapshotCache;
+        this.riskService = riskService;
+    }
+
+    /** 测试和本地快照校验构造器；生产实例必须接入统一风险服务。 */
+    AccountStateSnapshotConsumer(ObjectMapper objectMapper,
+                                 RiskProperties properties,
+                                 PerpetualAccountStateSnapshotCache snapshotCache) {
+        this(objectMapper, properties, snapshotCache, null);
     }
 
     @KafkaListener(
@@ -52,6 +62,7 @@ public class AccountStateSnapshotConsumer {
             return;
         }
         try {
+            List<PerpetualAccountStateUpdatedEvent> appliedEvents = new java.util.ArrayList<>(records.size());
             for (ConsumerRecord<String, String> record : records) {
                 requireCurrentTopic(record.topic());
                 PerpetualAccountStateUpdatedEvent event = objectMapper.readValue(
@@ -69,6 +80,12 @@ public class AccountStateSnapshotConsumer {
                     throw new IllegalStateException("完整账户快照同一修订号内容冲突，等待 RPC 重建: userId="
                             + event.userId() + " revision=" + event.accountRevision());
                 }
+                if (result == PerpetualAccountStateSnapshotCache.ApplyResult.APPLIED) {
+                    appliedEvents.add(event);
+                }
+            }
+            if (riskService != null && !appliedEvents.isEmpty()) {
+                riskService.scanAccountStateUpdates(appliedEvents);
             }
             markReadyWhenCaughtUp(consumer);
         } catch (Exception ex) {
