@@ -9,15 +9,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Repository;
 
 /**
- * 查找当前产品线中尚未结算的到期最终费率。
- *
- * <p>不可拆原因：到期选择必须在一个数据库快照中同时验证最终费率、当前合约产品线和结算幂等状态；
- * 拆分后会在合约版本切换或并发创建结算时重复派发。该查询属于在线结算控制，不提供后台时间线、对账或报表。</p>
+ * 兼容旧恢复工具的数据库到期费率查询；资金费生产定时任务不再注入此类。
  */
-@Repository
 public class FundingDueRateRepository {
 
     private final JdbcTemplate jdbcTemplate;

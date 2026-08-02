@@ -16,7 +16,6 @@ import com.surprising.funding.provider.model.FundingPaymentPage;
 import com.surprising.funding.provider.model.FundingPaymentWrite;
 import com.surprising.funding.provider.model.FundingRateInput;
 import com.surprising.funding.provider.model.FundingSettlementWork;
-import com.surprising.funding.provider.repository.FundingDueRateRepository;
 import com.surprising.funding.provider.repository.FundingLeaseRepository;
 import com.surprising.funding.provider.repository.FundingPaymentCandidateRepository;
 import com.surprising.funding.provider.repository.FundingPaymentRepository;
@@ -68,14 +67,10 @@ class FundingServiceTest {
         fixture.cache.update(new FundingRateResponse("BTC-USDT", 12L, 120L, 100L, 20L,
                 Instant.now().plusSeconds(8 * 60 * 60), 8, "PREDICTED", Instant.now()));
         when(fixture.rateRepository.saveFinal(due)).thenReturn(true);
-        when(fixture.dueRateRepository.findDue(any(Instant.class),
-                eq(properties.getSettlement().getBatchSize()))).thenReturn(List.of());
 
         fixture.service.settleDueRates();
 
         verify(fixture.rateRepository).saveFinal(due);
-        verify(fixture.dueRateRepository).findDue(any(Instant.class),
-                eq(properties.getSettlement().getBatchSize()));
         assertThat(fixture.service.latestRate("BTC-USDT").sequence()).isEqualTo(12L);
     }
 
@@ -114,8 +109,7 @@ class FundingServiceTest {
         List<FundingPaymentWrite> writes = List.of(
                 new FundingPaymentWrite(100L, "FUNDING:LINEAR_PERPETUAL:77:100", longPayment),
                 new FundingPaymentWrite(101L, "FUNDING:LINEAR_PERPETUAL:77:101", shortPayment));
-        when(fixture.dueRateRepository.findDue(any(Instant.class), any(Integer.class)))
-                .thenReturn(List.of(rate));
+        fixture.cache.update(rate);
         when(fixture.settlementRepository.createOrResume(eq(rate), any(Instant.class)))
                 .thenReturn(Optional.of(settlement));
         when(fixture.settlementRepository.lockProcessing(77L)).thenReturn(Optional.of(settlement));
@@ -153,7 +147,6 @@ class FundingServiceTest {
         private final FundingSequenceRepository sequenceRepository = mock(FundingSequenceRepository.class);
         private final FundingRateInputRepository rateInputRepository = mock(FundingRateInputRepository.class);
         private final FundingRateRepository rateRepository = mock(FundingRateRepository.class);
-        private final FundingDueRateRepository dueRateRepository = mock(FundingDueRateRepository.class);
         private final FundingSettlementRepository settlementRepository = mock(FundingSettlementRepository.class);
         private final FundingPaymentCandidateRepository paymentCandidateRepository =
                 mock(FundingPaymentCandidateRepository.class);
@@ -169,8 +162,8 @@ class FundingServiceTest {
             when(leaseRepository.acquire(any(), any(), any())).thenReturn(true);
             cache = new LatestFundingRateCache(properties);
             service = new FundingService(properties, leaseRepository, sequenceRepository,
-                    rateInputRepository, rateRepository, dueRateRepository, settlementRepository,
-                    paymentCandidateRepository, paymentRepository, accountCommandWalService, cache, kafka,
+                    rateInputRepository, rateRepository, settlementRepository, paymentCandidateRepository,
+                    paymentRepository, accountCommandWalService, cache, kafka,
                     new ObjectMapper(), transactionManager);
         }
     }

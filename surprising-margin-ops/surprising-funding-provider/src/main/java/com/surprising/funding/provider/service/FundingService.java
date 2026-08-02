@@ -12,7 +12,6 @@ import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingPaymentPage;
 import com.surprising.funding.provider.model.FundingPaymentWrite;
 import com.surprising.funding.provider.model.FundingSettlementWork;
-import com.surprising.funding.provider.repository.FundingDueRateRepository;
 import com.surprising.funding.provider.repository.FundingLeaseRepository;
 import com.surprising.funding.provider.repository.FundingPaymentCandidateRepository;
 import com.surprising.funding.provider.repository.FundingPaymentRepository;
@@ -46,7 +45,6 @@ public class FundingService {
     private final FundingSequenceRepository sequenceRepository;
     private final FundingRateInputRepository rateInputRepository;
     private final FundingRateRepository rateRepository;
-    private final FundingDueRateRepository dueRateRepository;
     private final FundingSettlementRepository settlementRepository;
     private final FundingPaymentCandidateRepository paymentCandidateRepository;
     private final FundingPaymentRepository paymentRepository;
@@ -62,7 +60,6 @@ public class FundingService {
                           FundingSequenceRepository sequenceRepository,
                           FundingRateInputRepository rateInputRepository,
                           FundingRateRepository rateRepository,
-                          FundingDueRateRepository dueRateRepository,
                           FundingSettlementRepository settlementRepository,
                           FundingPaymentCandidateRepository paymentCandidateRepository,
                           FundingPaymentRepository paymentRepository,
@@ -76,7 +73,6 @@ public class FundingService {
         this.sequenceRepository = sequenceRepository;
         this.rateInputRepository = rateInputRepository;
         this.rateRepository = rateRepository;
-        this.dueRateRepository = dueRateRepository;
         this.settlementRepository = settlementRepository;
         this.paymentCandidateRepository = paymentCandidateRepository;
         this.paymentRepository = paymentRepository;
@@ -114,14 +110,16 @@ public class FundingService {
             return;
         }
         Instant now = Instant.now();
-        freezeDuePredictions(now);
         Deque<FundingSettlementWork> settlements = new ArrayDeque<>();
-        for (FundingRateResponse rate : dueRateRepository.findDue(
-                now, properties.getSettlement().getBatchSize())) {
+        for (FundingRateResponse rate : latestFundingRateCache.duePredictions(now).stream()
+                .limit(properties.getSettlement().getBatchSize()).toList()) {
             if (!ownsSymbol(rate.symbol())) {
                 continue;
             }
             try {
+                // 最终费率由内存预测快照确定，数据库只保存冻结投影；不再从数据库反查到期费率。
+                rateRepository.saveFinal(rate);
+                latestFundingRateCache.removeIfCurrent(rate);
                 FundingSettlementWork settlement = transactionTemplate.execute(
                         status -> settlementRepository.createOrResume(rate, Instant.now()).orElse(null));
                 if (settlement != null) {
@@ -273,21 +271,6 @@ public class FundingService {
             return true;
         }
         return leaseRepository.acquire(symbol, nodeId, properties.getCoordination().getLeaseDuration());
-    }
-
-    private void freezeDuePredictions(Instant now) {
-        for (FundingRateResponse rate : latestFundingRateCache.duePredictions(now)) {
-            if (!ownsSymbol(rate.symbol())) {
-                continue;
-            }
-            try {
-                rateRepository.saveFinal(rate);
-                latestFundingRateCache.removeIfCurrent(rate);
-            } catch (Exception ex) {
-                log.error("Failed to freeze funding rate symbol={} fundingTime={}: {}",
-                        rate.symbol(), rate.fundingTime(), ex.getMessage(), ex);
-            }
-        }
     }
 
     private PerpFundingRateEvent fundingRateEvent(FundingRateResponse rate) {

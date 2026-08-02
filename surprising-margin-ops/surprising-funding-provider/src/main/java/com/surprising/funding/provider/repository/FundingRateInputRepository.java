@@ -11,7 +11,6 @@ import java.time.Duration;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -23,24 +22,15 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class FundingRateInputRepository {
 
-    private final JdbcTemplate jdbcTemplate;
     private final FundingProperties properties;
     private final LatestMarkPriceCache markPriceCache;
     private final InstrumentSnapshotCache snapshotCache;
 
-    public FundingRateInputRepository(JdbcTemplate jdbcTemplate,
-                                      FundingProperties properties,
-                                      LatestMarkPriceCache markPriceCache) {
-        this(jdbcTemplate, properties, markPriceCache, null);
-    }
-
     @org.springframework.beans.factory.annotation.Autowired
-    public FundingRateInputRepository(JdbcTemplate jdbcTemplate,
-                                      FundingProperties properties,
+    public FundingRateInputRepository(FundingProperties properties,
                                       LatestMarkPriceCache markPriceCache,
                                       @org.springframework.beans.factory.annotation.Qualifier("fundingInstrumentSnapshotCache")
                                       InstrumentSnapshotCache snapshotCache) {
-        this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
         this.markPriceCache = markPriceCache;
         this.snapshotCache = snapshotCache;
