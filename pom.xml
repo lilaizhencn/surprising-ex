@@ -15,6 +15,7 @@
     <modules>
         <module>surprising-parent</module>
         <module>surprising-product-api</module>
+        <module>surprising-event-store</module>
         <module>surprising-instrument</module>
         <module>surprising-candlestick</module>
         <module>surprising-price</module>

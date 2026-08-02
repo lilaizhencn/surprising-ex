@@ -18,6 +18,7 @@ public class AccountProperties {
     private ExpiringSettlement expiringSettlement = new ExpiringSettlement();
     private TradeSettlement tradeSettlement = new TradeSettlement();
     private CommandWait commandWait = new CommandWait();
+    private Wal wal = new Wal();
 
     /** 启动时拒绝未隔离的旧版 Topic 配置。 */
     @PostConstruct
@@ -87,6 +88,14 @@ public class AccountProperties {
 
     public void setCommandWait(CommandWait commandWait) {
         this.commandWait = commandWait == null ? new CommandWait() : commandWait;
+    }
+
+    public Wal getWal() {
+        return wal;
+    }
+
+    public void setWal(Wal wal) {
+        this.wal = wal == null ? new Wal() : wal;
     }
 
     public static class Kafka {
@@ -629,6 +638,21 @@ public class AccountProperties {
                 throw new IllegalArgumentException("command wait pollDelayMs must be positive");
             }
             this.pollDelayMs = pollDelayMs;
+        }
+    }
+
+    public static class Wal {
+        private String directory = "data/account-wal";
+
+        public String getDirectory() {
+            return directory;
+        }
+
+        public void setDirectory(String directory) {
+            if (directory == null || directory.isBlank()) {
+                throw new IllegalArgumentException("account WAL directory is required");
+            }
+            this.directory = directory.trim();
         }
     }
 }

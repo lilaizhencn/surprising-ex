@@ -17,7 +17,13 @@ import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandRegistration;
 import com.surprising.account.provider.repository.AccountCommandRepository;
+import com.surprising.eventstore.UserPartitionCommandLane;
+import com.surprising.eventstore.UserPartitionKey;
+import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.product.api.ProductLine;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -44,6 +50,8 @@ public class AccountUserCommandProcessor {
     private final PositionCacheAfterCommitSynchronizer positionCacheSynchronizer;
     private final AccountRiskWalletSnapshotService riskWalletSnapshotService;
     private final PerpetualAccountStateSnapshotService accountStateSnapshotService;
+    private final UserPartitionWal userPartitionWal;
+    private final UserPartitionCommandLane userPartitionCommandLane;
 
     /** 保留测试和旧调用方构造签名；未注入风险钱包发布器时不改变原有命令语义。 */
     public AccountUserCommandProcessor(ObjectMapper objectMapper,
@@ -59,7 +67,7 @@ public class AccountUserCommandProcessor {
                                        PositionCacheAfterCommitSynchronizer positionCacheSynchronizer) {
         this(objectMapper, properties, commandRepository, outboxService, adlTargetSettlementService,
                 deficitSettlementService, fundingSettlementService, accountSettlementService,
-                orderReservationService, accountService, positionCacheSynchronizer, null, null);
+                orderReservationService, accountService, positionCacheSynchronizer, null, null, null, null);
     }
 
     @Autowired
@@ -75,7 +83,9 @@ public class AccountUserCommandProcessor {
                                        AccountService accountService,
                                        PositionCacheAfterCommitSynchronizer positionCacheSynchronizer,
                                        AccountRiskWalletSnapshotService riskWalletSnapshotService,
-                                       PerpetualAccountStateSnapshotService accountStateSnapshotService) {
+                                       PerpetualAccountStateSnapshotService accountStateSnapshotService,
+                                       UserPartitionWal userPartitionWal,
+                                       UserPartitionCommandLane userPartitionCommandLane) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.commandRepository = commandRepository;
@@ -89,12 +99,21 @@ public class AccountUserCommandProcessor {
         this.positionCacheSynchronizer = positionCacheSynchronizer;
         this.riskWalletSnapshotService = riskWalletSnapshotService;
         this.accountStateSnapshotService = accountStateSnapshotService;
+        this.userPartitionWal = userPartitionWal;
+        this.userPartitionCommandLane = userPartitionCommandLane;
     }
 
     @Transactional
     public List<ProcessingOutcome> processBatch(List<CommandEnvelope> envelopes) {
         if (envelopes == null || envelopes.isEmpty()) {
             return List.of();
+        }
+        // 先把 Kafka 命令写入本地 WAL，再允许数据库投影和业务派生逻辑运行。
+        // 数据库投影失败时，重试仍使用同一条不可变事实，不会生成新的序列或重复资金动作。
+        if (userPartitionWal != null) {
+            for (CommandEnvelope envelope : envelopes) {
+                appendToWal(envelope);
+            }
         }
         accountSettlementService.lockOpenInterestShards(openInterestLockRequests(envelopes), Instant.now());
         List<ProcessingOutcome> outcomes = new ArrayList<>(envelopes.size());
@@ -103,9 +122,42 @@ public class AccountUserCommandProcessor {
                     || envelope.serializedEnvelope() == null || envelope.serializedEnvelope().isBlank()) {
                 throw new AccountCommandPoisonPillException("invalid account command batch envelope");
             }
-            outcomes.add(processOne(envelope.command(), envelope.serializedEnvelope()));
+            UserPartitionKey partition = new UserPartitionKey(envelope.command().productLine(),
+                    envelope.command().userId());
+            if (userPartitionCommandLane == null) {
+                outcomes.add(processOne(envelope.command(), envelope.serializedEnvelope()));
+            } else {
+                outcomes.add(userPartitionCommandLane.execute(partition,
+                        () -> processOne(envelope.command(), envelope.serializedEnvelope())));
+            }
         }
         return List.copyOf(outcomes);
+    }
+
+    private void appendToWal(CommandEnvelope envelope) {
+        if (envelope == null || envelope.command() == null || envelope.serializedEnvelope() == null
+                || envelope.serializedEnvelope().isBlank()) {
+            throw new AccountCommandPoisonPillException("invalid account command batch envelope");
+        }
+        AccountUserCommand command = envelope.command();
+        UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
+        userPartitionWal.append(partition, command.commandId(), command.commandType().name(),
+                envelope.serializedEnvelope().getBytes(StandardCharsets.UTF_8),
+                fingerprint(envelope.serializedEnvelope()), command.occurredAt());
+    }
+
+    private String fingerprint(String serializedEnvelope) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(serializedEnvelope.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                result.append(String.format(java.util.Locale.ROOT, "%02x", value));
+            }
+            return result.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
     }
 
     private List<AccountSettlementService.OpenInterestLockRequest> openInterestLockRequests(

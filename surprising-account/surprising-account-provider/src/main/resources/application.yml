@@ -102,3 +102,5 @@ surprising:
     command-wait:
       timeout: 10s
       poll-delay-ms: 20
+    wal:
+      directory: ${ACCOUNT_WAL_DIR:data/account-wal}
