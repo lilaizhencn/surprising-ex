@@ -4248,6 +4248,11 @@ run_spot_asset_flow() {
   taker="$(place_order "${product_line}" "${TAKER_USER}" "spot-buy-taker-${RUN_ID}" "BUY" "LIMIT" "IOC" "${price}" "${qty}" false false)"
   wait_order_filled "${product_line}" "${taker}" "${qty}"
   wait_account_processed_order "${product_line}" "${taker}"
+  if [[ "${ACCOUNT_RESTART_RECOVERY}" == "true" ]]; then
+    # 现货没有衍生品持仓，但账户余额、资产冻结和现货预占同样必须经受进程重启恢复。
+    restart_account_for_recovery "${product_line}"
+    wait_account_processed_order "${product_line}" "${taker}"
+  fi
   wait_sql_equals "spot has no derivative positions" \
     "SELECT count(*) FROM account_positions WHERE product_line = 'SPOT' AND user_id IN (${MANUAL_MAKER_USER}, ${TAKER_USER})" \
     "0"
