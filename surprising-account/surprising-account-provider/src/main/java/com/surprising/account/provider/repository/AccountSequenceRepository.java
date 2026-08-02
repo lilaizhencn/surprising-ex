@@ -22,11 +22,8 @@ public class AccountSequenceRepository {
         SPOT_RESERVATION("public.account_spot_reservation_seq"),
         POSITION_EVENT("public.account_position_event_seq"),
         OPEN_INTEREST_EVENT("public.account_open_interest_event_seq"),
-        LIQUIDATION_FEE_EVENT("public.account_liquidation_fee_event_seq"),
         COMMAND_RESULT_EVENT("public.account_command_result_event_seq"),
         COMMAND_RETRY_EVENT("public.account_command_retry_event_seq"),
-        USER_COMMAND_OUTBOX_EVENT("public.account_user_command_outbox_event_seq"),
-        ACCOUNT_RISK_WALLET_EVENT("public.account_risk_wallet_event_seq"),
         ACCOUNT_STATE_EVENT("public.account_state_event_seq");
 
         private final String databaseSequence;
@@ -86,24 +83,12 @@ public class AccountSequenceRepository {
         return nextSequence(Sequence.OPEN_INTEREST_EVENT);
     }
 
-    public long nextLiquidationFeeEventId() {
-        return nextSequence(Sequence.LIQUIDATION_FEE_EVENT);
-    }
-
     public long nextCommandResultEventId() {
         return nextSequence(Sequence.COMMAND_RESULT_EVENT);
     }
 
     public long nextCommandRetryEventId() {
         return nextSequence(Sequence.COMMAND_RETRY_EVENT);
-    }
-
-    public long nextUserCommandOutboxEventId() {
-        return nextSequence(Sequence.USER_COMMAND_OUTBOX_EVENT);
-    }
-
-    public long nextRiskWalletEventId() {
-        return nextSequence(Sequence.ACCOUNT_RISK_WALLET_EVENT);
     }
 
     public long nextAccountStateEventId() {

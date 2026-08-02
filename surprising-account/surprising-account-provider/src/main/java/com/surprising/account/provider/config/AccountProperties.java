@@ -308,7 +308,6 @@ public class AccountProperties {
         private int contractSpecMaxEntries = 4096;
         private int instrumentTypeMaxEntries = 4096;
         private int spotInstrumentSpecMaxEntries = 4096;
-        private int liquidationFeeContextMaxEntries = 200_000;
 
         public int getContractSpecMaxEntries() {
             return contractSpecMaxEntries;
@@ -334,13 +333,6 @@ public class AccountProperties {
             this.spotInstrumentSpecMaxEntries = spotInstrumentSpecMaxEntries;
         }
 
-        public int getLiquidationFeeContextMaxEntries() {
-            return liquidationFeeContextMaxEntries;
-        }
-
-        public void setLiquidationFeeContextMaxEntries(int liquidationFeeContextMaxEntries) {
-            this.liquidationFeeContextMaxEntries = liquidationFeeContextMaxEntries;
-        }
     }
 
     public static class PositionCache {

@@ -73,7 +73,6 @@ surprising:
       contract-spec-max-entries: 4096
       instrument-type-max-entries: 4096
       spot-instrument-spec-max-entries: 4096
-      liquidation-fee-context-max-entries: 200000
     position-cache:
       key-prefix: ${POSITION_REDIS_KEY_PREFIX:surprising:position:v1}
       rebuild-batch-size: 1000

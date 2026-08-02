@@ -214,20 +214,6 @@ class SingleTableRepositoryBoundaryTest {
     }
 
     @Test
-    void liquidationOrderContextRepositoryOnlyQueriesLiquidationOrderTable() {
-        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        LiquidationOrderContextRepository repository = new LiquidationOrderContextRepository(jdbcTemplate);
-
-        repository.findFeeContext(9001L, 1001L, "BTC-USDT");
-
-        String sql = capturedQuery(jdbcTemplate);
-        assertThat(sql)
-                .contains("FROM liquidation_orders")
-                .doesNotContain("account_ledger_entries")
-                .doesNotContain("account_balances");
-    }
-
-    @Test
     void positionModeOrderRepositoriesKeepTheirOwnTableBoundary() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any(Object[].class)))
