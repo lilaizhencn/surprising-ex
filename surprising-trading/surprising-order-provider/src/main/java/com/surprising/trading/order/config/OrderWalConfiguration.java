@@ -4,6 +4,8 @@ import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.trading.order.service.OrderIdSequenceStore;
+import com.surprising.trading.order.service.CancelAllAfterLocalStateStore;
+import tools.jackson.databind.ObjectMapper;
 import java.nio.file.Path;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -37,5 +39,13 @@ public class OrderWalConfiguration {
                 Path.of(properties.getWal().getDirectory(),
                         properties.getKafka().getProductLine().name(), "sequence"),
                 properties.getWal().getNodeId());
+    }
+
+    @Bean(destroyMethod = "close")
+    public CancelAllAfterLocalStateStore cancelAllAfterLocalStateStore(TradingOrderProperties properties,
+                                                                       ObjectMapper objectMapper) {
+        return new CancelAllAfterLocalStateStore(
+                Path.of(properties.getWal().getDirectory(),
+                        properties.getKafka().getProductLine().name(), "cancel-all-after"), objectMapper);
     }
 }

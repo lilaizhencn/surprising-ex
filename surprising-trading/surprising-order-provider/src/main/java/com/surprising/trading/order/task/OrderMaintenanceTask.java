@@ -3,9 +3,7 @@ package com.surprising.trading.order.task;
 import com.surprising.trading.order.service.AlgoOrderService;
 import com.surprising.trading.order.service.CancelAllAfterService;
 import com.surprising.trading.order.service.OpenOrderViewCoordinator;
-import com.surprising.trading.order.service.OrderAccountCommandResultReconciler;
 import com.surprising.trading.order.service.OrderScheduleIndexCoordinator;
-import com.surprising.trading.order.service.OutboxPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -15,30 +13,19 @@ import org.springframework.stereotype.Component;
 @Component
 public class OrderMaintenanceTask {
 
-    private final OrderAccountCommandResultReconciler commandResultReconciler;
     private final OpenOrderViewCoordinator openOrderViewCoordinator;
     private final OrderScheduleIndexCoordinator scheduleIndexCoordinator;
     private final AlgoOrderService algoOrderService;
     private final CancelAllAfterService cancelAllAfterService;
-    private final OutboxPublisher outboxPublisher;
 
-    public OrderMaintenanceTask(OrderAccountCommandResultReconciler commandResultReconciler,
-                                OpenOrderViewCoordinator openOrderViewCoordinator,
+    public OrderMaintenanceTask(OpenOrderViewCoordinator openOrderViewCoordinator,
                                 OrderScheduleIndexCoordinator scheduleIndexCoordinator,
                                 AlgoOrderService algoOrderService,
-                                CancelAllAfterService cancelAllAfterService,
-                                OutboxPublisher outboxPublisher) {
-        this.commandResultReconciler = commandResultReconciler;
+                                CancelAllAfterService cancelAllAfterService) {
         this.openOrderViewCoordinator = openOrderViewCoordinator;
         this.scheduleIndexCoordinator = scheduleIndexCoordinator;
         this.algoOrderService = algoOrderService;
         this.cancelAllAfterService = cancelAllAfterService;
-        this.outboxPublisher = outboxPublisher;
-    }
-
-    @Scheduled(fixedDelayString = "${surprising.trading.order.account-result-reconcile-delay-ms:1000}")
-    public void reconcileAccountCommands() {
-        commandResultReconciler.reconcile();
     }
 
     @Scheduled(fixedDelayString = "${surprising.trading.order.redis-index.reconcile-delay-ms:10000}")
@@ -61,13 +48,4 @@ public class OrderMaintenanceTask {
         cancelAllAfterService.scanDueTimers();
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.outbox.publish-delay-ms:20}")
-    public void publishOutbox() {
-        outboxPublisher.publishPending();
-    }
-
-    @Scheduled(fixedDelayString = "${surprising.trading.order.outbox.cleanup-delay-ms:60000}")
-    public void cleanupOutbox() {
-        outboxPublisher.cleanupPublished();
-    }
 }

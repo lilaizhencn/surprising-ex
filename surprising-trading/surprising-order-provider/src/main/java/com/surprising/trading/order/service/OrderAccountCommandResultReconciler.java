@@ -2,10 +2,11 @@ package com.surprising.trading.order.service;
 
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.repository.OrderAccountCommandResultRepository;
-import org.springframework.stereotype.Service;
-
-@Service
-    public class OrderAccountCommandResultReconciler {
+/**
+ * 旧订单数据库结果核对器，仅保留历史测试类型；生产订单结果由用户分区 WAL 消费器处理。
+ */
+@Deprecated(forRemoval = true)
+public class OrderAccountCommandResultReconciler {
 
     private final TradingOrderProperties properties;
     private final OrderAccountCommandResultRepository repository;
