@@ -177,6 +177,30 @@ public class OrderPlacementStateService {
         return positionRepository.lockedPosition(line, userId, symbol, mode, side);
     }
 
+    /**
+     * 永续订单事实流使用账户 JVM 快照读取持仓，不允许为了平仓重新打开持仓表事务。
+     */
+    public Optional<ReduceOnlyPosition> localPosition(ProductLine line,
+                                                      long userId,
+                                                      String symbol,
+                                                      MarginMode mode,
+                                                      PositionSide side) {
+        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+            throw new IllegalStateException("订单本地状态尚未支持该产品线的持仓快照: " + line);
+        }
+        PerpetualAccountStateUpdatedEvent state = state(line, userId);
+        MarginMode normalizedMode = MarginMode.defaultIfNull(mode);
+        PositionSide normalizedSide = PositionSide.defaultIfNull(side);
+        return state.positions().stream()
+                .filter(position -> position.symbol().equalsIgnoreCase(symbol))
+                .filter(position -> position.marginMode() == normalizedMode)
+                .filter(position -> position.positionSide() == normalizedSide)
+                .filter(position -> position.signedQuantitySteps() != 0L)
+                .map(position -> new ReduceOnlyPosition(position.signedQuantitySteps(),
+                        position.instrumentVersion()))
+                .findFirst();
+    }
+
     public boolean hasActiveMarginModeConflict(ProductLine line, long userId, String symbol, MarginMode mode) {
         return positionRepository.hasMarginModeConflict(line, userId, symbol, mode)
                 || orderRepository.hasActiveMarginModeConflict(line, userId, symbol, mode)

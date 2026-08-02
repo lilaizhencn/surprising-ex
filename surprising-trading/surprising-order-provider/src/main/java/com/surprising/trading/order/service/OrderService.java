@@ -475,8 +475,64 @@ public class OrderService {
         return dryRunOpeningFunds(normalized, validation, resolvedFeeSnapshot.get());
     }
 
-    @Transactional
     public AmendOrderResponse amend(AmendOrderRequest request) {
+        if (orderUserStateService != null) {
+            return amendWal(request);
+        }
+        return amendDatabase(request);
+    }
+
+    /** 生产改单只追加同一用户分区的撤单事实，再提交替代订单事实。 */
+    private AmendOrderResponse amendWal(AmendOrderRequest request) {
+        AmendOrderRequest normalized = normalizeAmend(request);
+        OrderResponse original = orderUserStateService.get(normalized.userId(), normalized.orderId());
+        if (original.userId() != normalized.userId()) {
+            throw new IllegalArgumentException("order does not belong to user");
+        }
+        if (original.orderType() != OrderType.LIMIT) {
+            throw new IllegalArgumentException("only LIMIT orders can be amended");
+        }
+        if (original.status() != OrderStatus.ACCEPTED && original.status() != OrderStatus.PARTIALLY_FILLED) {
+            throw new IllegalStateException("order is not amendable: " + original.status().name());
+        }
+        if (original.remainingQuantitySteps() <= 0L) {
+            throw new IllegalStateException("order has no open quantity to amend");
+        }
+        long replacementPriceTicks = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
+        long replacementQuantitySteps = normalized.quantitySteps() == null
+                ? original.remainingQuantitySteps() : normalized.quantitySteps();
+        TimeInForce replacementTif = normalized.timeInForce() == null
+                ? original.timeInForce() : normalized.timeInForce();
+        boolean replacementPostOnly = normalized.postOnly() == null
+                ? original.postOnly() : normalized.postOnly();
+        PlaceOrderRequest replacement = new PlaceOrderRequest(
+                original.userId(), normalized.newClientOrderId(), original.symbol(), original.side(),
+                original.orderType(), replacementTif, replacementPriceTicks, replacementQuantitySteps,
+                original.marginMode(), original.positionSide(), original.reduceOnly(), replacementPostOnly);
+        if (replacement.clientOrderId() != null && !replacement.clientOrderId().isBlank()) {
+            try {
+                OrderResponse existing = orderUserStateService.getByClientOrderId(normalized.userId(),
+                        replacement.clientOrderId());
+                requireSameClientOrderIntent(replacement, existing);
+                return new AmendOrderResponse(original, existing, false, "replacement order already exists");
+            } catch (IllegalStateException ignored) {
+                // 本地用户分区没有替代订单，继续执行改单事实。
+            }
+        }
+        OrderResponse canceled = orderUserStateService.cancel(original.userId(), original.orderId(),
+                "order amend replace");
+        if (canceled.status() != OrderStatus.CANCEL_REQUESTED && canceled.status() != OrderStatus.CANCELED) {
+            throw new IllegalStateException("cancel requested failed for amend: " + canceled.status());
+        }
+        OrderResponse replacementOrder = place(replacement);
+        String message = replacementOrder.status() == OrderStatus.REJECTED
+                ? "cancel requested; replacement rejected: " + replacementOrder.rejectReason()
+                : "cancel requested; replacement submitted";
+        return new AmendOrderResponse(canceled, replacementOrder, true, message);
+    }
+
+    /** 仅保留给未装配用户分区状态机的历史测试构造。 */
+    private AmendOrderResponse amendDatabase(AmendOrderRequest request) {
         AmendOrderRequest normalized = normalizeAmend(request);
         ProductLine productLine = currentProductLine();
         var existingReplacement = orderRepository.findByClientOrderId(
@@ -537,7 +593,6 @@ public class OrderService {
         return new AmendOrderResponse(cancelResult.order(), replacementOrder, true, message);
     }
 
-    @Transactional
     public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
         List<AmendOrderRequest> orders = request == null ? List.of() : request.orders();
         requireBatchSize(orders.size(), 20, "orders");
@@ -553,8 +608,55 @@ public class OrderService {
         return amendBatchResponse(results);
     }
 
-    @Transactional
     public OrderResponse closePosition(ClosePositionRequest request) {
+        if (orderUserStateService != null) {
+            return closePositionWal(request);
+        }
+        return closePositionDatabase(request);
+    }
+
+    /** 永续平仓从账户 JVM 快照读取仓位，再通过订单用户事实流提交只减仓单。 */
+    private OrderResponse closePositionWal(ClosePositionRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("close position request is required");
+        }
+        if (request.userId() <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        String symbol = normalizeSymbol(request.symbol());
+        MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
+        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
+        ProductLine productLine = currentProductLine();
+        placementStateService.lockUserPositionMode(productLine, request.userId());
+        PositionMode positionMode = placementStateService.positionMode(productLine, request.userId());
+        if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
+            throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
+        }
+        ReduceOnlyPosition position = placementStateService.localPosition(productLine, request.userId(), symbol, marginMode,
+                        positionSide)
+                .orElseThrow(() -> new IllegalStateException("open position not found"));
+        if (position.signedQuantitySteps() == 0L) {
+            throw new IllegalStateException("open position not found");
+        }
+        OrderSide closeSide = position.signedQuantitySteps() > 0L ? OrderSide.SELL : OrderSide.BUY;
+        PlaceOrderRequest closeOrder = new PlaceOrderRequest(
+                request.userId(),
+                emptyToNull(request.clientOrderId()),
+                symbol,
+                closeSide,
+                OrderType.MARKET,
+                TimeInForce.IOC,
+                0L,
+                Math.absExact(position.signedQuantitySteps()),
+                marginMode,
+                positionSide,
+                true,
+                false);
+        return place(closeOrder);
+    }
+
+    /** 仅保留给未装配用户分区状态机的历史测试构造。 */
+    private OrderResponse closePositionDatabase(ClosePositionRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("close position request is required");
         }
@@ -579,18 +681,9 @@ public class OrderService {
         }
         OrderSide closeSide = position.signedQuantitySteps() > 0L ? OrderSide.SELL : OrderSide.BUY;
         PlaceOrderRequest closeOrder = new PlaceOrderRequest(
-                request.userId(),
-                emptyToNull(request.clientOrderId()),
-                symbol,
-                closeSide,
-                OrderType.MARKET,
-                TimeInForce.IOC,
-                0L,
-                Math.absExact(position.signedQuantitySteps()),
-                marginMode,
-                positionSide,
-                true,
-                false);
+                request.userId(), emptyToNull(request.clientOrderId()), symbol, closeSide, OrderType.MARKET,
+                TimeInForce.IOC, 0L, Math.absExact(position.signedQuantitySteps()), marginMode, positionSide,
+                true, false);
         return place(closeOrder);
     }
 
@@ -912,26 +1005,30 @@ public class OrderService {
         return new OrderQueryResponse(rows.size(), rows, page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    @Transactional
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason) {
         return adminCancelOrder(orderId, reason, null);
     }
 
-    @Transactional
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
         requireOrderId(orderId);
+        if (orderUserStateService != null) {
+            ProductLine resolved = productLine == null ? currentProductLine() : productLine;
+            OrderResponse canceled = orderUserStateService.cancelAny(resolved, orderId, adminCancelReason(reason));
+            boolean requested = canceled.status() == OrderStatus.CANCEL_REQUESTED;
+            return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.symbol(),
+                    canceled.status(), requested, requested ? "cancel requested" : "order is already "
+                    + canceled.status().name(), canceled);
+        }
         OrderRecord order = orderRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
         requireOrderProductLine(order, productLine);
         return requestCancel(order, adminCancelReason(reason));
     }
 
-    @Transactional
     public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request) {
         return adminCancelOrders(request, null);
     }
 
-    @Transactional
     public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request, ProductLine productLine) {
         Long userId = request == null ? null : request.userId();
         if (userId != null && userId <= 0) {
@@ -945,6 +1042,19 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String reason = adminCancelReason(request == null ? null : request.reason());
+        if (orderUserStateService != null) {
+            ProductLine resolved = productLine == null ? currentProductLine() : productLine;
+            List<OrderResponse> canceled = orderUserStateService.cancelAdminOrders(resolved, userId, symbol, limit,
+                    reason);
+            List<AdminCancelOrderResult> results = canceled.stream()
+                    .map(order -> new AdminCancelOrderResult(order.orderId(), order.userId(), order.symbol(),
+                            order.status(), order.status() == OrderStatus.CANCEL_REQUESTED,
+                            order.status() == OrderStatus.CANCEL_REQUESTED ? "cancel requested"
+                                    : "order is already " + order.status().name(), order))
+                    .toList();
+            int requested = (int) results.stream().filter(AdminCancelOrderResult::cancelRequested).count();
+            return new AdminCancelOrdersResponse(results.size(), requested, results.size() - requested, results);
+        }
         String contractType = contractType(productLine);
         List<OrderRecord> orders = contractType == null
                 ? orderRepository.adminCancelableOrders(userId, symbol, limit)
@@ -991,7 +1101,6 @@ public class OrderService {
                 sample);
     }
 
-    @Transactional
     public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request) {
         return adminCancelBySymbol(request, null);
     }
@@ -1009,9 +1118,12 @@ public class OrderService {
     /**
      * 到期生命周期只发起撤单，最终状态仍由撮合结果驱动。
      */
-    @Transactional
     public int requestLifecycleCancellation(String symbol, int limit) {
         String normalizedSymbol = normalizeSymbol(symbol);
+        if (orderUserStateService != null) {
+            return orderUserStateService.cancelLifecycleOrders(currentProductLine(), normalizedSymbol, limit,
+                    "INSTRUMENT_SETTLING").size();
+        }
         List<OrderRecord> orders = orderRepository.lifecycleCancelableOrders(
                 currentProductLine(), normalizedSymbol, limit);
         int requested = 0;
@@ -1024,6 +1136,9 @@ public class OrderService {
     }
 
     public boolean hasLifecycleActiveOrders(String symbol) {
+        if (orderUserStateService != null) {
+            return orderUserStateService.hasLifecycleActiveOrders(currentProductLine(), normalizeSymbol(symbol));
+        }
         return orderRepository.hasLifecycleActiveOrders(currentProductLine(), normalizeSymbol(symbol));
     }
 
@@ -1055,10 +1170,13 @@ public class OrderService {
      * <p>撤单更新带状态条件，并且撮合确认撤单前 {@code CANCEL_REQUESTED} 订单仍参与容量计算，
      * 因此重复消费仓位事件不会重复生成有效撤单。</p>
      */
-    @Transactional
     public void onPositionUpdated(PositionUpdatedEvent event) {
         if (event == null || event.productLine() != currentProductLine()) {
             throw new IllegalArgumentException("position event product line does not match order provider");
+        }
+        if (orderUserStateService != null) {
+            orderUserStateService.pruneReduceOnlyOrders(event, REDUCE_ONLY_PRUNE_REASON);
+            return;
         }
         String symbol = normalizeSymbol(event.symbol());
         placementStateService.lockUserSymbolMarginScope(event.productLine(), event.userId(), symbol);

@@ -7,6 +7,7 @@ import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
+import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.cache.PerpetualAccountStateSnapshotCache;
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionEvent;
@@ -132,6 +133,7 @@ public class OrderUserStateService {
     public OrderResponse place(OrderRecord order) {
         UserPartitionKey partition = partition(order.productLine(), order.userId());
         return lane.execute(partition, () -> {
+            applyPartition(partition);
             OrderUserState current = state(partition);
             Optional<OrderRecord> duplicate = current.orders().stream()
                     .filter(value -> value.clientOrderId() != null
@@ -150,12 +152,15 @@ public class OrderUserStateService {
     /** 同一用户分区内原子检查保证金模式，避免两个并发下单在检查与写入之间交错。 */
     public boolean hasActiveMarginModeConflict(long userId, String symbol, com.surprising.trading.api.model.MarginMode marginMode) {
         UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
-        return lane.execute(partition, () -> state(partition).orders().stream()
-                .filter(value -> value.symbol().equalsIgnoreCase(symbol))
-                .filter(value -> value.status() != OrderStatus.CANCELED
-                        && value.status() != OrderStatus.REJECTED
-                        && value.status() != OrderStatus.FILLED)
-                .anyMatch(value -> value.marginMode() != com.surprising.trading.api.model.MarginMode.defaultIfNull(marginMode)));
+        return lane.execute(partition, () -> {
+            applyPartition(partition);
+            return state(partition).orders().stream()
+                    .filter(value -> value.symbol().equalsIgnoreCase(symbol))
+                    .filter(value -> value.status() != OrderStatus.CANCELED
+                            && value.status() != OrderStatus.REJECTED
+                            && value.status() != OrderStatus.FILLED)
+                    .anyMatch(value -> value.marginMode() != com.surprising.trading.api.model.MarginMode.defaultIfNull(marginMode));
+        });
     }
 
     private void validateMarginModeInPartition(OrderUserState current, OrderRecord order) {
@@ -201,14 +206,162 @@ public class OrderUserStateService {
         });
     }
 
+    /**
+     * 管理撤单也必须定位到订单所属用户分区后追加撤单事实，不能回查订单表再开启数据库事务。
+     */
+    public OrderResponse cancelAny(ProductLine productLine, long orderId, String reason) {
+        if (productLine == null || productLine != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("订单产品线与当前订单节点不一致");
+        }
+        for (UserPartitionKey partition : orderedPartitions(productLine)) {
+            Optional<OrderRecord> candidate = lane.execute(partition, () -> {
+                applyPartition(partition);
+                return state(partition).orders().stream()
+                    .filter(value -> value.orderId() == orderId)
+                    .findFirst();
+            });
+            if (candidate.isEmpty()) {
+                continue;
+            }
+            return lane.execute(partition, () -> {
+                applyPartition(partition);
+                OrderRecord order = find(state(partition), orderId);
+                if (order.status() == OrderStatus.CANCELED || order.status() == OrderStatus.FILLED
+                        || order.status() == OrderStatus.REJECTED || order.status() == OrderStatus.CANCEL_REQUESTED) {
+                    return toResponse(order);
+                }
+                append(partition, OrderUserEvent.cancel(orderId, reason));
+                return toResponse(withStatus(order, OrderStatus.CANCEL_REQUESTED, null));
+            });
+        }
+        throw new IllegalStateException("订单不存在: " + orderId);
+    }
+
+    /**
+     * 按用户分区扫描管理撤单范围；扫描和追加事实在同一个分区 lane 中完成，避免读写交错。
+     */
+    public List<OrderResponse> cancelAdminOrders(ProductLine productLine,
+                                                  Long userId,
+                                                  String symbol,
+                                                  int limit,
+                                                  String reason) {
+        if (productLine == null || productLine != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("订单产品线与当前订单节点不一致");
+        }
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
+        List<OrderResponse> result = new ArrayList<>();
+        for (UserPartitionKey partition : orderedPartitions(productLine)) {
+            if (result.size() >= limit) {
+                break;
+            }
+            int remaining = limit - result.size();
+            List<OrderResponse> canceled = lane.execute(partition, () -> {
+                applyPartition(partition);
+                OrderUserState current = state(partition);
+                List<OrderRecord> orders = current.orders().stream()
+                        .filter(value -> userId == null || value.userId() == userId)
+                        .filter(value -> normalizedSymbol == null || value.symbol().equals(normalizedSymbol))
+                        .filter(value -> value.status() != OrderStatus.CANCELED
+                                && value.status() != OrderStatus.REJECTED
+                                && value.status() != OrderStatus.FILLED
+                                && value.status() != OrderStatus.CANCEL_REQUESTED)
+                        .sorted(java.util.Comparator.comparingLong(OrderRecord::orderId))
+                        .limit(remaining)
+                        .toList();
+                List<OrderResponse> responses = new ArrayList<>(orders.size());
+                for (OrderRecord order : orders) {
+                    append(partition, OrderUserEvent.cancel(order.orderId(), reason));
+                    responses.add(toResponse(withStatus(order, OrderStatus.CANCEL_REQUESTED, null)));
+                }
+                return List.copyOf(responses);
+            });
+            result.addAll(canceled);
+        }
+        return List.copyOf(result);
+    }
+
+    /**
+     * 生命周期清理只操作本地订单状态；数据库订单表仅作为异步投影，不参与撤单裁决。
+     */
+    public List<OrderResponse> cancelLifecycleOrders(ProductLine productLine,
+                                                      String symbol,
+                                                      int limit,
+                                                      String reason) {
+        return cancelAdminOrders(productLine, null, symbol, limit, reason);
+    }
+
+    public boolean hasLifecycleActiveOrders(ProductLine productLine, String symbol) {
+        if (productLine == null || productLine != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("订单产品线与当前订单节点不一致");
+        }
+        String normalizedSymbol = symbol == null ? null : symbol.trim().toUpperCase();
+        return orderedPartitions(productLine).stream().anyMatch(partition -> lane.execute(partition, () -> {
+            applyPartition(partition);
+            return state(partition).orders().stream()
+                    .anyMatch(value -> (normalizedSymbol == null || value.symbol().equals(normalizedSymbol))
+                            && value.status() != OrderStatus.CANCELED
+                            && value.status() != OrderStatus.REJECTED
+                            && value.status() != OrderStatus.FILLED);
+        }));
+    }
+
+    /**
+     * 账户持仓快照变小时，按同一用户分区裁剪超出持仓容量的只减仓单。
+     * 相同事件重复到达时，固定的 CANCEL 事件编号由 WAL 幂等去重。
+     */
+    public int pruneReduceOnlyOrders(PositionUpdatedEvent event, String reason) {
+        if (event == null || event.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("持仓事件产品线与当前订单节点不一致");
+        }
+        UserPartitionKey partition = partition(event.productLine(), event.userId());
+        return lane.execute(partition, () -> {
+            applyPartition(partition);
+            OrderUserState current = state(partition);
+            List<OrderRecord> orders = current.orders().stream()
+                    .filter(value -> value.symbol().equalsIgnoreCase(event.symbol()))
+                    .filter(value -> value.reduceOnly())
+                    .filter(value -> value.status() != OrderStatus.CANCELED
+                            && value.status() != OrderStatus.REJECTED
+                            && value.status() != OrderStatus.FILLED
+                            && value.status() != OrderStatus.CANCEL_REQUESTED)
+                    .sorted(java.util.Comparator.comparingLong(OrderRecord::orderId))
+                    .toList();
+            long capacity = Math.absExact(event.signedQuantitySteps());
+            OrderSide closeSide = event.signedQuantitySteps() > 0L
+                    ? OrderSide.SELL : event.signedQuantitySteps() < 0L ? OrderSide.BUY : null;
+            long consumed = 0L;
+            int requested = 0;
+            for (OrderRecord order : orders) {
+                boolean valid = closeSide != null && order.side() == closeSide
+                        && order.instrumentVersion() == event.instrumentVersion()
+                        && order.positionSide() == event.positionSide();
+                if (valid) {
+                    consumed = Math.addExact(consumed, order.remainingQuantitySteps());
+                }
+                if (!valid || consumed > capacity) {
+                    append(partition, OrderUserEvent.cancel(order.orderId(), reason));
+                    requested++;
+                }
+            }
+            return requested;
+        });
+    }
+
     public OrderResponse get(long userId, long orderId) {
-        return toResponse(find(state(partition(properties.getKafka().getProductLine(), userId)), orderId));
+        UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
+        return lane.execute(partition, () -> {
+            applyPartition(partition);
+            return toResponse(find(state(partition), orderId));
+        });
     }
 
     public OrderResponse get(long orderId) {
-        for (UserPartitionKey partition : stateStore.partitions()) {
-            Optional<OrderRecord> found = state(partition).orders().stream()
-                    .filter(value -> value.orderId() == orderId).findFirst();
+        for (UserPartitionKey partition : orderedPartitions(properties.getKafka().getProductLine())) {
+            Optional<OrderRecord> found = lane.execute(partition, () -> {
+                applyPartition(partition);
+                return state(partition).orders().stream()
+                        .filter(value -> value.orderId() == orderId).findFirst();
+            });
             if (found.isPresent()) {
                 return toResponse(found.orElseThrow());
             }
@@ -217,15 +370,22 @@ public class OrderUserStateService {
     }
 
     public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
-        OrderUserState state = state(partition(properties.getKafka().getProductLine(), userId));
-        return state.orders().stream().filter(value -> clientOrderId.equals(value.clientOrderId())).findFirst()
-                .map(this::toResponse)
-                .orElseThrow(() -> new IllegalStateException("order not found for clientOrderId: " + clientOrderId));
+        UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
+        return lane.execute(partition, () -> {
+            applyPartition(partition);
+            return state(partition).orders().stream()
+                    .filter(value -> clientOrderId.equals(value.clientOrderId())).findFirst()
+                    .map(this::toResponse)
+                    .orElseThrow(() -> new IllegalStateException("order not found for clientOrderId: " + clientOrderId));
+        });
     }
 
     public OrderQueryResponse openOrders(long userId, String symbol, int limit, long beforeOrderId) {
         String normalized = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
-        List<OrderResponse> orders = state(partition(properties.getKafka().getProductLine(), userId)).orders().stream()
+        UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
+        List<OrderResponse> orders = lane.execute(partition, () -> {
+            applyPartition(partition);
+            return state(partition).orders().stream()
                 .filter(value -> value.orderId() < beforeOrderId || beforeOrderId <= 0L)
                 .filter(value -> normalized == null || value.symbol().equals(normalized))
                 .filter(value -> value.status() != OrderStatus.CANCELED && value.status() != OrderStatus.REJECTED
@@ -234,6 +394,7 @@ public class OrderUserStateService {
                 .limit(limit + 1L)
                 .map(this::toResponse)
                 .toList();
+        });
         boolean more = orders.size() > limit;
         List<OrderResponse> page = more ? orders.subList(0, limit) : orders;
         String cursor = more ? Base64.getUrlEncoder().withoutPadding()
@@ -244,6 +405,7 @@ public class OrderUserStateService {
     public List<OrderResponse> cancelOpenOrders(long userId, String symbol, int limit) {
         UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
         return lane.execute(partition, () -> {
+            applyPartition(partition);
             List<OrderRecord> orders = state(partition).orders().stream()
                     .filter(value -> symbol == null || value.symbol().equalsIgnoreCase(symbol))
                     .filter(value -> value.status() != OrderStatus.CANCELED && value.status() != OrderStatus.REJECTED
@@ -549,6 +711,15 @@ public class OrderUserStateService {
 
     private UserPartitionKey partition(String ignoredSymbol, long userId) {
         return partition(properties.getKafka().getProductLine(), userId);
+    }
+
+    private List<UserPartitionKey> orderedPartitions(ProductLine productLine) {
+        java.util.Set<UserPartitionKey> partitions = new java.util.HashSet<>(stateStore.partitions());
+        partitions.addAll(wal.partitions());
+        return partitions.stream()
+                .filter(value -> value.productLine() == productLine)
+                .sorted(java.util.Comparator.comparing(UserPartitionKey::value))
+                .toList();
     }
 
     private OrderRecord find(OrderUserState state, long orderId) {
