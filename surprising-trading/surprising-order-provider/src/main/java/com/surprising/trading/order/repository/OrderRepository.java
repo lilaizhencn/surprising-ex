@@ -3,13 +3,12 @@ package com.surprising.trading.order.repository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.OrderRecord;
 import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * 订单数据库投影仓储，只负责 {@code trading_orders} 表和投影所需的序列。
+ * 订单数据库投影仓储，只负责 {@code trading_orders} 表。
  *
  * <p>订单下单、撤单、预占结果和撮合结果均由用户分区 WAL/RocksDB 裁决，本仓储没有任何
  * 在线状态查询或状态更新方法，避免数据库重新成为事实源。</p>
@@ -34,34 +33,8 @@ public class OrderRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /** 仅供费率配置和异步通知投影分配不重复的技术编号。 */
-    public long nextSequence(String sequenceName) {
-        Long value = jdbcTemplate.queryForObject("SELECT nextval(CAST(? AS regclass))", Long.class,
-                tradingSequenceIdentifier(sequenceName));
-        if (value == null) {
-            throw new IllegalStateException("无法分配数据库技术序列: " + sequenceName);
-        }
-        return value;
-    }
-
-    /** 批量分配技术编号；不参与订单状态裁决。 */
-    public List<Long> nextSequenceBatch(String sequenceName, int count) {
-        if (count <= 0) {
-            return List.of();
-        }
-        List<Long> values = jdbcTemplate.query("""
-                SELECT nextval(CAST(? AS regclass)) AS id
-                  FROM generate_series(1, ?) AS n
-                 ORDER BY n
-                """, (rs, rowNum) -> rs.getLong("id"), tradingSequenceIdentifier(sequenceName), count);
-        if (values.size() != count) {
-            throw new IllegalStateException("无法批量分配数据库技术序列: " + sequenceName);
-        }
-        return List.copyOf(values);
-    }
-
     /** 写入一条完整订单投影；调用方必须处于异步投影事务中。 */
-    public boolean insert(OrderRecord order) {
+    private boolean insert(OrderRecord order) {
         if (order == null) {
             throw new IllegalArgumentException("订单投影不能为空");
         }
@@ -119,10 +92,4 @@ public class OrderRepository {
         return version <= 0L ? null : version;
     }
 
-    private String tradingSequenceIdentifier(String sequenceName) {
-        if (sequenceName == null || !sequenceName.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
-            throw new IllegalArgumentException("数据库技术序列名称无效: " + sequenceName);
-        }
-        return "public.trading_" + sequenceName.toLowerCase().replace('-', '_') + "_seq";
-    }
 }

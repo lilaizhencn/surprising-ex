@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.LeverageSettingEvent;
+import com.surprising.trading.api.model.LeverageSettingRequest;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
@@ -45,6 +47,30 @@ class OrderMarginSnapshotCacheTest {
 
         assertThat(cache.applyOrder(accepted)).isEqualTo(OrderMarginSnapshotCache.ApplyResult.APPLIED);
         assertThat(cache.applyOrder(canceled)).isEqualTo(OrderMarginSnapshotCache.ApplyResult.CONFLICT);
+    }
+
+    @Test
+    void leverageEventIsOrderedAndIdempotentInJvmSnapshot() {
+        OrderMarginSnapshotCache cache = new OrderMarginSnapshotCache();
+        LeverageSettingEvent first = leverage(7L, 10_000_000L, NOW);
+
+        assertThat(cache.applyLeverage(first)).isEqualTo(OrderMarginSnapshotCache.ApplyResult.APPLIED);
+        assertThat(cache.applyLeverage(first)).isEqualTo(OrderMarginSnapshotCache.ApplyResult.STALE);
+        assertThat(cache.lookupConfiguredLeverage(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.CROSS)).contains(10_000_000L);
+
+        assertThat(cache.applyLeverage(leverage(6L, 11_000_000L, NOW.minusSeconds(1))))
+                .isEqualTo(OrderMarginSnapshotCache.ApplyResult.STALE);
+        assertThat(cache.applyLeverage(leverage(8L, 20_000_000L, NOW.plusSeconds(1))))
+                .isEqualTo(OrderMarginSnapshotCache.ApplyResult.APPLIED);
+        assertThat(cache.lookupConfiguredLeverage(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.CROSS)).contains(20_000_000L);
+    }
+
+    private LeverageSettingEvent leverage(long eventId, long leveragePpm, Instant eventTime) {
+        return new LeverageSettingEvent(LeverageSettingEvent.CURRENT_SCHEMA_VERSION, eventId,
+                new LeverageSettingRequest(1001L, ProductLine.LINEAR_PERPETUAL, "BTC-USDT",
+                        MarginMode.CROSS, leveragePpm, "test"), eventTime);
     }
 
     private PositionUpdatedEvent position(long revision, long quantity) {

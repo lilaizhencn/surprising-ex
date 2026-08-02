@@ -16,7 +16,7 @@
 
 事实表是 `trading_fee_schedules`，由
 `surprising-trading/surprising-order-provider` 的
-`OrderFeeRepository` 单表负责读写。重要字段如下：
+`OrderFeeRepository` 单表负责启动恢复、异步投影和后台查询。重要字段如下：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -47,12 +47,12 @@
 管理入口只有 `TradingFeeService`：
 
 1. `TradingFeeController` 校验产品线和请求参数；
-2. `TradingFeeService` 在事务内调用 `OrderFeeRepository` 写入费率表；
-3. 同一事务向 Outbox 写入完整的 `FeeScheduleEvent`；
-4. Outbox 发布到产品线费率 Topic：
+2. `TradingFeeService` 在本地生成完整的 `FeeScheduleResponse` 事实，编号由本地 RocksDB 序列生成；
+3. `FeeScheduleEventPublisher` 同步发布完整的 `FeeScheduleEvent` 到产品线费率 Topic：
    `surprising.<product-line>.fee.schedule.events.v1`；
-5. 每个模块的 `FeeScheduleSnapshotConsumer` 消费事件，按记录版本幂等更新本模块 JVM 快照；
-6. 订单模块启动时从本模块事实表恢复快照，其他模块启动时只通过内部 RPC
+4. 每个模块的 `FeeScheduleSnapshotConsumer` 消费事件，按记录版本幂等更新本模块 JVM 快照；
+5. 订单模块的同一消费者将事件异步投影到 `trading_fee_schedules`，数据库不可用只会阻塞投影重试，不会阻塞下单；
+6. 订单模块启动时从数据库恢复快照，其他模块启动时只通过内部 RPC
    `GET /internal/v1/trading/fees/snapshot?productLine=...` 初始化，Kafka 仅负责增量通知，不作为查询接口。
 
 事件携带完整费率记录和 `UPSERTED`/`DISABLED` 类型。快照整体替换使用原子引用，订单热路径只做内存读取；费率快照未恢复、损坏或事件延迟时，统一使用 Instrument 默认费率，避免下单因数据库抖动阻塞。

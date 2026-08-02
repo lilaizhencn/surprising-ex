@@ -76,7 +76,7 @@ public class PerpetualAccountStateSnapshotService {
         }
         long accountRevision = revisionRepository.current(productLine, userId);
         if (accountRevision <= 0L) {
-            throw new IllegalStateException("永续用户账户快照不存在: " + userId);
+            throw new IllegalStateException("产品线用户账户快照不存在: " + productLine + ":" + userId);
         }
         return build(productLine, accountType, userId, accountRevision, Instant.now(), "rpc-snapshot-init");
     }

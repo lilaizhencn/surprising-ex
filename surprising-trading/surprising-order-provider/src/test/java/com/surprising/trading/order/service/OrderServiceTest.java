@@ -112,10 +112,10 @@ class OrderServiceTest {
     }
 
     @Test
-    void unsupportedProductLineFailsClosedUntilItsAccountReducerIsReady() {
-        OrderService service = service(ProductLine.LINEAR_DELIVERY);
+    void optionProductLineFailsClosedUntilItsAccountReducerIsReady() {
+        OrderService service = service(ProductLine.OPTION);
 
-        assertThatThrownBy(() -> service.place(request("delivery-1")))
+        assertThatThrownBy(() -> service.place(request("option-1")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未接入本地账户事实流");
         verify(userState, never()).place(any(OrderRecord.class));

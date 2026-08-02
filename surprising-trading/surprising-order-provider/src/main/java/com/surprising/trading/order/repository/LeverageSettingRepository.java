@@ -18,9 +18,14 @@ public class LeverageSettingRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void upsert(LeverageSettingRequest request, Instant now) {
+    /** Kafka 杠杆事实的异步投影；不属于下单或管理请求热路径。 */
+    public void project(LeverageSettingRequest request, Instant eventTime) {
+        if (request == null || request.productLine() == null) {
+            throw new IllegalArgumentException("杠杆投影事实无效");
+        }
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         ProductLine productLine = productLine(request.productLine());
+        Instant now = eventTime == null ? Instant.now() : eventTime;
         jdbcTemplate.update("""
                 INSERT INTO trading_leverage_settings (
                     product_line, user_id, symbol, margin_mode, leverage_ppm, reason, created_at, updated_at

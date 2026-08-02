@@ -127,6 +127,7 @@ create_product_topics() {
   create_topic "${prefix}.order.commands.v1"
   create_topic "${prefix}.order.events.v1"
   create_topic "${prefix}.fee.schedule.events.v1"
+  create_topic "${prefix}.leverage.setting.events.v1"
   create_topic "${prefix}.trigger-order.events.v1"
   create_topic "${prefix}.match.results.v1"
   create_topic "${prefix}.match.trades.v1"

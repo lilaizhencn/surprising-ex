@@ -10,11 +10,9 @@ import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.ObjectMapper;
 
-/** 费率配置提交后直接发送 Kafka 通知，并更新本节点的 JVM 快照。 */
+/** 费率配置先写入 Kafka 事实流，再更新本节点的 JVM 快照。 */
 @Service
 public class FeeScheduleEventPublisher {
 
@@ -42,23 +40,10 @@ public class FeeScheduleEventPublisher {
         FeeScheduleEvent event = new FeeScheduleEvent(FeeScheduleEvent.CURRENT_SCHEMA_VERSION,
                 schedule.productLine(), schedule.feeScheduleId(), type, schedule,
                 schedule.updatedAt() == null ? Instant.now() : schedule.updatedAt());
-        try {
-            if (TransactionSynchronizationManager.isSynchronizationActive()) {
-                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        publishAfterCommit(event);
-                    }
-                });
-            } else {
-                publishAfterCommit(event);
-            }
-        } catch (Exception ex) {
-            throw new IllegalStateException("费率事件发送 Kafka 失败", ex);
-        }
+        publishFact(event);
     }
 
-    private void publishAfterCommit(FeeScheduleEvent event) {
+    private void publishFact(FeeScheduleEvent event) {
         try {
             String topic = properties.getKafka().getFeeScheduleEventsTopic();
             String key = event.productLine().name() + ":" + event.schedule().userId();

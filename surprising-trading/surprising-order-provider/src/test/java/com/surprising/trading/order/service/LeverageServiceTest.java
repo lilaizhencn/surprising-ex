@@ -2,10 +2,8 @@ package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -14,7 +12,7 @@ import com.surprising.trading.api.model.LeverageSettingResponse;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
-import com.surprising.trading.order.repository.LeverageSettingRepository;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -22,12 +20,14 @@ import org.junit.jupiter.api.Test;
 class LeverageServiceTest {
 
     @Test
-    void setLeverageNormalizesSymbolAndPersistsSetting() {
-        LeverageSettingRepository repository = mock(LeverageSettingRepository.class);
+    void setLeverageNormalizesSymbolAndPublishesFactWithoutDatabaseWrite() {
         InstrumentRuleLookup lookup = symbol -> Optional.of(rule(symbol));
         OrderMarginSnapshotCache cache = new OrderMarginSnapshotCache();
         cache.markLeverageSnapshotReady(ProductLine.LINEAR_PERPETUAL);
-        LeverageService service = new LeverageService(repository, lookup, cache);
+        LeverageSettingEventPublisher publisher = mock(LeverageSettingEventPublisher.class);
+        OrderIdSequenceStore sequence = mock(OrderIdSequenceStore.class);
+        when(sequence.next()).thenReturn(701L);
+        LeverageService service = new LeverageService(lookup, cache, publisher, sequence);
 
         LeverageSettingResponse response = service.set(new LeverageSettingRequest(1001L,
                 ProductLine.LINEAR_PERPETUAL, "btc-usdt", MarginMode.ISOLATED, 10_000_000L,
@@ -35,18 +35,18 @@ class LeverageServiceTest {
 
         assertThat(response.leveragePpm()).isEqualTo(10_000_000L);
         assertThat(response.source()).isEqualTo("USER");
-        assertThat(cache.lookupConfiguredLeverage(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
-                MarginMode.ISOLATED)).contains(10_000_000L);
-        verify(repository).upsert(eq(new LeverageSettingRequest(1001L, ProductLine.LINEAR_PERPETUAL,
-                "BTC-USDT", MarginMode.ISOLATED, 10_000_000L, "user changed leverage")), any());
+        org.mockito.Mockito.verify(publisher).publish(
+                org.mockito.ArgumentMatchers.eq(new LeverageSettingRequest(1001L, ProductLine.LINEAR_PERPETUAL,
+                        "BTC-USDT", MarginMode.ISOLATED, 10_000_000L, "user changed leverage")),
+                org.mockito.ArgumentMatchers.eq(701L), org.mockito.ArgumentMatchers.any(Instant.class));
     }
 
     @Test
     void rejectsLeverageAboveInstrumentMaximum() {
-        LeverageSettingRepository repository = mock(LeverageSettingRepository.class);
         OrderMarginSnapshotCache cache = new OrderMarginSnapshotCache();
         cache.markLeverageSnapshotReady(ProductLine.LINEAR_PERPETUAL);
-        LeverageService service = new LeverageService(repository, symbol -> Optional.of(rule(symbol)), cache);
+        LeverageService service = new LeverageService(symbol -> Optional.of(rule(symbol)), cache,
+                mock(LeverageSettingEventPublisher.class), mock(OrderIdSequenceStore.class));
 
         assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L,
                 ProductLine.LINEAR_PERPETUAL, "BTC-USDT", MarginMode.CROSS, 125_000_000L, "too high")))
@@ -56,22 +56,22 @@ class LeverageServiceTest {
 
     @Test
     void getFallsBackToInstrumentDefaultWhenUserSettingIsMissing() {
-        LeverageSettingRepository repository = mock(LeverageSettingRepository.class);
         InstrumentRuleLookup lookup = symbol -> Optional.of(rule(symbol));
         OrderMarginSnapshotCache cache = new OrderMarginSnapshotCache();
         cache.markLeverageSnapshotReady(ProductLine.LINEAR_PERPETUAL);
-        LeverageService service = new LeverageService(repository, lookup, cache);
+        LeverageService service = new LeverageService(lookup, cache, mock(LeverageSettingEventPublisher.class),
+                mock(OrderIdSequenceStore.class));
 
         assertThat(service.get(1001L, "BTC-USDT", null).source()).isEqualTo("INSTRUMENT_DEFAULT");
     }
 
     @Test
     void getDerivesProductLineFromInstrumentContractType() {
-        LeverageSettingRepository repository = mock(LeverageSettingRepository.class);
         InstrumentRuleLookup lookup = symbol -> Optional.of(rule(symbol, ContractType.INVERSE_DELIVERY));
         OrderMarginSnapshotCache cache = new OrderMarginSnapshotCache();
         cache.markLeverageSnapshotReady(ProductLine.INVERSE_DELIVERY);
-        LeverageService service = new LeverageService(repository, lookup, cache);
+        LeverageService service = new LeverageService(lookup, cache, mock(LeverageSettingEventPublisher.class),
+                mock(OrderIdSequenceStore.class));
 
         assertThat(service.get(1001L, "btc-usd-260327", null).productLine())
                 .isEqualTo(ProductLine.INVERSE_DELIVERY);
@@ -79,9 +79,9 @@ class LeverageServiceTest {
 
     @Test
     void rejectsProductLineThatDoesNotMatchInstrumentContractType() {
-        LeverageSettingRepository repository = mock(LeverageSettingRepository.class);
         InstrumentRuleLookup lookup = symbol -> Optional.of(rule(symbol, ContractType.INVERSE_DELIVERY));
-        LeverageService service = new LeverageService(repository, lookup, new OrderMarginSnapshotCache());
+        LeverageService service = new LeverageService(lookup, new OrderMarginSnapshotCache(),
+                mock(LeverageSettingEventPublisher.class), mock(OrderIdSequenceStore.class));
 
         assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, ProductLine.LINEAR_PERPETUAL,
                 "BTC-USD-260327", MarginMode.CROSS, 10_000_000L, "wrong line")))

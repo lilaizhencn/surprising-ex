@@ -80,6 +80,7 @@ public class TradingOrderProperties {
         private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
+        private String leverageSettingEventsTopic = "surprising.perp.leverage.setting.events.v1";
         private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
         private String accountStateSnapshotGroupId = "surprising-order-account-state-v1";
         private int accountCommandResultsConcurrency = 32;
@@ -184,6 +185,12 @@ public class TradingOrderProperties {
         public void setFeeScheduleEventsTopic(String feeScheduleEventsTopic) {
             this.feeScheduleEventsTopic = feeScheduleEventsTopic;
         }
+        public String getLeverageSettingEventsTopic() {
+            return productTopics().leverageSettingEventsTopic();
+        }
+        public void setLeverageSettingEventsTopic(String leverageSettingEventsTopic) {
+            this.leverageSettingEventsTopic = leverageSettingEventsTopic;
+        }
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("order-instrument-lifecycle");
         }
@@ -192,6 +199,9 @@ public class TradingOrderProperties {
         }
         public String getFeeScheduleSnapshotGroupId() {
             return productTopics().consumerGroup("order-fee-snapshot");
+        }
+        public String getLeverageSettingSnapshotGroupId() {
+            return productTopics().consumerGroup("order-leverage-snapshot");
         }
 
         private ProductTopicNames productTopics() {

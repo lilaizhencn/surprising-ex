@@ -6,31 +6,31 @@ import com.surprising.trading.api.model.LeverageSettingResponse;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
-import com.surprising.trading.order.repository.LeverageSettingRepository;
 import com.surprising.trading.order.repository.OrderLeverageMath;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class LeverageService {
 
     private static final long MIN_LEVERAGE_PPM = 1_000_000L;
 
-    private final LeverageSettingRepository leverageSettingRepository;
     private final InstrumentRuleLookup instrumentRuleLookup;
     private final OrderMarginSnapshotCache marginSnapshotCache;
+    private final LeverageSettingEventPublisher eventPublisher;
+    private final OrderIdSequenceStore idSequenceStore;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public LeverageService(LeverageSettingRepository leverageSettingRepository,
-                           InstrumentRuleLookup instrumentRuleLookup,
-                           OrderMarginSnapshotCache marginSnapshotCache) {
-        this.leverageSettingRepository = leverageSettingRepository;
+    public LeverageService(InstrumentRuleLookup instrumentRuleLookup,
+                           OrderMarginSnapshotCache marginSnapshotCache,
+                           LeverageSettingEventPublisher eventPublisher,
+                           OrderIdSequenceStore idSequenceStore) {
         this.instrumentRuleLookup = instrumentRuleLookup;
         this.marginSnapshotCache = marginSnapshotCache;
+        this.eventPublisher = eventPublisher;
+        this.idSequenceStore = idSequenceStore;
     }
 
-    @Transactional
     public LeverageSettingResponse set(LeverageSettingRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("leverage setting request is required");
@@ -54,8 +54,10 @@ public class LeverageService {
         LeverageSettingRequest normalized = new LeverageSettingRequest(request.userId(), productLine, symbol, marginMode,
                 request.leveragePpm(), request.reason());
         Instant updatedAt = Instant.now();
-        leverageSettingRepository.upsert(normalized, updatedAt);
-        marginSnapshotCache.putLeverage(productLine, request.userId(), symbol, marginMode, request.leveragePpm());
+        if (eventPublisher == null || idSequenceStore == null) {
+            throw new IllegalStateException("杠杆事件发布器未配置");
+        }
+        eventPublisher.publish(normalized, idSequenceStore.next(), updatedAt);
         return new LeverageSettingResponse(request.userId(), productLine, symbol, marginMode,
                 request.leveragePpm(), rule.maxLeveragePpm(),
                 OrderLeverageMath.initialMarginRateFromLeveragePpm(request.leveragePpm()),

@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** 订单等下游模块启动或用户首次接入时使用的永续账户快照初始化入口。 */
+/** 订单等下游模块启动或用户首次接入时使用的产品线账户快照初始化入口。 */
 @RestController
 @RequestMapping(AccountApiPaths.INTERNAL_BASE_PATH)
 public class PerpetualAccountStateInternalController {
@@ -31,14 +31,12 @@ public class PerpetualAccountStateInternalController {
     public PerpetualAccountStateUpdatedEvent snapshot(@RequestParam("productLine") ProductLine productLine,
                                                        @RequestParam("userId") long userId) {
         try {
-            if (productLine == ProductLine.LINEAR_PERPETUAL) {
-                var local = stateReducer.snapshot(new UserPartitionKey(productLine, userId));
-                if (local.isPresent()) {
-                    return local.get();
-                }
+            var local = stateReducer.snapshot(new UserPartitionKey(productLine, userId));
+            if (local.isPresent()) {
+                return local.get();
             }
             // 只有显式初始化入口才允许从数据库恢复基线，并立即写入本地 reducer；
-            // 账户命令执行器不会在热路径隐式查库。
+            // 账户命令执行器不会在热路径隐式查库。所有产品线都使用同一条边界。
             var snapshot = snapshotService.snapshot(productLine, userId);
             stateReducer.initialize(snapshot);
             return snapshot;

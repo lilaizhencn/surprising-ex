@@ -7,7 +7,7 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-/** 永续账户完整快照唯一初始化 RPC；实时增量仍然只通过 Kafka 传播。 */
+/** 产品线账户完整快照唯一初始化 RPC；实时增量仍然只通过 Kafka 传播。 */
 @FeignClient(
         name = "surprising-account-provider",
         contextId = "perpetualAccountStateRpcApi",

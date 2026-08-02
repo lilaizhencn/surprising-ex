@@ -105,6 +105,14 @@ public final class FeeScheduleSnapshotCache {
                 .toList();
     }
 
+    /** 读取单条本地费率事实；管理写入和禁用都必须基于该快照，不得回查数据库。 */
+    public Optional<FeeScheduleResponse> find(ProductLine productLine, long feeScheduleId) {
+        if (productLine == null || feeScheduleId <= 0L) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(state.get().schedules().get(new ScheduleKey(productLine, feeScheduleId)));
+    }
+
     /** 返回当前时间适用的用户费率计划；没有覆盖时返回空值，由调用方回退到 Instrument 默认费率。 */
     public Optional<FeeScheduleResponse> effective(ProductLine productLine,
                                                    long userId,

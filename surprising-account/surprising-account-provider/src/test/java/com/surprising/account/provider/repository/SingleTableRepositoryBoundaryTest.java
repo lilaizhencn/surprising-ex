@@ -7,8 +7,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.MarginMode;
-import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -121,7 +119,7 @@ class SingleTableRepositoryBoundaryTest {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         PositionRepository repository = new PositionRepository(jdbcTemplate);
 
-        repository.findOpenByUser(1001L, null);
+        repository.findSnapshotByUser(ProductLine.LINEAR_PERPETUAL, 1001L);
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
@@ -135,8 +133,7 @@ class SingleTableRepositoryBoundaryTest {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         PositionMarginRepository repository = new PositionMarginRepository(jdbcTemplate);
 
-        repository.find(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", "USDT",
-                MarginMode.ISOLATED, PositionSide.NET);
+        repository.findByUser(ProductLine.LINEAR_PERPETUAL, 1001L);
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)

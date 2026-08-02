@@ -3,6 +3,7 @@ package com.surprising.trading.order.service;
 import com.surprising.trading.api.cache.FeeScheduleSnapshotCache;
 import com.surprising.trading.api.model.FeeScheduleEvent;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.order.repository.OrderFeeRepository;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -15,13 +16,23 @@ public class FeeScheduleSnapshotConsumer {
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final FeeScheduleSnapshotCache cache;
+    private final OrderFeeRepository projectionRepository;
 
     public FeeScheduleSnapshotConsumer(ObjectMapper objectMapper,
                                        TradingOrderProperties properties,
-                                       FeeScheduleSnapshotCache cache) {
+                                       FeeScheduleSnapshotCache cache,
+                                       OrderFeeRepository projectionRepository) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.cache = cache;
+        this.projectionRepository = projectionRepository;
+    }
+
+    /** 测试或无数据库投影场景使用；生产配置必须注入异步投影仓储。 */
+    public FeeScheduleSnapshotConsumer(ObjectMapper objectMapper,
+                                       TradingOrderProperties properties,
+                                       FeeScheduleSnapshotCache cache) {
+        this(objectMapper, properties, cache, null);
     }
 
     @KafkaListener(
@@ -40,6 +51,9 @@ public class FeeScheduleSnapshotConsumer {
             FeeScheduleSnapshotCache.ApplyResult result = cache.apply(event);
             if (result == FeeScheduleSnapshotCache.ApplyResult.CONFLICT) {
                 throw new IllegalStateException("费率 JVM 快照同一修订号出现不同状态，暂停产品线消费");
+            }
+            if (projectionRepository != null) {
+                projectionRepository.project(event.schedule());
             }
         } catch (Exception ex) {
             throw new IllegalArgumentException("费率快照事件解析失败", ex);

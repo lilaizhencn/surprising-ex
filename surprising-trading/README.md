@@ -109,7 +109,8 @@ WAL/RocksDB，由 `OrderUserStateService` 按序应用。`OrderRepository` 仅�
 
 ## 杠杆设置
 
-- 用户杠杆配置保存在 `trading_leverage_settings`，唯一键是 `user_id + symbol + margin_mode`。
+- 用户杠杆配置的事实通过 `LeverageSettingEvent` 发布到产品线 Topic，订单 JVM 快照直接读取；
+  `trading_leverage_settings` 只作为异步投影和启动恢复来源，唯一键是 `user_id + symbol + margin_mode`。
 - `leveragePpm` 使用 ppm 表示杠杆：`10_000_000 = 10x`，`100_000_000 = 100x`。
 - 用户接口：`POST /api/v1/trading/leverage/settings` 设置杠杆，`GET /api/v1/trading/leverage/settings?userId=...&symbol=...&marginMode=...` 查询当前设置。
 - 设置杠杆时会先校验不能超过 instrument 当前版本的 `max_leverage_ppm`。

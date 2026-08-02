@@ -162,12 +162,9 @@ public class OrderService {
         return orderUserStateService.place(order);
     }
 
-    /**
-     * 订单事实流不能把未接入账户 reducer 的产品线偷偷降级到数据库事务。
-     * 产品线接入本地账户状态机后再开放对应入口。
-     */
+    /** 订单事实流只开放已接入本地账户 reducer 的产品线，未接入的产品线必须失败关闭。 */
     private void requireLocalAccountProductLine(ProductLine productLine) {
-        if (productLine != ProductLine.SPOT && productLine != ProductLine.LINEAR_PERPETUAL) {
+        if (productLine == null || productLine == ProductLine.OPTION) {
             throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
         }
     }
@@ -178,7 +175,7 @@ public class OrderService {
         if (productLine == ProductLine.SPOT) {
             return ValidationResult.ok();
         }
-        if (productLine != ProductLine.LINEAR_PERPETUAL) {
+        if (productLine == ProductLine.OPTION) {
             throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
         }
         if (request.reduceOnly()) {

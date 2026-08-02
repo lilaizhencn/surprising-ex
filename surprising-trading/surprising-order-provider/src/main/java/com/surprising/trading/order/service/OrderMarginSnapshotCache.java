@@ -4,11 +4,13 @@ import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.LeverageSettingEvent;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.model.OrderRecord;
 import java.util.Optional;
 import java.util.Set;
+import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.springframework.stereotype.Component;
@@ -261,7 +263,36 @@ public class OrderMarginSnapshotCache {
             return;
         }
         leverages.put(new LeverageKey(productLine, userId, symbol.trim().toUpperCase(), marginMode),
-                new LeverageValue(true, leveragePpm));
+                new LeverageValue(true, leveragePpm, Instant.EPOCH, 0L, "RECOVERY"));
+    }
+
+    /** 应用 Kafka 杠杆事实，按事件时间和完整内容做顺序/分叉校验。 */
+    public ApplyResult applyLeverage(LeverageSettingEvent event) {
+        if (event == null || event.setting() == null || event.setting().productLine() == null) {
+            return ApplyResult.IGNORED;
+        }
+        LeverageSettingEvent settingEvent = event;
+        LeverageKey key = new LeverageKey(settingEvent.setting().productLine(), settingEvent.setting().userId(),
+                settingEvent.setting().symbol(), settingEvent.setting().marginMode());
+        LeverageValue incoming = new LeverageValue(true, settingEvent.setting().leveragePpm(),
+                settingEvent.eventTime(), settingEvent.eventId(), settingEvent.setting().toString());
+        final ApplyResult[] result = {ApplyResult.APPLIED};
+        leverages.compute(key, (ignored, previous) -> {
+            if (previous != null) {
+                int revision = compareRevision(incoming, previous);
+                if (revision < 0) {
+                    result[0] = ApplyResult.STALE;
+                    return previous;
+                }
+                if (revision == 0) {
+                    result[0] = sameLeverage(previous, incoming) ? ApplyResult.STALE : ApplyResult.CONFLICT;
+                    return previous;
+                }
+            }
+            return incoming;
+        });
+        leverageReadyLines.add(settingEvent.setting().productLine());
+        return result[0];
     }
 
     /** 为没有用户特殊设置的用户预置“使用合约默认杠杆”的已知状态。 */
@@ -273,7 +304,7 @@ public class OrderMarginSnapshotCache {
             return;
         }
         leverages.putIfAbsent(new LeverageKey(productLine, userId, symbol.trim().toUpperCase(), marginMode),
-                new LeverageValue(true, null));
+                new LeverageValue(true, null, Instant.EPOCH, 0L, "DEFAULT"));
     }
 
     public Optional<MarginSnapshot> lookup(ProductLine productLine,
@@ -356,6 +387,19 @@ public class OrderMarginSnapshotCache {
                 && previous.signedQuantitySteps() == event.signedQuantitySteps();
     }
 
+    private int compareRevision(LeverageValue left, LeverageValue right) {
+        int time = left.updatedAt().compareTo(right.updatedAt());
+        if (time != 0) {
+            return time;
+        }
+        return Long.compare(left.eventId(), right.eventId());
+    }
+
+    private boolean sameLeverage(LeverageValue left, LeverageValue right) {
+        return left.leveragePpm().equals(right.leveragePpm())
+                && left.fingerprint().equals(right.fingerprint());
+    }
+
     private boolean sameOrder(OrderValue previous, OrderValue next) {
         return previous.productLine() == next.productLine()
                 && previous.userId() == next.userId()
@@ -409,7 +453,8 @@ public class OrderMarginSnapshotCache {
     private record PositionValue(long revision, long instrumentVersion, long signedQuantitySteps) {
     }
 
-    private record LeverageValue(boolean known, Long leveragePpm) {
+    private record LeverageValue(boolean known, Long leveragePpm, Instant updatedAt,
+                                 long eventId, String fingerprint) {
     }
 
     private record OrderValue(ProductLine productLine, long userId, String symbol, MarginMode marginMode,

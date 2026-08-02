@@ -13,7 +13,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -57,9 +56,13 @@ public class OrderFeeRepository {
                 """, (rs, rowNum) -> toResponse(rs), productLine.name());
     }
 
-    public void upsertSchedule(FeeScheduleUpsertRequest request, long feeScheduleId, Instant now) {
-        Instant effectiveTime = request.effectiveTime() == null ? now : request.effectiveTime();
-        ProductLine productLine = productLine(request.productLine());
+    /** Kafka 费率事实的异步数据库投影；订单请求线程不调用。 */
+    public void project(FeeScheduleResponse schedule) {
+        if (schedule == null || schedule.productLine() == null || schedule.feeScheduleId() <= 0L) {
+            throw new IllegalArgumentException("费率投影事实无效");
+        }
+        Instant now = schedule.updatedAt() == null ? Instant.now() : schedule.updatedAt();
+        Instant effectiveTime = schedule.effectiveTime() == null ? now : schedule.effectiveTime();
         jdbcTemplate.update("""
                 INSERT INTO trading_fee_schedules (
                     fee_schedule_id, product_line, user_id, symbol, maker_fee_rate_ppm, taker_fee_rate_ppm,
@@ -78,35 +81,14 @@ public class OrderFeeRepository {
                     effective_time = EXCLUDED.effective_time,
                     expire_time = EXCLUDED.expire_time,
                     updated_at = EXCLUDED.updated_at
-                """, feeScheduleId, productLine.name(), request.userId(), emptyToNull(request.symbol()),
-                request.makerFeeRatePpm(), request.takerFeeRatePpm(), sourceType(request.sourceType()).name(),
-                emptyToNull(request.tierCode()), request.reason().trim(), status(request.status()).name(),
-                Timestamp.from(effectiveTime), timestampOrNull(request.expireTime()),
-                Timestamp.from(now), Timestamp.from(now));
-    }
-
-    public boolean disableSchedule(long feeScheduleId, ProductLine productLine, Instant now) {
-        requireProductLine(productLine);
-        return jdbcTemplate.update("""
-                UPDATE trading_fee_schedules
-                   SET status = 'DISABLED',
-                       updated_at = ?
-                 WHERE fee_schedule_id = ?
-                   AND (CAST(? AS text) IS NULL OR product_line = ?)
-                   AND status <> 'DISABLED'
-                """, Timestamp.from(now), feeScheduleId,
-                productLine.name(), productLine.name()) == 1;
-    }
-
-    public Optional<FeeScheduleResponse> findSchedule(long feeScheduleId, ProductLine productLine) {
-        requireProductLine(productLine);
-        return jdbcTemplate.query("""
-                SELECT *
-                  FROM trading_fee_schedules
-                 WHERE fee_schedule_id = ?
-                   AND (CAST(? AS text) IS NULL OR product_line = ?)
-                """, (rs, rowNum) -> toResponse(rs), feeScheduleId,
-                productLine.name(), productLine.name()).stream().findFirst();
+                WHERE trading_fee_schedules.updated_at IS NULL
+                   OR trading_fee_schedules.updated_at <= EXCLUDED.updated_at
+                """, schedule.feeScheduleId(), schedule.productLine().name(), schedule.userId(),
+                emptyToNull(schedule.symbol()), schedule.makerFeeRatePpm(), schedule.takerFeeRatePpm(),
+                sourceType(schedule.sourceType()).name(), emptyToNull(schedule.tierCode()), schedule.reason(),
+                status(schedule.status()).name(), Timestamp.from(effectiveTime),
+                timestampOrNull(schedule.expireTime()), Timestamp.from(schedule.createdAt() == null ? now : schedule.createdAt()),
+                Timestamp.from(now));
     }
 
     public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
