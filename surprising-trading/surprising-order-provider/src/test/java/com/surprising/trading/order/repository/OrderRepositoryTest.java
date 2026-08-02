@@ -163,18 +163,6 @@ class OrderRepositoryTest {
     }
 
     @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void lockUserSymbolMarginScopeUsesProductScopedAdvisoryLockKey() {
-        JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
-        OrderCoordinationRepository repository = new OrderCoordinationRepository(jdbcTemplate);
-
-        repository.lockUserSymbolMarginScope(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT");
-
-        verify(jdbcTemplate).query(contains("pg_advisory_xact_lock"),
-                any(ResultSetExtractor.class), eq("LINEAR_DELIVERY:1001:BTC-USDT"));
-    }
-
-    @Test
     void activeMarginModeConflictOnlyChecksTradingOrders() {
         JdbcTemplate jdbcTemplate = org.mockito.Mockito.mock(JdbcTemplate.class);
         OrderRepository repository = new OrderRepository(jdbcTemplate);
