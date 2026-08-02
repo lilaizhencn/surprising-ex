@@ -2,7 +2,6 @@ package com.surprising.trading.order.service;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.repository.AlgoOrderRepository;
 import com.surprising.trading.order.repository.CancelAllAfterRepository;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +14,7 @@ import org.springframework.stereotype.Component;
 public class OrderScheduleIndexCoordinator {
     private final TradingOrderProperties properties;
     private final CancelAllAfterRepository timerRepository;
-    private final AlgoOrderRepository algoRepository;
+    private final OrderUserStateService orderUserStateService;
     private final OrderScheduleIndex index;
     private final OrderRedisLease lease;
     private final CancelAllAfterLocalStateStore localStateStore;
@@ -23,22 +22,22 @@ public class OrderScheduleIndexCoordinator {
     /** 历史测试构造。 */
     public OrderScheduleIndexCoordinator(TradingOrderProperties properties,
                                          CancelAllAfterRepository timerRepository,
-                                         AlgoOrderRepository algoRepository,
+                                         OrderUserStateService orderUserStateService,
                                          OrderScheduleIndex index,
                                          OrderRedisLease lease) {
-        this(properties, timerRepository, algoRepository, index, lease, null);
+        this(properties, timerRepository, orderUserStateService, index, lease, null);
     }
 
     @Autowired
     public OrderScheduleIndexCoordinator(TradingOrderProperties properties,
                                          CancelAllAfterRepository timerRepository,
-                                         AlgoOrderRepository algoRepository,
+                                         OrderUserStateService orderUserStateService,
                                          OrderScheduleIndex index,
                                          OrderRedisLease lease,
                                          @Nullable CancelAllAfterLocalStateStore localStateStore) {
         this.properties = properties;
         this.timerRepository = timerRepository;
-        this.algoRepository = algoRepository;
+        this.orderUserStateService = orderUserStateService;
         this.index = index;
         this.lease = lease;
         this.localStateStore = localStateStore;
@@ -101,7 +100,7 @@ public class OrderScheduleIndexCoordinator {
         }
         long afterAlgoId = 0;
         while (true) {
-            var rows = algoRepository.scheduledOrdersForIndex(line, afterAlgoId, batch);
+            var rows = orderUserStateService.scheduledAlgos(line, afterAlgoId, batch);
             if (rows.isEmpty()) return;
             for (var row : rows) {
                 index.synchronizeAlgo(row);

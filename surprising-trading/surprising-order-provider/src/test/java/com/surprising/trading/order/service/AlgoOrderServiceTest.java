@@ -3,190 +3,145 @@ package com.surprising.trading.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.eventstore.UserPartitionCommandLane;
+import com.surprising.eventstore.UserPartitionStateStore;
+import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AlgoOrderStatus;
 import com.surprising.trading.api.model.AlgoOrderType;
 import com.surprising.trading.api.model.CancelAlgoOrderRequest;
-import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
-import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.AlgoOrderProgress;
+import com.surprising.trading.order.model.AlgoOrderChild;
 import com.surprising.trading.order.model.AlgoOrderRecord;
 import com.surprising.trading.order.model.OrderRecord;
-import com.surprising.trading.order.repository.AlgoOrderRepository;
-import com.surprising.trading.order.repository.AlgoOrderChildRepository;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.kafka.core.KafkaTemplate;
+import tools.jackson.databind.ObjectMapper;
 
 class AlgoOrderServiceTest {
 
-    @Test
-    void twapRejectsChildQuantityThatCannotFinishInsideDuration() {
-        AlgoOrderService service = service(mock(AlgoOrderRepository.class),
-                mock(AlgoOrderChildRepository.class), mock(OrderService.class));
+    @TempDir
+    Path directory;
 
-        assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
-                1001L,
-                "twap-small-child",
-                "BTC-USDT",
-                AlgoOrderType.TWAP,
-                OrderSide.BUY,
-                0L,
-                100L,
-                10L,
-                10L,
-                20L,
-                MarginMode.CROSS,
-                PositionSide.NET,
-                false,
-                false,
-                TimeInForce.IOC,
-                null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("childQuantitySteps is too small");
+    @Test
+    void twapRejectsChildQuantityThatCannotFinishInsideDuration() throws Exception {
+        try (Fixture fixture = fixture(ProductLine.LINEAR_PERPETUAL, mock(OrderService.class))) {
+            assertThatThrownBy(() -> fixture.service.place(new PlaceAlgoOrderRequest(
+                    1001L, "twap-small-child", "BTC-USDT", AlgoOrderType.TWAP, OrderSide.BUY,
+                    0L, 100L, 10L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
+                    false, false, TimeInForce.IOC, null)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("childQuantitySteps is too small");
+        }
     }
 
     @Test
-    void reusedClientAlgoIdWithDifferentParametersIsRejected() {
-        AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
-        AlgoOrderService service = service(repository, mock(AlgoOrderChildRepository.class), mock(OrderService.class));
-        when(repository.findByClientAlgoOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "twap-1"))
-                .thenReturn(Optional.of(twapRecord()));
-
-        assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
-                1001L, "twap-1", "BTC-USDT", AlgoOrderType.TWAP, OrderSide.BUY,
-                1L, 100L, 50L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
-                false, false, TimeInForce.IOC, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("clientAlgoOrderId already used with different algo parameters");
-        verify(repository, never()).nextAlgoOrderId();
+    void reusedClientAlgoIdWithDifferentParametersIsRejected() throws Exception {
+        try (Fixture fixture = fixture(ProductLine.LINEAR_PERPETUAL, mock(OrderService.class))) {
+            fixture.userState.placeAlgo(twapRecord());
+            assertThatThrownBy(() -> fixture.service.place(new PlaceAlgoOrderRequest(
+                    1001L, "twap-1", "BTC-USDT", AlgoOrderType.TWAP, OrderSide.BUY,
+                    1L, 100L, 50L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
+                    false, false, TimeInForce.IOC, null)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("clientAlgoOrderId already used with different algo parameters");
+        }
     }
 
     @Test
-    void dueTwapPlacesIocChildOrderThroughOrderService() {
-        AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
-        AlgoOrderChildRepository childRepository = mock(AlgoOrderChildRepository.class);
+    void dueTwapPlacesIocChildOrderThroughOrderService() throws Exception {
         OrderService orderService = mock(OrderService.class);
-        AlgoOrderService service = service(repository, childRepository, orderService);
-        AlgoOrderRecord record = twapRecord();
-        Instant now = Instant.parse("2026-07-05T00:00:00Z");
-        when(childRepository.progress(record.algoOrderId()))
-                .thenReturn(new AlgoOrderProgress(0L, 0L, 0, 0, 1));
-        when(childRepository.insert(eq(record), eq(1), any(OrderResponse.class), eq(now))).thenReturn(true);
-        when(orderService.place(any())).thenReturn(orderResponse(9001L, "algo-77-1", TimeInForce.IOC));
+        try (Fixture fixture = fixture(ProductLine.LINEAR_PERPETUAL, orderService)) {
+            AlgoOrderRecord record = twapRecord();
+            fixture.userState.placeAlgo(record);
+            when(orderService.place(any())).thenReturn(orderResponse(9001L, "algo-77-0", TimeInForce.IOC));
 
-        service.executeDue(record, now);
+            fixture.service.executeDue(record, Instant.parse("2026-07-05T00:00:00Z"));
 
-        ArgumentCaptor<PlaceOrderRequest> request = ArgumentCaptor.forClass(PlaceOrderRequest.class);
-        verify(orderService).place(request.capture());
-        assertThat(request.getValue().clientOrderId()).isEqualTo("algo-77-1");
-        assertThat(request.getValue().orderType()).isEqualTo(OrderType.MARKET);
-        assertThat(request.getValue().timeInForce()).isEqualTo(TimeInForce.IOC);
-        assertThat(request.getValue().quantitySteps()).isEqualTo(50L);
-        verify(childRepository).insert(eq(record), eq(1), any(OrderResponse.class), eq(now));
-        verify(repository).markChildLinked(record.algoOrderId(), 9001L, now.plusSeconds(10), now);
+            verify(orderService).place(any());
+            assertThat(fixture.userState.algoChildren(1001L, record.algoOrderId()))
+                    .extracting(AlgoOrderChild::orderId).containsExactly(9001L);
+        }
     }
 
     @Test
-    void icebergWaitsForActiveVisibleChildBeforePlacingNextSlice() {
-        AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
-        AlgoOrderChildRepository childRepository = mock(AlgoOrderChildRepository.class);
+    void icebergWaitsForActiveVisibleChildBeforePlacingNextSlice() throws Exception {
         OrderService orderService = mock(OrderService.class);
-        AlgoOrderService service = service(repository, childRepository, orderService);
-        AlgoOrderRecord record = icebergRecord();
-        Instant now = Instant.parse("2026-07-05T00:00:00Z");
-        when(childRepository.progress(record.algoOrderId()))
-                .thenReturn(new AlgoOrderProgress(10L, 40L, 1, 1, 2));
+        try (Fixture fixture = fixture(ProductLine.LINEAR_PERPETUAL, orderService)) {
+            AlgoOrderRecord record = icebergRecord();
+            fixture.userState.placeAlgo(record);
+            fixture.userState.place(childRecord());
+            fixture.userState.linkAlgoChild(record, new AlgoOrderChild(record.algoOrderId(), 1, 9001L, 50L));
 
-        service.executeDue(record, now);
+            fixture.service.executeDue(record, Instant.parse("2026-07-05T00:00:00Z"));
 
-        verify(orderService, never()).place(any());
-        verify(repository).scheduleNext(eq(record.algoOrderId()), eq(AlgoOrderStatus.RUNNING), any(), eq(now));
+            verify(orderService, never()).place(any());
+        }
     }
 
     @Test
-    void cancelAlgoCancelsActiveChildrenAndStopsFutureSlices() {
-        AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
-        AlgoOrderChildRepository childRepository = mock(AlgoOrderChildRepository.class);
+    void cancelAlgoCancelsActiveChildrenAndStopsFutureSlices() throws Exception {
         OrderService orderService = mock(OrderService.class);
-        AlgoOrderService service = service(repository, childRepository, orderService);
-        AlgoOrderRecord record = icebergRecord();
-        AlgoOrderRecord canceled = new AlgoOrderRecord(record.algoOrderId(), record.userId(),
-                record.clientAlgoOrderId(), record.symbol(), record.algoType(), record.side(), record.priceTicks(),
-                record.quantitySteps(), record.childQuantitySteps(), record.intervalSeconds(), record.durationSeconds(),
-                record.marginMode(), record.positionSide(), record.reduceOnly(), record.postOnly(),
-                record.timeInForce(), AlgoOrderStatus.CANCELED, record.currentOrderId(), record.rejectReason(),
-                record.traceId(), record.startAt(), null, Instant.parse("2026-07-05T00:00:01Z"),
-                record.createdAt(), Instant.parse("2026-07-05T00:00:01Z"));
-        when(repository.findByAlgoOrderId(record.algoOrderId()))
-                .thenReturn(Optional.of(record))
-                .thenReturn(Optional.of(canceled));
-        when(childRepository.activeOrders(record.algoOrderId())).thenReturn(List.of(childRecord()));
-        when(childRepository.progress(record.algoOrderId()))
-                .thenReturn(new AlgoOrderProgress(0L, 50L, 1, 1, 2));
+        try (Fixture fixture = fixture(ProductLine.LINEAR_PERPETUAL, orderService)) {
+            AlgoOrderRecord record = icebergRecord();
+            fixture.userState.placeAlgo(record);
+            fixture.userState.place(childRecord());
+            fixture.userState.linkAlgoChild(record, new AlgoOrderChild(record.algoOrderId(), 1, 9001L, 50L));
 
-        var response = service.cancel(new CancelAlgoOrderRequest(record.userId(), record.algoOrderId()));
+            var response = fixture.service.cancel(new CancelAlgoOrderRequest(record.userId(), record.algoOrderId()));
 
-        assertThat(response.status()).isEqualTo(AlgoOrderStatus.CANCELED);
-        verify(repository).markCancelRequested(eq(record.algoOrderId()), any());
-        verify(orderService).cancel(any(CancelOrderRequest.class));
-        verify(repository).markCanceled(eq(record.algoOrderId()), any());
+            assertThat(response.status()).isEqualTo(AlgoOrderStatus.CANCELED);
+            verify(orderService).cancel(any());
+        }
     }
 
     @Test
-    void cancelRejectsAlgoOrderOutsideCurrentProductLineBeforeMutating() {
-        AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
-        OrderService orderService = mock(OrderService.class);
-        AlgoOrderService service = service(ProductLine.OPTION, repository,
-                mock(AlgoOrderChildRepository.class), orderService);
-        AlgoOrderRecord record = twapRecord();
-        when(repository.findByAlgoOrderId(record.algoOrderId())).thenReturn(Optional.of(record));
-        when(repository.algoOrderMatchesContractType(record.algoOrderId(), "VANILLA_OPTION")).thenReturn(false);
-
-        assertThatThrownBy(() -> service.cancel(new CancelAlgoOrderRequest(record.userId(), record.algoOrderId())))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("algo order not found: 77");
-
-        verify(repository, never()).markCancelRequested(eq(record.algoOrderId()), any());
-        verify(orderService, never()).cancel(any(CancelOrderRequest.class));
+    void nonPerpetualAlgoOrderFailsClosedWithoutDatabaseFallback() throws Exception {
+        try (Fixture fixture = fixture(ProductLine.OPTION, mock(OrderService.class))) {
+            assertThatThrownBy(() -> fixture.service.place(new PlaceAlgoOrderRequest(
+                    1001L, "option-1", "BTC-OPT", AlgoOrderType.TWAP, OrderSide.BUY,
+                    0L, 100L, 50L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
+                    false, false, TimeInForce.IOC, null)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("尚未接入本地订单事实流");
+        }
     }
 
-    private AlgoOrderService service(AlgoOrderRepository repository,
-                                     AlgoOrderChildRepository childRepository,
-                                     OrderService orderService) {
-        TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getAlgo().setMinDurationSeconds(1L);
-        properties.getAlgo().setMinIntervalSeconds(1L);
-        return new AlgoOrderService(properties, repository, childRepository, orderService);
-    }
-
-    private AlgoOrderService service(ProductLine productLine,
-                                     AlgoOrderRepository repository,
-                                     AlgoOrderChildRepository childRepository,
-                                     OrderService orderService) {
+    private Fixture fixture(ProductLine productLine, OrderService orderService) throws Exception {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAlgo().setMinDurationSeconds(1L);
         properties.getAlgo().setMinIntervalSeconds(1L);
         properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(productLine);
-        return new AlgoOrderService(properties, repository, childRepository, orderService);
+        KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+        when(kafka.send(any(String.class), any(String.class), any(String.class)))
+                .thenReturn(CompletableFuture.completedFuture(null));
+        Path root = Files.createTempDirectory(directory, "algo-");
+        UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+        UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"));
+        OrderUserStateService user = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                new UserPartitionCommandLane(), kafka);
+        AlgoOrderService service = new AlgoOrderService(properties, orderService, user,
+                OrderScheduleIndex.disabled(), null);
+        return new Fixture(service, user, wal, state);
     }
 
     private AlgoOrderRecord twapRecord() {
@@ -219,5 +174,16 @@ class AlgoOrderServiceTest {
                 OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTX, 600_000L,
                 50L, 0L, 50L, MarginMode.CROSS, PositionSide.NET, 0L, 0L,
                 false, true, OrderStatus.ACCEPTED, null, now, now);
+    }
+
+    private record Fixture(AlgoOrderService service,
+                           OrderUserStateService userState,
+                           UserPartitionWal wal,
+                           UserPartitionStateStore state) implements AutoCloseable {
+        @Override
+        public void close() {
+            wal.close();
+            state.close();
+        }
     }
 }

@@ -26,9 +26,13 @@ import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.order.model.AlgoOrderChild;
+import com.surprising.trading.order.model.AlgoOrderProgress;
+import com.surprising.trading.order.model.AlgoOrderRecord;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.OrderUserEvent;
 import com.surprising.trading.order.model.OrderUserState;
+import com.surprising.trading.api.model.AlgoOrderResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.security.MessageDigest;
@@ -161,6 +165,171 @@ public class OrderUserStateService {
                             && value.status() != OrderStatus.FILLED)
                     .anyMatch(value -> value.marginMode() != com.surprising.trading.api.model.MarginMode.defaultIfNull(marginMode));
         });
+    }
+
+    /** 算法单与普通订单共用同一用户 WAL 和单写入 lane。 */
+    public AlgoOrderResponse placeAlgo(AlgoOrderRecord order) {
+        UserPartitionKey partition = partition(order.productLine(), order.userId());
+        return lane.execute(partition, () -> {
+            applyPartition(partition);
+            OrderUserState current = state(partition);
+            Optional<AlgoOrderRecord> duplicate = current.algoOrders().stream()
+                    .filter(value -> value.clientAlgoOrderId() != null
+                            && value.clientAlgoOrderId().equals(order.clientAlgoOrderId()))
+                    .findFirst();
+            if (duplicate.isPresent()) {
+                requireSameAlgoIntent(duplicate.get(), order);
+                return toAlgoResponse(current, duplicate.get());
+            }
+            append(partition, OrderUserEvent.algoPlace(order));
+            return toAlgoResponse(current, order);
+        });
+    }
+
+    public AlgoOrderRecord algo(long userId, long algoOrderId) {
+        UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
+        return lane.execute(partition, () -> {
+            applyPartition(partition);
+            return findAlgo(state(partition), algoOrderId);
+        });
+    }
+
+    public AlgoOrderRecord algoById(long algoOrderId) {
+        for (UserPartitionKey partition : orderedPartitions(properties.getKafka().getProductLine())) {
+            Optional<AlgoOrderRecord> found = lane.execute(partition, () -> {
+                applyPartition(partition);
+                return state(partition).algoOrders().stream()
+                        .filter(value -> value.algoOrderId() == algoOrderId).findFirst();
+            });
+            if (found.isPresent()) {
+                return found.orElseThrow();
+            }
+        }
+        throw new IllegalStateException("算法单不存在: " + algoOrderId);
+    }
+
+    public AlgoOrderResponse algoResponse(AlgoOrderRecord order) {
+        UserPartitionKey partition = partition(order.productLine(), order.userId());
+        return lane.execute(partition, () -> {
+            applyPartition(partition);
+            return toAlgoResponse(state(partition), findAlgo(state(partition), order.algoOrderId()));
+        });
+    }
+
+    public void updateAlgo(AlgoOrderRecord order) {
+        UserPartitionKey partition = partition(order.productLine(), order.userId());
+        lane.execute(partition, () -> {
+            applyPartition(partition);
+            findAlgo(state(partition), order.algoOrderId());
+            append(partition, OrderUserEvent.algoUpdate(order));
+            return null;
+        });
+    }
+
+    public void linkAlgoChild(AlgoOrderRecord order, AlgoOrderChild child) {
+        if (order.algoOrderId() != child.algoOrderId()) {
+            throw new IllegalArgumentException("算法单切片编号不匹配");
+        }
+        UserPartitionKey partition = partition(order.productLine(), order.userId());
+        lane.execute(partition, () -> {
+            applyPartition(partition);
+            findAlgo(state(partition), order.algoOrderId());
+            append(partition, OrderUserEvent.algoChild(order, child));
+            return null;
+        });
+    }
+
+    public AlgoOrderProgress algoProgress(long userId, long algoOrderId) {
+        UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
+        return lane.execute(partition, () -> progress(stateAfterApply(partition), algoOrderId));
+    }
+
+    public List<AlgoOrderChild> algoChildren(long userId, long algoOrderId) {
+        UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
+        return lane.execute(partition, () -> stateAfterApply(partition).algoChildren().stream()
+                .filter(value -> value.algoOrderId() == algoOrderId)
+                .sorted(java.util.Comparator.comparingInt(AlgoOrderChild::sliceIndex))
+                .toList());
+    }
+
+    public List<AlgoOrderRecord> claimDueAlgos(ProductLine productLine, Instant now, int limit, java.time.Duration lease) {
+        if (productLine != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("算法单产品线与当前订单节点不一致");
+        }
+        List<AlgoOrderRecord> claimed = new ArrayList<>();
+        for (UserPartitionKey partition : orderedPartitions(productLine)) {
+            if (claimed.size() >= limit) {
+                break;
+            }
+            int remaining = limit - claimed.size();
+            claimed.addAll(lane.execute(partition, () -> {
+                OrderUserState current = stateAfterApply(partition);
+                List<AlgoOrderRecord> due = current.algoOrders().stream()
+                        .filter(value -> (value.status() == com.surprising.trading.api.model.AlgoOrderStatus.PENDING
+                                || value.status() == com.surprising.trading.api.model.AlgoOrderStatus.RUNNING)
+                                && value.nextSliceAt() != null && !value.nextSliceAt().isAfter(now))
+                        .sorted(java.util.Comparator.comparing(AlgoOrderRecord::nextSliceAt)
+                                .thenComparingLong(AlgoOrderRecord::algoOrderId))
+                        .limit(remaining)
+                        .toList();
+                List<AlgoOrderRecord> result = new ArrayList<>(due.size());
+                for (AlgoOrderRecord order : due) {
+                    AlgoOrderRecord claimedOrder = withAlgoSchedule(order,
+                            com.surprising.trading.api.model.AlgoOrderStatus.RUNNING,
+                            now.plus(lease), now);
+                    append(partition, OrderUserEvent.algoUpdate(claimedOrder));
+                    result.add(claimedOrder);
+                }
+                return result;
+            }));
+        }
+        return List.copyOf(claimed);
+    }
+
+    public List<AlgoOrderRecord> scheduledAlgos(ProductLine productLine, long afterAlgoOrderId, int limit) {
+        if (productLine != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("算法单产品线与当前订单节点不一致");
+        }
+        return orderedPartitions(productLine).stream()
+                .flatMap(partition -> lane.execute(partition, () -> stateAfterApply(partition).algoOrders().stream()
+                        .filter(value -> value.algoOrderId() > afterAlgoOrderId
+                                && (value.status() == com.surprising.trading.api.model.AlgoOrderStatus.PENDING
+                                || value.status() == com.surprising.trading.api.model.AlgoOrderStatus.RUNNING)
+                                && value.nextSliceAt() != null)
+                        .toList()).stream())
+                .sorted(java.util.Comparator.comparingLong(AlgoOrderRecord::algoOrderId))
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    public List<AlgoOrderResponse> openAlgos(long userId, String symbol, int limit) {
+        UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
+        return lane.execute(partition, () -> {
+            OrderUserState current = stateAfterApply(partition);
+            return current.algoOrders().stream()
+                    .filter(value -> normalizedSymbol == null || value.symbol().equals(normalizedSymbol))
+                    .filter(value -> !isAlgoTerminal(value.status()))
+                    .sorted(java.util.Comparator.comparing(AlgoOrderRecord::createdAt).reversed())
+                    .limit(limit)
+                    .map(value -> toAlgoResponse(current, value))
+                    .toList();
+        });
+    }
+
+    public List<AlgoOrderRecord> lifecycleAlgos(ProductLine productLine, String symbol, int limit) {
+        return orderedPartitions(productLine).stream()
+                .flatMap(partition -> lane.execute(partition, () -> stateAfterApply(partition).algoOrders().stream()
+                        .filter(value -> value.symbol().equalsIgnoreCase(symbol) && !isAlgoTerminal(value.status()))
+                        .sorted(java.util.Comparator.comparing(AlgoOrderRecord::createdAt))
+                        .limit(limit)
+                        .toList()).stream())
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    public boolean hasLifecycleActiveAlgos(ProductLine productLine, String symbol) {
+        return !lifecycleAlgos(productLine, symbol, 1).isEmpty();
     }
 
     private void validateMarginModeInPartition(OrderUserState current, OrderRecord order) {
@@ -497,7 +666,7 @@ public class OrderUserStateService {
             current = applyEvent(current, event);
             List<String> eventIds = new ArrayList<>(current.appliedEventIds());
             eventIds.add(event.eventId());
-            current = new OrderUserState(current.orders(), eventIds);
+            current = new OrderUserState(current.orders(), eventIds, current.algoOrders(), current.algoChildren());
             stateStore.apply(partition, raw.sequence(), serialize(current));
             applied = raw.sequence();
         }
@@ -510,7 +679,10 @@ public class OrderUserStateService {
             case "ACCOUNT_RESULT" -> applyAccountResult(current, event.accountResult());
             case "MATCH_RESULT" -> applyMatchResult(current, event.matchResult());
             case "CANCEL" -> applyCancel(current, event);
-            default -> throw new IllegalStateException("未知订单事实事件: " + event.eventType());
+            case "ALGO_PLACE" -> applyAlgoPlace(current, event.algoOrder());
+            case "ALGO_CHILD" -> applyAlgoChild(current, event.algoOrder(), event.algoChild());
+            default -> event.eventType().startsWith("ALGO_UPDATE:")
+                    ? applyAlgoUpdate(current, event.algoOrder()) : unknownEvent(event);
         };
     }
 
@@ -521,7 +693,7 @@ public class OrderUserStateService {
         publishForPlace(order);
         List<OrderRecord> orders = new ArrayList<>(current.orders());
         orders.add(order);
-        return new OrderUserState(orders, current.appliedEventIds());
+        return new OrderUserState(orders, current.appliedEventIds(), current.algoOrders(), current.algoChildren());
     }
 
     private OrderUserState applyAccountResult(OrderUserState current, AccountCommandResultEvent result) {
@@ -595,7 +767,7 @@ public class OrderUserStateService {
         if (!touched) {
             throw new IllegalStateException("撮合结果对应订单不存在: " + result.orderId());
         }
-        return new OrderUserState(updatedOrders, current.appliedEventIds());
+        return new OrderUserState(updatedOrders, current.appliedEventIds(), current.algoOrders(), current.algoChildren());
     }
 
     private OrderUserState applyCancel(OrderUserState current, OrderUserEvent event) {
@@ -609,6 +781,130 @@ public class OrderUserStateService {
         publishOrderCommand(updated, OrderCommandType.CANCEL);
         publishOrderEvent(updated, OrderEventType.CANCEL_REQUESTED, event.cancelReason());
         return replace(current, updated);
+    }
+
+    private OrderUserState applyAlgoPlace(OrderUserState current, AlgoOrderRecord order) {
+        if (order == null) {
+            throw new IllegalStateException("算法单事实缺少订单");
+        }
+        if (current.algoOrders().stream().anyMatch(value -> value.algoOrderId() == order.algoOrderId())) {
+            return current;
+        }
+        List<AlgoOrderRecord> orders = new ArrayList<>(current.algoOrders());
+        orders.add(order);
+        return new OrderUserState(current.orders(), current.appliedEventIds(), orders, current.algoChildren());
+    }
+
+    private OrderUserState applyAlgoUpdate(OrderUserState current, AlgoOrderRecord updated) {
+        if (updated == null) {
+            throw new IllegalStateException("算法单更新事实缺少订单");
+        }
+        findAlgo(current, updated.algoOrderId());
+        List<AlgoOrderRecord> orders = current.algoOrders().stream()
+                .map(value -> value.algoOrderId() == updated.algoOrderId() ? updated : value)
+                .toList();
+        return new OrderUserState(current.orders(), current.appliedEventIds(), orders, current.algoChildren());
+    }
+
+    private OrderUserState applyAlgoChild(OrderUserState current,
+                                          AlgoOrderRecord updated,
+                                          AlgoOrderChild child) {
+        if (updated == null || child == null || updated.algoOrderId() != child.algoOrderId()) {
+            throw new IllegalStateException("算法单切片事实不完整");
+        }
+        OrderUserState withOrder = applyAlgoUpdate(current, updated);
+        if (withOrder.algoChildren().stream().anyMatch(value -> value.algoOrderId() == child.algoOrderId()
+                && value.sliceIndex() == child.sliceIndex())) {
+            return withOrder;
+        }
+        List<AlgoOrderChild> children = new ArrayList<>(withOrder.algoChildren());
+        children.add(child);
+        return new OrderUserState(withOrder.orders(), withOrder.appliedEventIds(), withOrder.algoOrders(), children);
+    }
+
+    private OrderUserState stateAfterApply(UserPartitionKey partition) {
+        applyPartition(partition);
+        return state(partition);
+    }
+
+    private AlgoOrderRecord findAlgo(OrderUserState state, long algoOrderId) {
+        return state.algoOrders().stream()
+                .filter(value -> value.algoOrderId() == algoOrderId)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("算法单不存在: " + algoOrderId));
+    }
+
+    private AlgoOrderProgress progress(OrderUserState state, long algoOrderId) {
+        List<AlgoOrderChild> children = state.algoChildren().stream()
+                .filter(value -> value.algoOrderId() == algoOrderId)
+                .toList();
+        long executed = 0L;
+        long active = 0L;
+        int activeCount = 0;
+        int nextSlice = 0;
+        for (AlgoOrderChild child : children) {
+            nextSlice = Math.max(nextSlice, child.sliceIndex() + 1);
+            OrderRecord order = state.orders().stream()
+                    .filter(value -> value.orderId() == child.orderId())
+                    .findFirst()
+                    .orElse(null);
+            if (order == null) {
+                throw new IllegalStateException("算法子单不在用户订单状态中: " + child.orderId());
+            }
+            executed = Math.addExact(executed, order.executedQuantitySteps());
+            if ((order.status() == OrderStatus.ACCEPTED || order.status() == OrderStatus.PARTIALLY_FILLED
+                    || order.status() == OrderStatus.CANCEL_REQUESTED) && order.remainingQuantitySteps() > 0L) {
+                active = Math.addExact(active, order.remainingQuantitySteps());
+                activeCount++;
+            }
+        }
+        return new AlgoOrderProgress(executed, active, children.size(), activeCount, nextSlice);
+    }
+
+    private AlgoOrderResponse toAlgoResponse(OrderUserState state, AlgoOrderRecord order) {
+        AlgoOrderProgress progress = progress(state, order.algoOrderId());
+        return new AlgoOrderResponse(order.algoOrderId(), order.userId(), order.clientAlgoOrderId(), order.symbol(),
+                order.algoType(), order.side(), order.priceTicks(), order.quantitySteps(), order.childQuantitySteps(),
+                order.intervalSeconds(), order.durationSeconds(), order.marginMode(), order.positionSide(),
+                order.reduceOnly(), order.postOnly(), order.timeInForce(), order.status(), progress.executedQuantitySteps(),
+                progress.activeQuantitySteps(), progress.childOrderCount(), order.currentOrderId(), order.rejectReason(),
+                order.startAt(), order.nextSliceAt(), order.completedAt(), order.createdAt(), order.updatedAt());
+    }
+
+    private AlgoOrderRecord withAlgoSchedule(AlgoOrderRecord order,
+                                             com.surprising.trading.api.model.AlgoOrderStatus status,
+                                             Instant nextSliceAt,
+                                             Instant now) {
+        return new AlgoOrderRecord(order.algoOrderId(), order.productLine(), order.userId(),
+                order.clientAlgoOrderId(), order.symbol(), order.algoType(), order.side(), order.priceTicks(),
+                order.quantitySteps(), order.childQuantitySteps(), order.intervalSeconds(), order.durationSeconds(),
+                order.marginMode(), order.positionSide(), order.reduceOnly(), order.postOnly(), order.timeInForce(),
+                status, order.currentOrderId(), order.rejectReason(), order.traceId(), order.startAt(), nextSliceAt,
+                order.completedAt(), order.createdAt(), now);
+    }
+
+    private boolean isAlgoTerminal(com.surprising.trading.api.model.AlgoOrderStatus status) {
+        return status == com.surprising.trading.api.model.AlgoOrderStatus.CANCELED
+                || status == com.surprising.trading.api.model.AlgoOrderStatus.COMPLETED
+                || status == com.surprising.trading.api.model.AlgoOrderStatus.FAILED;
+    }
+
+    private void requireSameAlgoIntent(AlgoOrderRecord left, AlgoOrderRecord right) {
+        if (left.userId() != right.userId() || left.productLine() != right.productLine()
+                || !java.util.Objects.equals(left.clientAlgoOrderId(), right.clientAlgoOrderId())
+                || !java.util.Objects.equals(left.symbol(), right.symbol()) || left.algoType() != right.algoType()
+                || left.side() != right.side() || left.priceTicks() != right.priceTicks()
+                || left.quantitySteps() != right.quantitySteps() || left.childQuantitySteps() != right.childQuantitySteps()
+                || left.intervalSeconds() != right.intervalSeconds() || left.durationSeconds() != right.durationSeconds()
+                || left.marginMode() != right.marginMode() || left.positionSide() != right.positionSide()
+                || left.reduceOnly() != right.reduceOnly() || left.postOnly() != right.postOnly()
+                || left.timeInForce() != right.timeInForce()) {
+            throw new IllegalArgumentException("clientAlgoOrderId already used with different algo parameters");
+        }
+    }
+
+    private OrderUserState unknownEvent(OrderUserEvent event) {
+        throw new IllegalStateException("未知订单事实事件: " + event.eventType());
     }
 
     private void publishForPlace(OrderRecord order) {
