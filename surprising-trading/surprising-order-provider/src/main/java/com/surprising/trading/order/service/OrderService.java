@@ -787,11 +787,10 @@ public class OrderService {
             return ReservationPlan.reject("unsupported margin account type " + requirement.get().accountType());
         }
         ReservationSequenceSlot slot = sequence == null
-                // 单笔订单通过 Kafka 异步到达账户模块，期间同一用户可能已经完成
-                // 另一笔预占并推进账户修订号。这里不能把下单时读取到的旧修订号
-                // 当成强栅栏，否则正常的并发下单会被误判为账户版本冲突。账户模块
-                // 仍以数据库原子余额预占作为最终资金裁决；只有批量请求内部显式
-                // 建立依赖链时，才使用修订号保证批内计算顺序。
+                // 单笔订单通过 Kafka 异步到达账户用户分区，期间同一用户可能已经完成
+                // 另一笔预占并推进账户修订号。这里不携带下单时读取到的旧修订号，
+                // 由账户单写入 reducer 按 WAL 顺序裁决资金；只有批量请求内部显式建立
+                // 依赖链时，才用前一条命令约束批内顺序。
                 ? new ReservationSequenceSlot(0L, null)
                 : sequence.next(currentProductLine(), request.userId(), orderId);
         return ReservationPlan.accept(new OrderReserveAccountCommand(

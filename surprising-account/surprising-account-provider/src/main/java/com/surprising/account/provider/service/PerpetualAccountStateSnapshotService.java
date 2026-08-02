@@ -22,11 +22,11 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 在永续账户命令事务中构造完整用户状态快照。
+ * 构造永续用户账户的启动恢复快照。
  *
- * <p>当前数据库仍是账户事实源，本服务只负责把同一事务已经提交的单表状态组合成一个
- * 有版本的 outbox 事件。下游模块消费该事件后可以建立统一 JVM 快照，迁移完成后再替换
- * 本服务的数据来源，不允许下游重新跨表拼装账户状态。</p>
+ * <p>用户分区 WAL 和本地 reducer 才是在线资金事实源。本服务只在本地分区尚未初始化时
+ * 从数据库恢复一份带修订号的基线；下游初始化完成后由账户事实流发布的 Kafka 快照保持更新，
+ * 不允许在线下单或结算重新拼装数据库状态。</p>
  */
 @Service
 public class PerpetualAccountStateSnapshotService {

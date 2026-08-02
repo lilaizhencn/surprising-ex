@@ -41,8 +41,11 @@ public class FundingAccountCommandResultService {
     }
 
     /**
-     * 数据库中的账户命令终态是权威结果。此任务修复遗漏、重复或乱序的结果事件，
-     * 从而避免把跨主题消息顺序作为正确性的前提。
+     * 只在恢复窗口修复遗漏的资金费投影结果。
+     *
+     * <p>账户用户分区的本地事实流和结果事件才是资金裁决依据；这里读取数据库仅用于
+     * 进程崩溃后补齐 funding_payments 的异步投影，不能反向修改账户状态，也不能作为
+     * 下单或结算的同步判断。</p>
      */
     @Transactional
     public void reconcileTerminalCommands() {
