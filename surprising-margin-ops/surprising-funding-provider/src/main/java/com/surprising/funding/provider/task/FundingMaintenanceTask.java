@@ -30,11 +30,7 @@ public class FundingMaintenanceTask {
         fundingService.settleDueRates();
     }
 
-    /**
-     * 恢复资金费数据库记录已经提交、本地命令 WAL 尚未落盘的窗口。
-     *
-     * <p>这里只能重建同一个幂等命令，不能重新计算结算候选或直接修改账户。</p>
-     */
+    /** 恢复本地资金费结算事实中尚未追加到账户 WAL 的幂等命令。 */
     @Scheduled(fixedDelayString = "${surprising.funding.settlement.command-recovery-delay-ms:1000}")
     public void recoverAccountCommands() {
         fundingService.recoverPendingCommands();

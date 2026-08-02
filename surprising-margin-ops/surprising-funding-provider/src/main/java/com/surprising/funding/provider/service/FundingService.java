@@ -20,6 +20,8 @@ import com.surprising.funding.provider.repository.FundingRateRepository;
 import com.surprising.funding.provider.repository.FundingSequenceRepository;
 import com.surprising.funding.provider.repository.FundingSettlementRepository;
 import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -56,6 +58,9 @@ public class FundingService {
     private final tools.jackson.databind.ObjectMapper objectMapper;
     /** 生产环境使用本地持久序号；旧数据库序号只保留给未装配本地状态的单元测试。 */
     private final FundingLocalSequenceStore localSequenceStore;
+    /** 生产结算事实库；为空只代表旧单元测试构造器，不允许由 Spring 生产装配。 */
+    private final FundingLocalSettlementStore localSettlementStore;
+    private final LatestMarkPriceCache markPriceCache;
 
     @org.springframework.beans.factory.annotation.Autowired
     public FundingService(FundingProperties properties,
@@ -71,7 +76,9 @@ public class FundingService {
                           @Qualifier("fundingKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                           tools.jackson.databind.ObjectMapper objectMapper,
                           PlatformTransactionManager transactionManager,
-                          FundingLocalSequenceStore localSequenceStore) {
+                          FundingLocalSequenceStore localSequenceStore,
+                          FundingLocalSettlementStore localSettlementStore,
+                          LatestMarkPriceCache markPriceCache) {
         this.properties = properties;
         this.leaseRepository = leaseRepository;
         this.sequenceRepository = sequenceRepository;
@@ -87,6 +94,8 @@ public class FundingService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
         this.localSequenceStore = localSequenceStore;
+        this.localSettlementStore = localSettlementStore;
+        this.markPriceCache = markPriceCache;
     }
 
     /** 仅供现有单元测试构造服务；生产 Bean 必须注入本地序号库。 */
@@ -105,7 +114,7 @@ public class FundingService {
                    PlatformTransactionManager transactionManager) {
         this(properties, leaseRepository, sequenceRepository, rateInputRepository, rateRepository,
                 settlementRepository, paymentCandidateRepository, paymentRepository, accountCommandWalService,
-                latestFundingRateCache, kafkaTemplate, objectMapper, transactionManager, null);
+                latestFundingRateCache, kafkaTemplate, objectMapper, transactionManager, null, null, null);
     }
 
     public void publishRates() {
@@ -132,6 +141,10 @@ public class FundingService {
 
     public void settleDueRates() {
         if (!properties.getSettlement().isEnabled()) {
+            return;
+        }
+        if (localSettlementStore != null) {
+            settleDueRatesFromLocalWal();
             return;
         }
         Instant now = Instant.now();
@@ -180,6 +193,68 @@ public class FundingService {
         }
     }
 
+    /**
+     * 生产资金费结算：本地事实库先提交游标和支付命令，再追加账户用户 WAL。
+     * 数据库投影失败不能阻塞账户扣款，也不能改变本地结算游标。
+     */
+    private void settleDueRatesFromLocalWal() {
+        recoverLocalPendingCommands();
+        Deque<FundingSettlementWork> settlements = new ArrayDeque<>(localSettlementStore.activeSettlements());
+        Instant now = Instant.now();
+        for (FundingRateResponse rate : latestFundingRateCache.duePredictions(now).stream()
+                .limit(properties.getSettlement().getBatchSize()).toList()) {
+            if (!ownsSymbol(rate.symbol())) {
+                continue;
+            }
+            try {
+                MarkPriceEvent markPrice = markPriceCache.fresh(rate.symbol(),
+                                properties.getCalculation().getMaxMarkAge())
+                        .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + rate.symbol()));
+                FundingSettlementWork settlement = localSettlementStore.begin(rate, markPrice);
+                latestFundingRateCache.removeIfCurrent(rate);
+                settlements.addLast(settlement);
+            } catch (Exception ex) {
+                log.error("资金费本地结算创建失败 symbol={} fundingTime={}: {}",
+                        rate.symbol(), rate.fundingTime(), ex.getMessage(), ex);
+            }
+        }
+        int remainingPages = Math.max(1, properties.getSettlement().getMaxPagesPerRun());
+        while (remainingPages-- > 0 && !settlements.isEmpty()) {
+            FundingSettlementWork settlement = settlements.removeFirst();
+            if (!ownsSymbol(settlement.symbol())) {
+                continue;
+            }
+            try {
+                FundingPaymentPage page = paymentCandidateRepository.findPage(
+                        settlement, Math.max(1, properties.getSettlement().getPaymentPageSize()));
+                List<FundingLocalSettlementStore.PendingPayment> payments =
+                        localSettlementStore.appendPage(settlement, page);
+                for (FundingLocalSettlementStore.PendingPayment payment : payments) {
+                    accountCommandWalService.append(toCommand(payment.settlementId(), payment.paymentId(),
+                            payment.commandId(), payment.payment(), now));
+                    localSettlementStore.markPublished(payment.commandId());
+                }
+                if (page.hasMore()) {
+                    settlements.addLast(new FundingSettlementWork(settlement.settlementId(), settlement.symbol(),
+                            settlement.fundingTime(), settlement.fundingRatePpm(), settlement.instrumentVersion(),
+                            settlement.markPriceTicks(), page.nextCursor()));
+                }
+            } catch (Exception ex) {
+                log.error("资金费本地结算分页失败 settlementId={} symbol={}: {}",
+                        settlement.settlementId(), settlement.symbol(), ex.getMessage(), ex);
+            }
+        }
+    }
+
+    private void recoverLocalPendingCommands() {
+        int limit = Math.max(1, properties.getSettlement().getReconcileBatchSize());
+        for (FundingLocalSettlementStore.PendingPayment payment : localSettlementStore.pendingPayments(limit)) {
+            accountCommandWalService.append(toCommand(payment.settlementId(), payment.paymentId(),
+                    payment.commandId(), payment.payment(), Instant.now()));
+            localSettlementStore.markPublished(payment.commandId());
+        }
+    }
+
     public FundingRateResponse latestRate(String symbol) {
         return latestFundingRateCache.requireFresh(normalizeSymbol(symbol));
     }
@@ -223,6 +298,10 @@ public class FundingService {
      */
     public void recoverPendingCommands() {
         if (!properties.getSettlement().isEnabled()) {
+            return;
+        }
+        if (localSettlementStore != null) {
+            recoverLocalPendingCommands();
             return;
         }
         for (FundingPaymentRepository.PendingPayment payment : paymentRepository.pendingCommands(
