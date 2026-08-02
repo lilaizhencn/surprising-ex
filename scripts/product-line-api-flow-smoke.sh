@@ -4366,6 +4366,38 @@ validate_multi_symbol_stress_config() {
   fi
 }
 
+validate_topic_reset_config() {
+  case "${RESET_KAFKA}" in
+    true|false) ;;
+    *)
+      echo "RESET_KAFKA 必须是 true 或 false" >&2
+      exit 1
+      ;;
+  esac
+  case "${CREATE_KAFKA_TOPICS}" in
+    true|false) ;;
+    *)
+      echo "CREATE_KAFKA_TOPICS 必须是 true 或 false" >&2
+      exit 1
+      ;;
+  esac
+  case "${KAFKA_RESET_SHARED_TOPICS}" in
+    true|false) ;;
+    *)
+      echo "KAFKA_RESET_SHARED_TOPICS 必须是 true 或 false" >&2
+      exit 1
+      ;;
+  esac
+  if [[ "${RESET_KAFKA}" == "true" && "${KAFKA_RESET_SHARED_TOPICS}" != "true" ]]; then
+    echo "重建测试数据库时必须同时设置 KAFKA_RESET_SHARED_TOPICS=true，避免 earliest 重放旧共享命令" >&2
+    exit 1
+  fi
+  if [[ "${RESET_KAFKA}" == "true" && "${CREATE_KAFKA_TOPICS}" != "true" ]]; then
+    echo "RESET_KAFKA=true 时必须同时设置 CREATE_KAFKA_TOPICS=true，否则价格种子会写入不存在的 Topic" >&2
+    exit 1
+  fi
+}
+
 run_line() {
   local product_line="$1"
   echo "========== Product line ${product_line} =========="
@@ -4441,6 +4473,7 @@ main() {
   require_command curl
   require_command "$(kafka_topics_cmd)"
   require_command "$(kafka_producer_cmd)"
+  validate_topic_reset_config
   if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
     require_command "$(kafka_consumer_groups_cmd)"
     validate_multi_symbol_stress_config

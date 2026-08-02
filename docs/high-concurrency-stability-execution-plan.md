@@ -2,7 +2,7 @@
 
 ## 1. 目标和执行原则
 
-本计划先只切换 `LINEAR_PERPETUAL`，确认永续从下单到撮合、结算、主动平仓、风控、强平、资金费、ADL、保险基金和 WebSocket 的真实流程稳定后，再按同一验收门槛复制到 `SPOT`、`LINEAR_DELIVERY` 和 `OPTION`。
+本计划先以 `LINEAR_PERPETUAL` 验证核心链路，再按完全相同的验收门槛复制到 `SPOT`、`LINEAR_DELIVERY` 和 `OPTION`。四条线都必须保持产品线、账户类型、Topic、Instrument 快照和风险模型隔离。
 
 核心目标不是单纯减少 SQL，而是让每类可变业务事实只有一个写者，并且在重试、重启、重平衡和多节点竞争下仍保持资金守恒：
 
@@ -18,10 +18,11 @@
 
 但账户事实目前仍在 PostgreSQL 事务内变更，强平实时路径仍保留数据库候选 claim、持仓锁和风险复核，账户完整快照的初始化路径也需要严格的一致性边界。因此在影子对账和故障演练完成前，不能删除旧 Repository、Redis 投影或 Outbox。
 
-本轮先修复了两个恢复一致性问题：
+本轮先修复了三个恢复一致性问题：
 
 1. 永续账户快照 RPC 使用 `REPEATABLE_READ` 只读事务，保证余额、持仓、保证金、订单冻结和持仓模式来自同一个数据库快照。
 2. JVM 账户快照对同一 `accountRevision` 的重复 RPC/Kafka 事件保持幂等，不再用新的 `eventId` 或时间覆盖已有状态。
+3. 普通异步下单不再把读取到的异步账户修订号作为强栅栏；账户命令仍按用户 Kafka key 串行，最终资金裁决仍由账户事务的原子预占完成。只有显式批次依赖链保留命令依赖关系，避免做市商并发下单因修订号已被前一条命令推进而全部误拒。
 
 ### 2.1 当前代码审计结论（2026-08-02 复核）
 
@@ -115,7 +116,7 @@
 
 ### 本轮真实流程记录（2026-08-02）
 
-使用 `scripts/product-line-api-flow-smoke.sh` 分批启动并验证了四条产品线。每一批都先启动 Instrument，再启动撮合、账户、入口、行情和做市 Provider；流程覆盖做市对手盘、重复 `clientOrderId`、撤单/订单控制、成交结算、主动平仓、强平候选、到期/行权生命周期和资金对账。
+使用 `scripts/product-line-api-flow-smoke.sh` 分批启动并验证了四条产品线。每一批都先启动 Instrument，再启动撮合、账户、入口、行情和做市 Provider；流程覆盖做市对手盘、重复 `clientOrderId`、撤单/订单控制、成交结算、主动平仓、强平候选、到期/行权生命周期和资金对账。数据库重建测试统一使用 `RESET_KAFKA=true CREATE_KAFKA_TOPICS=true KAFKA_RESET_SHARED_TOPICS=true`，避免账户消费者按生产要求从 `earliest` 重放旧命令污染新数据库；生产环境仍保留 `earliest` 恢复语义。
 
 - `LINEAR_PERPETUAL`：重复下单、账户 `SIGKILL` 重启恢复、Funding、强平和资金对账通过。
 - `SPOT`：买卖资产冻结、成交扣减、撤单解冻、重复下单、账户 `SIGKILL` 重启恢复和资金对账通过；虽然没有衍生品持仓平仓阶段，余额、冻结和现货预占仍按同一重启门槛验收。
@@ -124,7 +125,9 @@
 
 四条线的最终资金对账均返回 `OK`，违规行数为 `0`，账户命令非终态为 `0`，交易/账户/风控 Outbox 待发送为 `0`。演练中还发现撮合公共行情在 Kafka 元数据短暂不可用时可能丢失或乱序：深度发布器和逐笔成交发布器现已分别保留失败快照、按交易对单飞发送并异步重试；对应单元测试和撮合模块全量测试已通过。
 
-本轮还验证了两处真实故障修复：风险快照在 Redis 恰好过期的读写窗口内改用本地 JVM 快照继续完成版本化替换，避免把 Kafka 分区处理阻塞在数据库回退上；行情刷新器持续消费最新消息，生命周期测试使用 `MAX(sequence)+1` 生成单调序列，避免新标记价被历史序列误判为过期。风险 Provider 变更后同步重建包含它的宿主 fat JAR，防止部署产物继续运行旧类。四产品线完整运行日志保留在 `/tmp/surprising-product-line-api.x6VTHb`，现货重启恢复复验日志保留在 `/tmp/surprising-product-line-api.7wIYUQ`。
+本轮还验证了三处真实故障修复或测试护栏：风险快照在 Redis 恰好过期的读写窗口内改用本地 JVM 快照继续完成版本化替换，避免把 Kafka 分区处理阻塞在数据库回退上；行情刷新器持续消费最新消息，生命周期测试使用 `MAX(sequence)+1` 生成单调序列，避免新标记价被历史序列误判为过期；首次现货重建数据库但未删除共享账户 Topic 时，消费者按 `earliest` 重放旧释放命令并正确阻断（缺少预占），随后用清理共享 Topic 的正确测试前置条件复验通过。风险 Provider 变更后同步重建包含它的宿主 fat JAR，防止部署产物继续运行旧类。
+
+本次四条产品线的独立运行日志如下：`LINEAR_PERPETUAL` 保存在 `/tmp/surprising-product-line-api.SpJe4g`，`SPOT` 保存在 `/tmp/surprising-product-line-api.xRFuRr`，`LINEAR_DELIVERY` 保存在 `/tmp/surprising-product-line-api.lcleeQ`，`OPTION` 保存在 `/tmp/surprising-product-line-api.t38LII`。四次均包含 Instrument 首启、账户 `SIGKILL` 重启恢复和逐项资金对账；交割的交割结算流水、期权的行权流水均在对账报告中出现且最终持仓归零。
 
 ## 6. 允许关闭旧路径的条件
 
