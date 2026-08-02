@@ -21,11 +21,6 @@ public class ReduceOnlyValidator {
         this.marginSnapshotCache = marginSnapshotCache;
     }
 
-    /** 测试或嵌入式调用使用默认产品线配置；生产环境必须注入统一快照。 */
-    public ReduceOnlyValidator(OrderMarginSnapshotCache marginSnapshotCache) {
-        this(new TradingOrderProperties(), marginSnapshotCache);
-    }
-
     public ValidationResult validate(PlaceOrderRequest request) {
         if (!request.reduceOnly()) {
             return ValidationResult.ok();
@@ -68,8 +63,11 @@ public class ReduceOnlyValidator {
     }
 
     private ProductLine currentProductLine() {
-        TradingOrderProperties.Kafka kafka = properties == null ? null : properties.getKafka();
-        return kafka == null ? ProductLine.LINEAR_PERPETUAL : kafka.getProductLine();
+        if (properties == null || properties.getKafka() == null
+                || properties.getKafka().getProductLine() == null) {
+            throw new IllegalStateException("只减仓校验未配置产品线");
+        }
+        return properties.getKafka().getProductLine();
     }
 
 }

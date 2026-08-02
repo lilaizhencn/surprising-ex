@@ -41,8 +41,10 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -782,15 +784,32 @@ public class OrderUserStateService {
                 || result.trades() == null) {
             throw new IllegalArgumentException("撮合结果身份或数量无效");
         }
+        if (result.filledQuantitySteps() > 0L && result.trades().isEmpty()) {
+            throw new IllegalArgumentException("撮合结果包含成交数量但缺少成交事实");
+        }
+        Set<Long> tradeIds = new HashSet<>();
+        long tradeQuantity = 0L;
         for (MatchTradeEvent trade : result.trades()) {
             if (trade == null || !result.symbol().equalsIgnoreCase(trade.symbol())
                     || trade.tradeId() <= 0L || trade.commandId() <= 0L
+                    || trade.commandId() != result.commandId()
                     || trade.takerOrderId() <= 0L || trade.makerOrderId() <= 0L
                     || trade.takerUserId() <= 0L || trade.makerUserId() <= 0L
+                    || trade.takerOrderId() != result.orderId() || trade.takerUserId() != result.userId()
                     || trade.priceTicks() <= 0L || trade.quantitySteps() <= 0L
                     || trade.takerInstrumentVersion() <= 0L || trade.makerInstrumentVersion() <= 0L) {
-                throw new IllegalArgumentException("撮合成交参与方或交易对不一致");
+                throw new IllegalArgumentException("撮合成交参与方或交易对不一致 tradeId=" + trade.tradeId()
+                        + ",tradeCommandId=" + trade.commandId() + ",resultCommandId=" + result.commandId()
+                        + ",takerOrderId=" + trade.takerOrderId() + ",resultOrderId=" + result.orderId()
+                        + ",takerUserId=" + trade.takerUserId() + ",resultUserId=" + result.userId());
             }
+            if (!tradeIds.add(trade.tradeId())) {
+                throw new IllegalArgumentException("撮合结果包含重复成交编号");
+            }
+            tradeQuantity = Math.addExact(tradeQuantity, trade.quantitySteps());
+        }
+        if (tradeQuantity != result.filledQuantitySteps()) {
+            throw new IllegalArgumentException("撮合结果成交数量与成交事实不一致");
         }
     }
 
@@ -895,13 +914,14 @@ public class OrderUserStateService {
         java.util.Map<Long, Long> makerFills = new java.util.HashMap<>();
         java.util.Map<Long, Boolean> makerCompletions = new java.util.HashMap<>();
         for (MatchTradeEvent trade : result.trades()) {
-            if (appliedTradeIds.contains(trade.tradeId()) || !freshTradeIds.add(trade.tradeId())) {
+            boolean belongsToCurrentUser = current.orders().stream()
+                    .anyMatch(value -> (value.orderId() == trade.makerOrderId()
+                            && value.userId() == trade.makerUserId())
+                            || (value.orderId() == result.orderId() && value.userId() == result.userId()));
+            if (!belongsToCurrentUser) {
                 continue;
             }
-            boolean belongsToCurrentUser = current.orders().stream()
-                    .anyMatch(value -> value.orderId() == trade.makerOrderId()
-                            && value.userId() == trade.makerUserId());
-            if (!belongsToCurrentUser) {
+            if (appliedTradeIds.contains(trade.tradeId()) || !freshTradeIds.add(trade.tradeId())) {
                 continue;
             }
             makerFills.merge(trade.makerOrderId(), trade.quantitySteps(), Math::addExact);

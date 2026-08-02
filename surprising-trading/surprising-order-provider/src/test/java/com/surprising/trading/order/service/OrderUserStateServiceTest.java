@@ -104,15 +104,66 @@ class OrderUserStateServiceTest {
             MatchResultEvent first = new MatchResultEvent(8001L, 9101L, 1001L, "BTC-USDT", 1L,
                     OrderCommandType.PLACE, "MATCHED", 2L, OrderStatus.PARTIALLY_FILLED, tradeTime,
                     java.util.List.of(trade), "trace");
+            MatchTradeEvent retryTrade = new MatchTradeEvent(7001L, 8002L, "BTC-USDT", 9101L, 1L, 1001L,
+                    OrderSide.BUY, 9901L, 1L, 2002L, 0L, 0L, 100L, 2L, false, false,
+                    tradeTime.plusSeconds(1), "trace-retry");
             MatchResultEvent retryWithNewCommand = new MatchResultEvent(8002L, 9101L, 1001L, "BTC-USDT", 1L,
                     OrderCommandType.PLACE, "MATCHED", 2L, OrderStatus.PARTIALLY_FILLED, tradeTime.plusSeconds(1),
-                    java.util.List.of(trade), "trace-retry");
+                    java.util.List.of(retryTrade), "trace-retry");
 
             service.processMatchResults(java.util.List.of(first));
             service.processMatchResults(java.util.List.of(retryWithNewCommand));
 
             assertThat(service.get(1001L, 9101L).executedQuantitySteps()).isEqualTo(2L);
             assertThat(service.get(1001L, 9101L).remainingQuantitySteps()).isEqualTo(8L);
+        }
+    }
+
+    @Test
+    void repeatedTradeIdAfterRestartDoesNotIncreaseExecutedQuantityAgain() throws Exception {
+        Path root = Files.createTempDirectory("order-user-state-trade-id-restart-");
+        TradingOrderProperties properties = properties();
+        Instant tradeTime = Instant.parse("2026-07-01T00:00:01Z");
+        MatchTradeEvent trade = new MatchTradeEvent(7101L, 8101L, "BTC-USDT", 9201L, 1L, 1001L,
+                OrderSide.BUY, 991L, 1L, 2002L, 0L, 0L, 100L, 2L, false, false, tradeTime, "trace");
+        MatchResultEvent result = new MatchResultEvent(8101L, 9201L, 1001L, "BTC-USDT", 1L,
+                OrderCommandType.PLACE, "MATCHED", 2L, OrderStatus.PARTIALLY_FILLED, tradeTime,
+                java.util.List.of(trade), "trace");
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            service.place(order("client-restart", 9201L, 10L));
+            service.place(orderFor(2002L, "maker-restart", 991L, 10L));
+            service.processMatchResults(java.util.List.of(result));
+        }
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            OrderUserStateService restarted = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            restarted.processMatchResults(java.util.List.of(result));
+
+            assertThat(restarted.get(1001L, 9201L).executedQuantitySteps()).isEqualTo(2L);
+            assertThat(restarted.get(1001L, 9201L).remainingQuantitySteps()).isEqualTo(8L);
+            assertThat(restarted.get(2002L, 991L).executedQuantitySteps()).isEqualTo(2L);
+        }
+    }
+
+    @Test
+    void rejectsMatchResultWhenFilledQuantityHasNoMatchingTradeFacts() throws Exception {
+        Path root = Files.createTempDirectory("order-user-state-invalid-match-");
+        TradingOrderProperties properties = properties();
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            MatchResultEvent invalid = new MatchResultEvent(8201L, 9301L, 1001L, "BTC-USDT", 1L,
+                    OrderCommandType.PLACE, "MATCHED", 1L, OrderStatus.PARTIALLY_FILLED,
+                    Instant.parse("2026-07-01T00:00:01Z"), java.util.List.of(), "trace");
+
+            assertThatThrownBy(() -> service.processMatchResults(java.util.List.of(invalid)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("缺少成交事实");
         }
     }
 

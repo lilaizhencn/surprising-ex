@@ -20,7 +20,8 @@ class ReduceOnlyValidatorTest {
 
     @Test
     void acceptsSellReduceOnlyForLongPositionFromJvmSnapshot() {
-        ReduceOnlyValidator validator = new ReduceOnlyValidator(snapshot(ProductLine.LINEAR_PERPETUAL, 10L, 2L));
+        ReduceOnlyValidator validator = validator(ProductLine.LINEAR_PERPETUAL,
+                snapshot(ProductLine.LINEAR_PERPETUAL, 10L, 2L));
 
         var result = validator.validate(request(OrderSide.SELL, 8L));
 
@@ -31,7 +32,7 @@ class ReduceOnlyValidatorTest {
     @Test
     void rejectsReduceOnlyWithoutPosition() {
         OrderMarginSnapshotCache cache = snapshot(ProductLine.LINEAR_PERPETUAL, 0L, 0L);
-        ReduceOnlyValidator validator = new ReduceOnlyValidator(cache);
+        ReduceOnlyValidator validator = validator(ProductLine.LINEAR_PERPETUAL, cache);
 
         var result = validator.validate(request(OrderSide.SELL, 1L));
 
@@ -41,7 +42,8 @@ class ReduceOnlyValidatorTest {
 
     @Test
     void rejectsSideThatWouldIncreasePosition() {
-        ReduceOnlyValidator validator = new ReduceOnlyValidator(snapshot(ProductLine.LINEAR_PERPETUAL, 10L, 0L));
+        ReduceOnlyValidator validator = validator(ProductLine.LINEAR_PERPETUAL,
+                snapshot(ProductLine.LINEAR_PERPETUAL, 10L, 0L));
 
         var result = validator.validate(request(OrderSide.BUY, 1L));
 
@@ -51,7 +53,8 @@ class ReduceOnlyValidatorTest {
 
     @Test
     void rejectsQuantityAbovePositionAfterPendingCloseOrders() {
-        ReduceOnlyValidator validator = new ReduceOnlyValidator(snapshot(ProductLine.LINEAR_PERPETUAL, -10L, 4L));
+        ReduceOnlyValidator validator = validator(ProductLine.LINEAR_PERPETUAL,
+                snapshot(ProductLine.LINEAR_PERPETUAL, -10L, 4L));
 
         var result = validator.validate(request(OrderSide.BUY, 7L));
 
@@ -76,7 +79,7 @@ class ReduceOnlyValidatorTest {
     void rejectsBeforeSnapshotIsReadyWithoutDatabaseFallback() {
         OrderMarginSnapshotCache cache = new OrderMarginSnapshotCache();
         cache.applyPosition(position(ProductLine.LINEAR_PERPETUAL, 10L));
-        ReduceOnlyValidator validator = new ReduceOnlyValidator(cache);
+        ReduceOnlyValidator validator = validator(ProductLine.LINEAR_PERPETUAL, cache);
 
         var result = validator.validate(request(OrderSide.SELL, 1L));
 
@@ -109,5 +112,11 @@ class ReduceOnlyValidatorTest {
     private PlaceOrderRequest request(OrderSide side, long quantitySteps) {
         return new PlaceOrderRequest(1001L, "c1", "BTC-USDT", side,
                 OrderType.MARKET, TimeInForce.IOC, 0L, quantitySteps, true, false);
+    }
+
+    private ReduceOnlyValidator validator(ProductLine productLine, OrderMarginSnapshotCache cache) {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(productLine);
+        return new ReduceOnlyValidator(properties, cache);
     }
 }
