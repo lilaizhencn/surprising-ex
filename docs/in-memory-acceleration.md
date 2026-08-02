@@ -30,27 +30,28 @@ Instrument Service 通过统一聚合 Service 组装合约正文、风险档位�
 下单、撮合、账户、风控、指数价、标记价、K 线和做市热路径只读本 JVM 快照，数据库仅保留 Instrument 写入、
 启动恢复和审计回源边界。
 
-资金费率发布已同样从 JVM 快照读取 funding 参数和资产精度；资金费结算候选只从数据库读取持仓与游标，
-再用同一快照完成合约计算。涉及持仓、余额和结算幂等的事务性组合仍保留在主库事务边界，不能改成非原子多次写入。
+资金费率发布和结算都从 JVM 快照读取 funding 参数、资产精度和持仓；结算游标、支付命令和发布状态
+先同步写入资金费 RocksDB，再追加账户用户分区 WAL。数据库只承担异步历史投影、启动恢复和审计，不能
+参与资金费候选计算或决定重复扣款。
 
 `RedisRiskCalculator` 使用不可变快照和 `AtomicReference` 整体替换，风控计算不为规格参数查询数据库；
 `instrumentVersion` 是历史订单、持仓和 Kafka 事件定位开仓规格的内部字段，不能删除。
 
 ## Trigger 与风险组
 
-`RedisTriggerOrderIndex` 在 Redis ZSET 之外维护节点本地一级索引。Redis readiness、Lua 区间查询和跨节点恢复仍是完整性边界；本地索引只作为候选合并来源，Redis 不可用时上游回退 PostgreSQL 精确抢占。
+`RedisTriggerOrderIndex` 在 Redis ZSET 之外维护节点本地一级索引。Redis readiness、Lua 区间查询和跨节点恢复仍是完整性边界；本地索引只作为候选合并来源，索引或 Redis 未就绪时必须暂停触发执行，不能回退 PostgreSQL 高频扫描。
 本地索引内部按触发价维护有序桶，只遍历命中的价格区间。由于节点之间仍可能存在不同订单，Redis 查询不能删除；本地索引只减少同节点扫描和序列化开销。
 
-`RiskService.scanPositionUpdates` 先按 `productLine:userId:accountType:settleAsset` 聚合事件，在本地风险组快照上合并最新持仓，再调用现有风险计算和事务写入。定期 `scan` 仍从数据库重建，Redis 仍负责跨节点投影、租约和最终候选审计；缓存失效或租约丢失会清空本地组并恢复数据库路径。
+`RiskService.scanPositionUpdates` 先按 `productLine:userId:accountType:settleAsset` 聚合事件，在本地风险组快照上合并最新持仓，再追加 RocksDB 投影队列。定期任务只负责异步数据库投影和启动恢复，Redis 仍负责跨节点投影、租约和最终候选审计；缓存失效或租约丢失会清空本地组并暂停风险计算。
 
 条件单、保险基金和 ADL 服务使用同一套 Instrument 内部快照初始化与 Kafka 增量消费约定。三者的 Repository
 均只读取单表，账户命令、持仓、保证金、缺口和保险余额由 Service 在事务内聚合，不使用 SQL JOIN。
 
 ### 未平仓量快照
 
-`account-provider` 是 `trading_symbol_open_interest_shards` 的唯一写入方，并通过
-`/internal/v1/accounts/open-interest/snapshot` 提供启动快照。每次仓位或 ADL 调整在同一事务写入
-账户 outbox，Kafka 发布分片绝对值和修订号；订单模块按产品线、合约和分片在 JVM 中幂等更新并聚合。
+`account-provider` 是 `trading_symbol_open_interest_shards` 的唯一投影写入方，并通过
+`/internal/v1/accounts/open-interest/snapshot` 提供启动快照。仓位和账户状态事件携带分片绝对值和修订号；
+订单模块按产品线、合约和分片在 JVM 中幂等更新并聚合。
 下单保证金计算在快照就绪后不再查询未平仓量视图，账户数据库仍负责持久化、启动恢复和最终审计。
 
 快照未就绪时，相关实时流量拒绝启动或返回空候选，避免使用不完整规格计算资金结果。

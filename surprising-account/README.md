@@ -12,23 +12,23 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 
 - 写模型以“一张业务表对应一个 Repository”为目标，Repository 只负责本表 SQL，不编排跨表业务。
 - `AccountQueryService` 聚合余额与亏空、基础账户与产品账户，以及流水、划转和调整记录的单表 Repository。
-- `AccountBalanceCommandService` 编排余额调整和产品账户划转，事务内按固定顺序调用余额、流水和划转 Repository。
-- `PositionRepository`、`PositionMarginRepository`、`PositionModeRepository` 和
-  `TradeSettlementSideRepository` 分别只负责持仓、持仓保证金、持仓模式和成交侧结算表。
+- `AccountCommandGateway` 统一接收余额调整、划转和资金命令，追加到用户分区 WAL，由本地 reducer 顺序裁决。
+- `PositionRepository`、`PositionMarginRepository` 和 `PositionModeRepository` 只负责启动恢复快照所需的单表读取；
+  成交侧结算状态由用户分区本地状态和异步审计投影维护。
 - `AccountQueryService` 和持仓快照服务只聚合恢复/查询所需的单表 Repository；交易命令不再通过同步
   数据库服务编排，而是进入用户分区 WAL，由本地 reducer 串行执行。
 - account-provider 通过 `/internal/v1/accounts/open-interest/snapshot` 提供当前产品线未平仓量启动快照；
-  持仓或 ADL 调整在同一事务写入 outbox，发布带分片修订号的 Kafka 绝对值事件，其他模块不直接读取该表。
+  账户用户分区提交后发布带分片修订号的 Kafka 绝对值事件，其他模块不直接读取该表。
 - 账户启动时通过 Instrument 内部聚合 RPC 加载本产品线完整 JVM 快照，并消费
   `surprising.instrument.events.v1` 增量更新；`AccountInstrumentRepository`、资产精度读取和持仓投影
   只从本地快照取得合约正文、结算资产与精度，不再读取 Instrument 相关表。
-- `SpotOrderReservationRepository` 只负责现货订单预占表；`AccountOrderReservationService`
-  聚合预占、余额、成交侧审计和指令结果，`SpotTradeSettlementService` 编排现货余额与流水结算。
+- 现货预占、成交结算和衍生品资金命令都使用同一用户分区 WAL 入口；产品线规则在 reducer 内隔离，
+  不通过同步 Repository 组合业务状态。
 - ADL、亏空回补和资金费统一提交账户用户分区命令；账户 reducer 是唯一资金写者，数据库只保留异步投影、
   启动恢复和审计入口。
 - `PositionCacheProjectionService` 只负责启动重建页和事务提交前最终快照；在线持仓读取直接使用 Redis
   事件投影，`PositionCacheProjectionRepository` 不参与普通查询。
-  的最终状态快照；账户状态事件由用户分区 WAL 在本地提交后直接发布 Kafka，数据库不再作为热路径 outbox。
+- 账户状态事件由用户分区 WAL 在本地提交后直接发布 Kafka，数据库不再作为热路径 outbox。
 - 账户持仓事件同时进入按产品线隔离的 `PositionSnapshotCache`，按精确持仓键进行 revision 防回退。
   该 JVM 快照当前用于迁移影子和恢复准备，尚未取代 PostgreSQL 资金事实源；正式切换必须遵循
   [永续 JVM 单写者迁移计划](../docs/linear-perpetual-jvm-migration-plan.md)。
@@ -66,7 +66,7 @@ surprising.<product-segment>.account.user.commands.v1
 
 Kafka key 固定为 `<PRODUCT_LINE>:<userId>`。命令、DLT 和结果 Topic 都使用 32 个分区，
 account-provider 使用独立的批量 listener factory、32 个 listener lane 和批次确认；每次 poll 最多 500 条命令，
-按 Kafka 批次在一个数据库事务内处理。同一产品线、同一用户的资金指令自然串行，
+命令先进入用户分区 WAL，由本地 reducer 和 RocksDB 状态库按序处理。同一产品线、同一用户的资金指令自然串行，
 不再依赖应用层 stripe 锁；不同用户可以并行。订单、撮合、资金费、ADL、保险、交割/行权和 HTTP
 写接口只产生账户命令，不能直接更新可变账户表。
 
@@ -85,8 +85,10 @@ account-provider 使用独立的批量 listener factory、32 个 listener lane �
 - 开仓成交必须携带订单接受时的不可变预占快照，并把实际成交保证金从 `account_balances.locked_units` 迁移到 `account_position_margins`；缺失快照或 reduce-only 订单出现开仓数量都会失败并回滚。
 - `account_trade_settlement_sides` 记录每侧成交已消费/已释放的订单保证金；终态 `ORDER_RELEASE` 用该审计值释放余额表中的剩余冻结，不查询独立预占记录。
 - 持仓更新、余额更新、发生数值变化的 deficit 更新、PnL/fee ledger 插入/回填、订单保证金释放、持仓保证金增减都要求写入 1 行。任何异常都不应静默跳过。
-- 持仓数量或版本变化后，account-provider 只发送带完整快照的持久化持仓事件。order-provider 按用户顺序消费，并在自己的事务里把事件发生前创建、反向、版本不一致或超过新持仓容量的未完成 reduce-only 订单写为 `CANCEL_REQUESTED`，再通过 order command outbox 发送撤单。
-- 结算把持仓降为零时，trigger-provider 消费同一事件，按精确持仓范围取消不晚于关仓事件创建的全部 `PENDING` 止盈、止损和追踪止损。触发单更新与状态 outbox 在同一事务提交，Redis 在提交后清理；account-provider 不再写订单或触发单表。
+- 持仓数量或版本变化后，account-provider 只发送带完整快照的持久化持仓事件。order-provider 按用户顺序消费，
+  在本地订单状态机中标记需要撤销的 reduce-only 订单，再通过订单用户 WAL 发布撤单命令。
+- 结算把持仓降为零时，trigger-provider 消费同一事件，按精确持仓范围更新本地索引并发布撤单命令；Redis 只做跨节点投影，
+  account-provider 不写订单或触发单表。
 
 `account_commands.command_id` 与不可变 envelope hash 是执行幂等键。
 `account_trade_settlement_sides(product_line, symbol, trade_id, participant_role)` 在 taker/maker
@@ -136,7 +138,7 @@ curl -X POST 'http://localhost:9086/api/v1/accounts/position-margin-adjustments'
 `account_position_margins.margin_units`；为负数时，把逐仓持仓保证金释放回可用余额。
 减少保证金必须依赖最新 risk position snapshot，且减少后逐仓权益必须高于维持保证金加
 `surprising.account.position-margin.removal-buffer-ppm` 安全缓冲。
-手动逐仓保证金调整成功后，account-provider 会写一条 `POSITION_UPDATED` 事务 outbox，
+手动逐仓保证金调整成功后，account-provider 会在用户分区 WAL 提交一条 `POSITION_UPDATED` 事件，
 其中 `tradeId=0`。下游 risk 和 WebSocket 消费者应把它当成持仓状态变更触发，重新读取最新
 持仓/风险状态，不要把它解释成一笔成交。
 
@@ -169,8 +171,7 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 
 根目录 [init.sql](../init.sql) 创建：
 
-- 原生 PostgreSQL 账户 ID Sequence，并由固定 10,000 ID 的 Hi/Lo 号段分配，覆盖账本、划转、
-  持仓/强平事件以及账户命令 outbox/result/retry 事件
+- 原生 PostgreSQL 账户 ID Sequence，覆盖异步账本投影、账户命令审计和恢复元数据
 - `account_balances`
 - `account_deficits`
 - `account_ledger_entries`
@@ -192,7 +193,6 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 - `account_commands_processing_idx`
 - `account_commands_dependency_idx`
 - `account_trade_settlement_sides_monitor_idx`
-- `account_outbox_pending_stream_idx`
 
 ## 配置
 
@@ -213,14 +213,6 @@ surprising:
     command-wait:
       timeout: 10s
       poll-delay-ms: 20
-    outbox:
-      batch-size: 1000
-      publish-delay-ms: 20
-      async-enabled: true
-      max-in-flight: 32
-      max-rows-per-key: 32
-      send-window-size: 5
-      send-timeout: 3s
     cache:
       contract-spec-max-entries: 4096
 ```
@@ -238,10 +230,10 @@ surprising:
 
 Kafka 发布沿用用户分区 key；发布失败时本地结果库和 WAL 保留待重试状态，不提交后续用户分区序号。
 
-`TRADE_SIDE_SETTLE` 仍会在 `account_commands` 中保留持久终态，但不再产生没有消费者的 command-result
-outbox；订单冻结和资金费结算仍会为各自消费者发送结果事件。
+`TRADE_SIDE_SETTLE` 仍会在 `account_commands` 中保留持久终态；订单冻结和资金费结算通过用户分区结果事件
+更新各自本地状态，数据库只异步保存审计结果。
 
-账户资金指令默认并发为 32，Hikari 连接池默认 40，为 outbox、定时对账和请求流量预留 8 个连接。
+账户资金指令默认并发为 32，Hikari 连接池仅供异步投影、恢复和查询使用。
 多产品线、多副本部署时应一起调整 `ACCOUNT_USER_COMMAND_CONCURRENCY` 和
 `ACCOUNT_DB_MAX_POOL_SIZE`，并使用事务级连接池代理控制数据库总连接预算。
 
@@ -252,7 +244,7 @@ outbox；订单冻结和资金费结算仍会为各自消费者发送结果事�
 - `surprising.account.command.event_lag{outcome=...}`
 - `accountTradeSettlement` 单侧成交超时健康状态
 
-排障时要与 Kafka lag、DLT 数量、PostgreSQL 延迟、等待依赖和 outbox 年龄一起观察。技术故障会持续
+排障时要与 Kafka lag、DLT 数量、PostgreSQL 投影延迟和等待依赖一起观察。技术故障会持续
 重试并阻塞所在分区，不会跳过资金指令；poison envelope 才进入相同分区号的 DLT。每个
 account-provider 进程使用稳定且唯一的 client id，同产品线副本共享相同消费组。
 
