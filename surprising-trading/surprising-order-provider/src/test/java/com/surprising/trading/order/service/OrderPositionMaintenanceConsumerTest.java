@@ -56,7 +56,8 @@ class OrderPositionMaintenanceConsumerTest {
     private PositionUpdatedEvent event() {
         Instant now = Instant.parse("2026-07-19T00:00:00Z");
         return new PositionUpdatedEvent(
-                9001L, 8001L, 1001L, "BTC-USDT", 7L, MarginMode.CROSS, PositionSide.NET,
-                2L, 65_000L, 0L, now, "trace-position-prune");
+                PositionUpdatedEvent.CURRENT_SCHEMA_VERSION, 9001L, 8001L, ProductLine.LINEAR_PERPETUAL,
+                9001L, 1001L, "BTC-USDT", 7L, MarginMode.CROSS, PositionSide.NET,
+                2L, 65_000L, 65_000L, 0L, "USDT", 100L, now, now, now, "trace-position-prune");
     }
 }

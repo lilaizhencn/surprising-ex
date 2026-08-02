@@ -10,7 +10,10 @@ import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.model.MatchResultEvent;
+import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
@@ -84,6 +87,35 @@ class OrderUserStateServiceTest {
         }
     }
 
+    @Test
+    void repeatedTradeIdDoesNotIncreaseExecutedQuantityAgain() throws Exception {
+        Path root = Files.createTempDirectory("order-user-state-trade-idempotency-");
+        TradingOrderProperties properties = properties();
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            OrderRecord order = order("client-trade", 9101L, 10L);
+            service.place(order);
+            service.place(orderFor(2002L, "maker-trade", 9901L, 10L));
+            Instant tradeTime = Instant.parse("2026-07-01T00:00:01Z");
+            MatchTradeEvent trade = new MatchTradeEvent(7001L, 8001L, "BTC-USDT", 9101L, 1L, 1001L,
+                    OrderSide.BUY, 9901L, 1L, 2002L, 0L, 0L, 100L, 2L, false, false, tradeTime, "trace");
+            MatchResultEvent first = new MatchResultEvent(8001L, 9101L, 1001L, "BTC-USDT", 1L,
+                    OrderCommandType.PLACE, "MATCHED", 2L, OrderStatus.PARTIALLY_FILLED, tradeTime,
+                    java.util.List.of(trade), "trace");
+            MatchResultEvent retryWithNewCommand = new MatchResultEvent(8002L, 9101L, 1001L, "BTC-USDT", 1L,
+                    OrderCommandType.PLACE, "MATCHED", 2L, OrderStatus.PARTIALLY_FILLED, tradeTime.plusSeconds(1),
+                    java.util.List.of(trade), "trace-retry");
+
+            service.processMatchResults(java.util.List.of(first));
+            service.processMatchResults(java.util.List.of(retryWithNewCommand));
+
+            assertThat(service.get(1001L, 9101L).executedQuantitySteps()).isEqualTo(2L);
+            assertThat(service.get(1001L, 9101L).remainingQuantitySteps()).isEqualTo(8L);
+        }
+    }
+
     private TradingOrderProperties properties() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
@@ -99,8 +131,12 @@ class OrderUserStateServiceTest {
     }
 
     private OrderRecord order(String clientOrderId, long orderId, long quantity) {
+        return orderFor(1001L, clientOrderId, orderId, quantity);
+    }
+
+    private OrderRecord orderFor(long userId, String clientOrderId, long orderId, long quantity) {
         Instant now = Instant.parse("2026-07-01T00:00:00Z");
-        return new OrderRecord(orderId, ProductLine.LINEAR_PERPETUAL, 1001L, clientOrderId, "BTC-USDT", 1L,
+        return new OrderRecord(orderId, ProductLine.LINEAR_PERPETUAL, userId, clientOrderId, "BTC-USDT", 1L,
                 OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 100L, quantity, 0L, quantity, MarginMode.CROSS,
                 PositionSide.NET, 100L, 200L, false, false, null, null, 0L, OrderStatus.ACCEPTED, null, now, now, 1L);
     }

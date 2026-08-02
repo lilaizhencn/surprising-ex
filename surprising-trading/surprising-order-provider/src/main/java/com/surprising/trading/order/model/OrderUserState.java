@@ -7,7 +7,8 @@ public record OrderUserState(
         List<OrderRecord> orders,
         List<String> appliedEventIds,
         List<AlgoOrderRecord> algoOrders,
-        List<AlgoOrderChild> algoChildren) {
+        List<AlgoOrderChild> algoChildren,
+        List<Long> appliedTradeIds) {
 
     public OrderUserState {
         if (orders == null) {
@@ -17,13 +18,27 @@ public record OrderUserState(
         appliedEventIds = appliedEventIds == null ? List.of() : List.copyOf(appliedEventIds);
         algoOrders = algoOrders == null ? List.of() : List.copyOf(algoOrders);
         algoChildren = algoChildren == null ? List.of() : List.copyOf(algoChildren);
+        appliedTradeIds = appliedTradeIds == null ? List.of() : List.copyOf(appliedTradeIds);
+        java.util.HashSet<Long> uniqueTradeIds = new java.util.HashSet<>();
+        for (Long tradeId : appliedTradeIds) {
+            if (tradeId == null || tradeId <= 0L || !uniqueTradeIds.add(tradeId)) {
+                throw new IllegalArgumentException("订单成交幂等索引无效");
+            }
+        }
     }
 
     public OrderUserState(List<OrderRecord> orders) {
-        this(orders, List.of(), List.of(), List.of());
+        this(orders, List.of(), List.of(), List.of(), List.of());
     }
 
     public OrderUserState(List<OrderRecord> orders, List<String> appliedEventIds) {
-        this(orders, appliedEventIds, List.of(), List.of());
+        this(orders, appliedEventIds, List.of(), List.of(), List.of());
+    }
+
+    public OrderUserState(List<OrderRecord> orders,
+                          List<String> appliedEventIds,
+                          List<AlgoOrderRecord> algoOrders,
+                          List<AlgoOrderChild> algoChildren) {
+        this(orders, appliedEventIds, algoOrders, algoChildren, List.of());
     }
 }

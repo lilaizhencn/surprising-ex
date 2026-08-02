@@ -824,7 +824,8 @@ public class OrderUserStateService {
             current = applyEvent(current, event);
             List<String> eventIds = new ArrayList<>(current.appliedEventIds());
             eventIds.add(event.eventId());
-            current = new OrderUserState(current.orders(), eventIds, current.algoOrders(), current.algoChildren());
+            current = new OrderUserState(current.orders(), eventIds, current.algoOrders(), current.algoChildren(),
+                    current.appliedTradeIds());
             stateStore.apply(partition, raw.sequence(), serialize(current));
             if (marginSnapshotCache != null) {
                 for (OrderRecord order : current.orders()) {
@@ -860,7 +861,8 @@ public class OrderUserStateService {
         publishForPlace(order);
         List<OrderRecord> orders = new ArrayList<>(current.orders());
         orders.add(order);
-        return new OrderUserState(orders, current.appliedEventIds(), current.algoOrders(), current.algoChildren());
+        return new OrderUserState(orders, current.appliedEventIds(), current.algoOrders(), current.algoChildren(),
+                current.appliedTradeIds());
     }
 
     private OrderUserState applyAccountResult(OrderUserState current, AccountCommandResultEvent result) {
@@ -888,9 +890,14 @@ public class OrderUserStateService {
         if (result == null) {
             throw new IllegalStateException("撮合结果不能为空");
         }
+        java.util.Set<Long> appliedTradeIds = new java.util.HashSet<>(current.appliedTradeIds());
+        java.util.Set<Long> freshTradeIds = new java.util.HashSet<>();
         java.util.Map<Long, Long> makerFills = new java.util.HashMap<>();
         java.util.Map<Long, Boolean> makerCompletions = new java.util.HashMap<>();
         for (MatchTradeEvent trade : result.trades()) {
+            if (appliedTradeIds.contains(trade.tradeId()) || !freshTradeIds.add(trade.tradeId())) {
+                continue;
+            }
             boolean belongsToCurrentUser = current.orders().stream()
                     .anyMatch(value -> value.orderId() == trade.makerOrderId()
                             && value.userId() == trade.makerUserId());
@@ -900,13 +907,25 @@ public class OrderUserStateService {
             makerFills.merge(trade.makerOrderId(), trade.quantitySteps(), Math::addExact);
             makerCompletions.merge(trade.makerOrderId(), trade.makerOrderCompleted(), Boolean::logicalOr);
         }
+        boolean hasFreshTrade = !freshTradeIds.isEmpty();
+        // 同一成交被新的撮合命令号重复投递时，不能再次推进订单成交量或修订号。
+        if (!hasFreshTrade && result.filledQuantitySteps() > 0L) {
+            return current;
+        }
         List<OrderRecord> updatedOrders = new ArrayList<>(current.orders().size());
         boolean touched = false;
         for (OrderRecord order : current.orders()) {
             long filled = 0L;
             OrderStatus nextStatus = null;
             if (order.orderId() == result.orderId() && order.userId() == result.userId()) {
-                filled = result.filledQuantitySteps();
+                if (hasFreshTrade) {
+                    filled = result.trades().stream()
+                            .filter(trade -> freshTradeIds.contains(trade.tradeId()))
+                            .filter(trade -> trade.takerOrderId() == order.orderId()
+                                    && trade.takerUserId() == order.userId())
+                            .mapToLong(MatchTradeEvent::quantitySteps)
+                            .sum();
+                }
                 nextStatus = result.orderStatus();
             } else if (makerFills.containsKey(order.orderId())) {
                 filled = makerFills.get(order.orderId());
@@ -934,7 +953,9 @@ public class OrderUserStateService {
         if (!touched) {
             throw new IllegalStateException("撮合结果对应订单不存在: " + result.orderId());
         }
-        return new OrderUserState(updatedOrders, current.appliedEventIds(), current.algoOrders(), current.algoChildren());
+        appliedTradeIds.addAll(freshTradeIds);
+        return new OrderUserState(updatedOrders, current.appliedEventIds(), current.algoOrders(), current.algoChildren(),
+                appliedTradeIds.stream().sorted().toList());
     }
 
     private OrderUserState applyCancel(OrderUserState current, OrderUserEvent event) {
@@ -959,7 +980,8 @@ public class OrderUserStateService {
         }
         List<AlgoOrderRecord> orders = new ArrayList<>(current.algoOrders());
         orders.add(order);
-        return new OrderUserState(current.orders(), current.appliedEventIds(), orders, current.algoChildren());
+        return new OrderUserState(current.orders(), current.appliedEventIds(), orders, current.algoChildren(),
+                current.appliedTradeIds());
     }
 
     private OrderUserState applyAlgoUpdate(OrderUserState current, AlgoOrderRecord updated) {
@@ -970,7 +992,8 @@ public class OrderUserStateService {
         List<AlgoOrderRecord> orders = current.algoOrders().stream()
                 .map(value -> value.algoOrderId() == updated.algoOrderId() ? updated : value)
                 .toList();
-        return new OrderUserState(current.orders(), current.appliedEventIds(), orders, current.algoChildren());
+        return new OrderUserState(current.orders(), current.appliedEventIds(), orders, current.algoChildren(),
+                current.appliedTradeIds());
     }
 
     private OrderUserState applyAlgoChild(OrderUserState current,
@@ -986,7 +1009,8 @@ public class OrderUserStateService {
         }
         List<AlgoOrderChild> children = new ArrayList<>(withOrder.algoChildren());
         children.add(child);
-        return new OrderUserState(withOrder.orders(), withOrder.appliedEventIds(), withOrder.algoOrders(), children);
+        return new OrderUserState(withOrder.orders(), withOrder.appliedEventIds(), withOrder.algoOrders(), children,
+                withOrder.appliedTradeIds());
     }
 
     private OrderUserState stateAfterApply(UserPartitionKey partition) {
@@ -1192,7 +1216,8 @@ public class OrderUserStateService {
 
     private OrderUserState replace(OrderUserState state, OrderRecord updated) {
         return new OrderUserState(state.orders().stream().map(value -> value.orderId() == updated.orderId()
-                ? updated : value).toList(), state.appliedEventIds(), state.algoOrders(), state.algoChildren());
+                ? updated : value).toList(), state.appliedEventIds(), state.algoOrders(), state.algoChildren(),
+                state.appliedTradeIds());
     }
 
     private OrderRecord withStatus(OrderRecord order, OrderStatus status, String reason) {
