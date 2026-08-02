@@ -190,6 +190,7 @@ public class OrderService {
             if (existing.isPresent()) {
                 OrderRecord existingOrder = existing.get();
                 requireOrderCurrentProductLine(existingOrder);
+                requireSameClientOrderIntent(normalized, existingOrder);
                 return toResponse(existingOrder);
             }
         }
@@ -271,12 +272,14 @@ public class OrderService {
 
         boolean inserted = orderRepository.insert(order);
         if (!inserted && hasClientOrderId(normalized)) {
-            return orderRepository.findByClientOrderId(productLine, normalized.userId(), normalized.clientOrderId())
-                    .map(existing -> {
-                        requireOrderCurrentProductLine(existing);
-                        return toResponse(existing);
-                    })
-                    .orElseThrow(() -> new IllegalStateException("duplicate clientOrderId but order not found"));
+            var duplicate = orderRepository.findByClientOrderId(productLine, normalized.userId(), normalized.clientOrderId());
+            if (duplicate.isEmpty()) {
+                throw new IllegalStateException("duplicate clientOrderId but order not found");
+            }
+            OrderRecord existing = duplicate.get();
+            requireOrderCurrentProductLine(existing);
+            requireSameClientOrderIntent(normalized, existing);
+            return toResponse(existing);
         }
         if (!inserted) {
             throw new IllegalStateException("failed to insert order " + orderId);
@@ -1410,6 +1413,30 @@ public class OrderService {
 
     private boolean hasClientOrderId(PlaceOrderRequest request) {
         return request.clientOrderId() != null && !request.clientOrderId().isBlank();
+    }
+
+    /**
+     * 幂等键只能重放完全相同的业务意图；同一个键携带不同参数必须拒绝，
+     * 否则客户端重试拼写错误会被误当成成功并造成资金预期与实际订单不一致。
+     */
+    private void requireSameClientOrderIntent(PlaceOrderRequest request, OrderRecord existing) {
+        boolean same = existing.userId() == request.userId()
+                && existing.productLine() == currentProductLine()
+                && existing.clientOrderId() != null
+                && existing.clientOrderId().equals(request.clientOrderId())
+                && existing.symbol().equals(request.symbol())
+                && existing.side() == request.side()
+                && existing.orderType() == request.orderType()
+                && existing.timeInForce() == request.timeInForce()
+                && existing.priceTicks() == request.priceTicks()
+                && existing.quantitySteps() == request.quantitySteps()
+                && existing.marginMode() == request.marginMode()
+                && existing.positionSide() == request.positionSide()
+                && existing.reduceOnly() == request.reduceOnly()
+                && existing.postOnly() == request.postOnly();
+        if (!same) {
+            throw new IllegalArgumentException("clientOrderId already used with different order parameters");
+        }
     }
 
     private void requireOrderId(long orderId) {

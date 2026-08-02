@@ -37,6 +37,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -121,6 +122,7 @@ import org.springframework.transaction.support.TransactionTemplate;
             if (existing.isPresent()) {
                 TriggerOrderRecord existingOrder = existing.get();
                 requireTriggerOrderCurrentProductLine(existingOrder);
+                requireSameClientTriggerIntent(normalized, existingOrder);
                 return toResponse(existingOrder);
             }
         }
@@ -181,13 +183,15 @@ import org.springframework.transaction.support.TransactionTemplate;
         boolean inserted = triggerOrderRepository.insert(order);
         if (!inserted && hasClientTriggerOrderId(normalized)) {
             triggerOrderIndex.remove(order);
-            return triggerOrderRepository.findByClientTriggerOrderId(productLine, normalized.userId(),
-                            normalized.clientTriggerOrderId())
-                    .map(existing -> {
-                        requireTriggerOrderCurrentProductLine(existing);
-                        return toResponse(existing);
-                    })
-                    .orElseThrow(() -> new IllegalStateException("duplicate trigger id but order not found"));
+            var duplicate = triggerOrderRepository.findByClientTriggerOrderId(productLine, normalized.userId(),
+                    normalized.clientTriggerOrderId());
+            if (duplicate.isEmpty()) {
+                throw new IllegalStateException("duplicate trigger id but order not found");
+            }
+            TriggerOrderRecord existing = duplicate.get();
+            requireTriggerOrderCurrentProductLine(existing);
+            requireSameClientTriggerIntent(normalized, existing);
+            return toResponse(existing);
         }
         if (!inserted) {
             triggerOrderIndex.remove(order);
@@ -195,6 +199,30 @@ import org.springframework.transaction.support.TransactionTemplate;
         }
         enqueueStatusChange(order);
         return toResponse(order);
+    }
+
+    /** 幂等键只能重放同一份触发条件，参数变化必须拒绝并保持原订单不变。 */
+    private void requireSameClientTriggerIntent(PlaceTriggerOrderRequest request, TriggerOrderRecord existing) {
+        boolean same = existing.userId() == request.userId()
+                && existing.productLine() == currentProductLine()
+                && Objects.equals(existing.clientTriggerOrderId(), emptyToNull(request.clientTriggerOrderId()))
+                && Objects.equals(existing.ocoGroupId(), emptyToNull(request.ocoGroupId()))
+                && Objects.equals(existing.symbol(), request.symbol())
+                && existing.side() == request.side()
+                && existing.triggerType() == request.triggerType()
+                && existing.triggerPriceTicks() == request.triggerPriceTicks()
+                && Objects.equals(existing.activationPriceTicks(), request.activationPriceTicks())
+                && Objects.equals(existing.callbackRatePpm(), request.callbackRatePpm())
+                && existing.orderType() == request.orderType()
+                && existing.timeInForce() == request.timeInForce()
+                && existing.priceTicks() == request.priceTicks()
+                && existing.quantitySteps() == request.quantitySteps()
+                && existing.marginMode() == request.marginMode()
+                && existing.positionSide() == request.positionSide()
+                && Objects.equals(existing.expiresAt(), request.expiresAt());
+        if (!same) {
+            throw new IllegalArgumentException("clientTriggerOrderId already used with different trigger parameters");
+        }
     }
 
     @Transactional

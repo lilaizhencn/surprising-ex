@@ -64,6 +64,22 @@ class AlgoOrderServiceTest {
     }
 
     @Test
+    void reusedClientAlgoIdWithDifferentParametersIsRejected() {
+        AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
+        AlgoOrderService service = service(repository, mock(AlgoOrderChildRepository.class), mock(OrderService.class));
+        when(repository.findByClientAlgoOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "twap-1"))
+                .thenReturn(Optional.of(twapRecord()));
+
+        assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
+                1001L, "twap-1", "BTC-USDT", AlgoOrderType.TWAP, OrderSide.BUY,
+                1L, 100L, 50L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
+                false, false, TimeInForce.IOC, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("clientAlgoOrderId already used with different algo parameters");
+        verify(repository, never()).nextAlgoOrderId();
+    }
+
+    @Test
     void dueTwapPlacesIocChildOrderThroughOrderService() {
         AlgoOrderRepository repository = mock(AlgoOrderRepository.class);
         AlgoOrderChildRepository childRepository = mock(AlgoOrderChildRepository.class);

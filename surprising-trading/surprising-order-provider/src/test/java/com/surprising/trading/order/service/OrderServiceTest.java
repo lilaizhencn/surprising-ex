@@ -174,6 +174,24 @@ class OrderServiceTest {
     }
 
     @Test
+    void reusedClientOrderIdWithDifferentParametersIsRejected() {
+        OrderService service = service();
+        OrderRecord existing = order(9001L, "dup-conflict", OrderStatus.ACCEPTED, null);
+        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "dup-conflict"))
+                .thenReturn(Optional.of(existing));
+
+        PlaceOrderRequest changed = new PlaceOrderRequest(1001L, "dup-conflict", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 11L, false, false);
+
+        assertThatThrownBy(() -> service.place(changed))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("clientOrderId already used with different order parameters");
+        verify(orderRepository, never()).nextSequence("order");
+        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
+                anyLong(), anyLong(), anyLong(), anyLong());
+    }
+
+    @Test
     void positionEventPrunesInvalidAndExcessReduceOnlyOrdersInsideOrderModule() {
         OrderService service = service();
         Instant eventTime = Instant.parse("2026-07-19T00:00:00Z");

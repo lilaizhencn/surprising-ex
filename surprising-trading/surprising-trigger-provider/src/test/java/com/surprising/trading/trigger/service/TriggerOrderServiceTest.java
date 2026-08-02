@@ -247,15 +247,32 @@ class TriggerOrderServiceTest {
         TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
                 new TriggerProperties());
         TriggerOrderRecord existing = record(501L, TriggerOrderStatus.PENDING);
-        when(repository.findByClientTriggerOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "sl-1"))
+        when(repository.findByClientTriggerOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "tp-501"))
                 .thenReturn(Optional.of(existing));
 
-        TriggerOrderResponse response = service.place(new PlaceTriggerOrderRequest(1001L, "sl-1", null, "BTC-USDT",
-                OrderSide.SELL, TriggerOrderType.STOP_LOSS, 60_000L,
+        TriggerOrderResponse response = service.place(new PlaceTriggerOrderRequest(1001L, "tp-501", "oco-1", "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, 70_000L,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS, null));
 
         assertThat(response.triggerOrderId()).isEqualTo(501L);
         assertThat(response.status()).isEqualTo(TriggerOrderStatus.PENDING);
+    }
+
+    @Test
+    void reusedClientTriggerIdWithDifferentParametersIsRejected() {
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class),
+                new TriggerProperties());
+        TriggerOrderRecord existing = record(501L, TriggerOrderStatus.PENDING);
+        when(repository.findByClientTriggerOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "tp-501"))
+                .thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.place(new PlaceTriggerOrderRequest(1001L, "tp-501", "oco-1", "BTC-USDT",
+                OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, 71_000L,
+                OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("clientTriggerOrderId already used with different trigger parameters");
+        verify(repository, never()).nextSequence("trigger-order");
     }
 
     @Test

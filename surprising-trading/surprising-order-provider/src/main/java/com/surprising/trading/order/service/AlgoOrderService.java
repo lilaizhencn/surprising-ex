@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -89,6 +90,7 @@ public class AlgoOrderService {
             if (existing.isPresent()) {
                 AlgoOrderRecord existingOrder = existing.get();
                 requireAlgoOrderCurrentProductLine(existingOrder);
+                requireSameClientAlgoIntent(normalized, existingOrder);
                 return toResponse(existingOrder);
             }
         }
@@ -129,18 +131,43 @@ public class AlgoOrderService {
                 now);
         boolean inserted = algoOrderRepository.insert(record);
         if (!inserted && record.clientAlgoOrderId() != null) {
-            return algoOrderRepository.findByClientAlgoOrderId(productLine, record.userId(), record.clientAlgoOrderId())
-                    .map(existing -> {
-                        requireAlgoOrderCurrentProductLine(existing);
-                        return toResponse(existing);
-                    })
-                    .orElseThrow(() -> new IllegalStateException("duplicate clientAlgoOrderId but algo order not found"));
+            var duplicate = algoOrderRepository.findByClientAlgoOrderId(productLine, record.userId(), record.clientAlgoOrderId());
+            if (duplicate.isEmpty()) {
+                throw new IllegalStateException("duplicate clientAlgoOrderId but algo order not found");
+            }
+            AlgoOrderRecord existing = duplicate.get();
+            requireAlgoOrderCurrentProductLine(existing);
+            requireSameClientAlgoIntent(normalized, existing);
+            return toResponse(existing);
         }
         if (!inserted) {
             throw new IllegalStateException("failed to insert algo order " + algoOrderId);
         }
         afterCommit(() -> scheduleIndex.synchronizeAlgo(record));
         return toResponse(record);
+    }
+
+    /** 幂等键只能重放同一份算法单参数，参数变化必须拒绝。 */
+    private void requireSameClientAlgoIntent(PlaceAlgoOrderRequest request, AlgoOrderRecord existing) {
+        boolean same = existing.userId() == request.userId()
+                && existing.productLine() == currentProductLine()
+                && Objects.equals(existing.clientAlgoOrderId(), emptyToNull(request.clientAlgoOrderId()))
+                && Objects.equals(existing.symbol(), request.symbol())
+                && existing.algoType() == request.algoType()
+                && existing.side() == request.side()
+                && existing.priceTicks() == request.priceTicks()
+                && existing.quantitySteps() == request.quantitySteps()
+                && existing.childQuantitySteps() == request.childQuantitySteps()
+                && existing.intervalSeconds() == request.intervalSeconds()
+                && existing.durationSeconds() == request.durationSeconds()
+                && existing.marginMode() == request.marginMode()
+                && existing.positionSide() == request.positionSide()
+                && existing.reduceOnly() == request.reduceOnly()
+                && existing.postOnly() == request.postOnly()
+                && existing.timeInForce() == request.timeInForce();
+        if (!same) {
+            throw new IllegalArgumentException("clientAlgoOrderId already used with different algo parameters");
+        }
     }
 
     @Transactional
