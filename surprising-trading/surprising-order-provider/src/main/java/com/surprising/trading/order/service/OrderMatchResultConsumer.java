@@ -46,6 +46,13 @@ public class OrderMatchResultConsumer {
                 if (result.commandId() <= 0L || result.orderId() <= 0L) {
                     throw new IllegalArgumentException("撮合结果编号无效");
                 }
+                if (result.trades() == null) {
+                    throw new IllegalArgumentException("撮合结果成交列表不能为空");
+                }
+                if (result.trades().stream().anyMatch(trade -> trade == null
+                        || !result.symbol().equalsIgnoreCase(trade.symbol()))) {
+                    throw new IllegalArgumentException("撮合结果成交交易对不一致");
+                }
                 results.add(result);
             }
             stateService.processMatchResults(results);

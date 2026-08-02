@@ -720,6 +720,7 @@ public class OrderUserStateService {
                     || !"ORDER".equals(result.source())) {
                 continue;
             }
+            requireCurrentProductLine(result.productLine());
             UserPartitionKey partition = partition(result.productLine(), result.userId());
             lane.execute(partition, () -> {
                 append(partition, OrderUserEvent.accountResult(result));
@@ -738,6 +739,7 @@ public class OrderUserStateService {
             if (result == null) {
                 continue;
             }
+            validateMatchResult(result);
             appendMatch(result.userId(), result);
             for (MatchTradeEvent trade : result.trades()) {
                 if (trade.makerUserId() != result.userId()) {
@@ -754,6 +756,27 @@ public class OrderUserStateService {
             applyPartition(partition);
             return null;
         });
+    }
+
+    /** Service 入口也必须重复校验 Kafka Consumer 已做的产品线和参与方边界。 */
+    private void validateMatchResult(MatchResultEvent result) {
+        requireCurrentProductLine(properties.getKafka().getProductLine());
+        if (result.commandId() <= 0L || result.orderId() <= 0L || result.userId() <= 0L
+                || result.symbol() == null || result.symbol().isBlank() || result.instrumentVersion() <= 0L
+                || result.filledQuantitySteps() < 0L || result.orderStatus() == null
+                || result.trades() == null) {
+            throw new IllegalArgumentException("撮合结果身份或数量无效");
+        }
+        for (MatchTradeEvent trade : result.trades()) {
+            if (trade == null || !result.symbol().equalsIgnoreCase(trade.symbol())
+                    || trade.tradeId() <= 0L || trade.commandId() <= 0L
+                    || trade.takerOrderId() <= 0L || trade.makerOrderId() <= 0L
+                    || trade.takerUserId() <= 0L || trade.makerUserId() <= 0L
+                    || trade.priceTicks() <= 0L || trade.quantitySteps() <= 0L
+                    || trade.takerInstrumentVersion() <= 0L || trade.makerInstrumentVersion() <= 0L) {
+                throw new IllegalArgumentException("撮合成交参与方或交易对不一致");
+            }
+        }
     }
 
     @Scheduled(fixedDelayString = "${surprising.trading.order.wal.worker-delay-ms:25}")

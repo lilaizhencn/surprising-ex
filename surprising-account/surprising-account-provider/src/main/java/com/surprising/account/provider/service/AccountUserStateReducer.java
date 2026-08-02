@@ -175,6 +175,10 @@ public class AccountUserStateReducer {
             throw new IllegalStateException("账户 reducer 序号不连续 partition=" + partition.value()
                     + " current=" + currentSequence + " requested=" + sequence);
         }
+        if (current.snapshot().productLine() != command.productLine()
+                || !current.snapshot().accountType().equals(command.productLine().accountTypeCode())) {
+            throw new AccountCommandPoisonPillException("账户命令产品线与本地快照不一致");
+        }
         Reduction reduction = switch (command.commandType()) {
             case ORDER_RESERVE -> reserve(current, command);
             case ORDER_RELEASE -> release(current, command);

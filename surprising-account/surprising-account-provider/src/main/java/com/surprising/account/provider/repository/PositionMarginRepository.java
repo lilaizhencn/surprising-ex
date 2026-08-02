@@ -43,25 +43,6 @@ public class PositionMarginRepository {
                 .stream().findFirst();
     }
 
-    public Optional<PositionMarginRow> findLegacy(long userId,
-                                                  String symbol,
-                                                  String asset,
-                                                  MarginMode marginMode,
-                                                  PositionSide positionSide) {
-        return jdbcTemplate.query("""
-                SELECT symbol, asset, margin_mode, position_side, margin_units, updated_at
-                  FROM account_position_margins
-                 WHERE user_id = ?
-                   AND symbol = ?
-                   AND asset = ?
-                   AND margin_mode = ?
-                   AND position_side = ?
-                """, (rs, rowNum) -> toRow(rs), userId, symbol, asset,
-                MarginMode.defaultIfNull(marginMode).name(),
-                PositionSide.defaultIfNull(positionSide).name())
-                .stream().findFirst();
-    }
-
     /** 汇总一个用户永续隔离仓位的保证金，查询只触及 account_position_margins 单表。 */
     public Map<String, Long> sumOpenIsolatedByAsset(ProductLine productLine, long userId) {
         return jdbcTemplate.query("""
