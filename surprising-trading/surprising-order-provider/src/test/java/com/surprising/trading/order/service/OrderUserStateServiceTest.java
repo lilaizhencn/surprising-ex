@@ -20,6 +20,9 @@ import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.OrderUserCommand;
 import com.surprising.trading.api.model.OrderUserCommandType;
+import com.surprising.account.api.model.AccountCommandResultEvent;
+import com.surprising.account.api.model.AccountCommandStatus;
+import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -197,6 +200,36 @@ class OrderUserStateServiceTest {
             assertThatThrownBy(() -> service.executeUserCommand(conflict))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("载荷指纹冲突");
+        }
+    }
+
+    @Test
+    void cancelBeforeReservationResultDoesNotPublishPlaceAndReleasesAfterReserveAccepted() throws Exception {
+        Path root = Files.createTempDirectory("order-user-cancel-pending-");
+        TradingOrderProperties properties = properties();
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            KafkaTemplate<String, String> kafka = kafka();
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka);
+            OrderRecord pending = new OrderRecord(9501L, ProductLine.LINEAR_PERPETUAL, 1001L, "pending-1",
+                    "BTC-USDT", 1L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 100L, 10L, 0L, 10L,
+                    MarginMode.CROSS, PositionSide.NET, 100L, 200L, false, false, "USDT_PERPETUAL", "USDT",
+                    50L, OrderStatus.PENDING_RESERVE, null, Instant.now(), Instant.now(), 1L);
+            service.place(pending);
+
+            assertThat(service.cancel(1001L, pending.orderId(), "cancel while reserving").status())
+                    .isEqualTo(OrderStatus.CANCEL_REQUESTED);
+            AccountCommandResultEvent accepted = new AccountCommandResultEvent(
+                    9601L, OrderUserStateService.reservationCommandId(pending.productLine(), pending.orderId()),
+                    pending.productLine(), pending.userId(), AccountUserCommandType.ORDER_RESERVE,
+                    AccountCommandStatus.APPLIED, "ORDER", String.valueOf(pending.orderId()), "{}", null, null,
+                    Instant.now(), "trace");
+            service.processAccountCommandResults(java.util.List.of(accepted));
+
+            assertThat(service.get(1001L, pending.orderId()).status()).isEqualTo(OrderStatus.CANCELED);
+            org.mockito.Mockito.verify(kafka, org.mockito.Mockito.atLeastOnce())
+                    .send(anyString(), anyString(), anyString());
         }
     }
 

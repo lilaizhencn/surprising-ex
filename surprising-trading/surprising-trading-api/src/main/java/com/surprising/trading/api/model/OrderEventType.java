@@ -4,5 +4,6 @@ public enum OrderEventType {
     RESERVE_PENDING,
     ACCEPTED,
     REJECTED,
-    CANCEL_REQUESTED
+    CANCEL_REQUESTED,
+    CANCELED
 }

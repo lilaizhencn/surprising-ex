@@ -7,6 +7,7 @@ import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
+import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.cache.PerpetualAccountStateSnapshotCache;
 import com.surprising.eventstore.UserPartitionCommandLane;
@@ -1064,10 +1065,22 @@ public class OrderUserStateService {
         }
         long orderId = parseOrderId(result.sourceReference());
         OrderRecord order = find(current, orderId);
-        if (order.status() != OrderStatus.PENDING_RESERVE) {
+        if (order.status() != OrderStatus.PENDING_RESERVE && order.status() != OrderStatus.CANCEL_REQUESTED) {
             return current;
         }
         boolean accepted = result.status() == AccountCommandStatus.APPLIED;
+        if (order.status() == OrderStatus.CANCEL_REQUESTED) {
+            if (accepted) {
+                publishAccountRelease(order);
+                OrderRecord canceled = withStatus(order, OrderStatus.CANCELED, "cancel requested before reservation accepted");
+                publishOrderEvent(canceled, OrderEventType.CANCELED, canceled.rejectReason());
+                return replace(current, canceled);
+            }
+            OrderRecord rejected = withStatus(order, OrderStatus.REJECTED,
+                    result.errorMessage() == null ? result.errorCode() : result.errorMessage());
+            publishOrderEvent(rejected, OrderEventType.REJECTED, rejected.rejectReason());
+            return replace(current, rejected);
+        }
         OrderRecord updated = withStatus(order, accepted ? OrderStatus.ACCEPTED : OrderStatus.REJECTED,
                 accepted ? null : (result.errorMessage() == null ? result.errorCode() : result.errorMessage()));
         if (accepted) {
@@ -1158,6 +1171,13 @@ public class OrderUserStateService {
         if (order.status() == OrderStatus.CANCELED || order.status() == OrderStatus.FILLED
                 || order.status() == OrderStatus.REJECTED) {
             return current;
+        }
+        if (order.status() == OrderStatus.PENDING_RESERVE) {
+            // 预占结果尚未到达时不能把 CANCEL 发给撮合；否则撮合可能先看到 CANCEL，
+            // 随后又收到 PLACE，账户也会留下无法释放的冻结。等预占终态到达后再补发释放命令。
+            OrderRecord requested = withStatus(order, OrderStatus.CANCEL_REQUESTED, null);
+            publishOrderEvent(requested, OrderEventType.CANCEL_REQUESTED, event.cancelReason());
+            return replace(current, requested);
         }
         OrderRecord updated = withStatus(order, OrderStatus.CANCEL_REQUESTED, null);
         publishOrderCommand(updated, OrderCommandType.CANCEL);
@@ -1319,6 +1339,25 @@ public class OrderUserStateService {
                 objectMapper.writeValueAsString(command), command.commandId());
     }
 
+    /** 预占成功后才收到撤单时，直接发出幂等释放命令；订单从未发布 PLACE，不需要通知撮合撤单。 */
+    private void publishAccountRelease(OrderRecord order) {
+        if (order.reservedUnits() <= 0L || order.reservationAccountType() == null
+                || order.reservationAsset() == null) {
+            throw new IllegalStateException("待预占订单缺少释放快照: " + order.orderId());
+        }
+        OrderReleaseAccountCommand release = new OrderReleaseAccountCommand(
+                order.orderId(), true, order.quantitySteps(), 0L, true,
+                AccountType.valueOf(order.reservationAccountType()), order.reservationAsset(),
+                order.reservedUnits(), "ORDER_CANCEL_BEFORE_ACCEPT", Instant.now());
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION,
+                "ORDER_RELEASE:" + order.productLine().name() + ":" + order.orderId() + ":ORDER_CANCEL_BEFORE_ACCEPT",
+                order.productLine(), order.userId(), AccountUserCommandType.ORDER_RELEASE, "ORDER",
+                String.valueOf(order.orderId()), null, objectMapper.writeValueAsString(release), Instant.now(), null);
+        send(properties.getKafka().getAccountUserCommandsTopic(), command.partitionKey(),
+                objectMapper.writeValueAsString(command), command.commandId());
+    }
+
     private void publishOrderCommand(OrderRecord order, OrderCommandType type) {
         long commandId = commandId(order.orderId(), type);
         OrderCommandEvent command = new OrderCommandEvent(type, commandId, order.orderId(), order.userId(),
@@ -1452,9 +1491,9 @@ public class OrderUserStateService {
     }
 
     private long orderEventId(long orderId, OrderEventType type) {
-        // 订单编号低两位恒为零，四种订单事件占用其后的四个连续编号；不同订单的编号间隔至少为四，
-        // 因此事件编号在本地生成且不会因为类型变化发生碰撞。
-        return Math.addExact(orderId, type.ordinal() + 1L);
+        // 订单事件使用独立的低位编码；不能直接 orderId + ordinal，否则新增第五种事件
+        // 会和下一个订单的第一种事件碰撞。
+        return Math.addExact(Math.multiplyExact(orderId, 8L), type.ordinal() + 1L);
     }
 
     public static String reservationCommandId(ProductLine productLine, long orderId) {
