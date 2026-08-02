@@ -205,9 +205,16 @@ class AccountUserStateReducerTest {
 
             AccountUserStateReducer.Reduction first = reducer.apply(funding, 1L);
             AccountUserStateReducer.Reduction duplicate = reducer.apply(funding, 2L);
+            AccountUserCommand conflictingFunding = command("funding-conflict", AccountUserCommandType.FUNDING_SETTLE,
+                    objectMapper.writeValueAsString(new FundingSettlementAccountCommand(
+                            7001L, 7101L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
+                            "USDT", 10L, 1_000L, 10_000L, -40L)));
 
             assertThat(first.status()).isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
             assertThat(duplicate.status()).isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> reducer.apply(conflictingFunding, 3L))
+                    .isInstanceOf(AccountCommandPoisonPillException.class)
+                    .hasMessageContaining("不同资金事实");
             AccountUserReducerState state = reducer.state(new com.surprising.eventstore.UserPartitionKey(
                     ProductLine.LINEAR_PERPETUAL, 1001L)).orElseThrow();
             assertThat(state.snapshot().balances()).containsExactly(

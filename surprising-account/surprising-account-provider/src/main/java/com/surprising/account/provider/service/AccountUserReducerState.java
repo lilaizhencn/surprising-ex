@@ -4,6 +4,7 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** 持久化在用户分区状态库中的账户快照、预占明细和结算幂等索引。 */
@@ -11,7 +12,9 @@ public record AccountUserReducerState(
         PerpetualAccountStateUpdatedEvent snapshot,
         List<Reservation> reservations,
         List<Long> settledTradeIds,
-        List<Long> settledFundingPaymentIds) {
+        List<Long> settledFundingPaymentIds,
+        Map<Long, String> settledTradeFingerprints,
+        Map<Long, String> settledFundingPaymentFingerprints) {
 
     public AccountUserReducerState {
         if (snapshot == null || reservations == null) {
@@ -20,8 +23,13 @@ public record AccountUserReducerState(
         reservations = List.copyOf(reservations);
         settledTradeIds = settledTradeIds == null ? List.of() : List.copyOf(settledTradeIds);
         settledFundingPaymentIds = settledFundingPaymentIds == null ? List.of() : List.copyOf(settledFundingPaymentIds);
+        settledTradeFingerprints = settledTradeFingerprints == null ? Map.of() : Map.copyOf(settledTradeFingerprints);
+        settledFundingPaymentFingerprints = settledFundingPaymentFingerprints == null
+                ? Map.of() : Map.copyOf(settledFundingPaymentFingerprints);
         requireUniquePositive(settledTradeIds, "成交幂等索引");
         requireUniquePositive(settledFundingPaymentIds, "资金费幂等索引");
+        requireFingerprints(settledTradeFingerprints, settledTradeIds, "成交事实指纹");
+        requireFingerprints(settledFundingPaymentFingerprints, settledFundingPaymentIds, "资金费事实指纹");
         Set<Long> orderIds = new HashSet<>();
         for (Reservation reservation : reservations) {
             if (!orderIds.add(reservation.orderId())) {
@@ -32,13 +40,20 @@ public record AccountUserReducerState(
 
     public AccountUserReducerState(PerpetualAccountStateUpdatedEvent snapshot,
                                    List<Reservation> reservations) {
-        this(snapshot, reservations, List.of(), List.of());
+        this(snapshot, reservations, List.of(), List.of(), Map.of(), Map.of());
     }
 
     public AccountUserReducerState(PerpetualAccountStateUpdatedEvent snapshot,
                                    List<Reservation> reservations,
                                    List<Long> settledTradeIds) {
-        this(snapshot, reservations, settledTradeIds, List.of());
+        this(snapshot, reservations, settledTradeIds, List.of(), Map.of(), Map.of());
+    }
+
+    public AccountUserReducerState(PerpetualAccountStateUpdatedEvent snapshot,
+                                   List<Reservation> reservations,
+                                   List<Long> settledTradeIds,
+                                   List<Long> settledFundingPaymentIds) {
+        this(snapshot, reservations, settledTradeIds, settledFundingPaymentIds, Map.of(), Map.of());
     }
 
     public record Reservation(
@@ -89,6 +104,19 @@ public record AccountUserReducerState(
         Set<Long> unique = new HashSet<>();
         for (Long value : values) {
             if (value == null || value <= 0L || !unique.add(value)) {
+                throw new IllegalArgumentException(field + "无效");
+            }
+        }
+    }
+
+    private static void requireFingerprints(Map<Long, String> fingerprints,
+                                             List<Long> ids,
+                                             String field) {
+        Set<Long> allowed = new HashSet<>(ids);
+        for (Map.Entry<Long, String> entry : fingerprints.entrySet()) {
+            if (entry.getKey() == null || entry.getKey() <= 0L
+                    || !allowed.contains(entry.getKey())
+                    || entry.getValue() == null || entry.getValue().isBlank()) {
                 throw new IllegalArgumentException(field + "无效");
             }
         }

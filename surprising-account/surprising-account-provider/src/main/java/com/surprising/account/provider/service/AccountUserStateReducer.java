@@ -291,7 +291,8 @@ public class AccountUserStateReducer {
                 previous.positions(), previous.positionMargins(), locks, previous.positionMode(),
                 previous.eventTime(), previous.traceId());
         return new AccountUserReducerState(canonicalSnapshot, state.reservations(), state.settledTradeIds(),
-                state.settledFundingPaymentIds());
+                state.settledFundingPaymentIds(), state.settledTradeFingerprints(),
+                state.settledFundingPaymentFingerprints());
     }
 
     /** 账户管理员余额调整也必须进入同一用户分区，不能另开数据库事务写余额。 */
@@ -383,8 +384,7 @@ public class AccountUserStateReducer {
                 previous.positions(), previous.positionMargins(), previous.orderLocks(), mode,
                 previous.eventTime(), previous.traceId());
         AccountUserReducerState next = advanceSnapshot(
-                new AccountUserReducerState(changed, current.reservations(), current.settledTradeIds(),
-                        current.settledFundingPaymentIds()), previous);
+                stateWith(current, changed, current.reservations()), previous);
         return new Reduction(ApplyStatus.APPLIED,
                 jsonResult(Map.of("productLine", ProductLine.LINEAR_PERPETUAL,
                         "userId", command.userId(), "positionMode", mode,
@@ -421,8 +421,7 @@ public class AccountUserStateReducer {
             if (!mutation.accepted()) {
                 return rejected(current, "INSUFFICIENT_AVAILABLE_BALANCE", "可用余额不足");
             }
-            updated = addPositionMargin(new AccountUserReducerState(mutation.snapshot(), current.reservations(),
-                    current.settledTradeIds(), current.settledFundingPaymentIds()), symbol, asset,
+            updated = addPositionMargin(stateWith(current, mutation.snapshot(), current.reservations()), symbol, asset,
                     request.marginMode(), side, amount);
             nextMargin = Math.addExact(positionMargin(current.snapshot(), symbol, asset,
                     request.marginMode(), side), amount);
@@ -453,8 +452,16 @@ public class AccountUserStateReducer {
 
     private AccountUserReducerState advanceSnapshot(AccountUserReducerState state,
                                                      PerpetualAccountStateUpdatedEvent previous) {
-        return new AccountUserReducerState(nextSnapshot(state.snapshot(), previous.accountRevision()),
-                state.reservations(), state.settledTradeIds(), state.settledFundingPaymentIds());
+        return stateWith(state, nextSnapshot(state.snapshot(), previous.accountRevision()), state.reservations());
+    }
+
+    /** 构造中间状态时完整保留结算幂等索引，不能因余额字段变化而丢失指纹。 */
+    private AccountUserReducerState stateWith(AccountUserReducerState base,
+                                               PerpetualAccountStateUpdatedEvent snapshot,
+                                               List<AccountUserReducerState.Reservation> reservations) {
+        return new AccountUserReducerState(snapshot, reservations, base.settledTradeIds(),
+                base.settledFundingPaymentIds(), base.settledTradeFingerprints(),
+                base.settledFundingPaymentFingerprints());
     }
 
     private PerpetualAccountStateUpdatedEvent.Balance findBalance(
@@ -506,8 +513,7 @@ public class AccountUserStateReducer {
                 current.snapshot().accountRevision());
         return new Reduction(ApplyStatus.APPLIED, jsonResult("orderId", reserve.orderId(),
                 "reservedUnits", reserve.reservedUnits()), null,
-                new AccountUserReducerState(snapshot, reservations, current.settledTradeIds(),
-                        current.settledFundingPaymentIds()));
+                stateWith(current, snapshot, reservations));
     }
 
     private Reduction release(AccountUserReducerState current, AccountUserCommand command) {
@@ -547,8 +553,7 @@ public class AccountUserStateReducer {
                 adjustOrderLock(mutation.snapshot(), reservation.asset(), -amount),
                 current.snapshot().accountRevision());
         return new Reduction(ApplyStatus.APPLIED, jsonResult("orderId", release.orderId(),
-                "releasedUnits", amount), null, new AccountUserReducerState(snapshot, reservations,
-                current.settledTradeIds(), current.settledFundingPaymentIds()));
+                "releasedUnits", amount), null, stateWith(current, snapshot, reservations));
     }
 
     private Reduction trade(AccountUserReducerState current, AccountUserCommand command) {
@@ -560,7 +565,12 @@ public class AccountUserStateReducer {
         if (sideCommand.userId() != command.userId()) {
             throw new AccountCommandPoisonPillException("成交结算用户与账户命令不一致");
         }
+        String tradeFingerprint = fingerprint(command.payload());
         if (current.settledTradeIds().contains(trade.tradeId())) {
+            String existingFingerprint = current.settledTradeFingerprints().get(trade.tradeId());
+            if (existingFingerprint != null && !existingFingerprint.equals(tradeFingerprint)) {
+                throw new AccountCommandPoisonPillException("同一成交编号对应不同成交事实");
+            }
             return new Reduction(ApplyStatus.APPLIED, jsonResult("tradeId", trade.tradeId(),
                     "duplicate", true), null, current);
         }
@@ -616,16 +626,24 @@ public class AccountUserStateReducer {
         settledTradeIds.add(trade.tradeId());
         PerpetualAccountStateUpdatedEvent snapshot = nextSnapshot(next.snapshot(),
                 current.snapshot().accountRevision());
+        Map<Long, String> tradeFingerprints = new java.util.LinkedHashMap<>(next.settledTradeFingerprints());
+        tradeFingerprints.put(trade.tradeId(), fingerprint(command.payload()));
         return new Reduction(ApplyStatus.APPLIED, jsonResult("tradeId", trade.tradeId(),
                 "orderId", orderId), null,
                 new AccountUserReducerState(snapshot, next.reservations(), settledTradeIds,
-                        next.settledFundingPaymentIds()));
+                        next.settledFundingPaymentIds(), tradeFingerprints,
+                        next.settledFundingPaymentFingerprints()));
     }
 
     /** 在本地快照中完成资金费，负资金费不足部分进入账户亏空，不查询数据库。 */
     private Reduction funding(AccountUserReducerState current, AccountUserCommand command) {
         FundingSettlementAccountCommand payment = readPayload(command, FundingSettlementAccountCommand.class);
+        String paymentFingerprint = fingerprint(command.payload());
         if (current.settledFundingPaymentIds().contains(payment.paymentId())) {
+            String existingFingerprint = current.settledFundingPaymentFingerprints().get(payment.paymentId());
+            if (existingFingerprint != null && !existingFingerprint.equals(paymentFingerprint)) {
+                throw new AccountCommandPoisonPillException("同一资金费编号对应不同资金事实");
+            }
             return new Reduction(ApplyStatus.APPLIED, jsonResult("paymentId", payment.paymentId(),
                     "duplicate", true), null, current);
         }
@@ -634,9 +652,13 @@ public class AccountUserStateReducer {
         payments.add(payment.paymentId());
         PerpetualAccountStateUpdatedEvent snapshot = nextSnapshot(next.snapshot(),
                 current.snapshot().accountRevision());
+        Map<Long, String> paymentFingerprints = new java.util.LinkedHashMap<>(
+                next.settledFundingPaymentFingerprints());
+        paymentFingerprints.put(payment.paymentId(), paymentFingerprint);
         return new Reduction(ApplyStatus.APPLIED, jsonResult("settlementId", payment.settlementId(),
                 "paymentId", payment.paymentId()), null,
-                new AccountUserReducerState(snapshot, next.reservations(), next.settledTradeIds(), payments));
+                new AccountUserReducerState(snapshot, next.reservations(), next.settledTradeIds(), payments,
+                        next.settledTradeFingerprints(), paymentFingerprints));
     }
 
     private AccountUserReducerState applyFundingPayment(AccountUserReducerState current,
@@ -695,8 +717,7 @@ public class AccountUserStateReducer {
                 previous.userId(), previous.accountType(), balances, deficits, previous.positions(),
                 previous.positionMargins(), previous.orderLocks(), previous.positionMode(), previous.eventTime(),
                 previous.traceId());
-        return new AccountUserReducerState(snapshot, current.reservations(), current.settledTradeIds(),
-                current.settledFundingPaymentIds());
+        return stateWith(current, snapshot, current.reservations());
     }
 
     private PerpetualAccountStateUpdatedEvent.Balance adjustAvailable(
@@ -758,8 +779,7 @@ public class AccountUserStateReducer {
                 previous.schemaVersion(), previous.eventId(), previous.accountRevision(), previous.productLine(),
                 previous.userId(), previous.accountType(), balances, previous.deficits(), previous.positions(),
                 margins, previous.orderLocks(), previous.positionMode(), previous.eventTime(), previous.traceId());
-        return new AccountUserReducerState(snapshot, current.reservations(), current.settledTradeIds(),
-                current.settledFundingPaymentIds());
+        return stateWith(current, snapshot, current.reservations());
     }
 
     private AccountUserReducerState increaseDeficit(AccountUserReducerState current, String asset, long amount) {
@@ -905,8 +925,7 @@ public class AccountUserStateReducer {
                         value.asset(), value.reservedUnits(), nextReleased, nextConsumed, value.orderQuantitySteps())
                         : value)
                 .toList();
-        return new AccountUserReducerState(updated.snapshot(), reservations, updated.settledTradeIds(),
-                updated.settledFundingPaymentIds());
+        return stateWith(updated, updated.snapshot(), reservations);
     }
 
     private AccountUserReducerState applyBalanceDelta(AccountUserReducerState current,
@@ -942,8 +961,7 @@ public class AccountUserStateReducer {
                 previous.userId(), previous.accountType(), balances, previous.deficits(), previous.positions(),
                 previous.positionMargins(), previous.orderLocks(), previous.positionMode(), previous.eventTime(),
                 previous.traceId());
-        return new AccountUserReducerState(snapshot, current.reservations(), current.settledTradeIds(),
-                current.settledFundingPaymentIds());
+        return stateWith(current, snapshot, current.reservations());
     }
 
     private AccountUserReducerState applyBalanceTransfer(AccountUserReducerState current,
@@ -955,8 +973,7 @@ public class AccountUserStateReducer {
             throw new AccountCommandRejectedException("ACCOUNT_BALANCE_INSUFFICIENT",
                     "账户余额不足，拒绝成交结算");
         }
-        return new AccountUserReducerState(mutation.snapshot(), current.reservations(), current.settledTradeIds(),
-                current.settledFundingPaymentIds());
+        return stateWith(current, mutation.snapshot(), current.reservations());
     }
 
     private AccountUserReducerState addPositionMargin(AccountUserReducerState current,
@@ -1022,8 +1039,7 @@ public class AccountUserStateReducer {
                 previous.userId(), previous.accountType(), previous.balances(), previous.deficits(),
                 previous.positions(), margins, previous.orderLocks(), previous.positionMode(), previous.eventTime(),
                 previous.traceId());
-        return new AccountUserReducerState(snapshot, current.reservations(), current.settledTradeIds(),
-                current.settledFundingPaymentIds());
+        return stateWith(current, snapshot, current.reservations());
     }
 
     private AccountUserReducerState replacePosition(AccountUserReducerState current,
@@ -1058,8 +1074,7 @@ public class AccountUserStateReducer {
                 previous.userId(), previous.accountType(), previous.balances(), previous.deficits(), positions,
                 previous.positionMargins(), previous.orderLocks(), previous.positionMode(), previous.eventTime(),
                 previous.traceId());
-        return new AccountUserReducerState(snapshot, current.reservations(), current.settledTradeIds(),
-                current.settledFundingPaymentIds());
+        return stateWith(current, snapshot, current.reservations());
     }
 
     private OrderSide opposite(OrderSide side) {
@@ -1166,6 +1181,17 @@ public class AccountUserStateReducer {
             return objectMapper.readValue(command.payload(), type);
         } catch (Exception ex) {
             throw new AccountCommandPoisonPillException("账户 reducer 无法解析命令负载", ex);
+        }
+    }
+
+    /** 使用已进入 WAL 的原始命令负载计算事实指纹，重试必须携带完全相同的业务内容。 */
+    private String fingerprint(String payload) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 不可用", ex);
         }
     }
 
