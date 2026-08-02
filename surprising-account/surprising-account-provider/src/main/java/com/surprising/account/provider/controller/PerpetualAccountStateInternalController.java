@@ -37,8 +37,11 @@ public class PerpetualAccountStateInternalController {
                     return local.get();
                 }
             }
-            // 只有本地事实库尚无该用户时才建立一次数据库恢复基线。
-            return snapshotService.snapshot(productLine, userId);
+            // 只有显式初始化入口才允许从数据库恢复基线，并立即写入本地 reducer；
+            // 账户命令执行器不会在热路径隐式查库。
+            var snapshot = snapshotService.snapshot(productLine, userId);
+            stateReducer.initialize(snapshot);
+            return snapshot;
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

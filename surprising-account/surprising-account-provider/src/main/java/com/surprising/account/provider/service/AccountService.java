@@ -626,9 +626,9 @@ public class AccountService {
         return kafka != null && kafka.isProductTopicsEnabled() ? kafka.getProductLine() : null;
     }
 
-    /** 生产账户查询只读取用户 reducer；缺失用户时允许一次启动恢复，之后不再查询数据库。 */
+    /** 生产账户查询只读取用户 reducer；缺失用户时直接失败关闭，不隐式查询数据库。 */
     private boolean localStateEnabled() {
-        return userStateReducer != null && snapshotService != null && properties != null
+        return userStateReducer != null && properties != null
                 && properties.getKafka() != null
                 && properties.getKafka().getProductLine() == ProductLine.LINEAR_PERPETUAL;
     }
@@ -638,11 +638,8 @@ public class AccountService {
             throw new IllegalArgumentException("userId must be positive");
         }
         UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, userId);
-        return userStateReducer.snapshot(partition).orElseGet(() -> {
-            userStateReducer.initialize(snapshotService.snapshot(ProductLine.LINEAR_PERPETUAL, userId));
-            return userStateReducer.snapshot(partition)
-                    .orElseThrow(() -> new AccountStateUnavailableException("账户 JVM 快照不存在: " + userId));
-        });
+        return userStateReducer.snapshot(partition)
+                .orElseThrow(() -> new AccountStateUnavailableException("账户 JVM 快照尚未初始化: " + userId));
     }
 
     private Optional<PositionResponse> localPosition(long userId,

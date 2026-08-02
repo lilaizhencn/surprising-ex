@@ -2,14 +2,10 @@ package com.surprising.trading.order.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.account.api.model.AccountCommandResultEvent;
-import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.AccountUserCommand;
-import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AmendOrderBatchItemResponse;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -29,10 +25,6 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
-import com.surprising.trading.api.model.OrderCommandEvent;
-import com.surprising.trading.api.model.OrderCommandType;
-import com.surprising.trading.api.model.OrderEvent;
-import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
@@ -51,276 +43,59 @@ import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
-import com.surprising.trading.order.repository.OrderEventRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
-import com.surprising.trading.order.repository.OrderRepository;
-import com.surprising.trading.order.repository.OutboxRepository;
 import com.surprising.trading.order.repository.SpotOrderReservationRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class OrderService {
 
     private static final String REDUCE_ONLY_PRUNE_REASON = "REDUCE_ONLY_POSITION_REDUCED";
-    private static final Set<OrderStatus> TERMINAL_STATUSES = Set.of(
-            OrderStatus.REJECTED,
-            OrderStatus.CANCELED,
-            OrderStatus.FILLED);
-
-    private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
     private final ReduceOnlyValidator reduceOnlyValidator;
-    private final OrderRepository orderRepository;
-    private final OrderEventRepository orderEventRepository;
     private final OrderPlacementStateService placementStateService;
     private final OrderMarginRepository orderMarginRepository;
     private final SpotOrderReservationRepository spotOrderReservationRepository;
-    private final OutboxRepository outboxRepository;
-    private final RedisOpenOrderView openOrderView;
-    private final OrderInstrumentLifecycleFenceService lifecycleFenceService;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final OrderUserStateService orderUserStateService;
 
-    public OrderService(ObjectMapper objectMapper,
-                        TradingOrderProperties properties,
-                        OrderValidator orderValidator,
-                        ReduceOnlyValidator reduceOnlyValidator,
-                        OrderRepository orderRepository,
-                        OrderEventRepository orderEventRepository,
-                        OrderPlacementStateService placementStateService,
-                        OrderMarginRepository orderMarginRepository,
-                        SpotOrderReservationRepository spotOrderReservationRepository,
-                        OutboxRepository outboxRepository) {
-        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
-                placementStateService,
-                orderMarginRepository, spotOrderReservationRepository, outboxRepository,
-                null, null, null, null);
-    }
-
-    public OrderService(ObjectMapper objectMapper,
-                        TradingOrderProperties properties,
-                        OrderValidator orderValidator,
-                        ReduceOnlyValidator reduceOnlyValidator,
-                        OrderRepository orderRepository,
-                        OrderEventRepository orderEventRepository,
-                        OrderPlacementStateService placementStateService,
-                        OrderMarginRepository orderMarginRepository,
-                        SpotOrderReservationRepository spotOrderReservationRepository,
-                        OutboxRepository outboxRepository,
-                        RedisOpenOrderView openOrderView) {
-        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
-                placementStateService, orderMarginRepository, spotOrderReservationRepository,
-                outboxRepository, openOrderView, null, null, null);
-    }
-
-    public OrderService(ObjectMapper objectMapper,
-                        TradingOrderProperties properties,
-                        OrderValidator orderValidator,
-                        ReduceOnlyValidator reduceOnlyValidator,
-                        OrderRepository orderRepository,
-                        OrderEventRepository orderEventRepository,
-                        OrderPlacementStateService placementStateService,
-                        OrderMarginRepository orderMarginRepository,
-                        SpotOrderReservationRepository spotOrderReservationRepository,
-                        OutboxRepository outboxRepository,
-                        RedisOpenOrderView openOrderView,
-                        OrderInstrumentLifecycleFenceService lifecycleFenceService) {
-        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
-                placementStateService, orderMarginRepository, spotOrderReservationRepository,
-                outboxRepository, openOrderView, lifecycleFenceService, null, null);
-    }
-
-    /** 测试嵌入调用方的构造签名；生产 Spring 必须使用包含用户分区状态机的构造函数。 */
-    public OrderService(ObjectMapper objectMapper,
-                        TradingOrderProperties properties,
-                        OrderValidator orderValidator,
-                        ReduceOnlyValidator reduceOnlyValidator,
-                        OrderRepository orderRepository,
-                        OrderEventRepository orderEventRepository,
-                        OrderPlacementStateService placementStateService,
-                        OrderMarginRepository orderMarginRepository,
-                        SpotOrderReservationRepository spotOrderReservationRepository,
-                        OutboxRepository outboxRepository,
-                        RedisOpenOrderView openOrderView,
-                        OrderInstrumentLifecycleFenceService lifecycleFenceService,
-                        OrderFeeSnapshotLookup feeSnapshotLookup) {
-        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
-                placementStateService, orderMarginRepository, spotOrderReservationRepository, outboxRepository,
-                openOrderView, lifecycleFenceService, feeSnapshotLookup, null);
-    }
-
     @Autowired
-    public OrderService(ObjectMapper objectMapper,
-                        TradingOrderProperties properties,
+    public OrderService(TradingOrderProperties properties,
                         OrderValidator orderValidator,
                         ReduceOnlyValidator reduceOnlyValidator,
-                        OrderRepository orderRepository,
-                        OrderEventRepository orderEventRepository,
                         OrderPlacementStateService placementStateService,
                         OrderMarginRepository orderMarginRepository,
                         SpotOrderReservationRepository spotOrderReservationRepository,
-                        OutboxRepository outboxRepository,
-                        RedisOpenOrderView openOrderView,
-                        OrderInstrumentLifecycleFenceService lifecycleFenceService,
                         OrderFeeSnapshotLookup feeSnapshotLookup,
                         OrderUserStateService orderUserStateService) {
-        this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderValidator = orderValidator;
         this.reduceOnlyValidator = reduceOnlyValidator;
-        this.orderRepository = orderRepository;
-        this.orderEventRepository = orderEventRepository;
         this.placementStateService = placementStateService;
         this.orderMarginRepository = orderMarginRepository;
         this.spotOrderReservationRepository = spotOrderReservationRepository;
-        this.outboxRepository = outboxRepository;
-        this.openOrderView = openOrderView;
-        this.lifecycleFenceService = lifecycleFenceService;
         this.feeSnapshotLookup = feeSnapshotLookup;
         this.orderUserStateService = orderUserStateService;
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
-        if (orderUserStateService != null) {
-            return placeWal(request, null);
-        }
-        return place(request, null);
+        return placeWal(request, null);
     }
 
     /**
      * 批量下单使用同一用户的账户修订号序列；普通单笔下单仍严格读取当前 JVM 快照。
      */
     private OrderResponse place(PlaceOrderRequest request, BatchReservationSequence sequence) {
-        if (orderUserStateService != null) {
-            return placeWal(request, sequence);
-        }
-        PlaceOrderRequest normalized = normalize(request);
-        String traceId = TraceContext.currentOrCreate();
-        ProductLine productLine = currentProductLine();
-        // clientOrderId 是公开幂等键，重放请求直接返回第一次持久化的结果。
-        if (hasClientOrderId(normalized)) {
-            var existing = orderRepository.findByClientOrderId(productLine, normalized.userId(), normalized.clientOrderId());
-            if (existing.isPresent()) {
-                OrderRecord existingOrder = existing.get();
-                requireOrderCurrentProductLine(existingOrder);
-                requireSameClientOrderIntent(normalized, existingOrder);
-                return toResponse(existingOrder);
-            }
-        }
-
-        if (lifecycleFenceService != null) {
-            lifecycleFenceService.requirePlacementAllowed(productLine, normalized.symbol());
-        }
-        placementStateService.lockUserPositionMode(productLine, normalized.userId());
-        PositionMode positionMode = placementStateService.positionMode(productLine, normalized.userId());
-        normalized = normalizePositionMode(normalized, positionMode);
-        placementStateService.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
-        Instant now = Instant.now();
-        ValidationResult validation = validateMarginMode(productLine, normalized);
-        if (validation.accepted()) {
-            validation = orderValidator.validate(normalized);
-        }
-        if (validation.accepted() && normalized.reduceOnly()) {
-            ValidationResult reduceOnlyValidation = reduceOnlyValidator.validate(normalized);
-            if (!reduceOnlyValidation.accepted()) {
-                validation = ValidationResult.reject(reduceOnlyValidation.rejectReason(), validation.instrumentVersion());
-            } else {
-                validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
-                        validation.instrumentType(), validation.contractType());
-            }
-        }
-        OrderFeeSnapshot feeSnapshot = rejectedFeeSnapshot();
-        if (validation.accepted()) {
-            var resolvedFeeSnapshot = feeSnapshotLookup == null
-                    ? java.util.Optional.<OrderFeeSnapshot>empty()
-                    : feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
-                    validation.instrumentVersion(), now);
-            if (resolvedFeeSnapshot.isEmpty()) {
-                validation = ValidationResult.reject("fee schedule unavailable", validation.instrumentVersion());
-            } else {
-                feeSnapshot = resolvedFeeSnapshot.get();
-            }
-        }
-        long orderId = orderRepository.nextSequence("order");
-        ReservationPlan reservationPlan = ReservationPlan.none();
-        if (validation.accepted() && (!normalized.reduceOnly() || requiresReduceOnlyFunds(normalized, validation))) {
-            reservationPlan = planOpeningFunds(normalized, orderId, validation, feeSnapshot, sequence);
-            if (!reservationPlan.accepted()) {
-                validation = ValidationResult.reject(reservationPlan.rejectReason(),
-                        validation.instrumentVersion(), validation.instrumentType(), validation.contractType());
-            }
-        }
-        OrderStatus status = !validation.accepted()
-                ? OrderStatus.REJECTED
-                : reservationPlan.command() == null ? OrderStatus.ACCEPTED : OrderStatus.PENDING_RESERVE;
-        OrderReserveAccountCommand reservation = reservationPlan.command();
-        OrderRecord order = new OrderRecord(
-                orderId,
-                productLine,
-                normalized.userId(),
-                emptyToNull(normalized.clientOrderId()),
-                normalized.symbol(),
-                validation.instrumentVersion(),
-                normalized.side(),
-                normalized.orderType(),
-                normalized.timeInForce(),
-                normalized.priceTicks(),
-                normalized.quantitySteps(),
-                0L,
-                validation.accepted() ? normalized.quantitySteps() : 0L,
-                normalized.marginMode(),
-                normalized.positionSide(),
-                feeSnapshot.makerFeeRatePpm(),
-                feeSnapshot.takerFeeRatePpm(),
-                normalized.reduceOnly(),
-                normalized.postOnly(),
-                reservation == null ? null : reservation.accountType().name(),
-                reservation == null ? null : reservation.asset(),
-                reservation == null ? 0L : reservation.reservedUnits(),
-                status,
-                validation.rejectReason(),
-                now,
-                now,
-                1L);
-
-        boolean inserted = orderRepository.insert(order);
-        if (!inserted && hasClientOrderId(normalized)) {
-            var duplicate = orderRepository.findByClientOrderId(productLine, normalized.userId(), normalized.clientOrderId());
-            if (duplicate.isEmpty()) {
-                throw new IllegalStateException("duplicate clientOrderId but order not found");
-            }
-            OrderRecord existing = duplicate.get();
-            requireOrderCurrentProductLine(existing);
-            requireSameClientOrderIntent(normalized, existing);
-            return toResponse(existing);
-        }
-        if (!inserted) {
-            throw new IllegalStateException("failed to insert order " + orderId);
-        }
-
-        OrderEventType eventType = !validation.accepted()
-                ? OrderEventType.REJECTED
-                : status == OrderStatus.PENDING_RESERVE ? OrderEventType.RESERVE_PENDING : OrderEventType.ACCEPTED;
-        enqueueOrderEvent(order, eventType, validation.rejectReason(), now, traceId);
-        if (status == OrderStatus.PENDING_RESERVE) {
-            enqueueAccountReservation(order, reservationPlan.command(), reservationPlan.dependsOnCommandId(), now, traceId);
-        } else if (validation.accepted()) {
-            enqueueCommand(order, OrderCommandType.PLACE, now, traceId);
-        }
-        return toResponse(order);
+        return placeWal(request, sequence);
     }
 
     /** 生产下单入口：只构造订单事实和账户预占命令，不写订单数据库。 */
@@ -328,7 +103,6 @@ public class OrderService {
         PlaceOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
         requireLocalAccountProductLine(productLine);
-        String traceId = TraceContext.currentOrCreate();
         if (hasClientOrderId(normalized)) {
             var existing = orderUserStateService.findByClientOrderId(
                     normalized.userId(), normalized.clientOrderId());
@@ -434,10 +208,7 @@ public class OrderService {
     }
 
     public TestOrderResponse test(PlaceOrderRequest request) {
-        if (orderUserStateService != null) {
-            return testLocal(request);
-        }
-        return testDatabase(request);
+        return testLocal(request);
     }
 
     /** 生产测试下单只读取 JVM 快照，不为校验请求打开数据库事务。 */
@@ -478,50 +249,8 @@ public class OrderService {
         return dryRunOpeningFunds(normalized, validation, resolvedFeeSnapshot.get());
     }
 
-    /** 仅保留给未装配用户分区状态机的历史测试构造。 */
-    private TestOrderResponse testDatabase(PlaceOrderRequest request) {
-        PlaceOrderRequest normalized = normalize(request);
-        ProductLine productLine = currentProductLine();
-        placementStateService.lockUserPositionMode(productLine, normalized.userId());
-        PositionMode positionMode = placementStateService.positionMode(productLine, normalized.userId());
-        normalized = normalizePositionMode(normalized, positionMode);
-        placementStateService.lockUserSymbolMarginScope(productLine, normalized.userId(), normalized.symbol());
-        ValidationResult validation = validateMarginMode(productLine, normalized);
-        if (!validation.accepted()) {
-            return testRejected(validation, "MARGIN_MODE");
-        }
-        validation = orderValidator.validate(normalized);
-        if (!validation.accepted()) {
-            return testRejected(validation, "ORDER_RULES");
-        }
-        if (normalized.reduceOnly()) {
-            ValidationResult reduceOnlyValidation = reduceOnlyValidator.validate(normalized);
-            if (!reduceOnlyValidation.accepted()) {
-                return testRejected(reduceOnlyValidation, "REDUCE_ONLY");
-            }
-            validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
-                    validation.instrumentType(), validation.contractType());
-        }
-        var resolvedFeeSnapshot = feeSnapshotLookup == null
-                ? java.util.Optional.<OrderFeeSnapshot>empty()
-                : feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
-                validation.instrumentVersion(), Instant.now());
-        if (resolvedFeeSnapshot.isEmpty()) {
-            return new TestOrderResponse(false, "fee schedule unavailable", validation.instrumentVersion(),
-                    "FEE", null, null, 0L);
-        }
-        if (normalized.reduceOnly() && !requiresReduceOnlyFunds(normalized, validation)) {
-            return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
-                    null, null, 0L);
-        }
-        return dryRunOpeningFunds(normalized, validation, resolvedFeeSnapshot.get());
-    }
-
     public AmendOrderResponse amend(AmendOrderRequest request) {
-        if (orderUserStateService != null) {
-            return amendWal(request);
-        }
-        return amendDatabase(request);
+        return amendWal(request);
     }
 
     /** 生产改单只追加同一用户分区的撤单事实，再提交替代订单事实。 */
@@ -571,68 +300,6 @@ public class OrderService {
         return new AmendOrderResponse(canceled, replacementOrder, true, message);
     }
 
-    /** 仅保留给未装配用户分区状态机的历史测试构造。 */
-    private AmendOrderResponse amendDatabase(AmendOrderRequest request) {
-        AmendOrderRequest normalized = normalizeAmend(request);
-        ProductLine productLine = currentProductLine();
-        var existingReplacement = orderRepository.findByClientOrderId(
-                productLine, normalized.userId(), normalized.newClientOrderId());
-        OrderRecord original = orderRepository.findByOrderId(normalized.orderId())
-                .orElseThrow(() -> new IllegalStateException("order not found: " + normalized.orderId()));
-        requireOrderCurrentProductLine(original);
-        if (original.userId() != normalized.userId()) {
-            throw new IllegalArgumentException("order does not belong to user");
-        }
-        if (existingReplacement.isPresent()) {
-            requireOrderCurrentProductLine(existingReplacement.get());
-            return new AmendOrderResponse(toResponse(original), toResponse(existingReplacement.get()),
-                    false, "replacement order already exists");
-        }
-        if (original.orderType() != OrderType.LIMIT) {
-            throw new IllegalArgumentException("only LIMIT orders can be amended");
-        }
-        if (original.status() != OrderStatus.ACCEPTED && original.status() != OrderStatus.PARTIALLY_FILLED) {
-            throw new IllegalStateException("order is not amendable: " + original.status().name());
-        }
-        if (original.remainingQuantitySteps() <= 0) {
-            throw new IllegalStateException("order has no open quantity to amend");
-        }
-
-        placementStateService.lockUserPositionMode(productLine, original.userId());
-        placementStateService.lockUserSymbolMarginScope(productLine, original.userId(), original.symbol());
-        long replacementPriceTicks = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
-        long replacementQuantitySteps = normalized.quantitySteps() == null
-                ? original.remainingQuantitySteps()
-                : normalized.quantitySteps();
-        TimeInForce replacementTif = normalized.timeInForce() == null
-                ? original.timeInForce()
-                : normalized.timeInForce();
-        boolean replacementPostOnly = normalized.postOnly() == null ? original.postOnly() : normalized.postOnly();
-        PlaceOrderRequest replacement = new PlaceOrderRequest(
-                original.userId(),
-                normalized.newClientOrderId(),
-                original.symbol(),
-                original.side(),
-                original.orderType(),
-                replacementTif,
-                replacementPriceTicks,
-                replacementQuantitySteps,
-                original.marginMode(),
-                original.positionSide(),
-                original.reduceOnly(),
-                replacementPostOnly);
-
-        AdminCancelOrderResult cancelResult = requestCancel(original, "order amend replace");
-        if (!cancelResult.cancelRequested()) {
-            throw new IllegalStateException(cancelResult.message());
-        }
-        OrderResponse replacementOrder = place(replacement);
-        String message = replacementOrder.status() == OrderStatus.REJECTED
-                ? "cancel requested; replacement rejected: " + replacementOrder.rejectReason()
-                : "cancel requested; replacement submitted";
-        return new AmendOrderResponse(cancelResult.order(), replacementOrder, true, message);
-    }
-
     public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
         List<AmendOrderRequest> orders = request == null ? List.of() : request.orders();
         requireBatchSize(orders.size(), 20, "orders");
@@ -649,10 +316,7 @@ public class OrderService {
     }
 
     public OrderResponse closePosition(ClosePositionRequest request) {
-        if (orderUserStateService != null) {
-            return closePositionWal(request);
-        }
-        return closePositionDatabase(request);
+        return closePositionWal(request);
     }
 
     /** 永续平仓从账户 JVM 快照读取仓位，再通过订单用户事实流提交只减仓单。 */
@@ -692,38 +356,6 @@ public class OrderService {
                 positionSide,
                 true,
                 false);
-        return place(closeOrder);
-    }
-
-    /** 仅保留给未装配用户分区状态机的历史测试构造。 */
-    private OrderResponse closePositionDatabase(ClosePositionRequest request) {
-        if (request == null) {
-            throw new IllegalArgumentException("close position request is required");
-        }
-        if (request.userId() <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        String symbol = normalizeSymbol(request.symbol());
-        MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
-        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
-        ProductLine productLine = currentProductLine();
-        placementStateService.lockUserPositionMode(productLine, request.userId());
-        PositionMode positionMode = placementStateService.positionMode(productLine, request.userId());
-        if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
-            throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
-        }
-        placementStateService.lockUserSymbolMarginScope(productLine, request.userId(), symbol);
-        ReduceOnlyPosition position = placementStateService.lockedPosition(productLine, request.userId(), symbol, marginMode,
-                        positionSide)
-                .orElseThrow(() -> new IllegalStateException("open position not found"));
-        if (position.signedQuantitySteps() == 0L) {
-            throw new IllegalStateException("open position not found");
-        }
-        OrderSide closeSide = position.signedQuantitySteps() > 0L ? OrderSide.SELL : OrderSide.BUY;
-        PlaceOrderRequest closeOrder = new PlaceOrderRequest(
-                request.userId(), emptyToNull(request.clientOrderId()), symbol, closeSide, OrderType.MARKET,
-                TimeInForce.IOC, 0L, Math.absExact(position.signedQuantitySteps()), marginMode, positionSide,
-                true, false);
         return place(closeOrder);
     }
 
@@ -861,20 +493,7 @@ public class OrderService {
         if (request.userId() <= 0 || request.orderId() <= 0) {
             throw new IllegalArgumentException("userId and orderId must be positive");
         }
-        if (orderUserStateService != null) {
-            return orderUserStateService.cancel(request.userId(), request.orderId(), null);
-        }
-        OrderRecord order = orderRepository.findByOrderId(request.orderId())
-                .orElseThrow(() -> new IllegalStateException("order not found: " + request.orderId()));
-        requireOrderCurrentProductLine(order);
-        if (order.userId() != request.userId()) {
-            throw new IllegalArgumentException("order does not belong to user");
-        }
-        if (TERMINAL_STATUSES.contains(order.status()) || order.status() == OrderStatus.CANCEL_REQUESTED) {
-            return toResponse(order);
-        }
-
-        return requestCancel(order, null).order();
+        return orderUserStateService.cancel(request.userId(), request.orderId(), null);
     }
 
     public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
@@ -903,66 +522,25 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        if (orderUserStateService != null) {
-            String symbol = request.symbol() == null || request.symbol().isBlank()
-                    ? null : normalizeSymbol(request.symbol());
-            List<OrderResponse> canceled = orderUserStateService.cancelOpenOrders(request.userId(), symbol, limit);
-            List<OrderBatchItemResponse> results = new ArrayList<>(canceled.size());
-            for (int index = 0; index < canceled.size(); index++) {
-                results.add(new OrderBatchItemResponse(index, true, "cancel requested", canceled.get(index)));
-            }
-            return orderBatchResponse(results);
-        }
-        return cancelOpenOrdersFromDatabase(request);
-    }
-
-    /** 仅供未装配用户分区状态机的历史测试；生产入口不会进入此方法。 */
-    private OrderBatchResponse cancelOpenOrdersFromDatabase(CancelOpenOrdersRequest request) {
-        int limit = request.limit() == null ? 1000 : request.limit();
         String symbol = request.symbol() == null || request.symbol().isBlank()
-                ? null
-                : normalizeSymbol(request.symbol());
-        String contractType = currentProductContractType();
-        List<OrderRecord> orders = contractType == null
-                ? orderRepository.adminCancelableOrders(request.userId(), symbol, limit)
-                : orderRepository.adminCancelableOrders(request.userId(), symbol, contractType, limit);
+                ? null : normalizeSymbol(request.symbol());
+        List<OrderResponse> canceled = orderUserStateService.cancelOpenOrders(request.userId(), symbol, limit);
         List<OrderBatchItemResponse> results = new ArrayList<>();
-        for (int i = 0; i < orders.size(); i++) {
-            try {
-                AdminCancelOrderResult result = requestCancel(orders.get(i), "user cancel open orders");
-                results.add(new OrderBatchItemResponse(i, true, result.message(), result.order()));
-            } catch (IllegalArgumentException | IllegalStateException ex) {
-                results.add(new OrderBatchItemResponse(i, false, ex.getMessage(), null));
-            }
+        for (int index = 0; index < canceled.size(); index++) {
+            results.add(new OrderBatchItemResponse(index, true, "cancel requested", canceled.get(index)));
         }
         return orderBatchResponse(results);
     }
 
     public OrderResponse get(long orderId) {
-        if (orderUserStateService != null) {
-            return orderUserStateService.get(orderId);
-        }
-        return orderRepository.findByOrderId(orderId)
-                .map(order -> {
-                    requireOrderCurrentProductLine(order);
-                    return toResponse(order);
-                })
-                .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
+        return orderUserStateService.get(orderId);
     }
 
     public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        if (orderUserStateService != null) {
-            return orderUserStateService.getByClientOrderId(userId, normalizeClientOrderId(clientOrderId));
-        }
-        return orderRepository.findByClientOrderId(currentProductLine(), userId, normalizeClientOrderId(clientOrderId))
-                .map(order -> {
-                    requireOrderCurrentProductLine(order);
-                    return toResponse(order);
-                })
-                .orElseThrow(() -> new IllegalStateException("order not found for clientOrderId: " + clientOrderId));
+        return orderUserStateService.getByClientOrderId(userId, normalizeClientOrderId(clientOrderId));
     }
 
     public OrderQueryResponse openOrders(long userId, String symbol, int limit) {
@@ -976,24 +554,8 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        if (orderUserStateService != null) {
-            long beforeOrderId = decodeOpenOrderCursor(cursor);
-            return orderUserStateService.openOrders(userId, symbol, limit, beforeOrderId);
-        }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        ProductLine productLine = currentProductLine();
         long beforeOrderId = decodeOpenOrderCursor(cursor);
-        RedisOpenOrderView.Page page = openOrderView == null
-                ? databaseOpenOrderPage(productLine, userId, normalizedSymbol, beforeOrderId, limit)
-                : openOrderView.orders(productLine, userId, normalizedSymbol, beforeOrderId, limit)
-                        .orElseGet(() -> databaseOpenOrderPage(productLine, userId, normalizedSymbol,
-                                beforeOrderId, limit));
-        List<OrderResponse> rows = page.orders()
-                .stream()
-                .map(this::toResponse)
-                .toList();
-        String nextCursor = page.hasMore() ? encodeOpenOrderCursor(page.nextOrderId()) : null;
-        return new OrderQueryResponse(rows.size(), rows, nextCursor, page.hasMore(), "orderId.desc", limit);
+        return orderUserStateService.openOrders(userId, symbol, limit, beforeOrderId);
     }
 
     public OrderQueryResponse adminOrders(Long userId, String symbol, String status, Long orderId, int limit) {
@@ -1042,18 +604,12 @@ public class OrderService {
 
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
         requireOrderId(orderId);
-        if (orderUserStateService != null) {
-            ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-            OrderResponse canceled = orderUserStateService.cancelAny(resolved, orderId, adminCancelReason(reason));
-            boolean requested = canceled.status() == OrderStatus.CANCEL_REQUESTED;
-            return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.symbol(),
-                    canceled.status(), requested, requested ? "cancel requested" : "order is already "
-                    + canceled.status().name(), canceled);
-        }
-        OrderRecord order = orderRepository.findByOrderId(orderId)
-                .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
-        requireOrderProductLine(order, productLine);
-        return requestCancel(order, adminCancelReason(reason));
+        ProductLine resolved = productLine == null ? currentProductLine() : productLine;
+        OrderResponse canceled = orderUserStateService.cancelAny(resolved, orderId, adminCancelReason(reason));
+        boolean requested = canceled.status() == OrderStatus.CANCEL_REQUESTED;
+        return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.symbol(),
+                canceled.status(), requested, requested ? "cancel requested" : "order is already "
+                + canceled.status().name(), canceled);
     }
 
     public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request) {
@@ -1073,29 +629,16 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String reason = adminCancelReason(request == null ? null : request.reason());
-        if (orderUserStateService != null) {
-            ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-            List<OrderResponse> canceled = orderUserStateService.cancelAdminOrders(resolved, userId, symbol, limit,
-                    reason);
-            List<AdminCancelOrderResult> results = canceled.stream()
-                    .map(order -> new AdminCancelOrderResult(order.orderId(), order.userId(), order.symbol(),
-                            order.status(), order.status() == OrderStatus.CANCEL_REQUESTED,
-                            order.status() == OrderStatus.CANCEL_REQUESTED ? "cancel requested"
-                                    : "order is already " + order.status().name(), order))
-                    .toList();
-            int requested = (int) results.stream().filter(AdminCancelOrderResult::cancelRequested).count();
-            return new AdminCancelOrdersResponse(results.size(), requested, results.size() - requested, results);
-        }
-        String contractType = contractType(productLine);
-        List<OrderRecord> orders = contractType == null
-                ? orderRepository.adminCancelableOrders(userId, symbol, limit)
-                : orderRepository.adminCancelableOrders(userId, symbol, contractType, limit);
-        List<AdminCancelOrderResult> results = orders
-                .stream()
-                .map(order -> requestCancel(order, reason))
+        ProductLine resolved = productLine == null ? currentProductLine() : productLine;
+        List<OrderResponse> canceled = orderUserStateService.cancelAdminOrders(resolved, userId, symbol, limit, reason);
+        List<AdminCancelOrderResult> results = canceled.stream()
+                .map(order -> new AdminCancelOrderResult(order.orderId(), order.userId(), order.symbol(),
+                        order.status(), order.status() == OrderStatus.CANCEL_REQUESTED,
+                        order.status() == OrderStatus.CANCEL_REQUESTED ? "cancel requested"
+                                : "order is already " + order.status().name(), order))
                 .toList();
-        int canceled = (int) results.stream().filter(AdminCancelOrderResult::cancelRequested).count();
-        return new AdminCancelOrdersResponse(results.size(), canceled, results.size() - canceled, results);
+        int canceledCount = (int) results.stream().filter(AdminCancelOrderResult::cancelRequested).count();
+        return new AdminCancelOrdersResponse(results.size(), canceledCount, results.size() - canceledCount, results);
     }
 
     public AdminCancelOrdersPreviewResponse adminCancelPreview(Long userId, String symbol, int limit) {
@@ -1133,48 +676,12 @@ public class OrderService {
      */
     public int requestLifecycleCancellation(String symbol, int limit) {
         String normalizedSymbol = normalizeSymbol(symbol);
-        if (orderUserStateService != null) {
-            return orderUserStateService.cancelLifecycleOrders(currentProductLine(), normalizedSymbol, limit,
-                    "INSTRUMENT_SETTLING").size();
-        }
-        List<OrderRecord> orders = orderRepository.lifecycleCancelableOrders(
-                currentProductLine(), normalizedSymbol, limit);
-        int requested = 0;
-        for (OrderRecord order : orders) {
-            if (requestCancel(order, "INSTRUMENT_SETTLING").cancelRequested()) {
-                requested++;
-            }
-        }
-        return requested;
+        return orderUserStateService.cancelLifecycleOrders(currentProductLine(), normalizedSymbol, limit,
+                "INSTRUMENT_SETTLING").size();
     }
 
     public boolean hasLifecycleActiveOrders(String symbol) {
-        if (orderUserStateService != null) {
-            return orderUserStateService.hasLifecycleActiveOrders(currentProductLine(), normalizeSymbol(symbol));
-        }
-        return orderRepository.hasLifecycleActiveOrders(currentProductLine(), normalizeSymbol(symbol));
-    }
-
-    private AdminCancelOrderResult requestCancel(OrderRecord order, String reason) {
-        return requestCancel(order, reason, Instant.now(), TraceContext.currentOrCreate());
-    }
-
-    private AdminCancelOrderResult requestCancel(OrderRecord order,
-                                                 String reason,
-                                                 Instant now,
-                                                 String traceId) {
-        if (TERMINAL_STATUSES.contains(order.status()) || order.status() == OrderStatus.CANCEL_REQUESTED) {
-            return cancelResult(order, false, "order is already " + order.status().name());
-        }
-        boolean cancelRequested = orderRepository.requestCancel(order.orderId(), now);
-        OrderRecord updated = orderRepository.findByOrderId(order.orderId())
-                .orElseThrow(() -> new IllegalStateException("order disappeared after cancel update"));
-        if (!cancelRequested) {
-            return cancelResult(updated, false, "order was not cancelable");
-        }
-        enqueueOrderEvent(updated, OrderEventType.CANCEL_REQUESTED, reason, now, traceId);
-        enqueueCommand(updated, OrderCommandType.CANCEL, now, traceId);
-        return cancelResult(updated, true, "cancel requested");
+        return orderUserStateService.hasLifecycleActiveOrders(currentProductLine(), normalizeSymbol(symbol));
     }
 
     /**
@@ -1187,71 +694,7 @@ public class OrderService {
         if (event == null || event.productLine() != currentProductLine()) {
             throw new IllegalArgumentException("position event product line does not match order provider");
         }
-        if (orderUserStateService != null) {
-            orderUserStateService.pruneReduceOnlyOrders(event, REDUCE_ONLY_PRUNE_REASON);
-            return;
-        }
-        String symbol = normalizeSymbol(event.symbol());
-        placementStateService.lockUserSymbolMarginScope(event.productLine(), event.userId(), symbol);
-        List<OrderRecord> orders = orderRepository.lockOpenReduceOnlyOrders(
-                event.productLine(), event.userId(), symbol, event.positionSide(), event.eventTime());
-        if (orders.isEmpty()) {
-            return;
-        }
-        long capacity = Math.absExact(event.signedQuantitySteps());
-        OrderSide closeSide = event.signedQuantitySteps() > 0L
-                ? OrderSide.SELL
-                : event.signedQuantitySteps() < 0L ? OrderSide.BUY : null;
-        long consumedCapacity = 0L;
-        for (OrderRecord order : orders) {
-            boolean validCloseSide = closeSide != null
-                    && order.side() == closeSide
-                    && order.instrumentVersion() == event.instrumentVersion();
-            boolean excessQuantity = false;
-            if (validCloseSide) {
-                consumedCapacity = Math.addExact(consumedCapacity, order.remainingQuantitySteps());
-                excessQuantity = consumedCapacity > capacity;
-            }
-            if ((!validCloseSide || excessQuantity) && order.status() != OrderStatus.CANCEL_REQUESTED) {
-                requestCancel(order, REDUCE_ONLY_PRUNE_REASON, event.eventTime(), event.traceId());
-            }
-        }
-    }
-
-    private AdminCancelOrderResult cancelResult(OrderRecord order, boolean cancelRequested, String message) {
-        return new AdminCancelOrderResult(
-                order.orderId(),
-                order.userId(),
-                order.symbol(),
-                order.status(),
-                cancelRequested,
-                message,
-                toResponse(order));
-    }
-
-    private void requireOrderProductLine(OrderRecord order, ProductLine productLine) {
-        requireOrderContractType(order, contractType(productLine));
-    }
-
-    private void requireOrderCurrentProductLine(OrderRecord order) {
-        requireOrderContractType(order, currentProductContractType());
-    }
-
-    private void requireOrderContractType(OrderRecord order, String contractType) {
-        if (contractType == null) {
-            return;
-        }
-        if (!orderRepository.orderMatchesContractType(order.orderId(), contractType)) {
-            throw new IllegalStateException("order not found: " + order.orderId());
-        }
-    }
-
-    private String contractType(ProductLine productLine) {
-        return productLine == null ? null : productLine.contractTypeCode();
-    }
-
-    private String currentProductContractType() {
-        return properties.getKafka().isProductTopicsEnabled() ? contractType(currentProductLine()) : null;
+        orderUserStateService.pruneReduceOnlyOrders(event, REDUCE_ONLY_PRUNE_REASON);
     }
 
     private String adminCancelReason(String reason) {
@@ -1282,146 +725,7 @@ public class OrderService {
     }
 
     public void processAccountCommandResults(List<AccountCommandResultEvent> results) {
-        if (results == null || results.isEmpty()) {
-            return;
-        }
-        if (orderUserStateService != null) {
-            orderUserStateService.processAccountCommandResults(results);
-            return;
-        }
-        LinkedHashMap<Long, AccountCommandResultEvent> byOrderId = new LinkedHashMap<>();
-        for (AccountCommandResultEvent result : results) {
-            if (result == null
-                    || result.commandType() != AccountUserCommandType.ORDER_RESERVE
-                    || !"ORDER".equals(result.source())) {
-                continue;
-            }
-            long orderId;
-            try {
-                orderId = Long.parseLong(result.sourceReference());
-            } catch (NumberFormatException ex) {
-                throw new IllegalArgumentException("invalid order account command source reference", ex);
-            }
-            AccountCommandResultEvent duplicate = byOrderId.putIfAbsent(orderId, result);
-            if (duplicate != null
-                    && (!duplicate.commandId().equals(result.commandId())
-                    || duplicate.status() != result.status()
-                    || duplicate.userId() != result.userId()
-                    || duplicate.productLine() != result.productLine())) {
-                throw new IllegalArgumentException("conflicting account command results for order " + orderId);
-            }
-        }
-        if (byOrderId.isEmpty()) {
-            return;
-        }
-
-        Map<Long, OrderRecord> currentOrders = orderRepository.findByOrderIds(byOrderId.keySet());
-        List<OrderRepository.ReservationCompletion> completions = new ArrayList<>(byOrderId.size());
-        Instant consumedAt = Instant.now();
-        for (Map.Entry<Long, AccountCommandResultEvent> entry : byOrderId.entrySet()) {
-            long orderId = entry.getKey();
-            AccountCommandResultEvent result = entry.getValue();
-            OrderRecord current = currentOrders.get(orderId);
-            if (current == null) {
-                throw new IllegalStateException("order not found for account command result " + orderId);
-            }
-            requireOrderCurrentProductLine(current);
-            if (current.productLine() != result.productLine() || current.userId() != result.userId()) {
-                throw new IllegalStateException("account command result does not match order identity " + orderId);
-            }
-            String expectedCommandId = reservationCommandId(current.productLine(), current.orderId());
-            if (!expectedCommandId.equals(result.commandId())) {
-                throw new IllegalStateException("account command result id does not match order " + orderId);
-            }
-            if (current.status() != OrderStatus.PENDING_RESERVE) {
-                continue;
-            }
-            boolean accepted = result.status() == AccountCommandStatus.APPLIED;
-            String rejectReason = accepted ? null
-                    : result.errorMessage() == null || result.errorMessage().isBlank()
-                    ? result.errorCode() : result.errorMessage();
-            completions.add(new OrderRepository.ReservationCompletion(
-                    orderId, accepted, rejectReason, consumedAt));
-        }
-        if (completions.isEmpty()) {
-            return;
-        }
-
-        Map<Long, OrderRecord> updatedOrders = orderRepository.completeReservations(completions);
-        if (updatedOrders.size() != completions.size()) {
-            List<Long> missingOrderIds = completions.stream()
-                    .map(OrderRepository.ReservationCompletion::orderId)
-                    .filter(orderId -> !updatedOrders.containsKey(orderId))
-                    .toList();
-            Map<Long, OrderRecord> concurrent = orderRepository.findByOrderIds(missingOrderIds);
-            for (long orderId : missingOrderIds) {
-                OrderRecord order = concurrent.get(orderId);
-                if (order == null || order.status() == OrderStatus.PENDING_RESERVE) {
-                    throw new IllegalStateException("failed to complete order reservation " + orderId);
-                }
-            }
-        }
-
-        List<OrderRepository.ReservationCompletion> appliedCompletions = completions.stream()
-                .filter(completion -> updatedOrders.containsKey(completion.orderId()))
-                .toList();
-        if (appliedCompletions.isEmpty()) {
-            return;
-        }
-        List<Long> eventIds = orderRepository.nextSequenceBatch("event", appliedCompletions.size());
-        int acceptedCount = (int) appliedCompletions.stream()
-                .filter(OrderRepository.ReservationCompletion::accepted).count();
-        List<Long> commandIds = orderRepository.nextSequenceBatch("command", acceptedCount);
-        List<OrderEvent> orderEvents = new ArrayList<>(appliedCompletions.size());
-        List<OutboxRepository.OrderOutboxWrite> outboxWrites =
-                new ArrayList<>(appliedCompletions.size() + acceptedCount);
-        int commandIndex = 0;
-        for (int index = 0; index < appliedCompletions.size(); index++) {
-            OrderRepository.ReservationCompletion completion = appliedCompletions.get(index);
-            AccountCommandResultEvent result = byOrderId.get(completion.orderId());
-            OrderRecord updated = updatedOrders.get(completion.orderId());
-            if (updated == null) {
-                throw new IllegalStateException("updated order not found " + completion.orderId());
-            }
-            OrderEventType eventType = completion.accepted()
-                    ? OrderEventType.ACCEPTED : OrderEventType.REJECTED;
-            OrderEvent event = orderEvent(updated, eventType, completion.rejectReason(), consumedAt,
-                    result.traceId(), eventIds.get(index));
-            orderEvents.add(event);
-            outboxWrites.add(new OutboxRepository.OrderOutboxWrite(
-                    "ORDER", updated.orderId(), properties.getKafka().getOrderEventsTopic(), updated.symbol(),
-                    eventType.name(), payload(event), consumedAt));
-            if (completion.accepted()) {
-                OrderCommandEvent command = orderCommand(updated, OrderCommandType.PLACE, consumedAt,
-                        result.traceId(), commandIds.get(commandIndex++));
-                outboxWrites.add(new OutboxRepository.OrderOutboxWrite(
-                        "ORDER", updated.orderId(), properties.getKafka().getOrderCommandsTopic(), updated.symbol(),
-                        OrderCommandType.PLACE.name(), payload(command), consumedAt));
-            }
-        }
-        orderEventRepository.insertAll(orderEvents);
-        outboxRepository.enqueueBatch(outboxWrites);
-    }
-
-    private void enqueueAccountReservation(OrderRecord order,
-                                           OrderReserveAccountCommand reservation,
-                                           String dependsOnCommandId,
-                                           Instant now,
-                                           String traceId) {
-        AccountUserCommand command = new AccountUserCommand(
-                AccountUserCommand.CURRENT_SCHEMA_VERSION,
-                reservationCommandId(order.productLine(), order.orderId()),
-                order.productLine(),
-                order.userId(),
-                AccountUserCommandType.ORDER_RESERVE,
-                "ORDER",
-                String.valueOf(order.orderId()),
-                dependsOnCommandId,
-                payload(reservation),
-                now,
-                traceId);
-        outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getAccountUserCommandsTopic(),
-                command.partitionKey(), command.commandType().name(), payload(command), now);
+        orderUserStateService.processAccountCommandResults(results);
     }
 
     private String reservationCommandId(ProductLine productLine, long orderId) {
@@ -1431,114 +735,6 @@ public class OrderService {
     private AmendOrderBatchResponse amendBatchResponse(List<AmendOrderBatchItemResponse> results) {
         int completed = (int) results.stream().filter(AmendOrderBatchItemResponse::success).count();
         return new AmendOrderBatchResponse(results.size(), completed, results.size() - completed, results);
-    }
-
-    private void enqueueCommand(OrderRecord order, OrderCommandType commandType, Instant now, String traceId) {
-        long commandId = orderRepository.nextSequence("command");
-        OrderCommandEvent command = orderCommand(order, commandType, now, traceId, commandId);
-        outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getOrderCommandsTopic(),
-                order.symbol(), commandType.name(), payload(command), now);
-    }
-
-    private OrderCommandEvent orderCommand(OrderRecord order,
-                                           OrderCommandType commandType,
-                                           Instant now,
-                                           String traceId,
-                                           long commandId) {
-        // 后续 exchange-core 撮合服务必须将 commandId/orderId 作为幂等键。
-        return new OrderCommandEvent(
-                commandType,
-                commandId,
-                order.orderId(),
-                order.userId(),
-                order.clientOrderId(),
-                order.symbol(),
-                order.instrumentVersion(),
-                order.side(),
-                order.orderType(),
-                order.timeInForce(),
-                order.priceTicks(),
-                order.quantitySteps(),
-                order.marginMode(),
-                order.positionSide(),
-                order.makerFeeRatePpm(),
-                order.takerFeeRatePpm(),
-                order.reduceOnly(),
-                order.postOnly(),
-                order.reservationAccountType(),
-                order.reservationAsset(),
-                order.reservedUnits(),
-                now,
-                traceId);
-    }
-
-    private OrderRecord rejectOrder(OrderRecord order, String rejectReason, Instant now) {
-        return new OrderRecord(
-                order.orderId(),
-                order.productLine(),
-                order.userId(),
-                order.clientOrderId(),
-                order.symbol(),
-                order.instrumentVersion(),
-                order.side(),
-                order.orderType(),
-                order.timeInForce(),
-                order.priceTicks(),
-                order.quantitySteps(),
-                order.executedQuantitySteps(),
-                0L,
-                order.marginMode(),
-                order.positionSide(),
-                order.makerFeeRatePpm(),
-                order.takerFeeRatePpm(),
-                order.reduceOnly(),
-                order.postOnly(),
-                order.reservationAccountType(),
-                order.reservationAsset(),
-                order.reservedUnits(),
-                OrderStatus.REJECTED,
-                rejectReason,
-                order.createdAt(),
-                now,
-                order.revision() + 1);
-    }
-
-    private void enqueueOrderEvent(OrderRecord order,
-                                   OrderEventType eventType,
-                                   String reason,
-                                   Instant now,
-                                   String traceId) {
-        long eventId = orderRepository.nextSequence("event");
-        OrderEvent event = orderEvent(order, eventType, reason, now, traceId, eventId);
-        orderEventRepository.insert(event);
-        outboxRepository.enqueue("ORDER", order.orderId(), properties.getKafka().getOrderEventsTopic(),
-                order.symbol(), eventType.name(), payload(event), now);
-    }
-
-    private OrderEvent orderEvent(OrderRecord order,
-                                  OrderEventType eventType,
-                                  String reason,
-                                  Instant now,
-                                  String traceId,
-                                  long eventId) {
-        return new OrderEvent(
-                eventId,
-                order.orderId(),
-                order.userId(),
-                order.symbol(),
-                eventType,
-                order.status(),
-                reason,
-                now,
-                traceId);
-    }
-
-    private String payload(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JacksonException ex) {
-            throw new IllegalStateException("failed to serialize order event", ex);
-        }
     }
 
     private record ReservationPlan(OrderReserveAccountCommand command,
@@ -1747,19 +943,6 @@ public class OrderService {
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
-    }
-
-    private RedisOpenOrderView.Page databaseOpenOrderPage(ProductLine productLine,
-                                                           long userId,
-                                                           String symbol,
-                                                           long beforeOrderId,
-                                                           int limit) {
-        List<OrderRecord> fetched = orderRepository.openOrdersByOrderId(productLine, userId, symbol,
-                beforeOrderId, limit + 1);
-        boolean hasMore = fetched.size() > limit;
-        List<OrderRecord> page = hasMore ? List.copyOf(fetched.subList(0, limit)) : List.copyOf(fetched);
-        Long nextOrderId = hasMore && !page.isEmpty() ? page.get(page.size() - 1).orderId() : null;
-        return new RedisOpenOrderView.Page(page, hasMore, nextOrderId);
     }
 
     static String encodeOpenOrderCursor(long orderId) {

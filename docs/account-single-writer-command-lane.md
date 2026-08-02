@@ -102,16 +102,14 @@ trading_orders.PENDING_RESERVE
 - taker 的 `TRADE_SIDE_SETTLE`
 - maker 的 `TRADE_SIDE_SETTLE`
 
-两条命令分别使用各自的用户 key、commandId 和数据库事务。每侧在
-`account_trade_settlement_sides` 写一条不可变记录，不共享更新行；只有两侧都存在时才会进入
+两条命令分别使用各自的用户 key、commandId 和本地 WAL。每侧在自己的用户 reducer 中顺序执行；数据库表只作为
+异步审计和对账投影，不共享更新行；只有两侧都存在时才会进入
 `account_trade_settlement_completions` 视图。任何一侧超过
 `trade-settlement.stale-after`（默认 1 分钟）仍未完成，Actuator
 `accountTradeSettlement` health 变为 `DOWN`。不能人工把另一侧标成成功，必须修复根因并重放原命令。
 
-单侧事务不会在资金处理前预先插入共享结算行。余额、保证金、流水和仓位全部成功后，事务末尾
-通过一次 `INSERT ... ON CONFLICT DO UPDATE` 原子写入本侧 `APPLIED`；冲突更新同时校验
-taker/maker 用户和本侧仍为 `PENDING`。校验不通过时 UPSERT 影响 0 行并抛错，单侧事务全部回滚。
-这样两侧可以并行处理各自账户，只在事务末尾短暂竞争同一成交行。
+本地命令终态先写结果库，再提交账户状态序号，随后发布完整快照和结果事件；重复 commandId
+只能得到相同终态。两侧可以并行处理各自用户分区，数据库投影落后或不可用都不能改变已提交资金。
 
 ### 资金费
 
@@ -200,7 +198,7 @@ GROUP BY status;
 - API 超时：查询 command 状态或使用同一 `referenceId` 重试，绝不创建第二笔资金意图。
 - 依赖长期等待：先查父 command，再查 account outbox。父已终态时可安全重放原子命令；不要手工改状态。
 - 双边成交不完整：对照 taker/maker commandId、outbox 和 DLT，恢复缺失侧；不要直接补余额或持仓。
-- Redis 缓存异常：从 PostgreSQL/outbox 重建投影；资金链路继续以数据库为准。
+- Redis 或数据库投影异常：从本地 WAL、结果库和 Kafka 完整快照重建；资金链路继续以用户 reducer 为准。
 
 ## 部署检查
 

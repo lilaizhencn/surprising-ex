@@ -61,7 +61,7 @@ class AccountUserStateCommandWorkerTest {
             firstReducer.initialize(snapshot());
             AccountUserStateCommandWorker firstWorker = new AccountUserStateCommandWorker(
                     objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
-                    firstReducer, null, kafkaTemplate);
+                    firstReducer, kafkaTemplate);
 
             // 结果发布失败由 worker 捕获并保留在 WAL；状态和终态已经可靠落盘。
             assertThatCode(firstWorker::applyPending).doesNotThrowAnyException();
@@ -74,7 +74,7 @@ class AccountUserStateCommandWorkerTest {
                     objectMapper, stateStore, new UserPartitionCommandLane());
             AccountUserStateCommandWorker restartedWorker = new AccountUserStateCommandWorker(
                     objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
-                    restartedReducer, null, kafkaTemplate);
+                    restartedReducer, kafkaTemplate);
             assertThatCode(restartedWorker::applyPending).doesNotThrowAnyException();
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
             assertThat(restartedReducer.state(partition).orElseThrow().snapshot().balances()).containsExactly(
@@ -107,7 +107,7 @@ class AccountUserStateCommandWorkerTest {
                     "worker-fingerprint", command.occurredAt());
             AccountUserStateCommandWorker worker = new AccountUserStateCommandWorker(
                     objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
-                    reducer, null, kafkaTemplate);
+                    reducer, kafkaTemplate);
 
             worker.applyPending();
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);

@@ -5,1128 +5,149 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.instrument.api.model.ContractType;
-import com.surprising.instrument.api.model.InstrumentType;
-import com.surprising.account.api.model.PositionUpdatedEvent;
-import com.surprising.account.api.model.AccountCommandResultEvent;
-import com.surprising.account.api.model.AccountCommandStatus;
-import com.surprising.account.api.model.AccountUserCommand;
-import com.surprising.account.api.model.AccountUserCommandType;
-import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.TraceContext;
-import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
-import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
-import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
-import com.surprising.trading.api.model.AdminCursorPage;
-import com.surprising.trading.api.model.BatchAmendOrdersRequest;
-import com.surprising.trading.api.model.BatchPlaceOrderRequest;
-import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
-import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.MarginMode;
-import com.surprising.trading.api.model.OrderCommandEvent;
-import com.surprising.trading.api.model.OrderEvent;
-import com.surprising.trading.api.model.OrderEventType;
+import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
-import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
-import com.surprising.trading.order.model.ReduceOnlyPosition;
-import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
-import com.surprising.trading.order.repository.OrderEventRepository;
 import com.surprising.trading.order.repository.OrderMarginRepository;
-import com.surprising.trading.order.repository.OrderRepository;
-import com.surprising.trading.order.repository.OutboxRepository;
 import com.surprising.trading.order.repository.SpotOrderReservationRepository;
 import java.time.Instant;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-import tools.jackson.databind.ObjectMapper;
 
+/** 订单入口只编排 JVM 用户事实流，不允许通过数据库仓储回退。 */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
 
     @Mock
     private OrderValidator orderValidator;
-
     @Mock
     private ReduceOnlyValidator reduceOnlyValidator;
-
-    @Mock
-    private OrderRepository orderRepository;
-
-    @Mock
-    private OrderEventRepository orderEventRepository;
-
     @Mock
     private OrderPlacementStateService placementStateService;
-
-    @Mock
-    private OrderFeeSnapshotLookup feeSnapshotLookup;
-
-    @Mock
-    private OrderUserStateService orderUserStateService;
-
     @Mock
     private OrderMarginRepository orderMarginRepository;
-
     @Mock
     private SpotOrderReservationRepository spotOrderReservationRepository;
-
     @Mock
-    private OutboxRepository outboxRepository;
-
-    @AfterEach
-    void clearTraceContext() {
-        TraceContext.clear();
-    }
+    private OrderFeeSnapshotLookup feeSnapshotLookup;
+    @Mock
+    private OrderUserStateService userState;
 
     @Test
-    void acceptedOrderEventAndCommandPayloadCarryTraceId() throws Exception {
-        TraceContext.set("trace-order-1");
-        OrderInstrumentLifecycleFenceService lifecycleFenceService =
-                org.mockito.Mockito.mock(OrderInstrumentLifecycleFenceService.class);
-        TradingOrderProperties properties = new TradingOrderProperties();
-        OrderService service = new OrderService(new ObjectMapper(), properties, orderValidator,
-                reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
-                orderMarginRepository, spotOrderReservationRepository,
-                outboxRepository, null, lifecycleFenceService, feeSnapshotLookup);
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, null, "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, true, false);
-
-        var response = service.place(request);
-
-        verify(lifecycleFenceService).requirePlacementAllowed(
-                ProductLine.LINEAR_PERPETUAL, "BTC-USDT");
-        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
-        assertThat(response.positionSide()).isEqualTo(PositionSide.NET);
-        assertThat(response.makerFeeRatePpm()).isEqualTo(200L);
-        assertThat(response.takerFeeRatePpm()).isEqualTo(500L);
-        ArgumentCaptor<OrderEvent> eventCaptor = ArgumentCaptor.forClass(OrderEvent.class);
-        verify(orderEventRepository).insert(eventCaptor.capture());
-        assertThat(eventCaptor.getValue().traceId()).isEqualTo("trace-order-1");
-
-        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
-        verify(outboxRepository, times(2)).enqueue(eq("ORDER"), eq(9002L), anyString(), eq("BTC-USDT"),
-                anyString(), payloadCaptor.capture(), any());
-        ObjectMapper objectMapper = new ObjectMapper();
-        assertThat(objectMapper.readValue(payloadCaptor.getAllValues().get(0), OrderEvent.class).traceId())
-                .isEqualTo("trace-order-1");
-        OrderCommandEvent command = objectMapper.readValue(payloadCaptor.getAllValues().get(1),
-                OrderCommandEvent.class);
-        assertThat(command.traceId()).isEqualTo("trace-order-1");
-        assertThat(command.marginMode()).isEqualTo(MarginMode.CROSS);
-        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
-        verify(orderRepository).insert(orderCaptor.capture());
-        assertThat(orderCaptor.getValue().makerFeeRatePpm()).isEqualTo(200L);
-        assertThat(orderCaptor.getValue().takerFeeRatePpm()).isEqualTo(500L);
-    }
-
-    @Test
-    void duplicateClientOrderInsertConflictDoesNotReserveMargin() {
-        OrderService service = service();
-        OrderRecord existing = order(9001L, "dup-1", OrderStatus.ACCEPTED, null);
-        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "dup-1"))
-                .thenReturn(Optional.empty(), Optional.of(existing));
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(false);
-
-        var response = service.place(request("dup-1"));
-
-        assertThat(response.orderId()).isEqualTo(9001L);
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
-                anyLong(), anyLong(), anyLong(), anyLong());
-        verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
-                anyString(), any());
-    }
-
-    @Test
-    void reusedClientOrderIdWithDifferentParametersIsRejected() {
-        OrderService service = service();
-        OrderRecord existing = order(9001L, "dup-conflict", OrderStatus.ACCEPTED, null);
-        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "dup-conflict"))
-                .thenReturn(Optional.of(existing));
-
-        PlaceOrderRequest changed = new PlaceOrderRequest(1001L, "dup-conflict", "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 11L, false, false);
-
-        assertThatThrownBy(() -> service.place(changed))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("clientOrderId already used with different order parameters");
-        verify(orderRepository, never()).nextSequence("order");
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
-                anyLong(), anyLong(), anyLong(), anyLong());
-    }
-
-    @Test
-    void positionEventPrunesInvalidAndExcessReduceOnlyOrdersInsideOrderModule() {
-        OrderService service = service();
-        Instant eventTime = Instant.parse("2026-07-19T00:00:00Z");
-        OrderRecord firstValid = reduceOnlyOrder(9101L, OrderSide.SELL, 1L, OrderStatus.ACCEPTED);
-        OrderRecord excess = reduceOnlyOrder(9102L, OrderSide.SELL, 2L, OrderStatus.ACCEPTED);
-        OrderRecord wrongSide = reduceOnlyOrder(9103L, OrderSide.BUY, 1L, OrderStatus.PARTIALLY_FILLED);
-        OrderRecord alreadyCanceling = reduceOnlyOrder(
-                9104L, OrderSide.SELL, 1L, OrderStatus.CANCEL_REQUESTED);
-        when(orderRepository.lockOpenReduceOnlyOrders(
-                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", PositionSide.NET, eventTime))
-                .thenReturn(List.of(firstValid, excess, wrongSide, alreadyCanceling));
-        when(orderRepository.requestCancel(eq(9102L), eq(eventTime))).thenReturn(true);
-        when(orderRepository.requestCancel(eq(9103L), eq(eventTime))).thenReturn(true);
-        when(orderRepository.findByOrderId(9102L))
-                .thenReturn(Optional.of(reduceOnlyOrder(
-                        9102L, OrderSide.SELL, 2L, OrderStatus.CANCEL_REQUESTED)));
-        when(orderRepository.findByOrderId(9103L))
-                .thenReturn(Optional.of(reduceOnlyOrder(
-                        9103L, OrderSide.BUY, 1L, OrderStatus.CANCEL_REQUESTED)));
-        when(orderRepository.nextSequence("event")).thenReturn(9201L, 9202L);
-        when(orderRepository.nextSequence("command")).thenReturn(9301L, 9302L);
-        PositionUpdatedEvent event = new PositionUpdatedEvent(
-                9001L, 8001L, 1001L, "BTC-USDT", 7L, MarginMode.CROSS, PositionSide.NET,
-                2L, 65_000L, 0L, eventTime, "trace-position-prune");
-
-        service.onPositionUpdated(event);
-
-        verify(placementStateService).lockUserSymbolMarginScope(
-                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
-        verify(orderRepository).requestCancel(9102L, eventTime);
-        verify(orderRepository).requestCancel(9103L, eventTime);
-        verify(orderRepository, never()).requestCancel(eq(9101L), any());
-        verify(orderRepository, never()).requestCancel(eq(9104L), any());
-        verify(outboxRepository, times(4)).enqueue(
-                eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"), anyString(), anyString(), eq(eventTime));
-    }
-
-    @Test
-    void fundedOrderWaitsForAccountReservationBeforePublishingMatchingCommand() {
-        OrderService service = service();
-        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "no-margin")).thenReturn(Optional.empty());
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
-        var response = service.place(request("no-margin"));
-
-        assertThat(response.status()).isEqualTo(OrderStatus.PENDING_RESERVE);
-        assertThat(response.remainingQuantitySteps()).isEqualTo(10L);
-        assertThat(response.rejectReason()).isNull();
-        verify(orderRepository, never()).reject(anyLong(), anyString(), any());
-        verify(outboxRepository).enqueue(eq("ORDER"), eq(9002L), anyString(),
-                eq("LINEAR_PERPETUAL:1001"), eq("ORDER_RESERVE"), anyString(), any());
-        verify(orderRepository, never()).nextSequence("command");
-    }
-
-    @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void accountReservationResultsUseOneBatchAndOrderConsumptionTime() {
+    void placeUsesUserWalAndDoesNotNeedDatabaseState() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
-        OrderRecord firstPending = order(9001L, "reserve-1", OrderStatus.PENDING_RESERVE, null);
-        OrderRecord secondPending = order(9002L, "reserve-2", OrderStatus.PENDING_RESERVE, null);
-        OrderRecord firstAccepted = order(9001L, "reserve-1", OrderStatus.ACCEPTED, null);
-        OrderRecord secondRejected = order(9002L, "reserve-2", OrderStatus.REJECTED, "insufficient");
-        when(orderRepository.findByOrderIds(any()))
-                .thenReturn(Map.of(9001L, firstPending, 9002L, secondPending));
-        when(orderRepository.orderMatchesContractType(anyLong(), eq("LINEAR_PERPETUAL"))).thenReturn(true);
-        when(orderRepository.completeReservations(any()))
-                .thenReturn(Map.of(9001L, firstAccepted, 9002L, secondRejected));
-        when(orderRepository.nextSequenceBatch("event", 2)).thenReturn(List.of(9101L, 9102L));
-        when(orderRepository.nextSequenceBatch("command", 1)).thenReturn(List.of(9201L));
-        Instant accountCompletedAt = Instant.parse("2026-07-19T00:00:00Z");
-        Instant beforeConsume = Instant.now();
-        AccountCommandResultEvent accepted = reservationResult(
-                9001L, AccountCommandStatus.APPLIED, null, accountCompletedAt, "trace-reserve-1");
-        AccountCommandResultEvent rejected = reservationResult(
-                9002L, AccountCommandStatus.REJECTED, "insufficient", accountCompletedAt, "trace-reserve-2");
+        PlaceOrderRequest request = request("client-1");
+        OrderResponse expected = response(901L, request.clientOrderId(), OrderStatus.ACCEPTED);
+        when(userState.nextOrderId()).thenReturn(901L);
+        when(userState.place(any(OrderRecord.class))).thenReturn(expected);
 
-        service.processAccountCommandResults(List.of(accepted, rejected));
+        assertThat(service.place(request)).isEqualTo(expected);
 
-        ArgumentCaptor<List<OrderRepository.ReservationCompletion>> completionCaptor =
-                ArgumentCaptor.forClass(List.class);
-        verify(orderRepository).completeReservations(completionCaptor.capture());
-        assertThat(completionCaptor.getValue()).hasSize(2);
-        assertThat(completionCaptor.getValue())
-                .allSatisfy(completion -> assertThat(completion.completedAt()).isAfterOrEqualTo(beforeConsume));
-        ArgumentCaptor<List<OrderEvent>> eventsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(orderEventRepository).insertAll(eventsCaptor.capture());
-        assertThat(eventsCaptor.getValue()).extracting(OrderEvent::eventType)
-                .containsExactly(OrderEventType.ACCEPTED, OrderEventType.REJECTED);
-        ArgumentCaptor<List<OutboxRepository.OrderOutboxWrite>> outboxCaptor = ArgumentCaptor.forClass(List.class);
-        verify(outboxRepository).enqueueBatch(outboxCaptor.capture());
-        assertThat(outboxCaptor.getValue()).extracting(OutboxRepository.OrderOutboxWrite::eventType)
-                .containsExactly("ACCEPTED", "PLACE", "REJECTED");
-        assertThat(outboxCaptor.getValue())
-                .allSatisfy(write -> assertThat(write.createdAt()).isAfterOrEqualTo(beforeConsume));
+        verify(userState).place(any(OrderRecord.class));
+        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
+                anyLong(), anyLong(), anyLong(), anyLong());
     }
 
     @Test
-    void missingFeeScheduleRejectsOrderBeforeMarginReservation() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
+    void missingFeeSnapshotFailsClosedBeforeAppendingOrderFact() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL);
+        when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.empty());
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
+        when(userState.place(any(OrderRecord.class)))
+                .thenReturn(response(904L, "no-fee", OrderStatus.REJECTED));
 
-        var response = service.place(request("fee-missing"));
-
-        assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
-        assertThat(response.rejectReason()).isEqualTo("fee schedule unavailable");
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
-                anyLong(), anyLong(), anyLong(), anyLong());
-        verify(orderRepository, never()).nextSequence("command");
+        assertThat(service.place(request("no-fee")).status()).isEqualTo(OrderStatus.REJECTED);
+        verify(userState).place(any(OrderRecord.class));
     }
 
     @Test
-    void leverageRiskLimitRejectsInsertedOrderWithoutPublishingCommand() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("USDT", 0L, "leverage exceeds risk limit",
-                        100_000_000L, 50_000_000L, 20_000L)));
+    void cancelAndReadCommandsDelegateToLocalUserPartition() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL);
+        OrderResponse canceled = response(902L, "cancel-1", OrderStatus.CANCEL_REQUESTED);
+        when(userState.cancel(1001L, 902L, null)).thenReturn(canceled);
+        when(userState.get(902L)).thenReturn(canceled);
 
-        var response = service.place(request("bad-leverage"));
+        assertThat(service.cancel(new CancelOrderRequest(1001L, 902L))).isEqualTo(canceled);
+        assertThat(service.get(902L)).isEqualTo(canceled);
 
-        assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
-        assertThat(response.rejectReason()).isEqualTo("leverage exceeds risk limit");
-        verify(orderRepository, never()).nextSequence("command");
+        verify(userState).cancel(1001L, 902L, null);
+        verify(userState).get(902L);
     }
 
     @Test
-    void isolatedMarginOrdersReserveIsolatedMarginAndPublishCommand() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.ISOLATED),
-                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "iso-1", "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.ISOLATED, false, false);
+    void adminCancelUsesLocalPartitionAndProductLine() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL);
+        OrderResponse canceled = response(903L, "admin-1", OrderStatus.CANCEL_REQUESTED);
+        when(userState.cancelAdminOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
+                "admin cancel: risk"))
+                .thenReturn(java.util.List.of(canceled));
 
-        var response = service.place(request);
+        var result = service.adminCancelOrders(new AdminBatchCancelOrdersRequest(
+                1001L, "BTC-USDT", 10, "risk"));
 
-        assertThat(response.status()).isEqualTo(OrderStatus.PENDING_RESERVE);
-        assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED);
-        assertThat(response.positionSide()).isEqualTo(PositionSide.NET);
-        assertThat(response.rejectReason()).isNull();
-        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
-        verify(orderRepository).insert(orderCaptor.capture());
-        assertThat(orderCaptor.getValue().marginMode()).isEqualTo(MarginMode.ISOLATED);
-        verify(orderRepository, never()).nextSequence("command");
-        verify(outboxRepository).enqueue(eq("ORDER"), eq(9002L), anyString(), eq("BTC-USDT"),
-                eq("RESERVE_PENDING"), anyString(), any());
-        verify(outboxRepository).enqueue(eq("ORDER"), eq(9002L), anyString(), eq("LINEAR_PERPETUAL:1001"),
-                eq("ORDER_RESERVE"), anyString(), any());
+        assertThat(result.requested()).isEqualTo(1);
+        verify(userState).cancelAdminOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
+                "admin cancel: risk");
     }
 
     @Test
-    void coinPerpetualOrdersReserveCoinPerpetualProductAccount() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USD"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USD"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("COIN_PERPETUAL", "BTC", 100L, null,
-                        0L, 0L, 0L)));
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "coin-1", "BTC-USD", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, false, false);
+    void nonPerpetualOrderFailsClosedUntilItsAccountReducerIsReady() {
+        OrderService service = service(ProductLine.SPOT);
 
-        var response = service.place(request);
-
-        assertThat(response.status()).isEqualTo(OrderStatus.PENDING_RESERVE);
-        assertThat(response.rejectReason()).isNull();
-        verify(orderRepository, never()).nextSequence("command");
-    }
-
-    @Test
-    void spotOrderReservesSpotBalanceWithoutUsingPerpetualMargin() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(11L, InstrumentType.SPOT));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(11L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(spotOrderReservationRepository.requirement(eq("BTC-USDT"), eq(11L), eq(OrderSide.BUY),
-                eq(OrderType.LIMIT), eq(65_000L), eq(10L), any()))
-                .thenReturn(Optional.of(new SpotReservationRequirement("USDT", 651L)));
-        var response = service.place(request("spot-1"));
-
-        assertThat(response.status()).isEqualTo(OrderStatus.PENDING_RESERVE);
-        assertThat(response.rejectReason()).isNull();
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
-                anyLong(), anyLong(), anyLong(), anyLong());
-        verify(orderRepository, never()).nextSequence("command");
-    }
-
-    @Test
-    void openingOrderRejectsMarginModeSwitchWhileOtherModeIsActive() {
-        OrderService service = service();
-        when(placementStateService.hasActiveMarginModeConflict(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
-                MarginMode.ISOLATED))
-                .thenReturn(true);
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "iso-switch", "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.ISOLATED, false, false);
-
-        var response = service.place(request);
-
-        assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
-        assertThat(response.rejectReason())
-                .isEqualTo("margin mode switch requires closing positions and open orders first");
-        assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED);
-        verify(placementStateService).lockUserSymbolMarginScope(
-                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
-        verify(orderValidator, never()).validate(any());
-        verify(feeSnapshotLookup, never()).lookup(any(), anyLong(), anyString(), anyLong(), any());
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
-                anyLong(), anyLong(), anyLong(), anyLong());
-        verify(orderRepository, never()).nextSequence("command");
-    }
-
-    @Test
-    void hedgePositionSideRequiresHedgeModeBeforePersistence() {
-        OrderService service = service();
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "hedge-long", "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.CROSS, PositionSide.LONG,
-                false, false);
-
-        assertThatThrownBy(() -> service.place(request))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("positionSide LONG/SHORT requires HEDGE position mode");
-
-        verify(placementStateService, never()).lockUserSymbolMarginScope(
-                any(ProductLine.class), anyLong(), anyString());
-        verify(orderRepository, never()).insert(any());
-        verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
-                anyString(), any());
-    }
-
-    @Test
-    void hedgeOpeningOrderCarriesPositionSideAndReservesHedgeMargin() throws Exception {
-        OrderService service = service();
-        when(placementStateService.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(PositionSide.LONG), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "hedge-open-long", "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.CROSS, PositionSide.LONG,
-                false, false);
-
-        var response = service.place(request);
-
-        assertThat(response.status()).isEqualTo(OrderStatus.PENDING_RESERVE);
-        assertThat(response.positionSide()).isEqualTo(PositionSide.LONG);
-        assertThat(response.reduceOnly()).isFalse();
-        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
-        verify(orderRepository).insert(orderCaptor.capture());
-        assertThat(orderCaptor.getValue().positionSide()).isEqualTo(PositionSide.LONG);
-        assertThat(orderCaptor.getValue().reduceOnly()).isFalse();
-        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
-        verify(outboxRepository).enqueue(eq("ORDER"), eq(9002L), anyString(), eq("LINEAR_PERPETUAL:1001"),
-                eq("ORDER_RESERVE"), payloadCaptor.capture(), any());
-        ObjectMapper mapper = new ObjectMapper();
-        AccountUserCommand command = mapper.readValue(payloadCaptor.getValue(), AccountUserCommand.class);
-        OrderReserveAccountCommand reserve = mapper.readValue(command.payload(), OrderReserveAccountCommand.class);
-        assertThat(reserve.positionSide()).isEqualTo(PositionSide.LONG);
-    }
-
-    @Test
-    void hedgeClosingOrderIsNormalizedToReduceOnlyWithoutOpeningMarginReservation() {
-        OrderService service = service();
-        when(placementStateService.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(PositionMode.HEDGE);
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "hedge-close-long", "BTC-USDT", OrderSide.SELL,
-                OrderType.LIMIT, TimeInForce.IOC, 65_000L, 10L, MarginMode.CROSS, PositionSide.LONG,
-                false, false);
-
-        var response = service.place(request);
-
-        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
-        assertThat(response.positionSide()).isEqualTo(PositionSide.LONG);
-        assertThat(response.reduceOnly()).isTrue();
-        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
-        verify(orderRepository).insert(orderCaptor.capture());
-        assertThat(orderCaptor.getValue().reduceOnly()).isTrue();
-        assertThat(orderCaptor.getValue().positionSide()).isEqualTo(PositionSide.LONG);
-        verify(reduceOnlyValidator).validate(any());
-        verify(orderMarginRepository, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
-                anyLong(), anyLong(), anyLong(), anyLong());
-    }
-
-    @Test
-    void reduceOnlyOptionBuyReservesPremiumForShortClose() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L, InstrumentType.PERPETUAL,
-                ContractType.VANILLA_OPTION));
-        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT-260925-70000-C"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT-260925-70000-C"), eq(7L), eq(1001L),
-                eq(MarginMode.CROSS), eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT),
-                eq(120L), eq(2L), anyLong(), anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("OPTION", "USDT", 240L)));
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "option-close-short",
-                "BTC-USDT-260925-70000-C", OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC, 120L, 2L,
-                MarginMode.CROSS, PositionSide.NET, true, false);
-
-        var response = service.place(request);
-
-        assertThat(response.status()).isEqualTo(OrderStatus.PENDING_RESERVE);
-        assertThat(response.reduceOnly()).isTrue();
-        verify(orderRepository, never()).nextSequence("command");
-    }
-
-    @Test
-    void reduceOnlyOrderBypassesMarginModeSwitchConflictForRiskReduction() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-
-        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "reduce-conflict", "BTC-USDT", OrderSide.SELL,
-                OrderType.LIMIT, TimeInForce.IOC, 65_000L, 10L, MarginMode.CROSS, true, false);
-
-        var response = service.place(request);
-
-        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
-        assertThat(response.reduceOnly()).isTrue();
-        verify(placementStateService).lockUserSymbolMarginScope(
-                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT");
-        verify(placementStateService, never()).hasActiveMarginModeConflict(
-                any(ProductLine.class), anyLong(), anyString(),
-                any());
-        verify(orderRepository).nextSequence("command");
-    }
-
-    @Test
-    void testOrderDryRunDoesNotPersistReserveOrPublish() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("USDT", 100L)));
-
-        var response = service.test(request("dry-run-1"));
-
-        assertThat(response.accepted()).isTrue();
-        assertThat(response.validationStage()).isEqualTo("ACCEPTED");
-        assertThat(response.accountType()).isEqualTo("USDT_PERPETUAL");
-        assertThat(response.asset()).isEqualTo("USDT");
-        assertThat(response.estimatedReserveUnits()).isEqualTo(100L);
-        verify(orderRepository, never()).nextSequence("order");
-        verify(orderRepository, never()).insert(any());
-        verify(outboxRepository, never()).enqueue(anyString(), anyLong(), anyString(), anyString(), anyString(),
-                anyString(), any());
-    }
-
-    @Test
-    void placeBatchKeepsItemFailuresIsolatedFromValidOrders() {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        PlaceOrderRequest invalid = new PlaceOrderRequest(0L, "bad", "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, false, false);
-        PlaceOrderRequest validReduceOnly = new PlaceOrderRequest(1001L, "batch-ok", "BTC-USDT", OrderSide.SELL,
-                OrderType.LIMIT, TimeInForce.IOC, 65_000L, 10L, true, false);
-
-        var response = service.placeBatch(new BatchPlaceOrderRequest(List.of(invalid, validReduceOnly)));
-
-        assertThat(response.requested()).isEqualTo(2);
-        assertThat(response.completed()).isEqualTo(1);
-        assertThat(response.failed()).isEqualTo(1);
-        assertThat(response.results().get(0).success()).isFalse();
-        assertThat(response.results().get(0).message()).isEqualTo("userId must be positive");
-        assertThat(response.results().get(1).success()).isTrue();
-        assertThat(response.results().get(1).order().status()).isEqualTo(OrderStatus.ACCEPTED);
-        verify(orderRepository).insert(any(OrderRecord.class));
-    }
-
-    @Test
-    void placeBatchChainsAccountRevisionAndDependencyForSameUser() throws Exception {
-        OrderService service = service();
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L, 9003L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("USDT_PERPETUAL", "USDT", 100L)));
-
-        PlaceOrderRequest first = request("batch-revision-1");
-        PlaceOrderRequest second = new PlaceOrderRequest(1001L, "batch-revision-2", "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, MarginMode.CROSS, PositionSide.NET,
-                false, false);
-
-        var response = service.placeBatch(new BatchPlaceOrderRequest(List.of(first, second)));
-
-        assertThat(response.completed()).isEqualTo(2);
-        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
-        verify(outboxRepository, times(2)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("LINEAR_PERPETUAL:1001"),
-                eq("ORDER_RESERVE"), payloadCaptor.capture(), any());
-        ObjectMapper mapper = new ObjectMapper();
-        AccountUserCommand firstCommand = mapper.readValue(payloadCaptor.getAllValues().get(0), AccountUserCommand.class);
-        AccountUserCommand secondCommand = mapper.readValue(payloadCaptor.getAllValues().get(1), AccountUserCommand.class);
-        OrderReserveAccountCommand firstReserve = mapper.readValue(firstCommand.payload(), OrderReserveAccountCommand.class);
-        OrderReserveAccountCommand secondReserve = mapper.readValue(secondCommand.payload(), OrderReserveAccountCommand.class);
-        assertThat(firstReserve.expectedAccountRevision()).isZero();
-        assertThat(secondReserve.expectedAccountRevision()).isZero();
-        assertThat(firstCommand.dependsOnCommandId()).isNull();
-        assertThat(secondCommand.dependsOnCommandId()).isEqualTo("ORDER_RESERVE:LINEAR_PERPETUAL:9002");
-    }
-
-    @Test
-    void amendOrderRequestsCancelAndPlacesReplacementOrder() {
-        TraceContext.set("trace-amend-1");
-        OrderService service = service();
-        OrderRecord original = order(9001L, "orig-1", OrderStatus.ACCEPTED, null);
-        OrderRecord cancelRequested = order(9001L, "orig-1", OrderStatus.CANCEL_REQUESTED, null);
-        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "amend-1"))
-                .thenReturn(Optional.empty(), Optional.empty());
-        when(orderRepository.findByOrderId(9001L))
-                .thenReturn(Optional.of(original), Optional.of(cancelRequested));
-        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(66_000L), eq(5L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("USDT_PERPETUAL", "USDT", 100L)));
-        ArgumentCaptor<OrderRecord> replacementCaptor = ArgumentCaptor.forClass(OrderRecord.class);
-
-        var response = service.amend(new AmendOrderRequest(1001L, 9001L, "amend-1",
-                66_000L, 5L, TimeInForce.GTC, true));
-
-        assertThat(response.cancelRequested()).isTrue();
-        assertThat(response.originalOrder().status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
-        assertThat(response.replacementOrder().clientOrderId()).isEqualTo("amend-1");
-        assertThat(response.replacementOrder().priceTicks()).isEqualTo(66_000L);
-        assertThat(response.replacementOrder().quantitySteps()).isEqualTo(5L);
-        assertThat(response.replacementOrder().postOnly()).isTrue();
-        verify(orderRepository).requestCancel(eq(9001L), any());
-        verify(orderRepository).insert(replacementCaptor.capture());
-        assertThat(replacementCaptor.getValue().clientOrderId()).isEqualTo("amend-1");
-        verify(outboxRepository, times(3)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"),
-                anyString(), anyString(), any());
-        verify(outboxRepository).enqueue(eq("ORDER"), eq(9002L), anyString(), eq("LINEAR_PERPETUAL:1001"),
-                eq("ORDER_RESERVE"), anyString(), any());
-    }
-
-    @Test
-    void batchAmendKeepsItemFailuresIsolatedFromValidOrders() {
-        OrderService service = service();
-        OrderRecord original = order(9001L, "batch-orig-1", OrderStatus.ACCEPTED, null);
-        OrderRecord cancelRequested = order(9001L, "batch-orig-1", OrderStatus.CANCEL_REQUESTED, null);
-        when(orderRepository.findByClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "batch-amend-1"))
-                .thenReturn(Optional.empty(), Optional.empty());
-        when(orderRepository.findByOrderId(9001L))
-                .thenReturn(Optional.of(original), Optional.of(cancelRequested));
-        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-        when(orderMarginRepository.requirement(eq("BTC-USDT"), eq(7L), eq(1001L), eq(MarginMode.CROSS),
-                eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(66_000L), eq(4L), anyLong(),
-                anyLong()))
-                .thenReturn(Optional.of(new MarginRequirement("USDT_PERPETUAL", "USDT", 100L)));
-        AmendOrderRequest valid = new AmendOrderRequest(1001L, 9001L, "batch-amend-1",
-                66_000L, 4L, null, null);
-        AmendOrderRequest invalid = new AmendOrderRequest(1001L, 0L, "batch-amend-bad",
-                67_000L, null, null, null);
-
-        var response = service.amendBatch(new BatchAmendOrdersRequest(List.of(valid, invalid)));
-
-        assertThat(response.requested()).isEqualTo(2);
-        assertThat(response.completed()).isEqualTo(1);
-        assertThat(response.failed()).isEqualTo(1);
-        assertThat(response.results().get(0).success()).isTrue();
-        assertThat(response.results().get(0).amend().replacementOrder().clientOrderId()).isEqualTo("batch-amend-1");
-        assertThat(response.results().get(1).success()).isFalse();
-        assertThat(response.results().get(1).message()).isEqualTo("userId and orderId must be positive");
-        verify(orderRepository).requestCancel(eq(9001L), any());
-    }
-
-    @Test
-    void closePositionPlacesReduceOnlyMarketIocForLockedLongPosition() {
-        OrderService service = service();
-        when(placementStateService.lockedPosition(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", MarginMode.CROSS,
-                PositionSide.NET))
-                .thenReturn(Optional.of(new ReduceOnlyPosition(12L, 7L)));
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-
-        var response = service.closePosition(new ClosePositionRequest(1001L, "close-long", "btc-usdt",
-                MarginMode.CROSS, PositionSide.NET));
-
-        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
-        assertThat(response.side()).isEqualTo(OrderSide.SELL);
-        assertThat(response.orderType()).isEqualTo(OrderType.MARKET);
-        assertThat(response.timeInForce()).isEqualTo(TimeInForce.IOC);
-        assertThat(response.quantitySteps()).isEqualTo(12L);
-        assertThat(response.reduceOnly()).isTrue();
-        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
-        verify(orderRepository).insert(orderCaptor.capture());
-        assertThat(orderCaptor.getValue().clientOrderId()).isEqualTo("close-long");
-        assertThat(orderCaptor.getValue().priceTicks()).isZero();
-        verify(placementStateService, times(2)).lockUserSymbolMarginScope(
-                ProductLine.LINEAR_PERPETUAL, 1001L,
-                "BTC-USDT");
-    }
-
-    @Test
-    void closePositionLocksPositionInsideCurrentProductLine() {
-        OrderService service = service(ProductLine.LINEAR_DELIVERY);
-        when(placementStateService.lockedPosition(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT", MarginMode.CROSS,
-                PositionSide.NET))
-                .thenReturn(Optional.of(new ReduceOnlyPosition(-9L, 17L)));
-        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(17L));
-        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(17L));
-        when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(17L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(200L, 500L, "INSTRUMENT")));
-        when(orderRepository.nextSequence("order")).thenReturn(9002L);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-        when(orderRepository.insert(any(OrderRecord.class))).thenReturn(true);
-
-        var response = service.closePosition(new ClosePositionRequest(1001L, "close-delivery-short",
-                "btc-usdt", MarginMode.CROSS, PositionSide.NET));
-
-        assertThat(response.status()).isEqualTo(OrderStatus.ACCEPTED);
-        assertThat(response.side()).isEqualTo(OrderSide.BUY);
-        assertThat(response.quantitySteps()).isEqualTo(9L);
-        ArgumentCaptor<OrderRecord> orderCaptor = ArgumentCaptor.forClass(OrderRecord.class);
-        verify(orderRepository).insert(orderCaptor.capture());
-        assertThat(orderCaptor.getValue().productLine()).isEqualTo(ProductLine.LINEAR_DELIVERY);
-        verify(placementStateService, times(2)).lockUserSymbolMarginScope(
-                ProductLine.LINEAR_DELIVERY, 1001L,
-                "BTC-USDT");
-        verify(placementStateService).lockedPosition(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
-                MarginMode.CROSS, PositionSide.NET);
-        verify(placementStateService, never()).lockedPosition(
-                ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
-                MarginMode.CROSS, PositionSide.NET);
-    }
-
-    @Test
-    void cancelOpenOrdersRequestsCancelOnlyForRepositorySelectedUserOrders() {
-        OrderService service = service();
-        OrderRecord first = order(9001L, "open-1", OrderStatus.ACCEPTED, null);
-        OrderRecord second = order(9002L, "open-2", OrderStatus.PARTIALLY_FILLED, null);
-        OrderRecord firstCancelRequested = order(9001L, "open-1", OrderStatus.CANCEL_REQUESTED, null);
-        OrderRecord secondCancelRequested = order(9002L, "open-2", OrderStatus.CANCEL_REQUESTED, null);
-        when(orderRepository.adminCancelableOrders(1001L, "BTC-USDT", 2)).thenReturn(List.of(first, second));
-        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
-        when(orderRepository.requestCancel(eq(9002L), any())).thenReturn(true);
-        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(firstCancelRequested));
-        when(orderRepository.findByOrderId(9002L)).thenReturn(Optional.of(secondCancelRequested));
-        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
-
-        var response = service.cancelOpenOrders(new CancelOpenOrdersRequest(1001L, "btc-usdt", 2));
-
-        assertThat(response.requested()).isEqualTo(2);
-        assertThat(response.completed()).isEqualTo(2);
-        assertThat(response.failed()).isZero();
-        assertThat(response.results()).extracting("order.orderId").containsExactly(9001L, 9002L);
-        verify(orderRepository).adminCancelableOrders(1001L, "BTC-USDT", 2);
-        verify(orderRepository).requestCancel(eq(9001L), any());
-        verify(orderRepository).requestCancel(eq(9002L), any());
-        verify(outboxRepository, times(4)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"),
-                anyString(), anyString(), any());
-    }
-
-    @Test
-    void getRejectsOrderOutsideCurrentProductLine() {
-        OrderService service = service(ProductLine.LINEAR_DELIVERY);
-        OrderRecord accepted = order(9001L, "wrong-product", OrderStatus.ACCEPTED, null);
-        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(accepted));
-        when(orderRepository.orderMatchesContractType(9001L, "LINEAR_DELIVERY")).thenReturn(false);
-
-        assertThatThrownBy(() -> service.get(9001L))
+        assertThatThrownBy(() -> service.place(request("spot-1")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("order not found: 9001");
-    }
-
-    @Test
-    void cancelRejectsOrderOutsideCurrentProductLineBeforeMutating() {
-        OrderService service = service(ProductLine.LINEAR_DELIVERY);
-        OrderRecord accepted = order(9001L, "cancel-wrong-product", OrderStatus.ACCEPTED, null);
-        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(accepted));
-        when(orderRepository.orderMatchesContractType(9001L, "LINEAR_DELIVERY")).thenReturn(false);
-
-        assertThatThrownBy(() -> service.cancel(new CancelOrderRequest(1001L, 9001L)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("order not found: 9001");
-
-        verify(orderRepository, never()).requestCancel(eq(9001L), any());
-    }
-
-    @Test
-    void adminCancelOrderPublishesCancelEventAndCommand() throws Exception {
-        TraceContext.set("trace-admin-cancel");
-        OrderService service = service();
-        OrderRecord accepted = order(9001L, "cancel-1", OrderStatus.ACCEPTED, null);
-        OrderRecord cancelRequested = order(9001L, "cancel-1", OrderStatus.CANCEL_REQUESTED, null);
-        when(orderRepository.findByOrderId(9001L))
-                .thenReturn(Optional.of(accepted), Optional.of(cancelRequested));
-        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-
-        var response = service.adminCancelOrder(9001L, "risk operation");
-
-        assertThat(response.cancelRequested()).isTrue();
-        assertThat(response.order().status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
-        ArgumentCaptor<OrderEvent> eventCaptor = ArgumentCaptor.forClass(OrderEvent.class);
-        verify(orderEventRepository).insert(eventCaptor.capture());
-        assertThat(eventCaptor.getValue().eventType()).isEqualTo(OrderEventType.CANCEL_REQUESTED);
-        assertThat(eventCaptor.getValue().reason()).isEqualTo("admin cancel: risk operation");
-        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
-        verify(outboxRepository, times(2)).enqueue(eq("ORDER"), eq(9001L), anyString(), eq("BTC-USDT"),
-                anyString(), payloadCaptor.capture(), any());
-        OrderCommandEvent command = new ObjectMapper().readValue(payloadCaptor.getAllValues().get(1),
-                OrderCommandEvent.class);
-        assertThat(command.commandType()).isEqualTo(com.surprising.trading.api.model.OrderCommandType.CANCEL);
-        assertThat(command.traceId()).isEqualTo("trace-admin-cancel");
-    }
-
-    @Test
-    void adminBatchCancelOrdersCancelsOnlyRepositorySelectedOrders() {
-        OrderService service = service();
-        OrderRecord first = order(9001L, "batch-1", OrderStatus.ACCEPTED, null);
-        OrderRecord second = order(9002L, "batch-2", OrderStatus.PARTIALLY_FILLED, null);
-        OrderRecord firstCancelRequested = order(9001L, "batch-1", OrderStatus.CANCEL_REQUESTED, null);
-        OrderRecord secondCancelRequested = order(9002L, "batch-2", OrderStatus.CANCEL_REQUESTED, null);
-        when(orderRepository.adminCancelableOrders(null, "BTC-USDT", 2)).thenReturn(java.util.List.of(first, second));
-        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
-        when(orderRepository.requestCancel(eq(9002L), any())).thenReturn(true);
-        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(firstCancelRequested));
-        when(orderRepository.findByOrderId(9002L)).thenReturn(Optional.of(secondCancelRequested));
-        when(orderRepository.nextSequence("event")).thenReturn(9100L, 9101L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L, 9201L);
-
-        var response = service.adminCancelOrders(new AdminBatchCancelOrdersRequest(null, "BTC-USDT", 2,
-                "symbol halt"));
-
-        assertThat(response.requested()).isEqualTo(2);
-        assertThat(response.canceled()).isEqualTo(2);
-        assertThat(response.skipped()).isZero();
-        verify(orderRepository).adminCancelableOrders(null, "BTC-USDT", 2);
-        verify(orderRepository).requestCancel(eq(9001L), any());
-        verify(orderRepository).requestCancel(eq(9002L), any());
-        verify(orderEventRepository, times(2)).insert(any());
-        verify(outboxRepository, times(4)).enqueue(eq("ORDER"), anyLong(), anyString(), eq("BTC-USDT"),
-                anyString(), anyString(), any());
-    }
-
-    @Test
-    void adminCancelPreviewReturnsImpactAndSampleOrders() {
-        OrderService service = userStateService();
-        OrderRecord first = order(9001L, "preview-1", OrderStatus.ACCEPTED, null);
-        when(orderUserStateService.adminCancelPreview(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 2))
-                .thenReturn(new AdminCancelOrdersPreviewResponse(1001L, "BTC-USDT", 3, 1, 25L, 2, 1,
-                        List.of(toResponse(first))));
-
-        var response = service.adminCancelPreview(1001L, "btc-usdt", 2);
-
-        assertThat(response.userId()).isEqualTo(1001L);
-        assertThat(response.symbol()).isEqualTo("BTC-USDT");
-        assertThat(response.matched()).isEqualTo(3);
-        assertThat(response.sampleSize()).isEqualTo(1);
-        assertThat(response.totalRemainingQuantitySteps()).isEqualTo(25L);
-        assertThat(response.buyOrders()).isEqualTo(2);
-        assertThat(response.sellOrders()).isEqualTo(1);
-        assertThat(response.orders()).extracting("orderId").containsExactly(9001L);
-        verify(orderUserStateService).adminCancelPreview(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 2);
-    }
-
-    @Test
-    void adminOrdersDelegatesCursorAndSort() {
-        OrderService service = userStateService();
-        OrderRecord row = order(9001L, "admin-page", OrderStatus.ACCEPTED, null);
-        when(orderUserStateService.adminOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
-                OrderStatus.ACCEPTED, 9001L, 25, "cursor-1", "createdAt.asc"))
-                .thenReturn(new OrderQueryResponse(1, List.of(toResponse(row)), "cursor-2", true,
-                        "createdAt.asc", 25));
-
-        var response = service.adminOrders(1001L, "btc-usdt", "accepted", 9001L, 25,
-                "cursor-1", "createdAt.asc");
-
-        assertThat(response.orders()).extracting("orderId").containsExactly(9001L);
-        assertThat(response.nextCursor()).isEqualTo("cursor-2");
-        assertThat(response.hasMore()).isTrue();
-        assertThat(response.sort()).isEqualTo("createdAt.asc");
-        assertThat(response.limit()).isEqualTo(25);
-        verify(orderUserStateService).adminOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
-                OrderStatus.ACCEPTED, 9001L, 25, "cursor-1", "createdAt.asc");
-    }
-
-    @Test
-    void adminOrdersDelegatesProductLineAsContractType() {
-        OrderService service = userStateService(ProductLine.LINEAR_DELIVERY);
-        OrderRecord row = order(9001L, "admin-product-line", OrderStatus.ACCEPTED, null);
-        when(orderUserStateService.adminOrders(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
-                OrderStatus.ACCEPTED, 9001L, 25, "cursor-1", "createdAt.asc"))
-                .thenReturn(new OrderQueryResponse(1, List.of(toResponse(row)), "cursor-2", true,
-                        "createdAt.asc", 25));
-
-        var response = service.adminOrders(1001L, "btc-usdt", "accepted", 9001L, 25,
-                "cursor-1", "createdAt.asc", ProductLine.LINEAR_DELIVERY);
-
-        assertThat(response.orders()).extracting("orderId").containsExactly(9001L);
-        verify(orderUserStateService).adminOrders(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT",
-                OrderStatus.ACCEPTED, 9001L, 25, "cursor-1", "createdAt.asc");
-    }
-
-    @Test
-    void adminCancelOrderRejectsMismatchedProductLine() {
-        OrderService service = service();
-        OrderRecord accepted = order(9001L, "cancel-wrong-product", OrderStatus.ACCEPTED, null);
-        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(accepted));
-        when(orderRepository.orderMatchesContractType(9001L, "LINEAR_DELIVERY")).thenReturn(false);
-
-        assertThatThrownBy(() -> service.adminCancelOrder(9001L, "risk operation", ProductLine.LINEAR_DELIVERY))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("order not found: 9001");
-
-        verify(orderRepository, never()).requestCancel(eq(9001L), any());
-    }
-
-    @Test
-    void adminCancelBySymbolRequiresSymbolAndCancelsSelectedSymbolOrders() {
-        OrderService service = service();
-        OrderRecord first = order(9001L, "symbol-1", OrderStatus.ACCEPTED, null);
-        OrderRecord firstCancelRequested = order(9001L, "symbol-1", OrderStatus.CANCEL_REQUESTED, null);
-        when(orderRepository.adminCancelableOrders(null, "BTC-USDT", 1)).thenReturn(java.util.List.of(first));
-        when(orderRepository.requestCancel(eq(9001L), any())).thenReturn(true);
-        when(orderRepository.findByOrderId(9001L)).thenReturn(Optional.of(firstCancelRequested));
-        when(orderRepository.nextSequence("event")).thenReturn(9100L);
-        when(orderRepository.nextSequence("command")).thenReturn(9200L);
-
-        var response = service.adminCancelBySymbol(new AdminCancelBySymbolRequest("btc-usdt", 1,
-                "symbol halt"));
-
-        assertThat(response.requested()).isEqualTo(1);
-        assertThat(response.canceled()).isEqualTo(1);
-        verify(orderRepository).adminCancelableOrders(null, "BTC-USDT", 1);
-    }
-
-    @Test
-    void openOrderCursorRoundTripsAnOrderIdAndRejectsMalformedInput() {
-        String cursor = OrderService.encodeOpenOrderCursor(9001L);
-
-        assertThat(OrderService.decodeOpenOrderCursor(cursor)).isEqualTo(9001L);
-        assertThatThrownBy(() -> OrderService.decodeOpenOrderCursor("not-a-cursor"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("invalid open-order cursor");
-    }
-
-    private OrderService service() {
-        return service(new TradingOrderProperties());
+                .hasMessageContaining("尚未接入本地账户事实流");
+        verify(userState, never()).place(any(OrderRecord.class));
     }
 
     private OrderService service(ProductLine productLine) {
         TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(productLine);
-        return service(properties);
-    }
-
-    private OrderService service(TradingOrderProperties properties) {
-        return new OrderService(new ObjectMapper(), properties, orderValidator,
-                reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
-                orderMarginRepository,
-                spotOrderReservationRepository, outboxRepository, null, null, feeSnapshotLookup);
-    }
-
-    private OrderService userStateService() {
-        return userStateService(new TradingOrderProperties());
-    }
-
-    private OrderService userStateService(ProductLine productLine) {
-        TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductTopicsEnabled(true);
-        properties.getKafka().setProductLine(productLine);
-        return userStateService(properties);
-    }
-
-    private OrderService userStateService(TradingOrderProperties properties) {
-        return new OrderService(new ObjectMapper(), properties, orderValidator,
-                reduceOnlyValidator, orderRepository, orderEventRepository, placementStateService,
-                orderMarginRepository, spotOrderReservationRepository, outboxRepository, null, null,
-                feeSnapshotLookup, orderUserStateService);
-    }
-
-    private com.surprising.trading.api.model.OrderResponse toResponse(OrderRecord order) {
-        return new com.surprising.trading.api.model.OrderResponse(
-                order.orderId(), order.userId(), order.clientOrderId(), order.symbol(), order.instrumentVersion(),
-                order.side(), order.orderType(), order.timeInForce(), order.priceTicks(), order.quantitySteps(),
-                order.executedQuantitySteps(), order.remainingQuantitySteps(), order.marginMode(), order.positionSide(),
-                order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.reduceOnly(), order.postOnly(),
-                order.status(), order.rejectReason(), order.createdAt(), order.updatedAt());
+        when(placementStateService.localPositionMode(productLine, 1001L)).thenReturn(PositionMode.ONE_WAY);
+        when(placementStateService.cachedPositionMarginModeConflict(productLine, 1001L, "BTC-USDT",
+                MarginMode.CROSS)).thenReturn(false);
+        when(userState.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.CROSS)).thenReturn(false);
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
+                .thenReturn(Optional.of(new OrderFeeSnapshot(100L, 200L, "JVM")));
+        return new OrderService(properties, orderValidator, reduceOnlyValidator, placementStateService,
+                orderMarginRepository, spotOrderReservationRepository, feeSnapshotLookup, userState);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {
-        return new PlaceOrderRequest(1001L, clientOrderId, "BTC-USDT", OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, false, false);
+        return new PlaceOrderRequest(1001L, clientOrderId, "BTC-USDT", OrderSide.BUY, OrderType.LIMIT,
+                TimeInForce.GTC, 60_000L, 10L, MarginMode.CROSS, PositionSide.NET, true, false);
     }
 
-    private OrderRecord order(long orderId, String clientOrderId, OrderStatus status, String rejectReason) {
-        Instant now = Instant.parse("2026-07-01T00:00:00Z");
-        long remaining = status == OrderStatus.REJECTED ? 0L : 10L;
-        return new OrderRecord(orderId, 1001L, clientOrderId, "BTC-USDT", 7L, OrderSide.BUY,
-                OrderType.LIMIT, TimeInForce.GTC, 65_000L, 10L, 0L, remaining,
-                200L, 500L, false, false, status, rejectReason, now, now);
-    }
-
-    private OrderRecord reduceOnlyOrder(long orderId,
-                                        OrderSide side,
-                                        long remainingQuantitySteps,
-                                        OrderStatus status) {
-        Instant now = Instant.parse("2026-07-01T00:00:00Z");
-        return new OrderRecord(
-                orderId, ProductLine.LINEAR_PERPETUAL, 1001L, "reduce-" + orderId, "BTC-USDT", 7L,
-                side, OrderType.LIMIT, TimeInForce.GTC, 65_000L, remainingQuantitySteps,
-                0L, remainingQuantitySteps, MarginMode.CROSS, PositionSide.NET,
-                200L, 500L, true, false, status, null, now, now, 1L);
-    }
-
-    private AccountCommandResultEvent reservationResult(long orderId,
-                                                         AccountCommandStatus status,
-                                                         String errorMessage,
-                                                         Instant completedAt,
-                                                         String traceId) {
-        return new AccountCommandResultEvent(
-                orderId,
-                "ORDER_RESERVE:LINEAR_PERPETUAL:" + orderId,
-                ProductLine.LINEAR_PERPETUAL,
-                1001L,
-                AccountUserCommandType.ORDER_RESERVE,
-                status,
-                "ORDER",
-                Long.toString(orderId),
-                null,
-                status == AccountCommandStatus.REJECTED ? "INSUFFICIENT_AVAILABLE_BALANCE" : null,
-                errorMessage,
-                completedAt,
-                traceId);
+    private OrderResponse response(long orderId, String clientOrderId, OrderStatus status) {
+        Instant now = Instant.parse("2026-08-02T00:00:00Z");
+        return new OrderResponse(orderId, 1001L, clientOrderId, "BTC-USDT", 7L, OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 60_000L, 10L, 0L, 10L, MarginMode.CROSS,
+                PositionSide.NET, 100L, 200L, true, false, status, null, now, now);
     }
 }

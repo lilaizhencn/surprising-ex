@@ -46,7 +46,6 @@ public class AccountUserStateCommandWorker {
     private final UserPartitionResultStore resultStore;
     private final UserPartitionCommandLane lane;
     private final AccountUserStateReducer reducer;
-    private final PerpetualAccountStateSnapshotService snapshotService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final Set<String> publishedCommands = ConcurrentHashMap.newKeySet();
 
@@ -57,7 +56,6 @@ public class AccountUserStateCommandWorker {
                                          UserPartitionResultStore resultStore,
                                          UserPartitionCommandLane lane,
                                          AccountUserStateReducer reducer,
-                                         PerpetualAccountStateSnapshotService snapshotService,
                                          KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
@@ -66,7 +64,6 @@ public class AccountUserStateCommandWorker {
         this.resultStore = resultStore;
         this.lane = lane;
         this.reducer = reducer;
-        this.snapshotService = snapshotService;
         this.kafkaTemplate = kafkaTemplate;
     }
 
@@ -173,11 +170,9 @@ public class AccountUserStateCommandWorker {
         if (stateStore.read(partition).isPresent()) {
             return;
         }
-        if (partition.productLine() != com.surprising.product.api.ProductLine.LINEAR_PERPETUAL) {
-            throw new AccountStateUnavailableException("产品线账户快照尚未接入事实流: " + partition.value());
-        }
-        // 首次接管只从数据库读取一次基线快照；成功后该用户的事实不再由数据库裁决。
-        reducer.initialize(snapshotService.snapshot(partition.productLine(), partition.userId()));
+        // 账户命令执行器不允许在热路径读取数据库。用户必须先通过账户内部快照初始化入口
+        // 写入本地 reducer；缺失快照时停住该用户分区，等待恢复或初始化事件，而不是继续扣款。
+        throw new AccountStateUnavailableException("账户 JVM 快照尚未初始化: " + partition.value());
     }
 
     private AccountUserCommand decode(UserPartitionEvent event, UserPartitionKey partition) {
