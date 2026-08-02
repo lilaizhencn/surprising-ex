@@ -436,8 +436,53 @@ public class OrderService {
         return orderBatchResponse(results);
     }
 
-    @Transactional
     public TestOrderResponse test(PlaceOrderRequest request) {
+        if (orderUserStateService != null) {
+            return testLocal(request);
+        }
+        return testDatabase(request);
+    }
+
+    /** 生产测试下单只读取 JVM 快照，不为校验请求打开数据库事务。 */
+    private TestOrderResponse testLocal(PlaceOrderRequest request) {
+        PlaceOrderRequest normalized = normalize(request);
+        ProductLine productLine = currentProductLine();
+        requireLocalAccountProductLine(productLine);
+        PositionMode positionMode = placementStateService.localPositionMode(productLine, normalized.userId());
+        normalized = normalizePositionMode(normalized, positionMode);
+        ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
+        if (!validation.accepted()) {
+            return testRejected(validation, "MARGIN_MODE");
+        }
+        validation = orderValidator.validate(normalized);
+        if (!validation.accepted()) {
+            return testRejected(validation, "ORDER_RULES");
+        }
+        if (normalized.reduceOnly()) {
+            ValidationResult reduceOnlyValidation = reduceOnlyValidator.validate(normalized);
+            if (!reduceOnlyValidation.accepted()) {
+                return testRejected(reduceOnlyValidation, "REDUCE_ONLY");
+            }
+            validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
+                    validation.instrumentType(), validation.contractType());
+        }
+        var resolvedFeeSnapshot = feeSnapshotLookup == null
+                ? java.util.Optional.<OrderFeeSnapshot>empty()
+                : feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
+                validation.instrumentVersion(), Instant.now());
+        if (resolvedFeeSnapshot.isEmpty()) {
+            return new TestOrderResponse(false, "fee schedule unavailable", validation.instrumentVersion(),
+                    "FEE", null, null, 0L);
+        }
+        if (normalized.reduceOnly() && !requiresReduceOnlyFunds(normalized, validation)) {
+            return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
+                    null, null, 0L);
+        }
+        return dryRunOpeningFunds(normalized, validation, resolvedFeeSnapshot.get());
+    }
+
+    /** 仅保留给未装配用户分区状态机的历史测试构造。 */
+    private TestOrderResponse testDatabase(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
         placementStateService.lockUserPositionMode(productLine, normalized.userId());
