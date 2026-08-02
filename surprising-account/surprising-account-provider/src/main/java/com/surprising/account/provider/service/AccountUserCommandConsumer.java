@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.listener.BatchListenerFailedException;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ public class AccountUserCommandConsumer {
 
     private final ObjectMapper objectMapper;
     private final AccountUserCommandProcessor processor;
+    private final AccountUserCommandWalIngress walIngress;
     private final AccountProperties properties;
     private final AccountCommandMetrics metrics;
     private final Set<FailedRecord> failedRecords = ConcurrentHashMap.newKeySet();
@@ -29,8 +31,19 @@ public class AccountUserCommandConsumer {
                                       AccountUserCommandProcessor processor,
                                       AccountProperties properties,
                                       AccountCommandMetrics metrics) {
+        this(objectMapper, processor, null, properties, metrics);
+    }
+
+    /** 生产入口只写同步 WAL；数据库投影由独立 worker 负责。 */
+    @Autowired
+    public AccountUserCommandConsumer(ObjectMapper objectMapper,
+                                      AccountUserCommandProcessor processor,
+                                      AccountUserCommandWalIngress walIngress,
+                                      AccountProperties properties,
+                                      AccountCommandMetrics metrics) {
         this.objectMapper = objectMapper;
         this.processor = processor;
+        this.walIngress = walIngress;
         this.properties = properties;
         this.metrics = metrics;
     }
@@ -55,10 +68,13 @@ public class AccountUserCommandConsumer {
             }
         }
         try {
-            List<AccountUserCommandProcessor.ProcessingOutcome> outcomes = processor.processBatch(parsed.stream()
+            List<AccountUserCommandProcessor.CommandEnvelope> envelopes = parsed.stream()
                     .map(value -> new AccountUserCommandProcessor.CommandEnvelope(
                             value.command(), value.record().value()))
-                    .toList());
+                    .toList();
+            List<AccountUserCommandProcessor.ProcessingOutcome> outcomes = walIngress == null
+                    ? processor.processBatch(envelopes)
+                    : walIngress.append(envelopes);
             if (outcomes.size() != parsed.size()) {
                 throw new IllegalStateException("account command batch outcome size mismatch");
             }

@@ -22,8 +22,16 @@ class UserPartitionWalTest {
             assertThat(first.sequence()).isEqualTo(1L);
             assertThat(second.sequence()).isEqualTo(2L);
             assertThat(wal.lastSequence(key)).isEqualTo(2L);
+            assertThat(wal.lastProjectedSequence(key)).isZero();
+            wal.markProjected(key, 1L);
+            assertThat(wal.lastProjectedSequence(key)).isEqualTo(1L);
             assertThat(wal.replay(key)).extracting(UserPartitionEvent::eventId)
                     .containsExactly("cmd-1", "cmd-2");
+            assertThat(wal.partitions()).containsExactly(key);
+            wal.markProjected(key, 2L);
+            assertThat(wal.lastProjectedSequence(key)).isEqualTo(2L);
+            assertThatThrownBy(() -> wal.markProjected(key, 4L))
+                    .isInstanceOf(IllegalArgumentException.class);
         }
         try (UserPartitionWal reopened = new UserPartitionWal(directory)) {
             assertThat(reopened.replay(key)).extracting(UserPartitionEvent::sequence)

@@ -34,6 +34,8 @@ public final class UserPartitionWal implements AutoCloseable {
     private static final byte[] NEXT_PREFIX = "next/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] IDEMPOTENCY_PREFIX = "idempotency/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] EVENT_PREFIX = "event/".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] PARTITION_PREFIX = "partition/".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] PROJECTED_PREFIX = "projected/".getBytes(StandardCharsets.UTF_8);
     private static final int MAX_STRING_BYTES = 1_048_576;
     private static final int MAX_PAYLOAD_BYTES = 16 * 1_024 * 1_024;
 
@@ -87,6 +89,7 @@ public final class UserPartitionWal implements AutoCloseable {
                 batch.put(eventKey(partition, sequence), encode(event));
                 batch.put(idempotencyKey, encodeExisting(sequence, fingerprint));
                 batch.put(nextKey(partition), encodeLong(sequence + 1L));
+                batch.put(partitionKey(partition), new byte[]{1});
                 database.write(writeOptions, batch);
             }
             return event;
@@ -132,6 +135,48 @@ public final class UserPartitionWal implements AutoCloseable {
         return next == 0L ? 0L : next - 1L;
     }
 
+    /** 返回已成功完成数据库投影的最后一条连续事件序号。 */
+    public long lastProjectedSequence(UserPartitionKey partition) {
+        try {
+            byte[] value = database.get(projectedKey(partition));
+            return value == null ? 0L : decodeLong(value);
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("failed to read projected WAL sequence", ex);
+        }
+    }
+
+    /** 只有数据库事务成功提交后才能推进投影水位。 */
+    public void markProjected(UserPartitionKey partition, long sequence) {
+        if (partition == null || sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
+            throw new IllegalArgumentException("projected WAL event must exist");
+        }
+        long current = lastProjectedSequence(partition);
+        if (sequence != current + 1L) {
+            throw new IllegalStateException("projected WAL sequence must be continuous: current=" + current
+                    + " next=" + sequence);
+        }
+        try {
+            database.put(writeOptions, projectedKey(partition), encodeLong(sequence));
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("failed to mark projected WAL event", ex);
+        }
+    }
+
+    /** 返回当前 WAL 中出现过的全部用户分区，供重启恢复扫描。 */
+    public List<UserPartitionKey> partitions() {
+        List<UserPartitionKey> result = new ArrayList<>();
+        try (var iterator = database.newIterator()) {
+            iterator.seek(PARTITION_PREFIX);
+            while (iterator.isValid() && startsWith(iterator.key(), PARTITION_PREFIX)) {
+                String value = new String(iterator.key(), PARTITION_PREFIX.length,
+                        iterator.key().length - PARTITION_PREFIX.length, StandardCharsets.UTF_8);
+                result.add(UserPartitionKey.parse(value));
+                iterator.next();
+            }
+        }
+        return List.copyOf(result);
+    }
+
     private long nextSequence(UserPartitionKey partition) {
         try {
             byte[] value = database.get(nextKey(partition));
@@ -155,6 +200,14 @@ public final class UserPartitionWal implements AutoCloseable {
 
     private byte[] eventPrefix(UserPartitionKey partition) {
         return key(EVENT_PREFIX, partition.value() + '/');
+    }
+
+    private byte[] partitionKey(UserPartitionKey partition) {
+        return key(PARTITION_PREFIX, partition.value());
+    }
+
+    private byte[] projectedKey(UserPartitionKey partition) {
+        return key(PROJECTED_PREFIX, partition.value());
     }
 
     private byte[] key(byte[] prefix, String value) {

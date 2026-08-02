@@ -104,3 +104,5 @@ surprising:
       poll-delay-ms: 20
     wal:
       directory: ${ACCOUNT_WAL_DIR:data/account-wal}
+      projection-delay-ms: ${ACCOUNT_WAL_PROJECTION_DELAY_MS:25}
+      projection-batch-size: ${ACCOUNT_WAL_PROJECTION_BATCH_SIZE:100}

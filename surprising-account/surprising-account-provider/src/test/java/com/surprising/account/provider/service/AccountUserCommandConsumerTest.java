@@ -45,6 +45,28 @@ class AccountUserCommandConsumerTest {
                 .containsExactly("command-1", "command-2");
     }
 
+    @Test
+    void productionConstructorAcknowledgesOnlyAfterWalIngress() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        AccountUserCommandProcessor processor = mock(AccountUserCommandProcessor.class);
+        AccountUserCommandWalIngress ingress = mock(AccountUserCommandWalIngress.class);
+        when(ingress.append(anyList())).thenReturn(List.of(
+                AccountUserCommandProcessor.ProcessingOutcome.DURABLE));
+        AccountUserCommandConsumer consumer = new AccountUserCommandConsumer(
+                objectMapper, processor, ingress, properties,
+                new AccountCommandMetrics(new SimpleMeterRegistry()));
+        AccountUserCommand command = command("command-wal-1", 1001L,
+                Instant.parse("2026-07-20T00:00:00Z"));
+
+        consumer.onCommands(List.of(record(properties, command,
+                objectMapper.writeValueAsString(command), 43L)));
+
+        verify(ingress).append(anyList());
+        org.mockito.Mockito.verifyNoInteractions(processor);
+    }
+
     private static AccountUserCommand command(String commandId, long userId, Instant occurredAt) {
         return new AccountUserCommand(AccountUserCommand.CURRENT_SCHEMA_VERSION, commandId,
                 ProductLine.LINEAR_PERPETUAL, userId, AccountUserCommandType.ORDER_RELEASE,

@@ -643,6 +643,8 @@ public class AccountProperties {
 
     public static class Wal {
         private String directory = "data/account-wal";
+        private long projectionDelayMs = 25L;
+        private int projectionBatchSize = 100;
 
         public String getDirectory() {
             return directory;
@@ -653,6 +655,28 @@ public class AccountProperties {
                 throw new IllegalArgumentException("account WAL directory is required");
             }
             this.directory = directory.trim();
+        }
+
+        public long getProjectionDelayMs() {
+            return projectionDelayMs;
+        }
+
+        public void setProjectionDelayMs(long projectionDelayMs) {
+            if (projectionDelayMs <= 0L) {
+                throw new IllegalArgumentException("account WAL projectionDelayMs must be positive");
+            }
+            this.projectionDelayMs = projectionDelayMs;
+        }
+
+        public int getProjectionBatchSize() {
+            return projectionBatchSize;
+        }
+
+        public void setProjectionBatchSize(int projectionBatchSize) {
+            if (projectionBatchSize <= 0) {
+                throw new IllegalArgumentException("account WAL projectionBatchSize must be positive");
+            }
+            this.projectionBatchSize = projectionBatchSize;
         }
     }
 }
