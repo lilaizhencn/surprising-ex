@@ -111,9 +111,7 @@ public class OrderService {
                 return existing.get();
             }
         }
-        PositionMode positionMode = productLine == ProductLine.LINEAR_PERPETUAL
-                ? placementStateService.localPositionMode(productLine, normalized.userId())
-                : placementStateService.positionMode(productLine, normalized.userId());
+        PositionMode positionMode = placementStateService.localPositionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
         Instant now = Instant.now();
         ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
@@ -177,8 +175,12 @@ public class OrderService {
     /** 本地订单事实流使用账户快照和用户分区状态完成保证金模式校验，不打开数据库事务。 */
     private ValidationResult validateMarginModeForLocalState(ProductLine productLine,
                                                              PlaceOrderRequest request) {
-        if (request.reduceOnly() || productLine != ProductLine.LINEAR_PERPETUAL) {
-            return validateMarginMode(productLine, request);
+        if (productLine != ProductLine.LINEAR_PERPETUAL) {
+            throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
+        }
+        if (request.reduceOnly()) {
+            // 只减仓不会新增保证金模式状态；仓位模式和仓位快照由只减仓校验统一确认。
+            return ValidationResult.ok();
         }
         if (placementStateService.cachedPositionMarginModeConflict(productLine, request.userId(),
                 request.symbol(), request.marginMode())) {
@@ -467,16 +469,6 @@ public class OrderService {
         }
         return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
                 value.accountType(), value.asset(), value.initialMarginUnits());
-    }
-
-    private ValidationResult validateMarginMode(ProductLine productLine, PlaceOrderRequest request) {
-        MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
-        if (!request.reduceOnly()
-                && placementStateService.hasActiveMarginModeConflict(productLine, request.userId(), request.symbol(),
-                        marginMode)) {
-            return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
-        }
-        return ValidationResult.ok(0L);
     }
 
     private boolean requiresReduceOnlyFunds(PlaceOrderRequest request, ValidationResult validation) {

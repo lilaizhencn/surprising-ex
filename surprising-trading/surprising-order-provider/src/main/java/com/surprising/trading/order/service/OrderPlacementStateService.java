@@ -8,89 +8,36 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
-import com.surprising.trading.order.repository.OrderAlgoStateRepository;
-import com.surprising.trading.order.repository.OrderCoordinationRepository;
-import com.surprising.trading.order.repository.OrderPositionModeRepository;
-import com.surprising.trading.order.repository.OrderPositionRepository;
-import com.surprising.trading.order.repository.OrderRepository;
-import com.surprising.trading.order.repository.OrderTriggerStateRepository;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
-/** 在订单业务事务内聚合持仓、仓位模式、普通订单、触发单和算法单的单表状态查询。 */
+/** 订单下单所需的账户状态入口，只读取账户 JVM 快照并负责启动时按用户初始化。 */
 @Service
 public class OrderPlacementStateService {
-    private final OrderCoordinationRepository coordinationRepository;
-    private final OrderPositionModeRepository positionModeRepository;
-    private final OrderPositionRepository positionRepository;
-    private final OrderRepository orderRepository;
-    private final OrderTriggerStateRepository triggerRepository;
-    private final OrderAlgoStateRepository algoRepository;
     private final PerpetualAccountStateSnapshotCache accountStateSnapshotCache;
     private final PerpetualAccountStateRpcApi accountStateRpcApi;
     private final ConcurrentMap<Long, Object> snapshotInitializationLocks = new ConcurrentHashMap<>();
 
-    public OrderPlacementStateService(OrderCoordinationRepository coordinationRepository,
-                                      OrderPositionModeRepository positionModeRepository,
-                                      OrderPositionRepository positionRepository,
-                                      OrderRepository orderRepository,
-                                      OrderTriggerStateRepository triggerRepository,
-                                      OrderAlgoStateRepository algoRepository) {
-        this(coordinationRepository, positionModeRepository, positionRepository, orderRepository,
-                triggerRepository, algoRepository, null);
-    }
-
-    public OrderPlacementStateService(OrderCoordinationRepository coordinationRepository,
-                                      OrderPositionModeRepository positionModeRepository,
-                                      OrderPositionRepository positionRepository,
-                                      OrderRepository orderRepository,
-                                      OrderTriggerStateRepository triggerRepository,
-                                      OrderAlgoStateRepository algoRepository,
-                                      PerpetualAccountStateSnapshotCache accountStateSnapshotCache) {
-        this(coordinationRepository, positionModeRepository, positionRepository, orderRepository,
-                triggerRepository, algoRepository, accountStateSnapshotCache, null);
-    }
-
     @org.springframework.beans.factory.annotation.Autowired
-    public OrderPlacementStateService(OrderCoordinationRepository coordinationRepository,
-                                      OrderPositionModeRepository positionModeRepository,
-                                      OrderPositionRepository positionRepository,
-                                      OrderRepository orderRepository,
-                                      OrderTriggerStateRepository triggerRepository,
-                                      OrderAlgoStateRepository algoRepository,
-                                      @Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
+    public OrderPlacementStateService(@Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
                                       @Nullable PerpetualAccountStateRpcApi accountStateRpcApi) {
-        this.coordinationRepository = coordinationRepository;
-        this.positionModeRepository = positionModeRepository;
-        this.positionRepository = positionRepository;
-        this.orderRepository = orderRepository;
-        this.triggerRepository = triggerRepository;
-        this.algoRepository = algoRepository;
         this.accountStateSnapshotCache = accountStateSnapshotCache;
         this.accountStateRpcApi = accountStateRpcApi;
     }
 
-    public void lockUserPositionMode(ProductLine line, long userId) {
-        coordinationRepository.lockUserPositionMode(line, userId);
-    }
-
-    public void lockUserSymbolMarginScope(ProductLine line, long userId, String symbol) {
-        coordinationRepository.lockUserSymbolMarginScope(line, userId, symbol);
-    }
-
     public PositionMode positionMode(ProductLine line, long userId) {
-        if (line == ProductLine.LINEAR_PERPETUAL && accountStateSnapshotCache != null) {
-            if (!accountStateSnapshotCache.ready()) {
-                // Kafka 可能仍在追赶历史位点；只对当前用户做一次内部 RPC 初始化，
-                // 初始化成功后本地缓存即可安全服务该用户，后续更新仍由 Kafka 驱动。
-                initializeAccountState(line, userId);
-            }
-            return state(line, userId).positionMode();
+        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+            throw new IllegalStateException("订单本地状态尚未支持该产品线的仓位模式快照: " + line);
         }
-        return positionModeRepository.positionMode(line, userId);
+        if (!accountStateSnapshotCache.ready()) {
+            // Kafka 可能仍在追赶历史位点；只对当前用户做一次内部 RPC 初始化，
+            // 初始化成功后本地缓存即可安全服务该用户，后续更新仍由 Kafka 驱动。
+            initializeAccountState(line, userId);
+        }
+        return state(line, userId).positionMode();
     }
 
     /**
@@ -172,11 +119,6 @@ public class OrderPlacementStateService {
         }
     }
 
-    public Optional<ReduceOnlyPosition> lockedPosition(ProductLine line, long userId, String symbol,
-                                                       MarginMode mode, PositionSide side) {
-        return positionRepository.lockedPosition(line, userId, symbol, mode, side);
-    }
-
     /**
      * 永续订单事实流使用账户 JVM 快照读取持仓，不允许为了平仓重新打开持仓表事务。
      */
@@ -201,10 +143,4 @@ public class OrderPlacementStateService {
                 .findFirst();
     }
 
-    public boolean hasActiveMarginModeConflict(ProductLine line, long userId, String symbol, MarginMode mode) {
-        return positionRepository.hasMarginModeConflict(line, userId, symbol, mode)
-                || orderRepository.hasActiveMarginModeConflict(line, userId, symbol, mode)
-                || triggerRepository.hasMarginModeConflict(line, userId, symbol, mode)
-                || algoRepository.hasMarginModeConflict(line, userId, symbol, mode);
-    }
 }
