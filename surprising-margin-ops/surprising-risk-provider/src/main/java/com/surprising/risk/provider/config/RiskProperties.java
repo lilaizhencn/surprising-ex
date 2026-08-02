@@ -14,6 +14,7 @@ public class RiskProperties {
     private Calculation calculation = new Calculation();
     private Outbox outbox = new Outbox();
     private RedisState redisState = new RedisState();
+    private LocalState localState = new LocalState();
 
     /** 启动时拒绝未隔离的风险 Topic 配置。 */
     @PostConstruct
@@ -51,6 +52,42 @@ public class RiskProperties {
 
     public void setRedisState(RedisState redisState) {
         this.redisState = redisState;
+    }
+
+    public LocalState getLocalState() {
+        return localState;
+    }
+
+    public void setLocalState(LocalState localState) {
+        this.localState = localState;
+    }
+
+    /** 风险计算结果的本地持久化队列配置。 */
+    public static class LocalState {
+        private String walDirectory = "data/risk-projection-wal";
+        private int projectionBatchSize = 100;
+
+        public String getWalDirectory() {
+            return walDirectory;
+        }
+
+        public void setWalDirectory(String walDirectory) {
+            if (walDirectory == null || walDirectory.isBlank()) {
+                throw new IllegalArgumentException("risk local state walDirectory 不能为空");
+            }
+            this.walDirectory = walDirectory.trim();
+        }
+
+        public int getProjectionBatchSize() {
+            return projectionBatchSize;
+        }
+
+        public void setProjectionBatchSize(int projectionBatchSize) {
+            if (projectionBatchSize <= 0) {
+                throw new IllegalArgumentException("risk local state projectionBatchSize 必须为正数");
+            }
+            this.projectionBatchSize = projectionBatchSize;
+        }
     }
 
     public static class Kafka {

@@ -25,6 +25,12 @@ public class RiskMaintenanceTask {
         riskService.scan();
     }
 
+    /** 风险计算与数据库读模型投影解耦，数据库不可用时本地事实仍可继续累积。 */
+    @Scheduled(fixedDelayString = "${surprising.risk.local-state.projection-delay-ms:100}")
+    public void projectRisk() {
+        riskService.projectPending();
+    }
+
     @Scheduled(fixedDelayString = "${surprising.risk.outbox.publish-delay-ms:200}")
     public void publishOutbox() {
         outboxPublisher.publishPending();

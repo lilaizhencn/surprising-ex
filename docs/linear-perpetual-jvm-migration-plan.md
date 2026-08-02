@@ -53,7 +53,7 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 
 ### 2.3 风控
 
-[`RiskService`](../surprising-margin-ops/surprising-risk-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java) 已有 `localGroups`，但 `scanPositionUpdates` 在本地组缺失或过期时仍通过 `RedisRiskStateStore` 和 `RiskRepository.cachedRiskGroup` 恢复；`scanMarkPrice` 通过 Redis 反向索引找到风险组，再从 Redis 批量读取状态。风险快照、风险事件和强平候选在数据库事务中落库。
+[`RiskService`](../surprising-margin-ops/surprising-risk-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java) 使用 `localGroups` 和 Redis 风险组快照；`scanPositionUpdates` 在快照缺失时失败关闭，不再通过 `RiskRepository.cachedRiskGroup` 回查数据库。标记价触发只读取 Redis 反向索引命中的 JVM 风险组。风险计算结果先进入 `RiskLocalProjectionStore` 的 RocksDB 队列，再由异步投影器在数据库事务中落库。
 
 ### 2.4 强平
 
@@ -156,6 +156,7 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 - `scanMarkPrice` 直接按本地 `LINEAR_PERPETUAL:userId:settleAsset` 风险组计算，不依赖 Redis MGET。
 - Redis 风险状态保留为跨节点协调、可选反向索引和恢复投影。
 - 风险事件携带 `positionRevision`、`riskRevision`、`markSequence` 和行情时间。
+- 风险计算结果先追加 `RiskLocalProjectionStore` 的 RocksDB 本地队列，再由独立任务异步写入数据库读模型；数据库不可用时不阻塞风险计算，恢复后按投影水位重放。
 - 标记价/指数价过期、instrumentVersion 不匹配或状态不完整时停止强平候选生成。
 
 验收：同一持仓和价格在重放、重复、乱序和多节点下只产生一个有效风险状态；风险恢复不能把过期行情当成最新行情。
@@ -167,7 +168,7 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 `snapshotId` 兼容，避免历史候选重放失败；这一步只增加校验信息，尚未切换强平实时数据库路径。
 强平服务另外以独立消费组消费账户持仓事件，维护按产品线和 revision 隔离的 JVM 快照；该快照目前仅用于影子校验与恢复准备，未替代实时执行中的数据库复核。
 风控持仓触发消费者也在风险计算成功后推进同一类 JVM 快照；若风险计算失败，事件重试不会提前污染快照。
-风险持仓事件路径已在快照未就绪或风险组缺失时 fail-closed 并等待 Kafka 重试，不再从 `RiskRepository.cachedRiskGroup` 读取数据库；数据库查询仅由启动/定时恢复扫描使用。
+风险持仓事件路径已在快照未就绪或风险组缺失时 fail-closed 并等待 Kafka 重试，不再从 `RiskRepository.cachedRiskGroup` 读取数据库；风险事件热路径只读 JVM/Redis 快照，数据库查询仅由启动/定时恢复扫描和异步读模型投影使用。
 强平执行在本机快照明确领先候选版本时先取消陈旧候选并写审计；快照缺失或落后不做推断，继续走现有锁定和数据库复核。
 
 改动：

@@ -242,26 +242,26 @@ surprising:
 风险投影与标记价触发链路：
 
 ```text
-account_positions
-  + account_balances
-  + account_deficits
-  + instruments
-  + account_asset_scales
-  -> Redis 完整风险组
+账户 JVM 快照
+  + Instrument JVM 快照
+  + 标记价 JVM 快照
+  -> Redis 风险组与反向索引（跨节点协调）
   -> Redis symbol + instrumentVersion 反向索引
 Kafka 标记价更新
   -> 只读取反向索引命中的风险组
   -> 精确整数风险计算
+  -> 风险本地 RocksDB 投影队列
+  -> 异步数据库读模型投影
   -> risk_account_snapshots
   -> risk_position_snapshots
   -> risk_liquidation_candidates
   -> surprising.linear-perp.liquidation.candidates.v1
 ```
 
-标记价不从审计表读取。account position 事件只触发从 PostgreSQL 重载完整账户风险组，标记价更新
-通过 Redis 反向索引只计算受影响的组。Redis readiness 失效时停止候选生成，直到 keyset 重建完整
-风险组和反向索引。风险快照、candidate 和 candidate Outbox 在一个 PostgreSQL 事务内批量写入；
-最终强平仍重新校验并锁定 PostgreSQL 持仓和风险状态。
+标记价不从审计表读取。account position 事件和账户钱包事件只合并已经初始化的 JVM/Redis 风险组，
+缓存缺失时失败关闭，禁止在事件热路径回查 PostgreSQL。风险计算完成后先同步追加本地 RocksDB
+投影队列；独立投影任务再申请数据库序列并写入风险快照、candidate 和 candidate Outbox。
+投影水位在数据库事务成功后推进，崩溃时按原批次重放，数据库读模型只用于查询、审计和启动恢复。
 如果 position 风险事件暂时拿不到新鲜标记价，Kafka batch 会无限重试而不是丢弃；定时扫描是补充校验，
 不能作为提交并跳过资金风险事件的理由。
 
@@ -437,7 +437,9 @@ order-provider 校验余额和风险
 
 RocksDB 适合做本地状态存储，不适合代替账户权威账本。
 
-本项目里 RocksDB 主要用于 Kafka Streams 这类状态层，例如 K 线聚合 state store。账户余额、仓位、保证金、风险快照、强平候选仍以 PostgreSQL 作为当前权威状态。
+本项目里 RocksDB 用于账户/订单事实、撮合状态以及风险计算投影队列。账户余额、仓位、保证金和风险
+计算结果的在线事实分别由用户分区 reducer、撮合本地状态和风险 JVM 计算维护；PostgreSQL 只保留
+异步读模型、恢复基线和审计记录。
 
 撮合引擎 exchange-core 自身支持快照和 journal 思路；项目里的 matching provider 还会从 open orders 恢复 order book。生产环境需要继续完善 exchange-core snapshot/journal 的持久化和快速恢复策略。
 

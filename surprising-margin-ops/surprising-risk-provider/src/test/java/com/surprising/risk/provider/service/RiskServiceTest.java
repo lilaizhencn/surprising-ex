@@ -160,6 +160,35 @@ class RiskServiceTest {
     }
 
     @Test
+    void productionRiskCalculationOnlyAppendsLocalProjectionFact() throws Exception {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of();
+        RiskProperties properties = new RiskProperties();
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        try (RiskLocalProjectionStore localStore = new RiskLocalProjectionStore(
+                java.nio.file.Files.createTempDirectory("risk-service-local-"), new ObjectMapper())) {
+            RiskService service = redisRiskService(properties, riskRepository, outboxRepository, null,
+                    transactionManager, localStore);
+
+            service.scanPositionUpdates(List.of(
+                    positionEvent(31L, 1001L, "BTC-USDT", 7L, "USDT", "trace-local")));
+
+            assertThat(localStore.pending(10)).hasSize(1);
+            assertThat(riskRepository.savedAccounts).isZero();
+            assertThat(riskRepository.savedPositions).isZero();
+            assertThat(outboxRepository.enqueued).isZero();
+            assertThat(transactionManager.commits).isZero();
+
+            service.projectPending();
+
+            assertThat(riskRepository.savedAccounts).isEqualTo(1);
+            assertThat(transactionManager.commits).isEqualTo(1);
+            assertThat(localStore.pending(10)).isEmpty();
+        }
+    }
+
+    @Test
     void positionEventBatchScansDifferentRiskGroupsIndependently() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of();
@@ -220,7 +249,7 @@ class RiskServiceTest {
     }
 
     @Test
-    void positionEventRecoversMissingRiskGroupFromCommittedProjection() {
+    void positionEventFailsClosedWhenRiskGroupSnapshotIsMissing() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of();
         RiskProperties properties = new RiskProperties();
@@ -245,13 +274,13 @@ class RiskServiceTest {
                 riskRepository.persistence, new FakeRiskSequenceRepository(), outboxRepository, null,
                 transactionManager, stateStore, calculator);
 
-        service.scanPositionUpdates(List.of(
-                positionEvent(31L, 2002L, "BTC-USDT", 7L, "USDT", "trace-recovery")));
+        assertThatThrownBy(() -> service.scanPositionUpdates(List.of(
+                positionEvent(31L, 2002L, "BTC-USDT", 7L, "USDT", "trace-recovery"))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("禁止回退数据库");
 
-        assertThat(riskRepository.cachedRiskGroupCalls).isEqualTo(1);
-        assertThat(stored.get()).isNotNull();
-        assertThat(stored.get().key()).isEqualTo(new RiskGroupKey(2002L, "USDT"));
-        assertThat(transactionManager.commits).isEqualTo(1);
+        assertThat(riskRepository.cachedRiskGroupCalls).isZero();
+        assertThat(transactionManager.commits).isZero();
     }
 
     @Test
@@ -556,6 +585,15 @@ class RiskServiceTest {
                                          FakeRiskOutboxRepository outboxRepository,
                                          KafkaTemplate<String, String> kafka,
                                          TrackingTransactionManager transactionManager) {
+        return redisRiskService(properties, riskRepository, outboxRepository, kafka, transactionManager, null);
+    }
+
+    private RiskService redisRiskService(RiskProperties properties,
+                                         FakeRiskRepository riskRepository,
+                                         FakeRiskOutboxRepository outboxRepository,
+                                         KafkaTemplate<String, String> kafka,
+                                         TrackingTransactionManager transactionManager,
+                                         RiskLocalProjectionStore localStore) {
         RedisRiskStateStore stateStore = mock(RedisRiskStateStore.class);
         RedisRiskCalculator calculator = mock(RedisRiskCalculator.class);
         RedisRiskStateStore.ProjectionLease projectionLease =
@@ -585,7 +623,7 @@ class RiskServiceTest {
         return new RiskService(new ObjectMapper(), properties, riskRepository,
                 riskRepository.persistence, new FakeRiskSequenceRepository(),
                 outboxRepository, kafka, transactionManager, stateStore,
-                calculator);
+                calculator, localStore);
     }
 
     private PositionUpdatedEvent positionEvent(long revision,

@@ -64,6 +64,8 @@ import tools.jackson.databind.ObjectMapper;
     private final TransactionTemplate transactionTemplate;
     private final RedisRiskStateStore stateStore;
     private final RedisRiskCalculator redisCalculator;
+    /** 计算线程与数据库投影器之间的本地事实队列。 */
+    private final RiskLocalProjectionStore localProjectionStore;
     private RiskGroupKey reconcileAfter;
     private volatile boolean initialProjectionComplete;
     private boolean projectionStarted;
@@ -82,7 +84,8 @@ import tools.jackson.databind.ObjectMapper;
                        @Qualifier("riskKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
                        PlatformTransactionManager transactionManager,
                        RedisRiskStateStore stateStore,
-                       RedisRiskCalculator redisCalculator) {
+                       RedisRiskCalculator redisCalculator,
+                       RiskLocalProjectionStore localProjectionStore) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.riskRepository = riskRepository;
@@ -93,6 +96,23 @@ import tools.jackson.databind.ObjectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.stateStore = stateStore;
         this.redisCalculator = redisCalculator;
+        this.localProjectionStore = localProjectionStore;
+    }
+
+    /** 仅供现有单元测试构造风险计算器，不作为生产 Bean 构造器。 */
+    RiskService(ObjectMapper objectMapper,
+                RiskProperties properties,
+                RiskRepository riskRepository,
+                RiskPersistenceService persistenceService,
+                RiskSequenceRepository sequenceRepository,
+                RiskOutboxRepository outboxRepository,
+                KafkaTemplate<String, String> kafkaTemplate,
+                PlatformTransactionManager transactionManager,
+                RedisRiskStateStore stateStore,
+                RedisRiskCalculator redisCalculator) {
+        this(objectMapper, properties, riskRepository, persistenceService, sequenceRepository,
+                outboxRepository, kafkaTemplate, transactionManager, stateStore,
+                redisCalculator, null);
     }
 
     RiskService(ObjectMapper objectMapper,
@@ -105,7 +125,7 @@ import tools.jackson.databind.ObjectMapper;
                 PlatformTransactionManager transactionManager) {
         this(objectMapper, properties, riskRepository, persistenceService, sequenceRepository,
                 outboxRepository, kafkaTemplate,
-                transactionManager, null, null);
+                transactionManager, null, null, null);
     }
 
     RiskService(ObjectMapper objectMapper,
@@ -117,7 +137,7 @@ import tools.jackson.databind.ObjectMapper;
                 PlatformTransactionManager transactionManager) {
         this(objectMapper, properties, riskRepository, persistenceService, sequenceRepository,
                 outboxRepository, null,
-                transactionManager, null, null);
+                transactionManager, null, null, null);
     }
 
     public synchronized void scan() {
@@ -303,37 +323,14 @@ import tools.jackson.databind.ObjectMapper;
             }
             CachedRiskGroup projected = stateStore.read(productLine, key);
             if (projected == null) {
-                /*
-                 * 新账户的首笔持仓事件可能先于后台对账扫描到达。此时不能用零值
-                 * 组继续计算，也不能让 Kafka 分区永久卡在同一条消息上；从已提交
-                 * 的业务投影恢复一次完整风险组，再合并当前事件。该查询只用于
-                 * JVM/Redis 快照缺失的启动恢复窗口，正常事件路径仍只读快照。
-                 */
-                CachedRiskGroup recovered = recoverMissingGroup(productLine, key);
-                return new ProjectionUpdate(recovered, true);
+                // 事件热路径禁止因为缓存缺失而回查数据库；等待完整账户/持仓快照初始化后再重试。
+                throw new IllegalStateException("风险组 JVM/Redis 快照缺失，禁止回退数据库: " + key);
             }
             return new ProjectionUpdate(projected, false);
         }
         RedisRiskStateStore.ProjectionUpdate update =
                 stateStore.replace(productLine, key, () -> riskRepository.cachedRiskGroup(key));
         return new ProjectionUpdate(update.state(), update.changed());
-    }
-
-    private CachedRiskGroup recoverMissingGroup(ProductLine productLine, RiskGroupKey key) {
-        log.warn("风险组 JVM/Redis 快照缺失，执行一次已提交业务状态恢复: productLine={}, key={}",
-                productLine, key);
-        RedisRiskStateStore.ProjectionUpdate recovered = stateStore.replace(productLine, key, () -> {
-            CachedRiskGroup current = stateStore.read(productLine, key);
-            if (current != null) {
-                return current;
-            }
-            CachedRiskGroup authoritative = riskRepository.cachedRiskGroup(key);
-            if (authoritative == null || !key.equals(authoritative.key())) {
-                throw new IllegalStateException("无法恢复风险组权威快照: " + key);
-            }
-            return authoritative;
-        });
-        return recovered.state();
     }
 
     private CachedRiskGroup mergePositionEvents(CachedRiskGroup state, PositionEventGroup eventGroup) {
@@ -377,34 +374,124 @@ import tools.jackson.databind.ObjectMapper;
             candidateCount += evaluation.candidateCount();
         }
 
-        int totalPositionWrites = positionWriteCount;
-        int totalCandidates = candidateCount;
+        if (localProjectionStore != null) {
+            // 风险计算热路径只落本地同步 WAL，数据库序列、快照和强平候选由独立投影任务处理。
+            localProjectionStore.append(toProjectionBatch(evaluations));
+            return;
+        }
+
+        // 仅保留给没有注入本地队列的单元测试构造器；生产构造器始终注入 RiskLocalProjectionStore。
+        projectEvaluations(evaluations);
+    }
+
+    /** 消费本地风险事实并异步写入数据库读模型。 */
+    public void projectPending() {
+        if (localProjectionStore == null) {
+            return;
+        }
+        List<RiskLocalProjectionStore.PendingBatch> pending = localProjectionStore.pending(
+                Math.max(1, properties.getLocalState().getProjectionBatchSize()));
+        for (RiskLocalProjectionStore.PendingBatch item : pending) {
+            projectPendingBatch(item);
+        }
+    }
+
+    private void projectPendingBatch(RiskLocalProjectionStore.PendingBatch pending) {
+        RiskLocalProjectionStore.RiskProjectionBatch batch = pending.batch();
+        if (batch.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalStateException("风险本地投影事实产品线不匹配: " + batch.productLine());
+        }
+        int positionCount = batch.groups().stream()
+                .mapToInt(group -> group.positions().size() + group.flatPositions().size())
+                .sum();
+        int candidateCount = batch.groups().stream()
+                .mapToInt(group -> (int) group.positions().stream()
+                        .filter(RiskLocalProjectionStore.RiskProjectionPosition::liquidation)
+                        .count())
+                .sum();
+        RiskLocalProjectionStore.ProjectionIds ids = pending.ids().orElseGet(() -> {
+            List<Long> snapshots = sequenceRepository.nextSequences("risk-snapshot", batch.groups().size());
+            List<Long> events = sequenceRepository.nextSequences("risk-event",
+                    batch.groups().size() + positionCount);
+            List<Long> candidates = sequenceRepository.nextSequences("liquidation-candidate", candidateCount);
+            RiskLocalProjectionStore.ProjectionIds allocated = new RiskLocalProjectionStore.ProjectionIds(
+                    firstOrZero(snapshots), firstOrZero(events), firstOrZero(candidates));
+            localProjectionStore.assign(pending.sequence(), allocated);
+            return allocated;
+        });
+        List<GroupEvaluation> evaluations = new ArrayList<>(batch.groups().size());
+        for (RiskLocalProjectionStore.RiskProjectionGroup group : batch.groups()) {
+            List<EvaluatedPosition> positions = group.positions().stream()
+                    .map(position -> new EvaluatedPosition(position.position(), position.marginRatioPpm(),
+                            position.status(), position.equityUnits(), position.liquidation()))
+                    .toList();
+            evaluations.add(new GroupEvaluation(
+                    new RiskGroupKey(group.userId(), group.accountType(), group.settleAsset()),
+                    group.walletBalanceUnits(), group.unrealizedPnlUnits(), group.equityUnits(),
+                    group.maintenanceMarginUnits(), group.marginRatioPpm(), group.status(), positions,
+                    group.flatPositions(), positions.stream().mapToInt(position -> position.liquidation() ? 1 : 0)
+                            .sum(), group.eventTime(), group.traceId()));
+        }
+        projectEvaluations(evaluations, ids);
+        localProjectionStore.markProjected(pending.sequence());
+    }
+
+    private RiskLocalProjectionStore.RiskProjectionBatch toProjectionBatch(List<GroupEvaluation> evaluations) {
+        return new RiskLocalProjectionStore.RiskProjectionBatch(properties.getKafka().getProductLine(),
+                evaluations.stream().map(evaluation -> new RiskLocalProjectionStore.RiskProjectionGroup(
+                        evaluation.key().userId(), evaluation.key().accountType(), evaluation.key().settleAsset(),
+                        evaluation.walletBalanceUnits(), evaluation.unrealizedPnlUnits(), evaluation.equityUnits(),
+                        evaluation.maintenanceMarginUnits(), evaluation.marginRatioPpm(), evaluation.status(),
+                        evaluation.positions().stream().map(position ->
+                                new RiskLocalProjectionStore.RiskProjectionPosition(position.position(),
+                                        position.marginRatioPpm(), position.status(), position.equityUnits(),
+                                        position.liquidation())).toList(),
+                        evaluation.flatPositions(), evaluation.eventTime(), evaluation.traceId())).toList());
+    }
+
+    private long firstOrZero(List<Long> values) {
+        return values.isEmpty() ? 0L : values.get(0);
+    }
+
+    private void projectEvaluations(List<GroupEvaluation> evaluations) {
+        int positionWriteCount = evaluations.stream()
+                .mapToInt(evaluation -> evaluation.positions().size() + evaluation.flatPositions().size()).sum();
+        int candidateCount = evaluations.stream().mapToInt(GroupEvaluation::candidateCount).sum();
+        List<Long> snapshotIds = sequenceRepository.nextSequences("risk-snapshot", evaluations.size());
+        List<Long> eventIds = sequenceRepository.nextSequences("risk-event", evaluations.size() + positionWriteCount);
+        List<Long> candidateIds = sequenceRepository.nextSequences("liquidation-candidate", candidateCount);
+        projectEvaluations(evaluations, new RiskLocalProjectionStore.ProjectionIds(
+                firstOrZero(snapshotIds), firstOrZero(eventIds), firstOrZero(candidateIds)));
+    }
+
+    private void projectEvaluations(List<GroupEvaluation> evaluations,
+                                    RiskLocalProjectionStore.ProjectionIds ids) {
+        int positionWriteCount = evaluations.stream()
+                .mapToInt(evaluation -> evaluation.positions().size() + evaluation.flatPositions().size()).sum();
+        int candidateCount = evaluations.stream().mapToInt(GroupEvaluation::candidateCount).sum();
         List<RealtimeRiskEvent> realtimeEvents = new ArrayList<>();
         transactionTemplate.executeWithoutResult(status -> {
-            List<Long> snapshotIds = sequenceRepository.nextSequences("risk-snapshot", evaluations.size());
-            List<Long> eventIds = sequenceRepository.nextSequences("risk-event",
-                    evaluations.size() + totalPositionWrites);
-            List<Long> candidateIds = sequenceRepository.nextSequences("liquidation-candidate", totalCandidates);
             int eventIndex = 0;
             int candidateIndex = 0;
             List<RiskAccountSnapshotResponse> accounts = new ArrayList<>(evaluations.size());
-            List<PositionSnapshotWrite> positions = new ArrayList<>(totalPositionWrites);
-            List<LiquidationCandidateWrite> candidates = new ArrayList<>(totalCandidates);
+            List<PositionSnapshotWrite> positions = new ArrayList<>(positionWriteCount);
+            List<LiquidationCandidateWrite> candidates = new ArrayList<>(candidateCount);
 
             for (int groupIndex = 0; groupIndex < evaluations.size(); groupIndex++) {
                 GroupEvaluation evaluation = evaluations.get(groupIndex);
-                RiskAccountSnapshotResponse account = evaluation.account(snapshotIds.get(groupIndex));
+                long snapshotId = ids.snapshotStart() + groupIndex;
+                RiskAccountSnapshotResponse account = evaluation.account(snapshotId);
                 accounts.add(account);
-                stageAccountRisk(eventIds.get(eventIndex++), account, evaluation.traceId(), realtimeEvents);
+                stageAccountRisk(ids.eventStart() + eventIndex++, account, evaluation.traceId(), realtimeEvents);
                 for (EvaluatedPosition evaluatedPosition : evaluation.positions()) {
                     CalculatedPositionRisk position = evaluatedPosition.position();
                     positions.add(new PositionSnapshotWrite(account.snapshotId(), position,
                             evaluatedPosition.marginRatioPpm(), evaluatedPosition.status(), evaluation.eventTime()));
-                    stagePositionRisk(eventIds.get(eventIndex++), account.snapshotId(), position,
+                    stagePositionRisk(ids.eventStart() + eventIndex++, account.snapshotId(), position,
                             evaluatedPosition.marginRatioPpm(), evaluatedPosition.status(), evaluation.eventTime(),
                             evaluation.traceId(), realtimeEvents);
                     if (evaluatedPosition.liquidation()) {
-                        candidates.add(new LiquidationCandidateWrite(candidateIds.get(candidateIndex++), account,
+                        candidates.add(new LiquidationCandidateWrite(ids.candidateStart() + candidateIndex++, account,
                                 position, evaluatedPosition.marginRatioPpm(), evaluatedPosition.equityUnits(),
                                 evaluation.eventTime()));
                     }
@@ -412,7 +499,7 @@ import tools.jackson.databind.ObjectMapper;
                 for (CalculatedPositionRisk flatPosition : evaluation.flatPositions()) {
                     positions.add(new PositionSnapshotWrite(account.snapshotId(), flatPosition, 0L,
                             RiskStatus.NORMAL, evaluation.eventTime()));
-                    stagePositionRisk(eventIds.get(eventIndex++), account.snapshotId(), flatPosition, 0L,
+                    stagePositionRisk(ids.eventStart() + eventIndex++, account.snapshotId(), flatPosition, 0L,
                             RiskStatus.NORMAL, evaluation.eventTime(), evaluation.traceId(), realtimeEvents);
                 }
             }

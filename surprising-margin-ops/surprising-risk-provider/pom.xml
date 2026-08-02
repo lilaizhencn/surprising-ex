@@ -30,6 +30,11 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-event-store</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-instrument-api</artifactId>
         </dependency>
         <dependency>
