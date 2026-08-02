@@ -1106,140 +1106,6 @@ CREATE INDEX IF NOT EXISTS trading_orders_recovery_idx
       AND time_in_force IN ('GTC', 'GTX')
       AND remaining_quantity_steps > 0;
 
-CREATE TABLE IF NOT EXISTS trading_algo_orders (
-    algo_order_id              BIGINT PRIMARY KEY,
-    product_line               TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    user_id                    BIGINT NOT NULL,
-    client_algo_order_id       TEXT,
-    symbol                     TEXT NOT NULL,
-    algo_type                  TEXT NOT NULL,
-    side                       TEXT NOT NULL,
-    price_ticks                BIGINT NOT NULL,
-    quantity_steps             BIGINT NOT NULL,
-    child_quantity_steps       BIGINT NOT NULL,
-    interval_seconds           BIGINT NOT NULL,
-    duration_seconds           BIGINT NOT NULL,
-    margin_mode                TEXT NOT NULL DEFAULT 'CROSS',
-    position_side              TEXT NOT NULL DEFAULT 'NET',
-    reduce_only                BOOLEAN NOT NULL DEFAULT FALSE,
-    post_only                  BOOLEAN NOT NULL DEFAULT FALSE,
-    time_in_force              TEXT NOT NULL,
-    status                     TEXT NOT NULL,
-    current_order_id           BIGINT,
-    reject_reason              TEXT,
-    trace_id                   TEXT,
-    start_at                   TIMESTAMPTZ NOT NULL,
-    next_slice_at              TIMESTAMPTZ,
-    completed_at               TIMESTAMPTZ,
-    created_at                 TIMESTAMPTZ NOT NULL,
-    updated_at                 TIMESTAMPTZ NOT NULL,
-    CONSTRAINT trading_algo_orders_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT trading_algo_orders_user_positive CHECK (user_id > 0),
-    CONSTRAINT trading_algo_orders_client_id_length CHECK (
-        client_algo_order_id IS NULL OR length(client_algo_order_id) <= 64
-    ),
-    CONSTRAINT trading_algo_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT trading_algo_orders_symbol_fk
-        FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
-    CONSTRAINT trading_algo_orders_type_check CHECK (algo_type IN ('TWAP', 'ICEBERG')),
-    CONSTRAINT trading_algo_orders_side_check CHECK (side IN ('BUY', 'SELL')),
-    CONSTRAINT trading_algo_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
-    CONSTRAINT trading_algo_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
-    CONSTRAINT trading_algo_orders_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'GTX')),
-    CONSTRAINT trading_algo_orders_status_check CHECK (
-        status IN ('PENDING', 'RUNNING', 'CANCEL_REQUESTED', 'CANCELED', 'COMPLETED', 'FAILED')
-    ),
-    CONSTRAINT trading_algo_orders_long_values CHECK (
-        price_ticks >= 0
-        AND quantity_steps > 0
-        AND child_quantity_steps > 0
-        AND child_quantity_steps <= quantity_steps
-        AND interval_seconds > 0
-        AND duration_seconds > 0
-    ),
-    CONSTRAINT trading_algo_orders_algo_rules CHECK (
-        (algo_type = 'TWAP' AND time_in_force = 'IOC' AND post_only = FALSE)
-        OR (algo_type = 'ICEBERG' AND price_ticks > 0 AND time_in_force IN ('GTC', 'GTX'))
-    ),
-    CONSTRAINT trading_algo_orders_current_order_fk
-        FOREIGN KEY (current_order_id) REFERENCES trading_orders(order_id)
-);
-
-DO $$
-BEGIN
-    ALTER TABLE trading_algo_orders
-        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-    ALTER TABLE trading_algo_orders
-        DROP CONSTRAINT IF EXISTS trading_algo_orders_product_line_check;
-    ALTER TABLE trading_algo_orders
-        ADD CONSTRAINT trading_algo_orders_product_line_check CHECK (
-            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-        );
-    UPDATE trading_algo_orders a
-       SET product_line = CASE i.contract_type
-           WHEN 'SPOT' THEN 'SPOT'
-           WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-           WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-           WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-           WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-           WHEN 'VANILLA_OPTION' THEN 'OPTION'
-           ELSE a.product_line
-       END
-      FROM instrument_current_versions c
-      JOIN instruments i ON i.symbol = c.symbol AND i.version = c.version
-     WHERE c.symbol = a.symbol;
-END $$;
-
-DROP INDEX IF EXISTS trading_algo_orders_user_client_uidx;
-CREATE UNIQUE INDEX IF NOT EXISTS trading_algo_orders_user_client_uidx
-    ON trading_algo_orders (product_line, user_id, client_algo_order_id)
-    WHERE client_algo_order_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS trading_algo_orders_due_idx
-    ON trading_algo_orders (product_line, next_slice_at, algo_order_id)
-    WHERE status IN ('PENDING', 'RUNNING');
-
-CREATE INDEX IF NOT EXISTS trading_algo_orders_user_status_idx
-    ON trading_algo_orders (user_id, status, updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS trading_algo_order_children (
-    algo_order_id              BIGINT NOT NULL,
-    slice_index                INTEGER NOT NULL,
-    order_id                   BIGINT NOT NULL,
-    client_order_id            TEXT NOT NULL,
-    quantity_steps             BIGINT NOT NULL,
-    price_ticks                BIGINT NOT NULL,
-    order_type                 TEXT NOT NULL,
-    time_in_force              TEXT NOT NULL,
-    status                     TEXT NOT NULL,
-    created_at                 TIMESTAMPTZ NOT NULL,
-    updated_at                 TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (algo_order_id, slice_index),
-    CONSTRAINT trading_algo_order_children_algo_fk
-        FOREIGN KEY (algo_order_id) REFERENCES trading_algo_orders(algo_order_id),
-    CONSTRAINT trading_algo_order_children_order_fk
-        FOREIGN KEY (order_id) REFERENCES trading_orders(order_id),
-    CONSTRAINT trading_algo_order_children_client_id_unique UNIQUE (client_order_id),
-    CONSTRAINT trading_algo_order_children_values CHECK (
-        slice_index > 0
-        AND order_id > 0
-        AND quantity_steps > 0
-        AND price_ticks >= 0
-    ),
-    CONSTRAINT trading_algo_order_children_type_check CHECK (order_type IN ('LIMIT', 'MARKET')),
-    CONSTRAINT trading_algo_order_children_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'GTX')),
-    CONSTRAINT trading_algo_order_children_status_check CHECK (
-        status IN ('PENDING_RESERVE', 'ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED', 'CANCELED', 'PARTIALLY_FILLED', 'FILLED')
-    )
-);
-
-CREATE INDEX IF NOT EXISTS trading_algo_order_children_order_idx
-    ON trading_algo_order_children (order_id);
-
 CREATE SEQUENCE IF NOT EXISTS account_open_interest_revision_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 
 CREATE TABLE IF NOT EXISTS trading_symbol_open_interest_shards (
@@ -1712,7 +1578,6 @@ CREATE INDEX IF NOT EXISTS trading_match_trades_trace_idx
 CREATE SEQUENCE IF NOT EXISTS account_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_product_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_product_transfer_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
-CREATE SEQUENCE IF NOT EXISTS account_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_position_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_open_interest_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_liquidation_fee_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
@@ -2305,26 +2170,6 @@ CREATE INDEX IF NOT EXISTS account_commands_processing_idx
 CREATE INDEX IF NOT EXISTS account_commands_dependency_idx
     ON account_commands (depends_on_command_id, started_at)
     WHERE status = 'WAITING_DEPENDENCY';
-
-CREATE TABLE IF NOT EXISTS account_command_submissions (
-    command_id              VARCHAR(160) PRIMARY KEY,
-    product_line            TEXT NOT NULL,
-    user_id                 BIGINT NOT NULL,
-    command_type            TEXT NOT NULL,
-    source                  VARCHAR(64) NOT NULL,
-    source_reference        VARCHAR(160) NOT NULL,
-    identity_sha256         CHAR(64) NOT NULL,
-    payload                 JSONB NOT NULL,
-    created_at              TIMESTAMPTZ NOT NULL,
-    CONSTRAINT account_command_submissions_user_positive CHECK (user_id > 0),
-    CONSTRAINT account_command_submissions_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    )
-);
-
-CREATE INDEX IF NOT EXISTS account_command_submissions_user_idx
-    ON account_command_submissions (product_line, user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS account_trade_settlement_sides (
     product_line            TEXT NOT NULL,

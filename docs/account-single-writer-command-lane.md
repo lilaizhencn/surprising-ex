@@ -5,7 +5,6 @@
 账户模块是以下可变资金事实的唯一写者：
 
 - `account_balances`
-- `account_product_balances`
 - `account_positions`
 - `account_position_margins`
 - `account_deficits`
@@ -52,9 +51,9 @@ Redis 持仓和数据库表都是异步投影。用户持仓查询优先读本�
 
 幂等不是只靠 Kafka：
 
-- HTTP 写接口必须传稳定的 `referenceId`。`account_command_submissions` 保存规范化请求的
-  SHA-256；相同 reference、相同 payload 返回同一个 command，相同 reference、不同 payload
-  在任何资金写入前拒绝。
+- HTTP 写接口必须传稳定的 `referenceId`。网关在发送 Kafka 前根据规范化命令生成稳定的
+  `commandId`；本地 WAL 以命令身份摘要做幂等判断。相同 reference、相同 payload 返回同一个
+  command，相同 reference、不同 payload 在任何资金写入前拒绝，不再依赖独立的数据库提交表。
 - `account_commands.command_id` 是执行幂等键，并保存完整 envelope 的 SHA-256。重复 command
   只有全部身份字段和 payload 完全一致才允许；冲突重复被视为数据完整性故障。
 - 账本、订单 reservation、资金费 payment、ADL execution、保险 coverage 继续保留各自的业务唯一键。

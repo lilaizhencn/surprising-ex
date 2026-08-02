@@ -19,7 +19,6 @@ public class AccountSequenceRepository {
         LEDGER_ENTRY("public.account_ledger_entry_seq"),
         PRODUCT_LEDGER_ENTRY("public.account_product_ledger_entry_seq"),
         PRODUCT_TRANSFER("public.account_product_transfer_seq"),
-        SPOT_RESERVATION("public.account_spot_reservation_seq"),
         POSITION_EVENT("public.account_position_event_seq"),
         OPEN_INTEREST_EVENT("public.account_open_interest_event_seq"),
         COMMAND_RESULT_EVENT("public.account_command_result_event_seq"),
@@ -69,10 +68,6 @@ public class AccountSequenceRepository {
 
     public long nextProductTransferId() {
         return nextSequence(Sequence.PRODUCT_TRANSFER);
-    }
-
-    public long nextSpotReservationId() {
-        return nextSequence(Sequence.SPOT_RESERVATION);
     }
 
     public long nextPositionEventId() {

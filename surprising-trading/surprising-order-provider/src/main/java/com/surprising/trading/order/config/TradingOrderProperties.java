@@ -11,7 +11,7 @@ import jakarta.annotation.PostConstruct;
 public class TradingOrderProperties {
 
     private Kafka kafka = new Kafka();
-    private Outbox outbox = new Outbox();
+    private EventPublish eventPublish = new EventPublish();
     private Risk risk = new Risk();
     private Algo algo = new Algo();
     private RedisIndex redisIndex = new RedisIndex();
@@ -31,12 +31,12 @@ public class TradingOrderProperties {
         this.kafka = kafka;
     }
 
-    public Outbox getOutbox() {
-        return outbox;
+    public EventPublish getEventPublish() {
+        return eventPublish;
     }
 
-    public void setOutbox(Outbox outbox) {
-        this.outbox = outbox;
+    public void setEventPublish(EventPublish eventPublish) {
+        this.eventPublish = eventPublish == null ? new EventPublish() : eventPublish;
     }
 
     public Risk getRisk() {
@@ -204,111 +204,19 @@ public class TradingOrderProperties {
         }
     }
 
-    public static class Outbox {
-        private int batchSize = 1000;
-        private long publishDelayMs = 20L;
+    /** Kafka 通知发送配置，不承担订单或账户事实持久化。 */
+    public static class EventPublish {
         private Duration sendTimeout = Duration.ofSeconds(3);
-        private boolean asyncEnabled = true;
-        private int maxInFlight = 64;
-        private int maxRowsPerKey = 32;
-        private Duration retention = Duration.ofDays(7);
-        private long cleanupDelayMs = 60_000L;
-        private int cleanupBatchSize = 10_000;
-        private int cleanupMaxBatches = 10;
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
-        }
 
         public Duration getSendTimeout() {
             return sendTimeout;
         }
 
         public void setSendTimeout(Duration sendTimeout) {
+            if (sendTimeout == null || sendTimeout.isZero() || sendTimeout.isNegative()) {
+                throw new IllegalArgumentException("事件通知 sendTimeout 必须为正数");
+            }
             this.sendTimeout = sendTimeout;
-        }
-
-        public boolean isAsyncEnabled() {
-            return asyncEnabled;
-        }
-
-        public void setAsyncEnabled(boolean asyncEnabled) {
-            this.asyncEnabled = asyncEnabled;
-        }
-
-        public int getMaxInFlight() {
-            return maxInFlight;
-        }
-
-        public void setMaxInFlight(int maxInFlight) {
-            this.maxInFlight = maxInFlight;
-        }
-
-        public int getMaxRowsPerKey() {
-            return maxRowsPerKey;
-        }
-
-        public void setMaxRowsPerKey(int maxRowsPerKey) {
-            if (maxRowsPerKey <= 0) {
-                throw new IllegalArgumentException("trading order outbox maxRowsPerKey must be positive");
-            }
-            this.maxRowsPerKey = maxRowsPerKey;
-        }
-
-        public Duration getRetention() {
-            return retention;
-        }
-
-        public void setRetention(Duration retention) {
-            if (retention == null || retention.isZero() || retention.isNegative()) {
-                throw new IllegalArgumentException("trading order outbox retention must be positive");
-            }
-            this.retention = retention;
-        }
-
-        public long getCleanupDelayMs() {
-            return cleanupDelayMs;
-        }
-
-        public void setCleanupDelayMs(long cleanupDelayMs) {
-            if (cleanupDelayMs <= 0) {
-                throw new IllegalArgumentException("trading order outbox cleanupDelayMs must be positive");
-            }
-            this.cleanupDelayMs = cleanupDelayMs;
-        }
-
-        public int getCleanupBatchSize() {
-            return cleanupBatchSize;
-        }
-
-        public void setCleanupBatchSize(int cleanupBatchSize) {
-            if (cleanupBatchSize <= 0) {
-                throw new IllegalArgumentException("trading order outbox cleanupBatchSize must be positive");
-            }
-            this.cleanupBatchSize = cleanupBatchSize;
-        }
-
-        public int getCleanupMaxBatches() {
-            return cleanupMaxBatches;
-        }
-
-        public void setCleanupMaxBatches(int cleanupMaxBatches) {
-            if (cleanupMaxBatches <= 0) {
-                throw new IllegalArgumentException("trading order outbox cleanupMaxBatches must be positive");
-            }
-            this.cleanupMaxBatches = cleanupMaxBatches;
         }
     }
 

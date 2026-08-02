@@ -183,7 +183,6 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 - `account_positions`
 - `account_state_order_locks`
 - `account_commands`
-- `account_command_submissions`
 - `account_trade_settlement_sides`
 - `account_trade_settlement_completions`（只读视图）
 

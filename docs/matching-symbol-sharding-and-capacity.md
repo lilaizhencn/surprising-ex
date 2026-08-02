@@ -54,7 +54,7 @@ symbolId=104 -> 104 & 3 = 0 -> shard 0
 相关源码：
 
 - `surprising-trading/surprising-order-provider/src/main/java/com/surprising/trading/order/service/OrderService.java`
-- `surprising-trading/surprising-order-provider/src/main/java/com/surprising/trading/order/service/OutboxPublisher.java`
+- `surprising-trading/surprising-order-provider/src/main/java/com/surprising/trading/order/service/OrderUserStateService.java`
 - `surprising-trading/surprising-matching-provider/src/main/java/com/surprising/trading/matching/service/MatchingCommandConsumer.java`
 - `surprising-trading/surprising-matching-provider/src/main/java/com/surprising/trading/matching/service/ExchangeCoreEngine.java`
 - `surprising-trading/surprising-matching-provider/src/main/java/com/surprising/trading/matching/service/MatchingSymbolService.java`

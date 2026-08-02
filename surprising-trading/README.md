@@ -144,10 +144,8 @@ PostgreSQL advisory lock 不访问业务表，由 `OrderCoordinationRepository` 
 - `ICEBERG` 要求正数限价，`timeInForce` 必须为 `GTC` 或 `GTX`。它同一时间只保留一笔可见子单，前一片成交或取消后再放出下一片。
 - 活动算法单会阻断保证金模式和持仓模式切换，避免未来子单按旧模式假设继续发出。
 - 取消父算法单会同时取消活动子单；`cancel-open` 支持用户级和可选 symbol 级批量取消。
-- `AlgoOrderRepository` 只操作 `trading_algo_orders`，子单插入由
-  `AlgoOrderChildRepository` 操作 `trading_algo_order_children`，两步在
-  `AlgoOrderService` 事务中聚合。子单状态刷新、进度聚合和待撤子单查询必须同时读取
-  子单映射与普通订单实时状态，代码中已标注不能拆成两次查询的并发原因。
+- 算法单父指令、子单映射、进度和撤单状态都由 `OrderUserStateService` 写入同一用户分区 WAL；
+  `AlgoOrderService` 只负责参数校验和调度，不能通过数据库表补偿或重新拼装状态。
 
 REST 接口：
 
@@ -311,9 +309,8 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - 订单 Kafka 通知由本地事实状态同步发布；数据库投影不得反向驱动订单状态。
 - `trading_trigger_orders_user_client_uidx` 保证同一用户 `clientTriggerOrderId` 的止盈止损下单幂等。
 - `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + symbol + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
-- `trading_order_events` 和 `trading_outbox_events` 插入必须影响 1 行，否则事务失败，避免订单状态和消息链路不一致。
-- outbox 发布器先用 `FOR UPDATE SKIP LOCKED` claim 到期待发消息，并把 `next_attempt_at` 推进为短租约；随后在数据库事务外发送 Kafka，避免 Kafka 网络等待占住 PostgreSQL 行锁和连接。
-- outbox 失败后按 `next_attempt_at` 指数退避重试，避免 Kafka 故障时热循环。
+- 订单事实事件由用户分区 WAL/RocksDB 提交后直接发送 Kafka；数据库投影只按用户修订号异步替换，数据库不可用不会回滚订单状态。
+- `trading_outbox_events` 仅由撮合、触发、强平等仍需要数据库事务发件箱的模块使用，不再作为订单下单或账户资金的事实入口。
 - Kafka producer 开启 `acks=all` 和 `enable.idempotence=true`。
 - 下游消费者需要按 `commandId/orderId` 幂等处理 command，按 `eventId` 幂等处理 event。
 

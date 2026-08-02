@@ -5,29 +5,31 @@ import com.surprising.trading.api.model.FeeScheduleEventType;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.cache.FeeScheduleSnapshotCache;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.repository.OutboxRepository;
 import java.time.Instant;
+import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.ObjectMapper;
 
-/** 在费率表事务内写入 Outbox，可靠通知所有产品线对应的费率快照消费者。 */
+/** 费率配置提交后直接发送 Kafka 通知，并更新本节点的 JVM 快照。 */
 @Service
 public class FeeScheduleEventPublisher {
 
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
-    private final OutboxRepository outboxRepository;
+    private final KafkaTemplate<String, String> kafkaTemplate;
     private final FeeScheduleSnapshotCache snapshotCache;
 
     public FeeScheduleEventPublisher(ObjectMapper objectMapper,
                                      TradingOrderProperties properties,
-                                     OutboxRepository outboxRepository,
+                                     @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
                                      FeeScheduleSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;
-        this.outboxRepository = outboxRepository;
+        this.kafkaTemplate = kafkaTemplate;
         this.snapshotCache = snapshotCache;
     }
 
@@ -41,32 +43,33 @@ public class FeeScheduleEventPublisher {
                 schedule.productLine(), schedule.feeScheduleId(), type, schedule,
                 schedule.updatedAt() == null ? Instant.now() : schedule.updatedAt());
         try {
-            outboxRepository.enqueue("FEE_SCHEDULE", schedule.feeScheduleId(),
-                    properties.getKafka().getFeeScheduleEventsTopic(),
-                    schedule.productLine().name() + ":" + schedule.userId(), type.name(),
-                    objectMapper.writeValueAsString(event), event.eventTime());
-            applyAfterCommit(event);
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        publishAfterCommit(event);
+                    }
+                });
+            } else {
+                publishAfterCommit(event);
+            }
         } catch (Exception ex) {
-            throw new IllegalStateException("费率事件写入 Outbox 失败", ex);
+            throw new IllegalStateException("费率事件发送 Kafka 失败", ex);
         }
     }
 
-    private void applyAfterCommit(FeeScheduleEvent event) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    FeeScheduleSnapshotCache.ApplyResult result = snapshotCache.apply(event);
-                    if (result == FeeScheduleSnapshotCache.ApplyResult.CONFLICT) {
-                        throw new IllegalStateException("费率 JVM 快照同一修订号出现不同状态");
-                    }
-                }
-            });
-            return;
-        }
-        FeeScheduleSnapshotCache.ApplyResult result = snapshotCache.apply(event);
-        if (result == FeeScheduleSnapshotCache.ApplyResult.CONFLICT) {
-            throw new IllegalStateException("费率 JVM 快照同一修订号出现不同状态");
+    private void publishAfterCommit(FeeScheduleEvent event) {
+        try {
+            String topic = properties.getKafka().getFeeScheduleEventsTopic();
+            String key = event.productLine().name() + ":" + event.schedule().userId();
+            kafkaTemplate.send(topic, key, objectMapper.writeValueAsString(event))
+                    .get(properties.getEventPublish().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            FeeScheduleSnapshotCache.ApplyResult result = snapshotCache.apply(event);
+            if (result == FeeScheduleSnapshotCache.ApplyResult.CONFLICT) {
+                throw new IllegalStateException("费率 JVM 快照同一修订号出现不同状态");
+            }
+        } catch (Exception ex) {
+            throw new IllegalStateException("费率事件发送 Kafka 失败", ex);
         }
     }
 }

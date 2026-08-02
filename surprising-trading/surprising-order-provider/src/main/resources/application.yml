@@ -64,16 +64,8 @@ surprising:
         directory: ${ORDER_WAL_DIR:data/order-wal}
         node-id: ${ORDER_WAL_NODE_ID:1}
         worker-delay-ms: ${ORDER_WAL_WORKER_DELAY_MS:25}
-    outbox:
-      batch-size: 1000
-      publish-delay-ms: 20
-      async-enabled: true
-      max-in-flight: 64
+    event-publish:
       send-timeout: 3s
-      retention: 7d
-      cleanup-delay-ms: 60000
-      cleanup-batch-size: 10000
-      cleanup-max-batches: 10
       risk:
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000

@@ -353,11 +353,11 @@ ADL 使用以下账户流水类型：
 保存倒计时、触发状态和执行计数。数据库不再保存或裁决该状态；如需后台审计，应从事实事件异步
 生成独立投影，不能在倒计时执行时回查数据库。
 
-`trading_algo_orders` 保存 TWAP/Iceberg 父指令，子订单进入普通订单链路前由
-`trading_algo_order_children` 记录关联关系。`client_algo_order_id` 在用户范围内幂等；
-状态从 `PENDING` / `RUNNING` / `CANCEL_REQUESTED` 进入
-`CANCELED` / `COMPLETED` / `FAILED`。TWAP 使用 IOC 子单，Iceberg 在当前子单结束后补充下一笔，
-所有子单继续遵循普通订单的资金、风控、Outbox 和撮合边界。
+TWAP/Iceberg 父指令和子单都属于订单用户分区事实流，由 `OrderUserStateService` 在本地 WAL/RocksDB
+中按序保存。`clientAlgoOrderId` 在用户分区内幂等；状态从 `PENDING` / `RUNNING` /
+`CANCEL_REQUESTED` 进入 `CANCELED` / `COMPLETED` / `FAILED`。TWAP 使用 IOC 子单，Iceberg 在
+当前子单结束后补充下一片，所有子单继续遵循普通订单的资金、风控和撮合边界。数据库不再创建
+算法单专用表，后台查询如需持久化应消费订单事实事件建立独立投影。
 
 `trading_trigger_orders` 保存止盈止损、止损限价、跟踪委托和 OCO 状态。触发价、激活价、回调率、
 最高价、最低价、触发序号及实际触发价格均保存为长整型字段。触发后通过普通订单服务创建

@@ -9,29 +9,17 @@ import org.junit.jupiter.api.Test;
 class TradingOrderPropertiesTest {
 
     @Test
-    void outboxCleanupConfigurationMustBePositive() {
-        TradingOrderProperties.Outbox outbox = new TradingOrderProperties.Outbox();
+    void eventPublishTimeoutMustBePositive() {
+        TradingOrderProperties.EventPublish eventPublish = new TradingOrderProperties.EventPublish();
 
-        assertThatThrownBy(() -> outbox.setRetention(null))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("retention");
-        assertThatThrownBy(() -> outbox.setRetention(Duration.ZERO))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("retention");
-        assertThatThrownBy(() -> outbox.setRetention(Duration.ofSeconds(-1)))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("retention");
-        assertThatThrownBy(() -> outbox.setCleanupDelayMs(0))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cleanupDelayMs");
-        assertThatThrownBy(() -> outbox.setCleanupBatchSize(0))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cleanupBatchSize");
-        assertThatThrownBy(() -> outbox.setCleanupMaxBatches(0))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cleanupMaxBatches");
+        assertThatThrownBy(() -> eventPublish.setSendTimeout(null))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("sendTimeout");
+        assertThatThrownBy(() -> eventPublish.setSendTimeout(Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("sendTimeout");
+        assertThatThrownBy(() -> eventPublish.setSendTimeout(Duration.ofSeconds(-1)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("sendTimeout");
 
-        outbox.setRetention(Duration.ofSeconds(1));
-        outbox.setCleanupDelayMs(1);
-        outbox.setCleanupBatchSize(1);
-        outbox.setCleanupMaxBatches(1);
-        assertThat(outbox.getRetention()).isEqualTo(Duration.ofSeconds(1));
-        assertThat(outbox.getCleanupDelayMs()).isEqualTo(1);
-        assertThat(outbox.getCleanupBatchSize()).isEqualTo(1);
-        assertThat(outbox.getCleanupMaxBatches()).isEqualTo(1);
+        eventPublish.setSendTimeout(Duration.ofSeconds(1));
+        assertThat(eventPublish.getSendTimeout()).isEqualTo(Duration.ofSeconds(1));
     }
 }

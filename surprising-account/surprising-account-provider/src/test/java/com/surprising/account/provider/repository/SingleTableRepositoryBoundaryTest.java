@@ -105,34 +105,6 @@ class SingleTableRepositoryBoundaryTest {
     }
 
     @Test
-    void productBalanceRepositoryOnlyQueriesProductBalanceTable() {
-        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        ProductBalanceRepository repository = new ProductBalanceRepository(jdbcTemplate);
-
-        repository.findByUser(1001L, null);
-
-        String sql = capturedQuery(jdbcTemplate);
-        assertThat(sql)
-                .contains("FROM account_product_balances")
-                .doesNotContain("account_product_deficits")
-                .doesNotContain("account_product_ledger_entries");
-    }
-
-    @Test
-    void productDeficitRepositoryOnlyQueriesProductDeficitTable() {
-        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        ProductDeficitRepository repository = new ProductDeficitRepository(jdbcTemplate);
-
-        repository.findByUser(1001L, null);
-
-        String sql = capturedQuery(jdbcTemplate);
-        assertThat(sql)
-                .contains("FROM account_product_deficits")
-                .doesNotContain("account_product_balances")
-                .doesNotContain("account_product_ledger_entries");
-    }
-
-    @Test
     void positionModeRepositoryOnlyQueriesPositionModeTable() {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         PositionModeRepository repository = new PositionModeRepository(jdbcTemplate);
@@ -214,36 +186,6 @@ class SingleTableRepositoryBoundaryTest {
     }
 
     @Test
-    void positionModeOrderRepositoriesKeepTheirOwnTableBoundary() {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any(Object[].class)))
-                .thenReturn(false);
-
-        new PositionModeOrderRepository(jdbcTemplate)
-                .existsActive(ProductLine.LINEAR_PERPETUAL, 1001L);
-        new PositionModeTriggerOrderRepository(jdbcTemplate)
-                .existsPending(ProductLine.LINEAR_PERPETUAL, 1001L);
-        new PositionModeAlgoOrderRepository(jdbcTemplate)
-                .existsActive(ProductLine.LINEAR_PERPETUAL, 1001L);
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate, org.mockito.Mockito.times(3))
-                .queryForObject(sql.capture(), any(Class.class), any(Object[].class));
-        assertThat(sql.getAllValues().get(0))
-                .contains("FROM trading_orders")
-                .doesNotContain("trading_trigger_orders")
-                .doesNotContain("trading_algo_orders");
-        assertThat(sql.getAllValues().get(1))
-                .contains("FROM trading_trigger_orders")
-                .doesNotContain("trading_orders")
-                .doesNotContain("trading_algo_orders");
-        assertThat(sql.getAllValues().get(2))
-                .contains("FROM trading_algo_orders")
-                .doesNotContain("trading_orders")
-                .doesNotContain("trading_trigger_orders");
-    }
-
-    @Test
     void openInterestShardRepositoryOnlyWritesShardTable() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
         when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
@@ -257,20 +199,6 @@ class SingleTableRepositoryBoundaryTest {
                 .contains("INSERT INTO trading_symbol_open_interest_shards")
                 .doesNotContain("account_positions")
                 .doesNotContain("account_position_margins");
-    }
-
-    @Test
-    void spotOrderReservationRepositoryOnlyQueriesReservationTable() {
-        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        SpotOrderReservationRepository repository = new SpotOrderReservationRepository(jdbcTemplate);
-
-        repository.lock(9001L);
-
-        String sql = capturedQuery(jdbcTemplate);
-        assertThat(sql)
-                .contains("FROM account_spot_order_reservations")
-                .doesNotContain("account_product_balances")
-                .doesNotContain("account_product_ledger_entries");
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
