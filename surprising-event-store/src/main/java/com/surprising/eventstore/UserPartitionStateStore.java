@@ -1,8 +1,10 @@
 package com.surprising.eventstore;
 
 import org.rocksdb.Options;
+import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
+import org.rocksdb.Snapshot;
 import org.rocksdb.WriteBatch;
 import org.rocksdb.WriteOptions;
 import java.io.ByteArrayInputStream;
@@ -58,12 +60,14 @@ public final class UserPartitionStateStore implements AutoCloseable {
     /** 返回状态快照；没有显式初始化的用户不能被当成零余额用户。 */
     public Optional<StateSnapshot> read(UserPartitionKey partition) {
         Objects.requireNonNull(partition, "partition");
-        try {
-            byte[] state = database.get(stateKey(partition));
+        try (ReadOptions readOptions = new ReadOptions();
+             Snapshot snapshot = database.getSnapshot()) {
+            readOptions.setSnapshot(snapshot);
+            byte[] state = database.get(readOptions, stateKey(partition));
             if (state == null) {
                 return Optional.empty();
             }
-            byte[] sequence = database.get(sequenceKey(partition));
+            byte[] sequence = database.get(readOptions, sequenceKey(partition));
             if (sequence == null) {
                 throw new IllegalStateException("state snapshot sequence is missing: " + partition.value());
             }

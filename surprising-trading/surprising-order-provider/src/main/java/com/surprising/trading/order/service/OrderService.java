@@ -44,7 +44,6 @@ import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.OrderMarginRepository;
-import com.surprising.trading.order.repository.SpotOrderReservationRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -64,7 +63,7 @@ public class OrderService {
     private final ReduceOnlyValidator reduceOnlyValidator;
     private final OrderPlacementStateService placementStateService;
     private final OrderMarginRepository orderMarginRepository;
-    private final SpotOrderReservationRepository spotOrderReservationRepository;
+    private final SpotReservationCalculator spotReservationCalculator;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final OrderUserStateService orderUserStateService;
 
@@ -74,7 +73,7 @@ public class OrderService {
                         ReduceOnlyValidator reduceOnlyValidator,
                         OrderPlacementStateService placementStateService,
                         OrderMarginRepository orderMarginRepository,
-                        SpotOrderReservationRepository spotOrderReservationRepository,
+                        SpotReservationCalculator spotReservationCalculator,
                         OrderFeeSnapshotLookup feeSnapshotLookup,
                         OrderUserStateService orderUserStateService) {
         this.properties = properties;
@@ -82,7 +81,7 @@ public class OrderService {
         this.reduceOnlyValidator = reduceOnlyValidator;
         this.placementStateService = placementStateService;
         this.orderMarginRepository = orderMarginRepository;
-        this.spotOrderReservationRepository = spotOrderReservationRepository;
+        this.spotReservationCalculator = spotReservationCalculator;
         this.feeSnapshotLookup = feeSnapshotLookup;
         this.orderUserStateService = orderUserStateService;
     }
@@ -376,7 +375,7 @@ public class OrderService {
                                                 long orderId,
                                                 long instrumentVersion,
                                                 OrderFeeSnapshot feeSnapshot) {
-        var requirement = spotOrderReservationRepository.requirement(
+        var requirement = spotReservationCalculator.requirement(
                 request.symbol(), instrumentVersion, request.side(), request.orderType(), request.priceTicks(),
                 request.quantitySteps(), feeSnapshot);
         if (requirement.isEmpty()) {
@@ -434,7 +433,7 @@ public class OrderService {
                                                  ValidationResult validation,
                                                  OrderFeeSnapshot feeSnapshot) {
         if (validation.instrumentType() == InstrumentType.SPOT) {
-            var requirement = spotOrderReservationRepository.requirement(
+            var requirement = spotReservationCalculator.requirement(
                     request.symbol(), validation.instrumentVersion(), request.side(), request.orderType(),
                     request.priceTicks(), request.quantitySteps(), feeSnapshot);
             if (requirement.isEmpty()) {

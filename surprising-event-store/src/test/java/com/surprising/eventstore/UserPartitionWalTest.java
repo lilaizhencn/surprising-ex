@@ -4,6 +4,8 @@ import com.surprising.product.api.ProductLine;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,6 +69,24 @@ class UserPartitionWalTest {
             wal.markProjectedThrough(key, 3L);
 
             assertThat(wal.lastProjectedSequence(key)).isEqualTo(3L);
+        }
+    }
+
+    @Test
+    void concurrentProjectionWatermarksRemainContinuousAndIdempotent() throws Exception {
+        Path directory = Files.createTempDirectory("user-partition-wal-projection-race-");
+        UserPartitionKey key = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
+        try (UserPartitionWal wal = new UserPartitionWal(directory);
+             ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            wal.append(key, "cmd-1", "ORDER", bytes("one"), "fp-1", Instant.EPOCH);
+            wal.append(key, "cmd-2", "ORDER", bytes("two"), "fp-2", Instant.EPOCH);
+
+            var first = executor.submit(() -> wal.markProjectedThrough(key, 1L));
+            var second = executor.submit(() -> wal.markProjectedThrough(key, 2L));
+            first.get();
+            second.get();
+
+            assertThat(wal.lastProjectedSequence(key)).isEqualTo(2L);
         }
     }
 

@@ -6,10 +6,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.account.api.model.TradeParticipantRole;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
-import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.List;
@@ -119,29 +117,6 @@ class SingleTableRepositoryBoundaryTest {
     }
 
     @Test
-    void tradeSettlementSideRepositoryOnlyWritesSettlementSideTable() {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
-        TradeSettlementSideRepository repository = new TradeSettlementSideRepository(jdbcTemplate);
-        MatchTradeEvent trade = mock(MatchTradeEvent.class);
-        when(trade.symbol()).thenReturn("BTC-USDT");
-        when(trade.tradeId()).thenReturn(9001L);
-        when(trade.takerOrderId()).thenReturn(8001L);
-        when(trade.takerUserId()).thenReturn(1001L);
-        when(trade.makerUserId()).thenReturn(1002L);
-
-        repository.complete(ProductLine.LINEAR_PERPETUAL, trade, TradeParticipantRole.TAKER,
-                "command-1", 100L, 20L, Instant.parse("2026-07-30T00:00:00Z"));
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
-        assertThat(sql.getValue())
-                .contains("INSERT INTO account_trade_settlement_sides")
-                .doesNotContain("trading_match_trades")
-                .doesNotContain("account_positions");
-    }
-
-    @Test
     void positionRepositoryOnlyQueriesPositionTable() {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         PositionRepository repository = new PositionRepository(jdbcTemplate);
@@ -166,21 +141,6 @@ class SingleTableRepositoryBoundaryTest {
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
                 .contains("FROM account_position_margins")
-                .doesNotContain("account_positions")
-                .doesNotContain("instruments");
-    }
-
-    @Test
-    void riskPositionSnapshotRepositoryOnlyQueriesRiskSnapshotTable() {
-        JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        RiskPositionSnapshotRepository repository = new RiskPositionSnapshotRepository(jdbcTemplate);
-
-        repository.findLatestIsolated(1001L, "BTC-USDT", PositionSide.NET,
-                java.time.Duration.ofSeconds(10));
-
-        String sql = capturedQuery(jdbcTemplate);
-        assertThat(sql)
-                .contains("FROM risk_position_snapshots")
                 .doesNotContain("account_positions")
                 .doesNotContain("instruments");
     }

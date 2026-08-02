@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 用户分区命令结果的本地幂等存储。
@@ -29,6 +30,7 @@ public final class UserPartitionResultStore implements AutoCloseable {
     private final Options options;
     private final RocksDB database;
     private final WriteOptions writeOptions;
+    private final ReentrantLock writeLock = new ReentrantLock();
 
     public UserPartitionResultStore(Path directory) {
         try {
@@ -59,6 +61,7 @@ public final class UserPartitionResultStore implements AutoCloseable {
         if (result == null || result.length == 0 || result.length > MAX_RESULT_BYTES) {
             throw new IllegalArgumentException("命令结果大小无效");
         }
+        writeLock.lock();
         try {
             byte[] existing = database.get(key(commandId));
             if (existing != null) {
@@ -70,6 +73,8 @@ public final class UserPartitionResultStore implements AutoCloseable {
             database.put(writeOptions, key(commandId), Arrays.copyOf(result, result.length));
         } catch (RocksDBException ex) {
             throw new IllegalStateException("写入用户分区命令结果失败: " + commandId, ex);
+        } finally {
+            writeLock.unlock();
         }
     }
 

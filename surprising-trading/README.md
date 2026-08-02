@@ -99,10 +99,9 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 `GET /trigger-orders` 列表；订单事件、撮合结果、成交明细和聚合时间线接口不再从交易主库提供。
 这些跨表后台查询、资金对账和运营报表必须由未来财务运营系统消费事件投影，并连接独立数据库实现。
 
-订单入口的持久化边界按物理表拆分：`OrderRepository` 只操作 `trading_orders`，
-`OrderEventRepository` 只操作 `trading_order_events`，仓位、仓位模式、触发单和算法单状态分别由各自
-单表 Repository 查询，`OrderPlacementStateService` 在业务事务内聚合冲突校验和锁协调。
-PostgreSQL advisory lock 不访问业务表，由 `OrderCoordinationRepository` 独立负责。
+订单事实入口不再依赖订单数据库仓储：下单、撤单、账户预占结果和撮合结果统一追加到用户分区
+WAL/RocksDB，由 `OrderUserStateService` 按序应用。`OrderRepository` 仅作为异步投影写入
+`trading_orders`，不参与订单状态裁决；订单事件、仓位、仓位模式和算法单状态均从本地事实快照产生。
 - 业务查询：`GET /api/v1/trading/fees/effective?userId=...&symbol=...` 返回当前最终 maker/taker ppm 和来源，例如 `INSTRUMENT`、`VIP_SYMBOL`。
 - 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
 - account provider 结算成交时按订单快照写 `TRADE_FEE`，并在 ledger 保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm`。

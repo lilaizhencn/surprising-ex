@@ -116,13 +116,20 @@ public final class UserPartitionWal implements AutoCloseable {
         Objects.requireNonNull(partition, "partition");
         List<UserPartitionEvent> events = new ArrayList<>();
         byte[] prefix = eventPrefix(partition);
+        long expectedSequence = 1L;
         try (ReadOptions readOptions = new ReadOptions();
              Snapshot snapshot = database.getSnapshot()) {
             readOptions.setSnapshot(snapshot);
             try (var iterator = database.newIterator(readOptions)) {
                 iterator.seek(prefix);
                 while (iterator.isValid() && startsWith(iterator.key(), prefix)) {
-                    events.add(decode(iterator.value()));
+                    UserPartitionEvent event = decode(iterator.value());
+                    if (!partition.equals(event.partition()) || event.sequence() != expectedSequence) {
+                        throw new IllegalStateException("用户分区 WAL 序号不连续: partition=" + partition.value()
+                                + " expected=" + expectedSequence + " actual=" + event.sequence());
+                    }
+                    events.add(event);
+                    expectedSequence = Math.addExact(expectedSequence, 1L);
                     iterator.next();
                 }
             }
@@ -137,6 +144,7 @@ public final class UserPartitionWal implements AutoCloseable {
 
     /** 返回已成功完成数据库投影的最后一条连续事件序号。 */
     public long lastProjectedSequence(UserPartitionKey partition) {
+        Objects.requireNonNull(partition, "partition");
         try {
             byte[] value = database.get(projectedKey(partition));
             return value == null ? 0L : decodeLong(value);
@@ -147,18 +155,26 @@ public final class UserPartitionWal implements AutoCloseable {
 
     /** 只有数据库事务成功提交后才能推进投影水位。 */
     public void markProjected(UserPartitionKey partition, long sequence) {
-        if (partition == null || sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
-            throw new IllegalArgumentException("projected WAL event must exist");
-        }
-        long current = lastProjectedSequence(partition);
-        if (sequence != current + 1L) {
-            throw new IllegalStateException("projected WAL sequence must be continuous: current=" + current
-                    + " next=" + sequence);
-        }
+        Objects.requireNonNull(partition, "partition");
+        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
+        lock.lock();
         try {
-            database.put(writeOptions, projectedKey(partition), encodeLong(sequence));
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("failed to mark projected WAL event", ex);
+            if (sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
+                throw new IllegalArgumentException("projected WAL event must exist");
+            }
+            long current = lastProjectedSequence(partition);
+            if (sequence != current + 1L) {
+                throw new IllegalStateException("projected WAL sequence must be continuous: current=" + current
+                        + " next=" + sequence);
+            }
+            requireProjectionRange(partition, current + 1L, sequence);
+            try {
+                database.put(writeOptions, projectedKey(partition), encodeLong(sequence));
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("failed to mark projected WAL event", ex);
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -169,20 +185,41 @@ public final class UserPartitionWal implements AutoCloseable {
      * 保证目标序号不超过 WAL 尾部，并且只能在数据库事务成功提交后调用。</p>
      */
     public void markProjectedThrough(UserPartitionKey partition, long sequence) {
-        if (partition == null || sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
-            throw new IllegalArgumentException("projected WAL event must exist");
-        }
-        long current = lastProjectedSequence(partition);
-        if (sequence <= current) {
-            return;
-        }
-        if (sequence > lastSequence(partition)) {
-            throw new IllegalStateException("projected WAL sequence is ahead of WAL tail: " + sequence);
-        }
+        Objects.requireNonNull(partition, "partition");
+        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
+        lock.lock();
         try {
-            database.put(writeOptions, projectedKey(partition), encodeLong(sequence));
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("failed to mark projected WAL sequence", ex);
+            if (sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
+                throw new IllegalArgumentException("projected WAL event must exist");
+            }
+            long current = lastProjectedSequence(partition);
+            if (sequence <= current) {
+                return;
+            }
+            if (sequence > lastSequence(partition)) {
+                throw new IllegalStateException("projected WAL sequence is ahead of WAL tail: " + sequence);
+            }
+            requireProjectionRange(partition, current + 1L, sequence);
+            try {
+                database.put(writeOptions, projectedKey(partition), encodeLong(sequence));
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("failed to mark projected WAL sequence", ex);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** 投影水位只能覆盖已经存在的每一条连续事件，损坏或缺口必须停住。 */
+    private void requireProjectionRange(UserPartitionKey partition, long first, long last) {
+        for (long sequence = first; sequence <= last; sequence++) {
+            if (readEvent(partition, sequence).isEmpty()) {
+                throw new IllegalStateException("projected WAL event is missing: partition=" + partition.value()
+                        + " sequence=" + sequence);
+            }
+            if (sequence == Long.MAX_VALUE) {
+                break;
+            }
         }
     }
 
