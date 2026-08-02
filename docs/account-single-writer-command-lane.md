@@ -12,8 +12,8 @@
 - `account_ledger_entries` 与产品账户流水
 
 订单、撮合、资金费、ADL、保险基金、交割/行权和管理端接口只能产生
-`AccountUserCommand`，不能直接更新上述表。它们仍可读取账户事实用于计算，但读取结果不授权资金变更；
-最终条件检查必须在 account-provider 的数据库事务内重新执行。
+`AccountUserCommand`，不能直接更新上述表。命令先按用户追加本地 RocksDB WAL，由本地 reducer
+单写者裁决余额、持仓和保证金；数据库只异步登记审计、恢复基线和查询投影，不参与在线资金裁决。
 
 串行边界是 `productLine + userId`。每条产品线使用独立 Topic：
 
@@ -30,7 +30,7 @@ surprising.<product-segment>.account.command.results.v1
 ```
 
 三个 Topic 都创建 32 个分区，account-provider 的独立 user-command batch listener 并发度默认也是 32，
-每次 poll 最多 500 条并在一个数据库事务内处理。同一产品线、同一用户的所有指令进入同一分区并保持顺序；不同用户可并行。总消费者并发超过 32
+每次 poll 最多 500 条并先同步追加本地 WAL。同一产品线、同一用户的所有指令进入同一分区并保持顺序；不同用户可并行。总消费者并发超过 32
 不会增加该产品线吞吐。某个技术故障会阻塞所在分区，系统不会为了可用性跳过资金指令。
 
 产品线 Topic 和消费组始终隔离，不再提供共享/legacy 账户指令 Topic。跨产品线共享钱包行仍由
@@ -40,18 +40,13 @@ PostgreSQL 行锁和非负约束做最终并发保护；产品线级串行不能
 
 本方案不使用 XA，也不把 Kafka 事务当作数据库事务：
 
-1. 业务模块在自己的 PostgreSQL 事务中写业务事实和 `account_outbox_events`。
-2. outbox 发布器使用原始 key 把命令至少一次发送到 Kafka。
-3. account-provider 在一个本地 PostgreSQL 事务中完成：
-   - 注册/校验 `account_commands`；
-   - 条件更新余额、持仓、保证金、亏空；
-   - 写不可变账本；
-   - 把命令置为 `APPLIED` 或 `REJECTED`；
-   - 写结果和下游事件 outbox。
-4. Kafka offset 只在该事务成功后提交。事务失败时记录重投，`commandId` 幂等拦截重复执行。
+1. 业务模块把 `AccountUserCommand` 发送到产品线账户命令 Topic；账户消费者校验产品线、key 和命令指纹后同步追加用户 WAL。
+2. 本地单写者按用户分区顺序读取 WAL，先保存终态结果，再提交 RocksDB 状态序号；重复 commandId 或重复事件不会重复扣款。
+3. 账户状态快照通过 Kafka 发布给订单、撮合、风控、强平、资金费等模块，各模块只使用自己的 JVM 快照。
+4. 数据库审计投影器异步登记原始命令和终态；数据库不可用时不影响本地 reducer，重启依据 WAL、状态库和结果库恢复。
 
-Redis 持仓只是数据库提交后的 revision 投影。用户持仓查询读 Redis；资金判断、撮合结果、
-资金费、强平和 ADL 不以 Redis 为锁或事实源。投影失败不回滚已提交资金，outbox 可以重放恢复。
+Redis 持仓和数据库表都是异步投影。用户持仓查询优先读本地账户快照；资金判断、撮合结果、
+资金费、强平和 ADL 不以 Redis 或数据库为事实源。投影失败不回滚已提交资金，WAL 和 Kafka 快照可以重放恢复。
 
 ## 幂等层
 
@@ -63,11 +58,10 @@ Redis 持仓只是数据库提交后的 revision 投影。用户持仓查询读 
 - `account_commands.command_id` 是执行幂等键，并保存完整 envelope 的 SHA-256。重复 command
   只有全部身份字段和 payload 完全一致才允许；冲突重复被视为数据完整性故障。
 - 账本、订单 reservation、资金费 payment、ADL execution、保险 coverage 继续保留各自的业务唯一键。
-- outbox 是至少一次投递；消费端必须允许同一消息重复出现。
+- Kafka 和本地 WAL 发布都是至少一次投递；消费端必须允许同一消息重复出现。
 
-同步 HTTP 等待不是正确性条件。网关提交命令后，账户模块用一个批量数据库轮询器等待
-`account_commands` 终态；结果 Topic 只用于低延迟通知和观测。HTTP 超时表示“结果未知”，调用方必须
-用原 `referenceId` 重试，不能生成新 reference。
+同步 HTTP 等待不是正确性条件。网关提交命令后，账户模块等待本地结果库终态；结果 Topic 只用于低延迟通知和观测。
+HTTP 超时表示“结果未知”，调用方必须用原 `referenceId` 重试，不能生成新 reference。
 
 ## 不依赖跨 Topic 顺序
 
@@ -79,8 +73,8 @@ Redis 持仓只是数据库提交后的 revision 投影。用户持仓查询读 
 - 父命令 `REJECTED`：子命令以 `DEPENDENCY_REJECTED` 终止；
 - 父命令仍未终态或尚未到达：继续等待。
 
-因此，生产者先后发送、不同 outbox publisher 的速度、结果 Topic 延迟或消费者重平衡都不会改变
-状态机正确性。结果消费者也必须以数据库中的 `account_commands` 为权威进行定时 reconciliation。
+因此，生产者先后发送、结果 Topic 延迟或消费者重平衡都不会改变状态机正确性。恢复任务只能扫描
+数据库审计投影中缺失的记录，不能用数据库结果反向修改本地账户状态。
 
 ## 关键业务状态机
 
@@ -121,9 +115,9 @@ taker/maker 用户和本侧仍为 `PENDING`。校验不通过时 UPSERT 影响 0
 
 ### 资金费
 
-funding-provider 只计算并为每个用户写 `FUNDING_SETTLE`。结算保持
-`PROCESSING -> WAITING_ACCOUNTS -> COMPLETED/FAILED`，每个 payment 以账户命令终态为准。
-结果 Topic 只加速唤醒，定时 reconciliation 直接读账户命令表。
+funding-provider 只从账户 JVM 快照计算候选并为每个用户写 `FUNDING_SETTLE`。命令先进入资金费本地 WAL，
+再按用户 key 发布到账户 Topic；账户命令终态才是扣款结果。`funding_settlements`、`funding_payments`
+和冻结费率表仍作为结算幂等、恢复和审计投影，不能反向参与候选计算。
 
 ### ADL 自动减仓
 
