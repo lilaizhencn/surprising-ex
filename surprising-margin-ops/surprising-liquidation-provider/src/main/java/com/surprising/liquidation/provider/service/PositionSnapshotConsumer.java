@@ -55,6 +55,10 @@ public class PositionSnapshotConsumer {
                 if (result == PositionSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
                     throw new IllegalArgumentException("持仓事件产品线与强平服务不一致");
                 }
+                if (result == PositionSnapshotCache.ApplyResult.CONFLICT) {
+                    snapshotCache.markNotReady();
+                    throw new IllegalStateException("持仓 JVM 快照同一修订号出现不同状态");
+                }
             }
             log.debug("强平持仓 JVM 快照已应用事件数={}", events.size());
         } catch (Exception ex) {

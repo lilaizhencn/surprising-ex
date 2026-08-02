@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -50,8 +51,11 @@ public final class PositionSnapshotCache {
             long lastUserRevision = userRevisions.getOrDefault(event.userId(), 0L);
             PositionUpdatedEvent previous = positions.get(key);
             long previousRevision = previous == null ? 0L : previous.revision();
-            if (event.revision() <= previousRevision) {
+            if (event.revision() < previousRevision) {
                 return ApplyResult.STALE;
+            }
+            if (event.revision() == previousRevision && previous != null) {
+                return sameState(previous, event) ? ApplyResult.STALE : ApplyResult.CONFLICT;
             }
             positions.put(key, event);
             if (event.revision() > lastUserRevision) {
@@ -135,7 +139,25 @@ public final class PositionSnapshotCache {
     public enum ApplyResult {
         APPLIED,
         STALE,
-        PRODUCT_LINE_MISMATCH
+        PRODUCT_LINE_MISMATCH,
+        CONFLICT
+    }
+
+    private boolean sameState(PositionUpdatedEvent left, PositionUpdatedEvent right) {
+        return left.productLine() == right.productLine()
+                && left.userId() == right.userId()
+                && left.symbol().equalsIgnoreCase(right.symbol())
+                && left.instrumentVersion() == right.instrumentVersion()
+                && left.marginMode() == right.marginMode()
+                && left.positionSide() == right.positionSide()
+                && left.signedQuantitySteps() == right.signedQuantitySteps()
+                && left.entryPriceTicks() == right.entryPriceTicks()
+                && left.entryValueTicks() == right.entryValueTicks()
+                && left.realizedPnlUnits() == right.realizedPnlUnits()
+                && Objects.equals(left.marginAsset(), right.marginAsset())
+                && left.marginUnits() == right.marginUnits()
+                && Objects.equals(left.positionUpdatedAt(), right.positionUpdatedAt())
+                && Objects.equals(left.marginUpdatedAt(), right.marginUpdatedAt());
     }
 
     public record PositionKey(long userId, String symbol, MarginMode marginMode, PositionSide positionSide) {

@@ -12,7 +12,11 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.PositionMode;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -27,9 +31,14 @@ class AccountStateSnapshotConsumerTest {
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
         AccountStateSnapshotConsumer consumer = new AccountStateSnapshotConsumer(objectMapper, properties, cache);
+        Consumer<String, String> kafkaConsumer = mock(Consumer.class);
+        TopicPartition partition = new TopicPartition(consumer.topic(), 0);
+        when(kafkaConsumer.assignment()).thenReturn(Set.of(partition));
+        when(kafkaConsumer.endOffsets(Set.of(partition))).thenReturn(Map.of(partition, 2L));
+        when(kafkaConsumer.position(partition)).thenReturn(2L);
 
         consumer.onAccountStateUpdated(List.of(new ConsumerRecord<>(
-                consumer.topic(), 0, 1L, event.partitionKey(), "value")));
+                consumer.topic(), 0, 1L, event.partitionKey(), "value")), kafkaConsumer);
 
         assertThat(cache.isUserReady(event.userId())).isTrue();
         assertThat(consumer.topic()).isEqualTo("surprising.linear-perp.account.state.events.v1");

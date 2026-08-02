@@ -18,10 +18,10 @@ class RiskApplicationYamlTest {
 
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.risk.kafka.product-topics-enabled"))
-                .contains(false);
+                .contains("${PRODUCT_TOPICS_ENABLED:false}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.risk.kafka.product-line"))
-                .contains("LINEAR_PERPETUAL");
+                .contains("${PRODUCT_LINE:LINEAR_PERPETUAL}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.risk.kafka.position-events-topic"))
                 .contains("surprising.account.position.events.v1");

@@ -132,6 +132,9 @@ public class OrderPlacementStateService {
                 if (result == PerpetualAccountStateSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
                     throw new IllegalStateException("永续账户初始化快照产品线不一致");
                 }
+                if (result == PerpetualAccountStateSnapshotCache.ApplyResult.CONFLICT) {
+                    throw new IllegalStateException("永续账户初始化快照同一修订号内容冲突");
+                }
             }
         } catch (RuntimeException ex) {
             throw new IllegalStateException("永续用户账户状态快照初始化失败: " + userId, ex);

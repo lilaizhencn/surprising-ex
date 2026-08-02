@@ -65,6 +65,10 @@ public class AccountStateSnapshotConsumer {
                     throw new IllegalStateException("完整账户快照修订号存在间隙，等待缺失事件: userId="
                             + event.userId() + " revision=" + event.accountRevision());
                 }
+                if (result == PerpetualAccountStateSnapshotCache.ApplyResult.CONFLICT) {
+                    throw new IllegalStateException("完整账户快照同一修订号内容冲突，等待 RPC 重建: userId="
+                            + event.userId() + " revision=" + event.accountRevision());
+                }
             }
             markReadyWhenCaughtUp(consumer);
         } catch (Exception ex) {

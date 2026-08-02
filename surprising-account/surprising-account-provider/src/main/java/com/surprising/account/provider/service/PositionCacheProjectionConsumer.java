@@ -65,6 +65,9 @@ public class PositionCacheProjectionConsumer {
             if (result == PositionSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
                 throw new IllegalArgumentException("position event does not match local snapshot product line");
             }
+            if (result == PositionSnapshotCache.ApplyResult.CONFLICT) {
+                throw new IllegalStateException("position event has conflicting same-revision state");
+            }
             cache.apply(event.cacheEvent(), false);
         } catch (Exception ex) {
             cache.markNotReady(properties.getKafka().getProductLine());

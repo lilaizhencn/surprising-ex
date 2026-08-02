@@ -4,6 +4,7 @@ import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import java.util.Optional;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -43,12 +44,18 @@ public final class PerpetualAccountStateSnapshotCache {
         Object lock = userLocks.computeIfAbsent(event.userId(), ignored -> new Object());
         synchronized (lock) {
             PerpetualAccountStateUpdatedEvent previous = states.get(event.userId());
-            if (previous != null && event.accountRevision() <= previous.accountRevision()) {
+            if (previous != null && event.accountRevision() < previous.accountRevision()) {
                 return ApplyResult.STALE;
             }
+            if (previous != null && event.accountRevision() == previous.accountRevision()) {
+                if (sameState(previous, event)) {
+                    return ApplyResult.STALE;
+                }
+                markUserUnavailable(event.userId());
+                return ApplyResult.CONFLICT;
+            }
             if (previous != null && event.accountRevision() > previous.accountRevision() + 1L) {
-                userReady.computeIfAbsent(event.userId(), ignored -> new AtomicBoolean()).set(false);
-                ready.set(false);
+                markUserUnavailable(event.userId());
                 return ApplyResult.REVISION_GAP;
             }
             states.put(event.userId(), event);
@@ -77,6 +84,10 @@ public final class PerpetualAccountStateSnapshotCache {
             }
             // 同一修订号可能来自重复 RPC 或 Kafka 重放，不能用新的 eventId/时间覆盖已有快照。
             if (previous != null && event.accountRevision() == previous.accountRevision()) {
+                if (!sameState(previous, event)) {
+                    markUserUnavailable(event.userId());
+                    return ApplyResult.CONFLICT;
+                }
                 userReady.computeIfAbsent(event.userId(), ignored -> new AtomicBoolean()).set(true);
                 return ApplyResult.STALE;
             }
@@ -144,6 +155,28 @@ public final class PerpetualAccountStateSnapshotCache {
         APPLIED,
         STALE,
         REVISION_GAP,
-        PRODUCT_LINE_MISMATCH
+        PRODUCT_LINE_MISMATCH,
+        CONFLICT
+    }
+
+    private void markUserUnavailable(long userId) {
+        userReady.computeIfAbsent(userId, ignored -> new AtomicBoolean()).set(false);
+        ready.set(false);
+    }
+
+    /** 比较业务快照内容，忽略事件标识、生成时间和链路追踪字段。 */
+    private boolean sameState(PerpetualAccountStateUpdatedEvent left,
+                              PerpetualAccountStateUpdatedEvent right) {
+        return left.schemaVersion() == right.schemaVersion()
+                && left.accountRevision() == right.accountRevision()
+                && left.productLine() == right.productLine()
+                && left.userId() == right.userId()
+                && Objects.equals(left.accountType(), right.accountType())
+                && Objects.equals(left.balances(), right.balances())
+                && Objects.equals(left.deficits(), right.deficits())
+                && Objects.equals(left.positions(), right.positions())
+                && Objects.equals(left.positionMargins(), right.positionMargins())
+                && Objects.equals(left.orderLocks(), right.orderLocks())
+                && left.positionMode() == right.positionMode();
     }
 }

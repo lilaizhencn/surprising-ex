@@ -57,17 +57,28 @@ public final class FeeScheduleSnapshotCache {
         });
     }
 
-    /** 应用增量事件；相同记录的旧事件不会覆盖新快照。 */
-    public boolean apply(FeeScheduleEvent event) {
+    /**
+     * 应用增量事件；相同记录的旧事件不会覆盖新快照。
+     *
+     * <p>同一费率计划、同一更新时间和同一编号必须携带同一完整内容；否则视为事实源
+     * 分叉，不能让后到事件静默覆盖前一个费率。</p>
+     */
+    public ApplyResult apply(FeeScheduleEvent event) {
         if (event == null || event.schedule() == null || event.productLine() != event.schedule().productLine()) {
-            return false;
+            return ApplyResult.INVALID;
         }
         ProductLine productLine = event.productLine();
         ScheduleKey key = new ScheduleKey(productLine, event.feeScheduleId());
         FeeScheduleResponse incoming = immutable(event.schedule());
+        ApplyResult[] result = {ApplyResult.APPLIED};
         state.updateAndGet(previous -> {
             FeeScheduleResponse existing = previous.schedules().get(key);
             if (existing != null && compareRevision(incoming, existing) < 0) {
+                result[0] = ApplyResult.STALE;
+                return previous;
+            }
+            if (existing != null && compareRevision(incoming, existing) == 0) {
+                result[0] = existing.equals(incoming) ? ApplyResult.STALE : ApplyResult.CONFLICT;
                 return previous;
             }
             Map<ScheduleKey, FeeScheduleResponse> schedules = new HashMap<>(previous.schedules());
@@ -76,7 +87,7 @@ public final class FeeScheduleSnapshotCache {
             initialized.add(productLine);
             return new State(Map.copyOf(schedules), Set.copyOf(initialized));
         });
-        return true;
+        return result[0];
     }
 
     public boolean initialized(ProductLine productLine) {
@@ -159,5 +170,12 @@ public final class FeeScheduleSnapshotCache {
 
     private record State(Map<ScheduleKey, FeeScheduleResponse> schedules,
                          Set<ProductLine> initializedProductLines) {
+    }
+
+    public enum ApplyResult {
+        APPLIED,
+        STALE,
+        CONFLICT,
+        INVALID
     }
 }

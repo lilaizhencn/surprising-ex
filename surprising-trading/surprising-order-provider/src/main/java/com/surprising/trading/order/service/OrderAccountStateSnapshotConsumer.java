@@ -69,6 +69,9 @@ public class OrderAccountStateSnapshotConsumer {
                 if (result == PerpetualAccountStateSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
                     throw new IllegalArgumentException("完整账户快照产品线与订单服务不一致");
                 }
+                if (result == PerpetualAccountStateSnapshotCache.ApplyResult.CONFLICT) {
+                    throw new IllegalStateException("完整账户快照同一修订号内容冲突，等待 RPC 重建");
+                }
             }
             markReadyWhenCaughtUp(consumer);
         } catch (Exception ex) {

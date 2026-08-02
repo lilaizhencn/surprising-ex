@@ -63,7 +63,11 @@ public class OrderPositionMaintenanceConsumer {
             }
             for (PositionUpdatedEvent event : events) {
                 if (marginSnapshotCache != null) {
-                    marginSnapshotCache.applyPosition(event);
+                    OrderMarginSnapshotCache.ApplyResult result = marginSnapshotCache.applyPosition(event);
+                    if (result == OrderMarginSnapshotCache.ApplyResult.CONFLICT) {
+                        marginSnapshotCache.markNotReady(event.productLine());
+                        throw new IllegalStateException("持仓 JVM 快照同一修订号出现不同状态，暂停产品线消费");
+                    }
                 }
                 orderService.onPositionUpdated(event);
             }

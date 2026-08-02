@@ -158,6 +158,9 @@ import org.springframework.stereotype.Component;
         if (result == PositionSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
             throw new IllegalStateException("position rebuild product line does not match local snapshot");
         }
+        if (result == PositionSnapshotCache.ApplyResult.CONFLICT) {
+            throw new IllegalStateException("position rebuild contains conflicting same-revision state");
+        }
     }
 
     private void rebuildLocal(ProductLine productLine) {

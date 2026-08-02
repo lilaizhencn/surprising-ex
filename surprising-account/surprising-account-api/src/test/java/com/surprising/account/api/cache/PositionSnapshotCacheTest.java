@@ -17,7 +17,7 @@ class PositionSnapshotCacheTest {
 
         assertThat(cache.apply(event(10L, 5L))).isEqualTo(PositionSnapshotCache.ApplyResult.APPLIED);
         assertThat(cache.apply(event(9L, 99L))).isEqualTo(PositionSnapshotCache.ApplyResult.STALE);
-        assertThat(cache.apply(event(10L, 99L))).isEqualTo(PositionSnapshotCache.ApplyResult.STALE);
+        assertThat(cache.apply(event(10L, 99L))).isEqualTo(PositionSnapshotCache.ApplyResult.CONFLICT);
 
         assertThat(cache.position(1001L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET))
                 .get().extracting(PositionUpdatedEvent::signedQuantitySteps).isEqualTo(5L);

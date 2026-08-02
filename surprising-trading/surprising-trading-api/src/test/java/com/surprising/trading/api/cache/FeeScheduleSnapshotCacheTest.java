@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.FeeScheduleResponse;
+import com.surprising.trading.api.model.FeeScheduleEvent;
+import com.surprising.trading.api.model.FeeScheduleEventType;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
 import java.time.Instant;
@@ -48,6 +50,28 @@ class FeeScheduleSnapshotCacheTest {
                         NOW.minusSeconds(20), null, FeeScheduleStatus.DISABLED)));
 
         assertThat(cache.effective(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", NOW)).isEmpty();
+    }
+
+    @Test
+    void sameRevisionIsIdempotentButConflictingPayloadIsRejected() {
+        FeeScheduleSnapshotCache cache = new FeeScheduleSnapshotCache();
+        FeeScheduleResponse initial = schedule(9L, "BTC-USDT", FeeScheduleSourceType.USER_OVERRIDE,
+                200L, NOW);
+        cache.replace(ProductLine.LINEAR_PERPETUAL, List.of(initial));
+
+        FeeScheduleEvent duplicate = new FeeScheduleEvent(
+                FeeScheduleEvent.CURRENT_SCHEMA_VERSION, ProductLine.LINEAR_PERPETUAL, 9L,
+                FeeScheduleEventType.UPSERTED, initial, NOW);
+        assertThat(cache.apply(duplicate)).isEqualTo(FeeScheduleSnapshotCache.ApplyResult.STALE);
+
+        FeeScheduleResponse conflicting = new FeeScheduleResponse(
+                initial.feeScheduleId(), initial.productLine(), initial.userId(), initial.symbol(),
+                999L, initial.takerFeeRatePpm(), initial.sourceType(), initial.tierCode(), initial.reason(),
+                initial.status(), initial.effectiveTime(), initial.expireTime(), initial.createdAt(), initial.updatedAt());
+        FeeScheduleEvent conflict = new FeeScheduleEvent(
+                FeeScheduleEvent.CURRENT_SCHEMA_VERSION, ProductLine.LINEAR_PERPETUAL, 9L,
+                FeeScheduleEventType.UPSERTED, conflicting, NOW);
+        assertThat(cache.apply(conflict)).isEqualTo(FeeScheduleSnapshotCache.ApplyResult.CONFLICT);
     }
 
     private FeeScheduleResponse schedule(long id,

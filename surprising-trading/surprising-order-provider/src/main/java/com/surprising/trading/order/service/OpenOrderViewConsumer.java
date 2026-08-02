@@ -81,7 +81,11 @@ public class OpenOrderViewConsumer {
             }
             view.synchronize(order);
             if (marginSnapshotCache != null) {
-                marginSnapshotCache.applyOrder(order);
+                OrderMarginSnapshotCache.ApplyResult result = marginSnapshotCache.applyOrder(order);
+                if (result == OrderMarginSnapshotCache.ApplyResult.CONFLICT) {
+                    marginSnapshotCache.markNotReady(order.productLine());
+                    throw new IllegalStateException("订单 JVM 快照同一修订号出现不同状态，暂停产品线消费");
+                }
             }
         }
     }

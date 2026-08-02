@@ -56,11 +56,17 @@ public class FeeScheduleEventPublisher {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    snapshotCache.apply(event);
+                    FeeScheduleSnapshotCache.ApplyResult result = snapshotCache.apply(event);
+                    if (result == FeeScheduleSnapshotCache.ApplyResult.CONFLICT) {
+                        throw new IllegalStateException("费率 JVM 快照同一修订号出现不同状态");
+                    }
                 }
             });
             return;
         }
-        snapshotCache.apply(event);
+        FeeScheduleSnapshotCache.ApplyResult result = snapshotCache.apply(event);
+        if (result == FeeScheduleSnapshotCache.ApplyResult.CONFLICT) {
+            throw new IllegalStateException("费率 JVM 快照同一修订号出现不同状态");
+        }
     }
 }

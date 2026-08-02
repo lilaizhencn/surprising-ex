@@ -51,6 +51,24 @@ class PerpetualAccountStateSnapshotCacheTest {
         assertThat(cache.state(1001L)).contains(first);
     }
 
+    @Test
+    void rejectsSameRevisionWithDifferentBusinessState() {
+        PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
+        var first = event(2L);
+        var conflict = new PerpetualAccountStateUpdatedEvent(
+                1, 1000L, 2L, ProductLine.LINEAR_PERPETUAL, 1001L, "USDT_PERPETUAL",
+                List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 1L, 0L)),
+                List.of(), List.of(), List.of(), List.of(), PositionMode.ONE_WAY,
+                Instant.parse("2026-07-02T00:00:00Z"), "conflict");
+
+        assertThat(cache.initialize(first)).isEqualTo(
+                PerpetualAccountStateSnapshotCache.ApplyResult.APPLIED);
+        cache.markReady();
+        assertThat(cache.initialize(conflict)).isEqualTo(
+                PerpetualAccountStateSnapshotCache.ApplyResult.CONFLICT);
+        assertThat(cache.state(1001L)).isEmpty();
+    }
+
     private PerpetualAccountStateUpdatedEvent event(long revision) {
         return new PerpetualAccountStateUpdatedEvent(
                 1, revision + 100L, revision, ProductLine.LINEAR_PERPETUAL, 1001L, "USDT_PERPETUAL",

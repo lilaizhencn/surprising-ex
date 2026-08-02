@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
 import com.surprising.risk.api.model.RiskAccountSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
@@ -34,6 +35,9 @@ class RiskRepositoryTest {
 
     @Mock
     private JdbcTemplate jdbcTemplate;
+
+    @Mock
+    private InstrumentSnapshotCache snapshotCache;
 
     @Test
     void saveAccountSnapshotFailsWhenInsertIsSkipped() {
@@ -92,25 +96,23 @@ class RiskRepositoryTest {
 
     @Test
     void riskGroupsUsesAccountPositionKeysetPaginationWithoutMarkDependency() {
-        RiskRepository repository = new RiskRepository(jdbcTemplate);
-        when(jdbcTemplate.query(any(String.class), anyRowMapper(),
-                eq(1001L), eq(1001L), eq(1001L), eq("USDT_PERPETUAL"), eq(1001L),
-                eq("USDT_PERPETUAL"), eq("USDT"), eq(200))).thenReturn(List.of());
+        when(snapshotCache.initialized(ProductLine.LINEAR_PERPETUAL)).thenReturn(true);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
+        RiskRepository repository = new RiskRepository(jdbcTemplate, new RiskProperties(), snapshotCache);
 
         repository.riskGroups(new RiskGroupKey(1001L, "USDT"), 200);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq(1001L), eq(1001L), eq(1001L), eq("USDT_PERPETUAL"), eq(1001L),
-                eq("USDT_PERPETUAL"), eq("USDT"), eq(200));
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
         assertThat(sql.getValue())
-                .contains("END AS account_type")
-                .contains("FROM account_positions p")
+                .contains("SELECT user_id, symbol, instrument_version")
+                .contains("FROM account_positions")
+                .contains("product_line = ?")
+                .contains("signed_quantity_steps <> 0")
                 .doesNotContain("mark_prices")
-                .contains("user_id > ?")
-                .contains("account_type > ?")
-                .contains("ORDER BY user_id ASC, account_type ASC, settle_asset ASC")
-                .contains("LIMIT ?");
+                ;
+        assertThat(args.getValue()).containsExactly("LINEAR_PERPETUAL");
     }
 
     @Test
@@ -118,16 +120,17 @@ class RiskRepositoryTest {
         RiskProperties properties = new RiskProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         properties.getKafka().setProductTopicsEnabled(true);
-        RiskRepository repository = new RiskRepository(jdbcTemplate, properties);
+        when(snapshotCache.initialized(ProductLine.OPTION)).thenReturn(true);
+        when(jdbcTemplate.query(any(String.class), anyRowMapper(), any(Object[].class))).thenReturn(List.of());
+        RiskRepository repository = new RiskRepository(jdbcTemplate, properties, snapshotCache);
 
         repository.riskGroups(null, 50);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(), args.capture());
-        assertThat(sql.getValue()).contains("p.product_line = ?");
-        assertThat(args.getValue()).containsExactly(
-                "OPTION", 0L, 0L, 0L, "", 0L, "", "", 50);
+        assertThat(sql.getValue()).contains("product_line = ?");
+        assertThat(args.getValue()).containsExactly("OPTION");
     }
 
     @Test
@@ -198,7 +201,8 @@ class RiskRepositoryTest {
     void walletBalanceUsesCoinProductAccountForInversePerpetualRiskGroup() {
         RiskRepository repository = new RiskRepository(jdbcTemplate);
         when(jdbcTemplate.query(any(String.class), anyRowMapper(),
-                eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
+                eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq("INVERSE_PERPETUAL"),
+                eq(1001L), eq("BTC"),
                 eq(1001L), eq("BTC"), eq(1001L), eq("BTC"))).thenReturn(List.of(123L));
 
         long walletBalanceUnits = repository.walletBalanceUnits(1001L, "COIN_PERPETUAL", "BTC");
@@ -206,12 +210,13 @@ class RiskRepositoryTest {
         assertThat(walletBalanceUnits).isEqualTo(123L);
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbcTemplate).query(sql.capture(), anyRowMapper(),
-                eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq(1001L), eq("BTC"),
+                eq("COIN_PERPETUAL"), eq(1001L), eq("BTC"), eq("INVERSE_PERPETUAL"),
+                eq(1001L), eq("BTC"),
                 eq(1001L), eq("BTC"), eq(1001L), eq("BTC"));
         assertThat(sql.getValue())
                 .contains("SELECT ? AS account_type")
-                .contains("WHEN 'LINEAR_DELIVERY' THEN 'USDT_DELIVERY'")
-                .contains("WHEN 'INVERSE_DELIVERY' THEN 'COIN_DELIVERY'")
+                .contains("WHERE m.user_id = ?")
+                .contains("p.product_line = ?")
                 .contains("o.reservation_account_type = ctx.account_type")
                 .contains("WHEN ctx.account_type = 'USDT_PERPETUAL'")
                 .contains("LEFT JOIN account_product_balances pb")

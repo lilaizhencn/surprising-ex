@@ -37,7 +37,10 @@ public class FeeScheduleSnapshotConsumer {
             if (event.productLine() != properties.getKafka().getProductLine()) {
                 throw new IllegalArgumentException("费率事件产品线不匹配: " + event.productLine());
             }
-            cache.apply(event);
+            FeeScheduleSnapshotCache.ApplyResult result = cache.apply(event);
+            if (result == FeeScheduleSnapshotCache.ApplyResult.CONFLICT) {
+                throw new IllegalStateException("费率 JVM 快照同一修订号出现不同状态，暂停产品线消费");
+            }
         } catch (Exception ex) {
             throw new IllegalArgumentException("费率快照事件解析失败", ex);
         }

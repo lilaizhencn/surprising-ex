@@ -12,7 +12,11 @@ import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.trading.api.model.PositionMode;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -28,8 +32,13 @@ class AccountStateSnapshotConsumerTest {
         when(objectMapper.readValue("first", PerpetualAccountStateUpdatedEvent.class)).thenReturn(first);
         when(objectMapper.readValue("gap", PerpetualAccountStateUpdatedEvent.class)).thenReturn(gap);
         AccountStateSnapshotConsumer consumer = new AccountStateSnapshotConsumer(objectMapper, properties, cache);
+        Consumer<String, String> kafkaConsumer = mock(Consumer.class);
+        TopicPartition partition = new TopicPartition("surprising.account.state.events.v1", 0);
+        when(kafkaConsumer.assignment()).thenReturn(Set.of(partition));
+        when(kafkaConsumer.endOffsets(Set.of(partition))).thenReturn(Map.of(partition, 2L));
+        when(kafkaConsumer.position(partition)).thenReturn(2L);
 
-        consumer.onAccountStateUpdated(List.of(record(first, "first")));
+        consumer.onAccountStateUpdated(List.of(record(first, "first")), kafkaConsumer);
         assertThat(cache.isUserReady(first.userId())).isTrue();
         assertThatThrownBy(() -> consumer.onAccountStateUpdated(List.of(record(gap, "gap"))))
                 .isInstanceOf(IllegalStateException.class)

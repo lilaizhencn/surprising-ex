@@ -61,16 +61,31 @@ public class OrderMarginSnapshotCache {
         return productLine != null && readyLines.contains(productLine);
     }
 
-    /** 记录完整仓位事件，旧修订不能覆盖新状态。 */
-    public void applyPosition(PositionUpdatedEvent event) {
+    /**
+     * 记录完整仓位事件，旧修订不能覆盖新状态。
+     *
+     * <p>同一修订号的重复事件必须幂等忽略；如果同一修订号携带不同状态，说明
+     * 事件流或恢复快照已经分叉，不能让最后到达的消息覆盖先到达的状态。</p>
+     */
+    public ApplyResult applyPosition(PositionUpdatedEvent event) {
         if (event == null) {
-            return;
+            return ApplyResult.IGNORED;
         }
         PositionKey key = new PositionKey(event.productLine(), event.userId(), event.symbol(),
                 event.marginMode(), event.positionSide());
-        positions.compute(key, (ignored, previous) -> previous == null || event.revision() >= previous.revision()
-                ? new PositionValue(event.revision(), event.instrumentVersion(), event.signedQuantitySteps())
-                : previous);
+        final ApplyResult[] result = {ApplyResult.APPLIED};
+        positions.compute(key, (ignored, previous) -> {
+            if (previous != null && event.revision() < previous.revision()) {
+                result[0] = ApplyResult.STALE;
+                return previous;
+            }
+            if (previous != null && event.revision() == previous.revision()) {
+                result[0] = samePosition(previous, event) ? ApplyResult.STALE : ApplyResult.CONFLICT;
+                return previous;
+            }
+            return new PositionValue(event.revision(), event.instrumentVersion(), event.signedQuantitySteps());
+        });
+        return result[0];
     }
 
     /** 首次数据库兜底成功后补齐本地仓位，后续订单可直接使用事件快照。 */
@@ -104,9 +119,15 @@ public class OrderMarginSnapshotCache {
     }
 
     /** 记录订单投影，并按订单修订维护未成交数量，支持撤单请求仍占用容量。 */
-    public void applyOrder(OrderRecord order) {
+    /**
+     * 记录订单投影，并按订单修订维护未成交数量。
+     *
+     * <p>同一修订号的不同订单状态不是正常的重放，而是投影分叉；调用方必须暂停
+     * 当前产品线快照并等待重建。</p>
+     */
+    public ApplyResult applyOrder(OrderRecord order) {
         if (order == null) {
-            return;
+            return ApplyResult.IGNORED;
         }
         putPositionIfAbsent(order.productLine(), order.userId(), order.symbol(), order.marginMode(),
                 order.positionSide(), order.instrumentVersion());
@@ -114,8 +135,14 @@ public class OrderMarginSnapshotCache {
         OrderValue next = new OrderValue(order.productLine(), order.userId(), order.symbol(), order.marginMode(),
                 order.positionSide(), order.instrumentVersion(), order.side(), order.reduceOnly(), order.status().name(),
                 order.remainingQuantitySteps(), order.revision());
+        final ApplyResult[] result = {ApplyResult.APPLIED};
         orders.compute(order.orderId(), (ignored, previous) -> {
             if (previous != null && previous.revision() > next.revision()) {
+                result[0] = ApplyResult.STALE;
+                return previous;
+            }
+            if (previous != null && previous.revision() == next.revision()) {
+                result[0] = sameOrder(previous, next) ? ApplyResult.STALE : ApplyResult.CONFLICT;
                 return previous;
             }
             if (previous != null) {
@@ -126,6 +153,7 @@ public class OrderMarginSnapshotCache {
             adjustPendingReduceOnly(next, 1L);
             return next;
         });
+        return result[0];
     }
 
     /**
@@ -244,6 +272,31 @@ public class OrderMarginSnapshotCache {
     public record ReduceOnlySnapshot(long instrumentVersion,
                                      long signedQuantitySteps,
                                      long pendingReduceOnlySteps) {
+    }
+
+    public enum ApplyResult {
+        APPLIED,
+        STALE,
+        CONFLICT,
+        IGNORED
+    }
+
+    private boolean samePosition(PositionValue previous, PositionUpdatedEvent event) {
+        return previous.instrumentVersion() == event.instrumentVersion()
+                && previous.signedQuantitySteps() == event.signedQuantitySteps();
+    }
+
+    private boolean sameOrder(OrderValue previous, OrderValue next) {
+        return previous.productLine() == next.productLine()
+                && previous.userId() == next.userId()
+                && previous.symbol().equals(next.symbol())
+                && previous.marginMode() == next.marginMode()
+                && previous.positionSide() == next.positionSide()
+                && previous.instrumentVersion() == next.instrumentVersion()
+                && previous.side() == next.side()
+                && previous.reduceOnly() == next.reduceOnly()
+                && previous.status().equals(next.status())
+                && previous.remainingQuantitySteps() == next.remainingQuantitySteps();
     }
 
     private record PositionKey(ProductLine productLine, long userId, String symbol,

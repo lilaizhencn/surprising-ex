@@ -11,7 +11,6 @@ import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.service.OrderMarginMath;
 import java.math.BigInteger;
 import java.util.Optional;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
@@ -21,29 +20,14 @@ public class SpotOrderReservationRepository {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
 
-    private final JdbcTemplate jdbcTemplate;
     private final MarkPriceLookup markPriceLookup;
     private final TradingOrderProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
 
-    public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate, OrderRepository orderRepository) {
-        this(jdbcTemplate, orderRepository, (symbol, version, maxAge) -> java.util.OptionalLong.empty(),
-                new TradingOrderProperties(), null);
-    }
-
-    public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate,
-                                          OrderRepository orderRepository,
-                                          MarkPriceLookup markPriceLookup) {
-        this(jdbcTemplate, orderRepository, markPriceLookup, new TradingOrderProperties(), null);
-    }
-
     @Autowired
-    public SpotOrderReservationRepository(JdbcTemplate jdbcTemplate,
-                                          OrderRepository orderRepository,
-                                          MarkPriceLookup markPriceLookup,
+    public SpotOrderReservationRepository(MarkPriceLookup markPriceLookup,
                                           TradingOrderProperties properties,
                                           @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
-        this.jdbcTemplate = jdbcTemplate;
         this.markPriceLookup = markPriceLookup;
         this.properties = properties;
         this.snapshotCache = snapshotCache;
