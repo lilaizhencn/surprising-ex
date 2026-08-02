@@ -24,10 +24,10 @@ class WebSocketApplicationYamlTest {
                 .contains(1000);
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.product-line"))
-                .contains("LINEAR_PERPETUAL");
+                .contains("${PRODUCT_LINE:LINEAR_PERPETUAL}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.product-topics-enabled"))
-                .contains(false);
+                .contains("${PRODUCT_TOPICS_ENABLED:false}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.account-risk-events-topic"))
                 .contains("surprising.risk.account.events.v1");
