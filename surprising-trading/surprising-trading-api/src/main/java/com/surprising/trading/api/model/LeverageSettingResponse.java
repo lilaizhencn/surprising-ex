@@ -2,6 +2,7 @@ package com.surprising.trading.api.model;
 
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
+import java.util.Objects;
 
 public record LeverageSettingResponse(
         long userId,
@@ -15,19 +16,7 @@ public record LeverageSettingResponse(
         Instant updatedAt) {
 
     public LeverageSettingResponse {
-        productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        productLine = Objects.requireNonNull(productLine, "productLine");
         marginMode = MarginMode.defaultIfNull(marginMode);
-    }
-
-    public LeverageSettingResponse(long userId,
-                                   String symbol,
-                                   MarginMode marginMode,
-                                   long leveragePpm,
-                                   long maxLeveragePpm,
-                                   long initialMarginRatePpm,
-                                   String source,
-                                   Instant updatedAt) {
-        this(userId, ProductLine.LINEAR_PERPETUAL, symbol, marginMode, leveragePpm, maxLeveragePpm,
-                initialMarginRatePpm, source, updatedAt);
     }
 }

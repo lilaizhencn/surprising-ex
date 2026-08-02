@@ -669,12 +669,13 @@ class MarketMakerServiceTest {
 
         @Override
         public PositionModeResponse positionMode(long userId, ProductLine productLine) {
-            return new PositionModeResponse(userId, PositionMode.ONE_WAY, Instant.parse("2026-01-01T00:00:00Z"));
+            return new PositionModeResponse(ProductLine.LINEAR_PERPETUAL, userId, PositionMode.ONE_WAY,
+                    Instant.parse("2026-01-01T00:00:00Z"));
         }
 
         @Override
         public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
-            return new PositionModeResponse(request.userId(), request.positionMode(),
+            return new PositionModeResponse(ProductLine.LINEAR_PERPETUAL, request.userId(), request.positionMode(),
                     Instant.parse("2026-01-01T00:00:00Z"));
         }
 
