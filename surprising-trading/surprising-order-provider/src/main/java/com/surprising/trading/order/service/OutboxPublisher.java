@@ -24,10 +24,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.stereotype.Service;
 
-@Service
-    public class OutboxPublisher {
+/**
+ * 旧数据库 outbox 发布器仅保留给迁移测试，生产订单事实流由用户分区状态机直接发布 Kafka。
+ */
+public class OutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxPublisher.class);
     private static final Duration MINIMUM_CLAIM_LEASE = Duration.ofSeconds(30);

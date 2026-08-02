@@ -3,6 +3,7 @@ package com.surprising.account.provider.config;
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
+import com.surprising.eventstore.UserPartitionResultStore;
 import java.nio.file.Path;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +23,13 @@ public class AccountWalConfiguration {
         Path directory = Path.of(properties.getWal().getDirectory(),
                 properties.getKafka().getProductLine().name(), "state");
         return new UserPartitionStateStore(directory);
+    }
+
+    @Bean(destroyMethod = "close")
+    public UserPartitionResultStore accountUserPartitionResultStore(AccountProperties properties) {
+        Path directory = Path.of(properties.getWal().getDirectory(),
+                properties.getKafka().getProductLine().name(), "results");
+        return new UserPartitionResultStore(directory);
     }
 
     @Bean

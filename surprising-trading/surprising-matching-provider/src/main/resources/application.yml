@@ -63,6 +63,8 @@ surprising:
       recovery:
         open-order-book-restore-enabled: true
         open-order-batch-size: 10000
+      wal:
+        directory: ${MATCHING_WAL_DIR:data/matching-wal}
       protection:
         self-trade-prevention-enabled: true
         internal-market-maker-user-ids: [900001, 900002, 910001]

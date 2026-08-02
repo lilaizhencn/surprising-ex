@@ -60,6 +60,10 @@ surprising:
         rebuild-max-age: 5m
         ready-ttl: 30s
         lock-ttl: 30s
+      wal:
+        directory: ${ORDER_WAL_DIR:data/order-wal}
+        node-id: ${ORDER_WAL_NODE_ID:1}
+        worker-delay-ms: ${ORDER_WAL_WORKER_DELAY_MS:25}
     outbox:
       batch-size: 1000
       publish-delay-ms: 20

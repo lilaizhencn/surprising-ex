@@ -2,39 +2,32 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
-import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ExpiringContractSettlementFanoutService {
 
     private final AccountService accountService;
-    private final AccountOutboxService outboxService;
-    private final AccountProperties properties;
+    private final AccountCommandSubmissionService commandSubmissionService;
     private final ObjectMapper objectMapper;
 
     public ExpiringContractSettlementFanoutService(AccountService accountService,
-                                                   AccountOutboxService outboxService,
-                                                   AccountProperties properties,
+                                                   AccountCommandSubmissionService commandSubmissionService,
                                                    ObjectMapper objectMapper) {
         this.accountService = accountService;
-        this.outboxService = outboxService;
-        this.properties = properties;
+        this.commandSubmissionService = commandSubmissionService;
         this.objectMapper = objectMapper;
     }
 
-    @Transactional
     public int fanout(DeliverySettlementEvent event) {
         return enqueue(accountService.planDeliverySettlement(event), AccountUserCommandType.DELIVERY_SETTLE);
     }
 
-    @Transactional
     public int fanout(OptionExerciseEvent event) {
         return enqueue(accountService.planOptionExercise(event), AccountUserCommandType.OPTION_EXERCISE);
     }
@@ -58,8 +51,8 @@ public class ExpiringContractSettlementFanoutService {
                     objectMapper.writeValueAsString(payload),
                     now,
                     null);
-            outboxService.enqueueUserCommand(
-                    properties.getKafka().getUserCommandsTopic(), "EXPIRING_POSITION_COMMAND", command, now);
+            // Kafka 只负责把命令交给账户用户分区 WAL；数据库 outbox 不再参与生命周期结算入口。
+            commandSubmissionService.submit(command);
         }
         return plans.size();
     }

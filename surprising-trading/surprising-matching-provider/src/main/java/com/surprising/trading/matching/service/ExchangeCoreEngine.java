@@ -7,6 +7,7 @@ import com.surprising.trading.matching.model.InstrumentSymbol;
 import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import com.surprising.trading.matching.repository.MatchingOrderBookRecoveryRepository;
+import com.surprising.trading.matching.store.MatchingLocalStateStore;
 import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
 import exchange.core2.core.common.CoreSymbolSpecification;
@@ -50,6 +51,7 @@ public class ExchangeCoreEngine {
     private final MatchingSymbolService symbolService;
     private final MatchingOrderBookRecoveryRepository recoveryRepository;
     private final MatchingProtectionIndex protectionIndex;
+    private final MatchingLocalStateStore localStateStore;
     private final ConcurrentMap<String, MatchingSymbol> loadedSymbols = new ConcurrentHashMap<>();
     private final Set<Long> createdUsers = ConcurrentHashMap.newKeySet();
     private volatile Set<String> activeSymbols = Set.of();
@@ -60,18 +62,27 @@ public class ExchangeCoreEngine {
     public ExchangeCoreEngine(MatchingProperties properties,
                               MatchingSymbolService symbolService,
                               MatchingOrderBookRecoveryRepository recoveryRepository) {
-        this(properties, symbolService, recoveryRepository, null);
+        this(properties, symbolService, recoveryRepository, null, null);
+    }
+
+    public ExchangeCoreEngine(MatchingProperties properties,
+                              MatchingSymbolService symbolService,
+                              MatchingOrderBookRecoveryRepository recoveryRepository,
+                              MatchingProtectionIndex protectionIndex) {
+        this(properties, symbolService, recoveryRepository, protectionIndex, null);
     }
 
     @Autowired
     public ExchangeCoreEngine(MatchingProperties properties,
                               MatchingSymbolService symbolService,
                               MatchingOrderBookRecoveryRepository recoveryRepository,
-                              MatchingProtectionIndex protectionIndex) {
+                              MatchingProtectionIndex protectionIndex,
+                              MatchingLocalStateStore localStateStore) {
         this.properties = properties;
         this.symbolService = symbolService;
         this.recoveryRepository = recoveryRepository;
         this.protectionIndex = protectionIndex;
+        this.localStateStore = localStateStore;
     }
 
     @PostConstruct
@@ -255,7 +266,9 @@ public class ExchangeCoreEngine {
         long lastOrderId = 0L;
         long restored = 0L;
         while (true) {
-            var batch = recoveryRepository.recoverableOpenOrdersAfter(lastCreatedAt, lastOrderId, batchSize);
+            var batch = localStateStore == null
+                    ? recoveryRepository.recoverableOpenOrdersAfter(lastCreatedAt, lastOrderId, batchSize)
+                    : localStateStore.recoverableOpenOrdersAfter(lastCreatedAt, lastOrderId, batchSize);
             if (batch.isEmpty()) {
                 break;
             }

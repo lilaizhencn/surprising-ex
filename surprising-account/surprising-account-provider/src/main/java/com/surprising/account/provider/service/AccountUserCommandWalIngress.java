@@ -25,16 +25,14 @@ public class AccountUserCommandWalIngress {
         this.wal = wal;
     }
 
-    public List<AccountUserCommandProcessor.ProcessingOutcome> append(
-            List<AccountUserCommandProcessor.CommandEnvelope> envelopes) {
+    public List<AppendOutcome> append(List<CommandEnvelope> envelopes) {
         if (envelopes == null || envelopes.isEmpty()) {
             return List.of();
         }
         return envelopes.stream().map(this::appendOne).toList();
     }
 
-    private AccountUserCommandProcessor.ProcessingOutcome appendOne(
-            AccountUserCommandProcessor.CommandEnvelope envelope) {
+    private AppendOutcome appendOne(CommandEnvelope envelope) {
         if (envelope == null || envelope.command() == null
                 || envelope.serializedEnvelope() == null || envelope.serializedEnvelope().isBlank()) {
             throw new AccountCommandPoisonPillException("invalid account command batch envelope");
@@ -44,7 +42,7 @@ public class AccountUserCommandWalIngress {
         wal.append(partition, command.commandId(), command.commandType().name(),
                 envelope.serializedEnvelope().getBytes(StandardCharsets.UTF_8),
                 fingerprint(envelope.serializedEnvelope()), command.occurredAt());
-        return AccountUserCommandProcessor.ProcessingOutcome.DURABLE;
+        return AppendOutcome.DURABLE;
     }
 
     private String fingerprint(String serializedEnvelope) {
@@ -54,5 +52,14 @@ public class AccountUserCommandWalIngress {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 不可用", ex);
         }
+    }
+
+    /** Kafka 命令已经同步写入本地事实流后的结果。 */
+    public enum AppendOutcome {
+        DURABLE
+    }
+
+    /** 账户 Kafka 消费批次中的原始命令和固定序列化内容。 */
+    public record CommandEnvelope(AccountUserCommand command, String serializedEnvelope) {
     }
 }

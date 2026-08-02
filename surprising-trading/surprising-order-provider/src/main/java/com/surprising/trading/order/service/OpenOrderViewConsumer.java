@@ -13,11 +13,13 @@ import java.util.Set;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /** 在数据库写事务提交后，将订单生命周期和撮合结果投影到读模型。 */
-@Service
+/**
+ * @deprecated 订单主状态已经由用户分区 WAL 驱动；数据库读模型投影不再参与运行时状态变更。
+ */
+@Deprecated(forRemoval = true)
 public class OpenOrderViewConsumer {
 
     private final ObjectMapper mapper;

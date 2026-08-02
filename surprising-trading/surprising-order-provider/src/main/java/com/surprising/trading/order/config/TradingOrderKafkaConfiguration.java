@@ -81,6 +81,17 @@ public class TradingOrderKafkaConfiguration {
         return factory;
     }
 
+    @Bean(name = "orderMatchResultKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> orderMatchResultKafkaListenerContainerFactory(
+            @Qualifier("orderOpenViewConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.BATCH);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
+
     /**
      * 到期清理必须失败关闭；只要撤单或冻结资金确认未完成，就持续重试同一 instrument 事件。
      */

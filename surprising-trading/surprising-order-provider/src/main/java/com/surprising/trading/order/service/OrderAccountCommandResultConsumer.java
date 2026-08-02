@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -16,13 +17,23 @@ public class OrderAccountCommandResultConsumer {
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final OrderService orderService;
+    private final OrderUserStateService userStateService;
 
     public OrderAccountCommandResultConsumer(ObjectMapper objectMapper,
                                              TradingOrderProperties properties,
                                              OrderService orderService) {
+        this(objectMapper, properties, orderService, null);
+    }
+
+    @Autowired
+    public OrderAccountCommandResultConsumer(ObjectMapper objectMapper,
+                                             TradingOrderProperties properties,
+                                             OrderService orderService,
+                                             OrderUserStateService userStateService) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderService = orderService;
+        this.userStateService = userStateService;
     }
 
     @KafkaListener(
@@ -50,7 +61,11 @@ public class OrderAccountCommandResultConsumer {
                 }
                 results.add(result);
             }
-            orderService.processAccountCommandResults(results);
+            if (userStateService != null) {
+                userStateService.processAccountCommandResults(results);
+            } else {
+                orderService.processAccountCommandResults(results);
+            }
         } catch (Exception ex) {
             throw new IllegalStateException("failed to process order account command result batch", ex);
         }

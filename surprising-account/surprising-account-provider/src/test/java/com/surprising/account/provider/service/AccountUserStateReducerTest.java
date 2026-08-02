@@ -9,6 +9,7 @@ import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
+import com.surprising.account.api.model.FundingSettlementAccountCommand;
 import com.surprising.account.api.model.TradeParticipantRole;
 import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.eventstore.UserPartitionCommandLane;
@@ -125,6 +126,48 @@ class AccountUserStateReducerTest {
             assertThat(state.snapshot().positionMargins()).containsExactly(
                     new PerpetualAccountStateUpdatedEvent.PositionMargin(
                             "BTC-USDT", "USDT", MarginMode.CROSS, PositionSide.NET, 10L));
+        }
+    }
+
+    @Test
+    void fundingDebitConsumesAvailableThenPositionMarginAndRecordsDeficitIdempotently() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-funding-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, store, new UserPartitionCommandLane());
+            PerpetualAccountStateUpdatedEvent initial = new PerpetualAccountStateUpdatedEvent(
+                    PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
+                    ProductLine.LINEAR_PERPETUAL, 1001L, AccountType.USDT_PERPETUAL.name(),
+                    List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 10L, 20L)),
+                    List.of(),
+                    List.of(new PerpetualAccountStateUpdatedEvent.Position("BTC-USDT", 1L,
+                            MarginMode.CROSS, PositionSide.NET, 10L, 100L, 1_000L, 0L,
+                            Instant.parse("2026-08-02T00:00:00Z"))),
+                    List.of(new PerpetualAccountStateUpdatedEvent.PositionMargin(
+                            "BTC-USDT", "USDT", MarginMode.CROSS, PositionSide.NET, 20L)),
+                    List.of(), PositionMode.ONE_WAY, Instant.parse("2026-08-02T00:00:00Z"), "test");
+            reducer.initialize(initial);
+            AccountUserCommand funding = command("funding-1", AccountUserCommandType.FUNDING_SETTLE,
+                    objectMapper.writeValueAsString(new FundingSettlementAccountCommand(
+                            7001L, 7101L, "BTC-USDT", MarginMode.CROSS, PositionSide.NET,
+                            "USDT", 10L, 1_000L, 10_000L, -50L)));
+
+            AccountUserStateReducer.Reduction first = reducer.apply(funding, 1L);
+            AccountUserStateReducer.Reduction duplicate = reducer.apply(funding, 2L);
+
+            assertThat(first.status()).isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            assertThat(duplicate.status()).isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            AccountUserReducerState state = reducer.state(new com.surprising.eventstore.UserPartitionKey(
+                    ProductLine.LINEAR_PERPETUAL, 1001L)).orElseThrow();
+            assertThat(state.snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 0L, 0L));
+            assertThat(state.snapshot().deficits()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Deficit("USDT", 20L, 0L));
+            assertThat(state.snapshot().positionMargins()).isEmpty();
+            assertThat(state.settledFundingPaymentIds()).containsExactly(7101L);
+            assertThat(store.lastAppliedSequence(new com.surprising.eventstore.UserPartitionKey(
+                    ProductLine.LINEAR_PERPETUAL, 1001L))).isEqualTo(2L);
         }
     }
 

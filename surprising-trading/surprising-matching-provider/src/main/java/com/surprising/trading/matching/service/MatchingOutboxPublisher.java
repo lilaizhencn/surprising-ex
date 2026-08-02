@@ -24,10 +24,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.stereotype.Service;
+// 旧数据库 Outbox 发布器仅保留测试兼容实现，不注册为生产 Bean。
 
-@Service
-    public class MatchingOutboxPublisher {
+@Deprecated(forRemoval = true)
+public class MatchingOutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(MatchingOutboxPublisher.class);
     private static final Duration MINIMUM_CLAIM_LEASE = Duration.ofSeconds(30);

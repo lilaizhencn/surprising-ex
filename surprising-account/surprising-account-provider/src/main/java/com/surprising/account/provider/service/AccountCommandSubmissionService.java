@@ -2,10 +2,9 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.repository.AccountCommandSubmissionRepository;
-import java.time.Instant;
+import java.util.concurrent.TimeUnit;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
@@ -13,26 +12,27 @@ public class AccountCommandSubmissionService {
 
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
-    private final AccountCommandSubmissionRepository submissionRepository;
-    private final AccountOutboxService outboxService;
+    private final KafkaTemplate<String, String> kafkaTemplate;
 
     public AccountCommandSubmissionService(ObjectMapper objectMapper,
                                            AccountProperties properties,
-                                           AccountCommandSubmissionRepository submissionRepository,
-                                           AccountOutboxService outboxService) {
+                                           KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
-        this.submissionRepository = submissionRepository;
-        this.outboxService = outboxService;
+        this.kafkaTemplate = kafkaTemplate;
     }
 
-    @Transactional
+    /** HTTP 命令直接发送到 Kafka；账户消费者成功写入同步 WAL 后才提交 offset。 */
     public void submit(AccountUserCommand command) {
-        String serializedEnvelope = objectMapper.writeValueAsString(command);
-        Instant now = Instant.now();
-        if (submissionRepository.register(command, serializedEnvelope, now)) {
-            outboxService.enqueueUserCommand(properties.getKafka().getUserCommandsTopic(),
-                    "ACCOUNT_API_COMMAND", command, now);
+        if (command == null) {
+            throw new IllegalArgumentException("account command is required");
+        }
+        String serialized = objectMapper.writeValueAsString(command);
+        try {
+            kafkaTemplate.send(properties.getKafka().getUserCommandsTopic(), command.partitionKey(), serialized)
+                    .get(properties.getCommandWait().getTimeout().toMillis(), TimeUnit.MILLISECONDS);
+        } catch (Exception ex) {
+            throw new IllegalStateException("账户命令未能写入 Kafka: " + command.commandId(), ex);
         }
     }
 }

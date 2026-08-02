@@ -93,6 +93,35 @@ public class OrderPlacementStateService {
         return positionModeRepository.positionMode(line, userId);
     }
 
+    /**
+     * 订单 WAL 热路径使用的仓位模式读取；永续只允许从账户 JVM 快照读取，不能退回数据库。
+     */
+    public PositionMode localPositionMode(ProductLine line, long userId) {
+        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+            throw new IllegalStateException("订单本地状态尚未支持该产品线的仓位模式快照: " + line);
+        }
+        return positionMode(line, userId);
+    }
+
+    /**
+     * 从账户完整快照判断已有持仓是否使用了不同的保证金模式。
+     */
+    public boolean cachedPositionMarginModeConflict(ProductLine line,
+                                                     long userId,
+                                                     String symbol,
+                                                     MarginMode marginMode) {
+        if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {
+            throw new IllegalStateException("订单本地状态尚未支持该产品线的保证金模式快照: " + line);
+        }
+        // positionMode 会在需要时通过账户内部 RPC 初始化单个用户，初始化完成后只读 JVM 快照。
+        positionMode(line, userId);
+        MarginMode normalized = MarginMode.defaultIfNull(marginMode);
+        return state(line, userId).positions().stream()
+                .filter(position -> position.symbol().equalsIgnoreCase(symbol))
+                .filter(position -> position.signedQuantitySteps() != 0L)
+                .anyMatch(position -> position.marginMode() != normalized);
+    }
+
     /** 返回订单计算所依据的永续账户修订号；非永续或影子快照未启用时返回零。 */
     public long accountRevision(ProductLine line, long userId) {
         if (line != ProductLine.LINEAR_PERPETUAL || accountStateSnapshotCache == null) {

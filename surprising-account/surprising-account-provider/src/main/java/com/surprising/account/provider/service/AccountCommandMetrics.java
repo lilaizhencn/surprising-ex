@@ -1,6 +1,5 @@
 package com.surprising.account.provider.service;
 
-import com.surprising.account.provider.service.AccountUserCommandProcessor.ProcessingOutcome;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -13,18 +12,18 @@ import org.springframework.stereotype.Component;
 @Component
 public class AccountCommandMetrics {
 
-    private final Map<ProcessingOutcome, Counter> eventCounters;
-    private final Map<ProcessingOutcome, Timer> processingTimers;
-    private final Map<ProcessingOutcome, Timer> eventLagTimers;
+    private final Map<AccountUserCommandWalIngress.AppendOutcome, Counter> eventCounters;
+    private final Map<AccountUserCommandWalIngress.AppendOutcome, Timer> processingTimers;
+    private final Map<AccountUserCommandWalIngress.AppendOutcome, Timer> eventLagTimers;
     private final Counter failedCounter;
     private final Timer failedProcessingTimer;
     private final Timer failedEventLagTimer;
 
     public AccountCommandMetrics(MeterRegistry meterRegistry) {
-        this.eventCounters = new EnumMap<>(ProcessingOutcome.class);
-        this.processingTimers = new EnumMap<>(ProcessingOutcome.class);
-        this.eventLagTimers = new EnumMap<>(ProcessingOutcome.class);
-        for (ProcessingOutcome outcome : ProcessingOutcome.values()) {
+        this.eventCounters = new EnumMap<>(AccountUserCommandWalIngress.AppendOutcome.class);
+        this.processingTimers = new EnumMap<>(AccountUserCommandWalIngress.AppendOutcome.class);
+        this.eventLagTimers = new EnumMap<>(AccountUserCommandWalIngress.AppendOutcome.class);
+        for (AccountUserCommandWalIngress.AppendOutcome outcome : AccountUserCommandWalIngress.AppendOutcome.values()) {
             String outcomeTag = outcome.name().toLowerCase(java.util.Locale.ROOT);
             eventCounters.put(outcome, eventCounter(meterRegistry, outcomeTag));
             processingTimers.put(outcome, processingTimer(meterRegistry, outcomeTag));
@@ -35,7 +34,9 @@ public class AccountCommandMetrics {
         this.failedEventLagTimer = eventLagTimer(meterRegistry, "failed");
     }
 
-    public void record(ProcessingOutcome outcome, Instant eventTime, long startedAtNanos) {
+    public void record(AccountUserCommandWalIngress.AppendOutcome outcome,
+                       Instant eventTime,
+                       long startedAtNanos) {
         eventCounters.get(outcome).increment();
         recordTimers(processingTimers.get(outcome), eventLagTimers.get(outcome), eventTime, startedAtNanos);
     }

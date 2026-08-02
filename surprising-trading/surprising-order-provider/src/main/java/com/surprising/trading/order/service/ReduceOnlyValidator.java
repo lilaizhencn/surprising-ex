@@ -51,8 +51,9 @@ public class ReduceOnlyValidator {
             if (!cacheDecision.accepted()) {
                 return cacheDecision;
             }
-            // 过渡阶段仍由数据库行锁完成最终校验，防止订单事件尚未传播时重复占用平仓容量。
-            // 账户版本栅栏上线后再删除这一次最终复核。
+            // 账户快照和订单用户分区状态由同一条事实流驱动；通过快照校验后直接返回，
+            // 禁止下单热路径再执行持仓或开放订单 SQL。
+            return cacheDecision;
         }
         var position = positionLookup.lockedPosition(productLine, request.userId(), request.symbol(),
                 request.marginMode(), request.positionSide()).orElse(null);

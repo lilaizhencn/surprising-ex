@@ -15,6 +15,7 @@ public class TradingOrderProperties {
     private Risk risk = new Risk();
     private Algo algo = new Algo();
     private RedisIndex redisIndex = new RedisIndex();
+    private Wal wal = new Wal();
 
     /** 启动时拒绝未隔离的订单 Topic 配置。 */
     @PostConstruct
@@ -57,6 +58,14 @@ public class TradingOrderProperties {
     public RedisIndex getRedisIndex() { return redisIndex; }
 
     public void setRedisIndex(RedisIndex redisIndex) { this.redisIndex = redisIndex; }
+
+    public Wal getWal() {
+        return wal;
+    }
+
+    public void setWal(Wal wal) {
+        this.wal = wal == null ? new Wal() : wal;
+    }
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
@@ -303,6 +312,46 @@ public class TradingOrderProperties {
                 throw new IllegalArgumentException("trading order outbox cleanupMaxBatches must be positive");
             }
             this.cleanupMaxBatches = cleanupMaxBatches;
+        }
+    }
+
+    /** 订单用户分区事实流的本地存储配置。 */
+    public static class Wal {
+        private String directory = "data/order-wal";
+        private int nodeId = 1;
+        private long workerDelayMs = 25L;
+
+        public String getDirectory() {
+            return directory;
+        }
+
+        public void setDirectory(String directory) {
+            if (directory == null || directory.isBlank()) {
+                throw new IllegalArgumentException("订单 WAL 目录不能为空");
+            }
+            this.directory = directory.trim();
+        }
+
+        public int getNodeId() {
+            return nodeId;
+        }
+
+        public void setNodeId(int nodeId) {
+            if (nodeId < 0 || nodeId > 1023) {
+                throw new IllegalArgumentException("订单 WAL nodeId 必须在 0 到 1023 之间");
+            }
+            this.nodeId = nodeId;
+        }
+
+        public long getWorkerDelayMs() {
+            return workerDelayMs;
+        }
+
+        public void setWorkerDelayMs(long workerDelayMs) {
+            if (workerDelayMs <= 0L) {
+                throw new IllegalArgumentException("订单 WAL workerDelayMs 必须为正数");
+            }
+            this.workerDelayMs = workerDelayMs;
         }
     }
 

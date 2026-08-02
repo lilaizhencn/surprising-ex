@@ -21,16 +21,16 @@ import tools.jackson.databind.ObjectMapper;
 class AccountUserCommandConsumerTest {
 
     @Test
-    void parsesOnePollAsOneOrderedProcessorBatch() throws Exception {
+    void parsesOnePollAsOneOrderedWalBatch() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        AccountUserCommandProcessor processor = mock(AccountUserCommandProcessor.class);
-        when(processor.processBatch(anyList())).thenReturn(List.of(
-                AccountUserCommandProcessor.ProcessingOutcome.APPLIED,
-                AccountUserCommandProcessor.ProcessingOutcome.DUPLICATE));
+        AccountUserCommandWalIngress ingress = mock(AccountUserCommandWalIngress.class);
+        when(ingress.append(anyList())).thenReturn(List.of(
+                AccountUserCommandWalIngress.AppendOutcome.DURABLE,
+                AccountUserCommandWalIngress.AppendOutcome.DURABLE));
         AccountUserCommandConsumer consumer = new AccountUserCommandConsumer(
-                objectMapper, processor, properties, new AccountCommandMetrics(new SimpleMeterRegistry()));
+                objectMapper, ingress, properties, new AccountCommandMetrics(new SimpleMeterRegistry()));
 
         AccountUserCommand first = command("command-1", 1001L, Instant.parse("2026-07-20T00:00:00Z"));
         AccountUserCommand second = command("command-2", 1001L, Instant.parse("2026-07-20T00:00:01Z"));
@@ -39,8 +39,8 @@ class AccountUserCommandConsumerTest {
                 record(properties, second, objectMapper.writeValueAsString(second), 42L)));
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<AccountUserCommandProcessor.CommandEnvelope>> captor = ArgumentCaptor.forClass(List.class);
-        verify(processor).processBatch(captor.capture());
+        ArgumentCaptor<List<AccountUserCommandWalIngress.CommandEnvelope>> captor = ArgumentCaptor.forClass(List.class);
+        verify(ingress).append(captor.capture());
         assertThat(captor.getValue()).extracting(envelope -> envelope.command().commandId())
                 .containsExactly("command-1", "command-2");
     }
@@ -50,12 +50,11 @@ class AccountUserCommandConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        AccountUserCommandProcessor processor = mock(AccountUserCommandProcessor.class);
         AccountUserCommandWalIngress ingress = mock(AccountUserCommandWalIngress.class);
         when(ingress.append(anyList())).thenReturn(List.of(
-                AccountUserCommandProcessor.ProcessingOutcome.DURABLE));
+                AccountUserCommandWalIngress.AppendOutcome.DURABLE));
         AccountUserCommandConsumer consumer = new AccountUserCommandConsumer(
-                objectMapper, processor, ingress, properties,
+                objectMapper, ingress, properties,
                 new AccountCommandMetrics(new SimpleMeterRegistry()));
         AccountUserCommand command = command("command-wal-1", 1001L,
                 Instant.parse("2026-07-20T00:00:00Z"));
@@ -64,7 +63,6 @@ class AccountUserCommandConsumerTest {
                 objectMapper.writeValueAsString(command), 43L)));
 
         verify(ingress).append(anyList());
-        org.mockito.Mockito.verifyNoInteractions(processor);
     }
 
     private static AccountUserCommand command(String commandId, long userId, Instant occurredAt) {

@@ -4,6 +4,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -19,6 +20,7 @@ public class MatchingProperties {
     private Protection protection = new Protection();
     private MarketData marketData = new MarketData();
     private Outbox outbox = new Outbox();
+    private Wal wal = new Wal();
 
     /** 启动时拒绝未隔离的撮合 Topic 配置。 */
     @PostConstruct
@@ -72,6 +74,34 @@ public class MatchingProperties {
 
     public void setOutbox(Outbox outbox) {
         this.outbox = outbox;
+    }
+
+    public Wal getWal() {
+        return wal;
+    }
+
+    public void setWal(Wal wal) {
+        this.wal = wal == null ? new Wal() : wal;
+    }
+
+    /** 撮合本地事实库配置；目录按产品线隔离。 */
+    public static class Wal {
+        private String directory = "data/matching-wal";
+
+        public String getDirectory() {
+            return directory;
+        }
+
+        public void setDirectory(String directory) {
+            if (directory == null || directory.isBlank()) {
+                throw new IllegalArgumentException("撮合 WAL 目录不能为空");
+            }
+            this.directory = directory.trim();
+        }
+
+        public Path productLineDirectory(ProductLine productLine) {
+            return Path.of(directory, productLine.name());
+        }
     }
 
     public static class Kafka {

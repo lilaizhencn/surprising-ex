@@ -3,6 +3,8 @@ package com.surprising.account.provider.controller;
 import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.service.PerpetualAccountStateSnapshotService;
+import com.surprising.account.provider.service.AccountUserStateReducer;
+import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,15 +19,25 @@ import org.springframework.web.server.ResponseStatusException;
 public class PerpetualAccountStateInternalController {
 
     private final PerpetualAccountStateSnapshotService snapshotService;
+    private final AccountUserStateReducer stateReducer;
 
-    public PerpetualAccountStateInternalController(PerpetualAccountStateSnapshotService snapshotService) {
+    public PerpetualAccountStateInternalController(PerpetualAccountStateSnapshotService snapshotService,
+                                                   AccountUserStateReducer stateReducer) {
         this.snapshotService = snapshotService;
+        this.stateReducer = stateReducer;
     }
 
     @GetMapping("/perpetual-state/snapshot")
     public PerpetualAccountStateUpdatedEvent snapshot(@RequestParam("productLine") ProductLine productLine,
                                                        @RequestParam("userId") long userId) {
         try {
+            if (productLine == ProductLine.LINEAR_PERPETUAL) {
+                var local = stateReducer.snapshot(new UserPartitionKey(productLine, userId));
+                if (local.isPresent()) {
+                    return local.get();
+                }
+            }
+            // 只有本地事实库尚无该用户时才建立一次数据库恢复基线。
             return snapshotService.snapshot(productLine, userId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

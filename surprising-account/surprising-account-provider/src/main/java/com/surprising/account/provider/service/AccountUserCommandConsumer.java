@@ -21,28 +21,18 @@ public class AccountUserCommandConsumer {
     private static final Logger log = LoggerFactory.getLogger(AccountUserCommandConsumer.class);
 
     private final ObjectMapper objectMapper;
-    private final AccountUserCommandProcessor processor;
     private final AccountUserCommandWalIngress walIngress;
     private final AccountProperties properties;
     private final AccountCommandMetrics metrics;
     private final Set<FailedRecord> failedRecords = ConcurrentHashMap.newKeySet();
 
-    public AccountUserCommandConsumer(ObjectMapper objectMapper,
-                                      AccountUserCommandProcessor processor,
-                                      AccountProperties properties,
-                                      AccountCommandMetrics metrics) {
-        this(objectMapper, processor, null, properties, metrics);
-    }
-
-    /** 生产入口只写同步 WAL；数据库投影由独立 worker 负责。 */
+    /** 生产入口只写同步 WAL；数据库审计投影由独立 worker 负责。 */
     @Autowired
     public AccountUserCommandConsumer(ObjectMapper objectMapper,
-                                      AccountUserCommandProcessor processor,
                                       AccountUserCommandWalIngress walIngress,
                                       AccountProperties properties,
                                       AccountCommandMetrics metrics) {
         this.objectMapper = objectMapper;
-        this.processor = processor;
         this.walIngress = walIngress;
         this.properties = properties;
         this.metrics = metrics;
@@ -68,13 +58,14 @@ public class AccountUserCommandConsumer {
             }
         }
         try {
-            List<AccountUserCommandProcessor.CommandEnvelope> envelopes = parsed.stream()
-                    .map(value -> new AccountUserCommandProcessor.CommandEnvelope(
+            List<AccountUserCommandWalIngress.CommandEnvelope> envelopes = parsed.stream()
+                    .map(value -> new AccountUserCommandWalIngress.CommandEnvelope(
                             value.command(), value.record().value()))
                     .toList();
-            List<AccountUserCommandProcessor.ProcessingOutcome> outcomes = walIngress == null
-                    ? processor.processBatch(envelopes)
-                    : walIngress.append(envelopes);
+            if (walIngress == null) {
+                throw new IllegalStateException("账户 WAL 入口未配置，禁止回退数据库命令处理器");
+            }
+            List<AccountUserCommandWalIngress.AppendOutcome> outcomes = walIngress.append(envelopes);
             if (outcomes.size() != parsed.size()) {
                 throw new IllegalStateException("account command batch outcome size mismatch");
             }

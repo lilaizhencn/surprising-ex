@@ -66,6 +66,8 @@ public class MatchingService {
     private final LatestPublicTradeCache latestPublicTradeCache;
     private final OrderBookDepthPublisher depthPublisher;
     private final PublicTradePublisher tradePublisher;
+    /** 生产构造必须使用本地事实库；旧构造仅供不启动 Spring 的迁移测试。 */
+    private final boolean requireLocalState;
     private final Map<String, DepthState> depthStates = new ConcurrentHashMap<>();
 
     @Autowired
@@ -79,6 +81,21 @@ public class MatchingService {
                            LatestPublicTradeCache latestPublicTradeCache,
                            OrderBookDepthPublisher depthPublisher,
                            PublicTradePublisher tradePublisher) {
+        this(objectMapper, properties, exchangeCoreEngine, protectionRepository, persistenceService,
+                outboxRepository, protectionIndex, latestPublicTradeCache, depthPublisher, tradePublisher, true);
+    }
+
+    private MatchingService(ObjectMapper objectMapper,
+                            MatchingProperties properties,
+                            ExchangeCoreEngine exchangeCoreEngine,
+                            MatchingProtectionRepository protectionRepository,
+                            MatchingPersistenceService persistenceService,
+                            MatchingOutboxRepository outboxRepository,
+                            MatchingProtectionIndex protectionIndex,
+                            LatestPublicTradeCache latestPublicTradeCache,
+                            OrderBookDepthPublisher depthPublisher,
+                            PublicTradePublisher tradePublisher,
+                            boolean requireLocalState) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.exchangeCoreEngine = exchangeCoreEngine;
@@ -89,6 +106,7 @@ public class MatchingService {
         this.latestPublicTradeCache = latestPublicTradeCache;
         this.depthPublisher = depthPublisher;
         this.tradePublisher = tradePublisher;
+        this.requireLocalState = requireLocalState;
     }
 
     MatchingService(ObjectMapper objectMapper,
@@ -97,9 +115,8 @@ public class MatchingService {
                     MatchingProtectionRepository protectionRepository,
                     MatchingPersistenceService persistenceService,
                     MatchingOutboxRepository outboxRepository) {
-        this(objectMapper, properties, exchangeCoreEngine, protectionRepository,
-                persistenceService, outboxRepository, null, null,
-                OrderBookDepthPublisher.NOOP, PublicTradePublisher.NOOP);
+        this(objectMapper, properties, exchangeCoreEngine, protectionRepository, persistenceService,
+                outboxRepository, null, null, OrderBookDepthPublisher.NOOP, PublicTradePublisher.NOOP, false);
     }
 
     MatchingService(ObjectMapper objectMapper,
@@ -110,17 +127,16 @@ public class MatchingService {
                     MatchingOutboxRepository outboxRepository,
                     OrderBookDepthPublisher depthPublisher,
                     PublicTradePublisher tradePublisher) {
-        this(objectMapper, properties, exchangeCoreEngine, protectionRepository,
-                persistenceService, outboxRepository, null, null, depthPublisher, tradePublisher);
+        this(objectMapper, properties, exchangeCoreEngine, protectionRepository, persistenceService,
+                outboxRepository, null, null, depthPublisher, tradePublisher, false);
     }
 
-    @Transactional
     public void process(OrderCommandEvent command) {
+        persistenceService.prepare(command);
         process(command, persistenceService.commandState(command.commandId(), command.orderId()),
                 ProtectionChecks.REQUIRED, true);
     }
 
-    @Transactional
     public void processBatch(List<OrderCommandEvent> commands) {
         if (commands == null || commands.isEmpty()) {
             return;
@@ -135,6 +151,7 @@ public class MatchingService {
                 throw new IllegalArgumentException("conflicting matching commands for commandId="
                         + command.commandId());
             }
+            persistenceService.prepare(command);
         }
         LinkedHashMap<Long, Long> commandOrderIds = new LinkedHashMap<>(uniqueCommands.size());
         uniqueCommands.forEach((commandId, command) -> commandOrderIds.put(commandId, command.orderId()));
@@ -465,10 +482,6 @@ public class MatchingService {
     private void saveAndPublish(MatchResultEvent result,
                                 OrderCommandEvent orderCommand,
                                 Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots) {
-        if (!persistenceService.saveResult(result)) {
-            return;
-        }
-        persistenceService.applyActiveOrderStatus(result);
         boolean containsInternalSelfTrade = false;
         String lastTakerFinancialCommandId = null;
         List<MatchTradeEvent> externalTrades = new ArrayList<>(result.trades().size());
@@ -493,8 +506,9 @@ public class MatchingService {
                         requireQuantitySnapshot(trade, makerQuantitySnapshots));
             }
         }
-        persistenceService.saveTrades(externalTrades);
-        persistenceService.applyMakerFills(result.trades());
+        if (!persistenceService.commit(result, externalTrades)) {
+            return;
+        }
         if (protectionIndex != null) {
             protectionIndex.apply(orderCommand, result);
         }
@@ -508,7 +522,15 @@ public class MatchingService {
                 result.commandType().name(),
                 payload(result),
                 result.eventTime()));
-        outboxRepository.enqueueBatch(outboxWrites);
+        if (requireLocalState) {
+            persistenceService.enqueueOutbox(outboxWrites);
+        } else {
+            // 旧测试构造没有装配本地 RocksDB，只验证撮合业务输出，不代表生产回退路径。
+            if (outboxRepository == null) {
+                throw new IllegalStateException("迁移测试未提供撮合通知接收器");
+            }
+            outboxRepository.enqueueBatch(outboxWrites);
+        }
     }
 
     private void publishOrderBookDepth(MatchingSymbol symbol, CommandResultCode resultCode, Instant eventTime) {

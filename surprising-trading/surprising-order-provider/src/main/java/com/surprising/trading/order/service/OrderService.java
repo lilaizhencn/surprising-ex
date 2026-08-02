@@ -93,6 +93,7 @@ public class OrderService {
     private final RedisOpenOrderView openOrderView;
     private final OrderInstrumentLifecycleFenceService lifecycleFenceService;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
+    private final OrderUserStateService orderUserStateService;
 
     public OrderService(ObjectMapper objectMapper,
                         TradingOrderProperties properties,
@@ -107,7 +108,7 @@ public class OrderService {
         this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
                 placementStateService,
                 orderMarginRepository, spotOrderReservationRepository, outboxRepository,
-                null, null, null);
+                null, null, null, null);
     }
 
     public OrderService(ObjectMapper objectMapper,
@@ -123,7 +124,7 @@ public class OrderService {
                         RedisOpenOrderView openOrderView) {
         this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
                 placementStateService, orderMarginRepository, spotOrderReservationRepository,
-                outboxRepository, openOrderView, null, null);
+                outboxRepository, openOrderView, null, null, null);
     }
 
     public OrderService(ObjectMapper objectMapper,
@@ -140,7 +141,26 @@ public class OrderService {
                         OrderInstrumentLifecycleFenceService lifecycleFenceService) {
         this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
                 placementStateService, orderMarginRepository, spotOrderReservationRepository,
-                outboxRepository, openOrderView, lifecycleFenceService, null);
+                outboxRepository, openOrderView, lifecycleFenceService, null, null);
+    }
+
+    /** 测试嵌入调用方的构造签名；生产 Spring 必须使用包含用户分区状态机的构造函数。 */
+    public OrderService(ObjectMapper objectMapper,
+                        TradingOrderProperties properties,
+                        OrderValidator orderValidator,
+                        ReduceOnlyValidator reduceOnlyValidator,
+                        OrderRepository orderRepository,
+                        OrderEventRepository orderEventRepository,
+                        OrderPlacementStateService placementStateService,
+                        OrderMarginRepository orderMarginRepository,
+                        SpotOrderReservationRepository spotOrderReservationRepository,
+                        OutboxRepository outboxRepository,
+                        RedisOpenOrderView openOrderView,
+                        OrderInstrumentLifecycleFenceService lifecycleFenceService,
+                        OrderFeeSnapshotLookup feeSnapshotLookup) {
+        this(objectMapper, properties, orderValidator, reduceOnlyValidator, orderRepository, orderEventRepository,
+                placementStateService, orderMarginRepository, spotOrderReservationRepository, outboxRepository,
+                openOrderView, lifecycleFenceService, feeSnapshotLookup, null);
     }
 
     @Autowired
@@ -156,7 +176,8 @@ public class OrderService {
                         OutboxRepository outboxRepository,
                         RedisOpenOrderView openOrderView,
                         OrderInstrumentLifecycleFenceService lifecycleFenceService,
-                        OrderFeeSnapshotLookup feeSnapshotLookup) {
+                        OrderFeeSnapshotLookup feeSnapshotLookup,
+                        OrderUserStateService orderUserStateService) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderValidator = orderValidator;
@@ -170,10 +191,13 @@ public class OrderService {
         this.openOrderView = openOrderView;
         this.lifecycleFenceService = lifecycleFenceService;
         this.feeSnapshotLookup = feeSnapshotLookup;
+        this.orderUserStateService = orderUserStateService;
     }
 
-    @Transactional
     public OrderResponse place(PlaceOrderRequest request) {
+        if (orderUserStateService != null) {
+            return placeWal(request, null);
+        }
         return place(request, null);
     }
 
@@ -181,6 +205,9 @@ public class OrderService {
      * 批量下单使用同一用户的账户修订号序列；普通单笔下单仍严格读取当前 JVM 快照。
      */
     private OrderResponse place(PlaceOrderRequest request, BatchReservationSequence sequence) {
+        if (orderUserStateService != null) {
+            return placeWal(request, sequence);
+        }
         PlaceOrderRequest normalized = normalize(request);
         String traceId = TraceContext.currentOrCreate();
         ProductLine productLine = currentProductLine();
@@ -297,7 +324,91 @@ public class OrderService {
         return toResponse(order);
     }
 
-    @Transactional
+    /** 生产下单入口：只构造订单事实和账户预占命令，不写订单数据库。 */
+    private OrderResponse placeWal(PlaceOrderRequest request, BatchReservationSequence sequence) {
+        PlaceOrderRequest normalized = normalize(request);
+        ProductLine productLine = currentProductLine();
+        String traceId = TraceContext.currentOrCreate();
+        if (hasClientOrderId(normalized)) {
+            try {
+                OrderResponse existing = orderUserStateService.getByClientOrderId(
+                        normalized.userId(), normalized.clientOrderId());
+                requireSameClientOrderIntent(normalized, existing);
+                return existing;
+            } catch (IllegalStateException ignored) {
+                // 本地分区尚无该幂等键，继续构造首个事实事件。
+            }
+        }
+        PositionMode positionMode = productLine == ProductLine.LINEAR_PERPETUAL
+                ? placementStateService.localPositionMode(productLine, normalized.userId())
+                : placementStateService.positionMode(productLine, normalized.userId());
+        normalized = normalizePositionMode(normalized, positionMode);
+        Instant now = Instant.now();
+        ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
+        if (validation.accepted()) {
+            validation = orderValidator.validate(normalized);
+        }
+        if (validation.accepted() && normalized.reduceOnly()) {
+            ValidationResult reduceOnlyValidation = reduceOnlyValidator.validate(normalized);
+            if (!reduceOnlyValidation.accepted()) {
+                validation = ValidationResult.reject(reduceOnlyValidation.rejectReason(), validation.instrumentVersion());
+            } else {
+                validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
+                        validation.instrumentType(), validation.contractType());
+            }
+        }
+        OrderFeeSnapshot feeSnapshot = rejectedFeeSnapshot();
+        if (validation.accepted()) {
+            var resolved = feeSnapshotLookup == null ? java.util.Optional.<OrderFeeSnapshot>empty()
+                    : feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
+                    validation.instrumentVersion(), now);
+            if (resolved.isEmpty()) {
+                validation = ValidationResult.reject("fee schedule unavailable", validation.instrumentVersion());
+            } else {
+                feeSnapshot = resolved.get();
+            }
+        }
+        long orderId = orderUserStateService.nextOrderId();
+        ReservationPlan reservationPlan = ReservationPlan.none();
+        if (validation.accepted() && (!normalized.reduceOnly() || requiresReduceOnlyFunds(normalized, validation))) {
+            reservationPlan = planOpeningFunds(normalized, orderId, validation, feeSnapshot, sequence);
+            if (!reservationPlan.accepted()) {
+                validation = ValidationResult.reject(reservationPlan.rejectReason(), validation.instrumentVersion(),
+                        validation.instrumentType(), validation.contractType());
+            }
+        }
+        OrderStatus status = !validation.accepted() ? OrderStatus.REJECTED
+                : reservationPlan.command() == null ? OrderStatus.ACCEPTED : OrderStatus.PENDING_RESERVE;
+        OrderReserveAccountCommand reservation = reservationPlan.command();
+        OrderRecord order = new OrderRecord(orderId, productLine, normalized.userId(),
+                emptyToNull(normalized.clientOrderId()), normalized.symbol(), validation.instrumentVersion(),
+                normalized.side(), normalized.orderType(), normalized.timeInForce(), normalized.priceTicks(),
+                normalized.quantitySteps(), 0L, validation.accepted() ? normalized.quantitySteps() : 0L,
+                normalized.marginMode(), normalized.positionSide(), feeSnapshot.makerFeeRatePpm(),
+                feeSnapshot.takerFeeRatePpm(), normalized.reduceOnly(), normalized.postOnly(),
+                reservation == null ? null : reservation.accountType().name(),
+                reservation == null ? null : reservation.asset(), reservation == null ? 0L : reservation.reservedUnits(),
+                status, validation.rejectReason(), now, now, 1L);
+        return orderUserStateService.place(order);
+    }
+
+    /** 本地订单事实流使用账户快照和用户分区状态完成保证金模式校验，不打开数据库事务。 */
+    private ValidationResult validateMarginModeForLocalState(ProductLine productLine,
+                                                             PlaceOrderRequest request) {
+        if (request.reduceOnly() || productLine != ProductLine.LINEAR_PERPETUAL) {
+            return validateMarginMode(productLine, request);
+        }
+        if (placementStateService.cachedPositionMarginModeConflict(productLine, request.userId(),
+                request.symbol(), request.marginMode())) {
+            return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
+        }
+        if (orderUserStateService.hasActiveMarginModeConflict(request.userId(), request.symbol(),
+                request.marginMode())) {
+            return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
+        }
+        return ValidationResult.ok();
+    }
+
     public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
         List<PlaceOrderRequest> orders = request == null ? List.of() : request.orders();
         requireBatchSize(orders.size(), 20, "orders");
@@ -603,10 +714,12 @@ public class OrderService {
         return new OrderFeeSnapshot(0L, 0L, "REJECTED");
     }
 
-    @Transactional
     public OrderResponse cancel(CancelOrderRequest request) {
         if (request.userId() <= 0 || request.orderId() <= 0) {
             throw new IllegalArgumentException("userId and orderId must be positive");
+        }
+        if (orderUserStateService != null) {
+            return orderUserStateService.cancel(request.userId(), request.orderId(), null);
         }
         OrderRecord order = orderRepository.findByOrderId(request.orderId())
                 .orElseThrow(() -> new IllegalStateException("order not found: " + request.orderId()));
@@ -621,7 +734,6 @@ public class OrderService {
         return requestCancel(order, null).order();
     }
 
-    @Transactional
     public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
         List<CancelOrderRequest> orders = request == null ? List.of() : request.orders();
         requireBatchSize(orders.size(), 50, "orders");
@@ -637,7 +749,6 @@ public class OrderService {
         return orderBatchResponse(results);
     }
 
-    @Transactional
     public OrderBatchResponse cancelOpenOrders(CancelOpenOrdersRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("cancel open orders request is required");
@@ -649,6 +760,23 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
+        if (orderUserStateService != null) {
+            String symbol = request.symbol() == null || request.symbol().isBlank()
+                    ? null : normalizeSymbol(request.symbol());
+            List<OrderResponse> canceled = orderUserStateService.cancelOpenOrders(request.userId(), symbol, limit);
+            List<OrderBatchItemResponse> results = new ArrayList<>(canceled.size());
+            for (int index = 0; index < canceled.size(); index++) {
+                results.add(new OrderBatchItemResponse(index, true, "cancel requested", canceled.get(index)));
+            }
+            return orderBatchResponse(results);
+        }
+        return cancelOpenOrdersFromDatabase(request);
+    }
+
+    /** 仅供未装配用户分区状态机的历史测试；生产入口不会进入此方法。 */
+    @Transactional
+    private OrderBatchResponse cancelOpenOrdersFromDatabase(CancelOpenOrdersRequest request) {
+        int limit = request.limit() == null ? 1000 : request.limit();
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null
                 : normalizeSymbol(request.symbol());
@@ -669,6 +797,9 @@ public class OrderService {
     }
 
     public OrderResponse get(long orderId) {
+        if (orderUserStateService != null) {
+            return orderUserStateService.get(orderId);
+        }
         return orderRepository.findByOrderId(orderId)
                 .map(order -> {
                     requireOrderCurrentProductLine(order);
@@ -680,6 +811,9 @@ public class OrderService {
     public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
+        }
+        if (orderUserStateService != null) {
+            return orderUserStateService.getByClientOrderId(userId, normalizeClientOrderId(clientOrderId));
         }
         return orderRepository.findByClientOrderId(currentProductLine(), userId, normalizeClientOrderId(clientOrderId))
                 .map(order -> {
@@ -699,6 +833,10 @@ public class OrderService {
         }
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        if (orderUserStateService != null) {
+            long beforeOrderId = decodeOpenOrderCursor(cursor);
+            return orderUserStateService.openOrders(userId, symbol, limit, beforeOrderId);
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
         ProductLine productLine = currentProductLine();
@@ -1001,9 +1139,12 @@ public class OrderService {
         return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
     }
 
-    @Transactional
     public void processAccountCommandResults(List<AccountCommandResultEvent> results) {
         if (results == null || results.isEmpty()) {
+            return;
+        }
+        if (orderUserStateService != null) {
+            orderUserStateService.processAccountCommandResults(results);
             return;
         }
         LinkedHashMap<Long, AccountCommandResultEvent> byOrderId = new LinkedHashMap<>();
@@ -1420,6 +1561,25 @@ public class OrderService {
     private void requireSameClientOrderIntent(PlaceOrderRequest request, OrderRecord existing) {
         boolean same = existing.userId() == request.userId()
                 && existing.productLine() == currentProductLine()
+                && existing.clientOrderId() != null
+                && existing.clientOrderId().equals(request.clientOrderId())
+                && existing.symbol().equals(request.symbol())
+                && existing.side() == request.side()
+                && existing.orderType() == request.orderType()
+                && existing.timeInForce() == request.timeInForce()
+                && existing.priceTicks() == request.priceTicks()
+                && existing.quantitySteps() == request.quantitySteps()
+                && existing.marginMode() == request.marginMode()
+                && existing.positionSide() == request.positionSide()
+                && existing.reduceOnly() == request.reduceOnly()
+                && existing.postOnly() == request.postOnly();
+        if (!same) {
+            throw new IllegalArgumentException("clientOrderId already used with different order parameters");
+        }
+    }
+
+    private void requireSameClientOrderIntent(PlaceOrderRequest request, OrderResponse existing) {
+        boolean same = existing.userId() == request.userId()
                 && existing.clientOrderId() != null
                 && existing.clientOrderId().equals(request.clientOrderId())
                 && existing.symbol().equals(request.symbol())

@@ -2,7 +2,6 @@ package com.surprising.account.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.surprising.account.provider.service.AccountUserCommandProcessor.ProcessingOutcome;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -14,12 +13,12 @@ class AccountCommandMetricsTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         AccountCommandMetrics metrics = new AccountCommandMetrics(registry);
 
-        for (ProcessingOutcome outcome : ProcessingOutcome.values()) {
+        for (AccountUserCommandWalIngress.AppendOutcome outcome : AccountUserCommandWalIngress.AppendOutcome.values()) {
             metrics.record(outcome, Instant.now(), System.nanoTime());
         }
         metrics.recordFailure(null, System.nanoTime());
 
-        for (ProcessingOutcome outcome : ProcessingOutcome.values()) {
+        for (AccountUserCommandWalIngress.AppendOutcome outcome : AccountUserCommandWalIngress.AppendOutcome.values()) {
             String tag = outcome.name().toLowerCase(java.util.Locale.ROOT);
             assertThat(registry.get("surprising.account.command.events")
                     .tag("outcome", tag).counter().count()).isEqualTo(1.0d);

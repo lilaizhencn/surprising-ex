@@ -27,7 +27,6 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.stereotype.Service;
 
 /**
  * Drains account outbox rows with row-level locking so multiple account nodes can publish safely.
@@ -35,8 +34,10 @@ import org.springframework.stereotype.Service;
  * <p>Crashes can still produce duplicate Kafka sends between send and mark-published, so consumers
  * must treat event id/trade id as idempotency keys.</p>
  */
-@Service
-    public class AccountOutboxPublisher {
+/**
+ * 旧数据库 outbox 发布器仅保留给历史数据迁移测试，生产账户事实流由本地状态 worker 直接发布 Kafka。
+ */
+public class AccountOutboxPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(AccountOutboxPublisher.class);
     private static final Duration MINIMUM_CLAIM_LEASE = Duration.ofSeconds(30);
