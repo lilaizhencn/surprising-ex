@@ -40,7 +40,10 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前已实
 client / internal gateway
   -> POST /api/v1/trading/orders
   -> surprising-trading-entry-provider / surprising-order-provider
+  -> surprising.<product-segment>.order.user.commands.v1（key = PRODUCT_LINE:userId）
+  -> 用户分区单写入消费者
   -> 用户分区 WAL/RocksDB 顺序追加订单事实
+  -> surprising.<product-segment>.order.user.command.results.v1
   -> Kafka 订单事件与账户预占命令
   -> surprising.<product-segment>.order.commands.v1
   -> surprising-matching-provider / exchange-core
@@ -99,8 +102,9 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 `GET /trigger-orders` 列表；订单事件、撮合结果、成交明细和聚合时间线接口不再从交易主库提供。
 这些跨表后台查询、资金对账和运营报表必须由未来财务运营系统消费事件投影，并连接独立数据库实现。
 
-订单事实入口不再依赖订单数据库仓储：下单、撤单、账户预占结果和撮合结果统一追加到用户分区
-WAL/RocksDB，由 `OrderUserStateService` 按序应用。`OrderRepository` 仅作为异步投影写入
+订单事实入口不再依赖订单数据库仓储：下单、撤单、账户预占结果和撮合结果先按用户分区命令
+Topic 路由，再统一追加到用户分区 WAL/RocksDB，由 `OrderUserStateService` 按序应用。
+`OrderRepository` 仅作为异步投影写入
 `trading_orders`，不参与订单状态裁决；订单事件、仓位、仓位模式和算法单状态均从本地事实快照产生。
 - 业务查询：`GET /api/v1/trading/fees/effective?userId=...&symbol=...` 返回当前最终 maker/taker ppm 和来源，例如 `INSTRUMENT`、`VIP_SYMBOL`。
 - 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
@@ -310,6 +314,8 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `trading_trigger_orders_user_client_uidx` 保证同一用户 `clientTriggerOrderId` 的止盈止损下单幂等。
 - `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + symbol + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
 - 订单事实事件由用户分区 WAL/RocksDB 提交后直接发送 Kafka；数据库投影只按用户修订号异步替换，数据库不可用不会回滚订单状态。
+- HTTP、账户结果、撮合结果和只减仓清理都必须先写入 `order.user.commands.v1`；订单节点之间不能直接
+  调用另一个节点的本地 WAL。结果 Topic 只用于同步等待，终态同时保存在用户分区结果库。
 - `trading_outbox_events` 仅由撮合、触发、强平等仍需要数据库事务发件箱的模块使用，不再作为订单下单或账户资金的事实入口。
 - Kafka producer 开启 `acks=all` 和 `enable.idempotence=true`。
 - 下游消费者需要按 `commandId/orderId` 幂等处理 command，按 `eventId` 幂等处理 event。
@@ -320,6 +326,10 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `surprising.<product-segment>.order.events.v1`：订单入口事件，key = `symbol`。
 - `surprising.<product-segment>.match.results.v1`：可靠撮合结果，key = `symbol`；私有成交和开放订单投影只消费这条链路。
 - `surprising.<product-segment>.account.user.commands.v1`：matching outbox 产生的可靠用户资金命令；账户结算绝不消费公共逐笔流。
+- `surprising.<product-segment>.order.user.commands.v1`：订单用户分区单写入命令，key = `<PRODUCT_LINE>:<userId>`；
+  HTTP 下单/撤单、账户结果、撮合结果和算法状态更新都必须经过此 Topic。
+- `surprising.<product-segment>.order.user.command.results.v1`：订单用户命令终态，key = `<PRODUCT_LINE>:<userId>`；
+  每个 HTTP 节点使用独立结果消费组，不能把结果 Topic 当成事实源。
 - `surprising.<product-segment>.match.trades.v1`：供 WebSocket 公共逐笔与 K 线计算使用的可丢失 `PublicTradeEvent`，key = `symbol`。matching 按 symbol 使用独立队列，每 50ms 由专用非阻塞 Kafka producer 批量刷新；逐笔保持 FIFO、不合并，同一 symbol 排队超过 10,000 条时只丢弃该 symbol 最旧的消息。
 - `surprising.<product-segment>.orderbook.depth.v1`：可丢失的 L2 盘口快照，key = `symbol`；每个 symbol 只保留最新一份待发送快照。
 - `surprising.<product-segment>.mark.price.v1`：trigger-provider 消费的标记价格流，key = `symbol`。

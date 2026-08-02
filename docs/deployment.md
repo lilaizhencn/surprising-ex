@@ -48,6 +48,8 @@ RF=3 时按实际 Topic 数量计算副本。
 | 产品线 | `account.user.commands.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `account.user.commands.dlt.v1` | **32** | 原命令 Key 和分区 |
 | 产品线 | `account.command.results.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
+| 产品线 | `order.user.commands.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
+| 产品线 | `order.user.command.results.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
 
 三个账户命令 Topic 由 `ACCOUNT_COMMAND_PARTITIONS=32` 明确固定，分区数必须一致，DLT 必须保留原始
 分区号。所有 account-provider 的 `ACCOUNT_USER_COMMAND_CONCURRENCY` 总和超过 32 不会增加有效
@@ -110,6 +112,11 @@ exchange-core 内部的私有代码，而是独立的 Maven 依赖。父 POM 通
 - 每个消费者组的有效并行度上限是 32。禁止为每个交易对创建消费者，也禁止给运行中的 Topic
   原地加分区。
 - Kafka Streams 在再均衡或重启时从 changelog Topic 恢复 RocksDB。
+- 订单下单、撤单、账户结果、撮合结果和只减仓清理必须先进入
+  `order.user.commands.v1`，key 固定为 `<PRODUCT_LINE>:<userId>`，由当前分区所有者进入本地单写入 lane；
+  不允许 HTTP 节点直接写另一个节点的用户 WAL。
+- `order.user.command.results.v1` 是同步等待通知，不是事实源。每个订单 HTTP 节点必须配置唯一
+  `surprising.trading.order.kafka.client-id`，使结果消费组独立，否则跨节点请求可能收不到终态。
 - 撮合命令必须以 `symbol` 为 Key，保证同一交易对在一个分区有序。
 - 撮合命令和强平候选消费者拒绝 Kafka Key 与载荷 `symbol` 不一致的记录。账户命令和持仓事件
   必须使用 `<PRODUCT_LINE>:<userId>`。
