@@ -71,7 +71,7 @@ class AccountUserStateCommandWorkerTest {
                     new UserPartitionCommandLane(), reducer, kafkaTemplate).applyPending();
 
             AccountCommandTerminalResult terminal = objectMapper.readValue(
-                    new String(resultStore.read(command.commandId()).orElseThrow(),
+                    new String(resultStore.read(partition, command.commandId()).orElseThrow(),
                             java.nio.charset.StandardCharsets.UTF_8), AccountCommandTerminalResult.class);
             assertThat(terminal.ledgerDeltas()).containsExactly(
                     new AccountCommandTerminalResult.LedgerDelta(
@@ -111,7 +111,7 @@ class AccountUserStateCommandWorkerTest {
             // 结果发布失败由 worker 捕获并保留在 WAL；状态和终态已经可靠落盘。
             assertThatCode(firstWorker::applyPending).doesNotThrowAnyException();
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
-            assertThat(resultStore.read(command.commandId())).isPresent();
+            assertThat(resultStore.read(partition, command.commandId())).isPresent();
             assertThat(firstReducer.state(partition).orElseThrow().snapshot().balances()).containsExactly(
                     new PerpetualAccountStateUpdatedEvent.Balance("USDT", 700L, 300L));
 
@@ -156,7 +156,7 @@ class AccountUserStateCommandWorkerTest {
 
             worker.applyPending();
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
-            assertThat(resultStore.read(command.commandId())).isPresent();
+            assertThat(resultStore.read(partition, command.commandId())).isPresent();
             org.mockito.ArgumentCaptor<String> topic = org.mockito.ArgumentCaptor.forClass(String.class);
             org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(2))
                     .send(topic.capture(), anyString(), anyString());
@@ -207,7 +207,7 @@ class AccountUserStateCommandWorkerTest {
 
             firstWorker.applyPending();
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
-            assertThat(resultStore.read(dependent.commandId())).isPresent();
+            assertThat(resultStore.read(partition, dependent.commandId())).isPresent();
 
             AccountUserStateReducer restartedReducer = new AccountUserStateReducer(
                     objectMapper, stateStore, new UserPartitionCommandLane());
@@ -216,7 +216,7 @@ class AccountUserStateCommandWorkerTest {
                     restartedReducer, kafkaTemplate);
             assertThatCode(restartedWorker::applyPending).doesNotThrowAnyException();
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(2L);
-            assertThat(resultStore.read(dependent.commandId())).isPresent();
+            assertThat(resultStore.read(partition, dependent.commandId())).isPresent();
         }
     }
 

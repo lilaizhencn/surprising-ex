@@ -3,6 +3,7 @@ package com.surprising.account.provider.service;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.eventstore.UserPartitionKey;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -24,8 +25,8 @@ import tools.jackson.databind.ObjectMapper;
 
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
-    private final Map<String, WaitSlot> waiting = new ConcurrentHashMap<>();
-    private final Map<String, AccountCommandTerminalResult> completed = new ConcurrentHashMap<>();
+    private final Map<CommandKey, WaitSlot> waiting = new ConcurrentHashMap<>();
+    private final Map<CommandKey, AccountCommandTerminalResult> completed = new ConcurrentHashMap<>();
 
     public AccountCommandResultWaiter(ObjectMapper objectMapper,
                                       AccountProperties properties) {
@@ -33,31 +34,36 @@ import tools.jackson.databind.ObjectMapper;
         this.properties = properties;
     }
 
-    public AccountCommandTerminalResult await(String commandId, Duration timeout) {
-        WaitSlot slot = waiting.compute(commandId, (ignored, existing) -> {
+    public AccountCommandTerminalResult await(UserPartitionKey partition, String commandId, Duration timeout) {
+        if (partition == null || commandId == null || commandId.isBlank() || timeout == null
+                || timeout.isNegative() || timeout.isZero()) {
+            throw new IllegalArgumentException("账户命令等待参数无效");
+        }
+        CommandKey key = new CommandKey(partition, commandId);
+        WaitSlot slot = waiting.compute(key, (ignored, existing) -> {
             WaitSlot selected = existing == null ? new WaitSlot() : existing;
             selected.waiterCount.incrementAndGet();
             return selected;
         });
         try {
-            AccountCommandTerminalResult alreadyCompleted = completed.get(commandId);
+            AccountCommandTerminalResult alreadyCompleted = completed.get(key);
             if (alreadyCompleted != null) {
                 slot.result.complete(alreadyCompleted);
             }
             return slot.result.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException ex) {
             throw new AccountCommandTimeoutException(
-                    "account command is durable but did not finish before timeout: " + commandId);
+                    "account command is durable but did not finish before timeout: " + key);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new AccountCommandTimeoutException(
-                    "interrupted while waiting for account command " + commandId);
+                    "interrupted while waiting for account command " + key);
         } catch (ExecutionException ex) {
-            throw new IllegalStateException("failed while waiting for account command " + commandId,
+            throw new IllegalStateException("failed while waiting for account command " + key,
                     ex.getCause());
         } finally {
             if (slot.waiterCount.decrementAndGet() == 0) {
-                waiting.remove(commandId, slot);
+                waiting.remove(key, slot);
             }
         }
     }
@@ -80,8 +86,10 @@ import tools.jackson.databind.ObjectMapper;
             }
             AccountCommandTerminalResult result = new AccountCommandTerminalResult(
                     event.status(), event.resultPayload(), event.errorCode(), event.errorMessage());
-            completed.putIfAbsent(event.commandId(), result);
-            WaitSlot slot = waiting.get(event.commandId());
+            CommandKey key = new CommandKey(new UserPartitionKey(event.productLine(), event.userId()),
+                    event.commandId());
+            completed.putIfAbsent(key, result);
+            WaitSlot slot = waiting.get(key);
             if (slot != null) {
                 slot.result.complete(result);
             }
@@ -101,8 +109,8 @@ import tools.jackson.databind.ObjectMapper;
 
     /** 维护任务入口；结果由 Kafka listener 实时完成，不再轮询数据库。 */
     public void completeTerminalCommands() {
-        waiting.forEach((commandId, slot) -> {
-            AccountCommandTerminalResult result = completed.get(commandId);
+        waiting.forEach((key, slot) -> {
+            AccountCommandTerminalResult result = completed.get(key);
             if (result != null) {
                 slot.result.complete(result);
             }
@@ -112,5 +120,18 @@ import tools.jackson.databind.ObjectMapper;
     private static final class WaitSlot {
         private final CompletableFuture<AccountCommandTerminalResult> result = new CompletableFuture<>();
         private final AtomicInteger waiterCount = new AtomicInteger();
+    }
+
+    private record CommandKey(UserPartitionKey partition, String commandId) {
+        private CommandKey {
+            if (partition == null || commandId == null || commandId.isBlank()) {
+                throw new IllegalArgumentException("账户命令等待键无效");
+            }
+        }
+
+        @Override
+        public String toString() {
+            return partition.value() + ":" + commandId;
+        }
     }
 }

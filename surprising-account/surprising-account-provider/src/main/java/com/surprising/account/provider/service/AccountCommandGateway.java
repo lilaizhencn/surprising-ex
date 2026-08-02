@@ -17,6 +17,7 @@ import com.surprising.account.api.model.ProductBalanceResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import java.nio.charset.StandardCharsets;
@@ -98,11 +99,11 @@ public class AccountCommandGateway {
                 Instant.now(),
                 TraceContext.currentOrCreate());
         submissionService.submit(command);
-        return await(command.commandId(), resultType);
+        return await(new UserPartitionKey(productLine, userId), command.commandId(), resultType);
     }
 
-    private <T> T await(String commandId, Class<T> resultType) {
-        var terminal = resultWaiter.await(commandId, properties.getCommandWait().getTimeout());
+    private <T> T await(UserPartitionKey partition, String commandId, Class<T> resultType) {
+        var terminal = resultWaiter.await(partition, commandId, properties.getCommandWait().getTimeout());
         if (terminal.status() == AccountCommandStatus.REJECTED) {
             String code = terminal.errorCode() == null ? "ACCOUNT_COMMAND_REJECTED" : terminal.errorCode();
             throw new IllegalStateException(code + ": " + terminal.errorMessage());

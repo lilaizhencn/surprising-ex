@@ -8,6 +8,7 @@ import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
+import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,7 +27,8 @@ class AccountCommandResultWaiterTest {
         AccountCommandResultEvent event = event("command-1", AccountCommandStatus.APPLIED, "{\"ok\":true}");
         waiter.onResult(record(properties, objectMapper.writeValueAsString(event)));
 
-        assertThat(waiter.await("command-1", Duration.ofSeconds(1)))
+        assertThat(waiter.await(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L),
+                "command-1", Duration.ofSeconds(1)))
                 .isEqualTo(new AccountCommandTerminalResult(AccountCommandStatus.APPLIED,
                         "{\"ok\":true}", null, null));
     }
@@ -40,7 +42,8 @@ class AccountCommandResultWaiterTest {
         AccountCommandResultEvent event = event("command-2", AccountCommandStatus.REJECTED, null);
         waiter.onResult(record(properties, objectMapper.writeValueAsString(event)));
 
-        assertThat(waiter.await("command-2", Duration.ofSeconds(1)))
+        assertThat(waiter.await(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L),
+                "command-2", Duration.ofSeconds(1)))
                 .isEqualTo(new AccountCommandTerminalResult(AccountCommandStatus.REJECTED,
                         null, "NO_FUNDS", "insufficient balance"));
     }
@@ -50,9 +53,24 @@ class AccountCommandResultWaiterTest {
         AccountProperties properties = new AccountProperties();
         AccountCommandResultWaiter waiter = new AccountCommandResultWaiter(new ObjectMapper(), properties);
 
-        assertThatThrownBy(() -> waiter.await("command-3", Duration.ofMillis(10)))
+        assertThatThrownBy(() -> waiter.await(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L),
+                "command-3", Duration.ofMillis(10)))
                 .isInstanceOf(AccountCommandTimeoutException.class)
                 .hasMessageContaining("command-3");
+    }
+
+    @Test
+    void sameCommandIdFromAnotherUserCannotSatisfyWaiter() throws Exception {
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountCommandResultWaiter waiter = new AccountCommandResultWaiter(objectMapper, properties);
+        AccountCommandResultEvent event = event("same-command", AccountCommandStatus.APPLIED, "{\"ok\":true}");
+        waiter.onResult(record(properties, objectMapper.writeValueAsString(event)));
+
+        assertThatThrownBy(() -> waiter.await(new com.surprising.eventstore.UserPartitionKey(
+                ProductLine.LINEAR_PERPETUAL, 1002L), "same-command", Duration.ofMillis(10)))
+                .isInstanceOf(AccountCommandTimeoutException.class);
     }
 
     private ConsumerRecord<String, String> record(AccountProperties properties, String payload) {

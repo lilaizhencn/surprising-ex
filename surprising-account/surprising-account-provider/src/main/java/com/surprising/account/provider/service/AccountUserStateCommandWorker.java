@@ -88,7 +88,7 @@ public class AccountUserStateCommandWorker {
         List<UserPartitionEvent> events = wal.replay(partition);
         for (UserPartitionEvent event : events) {
             AccountUserCommand command = decode(event, partition);
-            AccountCommandTerminalResult existing = readResult(command.commandId()).orElse(null);
+            AccountCommandTerminalResult existing = readResult(partition, command.commandId()).orElse(null);
             if (event.sequence() <= applied) {
                 if (existing == null) {
                     // 旧版本可能在结果落盘前提交了状态，不能凭空生成终态继续运行，必须人工核对。
@@ -151,7 +151,7 @@ public class AccountUserStateCommandWorker {
             }
             AccountCommandTerminalResult terminal = toTerminal(command, before, reduction);
             // 先保存终态再提交余额和持仓，崩溃后可以重算并补交状态，不会出现不可恢复的中间窗。
-            resultStore.put(command.commandId(), serialize(terminal));
+            resultStore.put(partition, command.commandId(), serialize(terminal));
             reducer.commit(command, event.sequence(), reduction);
             publishStateSnapshot(reducer.state(partition)
                     .orElseThrow(() -> new AccountStateUnavailableException(
@@ -228,11 +228,11 @@ public class AccountUserStateCommandWorker {
         if (wal.readEvent(partition, command.dependsOnCommandId()).isEmpty()) {
             return null;
         }
-        return readResult(command.dependsOnCommandId()).orElse(null);
+        return readResult(partition, command.dependsOnCommandId()).orElse(null);
     }
 
-    private Optional<AccountCommandTerminalResult> readResult(String commandId) {
-        return resultStore.read(commandId).map(bytes -> {
+    private Optional<AccountCommandTerminalResult> readResult(UserPartitionKey partition, String commandId) {
+        return resultStore.read(partition, commandId).map(bytes -> {
             try {
                 return objectMapper.readValue(new String(bytes, StandardCharsets.UTF_8),
                         AccountCommandTerminalResult.class);

@@ -16,7 +16,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * 用户分区命令结果的本地幂等存储。
  *
  * <p>命令结果和账户状态不是同一个事实，但结果必须在状态提交后可靠保存，才能支持重启后
- * 查询、依赖判断和重复发布。相同命令只能写入相同结果，冲突结果直接失败关闭。</p>
+ * 查询、依赖判断和重复发布。结果键严格包含用户分区和命令编号，避免不同用户使用相同
+ * 命令编号时发生串读；相同分区中的相同命令只能写入相同结果，冲突结果直接失败关闭。</p>
  */
 public final class UserPartitionResultStore implements AutoCloseable {
 
@@ -44,42 +45,44 @@ public final class UserPartitionResultStore implements AutoCloseable {
         }
     }
 
-    /** 读取命令终态；没有结果表示命令尚未完成。 */
-    public Optional<byte[]> read(String commandId) {
+    /** 读取指定用户分区的命令终态；没有结果表示命令尚未完成。 */
+    public Optional<byte[]> read(UserPartitionKey partition, String commandId) {
+        requirePartition(partition);
         requireCommandId(commandId);
         try {
-            byte[] value = database.get(key(commandId));
+            byte[] value = database.get(key(partition, commandId));
             return value == null ? Optional.empty() : Optional.of(Arrays.copyOf(value, value.length));
         } catch (RocksDBException ex) {
-            throw new IllegalStateException("读取用户分区命令结果失败: " + commandId, ex);
+            throw new IllegalStateException("读取用户分区命令结果失败: " + partition.value() + ":" + commandId, ex);
         }
     }
 
-    /** 同步保存命令终态；相同内容重试幂等，内容冲突直接拒绝。 */
-    public void put(String commandId, byte[] result) {
+    /** 同步保存指定用户分区的命令终态；相同内容重试幂等，内容冲突直接拒绝。 */
+    public void put(UserPartitionKey partition, String commandId, byte[] result) {
+        requirePartition(partition);
         requireCommandId(commandId);
         if (result == null || result.length == 0 || result.length > MAX_RESULT_BYTES) {
             throw new IllegalArgumentException("命令结果大小无效");
         }
         writeLock.lock();
         try {
-            byte[] existing = database.get(key(commandId));
+            byte[] existing = database.get(key(partition, commandId));
             if (existing != null) {
                 if (!Arrays.equals(existing, result)) {
-                    throw new IllegalStateException("命令结果发生幂等冲突: " + commandId);
+                    throw new IllegalStateException("命令结果发生幂等冲突: " + partition.value() + ":" + commandId);
                 }
                 return;
             }
-            database.put(writeOptions, key(commandId), Arrays.copyOf(result, result.length));
+            database.put(writeOptions, key(partition, commandId), Arrays.copyOf(result, result.length));
         } catch (RocksDBException ex) {
-            throw new IllegalStateException("写入用户分区命令结果失败: " + commandId, ex);
+            throw new IllegalStateException("写入用户分区命令结果失败: " + partition.value() + ":" + commandId, ex);
         } finally {
             writeLock.unlock();
         }
     }
 
-    private byte[] key(String commandId) {
-        byte[] suffix = commandId.getBytes(StandardCharsets.UTF_8);
+    private byte[] key(UserPartitionKey partition, String commandId) {
+        byte[] suffix = (partition.value() + '/' + commandId).getBytes(StandardCharsets.UTF_8);
         byte[] value = new byte[PREFIX.length + suffix.length];
         System.arraycopy(PREFIX, 0, value, 0, PREFIX.length);
         System.arraycopy(suffix, 0, value, PREFIX.length, suffix.length);
@@ -90,6 +93,10 @@ public final class UserPartitionResultStore implements AutoCloseable {
         if (commandId == null || commandId.isBlank() || commandId.length() > 160) {
             throw new IllegalArgumentException("命令编号无效");
         }
+    }
+
+    private void requirePartition(UserPartitionKey partition) {
+        Objects.requireNonNull(partition, "partition");
     }
 
     @Override

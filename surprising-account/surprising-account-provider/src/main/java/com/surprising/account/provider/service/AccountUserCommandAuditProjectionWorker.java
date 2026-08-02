@@ -75,7 +75,7 @@ public class AccountUserCommandAuditProjectionWorker {
             if (event.sequence() <= projected) {
                 continue;
             }
-            Optional<AccountCommandTerminalResult> localTerminal = terminal(command.commandId());
+            Optional<AccountCommandTerminalResult> localTerminal = terminal(partition, command.commandId());
             if (event.sequence() != projected + 1L) {
                 throw new IllegalStateException("账户审计投影序号断裂 partition=" + partition.value());
             }
@@ -109,7 +109,7 @@ public class AccountUserCommandAuditProjectionWorker {
                 throw new IllegalStateException("账户账本投影序号断裂 partition=" + partition.value());
             }
             AccountUserCommand command = decode(event);
-            Optional<AccountCommandTerminalResult> terminal = terminal(command.commandId());
+            Optional<AccountCommandTerminalResult> terminal = terminal(partition, command.commandId());
             if (terminal.isEmpty()) {
                 // 终态尚未写入结果库时，账本不能越过当前命令；下一轮继续重试。
                 return;
@@ -120,8 +120,8 @@ public class AccountUserCommandAuditProjectionWorker {
         }
     }
 
-    private Optional<AccountCommandTerminalResult> terminal(String commandId) {
-        return resultStore.read(commandId).map(bytes -> {
+    private Optional<AccountCommandTerminalResult> terminal(UserPartitionKey partition, String commandId) {
+        return resultStore.read(partition, commandId).map(bytes -> {
             try {
                 return objectMapper.readValue(new String(bytes, StandardCharsets.UTF_8),
                         AccountCommandTerminalResult.class);
