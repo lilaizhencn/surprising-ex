@@ -526,10 +526,13 @@ public class OrderService {
             return ReservationPlan.reject("unsupported margin account type " + requirement.get().accountType());
         }
         ReservationSequenceSlot slot = sequence == null
-                ? new ReservationSequenceSlot(
-                placementStateService.accountRevision(currentProductLine(), request.userId()), null)
-                : sequence.next(currentProductLine(), request.userId(), orderId,
-                placementStateService.accountRevision(currentProductLine(), request.userId()));
+                // 单笔订单通过 Kafka 异步到达账户模块，期间同一用户可能已经完成
+                // 另一笔预占并推进账户修订号。这里不能把下单时读取到的旧修订号
+                // 当成强栅栏，否则正常的并发下单会被误判为账户版本冲突。账户模块
+                // 仍以数据库原子余额预占作为最终资金裁决；只有批量请求内部显式
+                // 建立依赖链时，才使用修订号保证批内计算顺序。
+                ? new ReservationSequenceSlot(0L, null)
+                : sequence.next(currentProductLine(), request.userId(), orderId);
         return ReservationPlan.accept(new OrderReserveAccountCommand(
                 orderId, request.symbol(), request.side(), OrderReservationKind.DERIVATIVE_MARGIN, accountType,
                 requirement.get().asset(), request.marginMode(), request.positionSide(),
@@ -1282,27 +1285,18 @@ public class OrderService {
     private record ReservationSequenceSlot(long expectedAccountRevision, String dependsOnCommandId) {
     }
 
-    /**
-     * 批量请求内按用户建立账户单写者的修订号链；链外并发命令仍会触发严格修订号冲突。
-     */
+    /** 批量请求内按用户建立账户命令依赖链，确保同一批次的预占按顺序执行。 */
     private final class BatchReservationSequence {
-        private final Map<Long, Long> baseRevisions = new HashMap<>();
-        private final Map<Long, Integer> counts = new HashMap<>();
         private final Map<Long, String> previousCommands = new HashMap<>();
 
         private ReservationSequenceSlot next(ProductLine productLine,
                                               long userId,
-                                              long orderId,
-                                              long currentRevision) {
-            if (currentRevision <= 0L) {
-                return new ReservationSequenceSlot(0L, null);
-            }
-            long base = baseRevisions.computeIfAbsent(userId, ignored -> currentRevision);
-            int index = counts.getOrDefault(userId, 0);
+                                              long orderId) {
             String dependency = previousCommands.get(userId);
-            counts.put(userId, index + 1);
             previousCommands.put(userId, reservationCommandId(productLine, orderId));
-            return new ReservationSequenceSlot(Math.addExact(base, index), dependency);
+            // 账户修订号由异步账户命令推进，批次之外可能在消息到达前变化；
+            // 不把下单时读取的旧值写入命令，最终资金裁决仍由账户数据库原子预占完成。
+            return new ReservationSequenceSlot(0L, dependency);
         }
     }
 

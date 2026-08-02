@@ -632,7 +632,6 @@ class OrderServiceTest {
                 eq(PositionSide.NET), eq(OrderSide.BUY), eq(OrderType.LIMIT), eq(65_000L), eq(10L), anyLong(),
                 anyLong()))
                 .thenReturn(Optional.of(new MarginRequirement("USDT_PERPETUAL", "USDT", 100L)));
-        when(placementStateService.accountRevision(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(5L);
 
         PlaceOrderRequest first = request("batch-revision-1");
         PlaceOrderRequest second = new PlaceOrderRequest(1001L, "batch-revision-2", "BTC-USDT", OrderSide.BUY,
@@ -650,8 +649,8 @@ class OrderServiceTest {
         AccountUserCommand secondCommand = mapper.readValue(payloadCaptor.getAllValues().get(1), AccountUserCommand.class);
         OrderReserveAccountCommand firstReserve = mapper.readValue(firstCommand.payload(), OrderReserveAccountCommand.class);
         OrderReserveAccountCommand secondReserve = mapper.readValue(secondCommand.payload(), OrderReserveAccountCommand.class);
-        assertThat(firstReserve.expectedAccountRevision()).isEqualTo(5L);
-        assertThat(secondReserve.expectedAccountRevision()).isEqualTo(6L);
+        assertThat(firstReserve.expectedAccountRevision()).isZero();
+        assertThat(secondReserve.expectedAccountRevision()).isZero();
         assertThat(firstCommand.dependsOnCommandId()).isNull();
         assertThat(secondCommand.dependsOnCommandId()).isEqualTo("ORDER_RESERVE:LINEAR_PERPETUAL:9002");
     }
