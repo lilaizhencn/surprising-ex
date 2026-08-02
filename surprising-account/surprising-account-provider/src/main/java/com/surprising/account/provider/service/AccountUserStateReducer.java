@@ -228,11 +228,12 @@ public class AccountUserStateReducer {
             throw new IllegalStateException("账户 reducer 不能回写旧序号 partition=" + partition.value()
                     + " current=" + currentSequence + " requested=" + sequence);
         }
+        AccountUserReducerState canonical = canonicalState(reduction.nextState());
         if (sequence == currentSequence) {
             AccountUserReducerState current = state(partition)
                     .orElseThrow(() -> new AccountStateUnavailableException(
                             "账户 JVM 快照尚未初始化: " + partition.value()));
-            if (!current.equals(reduction.nextState())) {
+            if (!current.equals(canonical)) {
                 throw new IllegalStateException("账户 reducer 相同序号状态冲突 partition=" + partition.value()
                         + " sequence=" + sequence);
             }
@@ -242,8 +243,55 @@ public class AccountUserStateReducer {
             throw new IllegalStateException("账户 reducer 序号不连续 partition=" + partition.value()
                     + " current=" + currentSequence + " requested=" + sequence);
         }
-        stateStore.apply(partition, sequence, serialize(reduction.nextState()));
-        states.put(partition, reduction.nextState());
+        stateStore.apply(partition, sequence, serialize(canonical));
+        states.put(partition, canonical);
+    }
+
+    /**
+     * 按预占明细重建订单锁定汇总，避免成交释放了余额却遗留旧的 orderLocks。
+     * 同时校验所有锁定来源都没有超过账户真实锁定余额；不一致时让该用户分区失败关闭。
+     */
+    private AccountUserReducerState canonicalState(AccountUserReducerState state) {
+        PerpetualAccountStateUpdatedEvent previous = state.snapshot();
+        Map<String, Long> orderLocks = new LinkedHashMap<>();
+        for (AccountUserReducerState.Reservation reservation : state.reservations()) {
+            long remaining = Math.subtractExact(
+                    Math.subtractExact(reservation.reservedUnits(), reservation.releasedUnits()),
+                    reservation.consumedUnits());
+            if (remaining > 0L) {
+                orderLocks.merge(reservation.asset(), remaining, Math::addExact);
+            }
+        }
+        List<PerpetualAccountStateUpdatedEvent.OrderLock> locks = orderLocks.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> new PerpetualAccountStateUpdatedEvent.OrderLock(entry.getKey(), entry.getValue()))
+                .toList();
+        Map<String, Long> totalLocked = new LinkedHashMap<>();
+        for (PerpetualAccountStateUpdatedEvent.Balance balance : previous.balances()) {
+            totalLocked.put(balance.asset(), balance.lockedUnits());
+        }
+        for (PerpetualAccountStateUpdatedEvent.OrderLock lock : locks) {
+            if (lock.lockedUnits() > totalLocked.getOrDefault(lock.asset(), 0L)) {
+                throw new IllegalStateException("订单锁定汇总超过账户锁定余额 asset=" + lock.asset());
+            }
+        }
+        Map<String, Long> isolatedMargins = new LinkedHashMap<>();
+        for (PerpetualAccountStateUpdatedEvent.PositionMargin margin : previous.positionMargins()) {
+            isolatedMargins.merge(margin.asset(), margin.marginUnits(), Math::addExact);
+        }
+        for (Map.Entry<String, Long> entry : isolatedMargins.entrySet()) {
+            long total = Math.addExact(entry.getValue(), orderLocks.getOrDefault(entry.getKey(), 0L));
+            if (total > totalLocked.getOrDefault(entry.getKey(), 0L)) {
+                throw new IllegalStateException("订单和持仓保证金超过账户锁定余额 asset=" + entry.getKey());
+            }
+        }
+        PerpetualAccountStateUpdatedEvent canonicalSnapshot = new PerpetualAccountStateUpdatedEvent(
+                previous.schemaVersion(), previous.eventId(), previous.accountRevision(), previous.productLine(),
+                previous.userId(), previous.accountType(), previous.balances(), previous.deficits(),
+                previous.positions(), previous.positionMargins(), locks, previous.positionMode(),
+                previous.eventTime(), previous.traceId());
+        return new AccountUserReducerState(canonicalSnapshot, state.reservations(), state.settledTradeIds(),
+                state.settledFundingPaymentIds());
     }
 
     /** 账户管理员余额调整也必须进入同一用户分区，不能另开数据库事务写余额。 */

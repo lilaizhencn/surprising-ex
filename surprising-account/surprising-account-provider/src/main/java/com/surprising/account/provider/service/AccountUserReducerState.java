@@ -2,7 +2,9 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** 持久化在用户分区状态库中的账户快照、预占明细和结算幂等索引。 */
 public record AccountUserReducerState(
@@ -18,6 +20,14 @@ public record AccountUserReducerState(
         reservations = List.copyOf(reservations);
         settledTradeIds = settledTradeIds == null ? List.of() : List.copyOf(settledTradeIds);
         settledFundingPaymentIds = settledFundingPaymentIds == null ? List.of() : List.copyOf(settledFundingPaymentIds);
+        requireUniquePositive(settledTradeIds, "成交幂等索引");
+        requireUniquePositive(settledFundingPaymentIds, "资金费幂等索引");
+        Set<Long> orderIds = new HashSet<>();
+        for (Reservation reservation : reservations) {
+            if (!orderIds.add(reservation.orderId())) {
+                throw new IllegalArgumentException("账户预占不能重复: " + reservation.orderId());
+            }
+        }
     }
 
     public AccountUserReducerState(PerpetualAccountStateUpdatedEvent snapshot,
@@ -71,6 +81,16 @@ public record AccountUserReducerState(
                            long releasedUnits,
                            long orderQuantitySteps) {
             this(orderId, null, accountType, asset, reservedUnits, releasedUnits, 0L, orderQuantitySteps);
+        }
+    }
+
+    /** 本地状态中的结算索引必须是正数且唯一，避免重启后重复扣减或重复入账。 */
+    private static void requireUniquePositive(List<Long> values, String field) {
+        Set<Long> unique = new HashSet<>();
+        for (Long value : values) {
+            if (value == null || value <= 0L || !unique.add(value)) {
+                throw new IllegalArgumentException(field + "无效");
+            }
         }
     }
 }

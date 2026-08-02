@@ -167,6 +167,15 @@ class AccountUserStateReducerTest {
             assertThat(state.snapshot().positionMargins()).containsExactly(
                     new PerpetualAccountStateUpdatedEvent.PositionMargin(
                             "BTC-USDT", "USDT", MarginMode.CROSS, PositionSide.NET, 10L));
+            AccountUserReducerState.Reservation reservation = state.reservations().stream()
+                    .filter(value -> value.orderId() == 9002L)
+                    .findFirst().orElseThrow();
+            long expectedOrderLock = reservation.reservedUnits() - reservation.releasedUnits()
+                    - reservation.consumedUnits();
+            assertThat(state.snapshot().orderLocks()).singleElement().satisfies(lock -> {
+                assertThat(lock.asset()).isEqualTo("USDT");
+                assertThat(lock.lockedUnits()).isEqualTo(expectedOrderLock);
+            });
         }
     }
 
