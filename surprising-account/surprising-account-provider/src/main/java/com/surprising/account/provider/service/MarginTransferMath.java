@@ -5,8 +5,8 @@ import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.trading.api.model.OrderSide;
 
 /**
- * Long-only margin math used after a match trade is received.
- * The account service decides how much of a fill closes old exposure and how much opens new exposure.
+ * 撮合成交到达后的单向持仓保证金计算。
+ * 账户服务根据成交量判断其中多少用于平掉原有敞口、多少用于建立新敞口。
  */
 public final class MarginTransferMath {
 

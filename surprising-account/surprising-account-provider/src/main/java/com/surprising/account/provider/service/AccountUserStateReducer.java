@@ -19,6 +19,7 @@ import com.surprising.account.provider.model.PositionState;
 import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionCommandLane;
+import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.product.api.ProductLine;
@@ -51,12 +52,21 @@ public class AccountUserStateReducer {
     private final UserPartitionCommandLane lane;
     private final InstrumentSnapshotCache instrumentSnapshotCache;
     private final PositionCalculator positionCalculator;
+    private final UserPartitionWal wal;
     private final Map<UserPartitionKey, AccountUserReducerState> states = new java.util.concurrent.ConcurrentHashMap<>();
 
     public AccountUserStateReducer(ObjectMapper objectMapper,
                                    UserPartitionStateStore stateStore,
                                    UserPartitionCommandLane lane) {
-        this(objectMapper, stateStore, lane, null, null);
+        this(objectMapper, stateStore, lane, null, null, null);
+    }
+
+    public AccountUserStateReducer(ObjectMapper objectMapper,
+                                   UserPartitionStateStore stateStore,
+                                   UserPartitionCommandLane lane,
+                                   InstrumentSnapshotCache instrumentSnapshotCache,
+                                   PositionCalculator positionCalculator) {
+        this(objectMapper, stateStore, lane, instrumentSnapshotCache, positionCalculator, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -64,12 +74,14 @@ public class AccountUserStateReducer {
                                    UserPartitionStateStore stateStore,
                                    UserPartitionCommandLane lane,
                                    InstrumentSnapshotCache instrumentSnapshotCache,
-                                   PositionCalculator positionCalculator) {
+                                   PositionCalculator positionCalculator,
+                                   UserPartitionWal wal) {
         this.objectMapper = objectMapper;
         this.stateStore = stateStore;
         this.lane = lane;
         this.instrumentSnapshotCache = instrumentSnapshotCache;
         this.positionCalculator = positionCalculator;
+        this.wal = wal;
     }
 
     /** 内部 RPC 启动初始化使用；初始化后热路径只读取本地状态。 */
@@ -83,6 +95,14 @@ public class AccountUserStateReducer {
             // Kafka 会重放同一用户的历史完整快照。已有本地状态可能已经包含 WAL 中的
             // 预占、成交指纹和依赖索引，不能用不带这些索引的公共快照覆盖它；本地状态库
             // 才是该进程的单写者事实源，后续快照只交给其他模块更新 JVM 读模型。
+            if (stateStore.lastAppliedSequence(partition) > 0L
+                    || (wal != null && wal.lastSequence(partition) > 0L)
+                    || existing.get().snapshot().accountRevision() >= snapshot.accountRevision()) {
+                return;
+            }
+            AccountUserReducerState replacement = new AccountUserReducerState(snapshot, List.of());
+            stateStore.replaceIfUnapplied(partition, serialize(replacement));
+            states.put(partition, replacement);
             return;
         }
         AccountUserReducerState state = new AccountUserReducerState(snapshot, List.of());
@@ -543,12 +563,13 @@ public class AccountUserStateReducer {
             return new Reduction(ApplyStatus.APPLIED, jsonResult("orderId", release.orderId(),
                     "releasedUnits", 0L), null, current);
         }
-        long unavailable = reservation.releasedUnits();
+        long unavailable = Math.addExact(reservation.releasedUnits(), reservation.consumedUnits());
         long releasable = Math.max(0L, Math.subtractExact(reservation.reservedUnits(), unavailable));
         long amount = release.releaseAll()
                 ? releasable
                 : AccountMarginReleaseMath.releaseForExecuted(reservation.reservedUnits(),
-                        reservation.releasedUnits(), 0L, release.quantitySteps(), release.remainingQuantitySteps());
+                        reservation.releasedUnits(), reservation.consumedUnits(), release.quantitySteps(),
+                        release.remainingQuantitySteps());
         if (amount <= 0L) {
             return new Reduction(ApplyStatus.APPLIED, jsonResult("orderId", release.orderId(),
                     "releasedUnits", 0L), null, current);
@@ -561,7 +582,7 @@ public class AccountUserStateReducer {
                 .map(value -> value.orderId() == release.orderId()
                         ? new AccountUserReducerState.Reservation(value.orderId(), value.symbol(), value.accountType(),
                         value.asset(), value.reservedUnits(), Math.addExact(value.releasedUnits(), amount),
-                        value.orderQuantitySteps())
+                        value.consumedUnits(), value.orderQuantitySteps())
                         : value)
                 .toList();
         PerpetualAccountStateUpdatedEvent snapshot = nextSnapshot(
@@ -987,6 +1008,9 @@ public class AccountUserStateReducer {
             }
             updated = stateWith(updated, mutation.snapshot(), updated.reservations());
         }
+        // 实际成交扣减和按比例释放共同消耗本次分配的订单锁定额。
+        updated = stateWith(updated,
+                adjustOrderLock(updated.snapshot(), reservation.asset(), -allocated), updated.reservations());
         List<AccountUserReducerState.Reservation> reservations = updated.reservations().stream()
                 .map(value -> value.orderId() == orderId
                         ? new AccountUserReducerState.Reservation(value.orderId(), value.symbol(), value.accountType(),
@@ -1064,6 +1088,9 @@ public class AccountUserStateReducer {
         if (released > 0L) {
             updated = applyBalanceTransfer(updated, reservation.asset(), released, true);
         }
+        // 实际保证金从订单预占转入持仓保证金，仍然锁在账户余额中，但不再属于订单锁。
+        updated = stateWith(updated,
+                adjustOrderLock(updated.snapshot(), reservation.asset(), -allocated), updated.reservations());
         long nextReleased = Math.addExact(reservation.releasedUnits(), released);
         long nextConsumed = Math.addExact(reservation.consumedUnits(), actualMarginUnits);
         List<AccountUserReducerState.Reservation> reservations = updated.reservations().stream()

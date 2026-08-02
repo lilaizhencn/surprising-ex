@@ -237,7 +237,9 @@ surprising:
 
 余额、持仓、保证金冻结、命令幂等和账本事实由用户分区本地 WAL/状态库维护；PostgreSQL 只作为异步
 投影、启动恢复和审计存储。当前产品线账户命令成功后发布 `PerpetualAccountStateUpdatedEvent` 到
-`account.state.events.v1`，下游按用户修订号建立 JVM 快照。
+`account.state.events.v1`（按用户键压缩）发布完整快照，下游每个 JVM 使用独立消费组按用户修订号建立本地快照。
+账户命令消费者在 WAL 落盘后立即调用同一用户分区 reducer，只有状态提交和结果发布成功才确认 Kafka 位点；
+定时任务只负责恢复进程崩溃后已经落盘的事实。
 
 Kafka 发布沿用用户分区 key；发布失败时本地结果库和 WAL 保留待重试状态，不提交后续用户分区序号。
 

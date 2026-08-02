@@ -21,7 +21,7 @@ RF=3 时按实际 Topic 数量计算副本。
 
 | 范围 | Topic 后缀或完整名称 | 分区数 | 必须使用的 Key |
 |---|---|---:|---|
-| 共享 | `surprising.instrument.events.v1` | 32 | `PRODUCT_LINE:SYMBOL` |
+| 共享 | `surprising.instrument.events.v1`（compact） | 32 | `PRODUCT_LINE:SYMBOL` |
 | 共享 | `surprising.instrument.lifecycle-drain.v1` | 32 | `symbol` |
 | 共享 | `surprising.account.position.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | 共享 | `surprising.account.liquidation-fee.events.v1` | 32 | 结算资产 |
@@ -41,7 +41,7 @@ RF=3 时按实际 Topic 数量计算副本。
 | 产品线 | `funding.rate.v1` | 32 | `symbol` |
 | 产品线 | `account.position.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `account.liquidation-fee.events.v1` | 32 | 结算资产 |
-| 产品线 | `account.state.events.v1` | 32 | `<PRODUCT_LINE>:<userId>` |
+| 产品线 | `account.state.events.v1`（compact） | 32 | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `risk.account.events.v1` | 32 | `<userId>:<accountType>:<asset>` |
 | 产品线 | `risk.position.events.v1` | 32 | `symbol` |
 | 产品线 | `liquidation.candidates.v1` | 32 | `symbol` |
@@ -50,10 +50,20 @@ RF=3 时按实际 Topic 数量计算副本。
 | 产品线 | `account.command.results.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `order.user.commands.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `order.user.command.results.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
+| 产品线 | `order.state.events.v1`（compact） | 32 | `<PRODUCT_LINE>:<userId>` |
 
 三个账户命令 Topic 由 `ACCOUNT_COMMAND_PARTITIONS=32` 明确固定，分区数必须一致，DLT 必须保留原始
 分区号。所有 account-provider 的 `ACCOUNT_USER_COMMAND_CONCURRENCY` 总和超过 32 不会增加有效
 并行度；双节点 AWS 基线每节点为 16。
+
+`instrument.events.v1`、`account.state.events.v1` 和 `order.state.events.v1` 使用 `cleanup.policy=compact`，键分别是合约和用户
+分区的最新状态。它们是 JVM 快照广播源；每个订单/账户实例必须使用唯一的 `client-id`，并把该值附加到
+快照消费组，不能让多个实例共享快照消费组而互相分摊状态。账户命令和订单命令消费组仍然共享，用于保证
+每个用户分区只有一个单写者。
+
+订单完整快照同时携带跨节点单调 `stateRevision` 和当前用户订单状态；本地 RocksDB 只把它作为
+未应用 WAL 分区的恢复基线，不能覆盖已有本地事实。订单分区迁移时必须先消费压缩快照，缺少快照或
+本地 WAL 与快照无法合并时保持失败关闭，禁止从落后的 `trading_orders` 投影猜测在线状态。
 
 order-provider 使用专用批量监听器消费 `account.command.results.v1`。单实例可设置
 `ORDER_ACCOUNT_COMMAND_RESULTS_CONCURRENCY=32`，多实例应共享同一个全局上限。

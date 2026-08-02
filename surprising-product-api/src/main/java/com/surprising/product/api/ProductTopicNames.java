@@ -122,6 +122,11 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("order.user.command.results");
     }
 
+    /** 用户订单完整状态快照 Topic，按用户键压缩，供分区迁移恢复本地状态。 */
+    public String orderStateEventsTopic() {
+        return topic("order.state.events");
+    }
+
     public String accountRiskEventsTopic() {
         return topic("risk.account.events");
     }

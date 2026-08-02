@@ -40,6 +40,7 @@ import com.surprising.trading.order.model.AlgoOrderRecord;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.OrderUserEvent;
 import com.surprising.trading.order.model.OrderUserState;
+import com.surprising.trading.order.model.OrderUserStateSnapshot;
 import com.surprising.trading.order.model.OrderUserAlgoChildCommand;
 import com.surprising.trading.order.model.OrderUserCancelCommand;
 import com.surprising.trading.order.model.OrderUserCancelOpenCommand;
@@ -57,6 +58,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -90,6 +93,7 @@ public class OrderUserStateService {
     private final PerpetualAccountStateSnapshotCache accountStateSnapshotCache;
     private final OrderIdSequenceStore orderIdSequenceStore;
     private final OrderMarginSnapshotCache marginSnapshotCache;
+    private final Map<UserPartitionKey, Long> publishedSnapshotRevisions = new ConcurrentHashMap<>();
     private long lastTimestamp;
     private int sequence;
 
@@ -862,6 +866,37 @@ public class OrderUserStateService {
         }
     }
 
+    /**
+     * 消费压缩订单快照时初始化本地状态。
+     *
+     * <p>快照只允许覆盖尚未应用本地 WAL 的分区。若本地已经有待处理事实，无法证明外部
+     * 快照包含这些事实，宁可保留本地分区停住，也不能用旧状态覆盖订单。</p>
+     */
+    public void initializeSnapshot(OrderUserStateSnapshot snapshot) {
+        if (snapshot == null || snapshot.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("订单完整快照产品线不匹配");
+        }
+        UserPartitionKey partition = new UserPartitionKey(snapshot.productLine(), snapshot.userId());
+        lane.execute(partition, () -> {
+            long localWalTail = wal.lastSequence(partition);
+            var existing = stateStore.read(partition);
+            if (localWalTail > 0L && (existing.isEmpty() || existing.get().sequence() == 0L)) {
+                throw new IllegalStateException("订单分区存在本地 WAL 但没有状态，拒绝外部快照覆盖: "
+                        + partition.value());
+            }
+            if (existing.isPresent() && existing.get().sequence() > 0L) {
+                return null;
+            }
+            long currentRevision = existing.map(value -> deserialize(value.state()).revision()).orElse(0L);
+            if (currentRevision >= snapshot.stateRevision()) {
+                return null;
+            }
+            stateStore.replaceIfUnapplied(partition, serialize(snapshot.state()));
+            publishedSnapshotRevisions.put(partition, snapshot.stateRevision());
+            return null;
+        });
+    }
+
     private Void applyPartition(UserPartitionKey partition) {
         OrderUserState current = state(partition);
         long applied = stateStore.lastAppliedSequence(partition);
@@ -882,8 +917,9 @@ public class OrderUserStateService {
             List<String> eventIds = new ArrayList<>(current.appliedEventIds());
             eventIds.add(event.eventId());
             current = new OrderUserState(current.orders(), eventIds, current.algoOrders(), current.algoChildren(),
-                    current.appliedTradeIds());
+                    current.appliedTradeIds(), Math.addExact(current.revision(), 1L));
             stateStore.apply(partition, raw.sequence(), serialize(current));
+            publishStateSnapshot(partition, current);
             if (marginSnapshotCache != null) {
                 for (OrderRecord order : current.orders()) {
                     OrderMarginSnapshotCache.ApplyResult result = marginSnapshotCache.applyOrder(order);
@@ -895,7 +931,31 @@ public class OrderUserStateService {
             }
             applied = raw.sequence();
         }
+        if (current.revision() > 0L) {
+            // 状态提交成功而快照发布失败时，重试不会再有新的 WAL 事件；这里负责补发最新
+            // 完整状态，避免分区迁移后新节点只能看到旧压缩值。
+            publishStateSnapshot(partition, current);
+        }
         return null;
+    }
+
+    private void publishStateSnapshot(UserPartitionKey partition, OrderUserState state) {
+        Long published = publishedSnapshotRevisions.get(partition);
+        if (published != null && published >= state.revision()) {
+            return;
+        }
+        OrderUserStateSnapshot snapshot = new OrderUserStateSnapshot(
+                OrderUserStateSnapshot.CURRENT_SCHEMA_VERSION,
+                partition.productLine(), partition.userId(), state.revision(), state, Instant.now());
+        try {
+            kafkaTemplate.send(properties.getKafka().getOrderStateEventsTopic(), snapshot.partitionKey(),
+                    objectMapper.writeValueAsString(snapshot)).get(
+                    properties.getEventPublish().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            publishedSnapshotRevisions.put(partition, state.revision());
+        } catch (Exception ex) {
+            throw new KafkaException("订单完整快照发布失败 partition=" + partition.value()
+                    + " revision=" + state.revision(), ex);
+        }
     }
 
     private OrderUserState applyEvent(OrderUserState current, OrderUserEvent event) {
@@ -919,7 +979,7 @@ public class OrderUserStateService {
         List<OrderRecord> orders = new ArrayList<>(current.orders());
         orders.add(order);
         return new OrderUserState(orders, current.appliedEventIds(), current.algoOrders(), current.algoChildren(),
-                current.appliedTradeIds());
+                current.appliedTradeIds(), current.revision());
     }
 
     private OrderUserState applyAccountResult(OrderUserState current, AccountCommandResultEvent result) {
@@ -1025,7 +1085,7 @@ public class OrderUserStateService {
         }
         appliedTradeIds.addAll(freshTradeIds);
         return new OrderUserState(updatedOrders, current.appliedEventIds(), current.algoOrders(), current.algoChildren(),
-                appliedTradeIds.stream().sorted().toList());
+                appliedTradeIds.stream().sorted().toList(), current.revision());
     }
 
     private OrderUserState applyCancel(OrderUserState current, OrderUserEvent event) {
@@ -1058,7 +1118,7 @@ public class OrderUserStateService {
         List<AlgoOrderRecord> orders = new ArrayList<>(current.algoOrders());
         orders.add(order);
         return new OrderUserState(current.orders(), current.appliedEventIds(), orders, current.algoChildren(),
-                current.appliedTradeIds());
+                current.appliedTradeIds(), current.revision());
     }
 
     private OrderUserState applyAlgoUpdate(OrderUserState current, AlgoOrderRecord updated) {
@@ -1070,7 +1130,7 @@ public class OrderUserStateService {
                 .map(value -> value.algoOrderId() == updated.algoOrderId() ? updated : value)
                 .toList();
         return new OrderUserState(current.orders(), current.appliedEventIds(), orders, current.algoChildren(),
-                current.appliedTradeIds());
+                current.appliedTradeIds(), current.revision());
     }
 
     private OrderUserState applyAlgoChild(OrderUserState current,
@@ -1087,7 +1147,7 @@ public class OrderUserStateService {
         List<AlgoOrderChild> children = new ArrayList<>(withOrder.algoChildren());
         children.add(child);
         return new OrderUserState(withOrder.orders(), withOrder.appliedEventIds(), withOrder.algoOrders(), children,
-                withOrder.appliedTradeIds());
+                withOrder.appliedTradeIds(), withOrder.revision());
     }
 
     private OrderUserState stateAfterApply(UserPartitionKey partition) {
@@ -1301,7 +1361,7 @@ public class OrderUserStateService {
     private OrderUserState replace(OrderUserState state, OrderRecord updated) {
         return new OrderUserState(state.orders().stream().map(value -> value.orderId() == updated.orderId()
                 ? updated : value).toList(), state.appliedEventIds(), state.algoOrders(), state.algoChildren(),
-                state.appliedTradeIds());
+                state.appliedTradeIds(), state.revision());
     }
 
     private OrderRecord withStatus(OrderRecord order, OrderStatus status, String reason) {

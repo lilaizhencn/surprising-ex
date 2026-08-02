@@ -119,6 +119,26 @@ create_topic_with_partitions() {
     --replication-factor "${REPLICATION_FACTOR}"
 }
 
+create_compacted_topic() {
+  local topic="$1"
+  create_compacted_topic_with_partitions "${topic}" "${PARTITIONS}"
+}
+
+create_compacted_topic_with_partitions() {
+  local topic="$1"
+  local partitions="$2"
+  echo "create compacted topic ${topic} partitions=${partitions}"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    return
+  fi
+  "${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+    --create --if-not-exists \
+    --topic "${topic}" \
+    --partitions "${partitions}" \
+    --replication-factor "${REPLICATION_FACTOR}" \
+    --config cleanup.policy=compact
+}
+
 create_product_topics() {
   local product_line="$1"
   local prefix="surprising.${product_line}"
@@ -138,6 +158,7 @@ create_product_topics() {
   create_topic_with_partitions "${prefix}.account.command.results.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
   create_topic_with_partitions "${prefix}.order.user.commands.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
   create_topic_with_partitions "${prefix}.order.user.command.results.v1" "${ACCOUNT_COMMAND_PARTITIONS}"
+  create_compacted_topic "${prefix}.order.state.events.v1"
   case "${product_line}" in
     linear-perp|inverse-perp|linear-delivery|inverse-delivery|option)
       create_topic "${prefix}.index.price.v1"
@@ -145,7 +166,7 @@ create_product_topics() {
       create_topic "${prefix}.account.position.events.v1"
       create_topic "${prefix}.account.open-interest.events.v1"
       create_topic "${prefix}.account.liquidation-fee.events.v1"
-      create_topic "${prefix}.account.state.events.v1"
+      create_compacted_topic "${prefix}.account.state.events.v1"
       create_topic "${prefix}.risk.account.events.v1"
       create_topic "${prefix}.risk.position.events.v1"
       create_topic "${prefix}.liquidation.candidates.v1"
@@ -167,12 +188,12 @@ create_product_topics() {
 }
 
 if [[ "${INCLUDE_SHARED_TOPICS}" == "true" ]]; then
-  create_topic surprising.instrument.events.v1
+      create_compacted_topic surprising.instrument.events.v1
   create_topic surprising.instrument.lifecycle-drain.v1
       create_topic surprising.account.position.events.v1
       create_topic surprising.account.open-interest.events.v1
       create_topic surprising.account.liquidation-fee.events.v1
-      create_topic surprising.account.state.events.v1
+      create_compacted_topic surprising.account.state.events.v1
       create_topic surprising.risk.account.events.v1
   create_topic surprising.risk.position.events.v1
 fi

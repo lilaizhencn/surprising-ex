@@ -104,6 +104,34 @@ public final class UserPartitionStateStore implements AutoCloseable {
     }
 
     /**
+     * 仅在该用户分区还没有应用任何事实时替换启动快照。
+     *
+     * <p>账户状态 Topic 是按用户键压缩的广播快照。新 JVM 可能先读到旧快照再读到较新的
+     * 快照；序号仍为零时允许单调替换，已经应用过 WAL 事实后则必须拒绝，避免用公共快照
+     * 覆盖本地单写者的预占、成交和幂等索引。</p>
+     */
+    public void replaceIfUnapplied(UserPartitionKey partition, byte[] state) {
+        requireState(partition, state);
+        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
+        lock.lock();
+        try {
+            if (currentSequence(partition) != 0L) {
+                throw new IllegalStateException("用户分区已经应用事实，不能替换启动快照: " + partition.value());
+            }
+            try (WriteBatch batch = new WriteBatch()) {
+                batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
+                batch.put(sequenceKey(partition), encodeLong(0L));
+                batch.put(partitionKey(partition), new byte[]{1});
+                database.write(writeOptions, batch);
+            }
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("替换用户分区启动快照失败: " + partition.value(), ex);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
      * 按连续事件序号提交状态。相同序号和相同内容的重试视为幂等；相同序号但内容不同直接拒绝。
      */
     public void apply(UserPartitionKey partition, long sequence, byte[] state) {

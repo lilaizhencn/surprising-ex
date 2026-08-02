@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.product.api.ProductLine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
@@ -29,8 +30,9 @@ class AccountUserCommandConsumerTest {
         when(ingress.append(anyList())).thenReturn(List.of(
                 AccountUserCommandWalIngress.AppendOutcome.DURABLE,
                 AccountUserCommandWalIngress.AppendOutcome.DURABLE));
+        AccountUserStateCommandWorker worker = mock(AccountUserStateCommandWorker.class);
         AccountUserCommandConsumer consumer = new AccountUserCommandConsumer(
-                objectMapper, ingress, properties, new AccountCommandMetrics(new SimpleMeterRegistry()));
+                objectMapper, ingress, worker, properties, new AccountCommandMetrics(new SimpleMeterRegistry()));
 
         AccountUserCommand first = command("command-1", 1001L, Instant.parse("2026-07-20T00:00:00Z"));
         AccountUserCommand second = command("command-2", 1001L, Instant.parse("2026-07-20T00:00:01Z"));
@@ -41,20 +43,22 @@ class AccountUserCommandConsumerTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<AccountUserCommandWalIngress.CommandEnvelope>> captor = ArgumentCaptor.forClass(List.class);
         verify(ingress).append(captor.capture());
+        verify(worker).applyPendingPartition(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L));
         assertThat(captor.getValue()).extracting(envelope -> envelope.command().commandId())
                 .containsExactly("command-1", "command-2");
     }
 
     @Test
-    void productionConstructorAcknowledgesOnlyAfterWalIngress() throws Exception {
+    void productionConstructorAppliesPartitionBeforeAcknowledgingPoll() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         AccountUserCommandWalIngress ingress = mock(AccountUserCommandWalIngress.class);
         when(ingress.append(anyList())).thenReturn(List.of(
                 AccountUserCommandWalIngress.AppendOutcome.DURABLE));
+        AccountUserStateCommandWorker worker = mock(AccountUserStateCommandWorker.class);
         AccountUserCommandConsumer consumer = new AccountUserCommandConsumer(
-                objectMapper, ingress, properties,
+                objectMapper, ingress, worker, properties,
                 new AccountCommandMetrics(new SimpleMeterRegistry()));
         AccountUserCommand command = command("command-wal-1", 1001L,
                 Instant.parse("2026-07-20T00:00:00Z"));
@@ -63,6 +67,7 @@ class AccountUserCommandConsumerTest {
                 objectMapper.writeValueAsString(command), 43L)));
 
         verify(ingress).append(anyList());
+        verify(worker).applyPendingPartition(new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L));
     }
 
     private static AccountUserCommand command(String commandId, long userId, Instant occurredAt) {

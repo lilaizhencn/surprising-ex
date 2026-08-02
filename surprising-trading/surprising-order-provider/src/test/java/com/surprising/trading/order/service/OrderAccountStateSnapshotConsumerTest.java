@@ -24,6 +24,7 @@ class OrderAccountStateSnapshotConsumerTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setClientId("order-node-a");
         PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache(ProductLine.LINEAR_PERPETUAL);
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
@@ -38,7 +39,7 @@ class OrderAccountStateSnapshotConsumerTest {
         cache.markReady();
         assertThat(cache.isUserReady(event.userId())).isTrue();
         assertThat(consumer.topic()).isEqualTo("surprising.linear-perp.account.state.events.v1");
-        assertThat(consumer.groupId()).isEqualTo("surprising-linear-perp-order-account-state-v1");
+        assertThat(consumer.groupId()).isEqualTo("surprising-linear-perp-order-account-state-v1-order-node-a");
     }
 
     @Test

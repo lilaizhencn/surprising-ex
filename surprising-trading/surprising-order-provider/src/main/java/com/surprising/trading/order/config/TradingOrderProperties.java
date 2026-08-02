@@ -149,6 +149,9 @@ public class TradingOrderProperties {
         public String getOrderUserCommandResultsTopic() {
             return productTopics().orderUserCommandResultsTopic();
         }
+        public String getOrderStateEventsTopic() {
+            return productTopics().orderStateEventsTopic();
+        }
         public String getOrderUserCommandGroupId() {
             return productTopics().consumerGroup("order-user-state");
         }
@@ -207,7 +210,13 @@ public class TradingOrderProperties {
         }
 
         public String getAccountStateSnapshotGroupId() {
-            return productTopics().consumerGroup("order-account-state");
+            // 账户完整快照是每个订单 JVM 的本地读快照，必须广播到每个实例，不能被共享消费组分摊。
+            return productTopics().consumerGroup("order-account-state") + "-" + clientId;
+        }
+
+        public String getOrderStateSnapshotGroupId() {
+            // 订单完整快照是每个订单 JVM 的本地事实恢复输入，必须广播到每个实例。
+            return productTopics().consumerGroup("order-state") + "-" + clientId;
         }
         public String getInstrumentLifecycleDrainTopic() { return instrumentLifecycleDrainTopic; }
         public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {

@@ -1,8 +1,10 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.account.provider.config.AccountProperties;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,6 +24,7 @@ public class AccountUserCommandConsumer {
 
     private final ObjectMapper objectMapper;
     private final AccountUserCommandWalIngress walIngress;
+    private final AccountUserStateCommandWorker stateWorker;
     private final AccountProperties properties;
     private final AccountCommandMetrics metrics;
     private final Set<FailedRecord> failedRecords = ConcurrentHashMap.newKeySet();
@@ -30,10 +33,12 @@ public class AccountUserCommandConsumer {
     @Autowired
     public AccountUserCommandConsumer(ObjectMapper objectMapper,
                                       AccountUserCommandWalIngress walIngress,
+                                      AccountUserStateCommandWorker stateWorker,
                                       AccountProperties properties,
                                       AccountCommandMetrics metrics) {
         this.objectMapper = objectMapper;
         this.walIngress = walIngress;
+        this.stateWorker = stateWorker;
         this.properties = properties;
         this.metrics = metrics;
     }
@@ -68,6 +73,16 @@ public class AccountUserCommandConsumer {
             List<AccountUserCommandWalIngress.AppendOutcome> outcomes = walIngress.append(envelopes);
             if (outcomes.size() != parsed.size()) {
                 throw new IllegalStateException("account command batch outcome size mismatch");
+            }
+            if (stateWorker == null) {
+                throw new IllegalStateException("账户状态执行器未配置，禁止只写 WAL 后提交 Kafka offset");
+            }
+            Set<UserPartitionKey> partitions = new LinkedHashSet<>();
+            for (ParsedRecord value : parsed) {
+                partitions.add(new UserPartitionKey(value.command().productLine(), value.command().userId()));
+            }
+            for (UserPartitionKey partition : partitions) {
+                stateWorker.applyPendingPartition(partition);
             }
             for (int index = 0; index < parsed.size(); index++) {
                 ParsedRecord value = parsed.get(index);

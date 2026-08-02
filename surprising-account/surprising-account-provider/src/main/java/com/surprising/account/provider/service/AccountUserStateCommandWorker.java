@@ -74,11 +74,31 @@ public class AccountUserStateCommandWorker {
     public void applyPending() {
         for (UserPartitionKey partition : wal.partitions()) {
             try {
-                lane.execute(partition, () -> applyPartition(partition));
+                applyPendingPartition(partition);
             } catch (RuntimeException ex) {
-                // 单个用户故障必须停在原序号，不能让其他用户或后续资金事件越过它。
-                log.warn("账户事实流分区执行失败 partition={}", partition.value(), ex);
+                // 恢复任务只记录故障并保留该分区位点，不能影响其他用户继续恢复。
+                log.warn("账户事实流恢复任务暂停分区={}", partition.value(), ex);
             }
+        }
+    }
+
+    /**
+     * 命令消费者在确认 Kafka offset 前调用的同步执行入口。
+     *
+     * <p>定时任务只负责恢复进程崩溃后已经落盘但尚未完成的事实；新命令不能先提交
+     * offset 再等待定时任务，否则节点故障时可能只剩 Kafka 已提交位点而没有可迁移的
+     * 本地状态。</p>
+     */
+    public void applyPendingPartition(UserPartitionKey partition) {
+        if (partition == null) {
+            throw new IllegalArgumentException("账户事实流分区不能为空");
+        }
+        try {
+            lane.execute(partition, () -> applyPartition(partition));
+        } catch (RuntimeException ex) {
+            // 单个用户故障必须停在原序号，不能让其他用户或后续资金事件越过它。
+            log.warn("账户事实流分区执行失败 partition={}", partition.value(), ex);
+            throw ex;
         }
     }
 

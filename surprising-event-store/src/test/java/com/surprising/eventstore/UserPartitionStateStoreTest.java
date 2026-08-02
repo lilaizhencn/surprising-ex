@@ -41,6 +41,21 @@ class UserPartitionStateStoreTest {
         }
     }
 
+    @Test
+    void newerBroadcastSnapshotCanReplaceOnlyAnUnappliedBaseline() throws Exception {
+        Path directory = Files.createTempDirectory("user-partition-state-replace-");
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            store.initialize(partition, bytes("old"));
+            store.replaceIfUnapplied(partition, bytes("new"));
+            assertThat(store.read(partition).orElseThrow().state()).isEqualTo(bytes("new"));
+            store.apply(partition, 1L, bytes("applied"));
+            assertThatThrownBy(() -> store.replaceIfUnapplied(partition, bytes("stale")))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("已经应用事实");
+        }
+    }
+
     private byte[] bytes(String value) {
         return value.getBytes(StandardCharsets.UTF_8);
     }

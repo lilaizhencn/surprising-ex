@@ -4,6 +4,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
+import java.util.UUID;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -95,7 +96,8 @@ public class AccountProperties {
         private ProductLine productLine;
         private boolean productTopicsEnabled;
         private String groupId = "surprising-account-v1";
-        private String clientId = "surprising-account";
+        /** 每个账户 JVM 的实例标识；快照广播消费组必须按实例隔离。 */
+        private String clientId = "account-provider-" + UUID.randomUUID();
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
@@ -147,7 +149,10 @@ public class AccountProperties {
         }
 
         public void setClientId(String clientId) {
-            this.clientId = clientId;
+            if (clientId == null || clientId.isBlank()) {
+                throw new IllegalArgumentException("账户节点 clientId 不能为空");
+            }
+            this.clientId = clientId.trim();
         }
 
         public String getOrderCommandsTopic() {
@@ -264,6 +269,11 @@ public class AccountProperties {
         }
         public String getInstrumentSnapshotGroupId() {
             return productTopics().consumerGroup("account-instrument-snapshot");
+        }
+
+        /** 账户状态快照是每个 JVM 都必须拥有的广播数据，不能与其他实例共享消费组。 */
+        public String getAccountStateReducerSnapshotGroupId() {
+            return productTopics().consumerGroup("account-reducer-state") + "-" + clientId;
         }
 
         public int getConcurrency() {

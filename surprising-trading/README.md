@@ -43,6 +43,7 @@ client / internal gateway
   -> surprising.<product-segment>.order.user.commands.v1（key = PRODUCT_LINE:userId）
   -> 用户分区单写入消费者
   -> 用户分区 WAL/RocksDB 顺序追加订单事实
+  -> surprising.<product-segment>.order.state.events.v1（按用户键压缩的完整状态广播）
   -> surprising.<product-segment>.order.user.command.results.v1
   -> Kafka 订单事件与账户预占命令
   -> surprising.<product-segment>.order.commands.v1
@@ -106,6 +107,11 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 Topic 路由，再统一追加到用户分区 WAL/RocksDB，由 `OrderUserStateService` 按序应用。
 `OrderRepository` 仅作为异步投影写入
 `trading_orders`，不参与订单状态裁决；订单事件、仓位、仓位模式和算法单状态均从本地事实快照产生。
+账户完整快照 Topic 使用用户键压缩，订单节点每个 JVM 通过唯一 `client-id` 使用独立消费组接收完整快照；
+不能让多个订单实例共享快照消费组，否则本地缓存会被 Kafka 分摊而缺失用户状态。
+订单状态也通过 `order.state.events.v1` 使用同样的用户键压缩广播，事件中的 `stateRevision` 是跨节点
+单调修订号，本地 WAL 序号只负责当前节点顺序。分区迁移时没有完整快照或本地事实无法安全合并，订单节点
+必须失败关闭，不能从落后的 `trading_orders` 投影恢复在线状态。
 - 业务查询：`GET /api/v1/trading/fees/effective?userId=...&symbol=...` 返回当前最终 maker/taker ppm 和来源，例如 `INSTRUMENT`、`VIP_SYMBOL`。
 - 订单接受时会把最终 `maker_fee_rate_ppm`、`taker_fee_rate_ppm` 写入 `trading_orders`。后续用户 VIP 等级或活动费率变化，不会重解释已接受挂单。
 - account provider 结算成交时按订单快照写 `TRADE_FEE`，并在 ledger 保存 `trade_id`、`order_id`、`symbol`、`fee_rate_ppm`。
@@ -329,6 +335,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `surprising.<product-segment>.order.user.commands.v1`：订单用户分区单写入命令，key = `<PRODUCT_LINE>:<userId>`；
   HTTP 下单/撤单、账户结果、撮合结果和算法状态更新都必须经过此 Topic。
 - `surprising.<product-segment>.order.user.command.results.v1`：订单用户命令终态，key = `<PRODUCT_LINE>:<userId>`；
+- `surprising.<product-segment>.order.state.events.v1`：订单用户完整状态压缩广播，key = `<PRODUCT_LINE>:<userId>`；
   每个 HTTP 节点使用独立结果消费组，不能把结果 Topic 当成事实源。
 - `surprising.<product-segment>.match.trades.v1`：供 WebSocket 公共逐笔与 K 线计算使用的可丢失 `PublicTradeEvent`，key = `symbol`。matching 按 symbol 使用独立队列，每 50ms 由专用非阻塞 Kafka producer 批量刷新；逐笔保持 FIFO、不合并，同一 symbol 排队超过 10,000 条时只丢弃该 symbol 最旧的消息。
 - `surprising.<product-segment>.orderbook.depth.v1`：可丢失的 L2 盘口快照，key = `symbol`；每个 symbol 只保留最新一份待发送快照。

@@ -222,6 +222,7 @@ class AccountUserStateReducerTest {
             assertThat(state.snapshot().balances()).containsExactly(
                     new PerpetualAccountStateUpdatedEvent.Balance("USDT", 798L, 0L),
                     new PerpetualAccountStateUpdatedEvent.Balance("BTC", 2L, 0L));
+            assertThat(state.snapshot().orderLocks()).isEmpty();
             assertThat(state.snapshot().positions()).isEmpty();
             assertThat(state.settledTradeIds()).containsExactly(8201L);
         }
@@ -291,6 +292,21 @@ class AccountUserStateReducerTest {
                 assertThat(lock.asset()).isEqualTo("USDT");
                 assertThat(lock.lockedUnits()).isEqualTo(expectedOrderLock);
             });
+
+            AccountUserCommand release = command("trade-release", AccountUserCommandType.ORDER_RELEASE,
+                    objectMapper.writeValueAsString(new OrderReleaseAccountCommand(
+                            9002L, true, 100L, 0L, true, AccountType.USDT_PERPETUAL, "USDT", 300L,
+                            "ORDER_FILLED", Instant.now())));
+            assertThat(reducer.apply(release, 3L).status())
+                    .isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            AccountUserReducerState afterRelease = reducer.state(new UserPartitionKey(
+                    ProductLine.LINEAR_PERPETUAL, 1001L)).orElseThrow();
+            assertThat(afterRelease.snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 990L, 10L));
+            assertThat(afterRelease.snapshot().orderLocks()).isEmpty();
+            assertThat(afterRelease.reservations().stream()
+                    .filter(value -> value.orderId() == 9002L)
+                    .findFirst().orElseThrow().releasedUnits()).isEqualTo(290L);
         }
     }
 

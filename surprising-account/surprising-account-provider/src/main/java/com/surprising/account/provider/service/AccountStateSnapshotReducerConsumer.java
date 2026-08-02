@@ -54,7 +54,6 @@ public class AccountStateSnapshotReducerConsumer {
     }
 
     public String groupId() {
-        return properties.getKafka().getProductLine().topicSegment()
-                + "-account-reducer-state-v1";
+        return properties.getKafka().getAccountStateReducerSnapshotGroupId();
     }
 }

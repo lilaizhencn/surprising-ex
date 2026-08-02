@@ -27,6 +27,8 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderRecord;
+import com.surprising.trading.order.model.OrderUserState;
+import com.surprising.trading.order.model.OrderUserStateSnapshot;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -90,6 +92,38 @@ class OrderUserStateServiceTest {
             assertThat(restarted.get(1001L, order.orderId()).status()).isEqualTo(OrderStatus.ACCEPTED);
             assertThat(wal.lastSequence(new com.surprising.eventstore.UserPartitionKey(
                     ProductLine.LINEAR_PERPETUAL, 1001L))).isEqualTo(1L);
+        }
+    }
+
+    @Test
+    void compactedSnapshotRestoresStateOnAnotherNodeWithoutReplayingTheDatabase() throws Exception {
+        Path sourceRoot = Files.createTempDirectory("order-user-state-source-");
+        Path targetRoot = Files.createTempDirectory("order-user-state-target-");
+        TradingOrderProperties properties = properties();
+        OrderRecord order = order("migration-1", 9051L, 10L);
+        OrderUserStateSnapshot snapshot;
+        try (UserPartitionWal wal = new UserPartitionWal(sourceRoot.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(sourceRoot.resolve("state"))) {
+            OrderUserStateService source = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            source.place(order);
+            OrderUserState sourceState = new ObjectMapper().readValue(
+                    state.read(new com.surprising.eventstore.UserPartitionKey(
+                            ProductLine.LINEAR_PERPETUAL, order.userId())).orElseThrow().state(),
+                    OrderUserState.class);
+            snapshot = new OrderUserStateSnapshot(OrderUserStateSnapshot.CURRENT_SCHEMA_VERSION,
+                    ProductLine.LINEAR_PERPETUAL, order.userId(), sourceState.revision(), sourceState,
+                    Instant.now());
+        }
+        try (UserPartitionWal wal = new UserPartitionWal(targetRoot.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(targetRoot.resolve("state"))) {
+            OrderUserStateService target = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            target.initializeSnapshot(snapshot);
+
+            assertThat(target.get(order.userId(), order.orderId()).status()).isEqualTo(OrderStatus.ACCEPTED);
+            assertThat(state.lastAppliedSequence(new com.surprising.eventstore.UserPartitionKey(
+                    ProductLine.LINEAR_PERPETUAL, order.userId()))).isZero();
         }
     }
 
