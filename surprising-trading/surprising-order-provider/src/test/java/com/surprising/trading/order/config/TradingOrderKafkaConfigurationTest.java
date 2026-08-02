@@ -16,6 +16,7 @@ class TradingOrderKafkaConfigurationTest {
     @Test
     void producerUsesDurableIdempotentSettings() {
         TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setBootstrapServers("kafka-a:9092");
 
         var factory = (DefaultKafkaProducerFactory<String, String>)
@@ -36,6 +37,7 @@ class TradingOrderKafkaConfigurationTest {
     @Test
     void stateProjectionConsumesAndAcknowledgesKafkaInBatches() {
         TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
                 configuration.orderStateConsumerFactory(properties);
@@ -49,6 +51,7 @@ class TradingOrderKafkaConfigurationTest {
     @Test
     void accountCommandResultsUseDedicatedPartitionParallelBatchListener() {
         TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setAccountCommandResultsConcurrency(32);
         TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
@@ -66,6 +69,7 @@ class TradingOrderKafkaConfigurationTest {
     @Test
     void resolvesOnlyProductLineTopics() {
         TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
 
         assertThat(properties.getKafka().getOrderCommandsTopic())
                 .isEqualTo("surprising.linear-perp.order.commands.v1");

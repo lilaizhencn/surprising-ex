@@ -22,6 +22,7 @@ class OrderAccountStateSnapshotConsumerTest {
     void appliesPerpetualStateAndExposesDedicatedGroup() throws Exception {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setProductTopicsEnabled(true);
         PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
         PerpetualAccountStateUpdatedEvent event = event(1L);
@@ -44,6 +45,7 @@ class OrderAccountStateSnapshotConsumerTest {
     void rejectsWrongKeyBeforeUpdatingCache() throws Exception {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);

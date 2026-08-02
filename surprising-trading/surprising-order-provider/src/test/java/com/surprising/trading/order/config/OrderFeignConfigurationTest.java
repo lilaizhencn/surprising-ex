@@ -19,6 +19,7 @@ class OrderFeignConfigurationTest {
     @Test
     void forwardsTraceId() {
         TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         TraceContext.set("trace-order-feign-1");
         RequestTemplate template = new RequestTemplate();
 

@@ -69,7 +69,8 @@ public class TradingOrderProperties {
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
-        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
+        private ProductLine productLine;
         private boolean productTopicsEnabled;
         private String orderCommandsTopic = "surprising.perp.order.commands.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
@@ -96,7 +97,7 @@ public class TradingOrderProperties {
         }
 
         public void setProductLine(ProductLine productLine) {
-            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+            this.productLine = productLine;
         }
 
         public boolean isProductTopicsEnabled() {
