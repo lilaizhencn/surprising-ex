@@ -30,9 +30,9 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * 用户账户事实流的唯一状态执行器。
  *
- * <p>它只从本地 WAL 顺序读取命令，由 reducer 在本地状态库中裁决并同步提交状态序号；数据库
- * 投影器不能调用这个类来决定结果。状态提交成功后才保存命令结果并发布 Kafka 结果事件，进程
- * 在任意位置崩溃都可以从状态序号继续重放。依赖未完成、序号断裂或快照缺失时分区停止推进。</p>
+ * <p>它只从本地 WAL 顺序读取命令，由 reducer 在本地状态库中裁决。命令终态先同步写入本地
+ * 结果库，再提交账户状态序号，最后发布快照和 Kafka 结果事件；进程在任意位置崩溃都可以
+ * 依据结果库重算并补齐状态或重发事件。依赖未完成、序号断裂或快照缺失时分区停止推进。</p>
  */
 @Service
 public class AccountUserStateCommandWorker {
@@ -87,7 +87,19 @@ public class AccountUserStateCommandWorker {
         long applied = stateStore.lastAppliedSequence(partition);
         List<UserPartitionEvent> events = wal.replay(partition);
         for (UserPartitionEvent event : events) {
+            AccountUserCommand command = decode(event, partition);
+            AccountCommandTerminalResult existing = readResult(command.commandId()).orElse(null);
             if (event.sequence() <= applied) {
+                if (existing == null) {
+                    // 旧版本可能在结果落盘前提交了状态，不能凭空生成终态继续运行，必须人工核对。
+                    throw new IllegalStateException("账户状态已提交但命令终态缺失 commandId="
+                            + command.commandId() + " sequence=" + event.sequence());
+                }
+                publishStateSnapshot(reducer.state(partition)
+                        .orElseThrow(() -> new AccountStateUnavailableException(
+                                "账户状态快照不存在: " + partition.value()))
+                        .snapshot());
+                publishOnce(event.sequence(), command, existing);
                 continue;
             }
             long expected = applied + 1L;
@@ -95,12 +107,22 @@ public class AccountUserStateCommandWorker {
                 throw new IllegalStateException("账户事实流序号断裂 partition=" + partition.value()
                         + " expected=" + expected + " actual=" + event.sequence());
             }
-            AccountUserCommand command = decode(event, partition);
-            AccountCommandTerminalResult existing = readResult(command.commandId()).orElse(null);
             if (existing != null) {
-                if (stateStore.lastAppliedSequence(partition) < event.sequence()) {
-                    throw new IllegalStateException("命令结果已存在但账户状态尚未提交 commandId="
-                            + command.commandId());
+                long persistedSequence = stateStore.lastAppliedSequence(partition);
+                if (persistedSequence > event.sequence()) {
+                    throw new IllegalStateException("账户状态序号领先于命令结果 commandId="
+                            + command.commandId() + " stateSequence=" + persistedSequence
+                            + " eventSequence=" + event.sequence());
+                }
+                if (persistedSequence < event.sequence()) {
+                    // 结果已落盘但状态尚未提交，重算只用于校验，不能相信旧进程留下的任意结果。
+                    AccountUserStateReducer.Reduction recovery = reduce(command, event.sequence());
+                    AccountCommandTerminalResult recomputed = toTerminal(recovery);
+                    if (!existing.equals(recomputed)) {
+                        throw new IllegalStateException("账户命令终态重算不一致 commandId="
+                                + command.commandId());
+                    }
+                    reducer.commit(command, event.sequence(), recovery);
                 }
                 publishStateSnapshot(reducer.state(partition)
                         .orElseThrow(() -> new AccountStateUnavailableException(
@@ -114,25 +136,39 @@ public class AccountUserStateCommandWorker {
             AccountUserStateReducer.Reduction reduction;
             AccountCommandTerminalResult dependency = dependencyResult(command);
             if (dependency == null && command.dependsOnCommandId() != null) {
+                // 依赖命令尚未落盘时，本分区不能越过当前命令。
                 break;
             } else if (dependency != null && dependency.status() == AccountCommandStatus.REJECTED) {
-                reduction = reducer.reject(command, event.sequence(), "DEPENDENCY_REJECTED",
+                reduction = reducer.rejectWithoutCommit(command, event.sequence(), "DEPENDENCY_REJECTED",
                         "依赖账户命令已拒绝");
             } else {
-                reduction = reducer.apply(command, event.sequence());
-            }
-            if (reduction.status() == AccountUserStateReducer.ApplyStatus.UNSUPPORTED) {
-                // 未实现的资金命令不能回退数据库，也不能跳过，否则会破坏账户分区顺序。
-                throw new IllegalStateException("账户 reducer 尚未支持命令类型 commandId="
-                        + command.commandId() + " type=" + command.commandType());
+                reduction = reduce(command, event.sequence());
             }
             AccountCommandTerminalResult terminal = toTerminal(reduction);
-            publishStateSnapshot(reduction.nextState().snapshot());
+            // 先保存终态再提交余额和持仓，崩溃后可以重算并补交状态，不会出现不可恢复的中间窗。
             resultStore.put(command.commandId(), serialize(terminal));
+            reducer.commit(command, event.sequence(), reduction);
+            publishStateSnapshot(reducer.state(partition)
+                    .orElseThrow(() -> new AccountStateUnavailableException(
+                            "账户状态快照不存在: " + partition.value()))
+                    .snapshot());
             publishOnce(event.sequence(), command, terminal);
             applied = event.sequence();
         }
         return null;
+    }
+
+    private AccountUserStateReducer.Reduction reduce(AccountUserCommand command, long sequence) {
+        AccountUserStateReducer.Reduction reduction = reducer.reduce(command, sequence);
+        if (reduction.status() == AccountUserStateReducer.ApplyStatus.UNSUPPORTED) {
+            if ("INSTRUMENT_SNAPSHOT_UNAVAILABLE".equals(reduction.errorCode())) {
+                throw new IllegalStateException("账户合约快照尚未就绪 commandId=" + command.commandId());
+            }
+            return reducer.rejectWithoutCommit(command, sequence,
+                    reduction.errorCode() == null ? "COMMAND_NOT_REDUCED" : reduction.errorCode(),
+                    "账户本地 reducer 尚未支持该产品线或命令类型");
+        }
+        return reduction;
     }
 
     private void ensureInitialized(UserPartitionKey partition) {

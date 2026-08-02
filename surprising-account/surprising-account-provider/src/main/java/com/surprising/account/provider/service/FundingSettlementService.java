@@ -14,14 +14,13 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import java.time.Instant;
 import java.util.List;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 资金费支付的权威写入服务。该服务必须位于账户模块，确保资金费计算节点不能修改账户余额、
  * 亏空、保证金或流水。
  */
-@Service
+/** 旧数据库资金费结算实现，仅保留历史数据校验；生产命令由用户分区 reducer 处理。 */
 public class FundingSettlementService {
 
     private final AccountSequenceRepository sequenceRepository;

@@ -328,6 +328,7 @@ public class OrderService {
     private OrderResponse placeWal(PlaceOrderRequest request, BatchReservationSequence sequence) {
         PlaceOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
+        requireLocalAccountProductLine(productLine);
         String traceId = TraceContext.currentOrCreate();
         if (hasClientOrderId(normalized)) {
             try {
@@ -390,6 +391,16 @@ public class OrderService {
                 reservation == null ? null : reservation.asset(), reservation == null ? 0L : reservation.reservedUnits(),
                 status, validation.rejectReason(), now, now, 1L);
         return orderUserStateService.place(order);
+    }
+
+    /**
+     * 订单事实流不能把未接入账户 reducer 的产品线偷偷降级到数据库事务。
+     * 产品线接入本地账户状态机后再开放对应入口。
+     */
+    private void requireLocalAccountProductLine(ProductLine productLine) {
+        if (productLine != ProductLine.LINEAR_PERPETUAL) {
+            throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
+        }
     }
 
     /** 本地订单事实流使用账户快照和用户分区状态完成保证金模式校验，不打开数据库事务。 */

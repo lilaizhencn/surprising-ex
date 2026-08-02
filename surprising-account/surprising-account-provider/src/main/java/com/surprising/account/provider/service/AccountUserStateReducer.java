@@ -100,7 +100,32 @@ public class AccountUserStateReducer {
             throw new IllegalArgumentException("账户 reducer 命令和序号不能为空");
         }
         UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
-        return lane.execute(partition, () -> applyLocked(partition, command, sequence));
+        return lane.execute(partition, () -> {
+            Reduction reduction = reduceLocked(partition, command, sequence);
+            commitLocked(partition, sequence, reduction);
+            return reduction;
+        });
+    }
+
+    /** 只计算下一状态，不写入状态库，供结果先落盘的事实流执行器使用。 */
+    public Reduction reduce(AccountUserCommand command, long sequence) {
+        if (command == null || sequence <= 0L) {
+            throw new IllegalArgumentException("账户 reducer 命令和序号不能为空");
+        }
+        UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
+        return lane.execute(partition, () -> reduceLocked(partition, command, sequence));
+    }
+
+    /** 提交已经计算好的下一状态；结果库先写入后才允许调用。 */
+    public void commit(AccountUserCommand command, long sequence, Reduction reduction) {
+        if (command == null || sequence <= 0L || reduction == null) {
+            throw new IllegalArgumentException("账户 reducer 提交参数不能为空");
+        }
+        UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
+        lane.execute(partition, () -> {
+            commitLocked(partition, sequence, reduction);
+            return null;
+        });
     }
 
     /** 依赖已拒绝时推进本分区序号，但不改变账户余额和持仓。 */
@@ -113,27 +138,28 @@ public class AccountUserStateReducer {
         }
         UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
         return lane.execute(partition, () -> {
-            AccountUserReducerState current = state(partition)
-                    .orElseThrow(() -> new AccountStateUnavailableException(
-                            "账户 JVM 快照尚未初始化，拒绝资金命令: " + partition.value()));
-            long currentSequence = stateStore.lastAppliedSequence(partition);
-            if (sequence <= currentSequence) {
-                return new Reduction(ApplyStatus.ALREADY_APPLIED, null, null, current);
-            }
-            if (sequence != currentSequence + 1L) {
-                throw new IllegalStateException("账户 reducer 序号不连续 partition=" + partition.value()
-                        + " current=" + currentSequence + " requested=" + sequence);
-            }
-            Reduction reduction = rejected(current, errorCode, errorMessage);
-            stateStore.apply(partition, sequence, serialize(reduction.nextState()));
-            states.put(partition, reduction.nextState());
+            Reduction reduction = rejectLocked(partition, sequence, errorCode, errorMessage);
+            commitLocked(partition, sequence, reduction);
             return reduction;
         });
     }
 
-    private Reduction applyLocked(UserPartitionKey partition,
-                                  AccountUserCommand command,
-                                  long sequence) {
+    /** 只计算拒绝结果，不提交状态，供命令终态先落盘的事实流执行器使用。 */
+    public Reduction rejectWithoutCommit(AccountUserCommand command,
+                                         long sequence,
+                                         String errorCode,
+                                         String errorMessage) {
+        if (command == null || sequence <= 0L) {
+            throw new IllegalArgumentException("账户 reducer 拒绝命令和序号不能为空");
+        }
+        UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
+        return lane.execute(partition, () -> rejectLocked(partition, sequence, errorCode, errorMessage));
+    }
+
+    /** 只在本地单写入队列中计算状态，不产生持久化副作用。 */
+    private Reduction reduceLocked(UserPartitionKey partition,
+                                   AccountUserCommand command,
+                                   long sequence) {
         AccountUserReducerState current = state(partition)
                 .orElseThrow(() -> new AccountStateUnavailableException(
                         "账户 JVM 快照尚未初始化，拒绝资金命令: " + partition.value()));
@@ -155,11 +181,57 @@ public class AccountUserStateReducer {
             case ADL_DEFICIT_RELEASE, INSURANCE_DEFICIT_RELEASE -> deficitRelease(current, command);
             default -> new Reduction(ApplyStatus.UNSUPPORTED, null, "COMMAND_NOT_REDUCED", current);
         };
-        if (reduction.status() != ApplyStatus.UNSUPPORTED) {
-            stateStore.apply(partition, sequence, serialize(reduction.nextState()));
-            states.put(partition, reduction.nextState());
-        }
         return reduction;
+    }
+
+    private Reduction rejectLocked(UserPartitionKey partition,
+                                   long sequence,
+                                   String errorCode,
+                                   String errorMessage) {
+        AccountUserReducerState current = state(partition)
+                .orElseThrow(() -> new AccountStateUnavailableException(
+                        "账户 JVM 快照尚未初始化，拒绝资金命令: " + partition.value()));
+        long currentSequence = stateStore.lastAppliedSequence(partition);
+        if (sequence <= currentSequence) {
+            return new Reduction(ApplyStatus.ALREADY_APPLIED, null, null, current);
+        }
+        if (sequence != currentSequence + 1L) {
+            throw new IllegalStateException("账户 reducer 序号不连续 partition=" + partition.value()
+                    + " current=" + currentSequence + " requested=" + sequence);
+        }
+        return rejected(current, errorCode, errorMessage);
+    }
+
+    /** 将计算结果按连续序号写入 RocksDB；重复提交必须与已有快照完全一致。 */
+    private void commitLocked(UserPartitionKey partition, long sequence, Reduction reduction) {
+        if (reduction.status() == ApplyStatus.UNSUPPORTED
+                || reduction.status() == ApplyStatus.ALREADY_APPLIED) {
+            return;
+        }
+        if (reduction.nextState() == null) {
+            throw new IllegalStateException("账户 reducer 结果缺少下一状态 partition=" + partition.value());
+        }
+        long currentSequence = stateStore.lastAppliedSequence(partition);
+        if (sequence < currentSequence) {
+            throw new IllegalStateException("账户 reducer 不能回写旧序号 partition=" + partition.value()
+                    + " current=" + currentSequence + " requested=" + sequence);
+        }
+        if (sequence == currentSequence) {
+            AccountUserReducerState current = state(partition)
+                    .orElseThrow(() -> new AccountStateUnavailableException(
+                            "账户 JVM 快照尚未初始化: " + partition.value()));
+            if (!current.equals(reduction.nextState())) {
+                throw new IllegalStateException("账户 reducer 相同序号状态冲突 partition=" + partition.value()
+                        + " sequence=" + sequence);
+            }
+            return;
+        }
+        if (sequence != currentSequence + 1L) {
+            throw new IllegalStateException("账户 reducer 序号不连续 partition=" + partition.value()
+                    + " current=" + currentSequence + " requested=" + sequence);
+        }
+        stateStore.apply(partition, sequence, serialize(reduction.nextState()));
+        states.put(partition, reduction.nextState());
     }
 
     private Reduction reserve(AccountUserReducerState current, AccountUserCommand command) {

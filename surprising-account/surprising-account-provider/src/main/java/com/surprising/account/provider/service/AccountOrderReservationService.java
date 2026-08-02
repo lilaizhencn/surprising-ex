@@ -12,9 +12,8 @@ import com.surprising.account.provider.repository.SpotOrderReservationRepository
 import com.surprising.account.provider.repository.TradeSettlementSideRepository;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
-import org.springframework.stereotype.Service;
 
-@Service
+/** 旧数据库预占实现，仅保留历史数据校验；生产预占由用户分区 reducer 处理。 */
 public class AccountOrderReservationService {
 
     private final AccountSequenceRepository sequenceRepository;

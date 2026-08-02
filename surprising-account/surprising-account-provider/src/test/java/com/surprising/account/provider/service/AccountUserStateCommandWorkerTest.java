@@ -1,6 +1,7 @@
 package com.surprising.account.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -33,6 +34,55 @@ import org.springframework.kafka.support.SendResult;
 import tools.jackson.databind.ObjectMapper;
 
 class AccountUserStateCommandWorkerTest {
+
+    @Test
+    void restartsAfterResultPublishFailureWithoutReapplyingBalanceMutation() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-worker-crash-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        CompletableFuture<SendResult<String, String>> success = CompletableFuture.completedFuture(null);
+        CompletableFuture<SendResult<String, String>> failure = new CompletableFuture<>();
+        failure.completeExceptionally(new IllegalStateException("模拟结果发布失败"));
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(success, failure, success, success);
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
+        AccountUserCommand command = command(objectMapper);
+
+        try (UserPartitionWal wal = new UserPartitionWal(directory.resolve("wal"));
+             UserPartitionStateStore stateStore = new UserPartitionStateStore(directory.resolve("state"));
+             UserPartitionResultStore resultStore = new UserPartitionResultStore(directory.resolve("result"))) {
+            wal.append(partition, command.commandId(), command.commandType().name(),
+                    objectMapper.writeValueAsString(command).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "worker-fingerprint", command.occurredAt());
+            AccountUserStateReducer firstReducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane());
+            firstReducer.initialize(snapshot());
+            AccountUserStateCommandWorker firstWorker = new AccountUserStateCommandWorker(
+                    objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
+                    firstReducer, null, kafkaTemplate);
+
+            // 结果发布失败由 worker 捕获并保留在 WAL；状态和终态已经可靠落盘。
+            assertThatCode(firstWorker::applyPending).doesNotThrowAnyException();
+            assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
+            assertThat(resultStore.read(command.commandId())).isPresent();
+            assertThat(firstReducer.state(partition).orElseThrow().snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 700L, 300L));
+
+            AccountUserStateReducer restartedReducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane());
+            AccountUserStateCommandWorker restartedWorker = new AccountUserStateCommandWorker(
+                    objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
+                    restartedReducer, null, kafkaTemplate);
+            assertThatCode(restartedWorker::applyPending).doesNotThrowAnyException();
+            assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
+            assertThat(restartedReducer.state(partition).orElseThrow().snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 700L, 300L));
+            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(4))
+                    .send(anyString(), anyString(), anyString());
+        }
+    }
 
     @Test
     void publishesUpdatedSnapshotBeforeCommandResultAndReplaysIdempotently() throws Exception {
