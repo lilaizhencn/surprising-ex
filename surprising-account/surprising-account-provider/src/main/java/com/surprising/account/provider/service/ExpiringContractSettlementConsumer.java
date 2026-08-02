@@ -102,9 +102,6 @@ public class ExpiringContractSettlementConsumer {
     }
 
     private void requireCurrentProductTopic(String topic, String expectedTopic, String eventName) {
-        if (!properties.getKafka().isProductTopicsEnabled()) {
-            return;
-        }
         if (!expectedTopic.equals(topic)) {
             throw new ProductTopicMismatchException(eventName + " topic must match current product line: expected="
                     + expectedTopic + " actual=" + topic);

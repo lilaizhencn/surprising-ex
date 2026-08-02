@@ -18,6 +18,7 @@ import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
+import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import com.surprising.trading.order.repository.OrderRepository;
 import java.time.Instant;
@@ -34,7 +35,7 @@ class TradingFeeServiceTest {
         OrderRepository orderRepository = mock(OrderRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
         OrderFeeSnapshotLookup feeSnapshotLookup = mock(OrderFeeSnapshotLookup.class);
-        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup,
+        TradingFeeService service = service(feeRepository, orderRepository, instrumentRuleLookup,
                 feeSnapshotLookup);
 
         when(instrumentRuleLookup.currentRule("BTC-USDT")).thenReturn(Optional.of(rule(7L)));
@@ -58,7 +59,7 @@ class TradingFeeServiceTest {
         OrderRepository orderRepository = mock(OrderRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
         OrderFeeSnapshotLookup feeSnapshotLookup = mock(OrderFeeSnapshotLookup.class);
-        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup,
+        TradingFeeService service = service(feeRepository, orderRepository, instrumentRuleLookup,
                 feeSnapshotLookup);
 
         when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
@@ -75,7 +76,7 @@ class TradingFeeServiceTest {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         OrderRepository orderRepository = mock(OrderRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
-        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup);
+        TradingFeeService service = service(feeRepository, orderRepository, instrumentRuleLookup, null);
         Instant effectiveTime = Instant.parse("2026-07-01T00:00:00Z");
         FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, 1001L, "BTC-USDT",
                 -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
@@ -98,7 +99,8 @@ class TradingFeeServiceTest {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         OrderRepository orderRepository = mock(OrderRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
-        TradingFeeService service = new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup);
+        TradingFeeService service = service(feeRepository, orderRepository, instrumentRuleLookup, null,
+                ProductLine.LINEAR_DELIVERY);
         FeeScheduleQueryResponse expected = new FeeScheduleQueryResponse(0, List.of(), "next", true,
                 "updatedAt.asc", 50);
 
@@ -117,5 +119,25 @@ class TradingFeeServiceTest {
         return new InstrumentRule("BTC-USDT", version, "TRADING", ContractType.LINEAR_PERPETUAL,
                 Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC"), true, true, true,
                 1L, 100_000L, 1L, 1_000_000_000L, 10_000L, 100_000_000L, 10_000L);
+    }
+
+    private TradingFeeService service(OrderFeeRepository feeRepository,
+                                      OrderRepository orderRepository,
+                                      InstrumentRuleLookup instrumentRuleLookup,
+                                      OrderFeeSnapshotLookup feeSnapshotLookup) {
+        return service(feeRepository, orderRepository, instrumentRuleLookup, feeSnapshotLookup,
+                ProductLine.LINEAR_PERPETUAL);
+    }
+
+    private TradingFeeService service(OrderFeeRepository feeRepository,
+                                      OrderRepository orderRepository,
+                                      InstrumentRuleLookup instrumentRuleLookup,
+                                      OrderFeeSnapshotLookup feeSnapshotLookup,
+                                      ProductLine productLine) {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(productLine);
+        properties.getKafka().setProductTopicsEnabled(true);
+        return new TradingFeeService(feeRepository, orderRepository, instrumentRuleLookup,
+                feeSnapshotLookup, null, properties);
     }
 }

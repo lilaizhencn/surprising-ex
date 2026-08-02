@@ -26,11 +26,13 @@ class ExpiringContractSettlementConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         RecordingFanoutService fanoutService = new RecordingFanoutService();
         AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer consumer =
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
         DeliverySettlementEvent event = deliveryEvent("BTC-USDT-260327");
 
-        consumer.onDeliverySettlement(new ConsumerRecord<>("surprising.linear-delivery.delivery.settlements.v1",
+        consumer.onDeliverySettlement(new ConsumerRecord<>(properties.getKafka().getDeliverySettlementsTopic(),
                 0, 1L, "BTC-USDT-260327", objectMapper.writeValueAsString(event)));
 
         assertThat(fanoutService.deliveryEvent).isEqualTo(event);
@@ -41,11 +43,13 @@ class ExpiringContractSettlementConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         RecordingFanoutService fanoutService = new RecordingFanoutService();
         AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer consumer =
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
         OptionExerciseEvent event = optionEvent("BTC-USDT-260925-70000-C");
 
-        consumer.onOptionExercise(new ConsumerRecord<>("surprising.option.option.exercises.v1",
+        consumer.onOptionExercise(new ConsumerRecord<>(properties.getKafka().getOptionExercisesTopic(),
                 0, 1L, "BTC-USDT-260925-70000-C", objectMapper.writeValueAsString(event)));
 
         assertThat(fanoutService.optionEvent).isEqualTo(event);

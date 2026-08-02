@@ -42,13 +42,13 @@ class OrderFeignConfigurationTest {
     }
 
     @Test
-    void doesNotForwardProductLineInLegacyTopicMode() {
+    void alwaysForwardsConfiguredProductLine() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         RequestTemplate template = new RequestTemplate();
 
         new OrderFeignConfiguration().orderTraceRequestInterceptor(properties).apply(template);
 
-        assertThat(template.headers()).doesNotContainKey("X-Product-Line");
+        assertThat(template.headers()).containsEntry("X-Product-Line", List.of("OPTION"));
     }
 }

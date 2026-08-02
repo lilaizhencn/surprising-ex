@@ -30,7 +30,7 @@ class PositionCacheProjectionConsumerTest {
         PositionCacheProjectionConsumer consumer =
                 new PositionCacheProjectionConsumer(objectMapper, cache, properties);
 
-        consumer.onPositionUpdated(record(event.partitionKey(), "{}"));
+        consumer.onPositionUpdated(record(properties.getKafka().getPositionEventsTopic(), event.partitionKey(), "{}"));
 
         verify(cache).apply(event.cacheEvent(), false);
         verify(cache, never()).markNotReady(ProductLine.LINEAR_PERPETUAL);
@@ -47,7 +47,7 @@ class PositionCacheProjectionConsumerTest {
         PositionCacheProjectionConsumer consumer = new PositionCacheProjectionConsumer(
                 objectMapper, cache, properties, snapshotCache);
 
-        consumer.onPositionUpdated(record(event.partitionKey(), "{}"));
+        consumer.onPositionUpdated(record(properties.getKafka().getPositionEventsTopic(), event.partitionKey(), "{}"));
 
         assertThat(snapshotCache.position(event.userId(), event.symbol(), event.marginMode(), event.positionSide()))
                 .hasValue(event);
@@ -64,7 +64,7 @@ class PositionCacheProjectionConsumerTest {
         PositionCacheProjectionConsumer consumer =
                 new PositionCacheProjectionConsumer(objectMapper, cache, properties);
 
-        assertThatThrownBy(() -> consumer.onPositionUpdated(record("BTC-USDT", "{}")))
+        assertThatThrownBy(() -> consumer.onPositionUpdated(record(properties.getKafka().getPositionEventsTopic(), "BTC-USDT", "{}")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to project durable position event");
 
@@ -90,8 +90,8 @@ class PositionCacheProjectionConsumerTest {
         return properties;
     }
 
-    private ConsumerRecord<String, String> record(String key, String value) {
-        return new ConsumerRecord<>("surprising.account.position.events.v1", 0, 1L, key, value);
+    private ConsumerRecord<String, String> record(String topic, String key, String value) {
+        return new ConsumerRecord<>(topic, 0, 1L, key, value);
     }
 
     private PositionUpdatedEvent event() {

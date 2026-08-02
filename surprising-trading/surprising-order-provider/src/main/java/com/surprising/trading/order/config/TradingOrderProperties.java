@@ -108,7 +108,7 @@ public class TradingOrderProperties {
         }
 
         public String getOrderCommandsTopic() {
-            return productTopicsEnabled ? productTopics().orderCommandsTopic() : orderCommandsTopic;
+            return productTopics().orderCommandsTopic();
         }
 
         public void setOrderCommandsTopic(String orderCommandsTopic) {
@@ -116,13 +116,13 @@ public class TradingOrderProperties {
         }
 
         public String getOrderEventsTopic() {
-            return productTopicsEnabled ? productTopics().orderEventsTopic() : orderEventsTopic;
+            return productTopics().orderEventsTopic();
         }
 
         public void setOrderEventsTopic(String orderEventsTopic) {
             this.orderEventsTopic = orderEventsTopic;
         }
-        public String getMatchResultsTopic() { return productTopicsEnabled ? productTopics().matchResultsTopic() : matchResultsTopic; }
+        public String getMatchResultsTopic() { return productTopics().matchResultsTopic(); }
         public void setMatchResultsTopic(String matchResultsTopic) { this.matchResultsTopic = matchResultsTopic; }
         public String getAccountUserCommandsTopic() {
             return productTopics().accountUserCommandsTopic();
@@ -138,14 +138,14 @@ public class TradingOrderProperties {
             this.accountCommandResultsConcurrency = Math.max(1, accountCommandResultsConcurrency);
         }
         public String getPositionEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
+            return productTopics().accountPositionEventsTopic();
         }
         public void setPositionEventsTopic(String positionEventsTopic) {
             this.positionEventsTopic = positionEventsTopic;
         }
 
         public String getAccountStateEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountStateEventsTopic() : accountStateEventsTopic;
+            return productTopics().accountStateEventsTopic();
         }
 
         public void setAccountStateEventsTopic(String accountStateEventsTopic) {
@@ -153,38 +153,32 @@ public class TradingOrderProperties {
         }
 
         public String getOpenInterestEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountOpenInterestEventsTopic() : openInterestEventsTopic;
+            return productTopics().accountOpenInterestEventsTopic();
         }
 
         public void setOpenInterestEventsTopic(String openInterestEventsTopic) {
             this.openInterestEventsTopic = openInterestEventsTopic;
         }
         public String getPositionMaintenanceGroupId() {
-            return productTopicsEnabled
-                    ? productTopics().consumerGroup("order-position-maintenance")
-                    : positionMaintenanceGroupId;
+            return productTopics().consumerGroup("order-position-maintenance");
         }
 
         public String getOpenInterestSnapshotGroupId() {
-            return productTopicsEnabled
-                    ? productTopics().consumerGroup("order-open-interest-snapshot")
-                    : "surprising-order-open-interest-snapshot-v1";
+            return productTopics().consumerGroup("order-open-interest-snapshot");
         }
         public void setPositionMaintenanceGroupId(String positionMaintenanceGroupId) {
             this.positionMaintenanceGroupId = positionMaintenanceGroupId;
         }
 
         public String getAccountStateSnapshotGroupId() {
-            return productTopicsEnabled
-                    ? productTopics().consumerGroup("order-account-state")
-                    : accountStateSnapshotGroupId;
+            return productTopics().consumerGroup("order-account-state");
         }
         public String getInstrumentLifecycleDrainTopic() { return instrumentLifecycleDrainTopic; }
         public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {
             this.instrumentLifecycleDrainTopic = instrumentLifecycleDrainTopic;
         }
         public String getFeeScheduleEventsTopic() {
-            return productTopicsEnabled ? productTopics().feeScheduleEventsTopic() : feeScheduleEventsTopic;
+            return productTopics().feeScheduleEventsTopic();
         }
         public void setFeeScheduleEventsTopic(String feeScheduleEventsTopic) {
             this.feeScheduleEventsTopic = feeScheduleEventsTopic;

@@ -31,19 +31,6 @@ public class TradingFeeService {
     private final FeeScheduleEventPublisher eventPublisher;
     private final TradingOrderProperties properties;
 
-    public TradingFeeService(OrderFeeRepository orderFeeRepository,
-                             OrderRepository orderRepository,
-                             InstrumentRuleLookup instrumentRuleLookup) {
-        this(orderFeeRepository, orderRepository, instrumentRuleLookup, null, null, null);
-    }
-
-    public TradingFeeService(OrderFeeRepository orderFeeRepository,
-                             OrderRepository orderRepository,
-                             InstrumentRuleLookup instrumentRuleLookup,
-                             OrderFeeSnapshotLookup feeSnapshotLookup) {
-        this(orderFeeRepository, orderRepository, instrumentRuleLookup, feeSnapshotLookup, null, null);
-    }
-
     @org.springframework.beans.factory.annotation.Autowired
     public TradingFeeService(OrderFeeRepository orderFeeRepository,
                              OrderRepository orderRepository,
@@ -179,9 +166,10 @@ public class TradingFeeService {
     }
 
     private void requireCurrentProductLine(ProductLine requested) {
-        if (properties != null && properties.getKafka().isProductTopicsEnabled()) {
-            ProductLineConfiguration.requireSame(properties.getKafka().getProductLine(), requested, "trading fee");
+        if (properties == null || properties.getKafka() == null) {
+            throw new IllegalStateException("交易费率服务未配置产品线");
         }
+        ProductLineConfiguration.requireSame(properties.getKafka().getProductLine(), requested, "trading fee");
     }
 
     private String normalizeSymbol(String symbol) {

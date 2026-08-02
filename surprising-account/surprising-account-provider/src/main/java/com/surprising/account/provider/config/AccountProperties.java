@@ -134,7 +134,7 @@ public class AccountProperties {
         }
 
         public String getGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("account") : groupId;
+            return productTopics().consumerGroup("account");
         }
 
         public void setGroupId(String groupId) {
@@ -150,7 +150,7 @@ public class AccountProperties {
         }
 
         public String getOrderCommandsTopic() {
-            return productTopicsEnabled ? productTopics().orderCommandsTopic() : orderCommandsTopic;
+            return productTopics().orderCommandsTopic();
         }
 
         public void setOrderCommandsTopic(String orderCommandsTopic) {
@@ -158,7 +158,7 @@ public class AccountProperties {
         }
 
         public String getOrderEventsTopic() {
-            return productTopicsEnabled ? productTopics().orderEventsTopic() : orderEventsTopic;
+            return productTopics().orderEventsTopic();
         }
 
         public void setOrderEventsTopic(String orderEventsTopic) {
@@ -166,7 +166,7 @@ public class AccountProperties {
         }
 
         public String getPositionEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
+            return productTopics().accountPositionEventsTopic();
         }
 
         public void setPositionEventsTopic(String positionEventsTopic) {
@@ -174,7 +174,7 @@ public class AccountProperties {
         }
 
         public String getOpenInterestEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountOpenInterestEventsTopic() : openInterestEventsTopic;
+            return productTopics().accountOpenInterestEventsTopic();
         }
 
         public void setOpenInterestEventsTopic(String openInterestEventsTopic) {
@@ -182,7 +182,7 @@ public class AccountProperties {
         }
 
         public String getLiquidationFeeEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountLiquidationFeeEventsTopic() : liquidationFeeEventsTopic;
+            return productTopics().accountLiquidationFeeEventsTopic();
         }
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {
@@ -190,7 +190,7 @@ public class AccountProperties {
         }
 
         public String getAccountStateEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountStateEventsTopic() : accountStateEventsTopic;
+            return productTopics().accountStateEventsTopic();
         }
 
         public void setAccountStateEventsTopic(String accountStateEventsTopic) {
@@ -214,13 +214,11 @@ public class AccountProperties {
         }
 
         public String getPositionCacheGroupId() {
-            return productTopicsEnabled
-                    ? productTopics().consumerGroup("account-position-cache")
-                    : groupId + "-position-cache";
+            return productTopics().consumerGroup("account-position-cache");
         }
 
         public String getTriggerOrderEventsTopic() {
-            return productTopicsEnabled ? productTopics().triggerOrderEventsTopic() : triggerOrderEventsTopic;
+            return productTopics().triggerOrderEventsTopic();
         }
 
         public void setTriggerOrderEventsTopic(String triggerOrderEventsTopic) {
@@ -228,9 +226,7 @@ public class AccountProperties {
         }
 
         public String getDeliverySettlementsTopic() {
-            return isDeliverySettlementsTopicEnabled() && productTopicsEnabled
-                    ? productTopics().deliverySettlementsTopic()
-                    : deliverySettlementsTopic;
+            return productTopics().deliverySettlementsTopic();
         }
 
         public void setDeliverySettlementsTopic(String deliverySettlementsTopic) {
@@ -238,15 +234,12 @@ public class AccountProperties {
         }
 
         public boolean isDeliverySettlementsTopicEnabled() {
-            return !productTopicsEnabled
-                    || productLine == ProductLine.LINEAR_DELIVERY
+            return productLine == ProductLine.LINEAR_DELIVERY
                     || productLine == ProductLine.INVERSE_DELIVERY;
         }
 
         public String getOptionExercisesTopic() {
-            return isOptionExercisesTopicEnabled() && productTopicsEnabled
-                    ? productTopics().optionExercisesTopic()
-                    : optionExercisesTopic;
+            return productTopics().optionExercisesTopic();
         }
 
         public void setOptionExercisesTopic(String optionExercisesTopic) {
@@ -254,7 +247,7 @@ public class AccountProperties {
         }
 
         public boolean isOptionExercisesTopicEnabled() {
-            return !productTopicsEnabled || productLine.isOptionProduct();
+            return productLine.isOptionProduct();
         }
 
         public String getInstrumentLifecycleDrainTopic() {
