@@ -42,9 +42,9 @@ public class TradingOrderKafkaConfiguration {
         return new KafkaTemplate<>(orderProducerFactory);
     }
 
-    /** 供可重放的活跃订单读模型使用；每个生命周期事件仍会从 PostgreSQL 重新读取权威订单。 */
+    /** 订单本地状态消费者共用的 Kafka 客户端配置。 */
     @Bean
-    public ConsumerFactory<String, String> orderOpenViewConsumerFactory(TradingOrderProperties properties) {
+    public ConsumerFactory<String, String> orderStateConsumerFactory(TradingOrderProperties properties) {
         Map<String, Object> config = new HashMap<>();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
@@ -55,9 +55,9 @@ public class TradingOrderKafkaConfiguration {
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
-    @Bean(name = "orderOpenViewKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> orderOpenViewKafkaListenerContainerFactory(
-            @Qualifier("orderOpenViewConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
+    @Bean(name = "orderStateKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> orderStateKafkaListenerContainerFactory(
+            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setBatchListener(true);
@@ -71,7 +71,7 @@ public class TradingOrderKafkaConfiguration {
      */
     @Bean(name = "orderAccountCommandResultKafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, String> orderAccountCommandResultKafkaListenerContainerFactory(
-            @Qualifier("orderOpenViewConsumerFactory") ConsumerFactory<String, String> consumerFactory,
+            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory,
             TradingOrderProperties properties) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
@@ -83,7 +83,7 @@ public class TradingOrderKafkaConfiguration {
 
     @Bean(name = "orderMatchResultKafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, String> orderMatchResultKafkaListenerContainerFactory(
-            @Qualifier("orderOpenViewConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
+            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setBatchListener(true);
@@ -97,7 +97,7 @@ public class TradingOrderKafkaConfiguration {
      */
     @Bean(name = "orderInstrumentLifecycleKafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, String> orderInstrumentLifecycleKafkaListenerContainerFactory(
-            @Qualifier("orderOpenViewConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
+            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));

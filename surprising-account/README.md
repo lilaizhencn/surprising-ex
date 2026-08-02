@@ -11,7 +11,8 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 ## 持久化边界
 
 - 写模型以“一张业务表对应一个 Repository”为目标，Repository 只负责本表 SQL，不编排跨表业务。
-- `AccountQueryService` 聚合余额与亏空、基础账户与产品账户，以及流水、划转和调整记录的单表 Repository。
+- `AccountQueryService` 只聚合账本、划转和后台调整等异步审计查询；余额、亏空、持仓和产品余额统一读取
+  `AccountService` 的本地用户快照。
 - `AccountCommandGateway` 统一接收余额调整、划转和资金命令，追加到用户分区 WAL，由本地 reducer 顺序裁决。
 - `PositionRepository`、`PositionMarginRepository` 和 `PositionModeRepository` 只负责启动恢复快照所需的单表读取；
   成交侧结算状态由用户分区本地状态和异步审计投影维护。
@@ -26,11 +27,13 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
   不通过同步 Repository 组合业务状态。
 - ADL、亏空回补和资金费统一提交账户用户分区命令；账户 reducer 是唯一资金写者，数据库只保留异步投影、
   启动恢复和审计入口。
-- `PositionCacheProjectionService` 只负责启动重建页和事务提交前最终快照；在线持仓读取直接使用 Redis
-  事件投影，`PositionCacheProjectionRepository` 不参与普通查询。
-- 账户状态事件由用户分区 WAL 在本地提交后直接发布 Kafka，数据库不再作为热路径 outbox。
+- `PositionCacheProjectionService` 只负责启动重建页和最终投影；在线持仓读取直接使用账户 JVM 快照，
+  Redis 与 `PositionCacheProjectionRepository` 只作为跨节点读模型和审计恢复来源。
+- 账户状态事件由用户分区 WAL 在本地提交后直接发布 Kafka，数据库不再作为热路径 outbox；
+  `AccountStateProjectionConsumer` 使用独立消费组把完整状态异步投影到余额、负债、持仓、逐仓保证金、
+  仓位模式和订单锁定汇总表，重复或过期修订号幂等忽略。
 - 账户持仓事件同时进入按产品线隔离的 `PositionSnapshotCache`，按精确持仓键进行 revision 防回退。
-  该 JVM 快照当前用于迁移影子和恢复准备，尚未取代 PostgreSQL 资金事实源；正式切换必须遵循
+  该 JVM 快照是订单、风控和强平实时计算输入；数据库只接受异步投影，正式部署仍必须遵循
   [永续 JVM 单写者迁移计划](../docs/linear-perpetual-jvm-migration-plan.md)。
 - 账户用户分区执行器只保留命令幂等、顺序、资金守恒和崩溃恢复编排，不在生产热路径构造 JDBC Repository；
   数据库写入由独立异步投影器完成。
@@ -178,6 +181,7 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 - `account_admin_balance_adjustments`
 - `account_position_margins`
 - `account_positions`
+- `account_state_order_locks`
 - `account_commands`
 - `account_command_submissions`
 - `account_trade_settlement_sides`

@@ -8,7 +8,7 @@ import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
 /**
- * Detects the bilateral-settlement special case where only one trade participant has completed.
+ * 检测双边结算中只有一个成交参与方完成的特殊情况。
  */
 @Component("accountTradeSettlement")
 public class AccountTradeSettlementHealthIndicator implements HealthIndicator {

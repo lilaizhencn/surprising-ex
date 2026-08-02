@@ -4,8 +4,8 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountDeficitRepository;
-import com.surprising.account.provider.repository.AccountOrderLockRepository;
 import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
+import com.surprising.account.provider.repository.AccountStateOrderLockRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
 import com.surprising.account.provider.repository.PositionModeRepository;
@@ -13,7 +13,6 @@ import com.surprising.account.provider.repository.PositionRepository;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -33,7 +32,7 @@ public class PerpetualAccountStateSnapshotService {
 
     private final AccountBalanceRepository balanceRepository;
     private final AccountDeficitRepository deficitRepository;
-    private final AccountOrderLockRepository orderLockRepository;
+    private final AccountStateOrderLockRepository orderLockRepository;
     private final PositionMarginRepository positionMarginRepository;
     private final PositionRepository positionRepository;
     private final PositionModeRepository positionModeRepository;
@@ -43,7 +42,7 @@ public class PerpetualAccountStateSnapshotService {
     @Autowired
     public PerpetualAccountStateSnapshotService(AccountBalanceRepository balanceRepository,
                                                 AccountDeficitRepository deficitRepository,
-                                                AccountOrderLockRepository orderLockRepository,
+                                                AccountStateOrderLockRepository orderLockRepository,
                                                 PositionMarginRepository positionMarginRepository,
                                                 PositionRepository positionRepository,
                                                 PositionModeRepository positionModeRepository,
@@ -108,11 +107,9 @@ public class PerpetualAccountStateSnapshotService {
                 .map(row -> new PerpetualAccountStateUpdatedEvent.PositionMargin(
                         row.symbol(), row.asset(), row.marginMode(), row.positionSide(), row.marginUnits()))
                 .toList();
-        Map<String, Long> openOrderLocks = orderLockRepository.sumOpenIsolatedByAsset(
-                productLine, userId, ACCOUNT_TYPE);
-        List<PerpetualAccountStateUpdatedEvent.OrderLock> orderLocks = openOrderLocks.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> new PerpetualAccountStateUpdatedEvent.OrderLock(entry.getKey(), entry.getValue()))
+        List<PerpetualAccountStateUpdatedEvent.OrderLock> orderLocks = orderLockRepository
+                .findByUser(productLine, userId).stream()
+                .map(row -> new PerpetualAccountStateUpdatedEvent.OrderLock(row.asset(), row.lockedUnits()))
                 .toList();
         var mode = positionModeRepository.find(productLine, userId)
                 .map(PositionModeRepository.PositionModeRow::positionMode)

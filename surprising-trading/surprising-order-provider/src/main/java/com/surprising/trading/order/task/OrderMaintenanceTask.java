@@ -2,8 +2,8 @@ package com.surprising.trading.order.task;
 
 import com.surprising.trading.order.service.AlgoOrderService;
 import com.surprising.trading.order.service.CancelAllAfterService;
-import com.surprising.trading.order.service.OpenOrderViewCoordinator;
 import com.surprising.trading.order.service.OrderScheduleIndexCoordinator;
+import com.surprising.trading.order.service.OrderLocalStateCoordinator;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -13,24 +13,24 @@ import org.springframework.stereotype.Component;
 @Component
 public class OrderMaintenanceTask {
 
-    private final OpenOrderViewCoordinator openOrderViewCoordinator;
+    private final OrderLocalStateCoordinator localStateCoordinator;
     private final OrderScheduleIndexCoordinator scheduleIndexCoordinator;
     private final AlgoOrderService algoOrderService;
     private final CancelAllAfterService cancelAllAfterService;
 
-    public OrderMaintenanceTask(OpenOrderViewCoordinator openOrderViewCoordinator,
+    public OrderMaintenanceTask(OrderLocalStateCoordinator localStateCoordinator,
                                 OrderScheduleIndexCoordinator scheduleIndexCoordinator,
                                 AlgoOrderService algoOrderService,
                                 CancelAllAfterService cancelAllAfterService) {
-        this.openOrderViewCoordinator = openOrderViewCoordinator;
+        this.localStateCoordinator = localStateCoordinator;
         this.scheduleIndexCoordinator = scheduleIndexCoordinator;
         this.algoOrderService = algoOrderService;
         this.cancelAllAfterService = cancelAllAfterService;
     }
 
     @Scheduled(fixedDelayString = "${surprising.trading.order.redis-index.reconcile-delay-ms:10000}")
-    public void reconcileOpenOrderView() {
-        openOrderViewCoordinator.reconcile();
+    public void reconcileLocalState() {
+        localStateCoordinator.reconcile();
     }
 
     @Scheduled(fixedDelayString = "${surprising.trading.order.redis-index.reconcile-delay-ms:10000}")

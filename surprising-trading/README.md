@@ -40,13 +40,14 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前已实
 client / internal gateway
   -> POST /api/v1/trading/orders
   -> surprising-trading-entry-provider / surprising-order-provider
-  -> PostgreSQL trading_orders + trading_order_events + trading_outbox_events
-  -> outbox publisher
+  -> 用户分区 WAL/RocksDB 顺序追加订单事实
+  -> Kafka 订单事件与账户预占命令
   -> surprising.<product-segment>.order.commands.v1
   -> surprising-matching-provider / exchange-core
-  -> trading_match_results / trading_match_trades
+  -> MatchResultEvent / MatchTradeEvent
   -> 可靠资金链路：match.results.v1 + account.user.commands.v1
   -> 内存公共行情链路：match.trades.v1 + orderbook.depth.v1
+  -> OrderStateProjectionWorker 异步投影 trading_orders 和审计表
 ```
 
 止盈止损走独立链路：
@@ -132,7 +133,8 @@ PostgreSQL advisory lock 不访问业务表，由 `OrderCoordinationRepository` 
 - `countdownMs=0` 关闭倒计时。
 - 正数 `countdownMs` 会刷新用户级倒计时；传 `symbol` 时只作用于该交易对，不传则作用于全部 symbol。
 - 倒计时到期后，order-provider 复用现有 `cancel-open` 路径撤用户开放普通单，并调用 trigger-provider 撤 pending TP/SL 条件单。
-- timer 状态保存在 `trading_cancel_all_after`；最近一次执行会记录普通单和条件单撤单数量。
+- timer 状态保存在订单用户分区的本地 WAL/RocksDB；数据库不参与倒计时、到期判断或撤单裁决。
+  数据库若配置了订单投影，只用于后台查询和审计，投影落后不会影响倒计时执行。
 
 ## 算法单
 
@@ -249,24 +251,31 @@ matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。�
 - 空仓只能提交 reduce-only `BUY`。
 - 已存在的未完成 reduce-only 平仓单会占用可平数量，新订单数量加上已有待平数量不能超过当前持仓。
 - 待平数量聚合使用 checked long addition；如果溢出，会拒绝订单或回滚强平事务，不能静默扩大可平容量。
-- 校验会用 PostgreSQL `FOR UPDATE` 锁住当前 `account_positions` 行和相关未完成 `trading_orders` 行，多节点 order-provider 并发下也不会超额平仓。
-- 持仓被成交、强平或 ADL 改变后，order-provider 消费按用户分区的持久化持仓事件，并在自己的事务里撤销事件发生前创建且反向、版本不一致或超过新持仓容量的订单。它与下单入口共用 advisory lock，并忽略事件之后创建的订单，避免延迟快照误撤重开仓位的新平仓单。
+- 校验使用账户和订单用户分区单写者的 `positionRevision`、订单 revision 和本地未成交索引，多节点
+  通过 Kafka 用户 key 串行更新；快照未就绪时失败关闭，不使用数据库行锁猜测可平数量。
+- 持仓被成交、强平或 ADL 改变后，order-provider 消费按用户分区的持久化持仓事件，并在同一订单用户
+  分区 WAL 中撤销事件发生前创建且反向、版本不一致或超过新持仓容量的订单。它忽略事件之后创建的
+  订单，避免延迟快照误撤重开仓位的新平仓单。
 
 下单保证金热路径还维护 `OrderMarginSnapshotCache`：持仓事件、订单投影和杠杆设置成功后更新本地快照，
-快照完整时不再做持仓、杠杆和挂单聚合 JOIN；全市场未平仓量仍从权威聚合读取。进程启动时分别从
-`account_positions`、`trading_leverage_settings` 和 `trading_orders` 单表恢复，投影未就绪、事件落后或
-任一用户状态未命中时直接拒绝下单，不在下单线程回查数据库。数据库仍是最终落账和恢复来源。
+快照完整时不再做持仓、杠杆和挂单聚合 JOIN；全市场未平仓量从产品线隔离的 JVM 快照读取。进程启动
+时通过账户内部快照 RPC、杠杆配置启动快照和订单本地 WAL 恢复，投影未就绪、事件落后或任一用户状态
+未命中时直接拒绝下单，不在下单线程回查数据库。数据库仅是异步投影、恢复基线和审计来源。
 
-`surprising-matching-provider` 在撮合拒绝时释放全部冻结；撤单成功或 immediate order 终态时按未成交比例释放未使用保证金。`surprising-account-provider` 消费成交后，按实际成交价计算开仓保证金，把这部分从订单冻结迁移到 `account_position_margins`，并释放委托价改善或市价风险边界多冻结的差额。线性合约市价单即使是 SELL 也故意按上边界冻结，因为 SELL 市价单可能吃到高于 mark 的买一挂单。平仓成交释放旧持仓保证金，不消耗新的订单保证金。
+`surprising-matching-provider` 在撮合拒绝时发布释放命令；订单用户分区按未成交比例追加终态事实，
+账户用户分区按实际成交价计算开仓保证金，把这部分从订单预占迁移到持仓保证金，并释放委托价改善
+或市价风险边界多冻结的差额。数据库只接收账户和订单完整快照投影。线性合约市价单即使是 SELL
+也故意按上边界冻结，因为 SELL 市价单可能吃到高于 mark 的买一挂单。平仓成交释放旧持仓保证金，
+不消耗新的订单保证金。
 
-保证金释放使用 PostgreSQL 条件更新：`locked_units >= releaseUnits`。如果冻结余额不足，matching 事务会失败并触发 command failure 重启保护，等待进程重启后通过 DB 恢复订单簿和 Kafka 重放继续处理。这里不能用 `GREATEST(0, locked_units - releaseUnits)` 静默扣减，否则会在异常状态下把不存在的冻结金额释放成可用余额。
+保证金释放由账户用户分区 reducer 按预占记录和 revision 原子校验：`lockedUnits >= releaseUnits`。
+如果冻结余额不足，命令拒绝并停在当前用户序号，不能静默扣减或把不存在的冻结金额释放成可用余额。
 
 ## Instrument 规则来源
 
-订单入口动态读取 `surprising-instrument` 写入 PostgreSQL 的当前版本：
+订单入口只读取 `surprising-instrument` JVM 快照中的当前版本：
 
-- `instrument_current_versions`
-- `instruments`
+- 数据库表只由 instrument 模块管理并用于恢复；订单服务不持有 `InstrumentRepository`。
 
 instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
@@ -297,8 +306,9 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `trading_orders_user_client_order_uidx` 保证同一用户 `clientOrderId` 幂等。
 - 下单插入只允许这个部分 `(userId, clientOrderId)` 唯一键冲突被幂等跳过。`orderId` 或其他唯一键冲突必须失败，不能被当成请求重放。
 - 幂等冲突发生在保证金冻结前；重复请求只返回已存在订单，不会创建新的 reservation 或重复锁定余额。
-- `orderId`、`eventId`、`commandId`、`outboxId` 等交易链路 ID 使用 PostgreSQL native sequence（例如 `trading_order_seq`、`trading_event_seq`、`trading_command_seq`、`trading_outbox_seq`）。不再用表计数器热点行分配高频 ID，避免并发下单和撮合时形成行锁瓶颈。
-- `trading_outbox_events` 与订单写入在同一事务提交。
+- `orderId`、`eventId`、`commandId` 等订单事实 ID 在 JVM/WAL 内按节点和时间生成；数据库序列只允许
+  用于异步审计或管理配置，不参与订单状态裁决。
+- 订单 Kafka 通知由本地事实状态同步发布；数据库投影不得反向驱动订单状态。
 - `trading_trigger_orders_user_client_uidx` 保证同一用户 `clientTriggerOrderId` 的止盈止损下单幂等。
 - `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + symbol + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
 - `trading_order_events` 和 `trading_outbox_events` 插入必须影响 1 行，否则事务失败，避免订单状态和消息链路不一致。

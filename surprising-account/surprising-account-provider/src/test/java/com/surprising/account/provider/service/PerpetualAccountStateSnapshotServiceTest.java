@@ -8,8 +8,8 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.account.provider.repository.AccountBalanceRepository;
 import com.surprising.account.provider.repository.AccountDeficitRepository;
-import com.surprising.account.provider.repository.AccountOrderLockRepository;
 import com.surprising.account.provider.repository.AccountRiskStateRevisionRepository;
+import com.surprising.account.provider.repository.AccountStateOrderLockRepository;
 import com.surprising.account.provider.repository.AccountSequenceRepository;
 import com.surprising.account.provider.repository.PositionMarginRepository;
 import com.surprising.account.provider.repository.PositionModeRepository;
@@ -20,7 +20,6 @@ import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class PerpetualAccountStateSnapshotServiceTest {
@@ -29,7 +28,7 @@ class PerpetualAccountStateSnapshotServiceTest {
     void restoresOneCompleteVersionedUserSnapshotFromDatabase() {
         AccountBalanceRepository balances = mock(AccountBalanceRepository.class);
         AccountDeficitRepository deficits = mock(AccountDeficitRepository.class);
-        AccountOrderLockRepository orderLocks = mock(AccountOrderLockRepository.class);
+        AccountStateOrderLockRepository orderLocks = mock(AccountStateOrderLockRepository.class);
         PositionMarginRepository margins = mock(PositionMarginRepository.class);
         PositionRepository positions = mock(PositionRepository.class);
         PositionModeRepository modes = mock(PositionModeRepository.class);
@@ -40,9 +39,9 @@ class PerpetualAccountStateSnapshotServiceTest {
                 new AccountBalanceRepository.BalanceRow(1001L, "USDT", 90L, 10L, now)));
         when(deficits.findByUser(1001L)).thenReturn(List.of(
                 new AccountDeficitRepository.DeficitRow("USDT", 5L, 2L)));
-        when(orderLocks.sumOpenIsolatedByAsset(ProductLine.LINEAR_PERPETUAL, 1001L,
-                com.surprising.account.api.model.AccountType.USDT_PERPETUAL))
-                .thenReturn(Map.of("USDT", 30L));
+        when(orderLocks.findByUser(ProductLine.LINEAR_PERPETUAL, 1001L))
+                .thenReturn(List.of(new AccountStateOrderLockRepository.LockProjectionRow(
+                        "USDT", 30L, now)));
         when(margins.findByUser(ProductLine.LINEAR_PERPETUAL, 1001L)).thenReturn(List.of(
                 new PositionMarginRepository.PositionMarginRow("BTC-USDT", "USDT", MarginMode.ISOLATED,
                         PositionSide.NET, 20L, now)));

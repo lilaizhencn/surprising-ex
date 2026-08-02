@@ -74,6 +74,7 @@ public class OrderUserStateService {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final PerpetualAccountStateSnapshotCache accountStateSnapshotCache;
     private final OrderIdSequenceStore orderIdSequenceStore;
+    private final OrderMarginSnapshotCache marginSnapshotCache;
     private long lastTimestamp;
     private int sequence;
 
@@ -83,7 +84,7 @@ public class OrderUserStateService {
                                  UserPartitionStateStore stateStore,
                                  UserPartitionCommandLane lane,
                                  KafkaTemplate<String, String> kafkaTemplate) {
-        this(objectMapper, properties, wal, stateStore, lane, kafkaTemplate, null, null);
+        this(objectMapper, properties, wal, stateStore, lane, kafkaTemplate, null, null, null);
     }
 
     @Autowired
@@ -94,7 +95,8 @@ public class OrderUserStateService {
                                  UserPartitionCommandLane lane,
                                  KafkaTemplate<String, String> kafkaTemplate,
                                  @Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
-                                 @Nullable OrderIdSequenceStore orderIdSequenceStore) {
+                                 @Nullable OrderIdSequenceStore orderIdSequenceStore,
+                                 @Nullable OrderMarginSnapshotCache marginSnapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.wal = wal;
@@ -103,6 +105,20 @@ public class OrderUserStateService {
         this.kafkaTemplate = kafkaTemplate;
         this.accountStateSnapshotCache = accountStateSnapshotCache;
         this.orderIdSequenceStore = orderIdSequenceStore;
+        this.marginSnapshotCache = marginSnapshotCache;
+    }
+
+    /** 兼容单元测试构造方式；生产环境由 Spring 注入全部本地快照组件。 */
+    public OrderUserStateService(ObjectMapper objectMapper,
+                                 TradingOrderProperties properties,
+                                 UserPartitionWal wal,
+                                 UserPartitionStateStore stateStore,
+                                 UserPartitionCommandLane lane,
+                                 KafkaTemplate<String, String> kafkaTemplate,
+                                 @Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
+                                 @Nullable OrderIdSequenceStore orderIdSequenceStore) {
+        this(objectMapper, properties, wal, stateStore, lane, kafkaTemplate,
+                accountStateSnapshotCache, orderIdSequenceStore, null);
     }
 
     /** 订单编号不依赖数据库序列；低两位预留给同一订单的命令编号。 */
@@ -150,7 +166,8 @@ public class OrderUserStateService {
             }
             validateMarginModeInPartition(current, order);
             append(partition, OrderUserEvent.place(order));
-            return toResponse(order);
+            applyPartition(partition);
+            return toResponse(find(state(partition), order.orderId()));
         });
     }
 
@@ -183,7 +200,8 @@ public class OrderUserStateService {
                 return toAlgoResponse(current, duplicate.get());
             }
             append(partition, OrderUserEvent.algoPlace(order));
-            return toAlgoResponse(current, order);
+            applyPartition(partition);
+            return toAlgoResponse(state(partition), findAlgo(state(partition), order.algoOrderId()));
         });
     }
 
@@ -223,6 +241,7 @@ public class OrderUserStateService {
             applyPartition(partition);
             findAlgo(state(partition), order.algoOrderId());
             append(partition, OrderUserEvent.algoUpdate(order));
+            applyPartition(partition);
             return null;
         });
     }
@@ -236,6 +255,7 @@ public class OrderUserStateService {
             applyPartition(partition);
             findAlgo(state(partition), order.algoOrderId());
             append(partition, OrderUserEvent.algoChild(order, child));
+            applyPartition(partition);
             return null;
         });
     }
@@ -280,6 +300,9 @@ public class OrderUserStateService {
                             now.plus(lease), now);
                     append(partition, OrderUserEvent.algoUpdate(claimedOrder));
                     result.add(claimedOrder);
+                }
+                if (!due.isEmpty()) {
+                    applyPartition(partition);
                 }
                 return result;
             }));
@@ -365,6 +388,7 @@ public class OrderUserStateService {
     public OrderResponse cancel(long userId, long orderId, String reason) {
         UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
         return lane.execute(partition, () -> {
+            applyPartition(partition);
             OrderUserState current = state(partition);
             OrderRecord order = find(current, orderId);
             if (order.status() == OrderStatus.CANCELED || order.status() == OrderStatus.FILLED
@@ -372,7 +396,8 @@ public class OrderUserStateService {
                 return toResponse(order);
             }
             append(partition, OrderUserEvent.cancel(orderId, reason));
-            return toResponse(withStatus(order, OrderStatus.CANCEL_REQUESTED, null));
+            applyPartition(partition);
+            return toResponse(find(state(partition), orderId));
         });
     }
 
@@ -401,7 +426,8 @@ public class OrderUserStateService {
                     return toResponse(order);
                 }
                 append(partition, OrderUserEvent.cancel(orderId, reason));
-                return toResponse(withStatus(order, OrderStatus.CANCEL_REQUESTED, null));
+                applyPartition(partition);
+                return toResponse(find(state(partition), orderId));
             });
         }
         throw new IllegalStateException("订单不存在: " + orderId);
@@ -441,7 +467,10 @@ public class OrderUserStateService {
                 List<OrderResponse> responses = new ArrayList<>(orders.size());
                 for (OrderRecord order : orders) {
                     append(partition, OrderUserEvent.cancel(order.orderId(), reason));
-                    responses.add(toResponse(withStatus(order, OrderStatus.CANCEL_REQUESTED, null)));
+                }
+                applyPartition(partition);
+                for (OrderRecord order : orders) {
+                    responses.add(toResponse(find(state(partition), order.orderId())));
                 }
                 return List.copyOf(responses);
             });
@@ -513,6 +542,7 @@ public class OrderUserStateService {
                     requested++;
                 }
             }
+            applyPartition(partition);
             return requested;
         });
     }
@@ -577,6 +607,14 @@ public class OrderUserStateService {
         String cursor = more ? Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(("order:" + page.getLast().orderId()).getBytes(StandardCharsets.UTF_8)) : null;
         return new OrderQueryResponse(page.size(), page, cursor, more, "orderId.desc", limit);
+    }
+
+    /** 返回当前产品线所有用户分区中的本地订单状态，供 JVM 快照启动重建使用。 */
+    public List<OrderRecord> localOrders(ProductLine productLine) {
+        requireCurrentProductLine(productLine);
+        return orderedPartitions(productLine).stream()
+                .flatMap(partition -> lane.execute(partition, () -> stateAfterApply(partition).orders().stream()))
+                .toList();
     }
 
     /** 管理查询也只扫描用户分区快照，数据库订单投影不参与在线裁决。 */
@@ -663,7 +701,10 @@ public class OrderUserStateService {
             List<OrderResponse> responses = new ArrayList<>(orders.size());
             for (OrderRecord order : orders) {
                 append(partition, OrderUserEvent.cancel(order.orderId(), "USER_CANCEL_ALL"));
-                responses.add(toResponse(withStatus(order, OrderStatus.CANCEL_REQUESTED, null)));
+            }
+            applyPartition(partition);
+            for (OrderRecord order : orders) {
+                responses.add(toResponse(find(state(partition), order.orderId())));
             }
             return List.copyOf(responses);
         });
@@ -682,6 +723,7 @@ public class OrderUserStateService {
             UserPartitionKey partition = partition(result.productLine(), result.userId());
             lane.execute(partition, () -> {
                 append(partition, OrderUserEvent.accountResult(result));
+                applyPartition(partition);
                 return null;
             });
         }
@@ -709,6 +751,7 @@ public class OrderUserStateService {
         UserPartitionKey partition = partition(result.symbol(), userId);
         lane.execute(partition, () -> {
             append(partition, OrderUserEvent.matchResult(result));
+            applyPartition(partition);
             return null;
         });
     }
@@ -745,6 +788,15 @@ public class OrderUserStateService {
             eventIds.add(event.eventId());
             current = new OrderUserState(current.orders(), eventIds, current.algoOrders(), current.algoChildren());
             stateStore.apply(partition, raw.sequence(), serialize(current));
+            if (marginSnapshotCache != null) {
+                for (OrderRecord order : current.orders()) {
+                    OrderMarginSnapshotCache.ApplyResult result = marginSnapshotCache.applyOrder(order);
+                    if (result == OrderMarginSnapshotCache.ApplyResult.CONFLICT) {
+                        marginSnapshotCache.markNotReady(partition.productLine());
+                        throw new IllegalStateException("订单 JVM 快照同一修订号出现不同状态");
+                    }
+                }
+            }
             applied = raw.sequence();
         }
         return null;
@@ -1102,7 +1154,7 @@ public class OrderUserStateService {
 
     private OrderUserState replace(OrderUserState state, OrderRecord updated) {
         return new OrderUserState(state.orders().stream().map(value -> value.orderId() == updated.orderId()
-                ? updated : value).toList(), state.appliedEventIds());
+                ? updated : value).toList(), state.appliedEventIds(), state.algoOrders(), state.algoChildren());
     }
 
     private OrderRecord withStatus(OrderRecord order, OrderStatus status, String reason) {

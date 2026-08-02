@@ -4,6 +4,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -137,6 +138,29 @@ public class AccountBalanceRepository {
                    AND asset = ?
                 """, Long.class, userId, asset);
         return equityUnits == null ? 0L : equityUnits;
+    }
+
+    /**
+     * 用账户事实流的完整余额列表替换数据库投影。
+     *
+     * <p>该方法只供异步状态投影调用，不能被下单或结算路径使用。先删除再写入能够清理
+     * 已经从本地快照中消失的资产，整个替换由上层事务保证原子性。</p>
+     */
+    public void replaceProjection(long userId,
+                                  List<PerpetualAccountStateUpdatedEvent.Balance> balances,
+                                  Instant projectedAt) {
+        jdbcTemplate.update("DELETE FROM account_balances WHERE user_id = ?", userId);
+        if (balances == null) {
+            return;
+        }
+        for (PerpetualAccountStateUpdatedEvent.Balance balance : balances) {
+            jdbcTemplate.update("""
+                    INSERT INTO account_balances (
+                        user_id, asset, available_units, locked_units, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """, userId, balance.asset(), balance.availableUnits(), balance.lockedUnits(),
+                    Timestamp.from(projectedAt));
+        }
     }
 
     private static void requireSingleRow(int rows, String operation) {

@@ -353,11 +353,10 @@ Redis、外部客户端或开启事务。长任务使用独立工作池，避免
 - 共享 trading、account、risk Outbox 的已发布记录保留七天。各发布者每分钟只清理自己负责的
   aggregate 或产品线，最多执行十个 10,000 行短事务，使用 `FOR UPDATE SKIP LOCKED`；
   未发布或失败记录绝不清理。
-- order-provider 用 Redis ZSET 加速死亡开关和算法单到期扫描，PostgreSQL 条件领取始终是最终权威；
-  Redis 丢失时回退有界数据库扫描。
-- 普通未完成订单使用 Redis 可重放读投影。`GET /orders/open` 遇到未就绪、用户 epoch 缺失或
-  Hash/ZSET 不完整时整页回退 PostgreSQL，不能返回部分页面。撤单、改单、冻结、解冻和终态仍由
-  PostgreSQL 条件写和事务 Outbox 保护。
+- order-provider 的死亡开关、算法单到期扫描和普通未完成订单都从用户分区 JVM 状态读取；Redis
+  只能作为查询或跨节点协调投影，丢失时暂停相关查询和执行，不回退数据库猜测空状态。
+- `GET /orders/open` 遇到快照未就绪、用户分区序号断裂或投影不完整时返回未就绪。撤单、改单、冻结、
+  解冻和终态都通过用户分区 WAL 按序追加，数据库仅异步投影和审计。
 - ADL Redis 队列只做候选排序。每个候选执行前重新计算新鲜标记价格，并由 PostgreSQL 锁定；
   Redis 不完整时使用数据库队列。
 - 强平 Redis 队列按保证金率排序；缺少就绪标记、载荷或 Redis 故障时，定时任务回退有界

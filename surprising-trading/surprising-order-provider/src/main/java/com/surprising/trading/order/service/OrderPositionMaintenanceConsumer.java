@@ -41,7 +41,7 @@ public class OrderPositionMaintenanceConsumer {
     @KafkaListener(
             topics = "#{__listener.topic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "orderOpenViewKafkaListenerContainerFactory")
+            containerFactory = "orderStateKafkaListenerContainerFactory")
     public void onPositionUpdated(List<ConsumerRecord<String, String>> records) {
         try {
             if (records == null || records.isEmpty()) {

@@ -55,6 +55,21 @@ class UserPartitionWalTest {
         }
     }
 
+    @Test
+    void fullSnapshotProjectionCanAdvanceAcrossSeveralEvents() throws Exception {
+        Path directory = Files.createTempDirectory("user-partition-wal-snapshot-projection-");
+        UserPartitionKey key = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
+        try (UserPartitionWal wal = new UserPartitionWal(directory)) {
+            wal.append(key, "cmd-1", "ORDER", bytes("one"), "fp-1", Instant.EPOCH);
+            wal.append(key, "cmd-2", "ORDER", bytes("two"), "fp-2", Instant.EPOCH);
+            wal.append(key, "cmd-3", "ORDER", bytes("three"), "fp-3", Instant.EPOCH);
+
+            wal.markProjectedThrough(key, 3L);
+
+            assertThat(wal.lastProjectedSequence(key)).isEqualTo(3L);
+        }
+    }
+
     private byte[] bytes(String value) {
         return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }

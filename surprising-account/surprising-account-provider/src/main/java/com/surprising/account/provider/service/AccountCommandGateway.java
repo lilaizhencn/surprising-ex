@@ -28,7 +28,7 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Synchronous HTTP facade over the durable per-user account command lane.
+ * 面向 HTTP 的账户命令同步门面，底层使用持久化的用户分区命令 lane。
  */
 @Service
 public class AccountCommandGateway {

@@ -349,10 +349,9 @@ ADL 使用以下账户流水类型：
 - `trading_orders_recovery_idx` 支持启动时按 Maker 优先级恢复已成功 `PLACE` 的
   `LIMIT + GTC/GTX` 未完成订单。
 
-`trading_cancel_all_after` 保存 `POST /trading/orders/cancel-all-after` 设置的用户死亡开关。
-`(user_id, symbol_scope)` 为主键，`symbol_scope='*'` 表示全账户；倒计时为零且状态为
-`DISABLED` 表示关闭。到期任务把 `ACTIVE` 改为 `TRIGGERING`，通过统一 `cancel-open` 服务取消
-普通订单和待触发 TP/SL，最后改为 `TRIGGERED`。每次刷新或关闭时重置取消计数。
+`POST /trading/orders/cancel-all-after` 的用户死亡开关属于订单用户分区事实流，由本地 WAL/RocksDB
+保存倒计时、触发状态和执行计数。数据库不再保存或裁决该状态；如需后台审计，应从事实事件异步
+生成独立投影，不能在倒计时执行时回查数据库。
 
 `trading_algo_orders` 保存 TWAP/Iceberg 父指令，子订单进入普通订单链路前由
 `trading_algo_order_children` 记录关联关系。`client_algo_order_id` 在用户范围内幂等；

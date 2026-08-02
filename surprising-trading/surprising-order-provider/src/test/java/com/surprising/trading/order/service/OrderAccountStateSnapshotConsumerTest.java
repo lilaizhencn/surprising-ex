@@ -26,7 +26,8 @@ class OrderAccountStateSnapshotConsumerTest {
         PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
-        OrderAccountStateSnapshotConsumer consumer = new OrderAccountStateSnapshotConsumer(objectMapper, properties, cache);
+        OrderAccountStateSnapshotConsumer consumer = new OrderAccountStateSnapshotConsumer(
+                objectMapper, properties, cache, new OrderMarginSnapshotCache());
 
         consumer.onAccountStateUpdated(List.of(new ConsumerRecord<>(
                 consumer.topic(), 0, 1L, event.partitionKey(), "value")));
@@ -46,7 +47,8 @@ class OrderAccountStateSnapshotConsumerTest {
         PerpetualAccountStateSnapshotCache cache = new PerpetualAccountStateSnapshotCache();
         PerpetualAccountStateUpdatedEvent event = event(1L);
         when(objectMapper.readValue("value", PerpetualAccountStateUpdatedEvent.class)).thenReturn(event);
-        OrderAccountStateSnapshotConsumer consumer = new OrderAccountStateSnapshotConsumer(objectMapper, properties, cache);
+        OrderAccountStateSnapshotConsumer consumer = new OrderAccountStateSnapshotConsumer(
+                objectMapper, properties, cache, new OrderMarginSnapshotCache());
 
         assertThatThrownBy(() -> consumer.onAccountStateUpdated(List.of(new ConsumerRecord<>(
                 consumer.topic(), 0, 1L, "wrong", "value"))))

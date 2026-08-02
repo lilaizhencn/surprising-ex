@@ -10,9 +10,9 @@ import java.util.List;
 /**
  * 永续账户单写者提交后的完整用户状态快照。
  *
- * <p>这是迁移期间的 canonical 账户读模型事件。当前快照仍由账户事务从单表仓储组合，
- * 但只在账户 outbox 中写入一次，其他模块通过该事件建立自己的 JVM 快照。任何列表为空
- * 都表示该类状态确实为空，不能把事件缺失解释成零余额或零持仓。</p>
+ * <p>这是账户用户分区单写者提交后的 canonical 状态事件。事件先由本地 WAL/RocksDB
+ * 固化，再发布到 Kafka；其他模块通过该事件建立自己的 JVM 快照，数据库只异步投影该完整
+ * 状态。任何列表为空都表示该类状态确实为空，不能把事件缺失解释成零余额或零持仓。</p>
  */
 public record PerpetualAccountStateUpdatedEvent(
         int schemaVersion,

@@ -7,22 +7,21 @@ Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产�
 
 ## 核心边界
 
-- PostgreSQL 是订单、余额、持仓、保证金、账本和风险状态的唯一事实源。
-- account-provider 是资金、持仓、保证金和亏空的唯一写者；其他模块通过按用户分区的账户指令请求变更。
-- 跨服务一致性使用本地事务、transactional outbox、Kafka 至少一次投递和消费端幂等，不使用 XA。
+- 订单和账户的交易事实由按用户分区的本地 WAL/RocksDB 单写者维护；PostgreSQL 只承担异步投影、启动恢复和审计。
+- account-provider 是资金、持仓、保证金和亏空的唯一写者；其他模块通过按用户分区的账户指令请求变更，快照缺失时失败关闭。
+- 跨服务一致性使用本地事实流、Kafka 至少一次投递和消费端幂等，不使用 XA；数据库投影落后不能改变交易裁决。
 - 交易订单和撮合 Outbox 通过一次 pending 行窗口扫描，按 `topic + eventKey` 领取有上限的连续前缀并用
   MVCC CAS 竞争，不同 stream 并发流水线写入 Kafka，ACK 后批量标记发布状态。
-- 用户持仓只从 Redis Hash 读取；未完成订单优先从 Redis ZSET/Hash 投影读取。Redis 不授权成交、
-  撤单、资金变更或最终强平执行。
+- 用户持仓和订单状态优先从各模块 JVM 快照读取；Redis 只能作为查询或跨节点协调投影。Redis、数据库
+  或 Kafka 投影未就绪时不得把空集合当成正确状态，也不授权成交、撤单、资金变更或最终强平执行。
 - risk-provider 在 Redis 维护完整风险组和 `symbol + instrumentVersion -> group` 反向索引；标记价更新
   只计算受影响的风险组，PostgreSQL 在同一事务内批量写风险快照、强平 candidate 和 candidate Outbox，
   liquidation 执行前仍重新校验并锁定 PostgreSQL 权威状态。内部规格缓存已引入
   `productLine + symbol + version` 规格键，历史订单和持仓继续使用同一内部版本号定位规格。
 - 风险持仓事件和标记价事件优先复用本 JVM/Redis 风险组快照；定时扫描仍承担恢复核对职责。
   强平候选输入直接使用候选事件中的风险值和持仓锁结果，只查询最新风险状态，避免重复读取持仓和账户快照。
-- 强平 candidate 进入同 hash-tag 的 Redis 优先队列，由 Lua 原子完成去重、lease 和延迟重试；worker
-  批量锁定并复核 PostgreSQL，再批量写订单、事件和 Outbox。Redis 丢失时从 PostgreSQL 恢复，
-  不改变资金权威边界。
+- 强平 candidate 进入带版本和租约的候选队列，由 JVM/Redis 做排序与跨节点协调；最终资金命令仍必须
+  进入 account-provider 用户分区事实流。候选投影丢失时暂停执行并等待事件或恢复，不回退到主库猜测。
 - 同一产品线、同一用户的账户指令固定使用 `<PRODUCT_LINE>:<userId>` 作为 Kafka key，并通过
   32 个分区串行处理。
 - 撮合命令、成交、盘口和价格事件使用 `symbol` 作为 key。同一 symbol 的命令必须保持有序。

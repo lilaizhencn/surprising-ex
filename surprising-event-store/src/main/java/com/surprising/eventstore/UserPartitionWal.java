@@ -162,6 +162,30 @@ public final class UserPartitionWal implements AutoCloseable {
         }
     }
 
+    /**
+     * 完整快照投影成功后一次性推进到指定序号。
+     *
+     * <p>完整状态已经包含中间事件的最终结果，因此允许水位跨过多个连续事件；调用方仍须
+     * 保证目标序号不超过 WAL 尾部，并且只能在数据库事务成功提交后调用。</p>
+     */
+    public void markProjectedThrough(UserPartitionKey partition, long sequence) {
+        if (partition == null || sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
+            throw new IllegalArgumentException("projected WAL event must exist");
+        }
+        long current = lastProjectedSequence(partition);
+        if (sequence <= current) {
+            return;
+        }
+        if (sequence > lastSequence(partition)) {
+            throw new IllegalStateException("projected WAL sequence is ahead of WAL tail: " + sequence);
+        }
+        try {
+            database.put(writeOptions, projectedKey(partition), encodeLong(sequence));
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("failed to mark projected WAL sequence", ex);
+        }
+    }
+
     /** 返回当前 WAL 中出现过的全部用户分区，供重启恢复扫描。 */
     public List<UserPartitionKey> partitions() {
         List<UserPartitionKey> result = new ArrayList<>();

@@ -34,12 +34,12 @@ class TradingOrderKafkaConfigurationTest {
     }
 
     @Test
-    void openOrderProjectionConsumesAndAcknowledgesKafkaInBatches() {
+    void stateProjectionConsumesAndAcknowledgesKafkaInBatches() {
         TradingOrderProperties properties = new TradingOrderProperties();
         TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
-                configuration.orderOpenViewConsumerFactory(properties);
-        var listenerFactory = configuration.orderOpenViewKafkaListenerContainerFactory(consumerFactory);
+                configuration.orderStateConsumerFactory(properties);
+        var listenerFactory = configuration.orderStateKafkaListenerContainerFactory(consumerFactory);
 
         assertThat(listenerFactory.isBatchListener()).isTrue();
         assertThat(listenerFactory.getContainerProperties().getAckMode())
@@ -52,7 +52,7 @@ class TradingOrderKafkaConfigurationTest {
         properties.getKafka().setAccountCommandResultsConcurrency(32);
         TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
-                configuration.orderOpenViewConsumerFactory(properties);
+                configuration.orderStateConsumerFactory(properties);
         var listenerFactory = configuration.orderAccountCommandResultKafkaListenerContainerFactory(
                 consumerFactory, properties);
         var container = listenerFactory.createContainer("surprising.linear-perp.account.command.results.v1");

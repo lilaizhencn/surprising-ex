@@ -3,6 +3,7 @@ package com.surprising.account.provider.repository;
 import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -14,28 +15,6 @@ public class AccountRiskStateRevisionRepository {
 
     public AccountRiskStateRevisionRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-    }
-
-    /**
-     * 在账户命令事务中推进用户修订号。主键行锁把多个节点的同一用户更新串成一条顺序，
-     * 事件发布失败时事务回滚，修订号也不会跳过一次已提交状态。
-     */
-    public long next(ProductLine productLine, long userId, Instant now) {
-        if (productLine == null || userId <= 0 || now == null) {
-            throw new IllegalArgumentException("productLine, userId and now are required");
-        }
-        Long revision = jdbcTemplate.queryForObject("""
-                INSERT INTO account_risk_state_revisions (product_line, user_id, revision, updated_at)
-                VALUES (?, ?, 1, ?)
-                ON CONFLICT (product_line, user_id) DO UPDATE
-                   SET revision = account_risk_state_revisions.revision + 1,
-                       updated_at = EXCLUDED.updated_at
-                RETURNING revision
-                """, Long.class, productLine.name(), userId, Timestamp.from(now));
-        if (revision == null || revision <= 0) {
-            throw new IllegalStateException("account risk state revision was not allocated");
-        }
-        return revision;
     }
 
     /** 读取用户当前账户修订号；不存在的用户视为零，供订单冻结版本栅栏使用。 */
@@ -50,5 +29,31 @@ public class AccountRiskStateRevisionRepository {
                                     AND user_id = ?), 0)
                 """, Long.class, productLine.name(), userId);
         return revision == null ? 0L : revision;
+    }
+
+    /**
+     * 为异步快照投影抢占单调修订号。
+     *
+     * <p>成功时会在当前事务内锁住用户修订行；调用方随后替换全部状态表，任一步失败都会
+     * 回滚修订号和投影数据。旧事件不会覆盖新状态，重复事件直接视为已完成。</p>
+     */
+    public boolean beginProjection(ProductLine productLine,
+                                   long userId,
+                                   long revision,
+                                   Instant now) {
+        if (productLine == null || userId <= 0L || revision <= 0L || now == null) {
+            throw new IllegalArgumentException("projection revision arguments are required");
+        }
+        List<Long> rows = jdbcTemplate.query("""
+                INSERT INTO account_risk_state_revisions (product_line, user_id, revision, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (product_line, user_id) DO UPDATE
+                   SET revision = EXCLUDED.revision,
+                       updated_at = EXCLUDED.updated_at
+                 WHERE account_risk_state_revisions.revision < EXCLUDED.revision
+             RETURNING revision
+                """, (rs, rowNum) -> rs.getLong("revision"), productLine.name(), userId, revision,
+                Timestamp.from(now));
+        return rows.size() == 1;
     }
 }

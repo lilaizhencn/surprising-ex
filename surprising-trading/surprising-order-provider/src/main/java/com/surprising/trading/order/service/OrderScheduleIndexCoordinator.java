@@ -2,10 +2,8 @@ package com.surprising.trading.order.service;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.repository.CancelAllAfterRepository;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.lang.Nullable;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -13,30 +11,18 @@ import org.springframework.stereotype.Component;
 @Component
 public class OrderScheduleIndexCoordinator {
     private final TradingOrderProperties properties;
-    private final CancelAllAfterRepository timerRepository;
     private final OrderUserStateService orderUserStateService;
     private final OrderScheduleIndex index;
     private final OrderRedisLease lease;
     private final CancelAllAfterLocalStateStore localStateStore;
 
-    /** 历史测试构造。 */
-    public OrderScheduleIndexCoordinator(TradingOrderProperties properties,
-                                         CancelAllAfterRepository timerRepository,
-                                         OrderUserStateService orderUserStateService,
-                                         OrderScheduleIndex index,
-                                         OrderRedisLease lease) {
-        this(properties, timerRepository, orderUserStateService, index, lease, null);
-    }
-
     @Autowired
     public OrderScheduleIndexCoordinator(TradingOrderProperties properties,
-                                         CancelAllAfterRepository timerRepository,
                                          OrderUserStateService orderUserStateService,
                                          OrderScheduleIndex index,
                                          OrderRedisLease lease,
-                                         @Nullable CancelAllAfterLocalStateStore localStateStore) {
+                                         CancelAllAfterLocalStateStore localStateStore) {
         this.properties = properties;
-        this.timerRepository = timerRepository;
         this.orderUserStateService = orderUserStateService;
         this.index = index;
         this.lease = lease;
@@ -71,32 +57,17 @@ public class OrderScheduleIndexCoordinator {
         long afterUser = 0;
         String afterScope = "";
         int synced = 0;
-        if (localStateStore != null) {
-            while (true) {
-                var rows = localStateStore.activeTimersForIndex(line, afterUser, afterScope, batch);
-                if (rows.isEmpty()) break;
-                for (var row : rows) {
-                    index.synchronizeTimer(line, row);
-                    if (++synced % 100 == 0 && !lease.renew(held, properties.getRedisIndex().getLockTtl()))
-                        throw new IllegalStateException("Redis schedule index rebuild lease lost");
-                }
-                var last = rows.get(rows.size() - 1);
-                afterUser = last.userId(); afterScope = last.symbolScope();
-                if (rows.size() < batch) break;
+        while (true) {
+            var rows = localStateStore.activeTimersForIndex(line, afterUser, afterScope, batch);
+            if (rows.isEmpty()) break;
+            for (var row : rows) {
+                index.synchronizeTimer(line, row);
+                if (++synced % 100 == 0 && !lease.renew(held, properties.getRedisIndex().getLockTtl()))
+                    throw new IllegalStateException("Redis schedule index rebuild lease lost");
             }
-        } else {
-            while (true) {
-                var rows = timerRepository.activeTimersForIndex(line, afterUser, afterScope, batch);
-                if (rows.isEmpty()) break;
-                for (var row : rows) {
-                    index.synchronizeTimer(line, row);
-                    if (++synced % 100 == 0 && !lease.renew(held, properties.getRedisIndex().getLockTtl()))
-                        throw new IllegalStateException("Redis schedule index rebuild lease lost");
-                }
-                var last = rows.get(rows.size() - 1);
-                afterUser = last.userId(); afterScope = last.symbolScope();
-                if (rows.size() < batch) break;
-            }
+            var last = rows.get(rows.size() - 1);
+            afterUser = last.userId(); afterScope = last.symbolScope();
+            if (rows.size() < batch) break;
         }
         long afterAlgoId = 0;
         while (true) {

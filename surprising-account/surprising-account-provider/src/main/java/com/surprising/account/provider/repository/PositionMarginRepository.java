@@ -1,5 +1,6 @@
 package com.surprising.account.provider.repository;
 
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
@@ -88,6 +89,33 @@ public class PositionMarginRepository {
                    AND margin_units > 0
                  ORDER BY symbol ASC, asset ASC, margin_mode ASC, position_side ASC
                 """, (rs, rowNum) -> toRow(rs), productLine.name(), userId);
+    }
+
+    /** 只由异步账户状态投影替换用户逐仓保证金快照。 */
+    public void replaceProjection(ProductLine productLine,
+                                  long userId,
+                                  List<PerpetualAccountStateUpdatedEvent.PositionMargin> margins,
+                                  Instant projectedAt) {
+        jdbcTemplate.update("""
+                DELETE FROM account_position_margins
+                 WHERE product_line = ?
+                   AND user_id = ?
+                """, productLine.name(), userId);
+        if (margins == null) {
+            return;
+        }
+        for (PerpetualAccountStateUpdatedEvent.PositionMargin margin : margins) {
+            if (margin.marginUnits() <= 0L) {
+                continue;
+            }
+            jdbcTemplate.update("""
+                    INSERT INTO account_position_margins (
+                        product_line, user_id, symbol, asset, margin_mode,
+                        position_side, margin_units, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, productLine.name(), userId, margin.symbol(), margin.asset(), margin.marginMode().name(),
+                    margin.positionSide().name(), margin.marginUnits(), Timestamp.from(projectedAt));
+        }
     }
 
     public long lockUnits(ProductLine productLine,

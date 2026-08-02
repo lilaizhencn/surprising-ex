@@ -247,15 +247,21 @@ PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-funds-reconcile.sh
 | 未平仓量 | `OpenInterestShardRepository` 原子调整分片并发布快照事件，订单侧有 JVM 缓存 | 后续将分片事实移入账户单写者，数据库分片只保留恢复/审计 |
 | 强平候选 | 候选带 `positionRevision`，强平消费持仓事件维护 JVM 快照 | 在账户命令版本栅栏完成前保留数据库最终锁定 |
 
-### 7.2 永续热路径仍然依赖数据库的地方
+### 7.2 永续热路径与数据库边界
 
-1. `AccountUserCommandProcessor` 通过 `AccountCommandRepository` 注册、去重和完成命令，`AccountSettlementService` 及大量单表 Repository 在 PostgreSQL 事务内修改余额、冻结、保证金、持仓、流水和未平仓量。当前风险钱包事件只是同一事务中的过渡性聚合，并不是 JVM 账户事实源。
-2. `OrderService.place`、`amend`、`cancel` 仍在订单事务中读取 `OrderPositionModeRepository`、`OrderPositionRepository`、`OrderCoordinationRepository` 和订单表；`RedisOpenOrderView` 不可用时会回退 PostgreSQL。下单保证金缓存目前只覆盖持仓、杠杆和未成交数量，不覆盖账户可用余额的原子扣减。
-3. 撮合恢复由 `MatchingOrderBookRecoveryRepository` 读取数据库，订单和成交结果仍通过 outbox/数据库状态推进。撮合内存订单簿不是最终恢复事实，尚未完成事件日志加检查点切换。
-4. `RiskService` 的启动重建和持久风险快照、候选写入使用数据库；强平 `LiquidationCandidateRepository.claimAll`、`LiquidationPositionRepository.lockAll` 对持仓执行 `FOR UPDATE`，`LiquidationRepository.candidateInputs` 仍 JOIN 风险快照校验最新状态。
-5. Funding、ADL、Insurance 已通过账户命令进入账户边界，但候选、租约、执行 saga、审计和恢复扫描仍使用数据库。它们不能在账户单写者切换前自行删除 Repository。
-6. Trigger 的 Redis 索引负责热读和跨节点租约，`TriggerOrderIndexCoordinator` 启动/重建仍从订单表加载；重建完成前必须保持不可用，而不能把空索引解释成“没有触发单”。
-7. WebSocket、后台订单查询和资金流水查询仍是数据库/Redis 读模型，不能被误认为交易事实源；它们需要明确“快照未就绪”和“查询延迟”的返回语义。
+1. 账户命令由 `AccountUserStateCommandWorker` 按 `LINEAR_PERPETUAL:userId` 顺序消费本地 WAL，
+   `AccountUserStateReducer` 在 RocksDB 状态快照中原子裁决余额、预占、持仓和资金命令。缺失快照、
+   序号断裂或 reducer 不支持时分区失败关闭，不查询数据库猜测余额。
+2. 订单由 `OrderUserStateService` 使用同一用户分区 WAL 和单写入 lane 管理。下单、撤单、账户结果、
+   撮合结果和算法单状态都从本地状态读取；`OrderRepository` 与 `OrderStateProjectionWorker` 只做
+   `trading_orders` 异步投影、后台查询和审计，不提供热路径回退。
+3. `trading_cancel_all_after` 和旧的 `RedisOpenOrderView` 数据库/Redis 事实路径已删除。倒计时、开放
+   订单查询和撤单裁决都来自本地用户状态；Redis 如继续部署只能作为查询或协调投影。
+4. 撮合恢复、Risk、Trigger、Funding、ADL、Insurance、强平和 WebSocket 仍可能使用各自的恢复、
+   审计或跨节点协调 Repository。它们不得把这些 Repository 重新接入订单/账户热路径；后续迁移需
+   逐模块以事件日志、检查点和 JVM 快照替换，并保持产品线隔离。
+5. 数据库状态由独立投影消费者按修订号或连续 WAL 序号幂等替换。投影落后只影响后台查询，不影响
+   资金、订单或持仓裁决；投影失败必须停在当前水位并报警。
 
 ### 7.3 当前最危险的竞态
 
@@ -282,19 +288,22 @@ PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-funds-reconcile.sh
 
 ### 阶段 B：账户单写者过渡层
 
-涉及：`AccountUserCommandProcessor`、`AccountService`、`AccountSettlementService`、`PositionRepository`、`PositionMarginRepository`、`OpenInterestShardRepository`、`AccountOutboxService`。
+涉及：`AccountUserStateCommandWorker`、`AccountUserStateReducer`、`AccountService`、`AccountStateProjectionService`。
 
 1. 引入永续用户状态快照，至少包含余额/冻结、欠款、订单预占、逐仓保证金、持仓、持仓模式、杠杆、未平仓量和每个子状态版本。
-2. 命令进入固定的 `LINEAR_PERPETUAL:userId` 单用户执行队列；数据库事务暂时继续落账，JVM 先做影子计算并比较每个字段。
-3. 事件必须先持久化到同一事务 outbox，带 `commandId`、`eventId`、`accountRevision`、`positionRevision`、`productLine`、`instrumentVersion`、`traceId` 和前置版本。
+2. 命令进入固定的 `LINEAR_PERPETUAL:userId` 单用户执行队列；事实先写入本地 WAL，数据库仅异步接收完整快照投影。
+3. 事件必须带 `commandId`、`eventId`、账户修订号、产品线、合约版本、`traceId` 和前置版本，并由
+   `UserPartitionWal` 的事件指纹索引幂等。
 4. 账户重启先加载最新检查点，再按用户键重放事件；事件缺失、版本回退或校验失败时该用户保持 not-ready，不得返回零余额/零持仓。
 5. 为账户命令增加 fencing token。节点失去用户租约后，不能再提交命令结果或发布后续事件。
 
-门禁：同一用户并发下单/撤单/成交/资金费/强平、重复命令、乱序事件、进程中断和重放后，JVM 影子结果与数据库逐字段相同。
+门禁：同一用户并发下单/撤单/成交/资金费/强平、重复命令、乱序事件、进程中断和重放后，本地
+事实状态逐字段一致，数据库投影最终与最新快照一致。
 
 ### 阶段 C：下单、订单状态和下单模式
 
-涉及：`OrderService`、`OrderPlacementStateService`、`OrderMarginSnapshotCache`、`RedisOpenOrderView`、`OrderPositionModeRepository`、`OrderPositionRepository`、`OrderCoordinationRepository`。
+涉及：`OrderService`、`OrderPlacementStateService`、`OrderUserStateService`、`OrderMarginSnapshotCache`、
+`OrderLocalStateCoordinator`、`OrderStateProjectionWorker`。
 
 - 先消费账户余额/持仓/持仓模式/账户命令结果事件，形成完整的订单入口 JVM 快照。
 - `OrderService` 的永续校验只读 Instrument、费率、标记价、余额和订单索引快照；快照未 ready 直接拒绝并返回明确原因。

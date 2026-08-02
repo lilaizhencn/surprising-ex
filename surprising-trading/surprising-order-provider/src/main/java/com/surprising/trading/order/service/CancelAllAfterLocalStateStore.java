@@ -140,7 +140,8 @@ public final class CancelAllAfterLocalStateStore implements AutoCloseable {
         return result;
     }
 
-    private Optional<CancelAllAfterTimer> read(ProductLine productLine, long userId, String symbolScope) {
+    /** 读取本地倒计时事实，供服务层返回状态和测试恢复路径使用。 */
+    public synchronized Optional<CancelAllAfterTimer> read(ProductLine productLine, long userId, String symbolScope) {
         try {
             byte[] value = database.get(key(PREFIX, timerKey(productLine, userId, symbolScope)));
             return value == null ? Optional.empty() : Optional.of(decode(value));

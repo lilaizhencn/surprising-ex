@@ -17,8 +17,7 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Waits for synchronous HTTP command results without issuing one database query per request and
- * poll interval. Kafka result topics are intentionally not required for correctness.
+ * 等待同步 HTTP 命令结果，不为每次请求和轮询间隔查询数据库；Kafka 结果 Topic 不是正确性前提。
  */
 @Service
     public class AccountCommandResultWaiter {

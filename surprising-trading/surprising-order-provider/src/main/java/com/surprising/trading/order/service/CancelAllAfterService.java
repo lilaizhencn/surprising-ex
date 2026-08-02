@@ -1,7 +1,6 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.TriggerOrderRpcApi;
 import com.surprising.trading.api.model.CancelAllAfterRequest;
 import com.surprising.trading.api.model.CancelAllAfterResponse;
@@ -11,7 +10,6 @@ import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.TriggerOrderBatchResponse;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.CancelAllAfterTimer;
-import com.surprising.trading.order.repository.CancelAllAfterRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -19,12 +17,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.lang.Nullable;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
-    public class CancelAllAfterService {
+public class CancelAllAfterService {
 
     private static final Logger log = LoggerFactory.getLogger(CancelAllAfterService.class);
     private static final int CANCEL_LIMIT = 1000;
@@ -32,7 +29,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
     private static final long MAX_COUNTDOWN_MS = 120_000L;
 
     private final TradingOrderProperties properties;
-    private final CancelAllAfterRepository repository;
     private final OrderService orderService;
     private final TriggerOrderRpcApi triggerOrderRpcApi;
     private final OrderScheduleIndex scheduleIndex;
@@ -40,38 +36,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
     @Autowired
     public CancelAllAfterService(TradingOrderProperties properties,
-                                 CancelAllAfterRepository repository,
                                  OrderService orderService,
                                  TriggerOrderRpcApi triggerOrderRpcApi,
-                                 CancelAllAfterLocalStateStore localStateStore) {
-        this(properties, repository, orderService, triggerOrderRpcApi, OrderScheduleIndex.disabled(), localStateStore);
-    }
-
-    /** 兼容历史单元测试；生产入口由 Spring 注入本地状态库。 */
-    public CancelAllAfterService(TradingOrderProperties properties,
-                                 CancelAllAfterRepository repository,
-                                 OrderService orderService,
-                                 TriggerOrderRpcApi triggerOrderRpcApi) {
-        this(properties, repository, orderService, triggerOrderRpcApi, OrderScheduleIndex.disabled(), null);
-    }
-
-    public CancelAllAfterService(TradingOrderProperties properties,
-                                 CancelAllAfterRepository repository,
-                                 OrderService orderService,
-                                 TriggerOrderRpcApi triggerOrderRpcApi,
+                                 CancelAllAfterLocalStateStore localStateStore,
                                  OrderScheduleIndex scheduleIndex) {
-        this(properties, repository, orderService, triggerOrderRpcApi, scheduleIndex, null);
-    }
-
-    /** 历史测试构造；生产必须使用本地倒计时状态库。 */
-    public CancelAllAfterService(TradingOrderProperties properties,
-                                 CancelAllAfterRepository repository,
-                                 OrderService orderService,
-                                 TriggerOrderRpcApi triggerOrderRpcApi,
-                                 OrderScheduleIndex scheduleIndex,
-                                 @Nullable CancelAllAfterLocalStateStore localStateStore) {
         this.properties = properties;
-        this.repository = repository;
         this.orderService = orderService;
         this.triggerOrderRpcApi = triggerOrderRpcApi;
         this.scheduleIndex = scheduleIndex;
@@ -96,10 +65,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
         Instant now = Instant.now();
         boolean active = request.countdownMs() > 0;
         Instant triggerAt = active ? now.plusMillis(request.countdownMs()) : null;
-        CancelAllAfterTimer timer = localStateStore == null
-                ? repository.upsert(currentProductLine(), request.userId(), symbolScope, request.countdownMs(),
-                triggerAt, active ? "ACTIVE" : "DISABLED", now, TraceContext.currentOrCreate())
-                : localStateStore.upsert(currentProductLine(), request.userId(), symbolScope,
+        CancelAllAfterTimer timer = localStateStore.upsert(currentProductLine(), request.userId(), symbolScope,
                 request.countdownMs(), triggerAt, active ? "ACTIVE" : "DISABLED", now);
         afterCommit(() -> scheduleIndex.synchronizeTimer(currentProductLine(), timer));
         return toResponse(timer);
@@ -107,23 +73,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
     public void scanDueTimers() {
         Instant now = Instant.now();
-        if (localStateStore != null) {
-            List<CancelAllAfterTimer> timers = localStateStore.due(currentProductLine(), now, CLAIM_LIMIT).stream()
-                    .map(timer -> localStateStore.claim(currentProductLine(), timer.userId(), timer.symbolScope(), now))
-                    .flatMap(java.util.Optional::stream)
-                    .toList();
-            for (CancelAllAfterTimer timer : timers) {
-                cancelDueTimer(timer);
-            }
-            return;
-        }
-        List<CancelAllAfterTimer> timers = scheduleIndex.dueTimers(currentProductLine(), now, CLAIM_LIMIT)
-                .map(candidates -> candidates.stream()
-                        .map(candidate -> repository.claimDueTimer(currentProductLine(), candidate.userId(),
-                                candidate.symbolScope(), now))
-                        .flatMap(java.util.Optional::stream)
-                        .toList())
-                .orElseGet(() -> repository.claimDueTimers(currentProductLine(), now, CLAIM_LIMIT));
+        List<CancelAllAfterTimer> timers = localStateStore.due(currentProductLine(), now, CLAIM_LIMIT).stream()
+                .map(timer -> localStateStore.claim(currentProductLine(), timer.userId(), timer.symbolScope(), now))
+                .flatMap(java.util.Optional::stream)
+                .toList();
         for (CancelAllAfterTimer timer : timers) {
             cancelDueTimer(timer);
         }
@@ -136,22 +89,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
                     new CancelOpenOrdersRequest(timer.userId(), symbol, CANCEL_LIMIT));
             TriggerOrderBatchResponse triggerResponse = triggerOrderRpcApi.cancelOpen(
                     new CancelOpenTriggerOrdersRequest(timer.userId(), symbol, CANCEL_LIMIT));
-            if (localStateStore == null) {
-                repository.markTriggered(currentProductLine(), timer.userId(), timer.symbolScope(),
-                        orderResponse.completed(), triggerResponse.completed(), Instant.now());
-            } else {
-                localStateStore.markTriggered(currentProductLine(), timer.userId(), timer.symbolScope(),
-                        orderResponse.completed(), triggerResponse.completed(), Instant.now());
-            }
+            localStateStore.markTriggered(currentProductLine(), timer.userId(), timer.symbolScope(),
+                    orderResponse.completed(), triggerResponse.completed(), Instant.now());
             scheduleIndex.removeTimer(currentProductLine(), timer.userId(), timer.symbolScope());
         } catch (RuntimeException ex) {
-            if (localStateStore == null) {
-                repository.releaseForRetry(currentProductLine(), timer.userId(), timer.symbolScope(),
-                        ex.getMessage(), Instant.now());
-            } else {
-                localStateStore.releaseForRetry(currentProductLine(), timer.userId(), timer.symbolScope(),
-                        ex.getMessage(), Instant.now());
-            }
+            localStateStore.releaseForRetry(currentProductLine(), timer.userId(), timer.symbolScope(),
+                    ex.getMessage(), Instant.now());
             scheduleIndex.synchronizeTimer(currentProductLine(), new CancelAllAfterTimer(
                     timer.userId(), timer.symbolScope(), timer.countdownMs(), "ACTIVE", timer.triggerAt(),
                     Instant.now(), timer.canceledOrders(), timer.canceledTriggerOrders()));
@@ -174,7 +117,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
     private static String normalizeSymbolScope(String symbol) {
         if (symbol == null || symbol.isBlank()) {
-            return CancelAllAfterRepository.ALL_SYMBOLS_SCOPE;
+            return "*";
         }
         String normalized = symbol.trim().toUpperCase(Locale.ROOT);
         if (!normalized.matches("^[A-Z0-9][A-Z0-9_-]{1,63}$")) {
@@ -184,7 +127,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
     }
 
     private static String publicSymbol(String symbolScope) {
-        return CancelAllAfterRepository.ALL_SYMBOLS_SCOPE.equals(symbolScope) ? null : symbolScope;
+        return "*".equals(symbolScope) ? null : symbolScope;
     }
 
     private ProductLine currentProductLine() {

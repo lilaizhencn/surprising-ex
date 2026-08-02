@@ -1,5 +1,6 @@
 package com.surprising.account.provider.repository;
 
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.provider.model.PositionSettlementState;
 import com.surprising.account.provider.model.PositionState;
@@ -314,6 +315,42 @@ public class PositionRepository {
                         rs.getLong("signed_quantity_steps")), productLine.name(), userId, symbol,
                 PositionSide.defaultIfNull(positionSide).name())
                 .stream().findFirst();
+    }
+
+    /**
+     * 用单用户完整仓位快照替换数据库投影。
+     *
+     * <p>零仓位只存在于本地事实快照中作为删除语义，不写入数据库，避免把无效的
+     * instrument_version 外键带入投影表。该方法不参与撮合、风控或结算热路径。</p>
+     */
+    public void replaceProjection(ProductLine productLine,
+                                  long userId,
+                                  List<PerpetualAccountStateUpdatedEvent.Position> positions,
+                                  Instant projectedAt) {
+        jdbcTemplate.update("""
+                DELETE FROM account_positions
+                 WHERE product_line = ?
+                   AND user_id = ?
+                """, productLine.name(), userId);
+        if (positions == null) {
+            return;
+        }
+        for (PerpetualAccountStateUpdatedEvent.Position position : positions) {
+            if (position.signedQuantitySteps() == 0L) {
+                continue;
+            }
+            jdbcTemplate.update("""
+                    INSERT INTO account_positions (
+                        product_line, user_id, symbol, margin_mode, position_side,
+                        instrument_version, signed_quantity_steps, entry_price_ticks,
+                        entry_value_ticks, realized_pnl_units, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, productLine.name(), userId, position.symbol(), position.marginMode().name(),
+                    position.positionSide().name(), position.instrumentVersion(),
+                    position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
+                    position.realizedPnlUnits(), Timestamp.from(position.updatedAt() == null
+                            ? projectedAt : position.updatedAt()));
+        }
     }
 
     public int update(ProductLine productLine,

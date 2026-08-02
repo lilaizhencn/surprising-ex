@@ -79,7 +79,6 @@ public class TradingOrderProperties {
         private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
-        private String openOrderViewGroupId = "surprising-order-open-view-v1";
         private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
         private String accountStateSnapshotGroupId = "surprising-order-account-state-v1";
         private int accountCommandResultsConcurrency = 32;
@@ -199,8 +198,6 @@ public class TradingOrderProperties {
         public String getFeeScheduleSnapshotGroupId() {
             return productTopics().consumerGroup("order-fee-snapshot");
         }
-        public String getOpenOrderViewGroupId() { return openOrderViewGroupId; }
-        public void setOpenOrderViewGroupId(String openOrderViewGroupId) { this.openOrderViewGroupId = openOrderViewGroupId; }
 
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);

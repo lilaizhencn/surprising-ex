@@ -19,13 +19,22 @@ import org.springframework.stereotype.Service;
 public class OrderPlacementStateService {
     private final PerpetualAccountStateSnapshotCache accountStateSnapshotCache;
     private final PerpetualAccountStateRpcApi accountStateRpcApi;
+    private final OrderMarginSnapshotCache marginSnapshotCache;
     private final ConcurrentMap<Long, Object> snapshotInitializationLocks = new ConcurrentHashMap<>();
 
     @org.springframework.beans.factory.annotation.Autowired
     public OrderPlacementStateService(@Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
-                                      @Nullable PerpetualAccountStateRpcApi accountStateRpcApi) {
+                                      @Nullable PerpetualAccountStateRpcApi accountStateRpcApi,
+                                      @Nullable OrderMarginSnapshotCache marginSnapshotCache) {
         this.accountStateSnapshotCache = accountStateSnapshotCache;
         this.accountStateRpcApi = accountStateRpcApi;
+        this.marginSnapshotCache = marginSnapshotCache;
+    }
+
+    /** 单元测试构造；生产由 Spring 注入完整的本地保证金快照。 */
+    OrderPlacementStateService(@Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
+                               @Nullable PerpetualAccountStateRpcApi accountStateRpcApi) {
+        this(accountStateSnapshotCache, accountStateRpcApi, null);
     }
 
     public PositionMode positionMode(ProductLine line, long userId) {
@@ -110,6 +119,10 @@ public class OrderPlacementStateService {
                 }
                 if (result == PerpetualAccountStateSnapshotCache.ApplyResult.CONFLICT) {
                     throw new IllegalStateException("永续账户初始化快照同一修订号内容冲突");
+                }
+                if (marginSnapshotCache != null) {
+                    marginSnapshotCache.applyAccountSnapshot(event);
+                    marginSnapshotCache.markAccountSnapshotReady(line);
                 }
             }
         } catch (RuntimeException ex) {

@@ -1106,65 +1106,6 @@ CREATE INDEX IF NOT EXISTS trading_orders_recovery_idx
       AND time_in_force IN ('GTC', 'GTX')
       AND remaining_quantity_steps > 0;
 
-CREATE TABLE IF NOT EXISTS trading_cancel_all_after (
-    product_line                    TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    user_id                         BIGINT NOT NULL,
-    symbol_scope                    TEXT NOT NULL,
-    countdown_ms                    BIGINT NOT NULL,
-    status                          TEXT NOT NULL,
-    trigger_at                      TIMESTAMPTZ,
-    last_heartbeat_at               TIMESTAMPTZ NOT NULL,
-    triggered_at                    TIMESTAMPTZ,
-    canceled_order_count            INTEGER NOT NULL DEFAULT 0,
-    canceled_trigger_order_count    INTEGER NOT NULL DEFAULT 0,
-    trace_id                        TEXT,
-    last_error                      TEXT,
-    created_at                      TIMESTAMPTZ NOT NULL,
-    updated_at                      TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (product_line, user_id, symbol_scope),
-    CONSTRAINT trading_cancel_all_after_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT trading_cancel_all_after_user_positive CHECK (user_id > 0),
-    CONSTRAINT trading_cancel_all_after_scope_check CHECK (
-        symbol_scope = '*' OR symbol_scope ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'
-    ),
-    CONSTRAINT trading_cancel_all_after_countdown_check CHECK (countdown_ms BETWEEN 0 AND 120000),
-    CONSTRAINT trading_cancel_all_after_status_check CHECK (
-        status IN ('ACTIVE', 'TRIGGERING', 'TRIGGERED', 'DISABLED')
-    ),
-    CONSTRAINT trading_cancel_all_after_trigger_check CHECK (
-        (status IN ('ACTIVE', 'TRIGGERING') AND trigger_at IS NOT NULL AND countdown_ms > 0)
-        OR (status IN ('TRIGGERED', 'DISABLED'))
-    ),
-    CONSTRAINT trading_cancel_all_after_counts_non_negative CHECK (
-        canceled_order_count >= 0 AND canceled_trigger_order_count >= 0
-    )
-);
-
-DO $$
-BEGIN
-    ALTER TABLE trading_cancel_all_after
-        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-    ALTER TABLE trading_cancel_all_after
-        DROP CONSTRAINT IF EXISTS trading_cancel_all_after_product_line_check;
-    ALTER TABLE trading_cancel_all_after
-        ADD CONSTRAINT trading_cancel_all_after_product_line_check CHECK (
-            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-        );
-    ALTER TABLE trading_cancel_all_after
-        DROP CONSTRAINT IF EXISTS trading_cancel_all_after_pkey;
-    ALTER TABLE trading_cancel_all_after
-        ADD CONSTRAINT trading_cancel_all_after_pkey PRIMARY KEY (product_line, user_id, symbol_scope);
-END $$;
-
-DROP INDEX IF EXISTS trading_cancel_all_after_due_idx;
-CREATE INDEX IF NOT EXISTS trading_cancel_all_after_due_idx
-    ON trading_cancel_all_after (product_line, trigger_at, user_id, symbol_scope)
-    WHERE status = 'ACTIVE';
-
 CREATE TABLE IF NOT EXISTS trading_algo_orders (
     algo_order_id              BIGINT PRIMARY KEY,
     product_line               TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
@@ -1790,6 +1731,26 @@ CREATE TABLE IF NOT EXISTS account_risk_state_revisions (
     CONSTRAINT account_risk_state_revisions_user_positive CHECK (user_id > 0),
     CONSTRAINT account_risk_state_revisions_revision_positive CHECK (revision > 0)
 );
+
+-- 账户状态快照的异步投影。订单锁定汇总来自用户分区事实流，恢复时不能再依赖交易订单表计算。
+CREATE TABLE IF NOT EXISTS account_state_order_locks (
+    product_line TEXT NOT NULL,
+    user_id      BIGINT NOT NULL,
+    asset        TEXT NOT NULL,
+    locked_units BIGINT NOT NULL,
+    updated_at   TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (product_line, user_id, asset),
+    CONSTRAINT account_state_order_locks_product_line_check CHECK (
+        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+    ),
+    CONSTRAINT account_state_order_locks_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_state_order_locks_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_state_order_locks_non_negative CHECK (locked_units >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS account_state_order_locks_user_idx
+    ON account_state_order_locks (product_line, user_id);
 
 CREATE TABLE IF NOT EXISTS account_asset_scales (
     asset               TEXT PRIMARY KEY,

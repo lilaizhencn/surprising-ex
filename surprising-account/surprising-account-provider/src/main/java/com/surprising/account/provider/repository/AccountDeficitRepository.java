@@ -1,5 +1,6 @@
 package com.surprising.account.provider.repository;
 
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -45,7 +46,25 @@ public class AccountDeficitRepository {
                 """, (rs, rowNum) -> new DeficitRow(
                         rs.getString("asset"),
                         rs.getLong("deficit_units"),
-                        rs.getLong("reserved_units")), userId);
+                rs.getLong("reserved_units")), userId);
+    }
+
+    /** 只由异步账户状态投影替换用户负债快照，不参与资金命令热路径。 */
+    public void replaceProjection(long userId,
+                                  List<PerpetualAccountStateUpdatedEvent.Deficit> deficits,
+                                  Instant projectedAt) {
+        jdbcTemplate.update("DELETE FROM account_deficits WHERE user_id = ?", userId);
+        if (deficits == null) {
+            return;
+        }
+        for (PerpetualAccountStateUpdatedEvent.Deficit deficit : deficits) {
+            jdbcTemplate.update("""
+                    INSERT INTO account_deficits (
+                        user_id, asset, deficit_units, reserved_units, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """, userId, deficit.asset(), deficit.deficitUnits(), deficit.reservedUnits(),
+                    Timestamp.from(projectedAt));
+        }
     }
 
     public boolean reserve(long userId, String asset, long amountUnits, Instant now) {

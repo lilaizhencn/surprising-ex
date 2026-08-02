@@ -31,19 +31,22 @@ public class OrderAccountStateSnapshotConsumer {
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final PerpetualAccountStateSnapshotCache snapshotCache;
+    private final OrderMarginSnapshotCache marginSnapshotCache;
 
     public OrderAccountStateSnapshotConsumer(ObjectMapper objectMapper,
                                              TradingOrderProperties properties,
-                                             PerpetualAccountStateSnapshotCache snapshotCache) {
+                                             PerpetualAccountStateSnapshotCache snapshotCache,
+                                             OrderMarginSnapshotCache marginSnapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.snapshotCache = snapshotCache;
+        this.marginSnapshotCache = marginSnapshotCache;
     }
 
     @KafkaListener(
             topics = "#{__listener.topic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "orderOpenViewKafkaListenerContainerFactory")
+            containerFactory = "orderStateKafkaListenerContainerFactory")
     public void onAccountStateUpdated(List<ConsumerRecord<String, String>> records,
                                       Consumer<String, String> consumer) {
         if (records == null || records.isEmpty()) {
@@ -71,6 +74,10 @@ public class OrderAccountStateSnapshotConsumer {
                 }
                 if (result == PerpetualAccountStateSnapshotCache.ApplyResult.CONFLICT) {
                     throw new IllegalStateException("完整账户快照同一修订号内容冲突，等待 RPC 重建");
+                }
+                if (result == PerpetualAccountStateSnapshotCache.ApplyResult.APPLIED
+                        || result == PerpetualAccountStateSnapshotCache.ApplyResult.STALE) {
+                    marginSnapshotCache.applyAccountSnapshot(event);
                 }
             }
             markReadyWhenCaughtUp(consumer);
@@ -109,5 +116,6 @@ public class OrderAccountStateSnapshotConsumer {
             }
         }
         snapshotCache.markReady();
+        marginSnapshotCache.markAccountSnapshotReady(properties.getKafka().getProductLine());
     }
 }

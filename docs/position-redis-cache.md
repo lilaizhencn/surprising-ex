@@ -1,14 +1,18 @@
-# 用户持仓 Redis 读模型
+# 用户持仓 JVM 与 Redis 读模型
 
 ## 目标与边界
 
-用户侧的 `GET /api/v1/accounts/position`、`/positions` 和 `/position-margin` 只读取 Redis，避免高频持仓查询直接压到 PostgreSQL。PostgreSQL 仍是余额、持仓、保证金、风控和强平的唯一事实源；订单校验、成交结算、资金费、风控和强平不能把 Redis 当作正确性锁。
+用户侧的 `GET /api/v1/accounts/position`、`/positions` 和 `/position-margin` 优先读取账户模块 JVM
+快照，避免高频持仓查询访问数据库。Redis 只作为跨节点查询和恢复投影；账户用户分区 WAL/RocksDB
+才是余额、持仓和保证金的交易事实源。订单校验、成交结算、资金费、风控和强平不能把 Redis 或
+数据库投影当作正确性锁。
 
-这不是“Redis 取代数据库”，而是把已经提交的数据库状态投影成一个可高并发读取的用户读模型。管理员持仓查询继续走 PostgreSQL，便于审计和排障。
+这不是“Redis 取代账户事实流”，而是把账户快照投影成可跨节点读取的用户读模型。管理员查询可以
+读取数据库异步投影，但必须显示投影修订号和延迟，便于审计和排障。
 
 ## 键和产品线隔离
 
-每个用户、每条产品线使用同一个 Redis Cluster hash tag，三个 Hash 可由一段 Lua 一次更新：
+每个用户、每条产品线使用同一个 Redis Cluster hash tag：
 
 ```text
 surprising:position:v1:{LINEAR_PERPETUAL:1001}:state
@@ -16,63 +20,39 @@ surprising:position:v1:{LINEAR_PERPETUAL:1001}:margin
 surprising:position:v1:{LINEAR_PERPETUAL:1001}:revision
 ```
 
-Hash field 固定为 `SYMBOL|MARGIN_MODE|POSITION_SIDE`。`state` 保存数量、开仓价、开仓价值、已实现盈亏、合约版本、更新时间和 revision；`margin` 保存结算资产、持仓保证金、更新时间和 revision；`revision` 保存最终比较值。产品线在 key 和快照中显式保存，不能跨线读取或写入。
-
-平仓后的零仓位保留在 Hash 中，而不是 `HDEL`。这样已实现盈亏可保留，且延迟到达的旧事件不能把已经关闭的仓位“复活”；`/positions` 仅过滤返回数量非零的字段。
+Hash field 固定为 `SYMBOL|MARGIN_MODE|POSITION_SIDE`。产品线必须同时存在于 key 和快照中，不能跨线
+读取或写入。平仓后的零仓位保留 revision 和已实现盈亏，防止延迟旧事件复活已关闭仓位。
 
 ## 一致性设计
 
-`account_positions` 和 `account_position_margins` 都有数据库分配的 `cache_revision`。account-provider 在每个资金事务中收集发生变化的持仓键，并按
-`productLine + userId + symbol + marginMode + positionSide` 去重。每个键只查询一次事务内最终持仓和保证金状态，生成完整持仓事件并分配全局递增 revision：
+账户 reducer 按 `LINEAR_PERPETUAL:userId` 单写入，账户 revision 在本地状态中单调递增：
 
 ```text
-业务更新持仓/保证金
-  -> PostgreSQL 分配递增 revision
-  -> 同一事务读取一份最终快照并写 account outbox
-  -> Kafka key 固定为 PRODUCT_LINE:userId
-  -> 提交后同一快照进入本机有界合并队列
-  -> 本机加速线程和耐久 Kafka consumer 都执行 Redis Lua CAS
-  -> 原子写 state + margin + revision
+账户用户分区命令
+  -> 本地 WAL 按序追加
+  -> RocksDB reducer 原子提交余额、持仓、保证金和 revision
+  -> Kafka 发布完整账户快照
+  -> 各模块 JVM 快照按 revision 幂等更新
+  -> 独立消费者异步替换数据库和 Redis 投影
 ```
 
-Lua 只接受比当前 revision 更大的快照，重复或乱序写入会被安全忽略。事务提交后，同一份最终快照进入内存有界队列，由后台线程低延迟写 Redis，资金事务不等待 Redis；account outbox 同时保证该快照最终发布到 Kafka。独立缓存 consumer 使用专用消费组耐久重放，进程退出、队列溢出和 Redis 短暂故障都不会永久丢失已提交更新。热点持仓的本机待处理快照按 revision 合并；队列满、事件非法或 Redis 写失败时会删除对应产品线 readiness marker，用户查询暂时返回 503，Kafka 重试或 PostgreSQL 对账修复后恢复。资金费和 ADL 模块不直接更新保证金或持仓，而是通过账户指令由 account-provider 统一写入。
+重复或乱序快照只接受更大的 revision；发现版本间隙、事件指纹冲突或快照损坏时，相关用户分区保持
+未就绪。资金费和 ADL 不直接更新保证金或持仓，而是通过账户指令由 account-provider 统一写入。
 
-因此不使用 XA。PostgreSQL 与 Redis 不被当作一个全局事务：数据库和同事务 outbox 是耐久事实，Redis 是可重建的 revision 快照。这个边界既避免跨系统两阶段提交的锁和故障复杂度，也保证进程在数据库提交后、快照入队前退出时仍可由 Kafka 重放恢复。
-
-反向开仓必须先释放旧仓保证金、再转入新仓保证金；否则按平仓比例释放时会误把新仓保证金一起释放。该顺序有专门回归测试保护。
+WAL/RocksDB 是耐久事实，数据库和 Redis 都是可重建投影。投影失败只会停止投影水位推进和对外读模型，
+不会改变资金裁决，也不能回退到数据库猜测零仓位。
 
 ## 启动、恢复和失败策略
 
-1. 缓存服务启动时，若当前产品线没有 readiness marker，会通过 token lease 由一个节点分页扫描 PostgreSQL 并重建 Redis。
-2. 扫描、提交后本机加速、Kafka 重放和周期校验都使用同一 revision CAS，因此旧扫描页或重复消息不会覆盖新成交。
-3. 构建完成才写 `ready` marker；用户查询在 marker 缺失或 Redis 异常时返回 HTTP 503，**不回退到数据库**，避免数据库被缓存故障放大。
-4. ready 节点周期性刷新 marker，并循环校验一个数据库分页；健康检查、Prometheus counter 会暴露应用、陈旧事件、失败和重建条数。
+1. 账户服务启动后先从本地 WAL/状态库恢复；没有本地快照时，必须通过账户内部快照 RPC 初始化，不能
+   用数据库余额临时填充。
+2. JVM 快照消费者使用产品线隔离的 Kafka topic 和消费组，按 revision 丢弃重复、乱序消息；重启时
+   从最新快照位置恢复，不使用过期行情或旧持仓事件。
+3. Redis 投影没有 readiness marker、数据不完整或写入失败时，查询返回未就绪；不把空集合解释成没有
+   持仓，也不允许其参与下单、撮合、风控或强平裁决。
 
-Redis 必须使用持久化，并配置 `maxmemory-policy noeviction`。如果 Redis 被清空，marker 会消失，用户读暂时 503，重建完成后恢复；不要将“丢 key”解释成“用户没有仓位”。
+## 运维与测试
 
-## 运维配置
-
-缓存复用当前产品线的 `account.position.events.v1` topic，不增加第二条持仓消息；专用消费组为 `surprising-<product>-account-position-cache-v1`。Account provider 的本机加速和重建配置位于 `surprising.account.position-cache`：
-
-```yaml
-surprising:
-  account:
-    position-cache:
-      key-prefix: surprising:position:v1
-      rebuild-batch-size: 1000
-      reconcile-delay-ms: 10000
-      ready-ttl: 30s
-      lock-ttl: 30s
-      accelerator-threads: 4
-      accelerator-queue-capacity: 10000
-```
-
-未上线环境可直接使用 `v1` 新键；不要为旧缓存值或旧缓存事件保留兼容分支。若需要重置测试环境，清空该 key prefix 后让服务自动重建即可。
-
-## 优势与取舍
-
-- 用户读由 `HGET/HVALS` 完成，按用户聚合，显著减少 `account_positions`、`instruments` 和保证金表的重复查询。
-- 业务写仍是单一 PostgreSQL 事务，不把资金正确性依赖在缓存可用性上。
-- 所有持仓和保证金写入都收口在 account-provider；新增写路径必须注册事务级持仓投影，单写者边界审计禁止其他模块直接修改账户表。
-- revision 让本机加速、Kafka 重放、滚动重启和重建可预测；租约只避免重复工作，不承担业务锁职责。
-- 缓存允许短暂延迟，但不允许静默永久丢失已提交更新；本机队列降低正常延迟，Kafka 是耐久恢复路径，周期对账负责发现实现缺陷和人工修数。Redis 不可用或投影失败时用户持仓读会明确失败，而不是返回可能错误的零仓位。
+Redis 只能启用持久化和 `noeviction`，用于跨节点读模型和协调。测试应先启动 instrument，再只启动一个
+产品线，验证并发下单、成交、资金费、强平、重复事件、进程重启和逐项资金守恒。所有模块的本地快照
+revision、Kafka lag、投影水位和未就绪原因都应纳入监控。

@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -15,8 +16,8 @@ import org.springframework.stereotype.Component;
 /**
  * 下单保证金计算需要的本地状态快照。
  *
- * <p>快照只在订单和仓位事件成功到达后更新，不能替代数据库的最终落账。重建完成前
- * lookup 返回空值，调用方必须失败关闭，不能把下单请求转成数据库查询。</p>
+ * <p>快照只在本地订单事实和账户状态事件成功到达后更新。重建完成前 lookup 返回空值，
+ * 调用方必须失败关闭，不能把下单请求转成数据库查询。</p>
  */
 @Component
 public class OrderMarginSnapshotCache {
@@ -26,13 +27,15 @@ public class OrderMarginSnapshotCache {
     private final ConcurrentMap<Long, OrderValue> orders = new ConcurrentHashMap<>();
     private final ConcurrentMap<OrderScope, Long> pending = new ConcurrentHashMap<>();
     private final ConcurrentMap<ReduceOnlyScope, Long> pendingReduceOnly = new ConcurrentHashMap<>();
-    private final Set<ProductLine> readyLines = ConcurrentHashMap.newKeySet();
+    private final Set<ProductLine> accountReadyLines = ConcurrentHashMap.newKeySet();
+    private final Set<ProductLine> orderReadyLines = ConcurrentHashMap.newKeySet();
 
     public void markNotReady(ProductLine productLine) {
         if (productLine == null) {
             return;
         }
         markOrderProjectionNotReady(productLine);
+        accountReadyLines.remove(productLine);
         positions.keySet().removeIf(key -> key.productLine() == productLine);
         leverages.keySet().removeIf(key -> key.productLine() == productLine);
     }
@@ -41,7 +44,7 @@ public class OrderMarginSnapshotCache {
         if (productLine == null) {
             return;
         }
-        readyLines.remove(productLine);
+        orderReadyLines.remove(productLine);
         orders.entrySet().removeIf(entry -> entry.getValue().productLine() == productLine);
         pending.keySet().removeIf(key -> key.productLine() == productLine);
         pendingReduceOnly.keySet().removeIf(key -> key.productLine() == productLine);
@@ -49,16 +52,27 @@ public class OrderMarginSnapshotCache {
 
     public void markReady(ProductLine productLine) {
         if (productLine != null) {
-            readyLines.add(productLine);
+            accountReadyLines.add(productLine);
+            orderReadyLines.add(productLine);
+        }
+    }
+
+    /** 账户完整快照已经追平 Kafka 位点。 */
+    public void markAccountSnapshotReady(ProductLine productLine) {
+        if (productLine != null) {
+            accountReadyLines.add(productLine);
         }
     }
 
     public void markOrderProjectionReady(ProductLine productLine) {
-        markReady(productLine);
+        if (productLine != null) {
+            orderReadyLines.add(productLine);
+        }
     }
 
     public boolean ready(ProductLine productLine) {
-        return productLine != null && readyLines.contains(productLine);
+        return productLine != null && accountReadyLines.contains(productLine)
+                && orderReadyLines.contains(productLine);
     }
 
     /**
@@ -88,7 +102,28 @@ public class OrderMarginSnapshotCache {
         return result[0];
     }
 
-    /** 首次数据库兜底成功后补齐本地仓位，后续订单可直接使用事件快照。 */
+    /**
+     * 使用账户完整快照初始化仓位索引。
+     *
+     * <p>PositionUpdatedEvent 和账户修订号属于不同序列空间，因此初始化只填充尚无增量
+     * 仓位事件的键；一旦收到增量事件，后续旧的完整快照不能覆盖它。</p>
+     */
+    public void applyAccountSnapshot(PerpetualAccountStateUpdatedEvent snapshot) {
+        if (snapshot == null || snapshot.productLine() == null) {
+            return;
+        }
+        for (PerpetualAccountStateUpdatedEvent.Position position : snapshot.positions()) {
+            PositionKey key = new PositionKey(snapshot.productLine(), snapshot.userId(), position.symbol(),
+                    position.marginMode(), position.positionSide());
+            positions.compute(key, (ignored, previous) -> previous == null || previous.revision() == 0L
+                    ? new PositionValue(0L, position.instrumentVersion(), position.signedQuantitySteps())
+                    : previous);
+            putDefaultLeverageIfAbsent(snapshot.productLine(), snapshot.userId(), position.symbol(),
+                    position.marginMode());
+        }
+    }
+
+    /** 启动或内部快照初始化时补齐本地仓位，后续订单只使用事件快照。 */
     public void putPosition(ProductLine productLine,
                             long userId,
                             String symbol,
@@ -118,7 +153,6 @@ public class OrderMarginSnapshotCache {
                 new PositionValue(0L, instrumentVersion, 0L));
     }
 
-    /** 记录订单投影，并按订单修订维护未成交数量，支持撤单请求仍占用容量。 */
     /**
      * 记录订单投影，并按订单修订维护未成交数量。
      *
