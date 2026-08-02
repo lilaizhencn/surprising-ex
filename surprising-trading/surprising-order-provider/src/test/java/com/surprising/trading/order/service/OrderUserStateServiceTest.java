@@ -117,8 +117,10 @@ class OrderUserStateServiceTest {
                     OrderCommandType.PLACE, "MATCHED", 2L, OrderStatus.PARTIALLY_FILLED, tradeTime.plusSeconds(1),
                     java.util.List.of(retryTrade), "trace-retry");
 
-            service.processMatchResults(java.util.List.of(first));
-            service.processMatchResults(java.util.List.of(retryWithNewCommand));
+            service.processMatchResultForUser(1001L, first);
+            service.processMatchResultForUser(2002L, first);
+            service.processMatchResultForUser(1001L, retryWithNewCommand);
+            service.processMatchResultForUser(2002L, retryWithNewCommand);
 
             assertThat(service.get(1001L, 9101L).executedQuantitySteps()).isEqualTo(2L);
             assertThat(service.get(1001L, 9101L).remainingQuantitySteps()).isEqualTo(8L);
@@ -141,13 +143,15 @@ class OrderUserStateServiceTest {
                     new UserPartitionCommandLane(), kafka());
             service.place(order("client-restart", 9201L, 10L));
             service.place(orderFor(2002L, "maker-restart", 991L, 10L));
-            service.processMatchResults(java.util.List.of(result));
+            service.processMatchResultForUser(1001L, result);
+            service.processMatchResultForUser(2002L, result);
         }
         try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
              UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
             OrderUserStateService restarted = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
                     new UserPartitionCommandLane(), kafka());
-            restarted.processMatchResults(java.util.List.of(result));
+            restarted.processMatchResultForUser(1001L, result);
+            restarted.processMatchResultForUser(2002L, result);
 
             assertThat(restarted.get(1001L, 9201L).executedQuantitySteps()).isEqualTo(2L);
             assertThat(restarted.get(1001L, 9201L).remainingQuantitySteps()).isEqualTo(8L);
@@ -167,7 +171,7 @@ class OrderUserStateServiceTest {
                     OrderCommandType.PLACE, "MATCHED", 1L, OrderStatus.PARTIALLY_FILLED,
                     Instant.parse("2026-07-01T00:00:01Z"), java.util.List.of(), "trace");
 
-            assertThatThrownBy(() -> service.processMatchResults(java.util.List.of(invalid)))
+            assertThatThrownBy(() -> service.processMatchResultForUser(9301L, invalid))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("缺少成交事实");
         }
@@ -225,7 +229,7 @@ class OrderUserStateServiceTest {
                     pending.productLine(), pending.userId(), AccountUserCommandType.ORDER_RESERVE,
                     AccountCommandStatus.APPLIED, "ORDER", String.valueOf(pending.orderId()), "{}", null, null,
                     Instant.now(), "trace");
-            service.processAccountCommandResults(java.util.List.of(accepted));
+            service.processAccountCommandResultForUser(accepted);
 
             assertThat(service.get(1001L, pending.orderId()).status()).isEqualTo(OrderStatus.CANCELED);
             org.mockito.Mockito.verify(kafka, org.mockito.Mockito.atLeastOnce())

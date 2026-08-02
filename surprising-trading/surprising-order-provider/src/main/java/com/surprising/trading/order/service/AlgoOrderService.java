@@ -147,11 +147,14 @@ public class AlgoOrderService {
         }
         Instant now = Instant.now();
         Duration lease = properties.getRedisIndex().getAlgoClaimLease();
-        List<AlgoOrderRecord> due = orderUserStateService.claimDueAlgos(
-                currentProductLine(), now, Math.max(1, properties.getAlgo().getClaimBatchSize()), lease);
+        List<AlgoOrderRecord> due = orderUserStateService.dueAlgos(
+                currentProductLine(), now, Math.max(1, properties.getAlgo().getClaimBatchSize()));
         for (AlgoOrderRecord record : due) {
             try {
-                executeDue(record, now);
+                AlgoOrderRecord claimed = withStatus(record, AlgoOrderStatus.RUNNING, null,
+                        now.plus(lease), null, now, record.currentOrderId());
+                orderUserCommandGateway.updateAlgo(claimed);
+                executeDue(claimed, now);
             } catch (RuntimeException ex) {
                 orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.FAILED, ex.getMessage(),
                         null, now, now, record.currentOrderId()));

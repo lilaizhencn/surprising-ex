@@ -410,41 +410,27 @@ public class OrderUserStateService {
                 .toList());
     }
 
-    public List<AlgoOrderRecord> claimDueAlgos(ProductLine productLine, Instant now, int limit, java.time.Duration lease) {
+    /** 只读返回到期算法单；状态变更必须由算法命令通过用户 Topic 提交。 */
+    public List<AlgoOrderRecord> dueAlgos(ProductLine productLine, Instant now, int limit) {
         if (productLine != properties.getKafka().getProductLine()) {
             throw new IllegalArgumentException("算法单产品线与当前订单节点不一致");
         }
-        List<AlgoOrderRecord> claimed = new ArrayList<>();
+        List<AlgoOrderRecord> result = new ArrayList<>();
         for (UserPartitionKey partition : orderedPartitions(productLine)) {
-            if (claimed.size() >= limit) {
+            if (result.size() >= limit) {
                 break;
             }
-            int remaining = limit - claimed.size();
-            claimed.addAll(lane.execute(partition, () -> {
-                OrderUserState current = stateAfterApply(partition);
-                List<AlgoOrderRecord> due = current.algoOrders().stream()
-                        .filter(value -> (value.status() == com.surprising.trading.api.model.AlgoOrderStatus.PENDING
-                                || value.status() == com.surprising.trading.api.model.AlgoOrderStatus.RUNNING)
-                                && value.nextSliceAt() != null && !value.nextSliceAt().isAfter(now))
-                        .sorted(java.util.Comparator.comparing(AlgoOrderRecord::nextSliceAt)
-                                .thenComparingLong(AlgoOrderRecord::algoOrderId))
-                        .limit(remaining)
-                        .toList();
-                List<AlgoOrderRecord> result = new ArrayList<>(due.size());
-                for (AlgoOrderRecord order : due) {
-                    AlgoOrderRecord claimedOrder = withAlgoSchedule(order,
-                            com.surprising.trading.api.model.AlgoOrderStatus.RUNNING,
-                            now.plus(lease), now);
-                    append(partition, OrderUserEvent.algoUpdate(claimedOrder));
-                    result.add(claimedOrder);
-                }
-                if (!due.isEmpty()) {
-                    applyPartition(partition);
-                }
-                return result;
-            }));
+            int remaining = limit - result.size();
+            result.addAll(lane.execute(partition, () -> stateAfterApply(partition).algoOrders().stream()
+                    .filter(value -> (value.status() == com.surprising.trading.api.model.AlgoOrderStatus.PENDING
+                            || value.status() == com.surprising.trading.api.model.AlgoOrderStatus.RUNNING)
+                            && value.nextSliceAt() != null && !value.nextSliceAt().isAfter(now))
+                    .sorted(java.util.Comparator.comparing(AlgoOrderRecord::nextSliceAt)
+                            .thenComparingLong(AlgoOrderRecord::algoOrderId))
+                    .limit(remaining)
+                    .toList()));
         }
-        return List.copyOf(claimed);
+        return List.copyOf(result);
     }
 
     public List<AlgoOrderRecord> scheduledAlgos(ProductLine productLine, long afterAlgoOrderId, int limit) {
@@ -536,94 +522,6 @@ public class OrderUserStateService {
             applyPartition(partition);
             return toResponse(find(state(partition), orderId));
         });
-    }
-
-    /**
-     * 管理撤单也必须定位到订单所属用户分区后追加撤单事实，不能回查订单表再开启数据库事务。
-     */
-    public OrderResponse cancelAny(ProductLine productLine, long orderId, String reason) {
-        if (productLine == null || productLine != properties.getKafka().getProductLine()) {
-            throw new IllegalArgumentException("订单产品线与当前订单节点不一致");
-        }
-        for (UserPartitionKey partition : orderedPartitions(productLine)) {
-            Optional<OrderRecord> candidate = lane.execute(partition, () -> {
-                applyPartition(partition);
-                return state(partition).orders().stream()
-                    .filter(value -> value.orderId() == orderId)
-                    .findFirst();
-            });
-            if (candidate.isEmpty()) {
-                continue;
-            }
-            return lane.execute(partition, () -> {
-                applyPartition(partition);
-                OrderRecord order = find(state(partition), orderId);
-                if (order.status() == OrderStatus.CANCELED || order.status() == OrderStatus.FILLED
-                        || order.status() == OrderStatus.REJECTED || order.status() == OrderStatus.CANCEL_REQUESTED) {
-                    return toResponse(order);
-                }
-                append(partition, OrderUserEvent.cancel(orderId, reason));
-                applyPartition(partition);
-                return toResponse(find(state(partition), orderId));
-            });
-        }
-        throw new IllegalStateException("订单不存在: " + orderId);
-    }
-
-    /**
-     * 按用户分区扫描管理撤单范围；扫描和追加事实在同一个分区 lane 中完成，避免读写交错。
-     */
-    public List<OrderResponse> cancelAdminOrders(ProductLine productLine,
-                                                  Long userId,
-                                                  String symbol,
-                                                  int limit,
-                                                  String reason) {
-        if (productLine == null || productLine != properties.getKafka().getProductLine()) {
-            throw new IllegalArgumentException("订单产品线与当前订单节点不一致");
-        }
-        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
-        List<OrderResponse> result = new ArrayList<>();
-        for (UserPartitionKey partition : orderedPartitions(productLine)) {
-            if (result.size() >= limit) {
-                break;
-            }
-            int remaining = limit - result.size();
-            List<OrderResponse> canceled = lane.execute(partition, () -> {
-                applyPartition(partition);
-                OrderUserState current = state(partition);
-                List<OrderRecord> orders = current.orders().stream()
-                        .filter(value -> userId == null || value.userId() == userId)
-                        .filter(value -> normalizedSymbol == null || value.symbol().equals(normalizedSymbol))
-                        .filter(value -> value.status() != OrderStatus.CANCELED
-                                && value.status() != OrderStatus.REJECTED
-                                && value.status() != OrderStatus.FILLED
-                                && value.status() != OrderStatus.CANCEL_REQUESTED)
-                        .sorted(java.util.Comparator.comparingLong(OrderRecord::orderId))
-                        .limit(remaining)
-                        .toList();
-                List<OrderResponse> responses = new ArrayList<>(orders.size());
-                for (OrderRecord order : orders) {
-                    append(partition, OrderUserEvent.cancel(order.orderId(), reason));
-                }
-                applyPartition(partition);
-                for (OrderRecord order : orders) {
-                    responses.add(toResponse(find(state(partition), order.orderId())));
-                }
-                return List.copyOf(responses);
-            });
-            result.addAll(canceled);
-        }
-        return List.copyOf(result);
-    }
-
-    /**
-     * 生命周期清理只操作本地订单状态；数据库订单表仅作为异步投影，不参与撤单裁决。
-     */
-    public List<OrderResponse> cancelLifecycleOrders(ProductLine productLine,
-                                                      String symbol,
-                                                      int limit,
-                                                      String reason) {
-        return cancelAdminOrders(productLine, null, symbol, limit, reason);
     }
 
     public boolean hasLifecycleActiveOrders(ProductLine productLine, String symbol) {
@@ -868,22 +766,6 @@ public class OrderUserStateService {
         });
     }
 
-    /** 账户结果消费只追加用户订单事实，不回查订单表。 */
-    public void processAccountCommandResults(List<AccountCommandResultEvent> results) {
-        if (results == null) {
-            return;
-        }
-        for (AccountCommandResultEvent result : results) {
-            if (result == null || result.commandType() != AccountUserCommandType.ORDER_RESERVE
-                    || !"ORDER".equals(result.source())) {
-                continue;
-            }
-            requireCurrentProductLine(result.productLine());
-            validateAccountResultIdentity(result);
-            processAccountCommandResultForUser(result);
-        }
-    }
-
     /** 账户结果已经位于用户命令单写入入口后，只允许在当前分区 lane 中追加一次事实。 */
     public void processAccountCommandResultForUser(AccountCommandResultEvent result) {
         if (result == null) {
@@ -910,25 +792,6 @@ public class OrderUserStateService {
         }
         if (orderId <= 0L || !reservationCommandId(result.productLine(), orderId).equals(result.commandId())) {
             throw new IllegalArgumentException("账户结果命令编号与订单预占命令不一致");
-        }
-    }
-
-    /** 撮合结果按成交参与方分别写入对应用户分区。 */
-    public void processMatchResults(List<MatchResultEvent> results) {
-        if (results == null) {
-            return;
-        }
-        for (MatchResultEvent result : results) {
-            if (result == null) {
-                continue;
-            }
-            validateMatchResult(result);
-            appendMatch(result.userId(), result);
-            for (MatchTradeEvent trade : result.trades()) {
-                if (trade.makerUserId() != result.userId()) {
-                    appendMatch(trade.makerUserId(), result);
-                }
-            }
         }
     }
 
@@ -1274,18 +1137,6 @@ public class OrderUserStateService {
                 order.reduceOnly(), order.postOnly(), order.timeInForce(), order.status(), progress.executedQuantitySteps(),
                 progress.activeQuantitySteps(), progress.childOrderCount(), order.currentOrderId(), order.rejectReason(),
                 order.startAt(), order.nextSliceAt(), order.completedAt(), order.createdAt(), order.updatedAt());
-    }
-
-    private AlgoOrderRecord withAlgoSchedule(AlgoOrderRecord order,
-                                             com.surprising.trading.api.model.AlgoOrderStatus status,
-                                             Instant nextSliceAt,
-                                             Instant now) {
-        return new AlgoOrderRecord(order.algoOrderId(), order.productLine(), order.userId(),
-                order.clientAlgoOrderId(), order.symbol(), order.algoType(), order.side(), order.priceTicks(),
-                order.quantitySteps(), order.childQuantitySteps(), order.intervalSeconds(), order.durationSeconds(),
-                order.marginMode(), order.positionSide(), order.reduceOnly(), order.postOnly(), order.timeInForce(),
-                status, order.currentOrderId(), order.rejectReason(), order.traceId(), order.startAt(), nextSliceAt,
-                order.completedAt(), order.createdAt(), now);
     }
 
     private boolean isAlgoTerminal(com.surprising.trading.api.model.AlgoOrderStatus status) {

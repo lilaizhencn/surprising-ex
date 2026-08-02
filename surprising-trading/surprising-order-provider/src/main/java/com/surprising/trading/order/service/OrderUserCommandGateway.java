@@ -79,14 +79,15 @@ public class OrderUserCommandGateway {
     }
 
     public void updateAlgo(AlgoOrderRecord order) {
-        publish(order.productLine(), order.userId(), "ORDER_ALGO_UPDATE:" + order.algoOrderId()
-                        + ":" + order.updatedAt().toEpochMilli(), OrderUserCommandType.ALGO_UPDATE, order);
+        submit(order.productLine(), order.userId(), "ORDER_ALGO_UPDATE:" + order.algoOrderId()
+                        + ":" + order.updatedAt().toEpochMilli(), OrderUserCommandType.ALGO_UPDATE, order,
+                AlgoOrderResponse.class);
     }
 
     public void linkAlgoChild(AlgoOrderRecord order, AlgoOrderChild child) {
-        publish(order.productLine(), order.userId(), "ORDER_ALGO_CHILD:" + order.algoOrderId()
+        submit(order.productLine(), order.userId(), "ORDER_ALGO_CHILD:" + order.algoOrderId()
                         + ":" + child.sliceIndex(), OrderUserCommandType.ALGO_CHILD,
-                new OrderUserAlgoChildCommand(order, child));
+                new OrderUserAlgoChildCommand(order, child), AlgoOrderResponse.class);
     }
 
     /** 账户预占结果改由用户命令 Topic 路由到订单状态所有者。 */
