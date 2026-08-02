@@ -476,7 +476,7 @@ public class OrderService {
     }
 
     private OrderFeeSnapshot rejectedFeeSnapshot() {
-        return new OrderFeeSnapshot(0L, 0L, "REJECTED");
+        return new OrderFeeSnapshot(properties.getKafka().getProductLine(), 0L, 0L, "REJECTED");
     }
 
     public OrderResponse cancel(CancelOrderRequest request) {

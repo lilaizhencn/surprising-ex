@@ -40,7 +40,7 @@ class TradingFeeServiceTest {
 
         when(instrumentRuleLookup.currentRule("BTC-USDT")).thenReturn(Optional.of(rule(7L)));
         when(feeSnapshotLookup.lookup(any(), eq(1001L), eq("BTC-USDT"), eq(7L), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(-50L, 350L, "VIP_SYMBOL")));
+                .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -50L, 350L, "VIP_SYMBOL")));
 
         var response = service.effectiveFee(1001L, "btc-usdt", 0L);
 

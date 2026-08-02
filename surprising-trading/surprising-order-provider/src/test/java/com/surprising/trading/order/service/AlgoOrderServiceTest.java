@@ -146,7 +146,7 @@ class AlgoOrderServiceTest {
 
     private AlgoOrderRecord twapRecord() {
         Instant now = Instant.parse("2026-07-05T00:00:00Z");
-        return new AlgoOrderRecord(77L, 1001L, "twap-1", "BTC-USDT", AlgoOrderType.TWAP,
+        return new AlgoOrderRecord(77L, ProductLine.LINEAR_PERPETUAL, 1001L, "twap-1", "BTC-USDT", AlgoOrderType.TWAP,
                 OrderSide.BUY, 0L, 100L, 50L, 10L, 20L, MarginMode.CROSS,
                 PositionSide.NET, false, false, TimeInForce.IOC, AlgoOrderStatus.PENDING,
                 null, null, "trace-1", now, now, null, now, now);
@@ -154,7 +154,7 @@ class AlgoOrderServiceTest {
 
     private AlgoOrderRecord icebergRecord() {
         Instant now = Instant.parse("2026-07-05T00:00:00Z");
-        return new AlgoOrderRecord(78L, 1001L, "ice-1", "BTC-USDT", AlgoOrderType.ICEBERG,
+        return new AlgoOrderRecord(78L, ProductLine.LINEAR_PERPETUAL, 1001L, "ice-1", "BTC-USDT", AlgoOrderType.ICEBERG,
                 OrderSide.SELL, 600_000L, 100L, 50L, 10L, 20L, MarginMode.CROSS,
                 PositionSide.NET, false, true, TimeInForce.GTX, AlgoOrderStatus.RUNNING,
                 9001L, null, "trace-1", now, now, null, now, now);
@@ -170,10 +170,10 @@ class AlgoOrderServiceTest {
 
     private OrderRecord childRecord() {
         Instant now = Instant.parse("2026-07-05T00:00:00Z");
-        return new OrderRecord(9001L, 1001L, "algo-78-1", "BTC-USDT", 1L,
+        return new OrderRecord(9001L, ProductLine.LINEAR_PERPETUAL, 1001L, "algo-78-1", "BTC-USDT", 1L,
                 OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTX, 600_000L,
                 50L, 0L, 50L, MarginMode.CROSS, PositionSide.NET, 0L, 0L,
-                false, true, OrderStatus.ACCEPTED, null, now, now);
+                false, true, null, null, 0L, OrderStatus.ACCEPTED, null, now, now, 1L);
     }
 
     private record Fixture(AlgoOrderService service,

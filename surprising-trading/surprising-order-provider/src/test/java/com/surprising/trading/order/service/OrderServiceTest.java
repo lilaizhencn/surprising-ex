@@ -132,7 +132,7 @@ class OrderServiceTest {
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(100L, 200L, "JVM")));
+                .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, 100L, 200L, "JVM")));
         return new OrderService(properties, orderValidator, reduceOnlyValidator, placementStateService,
                 orderMarginCalculator, spotReservationCalculator, feeSnapshotLookup, userState);
     }
