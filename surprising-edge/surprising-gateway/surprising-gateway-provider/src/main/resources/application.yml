@@ -36,7 +36,7 @@ surprising:
     security:
       user-id-header: X-User-Id
       require-identity-for-private-routes: true
-      allow-user-id-header-fallback: true
+      allow-user-id-header-fallback: ${GATEWAY_ALLOW_USER_ID_HEADER_FALLBACK:false}
       admin-roles:
         - SUPPORT
         - ADMIN
@@ -46,6 +46,13 @@ surprising:
       admin-approval-header: X-Admin-Approval-Id
       admin-approval-ttl: 30m
       require-admin-mfa: false
+      phone-registration-enabled: ${GATEWAY_PHONE_REGISTRATION_ENABLED:false}
+      require-email-verification: ${GATEWAY_REQUIRE_EMAIL_VERIFICATION:true}
+      resend-api-key: ${RESEND_API_KEY:}
+      resend-from: ${RESEND_FROM:}
+      resend-base-url: ${RESEND_BASE_URL:https://api.resend.com}
+      verification-code-pepper: ${GATEWAY_VERIFICATION_CODE_PEPPER:local-dev-verification-pepper-change-me}
+      verification-code-ttl: ${GATEWAY_VERIFICATION_CODE_TTL:10m}
       mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY:}
       issuer: surprising-ex-gateway
       jwt-secret: local-dev-change-me-surprising-ex-gateway-secret-2026

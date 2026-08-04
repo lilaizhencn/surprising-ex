@@ -3381,6 +3381,22 @@ CREATE TABLE IF NOT EXISTS gateway_user_mfa (
 CREATE INDEX IF NOT EXISTS gateway_user_mfa_enabled_idx
     ON gateway_user_mfa (enabled);
 
+CREATE TABLE IF NOT EXISTS gateway_user_security_scenes (
+    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    scene_code          TEXT NOT NULL,
+    enabled             BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, scene_code),
+    CONSTRAINT gateway_user_security_scene_code_check CHECK (
+        scene_code IN ('LOGIN', 'CHANGE_PASSWORD', 'SECURITY_SETTINGS', 'WITHDRAWAL',
+                       'API_WITHDRAWAL', 'WHITELIST', 'LARGE_TRANSFER', 'TRANSFER')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_security_scenes_updated_idx
+    ON gateway_user_security_scenes (user_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS gateway_user_kyc_profiles (
     user_id                 BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),
     kyc_level               TEXT NOT NULL DEFAULT 'NONE',

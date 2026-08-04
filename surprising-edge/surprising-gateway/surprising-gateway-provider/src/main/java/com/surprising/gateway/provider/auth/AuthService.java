@@ -87,7 +87,8 @@ public class AuthService {
             emailVerificationService.issueEmailVerification(user.userId(), email, ipAddress(httpRequest), now);
         }
         repository.loginLog(withRoles.userId(), "SUCCESS", "REGISTER", userAgent(httpRequest), ipAddress(httpRequest), now);
-        return authResponse(withRoles, httpRequest, now);
+        return authResponse(withRoles, httpRequest, now,
+                email != null && properties.getSecurity().isRequireEmailVerification());
     }
 
     @Transactional
@@ -373,9 +374,6 @@ public class AuthService {
                                  String totpCode,
                                  HttpServletRequest httpRequest,
                                  Instant now) {
-        if (!isAdmin(user.roles())) {
-            return;
-        }
         var credential = repository.mfaCredential(user.userId()).orElse(null);
         if (credential != null && credential.enabled()) {
             String secret = totpService.decryptSecret(credential.totpSecretCiphertext());
@@ -384,6 +382,9 @@ public class AuthService {
                         userAgent(httpRequest), ipAddress(httpRequest), now);
                 throw new IllegalArgumentException("invalid or missing totp code");
             }
+            return;
+        }
+        if (!isAdmin(user.roles())) {
             return;
         }
         if (properties.getSecurity().isRequireAdminMfa()) {
@@ -450,13 +451,21 @@ public class AuthService {
     }
 
     private AuthResponse authResponse(AuthenticatedUser user, HttpServletRequest request, Instant now) {
+        return authResponse(user, request, now, false);
+    }
+
+    private AuthResponse authResponse(AuthenticatedUser user,
+                                      HttpServletRequest request,
+                                      Instant now,
+                                      boolean requiresEmailVerification) {
         String accessToken = jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), now);
         String refreshToken = newRefreshToken();
         Instant refreshExpiresAt = now.plus(properties.getSecurity().getRefreshTokenTtl());
         repository.saveRefreshSession(user.userId(), hashRefreshToken(refreshToken), refreshExpiresAt,
                 userAgent(request), ipAddress(request), now);
         return new AuthResponse(user, accessToken, refreshToken,
-                now.plus(properties.getSecurity().getAccessTokenTtl()), refreshExpiresAt);
+                now.plus(properties.getSecurity().getAccessTokenTtl()), refreshExpiresAt,
+                requiresEmailVerification);
     }
 
     private String normalizeUsername(String username) {

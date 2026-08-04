@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import java.time.Instant;
@@ -48,6 +49,24 @@ public final class AuthModels {
     public record PasswordResetResponse(boolean accepted) {
     }
 
+    public record UserMfaVerificationRequest(
+            @NotBlank @Size(min = 6, max = 6) String totpCode) {
+    }
+
+    public record UserSecuritySceneUpdateRequest(
+            @NotNull Boolean enabled,
+            @Size(min = 6, max = 6) String totpCode) {
+    }
+
+    public record SensitiveChallengeRequest(@NotBlank String sceneCode) {
+    }
+
+    public record SensitiveChallengeVerificationRequest(
+            @NotBlank String sceneCode,
+            @NotBlank @Size(min = 6, max = 6) String emailCode,
+            @Size(min = 6, max = 6) String totpCode) {
+    }
+
     public record AuthenticatedUser(
             long userId,
             String username,
@@ -69,7 +88,15 @@ public final class AuthModels {
             String accessToken,
             String refreshToken,
             Instant accessTokenExpiresAt,
-            Instant refreshTokenExpiresAt) {
+            Instant refreshTokenExpiresAt,
+            boolean requiresEmailVerification) {
+        public AuthResponse(AuthenticatedUser user,
+                            String accessToken,
+                            String refreshToken,
+                            Instant accessTokenExpiresAt,
+                            Instant refreshTokenExpiresAt) {
+            this(user, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, false);
+        }
     }
 
     public record JwtPrincipal(
