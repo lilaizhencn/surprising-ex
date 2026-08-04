@@ -103,6 +103,26 @@ class AdminPermissionFilterTest {
     }
 
     @Test
+    void mapsWalletWithdrawalReadAndWriteToDedicatedPermissions() throws ServletException, IOException {
+        AuthService authService = authService();
+        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
+        MockHttpServletRequest readRequest = new MockHttpServletRequest(
+                "GET", "/api/v1/admin/wallet/withdrawals");
+        readRequest.addHeader("Authorization", "Bearer admin");
+        MockHttpServletResponse readResponse = new MockHttpServletResponse();
+        filter.doFilter(readRequest, readResponse, new MockFilterChain());
+
+        MockHttpServletRequest writeRequest = new MockHttpServletRequest(
+                "POST", "/api/v1/admin/wallet/withdrawals/00000000-0000-0000-0000-000000000001/approve");
+        writeRequest.addHeader("Authorization", "Bearer admin");
+        MockHttpServletResponse writeResponse = new MockHttpServletResponse();
+        filter.doFilter(writeRequest, writeResponse, new MockFilterChain());
+
+        verify(authService).requireAdminPermission("Bearer admin", "admin.wallet.read");
+        verify(authService).requireAdminPermission("Bearer admin", "admin.wallet.write");
+    }
+
+    @Test
     void publicGatewayIsNotRestrictedByAdminPermissions() throws ServletException, IOException {
         AuthService authService = authService();
         AdminPermissionFilter filter = new AdminPermissionFilter(authService);

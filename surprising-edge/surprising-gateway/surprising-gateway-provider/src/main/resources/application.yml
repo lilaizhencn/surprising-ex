@@ -37,6 +37,11 @@ management:
 
 surprising:
   gateway:
+    withdrawal:
+      single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT:10000}
+      daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT:50000}
+      valuation-base-url: ${GATEWAY_WITHDRAWAL_VALUATION_BASE_URL:http://localhost:9082}
+      valuation-max-age: ${GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE:30s}
     custody-wallet:
       enabled: ${GATEWAY_CUSTODY_WALLET_ENABLED:false}
       base-url: ${GATEWAY_CUSTODY_WALLET_BASE_URL:http://localhost:8002}

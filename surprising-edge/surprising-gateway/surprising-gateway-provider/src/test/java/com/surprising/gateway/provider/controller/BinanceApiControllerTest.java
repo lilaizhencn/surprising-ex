@@ -16,7 +16,7 @@ import com.surprising.gateway.provider.auth.GatewayApiKeyService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
 import com.surprising.gateway.provider.service.GatewayProxyService;
-import com.surprising.gateway.provider.service.SpotAccountClient;
+import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -61,7 +61,7 @@ class BinanceApiControllerTest {
 
         BinanceApiController controller = new BinanceApiController(properties, proxy,
                 mock(GatewayApiKeyService.class), authService, mock(ComplianceService.class),
-                mock(CustodyWalletClient.class), mock(SpotAccountClient.class), new ObjectMapper());
+                mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
 
         var response = controller.handle(request, null);
         List<Map<String, Object>> orders = new ObjectMapper().readValue(response.getBody(), List.class);
@@ -98,7 +98,7 @@ class BinanceApiControllerTest {
                 .thenReturn(ResponseEntity.ok(payload.getBytes(StandardCharsets.UTF_8)));
         BinanceApiController controller = new BinanceApiController(properties, proxy,
                 mock(GatewayApiKeyService.class), authService, mock(ComplianceService.class),
-                mock(CustodyWalletClient.class), mock(SpotAccountClient.class), new ObjectMapper());
+                mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
 
         var response = controller.handle(request, null);
         Map<String, Object> ticker = new ObjectMapper().readValue(response.getBody(), Map.class);
@@ -133,7 +133,7 @@ class BinanceApiControllerTest {
         request.setParameter("symbol", "BTCUSDT");
         BinanceApiController controller = new BinanceApiController(properties, proxy,
                 mock(GatewayApiKeyService.class), authService, mock(ComplianceService.class),
-                mock(CustodyWalletClient.class), mock(SpotAccountClient.class), new ObjectMapper());
+                mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
 
         var response = controller.handle(request, null);
         Map<String, Object> ticker = new ObjectMapper().readValue(response.getBody(), Map.class);

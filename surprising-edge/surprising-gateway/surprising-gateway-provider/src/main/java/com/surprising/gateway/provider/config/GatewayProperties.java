@@ -26,6 +26,7 @@ public class GatewayProperties implements EnvironmentAware {
     private String deploymentProfile = "local";
     private Security security = new Security();
     private CustodyWallet custodyWallet = new CustodyWallet();
+    private Withdrawal withdrawal = new Withdrawal();
     private KycDocuments kycDocuments = new KycDocuments();
     private BinanceApi binanceApi = new BinanceApi();
     private HttpClient httpClient = new HttpClient();
@@ -89,6 +90,18 @@ public class GatewayProperties implements EnvironmentAware {
         requireNonBlank(failures, "custody-wallet.webhook-secret", wallet.getWebhookSecret());
         requireNonBlank(failures, "custody-wallet.spot-account-base-url", wallet.getSpotAccountBaseUrl());
 
+        Withdrawal configuredWithdrawal = withdrawal == null ? new Withdrawal() : withdrawal;
+        if (configuredWithdrawal.getSingleApprovalThresholdUsdt() == null
+                || configuredWithdrawal.getSingleApprovalThresholdUsdt().signum() <= 0) {
+            failures.add("withdrawal.single-approval-threshold-usdt must be positive");
+        }
+        if (configuredWithdrawal.getDailyLimitUsdt() == null
+                || configuredWithdrawal.getDailyLimitUsdt().signum() <= 0) {
+            failures.add("withdrawal.daily-limit-usdt must be positive");
+        }
+        requireServiceUrl(failures, "withdrawal.valuation-base-url",
+                configuredWithdrawal.getValuationBaseUrl());
+
         KycDocuments documents = kycDocuments == null ? new KycDocuments() : kycDocuments;
         if (!documents.isEnabled()) {
             failures.add("kyc-documents.enabled must be true");
@@ -147,6 +160,18 @@ public class GatewayProperties implements EnvironmentAware {
         }
     }
 
+    private static void requireServiceUrl(List<String> failures, String name, String value) {
+        try {
+            java.net.URI uri = java.net.URI.create(value);
+            if ((!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())))
+                    || uri.getHost() == null) {
+                failures.add(name + " must be an HTTP(S) URL with a host");
+            }
+        } catch (IllegalArgumentException ex) {
+            failures.add(name + " must be an HTTP(S) URL with a host");
+        }
+    }
+
     @Override
     public void setEnvironment(Environment environment) {
         this.environment = environment == null ? new StandardEnvironment() : environment;
@@ -183,6 +208,14 @@ public class GatewayProperties implements EnvironmentAware {
 
     public void setCustodyWallet(CustodyWallet custodyWallet) {
         this.custodyWallet = custodyWallet == null ? new CustodyWallet() : custodyWallet;
+    }
+
+    public Withdrawal getWithdrawal() {
+        return withdrawal;
+    }
+
+    public void setWithdrawal(Withdrawal withdrawal) {
+        this.withdrawal = withdrawal == null ? new Withdrawal() : withdrawal;
     }
 
     public KycDocuments getKycDocuments() {
@@ -626,6 +659,46 @@ public class GatewayProperties implements EnvironmentAware {
         public void setRequestTimeout(Duration requestTimeout) {
             this.requestTimeout = requestTimeout == null || requestTimeout.isNegative()
                     || requestTimeout.isZero() ? Duration.ofSeconds(10) : requestTimeout;
+        }
+    }
+
+    public static class Withdrawal {
+        private java.math.BigDecimal singleApprovalThresholdUsdt = new java.math.BigDecimal("10000");
+        private java.math.BigDecimal dailyLimitUsdt = new java.math.BigDecimal("50000");
+        private String valuationBaseUrl = "http://localhost:9082";
+        private Duration valuationMaxAge = Duration.ofSeconds(30);
+
+        public java.math.BigDecimal getSingleApprovalThresholdUsdt() {
+            return singleApprovalThresholdUsdt;
+        }
+
+        public void setSingleApprovalThresholdUsdt(java.math.BigDecimal value) {
+            this.singleApprovalThresholdUsdt = value;
+        }
+
+        public java.math.BigDecimal getDailyLimitUsdt() {
+            return dailyLimitUsdt;
+        }
+
+        public void setDailyLimitUsdt(java.math.BigDecimal value) {
+            this.dailyLimitUsdt = value;
+        }
+
+        public String getValuationBaseUrl() {
+            return valuationBaseUrl;
+        }
+
+        public void setValuationBaseUrl(String value) {
+            this.valuationBaseUrl = value == null ? "" : value.trim();
+        }
+
+        public Duration getValuationMaxAge() {
+            return valuationMaxAge;
+        }
+
+        public void setValuationMaxAge(Duration value) {
+            this.valuationMaxAge = value == null || value.isZero() || value.isNegative()
+                    ? Duration.ofSeconds(30) : value;
         }
     }
 

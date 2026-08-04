@@ -6,7 +6,7 @@ import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
-import com.surprising.gateway.provider.service.SpotAccountClient;
+import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -33,18 +33,18 @@ public class CustodyWalletController {
     private final CustodyWalletClient walletClient;
     private final SensitiveActionVerificationService verificationService;
     private final ComplianceService complianceService;
-    private final SpotAccountClient spotAccountClient;
+    private final CustodyWithdrawalService withdrawalService;
 
     public CustodyWalletController(AuthService authService,
                                    CustodyWalletClient walletClient,
                                    SensitiveActionVerificationService verificationService,
                                    ComplianceService complianceService,
-                                   SpotAccountClient spotAccountClient) {
+                                   CustodyWithdrawalService withdrawalService) {
         this.authService = authService;
         this.walletClient = walletClient;
         this.verificationService = verificationService;
         this.complianceService = complianceService;
-        this.spotAccountClient = spotAccountClient;
+        this.withdrawalService = withdrawalService;
     }
 
     @PostMapping("/addresses")
@@ -85,27 +85,19 @@ public class CustodyWalletController {
             JwtPrincipal principal = principal(authorization);
             requireSecurity(principal.userId(), "WITHDRAWAL", emailCode, totpCode);
             requireKyc(principal.userId());
-            long amountUnits = walletClient.amountUnits(request.assetSymbol(), request.amount());
-            String withdrawalReference = "custody-wallet-withdrawal:" + idempotencyKey;
-            spotAccountClient.adjustBalance(principal.userId(), request.assetSymbol(), -amountUnits,
-                    withdrawalReference, "custody wallet withdrawal");
-            Map<String, Object> payload = Map.of(
-                    "custodyAddressId", request.custodyAddressId(),
-                    "chain", request.chain(),
-                    "assetSymbol", request.assetSymbol(),
-                    "toAddress", request.toAddress(),
-                    "amount", request.amount(),
-                    "externalReference", request.externalReference() == null || request.externalReference().isBlank()
-                            ? withdrawalReference : request.externalReference(),
-                    "confirmed", true);
-            try {
-                return walletClient.createWithdrawal(principal.userId(), payload, idempotencyKey);
-            } catch (CustodyWalletClient.CustodyWalletRejectedException ex) {
-                spotAccountClient.adjustBalance(principal.userId(), request.assetSymbol(), amountUnits,
-                        withdrawalReference + ":refund", "custody wallet withdrawal rejected refund");
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "custody wallet rejected withdrawal; funds were released", ex);
-            }
+            CustodyWithdrawalService.WithdrawalResponse response = withdrawalService.submit(
+                    principal.userId(), idempotencyKey,
+                    new CustodyWithdrawalService.WithdrawalRequest(
+                            request.custodyAddressId(), request.chain(), request.assetSymbol(), request.toAddress(),
+                            request.amount(), request.externalReference()));
+            return Map.of("id", response.walletWithdrawalId() == null
+                            ? response.withdrawalId().toString() : response.walletWithdrawalId(),
+                    "withdrawalId", response.withdrawalId().toString(), "status", response.status(),
+                    "success", true);
+        } catch (CustodyWithdrawalService.WithdrawalRejectedException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (CustodyWithdrawalService.WithdrawalUnknownException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         } catch (IllegalStateException ex) {

@@ -10,6 +10,11 @@ spring:
 surprising:
   gateway:
     deployment-profile: production
+    withdrawal:
+      single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT}
+      daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT}
+      valuation-base-url: ${GATEWAY_WITHDRAWAL_VALUATION_BASE_URL}
+      valuation-max-age: ${GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE:30s}
     custody-wallet:
       enabled: ${GATEWAY_CUSTODY_WALLET_ENABLED:true}
       base-url: ${GATEWAY_CUSTODY_WALLET_BASE_URL}

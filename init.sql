@@ -3305,6 +3305,8 @@ VALUES
     ('admin.approvals.write', 'Write approvals', 'Create, approve, reject and consume admin approvals.'),
     ('admin.system.read', 'Read system state', 'View configured routes and backend health.'),
     ('admin.security.mfa', 'Manage own MFA', 'Enroll, confirm and disable own admin TOTP MFA.'),
+    ('admin.wallet.read', 'Read wallet withdrawals', 'View exchange withdrawal intents and custody status.'),
+    ('admin.wallet.write', 'Write wallet withdrawals', 'Approve, reject and retry exchange withdrawals.'),
     ('admin.support.read', 'Read support console', 'View read-only customer support user overviews.'),
     ('admin.support.write', 'Write support tickets', 'Create and update customer support tickets and internal notes.'),
     ('admin.compliance.read', 'Read compliance', 'View KYC, AML cases and risk tags.'),
@@ -3346,6 +3348,8 @@ SELECT r.role_id, p.permission_id
       'admin.approvals.write',
       'admin.system.read',
       'admin.security.mfa',
+      'admin.wallet.read',
+      'admin.wallet.write',
       'admin.compliance.read',
       'admin.compliance.write',
       'admin.permissions.read',
@@ -3433,6 +3437,48 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_webhook_events (
 
 CREATE INDEX IF NOT EXISTS gateway_wallet_webhook_events_status_idx
     ON gateway_wallet_webhook_events (status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawals (
+    withdrawal_id        UUID PRIMARY KEY,
+    user_id              BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    idempotency_key      TEXT NOT NULL,
+    request_sha256       TEXT NOT NULL,
+    chain                TEXT NOT NULL,
+    asset_symbol         TEXT NOT NULL,
+    custody_address_id   UUID NOT NULL,
+    to_address           TEXT NOT NULL,
+    amount               TEXT NOT NULL,
+    amount_units         BIGINT NOT NULL,
+    usdt_value            NUMERIC(38,18) NOT NULL,
+    external_reference   TEXT,
+    spot_debit_reference TEXT NOT NULL,
+    request_payload      JSONB NOT NULL,
+    status               TEXT NOT NULL,
+    wallet_response      JSONB,
+    wallet_withdrawal_id TEXT,
+    error_code           TEXT,
+    error_message        TEXT,
+    admin_user_id        BIGINT REFERENCES gateway_users(user_id),
+    admin_username       TEXT,
+    admin_reason         TEXT,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    submitted_at         TIMESTAMPTZ,
+    completed_at         TIMESTAMPTZ,
+    CONSTRAINT gateway_wallet_withdrawal_status_check CHECK (
+        status IN ('PENDING_APPROVAL', 'PROCESSING', 'DEBIT_UNKNOWN', 'DEBITED', 'SUBMITTED',
+                   'BROADCAST_UNKNOWN', 'COMPLETED', 'REJECTED', 'REFUND_PENDING', 'REFUNDED')
+    ),
+    CONSTRAINT gateway_wallet_withdrawal_amount_check CHECK (amount_units > 0 AND usdt_value > 0),
+    CONSTRAINT gateway_wallet_withdrawal_idempotency_uq UNIQUE (user_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawals_user_status_idx
+    ON gateway_wallet_withdrawals (user_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawals_wallet_id_idx
+    ON gateway_wallet_withdrawals (wallet_withdrawal_id)
+    WHERE wallet_withdrawal_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS gateway_user_kyc_profiles (
     user_id                 BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),

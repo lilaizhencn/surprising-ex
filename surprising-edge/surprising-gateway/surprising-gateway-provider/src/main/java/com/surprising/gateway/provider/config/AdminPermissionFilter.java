@@ -72,6 +72,9 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         if (path.startsWith("/security/mfa")) {
             return "admin.security.mfa";
         }
+        if (path.startsWith("/wallet/withdrawals")) {
+            return "admin.wallet." + (read ? "read" : "write");
+        }
         if (path.startsWith("/support")) {
             return "admin.support." + (read ? "read" : "write");
         }

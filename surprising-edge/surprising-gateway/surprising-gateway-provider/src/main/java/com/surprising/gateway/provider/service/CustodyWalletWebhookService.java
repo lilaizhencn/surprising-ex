@@ -33,17 +33,20 @@ public class CustodyWalletWebhookService {
     private final GatewayProperties properties;
     private final CustodyWalletWebhookRepository repository;
     private final CustodyWalletClient walletClient;
+    private final CustodyWithdrawalService withdrawalService;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
     public CustodyWalletWebhookService(GatewayProperties properties,
                                        CustodyWalletWebhookRepository repository,
                                        CustodyWalletClient walletClient,
+                                       CustodyWithdrawalService withdrawalService,
                                        RestTemplate restTemplate,
                                        ObjectMapper objectMapper) {
         this.properties = properties;
         this.repository = repository;
         this.walletClient = walletClient;
+        this.withdrawalService = withdrawalService;
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
     }
@@ -79,7 +82,9 @@ public class CustodyWalletWebhookService {
             throw new IllegalStateException("wallet webhook event is already being processed");
         }
         try {
-            if (DEPOSIT_CONFIRMED.equals(normalizedType) || DEPOSIT_REORGED.equals(normalizedType)) {
+            if (normalizedType.startsWith("WITHDRAWAL.")) {
+                withdrawalService.handleWebhook(normalizedType, event);
+            } else if (DEPOSIT_CONFIRMED.equals(normalizedType) || DEPOSIT_REORGED.equals(normalizedType)) {
                 postSpotAdjustment(eventId, normalizedType, event);
             }
             repository.markProcessed(eventId, Instant.now());

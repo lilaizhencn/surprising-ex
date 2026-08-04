@@ -24,9 +24,10 @@ class CustodyWalletWebhookServiceTest {
     private final GatewayProperties properties = new GatewayProperties();
     private final CustodyWalletWebhookRepository repository = mock(CustodyWalletWebhookRepository.class);
     private final CustodyWalletClient walletClient = mock(CustodyWalletClient.class);
+    private final CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
     private final RestTemplate restTemplate = mock(RestTemplate.class);
     private final CustodyWalletWebhookService service = new CustodyWalletWebhookService(
-            properties, repository, walletClient, restTemplate, new ObjectMapper());
+            properties, repository, walletClient, withdrawalService, restTemplate, new ObjectMapper());
 
     @BeforeEach
     void setUp() {
@@ -73,5 +74,22 @@ class CustodyWalletWebhookServiceTest {
                 Long.toString(Instant.now().getEpochSecond()), "v1=bad", body))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("signature");
+    }
+
+    @Test
+    void dispatchesWithdrawalWebhookToTheWithdrawalStateMachine() {
+        byte[] body = ("{\"id\":\"withdrawal-event-1\",\"type\":\"WITHDRAWAL.CONFIRMED\","
+                + "\"data\":{\"withdrawalId\":\"wallet-withdrawal-1\","
+                + "\"externalReference\":\"custody-wallet-withdrawal:withdraw-1\"}}")
+                .getBytes(StandardCharsets.UTF_8);
+        long timestamp = Instant.now().getEpochSecond();
+        when(repository.claim(eq("withdrawal-event-1"), eq("WITHDRAWAL.CONFIRMED"), any(), any()))
+                .thenReturn(CustodyWalletWebhookRepository.ClaimResult.CLAIMED);
+
+        service.handle("withdrawal-event-1", "WITHDRAWAL.CONFIRMED", Long.toString(timestamp),
+                service.signature("webhook-secret", timestamp, body), body);
+
+        verify(withdrawalService).handleWebhook(eq("WITHDRAWAL.CONFIRMED"), any());
+        verify(repository).markProcessed(eq("withdrawal-event-1"), any());
     }
 }

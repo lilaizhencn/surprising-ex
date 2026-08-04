@@ -8,7 +8,7 @@ import com.surprising.gateway.provider.auth.GatewayApiKeyService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.GatewayProxyService;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
-import com.surprising.gateway.provider.service.SpotAccountClient;
+import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
@@ -41,7 +41,7 @@ public class BinanceApiController {
     private final AuthService authService;
     private final ComplianceService complianceService;
     private final CustodyWalletClient custodyWalletClient;
-    private final SpotAccountClient spotAccountClient;
+    private final CustodyWithdrawalService withdrawalService;
     private final ObjectMapper objectMapper;
 
     public BinanceApiController(GatewayProperties properties,
@@ -50,7 +50,7 @@ public class BinanceApiController {
                                 AuthService authService,
                                 ComplianceService complianceService,
                                 CustodyWalletClient custodyWalletClient,
-                                SpotAccountClient spotAccountClient,
+                                CustodyWithdrawalService withdrawalService,
                                 ObjectMapper objectMapper) {
         this.properties = properties;
         this.gatewayProxyService = gatewayProxyService;
@@ -58,7 +58,7 @@ public class BinanceApiController {
         this.authService = authService;
         this.complianceService = complianceService;
         this.custodyWalletClient = custodyWalletClient;
-        this.spotAccountClient = spotAccountClient;
+        this.withdrawalService = withdrawalService;
         this.objectMapper = objectMapper;
     }
 
@@ -123,6 +123,8 @@ public class BinanceApiController {
         } catch (ResponseStatusException ex) {
             return error(HttpStatus.valueOf(ex.getStatusCode().value()), -1000,
                     ex.getReason() == null ? "request failed" : ex.getReason());
+        } catch (CustodyWithdrawalService.WithdrawalRejectedException ex) {
+            return error(HttpStatus.BAD_REQUEST, -2010, ex.getMessage());
         } catch (IllegalArgumentException ex) {
             return error(HttpStatus.BAD_REQUEST, -1100, ex.getMessage());
         } catch (IllegalStateException ex) {
@@ -191,27 +193,14 @@ public class BinanceApiController {
                 .filter(entry -> entry.getKey().equalsIgnoreCase(chain))
                 .map(Map.Entry::getValue).findFirst()
                 .orElseThrow(() -> new IllegalStateException("withdrawal source address is not configured for network"));
-        long amountUnits = custodyWalletClient.amountUnits(asset, required(params, "amount"));
-        String reference = "custody-wallet-withdrawal:" + idempotencyKey;
-        spotAccountClient.adjustBalance(userId, asset, -amountUnits, reference, "binance wallet withdrawal");
-        Map<String, Object> payload = Map.of(
-                "custodyAddressId", java.util.UUID.fromString(sourceId),
-                "chain", chain,
-                "assetSymbol", asset,
-                "toAddress", required(params, "address"),
-                "amount", required(params, "amount"),
-                "externalReference", reference,
-                "confirmed", true);
-        try {
-            Map<String, Object> result = custodyWalletClient.createWithdrawal(userId, payload, idempotencyKey);
-            return json(HttpStatus.OK, Map.of("id", result.getOrDefault("id", idempotencyKey),
-                    "msg", "success", "success", true));
-        } catch (CustodyWalletClient.CustodyWalletRejectedException ex) {
-            spotAccountClient.adjustBalance(userId, asset, amountUnits, reference + ":refund",
-                    "binance wallet withdrawal rejected refund");
-            return error(HttpStatus.BAD_REQUEST, -2010,
-                    "custody wallet rejected withdrawal; funds were released");
-        }
+        CustodyWithdrawalService.WithdrawalResponse result = withdrawalService.submit(userId, idempotencyKey,
+                new CustodyWithdrawalService.WithdrawalRequest(
+                        java.util.UUID.fromString(sourceId), chain, asset, required(params, "address"),
+                        required(params, "amount"), null));
+        return json(HttpStatus.OK, Map.of("id", result.walletWithdrawalId() == null
+                        ? result.withdrawalId().toString() : result.walletWithdrawalId(),
+                "withdrawalId", result.withdrawalId().toString(), "status", result.status(),
+                "msg", "success", "success", true));
     }
 
     private ResponseEntity<byte[]> withdrawHistory(HttpServletRequest request) {
