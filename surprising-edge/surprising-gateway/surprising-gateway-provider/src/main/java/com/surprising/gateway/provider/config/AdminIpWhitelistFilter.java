@@ -45,7 +45,7 @@ public class AdminIpWhitelistFilter extends OncePerRequestFilter {
     }
 
     boolean isAllowed(String clientIp, List<String> allowlist) {
-        if (clientIp == null || clientIp.isBlank()) {
+        if (clientIp == null || clientIp.isBlank() || allowlist == null || allowlist.isEmpty()) {
             return false;
         }
         for (String rule : allowlist) {
@@ -67,7 +67,12 @@ public class AdminIpWhitelistFilter extends OncePerRequestFilter {
         List<String> trustedProxyAllowlist = properties.getSecurity().getTrustedProxyIpAllowlist();
         if (forwarded != null && !forwarded.isBlank()
                 && isAllowed(remoteAddress, trustedProxyAllowlist)) {
-            return forwarded.split(",")[0].trim();
+            String[] chain = forwarded.split(",");
+            for (int index = chain.length - 1; index >= 0; index--) {
+                if (!chain[index].isBlank()) {
+                    return chain[index].trim();
+                }
+            }
         }
         return remoteAddress;
     }

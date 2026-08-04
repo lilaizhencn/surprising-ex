@@ -5,11 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.ClassPathResource;
 
@@ -88,6 +91,27 @@ class GatewayProductionSecurityConfigurationTest {
     void productionYamlBindsTheFailClosedSecurityBoundary() throws IOException {
         StandardEnvironment environment = new StandardEnvironment();
         environment.setActiveProfiles("production");
+        Map<String, Object> testEnvironment = new HashMap<>();
+        testEnvironment.put("GATEWAY_ADMIN_IP_ALLOWLIST", "10.0.0.0/8");
+        testEnvironment.put("GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST", "192.0.2.0/24");
+        testEnvironment.put("GATEWAY_JWT_SECRET", "jwt-secret-with-at-least-thirty-two-characters");
+        testEnvironment.put("GATEWAY_VERIFICATION_CODE_PEPPER",
+                "verification-pepper-with-at-least-thirty-two-characters");
+        testEnvironment.put("GATEWAY_MFA_SECRET_ENCRYPTION_KEY",
+                "mfa-encryption-key-with-at-least-thirty-two-characters");
+        testEnvironment.put("RESEND_API_KEY", "re_test_api_key");
+        testEnvironment.put("RESEND_FROM", "security@example.com");
+        testEnvironment.put("GATEWAY_CUSTODY_WALLET_BASE_URL", "https://wallet.example.com");
+        testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_KEY", "wallet-key");
+        testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_SECRET", "wallet-secret");
+        testEnvironment.put("GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET", "wallet-webhook-secret");
+        testEnvironment.put("GATEWAY_SPOT_ACCOUNT_BASE_URL", "https://account.example.com");
+        testEnvironment.put("GATEWAY_KYC_DOCUMENTS_ENDPOINT", "https://s3.example.com");
+        testEnvironment.put("GATEWAY_KYC_DOCUMENTS_BUCKET", "kyc-documents");
+        testEnvironment.put("GATEWAY_KYC_DOCUMENTS_REGION", "ap-southeast-1");
+        testEnvironment.put("GATEWAY_KYC_DOCUMENTS_ACCESS_KEY", "s3-access-key");
+        testEnvironment.put("GATEWAY_KYC_DOCUMENTS_SECRET_KEY", "s3-secret-key");
+        environment.getPropertySources().addFirst(new MapPropertySource("test-env", testEnvironment));
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
         for (var source : loader.load("production", new ClassPathResource("application-production.yml"))) {
             environment.getPropertySources().addLast(source);
@@ -101,10 +125,13 @@ class GatewayProductionSecurityConfigurationTest {
         assertThat(properties.getSecurity().isRequireIdentityForPrivateRoutes()).isTrue();
         assertThat(properties.getSecurity().isAllowUserIdHeaderFallback()).isFalse();
         assertThat(properties.getSecurity().isRequireAdminMfa()).isTrue();
-        assertThat(properties.getSecurity().getTrustedProxyIpAllowlist()).containsExactly(
-                "${GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST}");
+        assertThat(properties.getSecurity().getAdminIpAllowlist()).containsExactly("10.0.0.0/8");
+        assertThat(properties.getSecurity().getTrustedProxyIpAllowlist()).containsExactly("192.0.2.0/24");
         assertThat(properties.getCustodyWallet().isEnabled()).isTrue();
         assertThat(properties.getKycDocuments().isEnabled()).isTrue();
         assertThat(properties.getKycDocuments().getType()).isEqualTo("s3");
+        properties.setEnvironment(environment);
+        assertThatCode(properties::validateProductionSecurityConfiguration)
+                .doesNotThrowAnyException();
     }
 }
