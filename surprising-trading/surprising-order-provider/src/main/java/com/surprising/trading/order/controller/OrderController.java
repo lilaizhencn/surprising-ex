@@ -240,4 +240,18 @@ public class OrderController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
+
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/history")
+    public OrderQueryResponse historyOrders(@RequestParam("userId") long userId,
+                                            @RequestParam(value = "symbol", required = false) String symbol,
+                                            @RequestParam(value = "limit", defaultValue = "100") int limit,
+                                            @RequestParam(value = "orderId", required = false) Long orderId,
+                                            @RequestParam(value = "startTime", required = false) Long startTime,
+                                            @RequestParam(value = "endTime", required = false) Long endTime) {
+        try {
+            return orderService.historyOrders(userId, symbol, limit, orderId, startTime, endTime);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
 }

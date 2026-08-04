@@ -681,6 +681,35 @@ public class OrderUserStateService {
         return new OrderQueryResponse(page.size(), page, cursor, more, "orderId.desc", limit);
     }
 
+    public OrderQueryResponse historyOrders(long userId,
+                                            String symbol,
+                                            int limit,
+                                            Long minimumOrderId,
+                                            Instant startTime,
+                                            Instant endTime) {
+        String normalized = symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase();
+        UserPartitionKey partition = partition(properties.getKafka().getProductLine(), userId);
+        List<OrderResponse> orders = lane.execute(partition, () -> {
+            applyPartition(partition);
+            return state(partition).orders().stream()
+                    .filter(value -> normalized == null || value.symbol().equals(normalized))
+                    .filter(value -> minimumOrderId == null || value.orderId() >= minimumOrderId)
+                    .filter(value -> startTime == null || !value.createdAt().isBefore(startTime))
+                    .filter(value -> endTime == null || !value.createdAt().isAfter(endTime))
+                    .sorted(java.util.Comparator.comparingLong(OrderRecord::orderId).reversed())
+                    .limit((long) limit + 1L)
+                    .map(this::toResponse)
+                    .toList();
+        });
+        boolean more = orders.size() > limit;
+        List<OrderResponse> page = more ? orders.subList(0, limit) : orders;
+        String cursor = more && !page.isEmpty()
+                ? Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(("order:" + page.getLast().orderId()).getBytes(StandardCharsets.UTF_8))
+                : null;
+        return new OrderQueryResponse(page.size(), page, cursor, more, "orderId.desc", limit);
+    }
+
     /** 返回当前产品线所有用户分区中的本地订单状态，供 JVM 快照启动重建使用。 */
     public List<OrderRecord> localOrders(ProductLine productLine) {
         requireCurrentProductLine(productLine);

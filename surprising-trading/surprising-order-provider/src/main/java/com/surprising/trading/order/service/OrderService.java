@@ -549,6 +549,31 @@ public class OrderService {
         return orderUserStateService.openOrders(userId, symbol, limit, beforeOrderId);
     }
 
+    public OrderQueryResponse historyOrders(long userId,
+                                            String symbol,
+                                            int limit,
+                                            Long minimumOrderId,
+                                            Long startTimeMillis,
+                                            Long endTimeMillis) {
+        if (userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        if (minimumOrderId != null && minimumOrderId <= 0L) {
+            throw new IllegalArgumentException("orderId must be positive");
+        }
+        Instant startTime = epochMillis(startTimeMillis, "startTime");
+        Instant endTime = epochMillis(endTimeMillis, "endTime");
+        if (startTime != null && endTime != null && startTime.isAfter(endTime)) {
+            throw new IllegalArgumentException("startTime must not be after endTime");
+        }
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
+        return orderUserStateService.historyOrders(userId, normalizedSymbol, limit, minimumOrderId,
+                startTime, endTime);
+    }
+
     public OrderQueryResponse adminOrders(Long userId, String symbol, String status, Long orderId, int limit) {
         return adminOrders(userId, symbol, status, orderId, limit, null, null, null);
     }
@@ -975,6 +1000,20 @@ public class OrderService {
             return orderId;
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid open-order cursor", ex);
+        }
+    }
+
+    private Instant epochMillis(Long value, String field) {
+        if (value == null) {
+            return null;
+        }
+        if (value < 0L) {
+            throw new IllegalArgumentException(field + " must be non-negative");
+        }
+        try {
+            return Instant.ofEpochMilli(value);
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException(field + " is invalid", ex);
         }
     }
 

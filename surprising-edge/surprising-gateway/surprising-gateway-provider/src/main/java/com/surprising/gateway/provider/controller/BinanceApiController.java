@@ -107,13 +107,17 @@ public class BinanceApiController {
                 return orders(request, userId, true);
             }
             if (path.endsWith("/allOrders")) {
-                return error(HttpStatus.NOT_IMPLEMENTED, -1000, "historical order query is not available yet");
+                long userId = authenticate(request, "READ");
+                return historyOrders(request, userId);
             }
             if (path.endsWith("/order")) {
                 return order(request, body);
             }
-            if (path.endsWith("/ticker/price") || path.endsWith("/ticker/24hr")) {
-                return error(HttpStatus.NOT_IMPLEMENTED, -1000, "ticker compatibility is not available yet");
+            if (path.endsWith("/ticker/price")) {
+                return tickerPrice(request);
+            }
+            if (path.endsWith("/ticker/24hr")) {
+                return ticker24hr(request);
             }
             return error(HttpStatus.NOT_FOUND, -1003, "unsupported Binance-compatible endpoint");
         } catch (ResponseStatusException ex) {
@@ -303,6 +307,34 @@ public class BinanceApiController {
         return json(HttpStatus.OK, result);
     }
 
+    private ResponseEntity<byte[]> historyOrders(HttpServletRequest request, long userId) {
+        String symbol = request.getParameter("symbol");
+        String query = "userId=" + userId + "&limit=" + capped(request.getParameter("limit"));
+        if (symbol != null && !symbol.isBlank()) {
+            query += "&symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol));
+        }
+        for (String parameter : List.of("orderId", "startTime", "endTime")) {
+            String value = request.getParameter(parameter);
+            if (value != null && !value.isBlank()) query += "&" + parameter + "=" + encode(value);
+        }
+        ResponseEntity<byte[]> response = proxy("trading", "/history", request, null, userId, query, true);
+        if (response.getStatusCode().isError()) return response;
+        Map<String, Object> payload = readMap(response.getBody());
+        List<Map<String, Object>> result = new ArrayList<>();
+        Object rows = payload.get("orders");
+        if (rows instanceof List<?> list) {
+            for (Object row : list) {
+                Map<String, Object> value = mapValue(row);
+                String rowSymbol = symbol == null || symbol.isBlank()
+                        ? stringValue(value.get("symbol")) : symbol;
+                result.add(orderView(value, rowSymbol, properties.getBinanceApi().scale(rowSymbol)));
+            }
+        }
+        result.sort((left, right) -> Long.compare(number(left.get("orderId")),
+                number(right.get("orderId"))));
+        return json(HttpStatus.OK, result);
+    }
+
     private ResponseEntity<byte[]> account(HttpServletRequest request, byte[] body, long userId) {
         ResponseEntity<byte[]> response = proxy("account", "/balances", request, null, userId,
                 "userId=" + userId, true);
@@ -338,6 +370,59 @@ public class BinanceApiController {
                 "lastUpdateId", number(payload.get("sequence")),
                 "bids", levels(payload.get("bids"), scale),
                 "asks", levels(payload.get("asks"), scale)));
+    }
+
+    private ResponseEntity<byte[]> tickerPrice(HttpServletRequest request) {
+        String symbol = requiredParameter(request, "symbol");
+        String query = "symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol));
+        ResponseEntity<byte[]> response = proxy("trading-market", "/latest-trade", request, null, null, query, false);
+        if (response.getStatusCode().isError()) return response;
+        Map<String, Object> payload = readMap(response.getBody());
+        GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
+        return json(HttpStatus.OK, Map.of("symbol", symbol,
+                "price", decimalString(number(payload.get("priceTicks")), scale.getPriceScale())));
+    }
+
+    private ResponseEntity<byte[]> ticker24hr(HttpServletRequest request) {
+        String symbol = requiredParameter(request, "symbol");
+        String query = "symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol));
+        ResponseEntity<byte[]> response = proxy("trading-market", "/ticker-24hr", request, null, null, query, false);
+        if (response.getStatusCode().isError()) return response;
+        Map<String, Object> payload = readMap(response.getBody());
+        GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
+        int priceScale = scale.getPriceScale();
+        int quantityScale = scale.getQuantityScale();
+        long openTicks = number(payload.get("openPriceTicks"));
+        long lastTicks = number(payload.get("lastPriceTicks"));
+        BigDecimal volumeSteps = decimalNumber(payload.get("volumeSteps"));
+        BigDecimal quoteVolumeTicksSteps = decimalNumber(payload.get("quoteVolumeTicksSteps"));
+        BigDecimal weightedTicks = volumeSteps.signum() == 0
+                ? BigDecimal.ZERO
+                : quoteVolumeTicksSteps.divide(volumeSteps, priceScale + 8, java.math.RoundingMode.HALF_UP);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("symbol", symbol);
+        BigDecimal priceChangeTicks = BigDecimal.valueOf(lastTicks).subtract(BigDecimal.valueOf(openTicks));
+        result.put("priceChange", decimalString(priceChangeTicks, priceScale));
+        result.put("priceChangePercent", percentage(lastTicks, openTicks));
+        result.put("weightedAvgPrice", decimalString(weightedTicks, priceScale));
+        result.put("prevClosePrice", decimalString(openTicks, priceScale));
+        result.put("lastPrice", decimalString(lastTicks, priceScale));
+        result.put("lastQty", decimalString(decimalNumber(payload.get("lastQuantitySteps")), quantityScale));
+        result.put("bidPrice", "0");
+        result.put("bidQty", "0");
+        result.put("askPrice", "0");
+        result.put("askQty", "0");
+        result.put("openPrice", decimalString(openTicks, priceScale));
+        result.put("highPrice", decimalString(number(payload.get("highPriceTicks")), priceScale));
+        result.put("lowPrice", decimalString(number(payload.get("lowPriceTicks")), priceScale));
+        result.put("volume", decimalString(volumeSteps, quantityScale));
+        result.put("quoteVolume", decimalString(quoteVolumeTicksSteps, priceScale + quantityScale));
+        result.put("openTime", epochMillisOrZero(payload.get("openTime")));
+        result.put("closeTime", epochMillisOrZero(payload.get("closeTime")));
+        result.put("firstId", number(payload.get("firstTradeId")));
+        result.put("lastId", number(payload.get("lastTradeId")));
+        result.put("count", number(payload.get("tradeCount")));
+        return json(HttpStatus.OK, result);
     }
 
     private ResponseEntity<byte[]> proxy(String service, String suffix, HttpServletRequest request,
@@ -479,6 +564,27 @@ public class BinanceApiController {
         return BigDecimal.valueOf(units, scale).stripTrailingZeros().toPlainString();
     }
 
+    private String decimalString(BigDecimal units, int scale) {
+        return units.movePointLeft(scale).stripTrailingZeros().toPlainString();
+    }
+
+    private BigDecimal decimalNumber(Object value) {
+        if (value == null) return BigDecimal.ZERO;
+        try {
+            return new BigDecimal(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("decimal response field is invalid", ex);
+        }
+    }
+
+    private String percentage(long lastTicks, long openTicks) {
+        if (openTicks == 0L) return "0";
+        return BigDecimal.valueOf(lastTicks).subtract(BigDecimal.valueOf(openTicks))
+                .multiply(BigDecimal.valueOf(100L))
+                .divide(BigDecimal.valueOf(openTicks), 8, java.math.RoundingMode.HALF_UP)
+                .stripTrailingZeros().toPlainString();
+    }
+
     private long number(Object value) {
         if (value == null) return 0L;
         try {
@@ -494,6 +600,15 @@ public class BinanceApiController {
             return Instant.parse(String.valueOf(value)).toEpochMilli();
         } catch (RuntimeException ex) {
             return System.currentTimeMillis();
+        }
+    }
+
+    private long epochMillisOrZero(Object value) {
+        if (value == null || String.valueOf(value).isBlank()) return 0L;
+        try {
+            return Instant.parse(String.valueOf(value)).toEpochMilli();
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException("timestamp response field is invalid", ex);
         }
     }
 

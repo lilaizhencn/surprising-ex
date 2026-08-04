@@ -19,6 +19,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandType;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.OrderUserCommand;
 import com.surprising.trading.api.model.OrderUserCommandType;
@@ -58,6 +59,32 @@ class OrderUserStateServiceTest {
             assertThat(wal.replay(new com.surprising.eventstore.UserPartitionKey(
                     ProductLine.LINEAR_PERPETUAL, 1001L))).hasSize(1);
             assertThat(service.get(1001L, order.orderId()).status()).isEqualTo(OrderStatus.ACCEPTED);
+        }
+    }
+
+    @Test
+    void historyOrdersIncludesTerminalOrdersAndAppliesTimeAndOrderIdFilters() throws Exception {
+        Path root = Files.createTempDirectory("order-user-history-");
+        TradingOrderProperties properties = properties();
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            service.place(order("history-accepted", 9301L, 10L));
+            Instant terminalAt = Instant.parse("2026-07-02T00:00:00Z");
+            OrderRecord filled = new OrderRecord(9302L, ProductLine.LINEAR_PERPETUAL, 1001L, "history-filled",
+                    "BTC-USDT", 1L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 100L, 10L, 10L, 0L,
+                    MarginMode.CROSS, PositionSide.NET, 100L, 200L, false, false, null, null, 0L,
+                    OrderStatus.FILLED, null, terminalAt, terminalAt, 1L);
+            service.place(filled);
+
+            assertThat(service.historyOrders(1001L, "BTC-USDT", 10, null,
+                    Instant.parse("2026-07-01T00:00:00Z"), terminalAt).orders())
+                    .extracting(OrderResponse::orderId)
+                    .containsExactly(9302L, 9301L);
+            assertThat(service.historyOrders(1001L, "BTC-USDT", 10, 9302L, null, null).orders())
+                    .extracting(OrderResponse::orderId)
+                    .containsExactly(9302L);
         }
     }
 

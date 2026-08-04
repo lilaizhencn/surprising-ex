@@ -2,10 +2,12 @@ package com.surprising.trading.matching.repository;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.MarketTickerSummary;
 import com.surprising.trading.matching.config.MatchingProperties;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
@@ -78,6 +80,54 @@ public class MatchingTradeRepository {
             }
         });
         requireCompleteBatch(rows, trades.size());
+    }
+
+    public MarketTickerSummary summary(String symbol, Instant from, Instant to) {
+        if (symbol == null || symbol.isBlank() || from == null || to == null || from.isAfter(to)) {
+            throw new IllegalArgumentException("ticker summary request is invalid");
+        }
+        return jdbcTemplate.queryForObject("""
+                WITH recent AS (
+                    SELECT trade_id, price_ticks, quantity_steps, event_time
+                      FROM trading_match_trades
+                     WHERE product_line = ?
+                       AND symbol = ?
+                       AND event_time >= ?
+                       AND event_time <= ?
+                )
+                SELECT COALESCE((SELECT trade_id FROM recent ORDER BY event_time, trade_id LIMIT 1), 0) AS first_trade_id,
+                       COALESCE((SELECT trade_id FROM recent ORDER BY event_time DESC, trade_id DESC LIMIT 1), 0) AS last_trade_id,
+                       COUNT(*) AS trade_count,
+                       COALESCE((SELECT price_ticks FROM recent ORDER BY event_time, trade_id LIMIT 1), 0) AS open_price_ticks,
+                       COALESCE(MAX(price_ticks), 0) AS high_price_ticks,
+                       COALESCE(MIN(price_ticks), 0) AS low_price_ticks,
+                       COALESCE((SELECT price_ticks FROM recent ORDER BY event_time DESC, trade_id DESC LIMIT 1), 0) AS last_price_ticks,
+                       COALESCE(SUM(quantity_steps::NUMERIC), 0) AS volume_steps,
+                       COALESCE(SUM(price_ticks::NUMERIC * quantity_steps::NUMERIC), 0) AS quote_volume_ticks_steps,
+                       COALESCE((SELECT quantity_steps::NUMERIC FROM recent ORDER BY event_time DESC, trade_id DESC LIMIT 1), 0) AS last_quantity_steps,
+                       MIN(event_time) AS open_time,
+                       MAX(event_time) AS close_time
+                  FROM recent
+                """, (result, rowNum) -> new MarketTickerSummary(
+                        symbol.trim().toUpperCase(java.util.Locale.ROOT),
+                        result.getLong("first_trade_id"),
+                        result.getLong("last_trade_id"),
+                        result.getLong("trade_count"),
+                        result.getLong("open_price_ticks"),
+                        result.getLong("high_price_ticks"),
+                        result.getLong("low_price_ticks"),
+                        result.getLong("last_price_ticks"),
+                        result.getBigDecimal("volume_steps"),
+                        result.getBigDecimal("quote_volume_ticks_steps"),
+                        result.getBigDecimal("last_quantity_steps"),
+                        timestamp(result.getTimestamp("open_time")),
+                        timestamp(result.getTimestamp("close_time"))),
+                productLine(), symbol.trim().toUpperCase(java.util.Locale.ROOT),
+                Timestamp.from(from), Timestamp.from(to));
+    }
+
+    private Instant timestamp(Timestamp value) {
+        return value == null ? null : value.toInstant();
     }
 
     private String productLine() {
