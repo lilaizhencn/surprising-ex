@@ -100,6 +100,30 @@ class GatewayProductionSecurityConfigurationTest {
     }
 
     @Test
+    void productionProfileRejectsOpenTrustedProxyAllowlist() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.setDeploymentProfile("production");
+        properties.getSecurity().setAdminIpAllowlist(List.of("10.0.0.0/8"));
+        properties.getSecurity().setTrustedProxyIpAllowlist(List.of("::/0"));
+
+        assertThatThrownBy(properties::validateProductionSecurityConfiguration)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("security.trusted-proxy-ip-allowlist must not allow all addresses");
+    }
+
+    @Test
+    void productionProfileRejectsBlankNetworkRule() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.setDeploymentProfile("production");
+        properties.getSecurity().setAdminIpAllowlist(List.of(""));
+        properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
+
+        assertThatThrownBy(properties::validateProductionSecurityConfiguration)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("security.admin-ip-allowlist must not contain blank rules");
+    }
+
+    @Test
     void productionYamlBindsTheFailClosedSecurityBoundary() throws IOException {
         StandardEnvironment environment = new StandardEnvironment();
         environment.setActiveProfiles("production");
