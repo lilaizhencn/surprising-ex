@@ -3463,6 +3463,37 @@ ALTER TABLE gateway_user_kyc_profiles ADD COLUMN IF NOT EXISTS face_verification
 CREATE INDEX IF NOT EXISTS gateway_user_kyc_status_idx
     ON gateway_user_kyc_profiles (status, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS gateway_user_kyc_documents (
+    document_id         BIGSERIAL PRIMARY KEY,
+    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    document_type       TEXT NOT NULL,
+    original_filename   TEXT NOT NULL,
+    content_type        TEXT NOT NULL,
+    file_size           BIGINT NOT NULL,
+    sha256              TEXT NOT NULL,
+    object_key          TEXT NOT NULL UNIQUE,
+    status              TEXT NOT NULL DEFAULT 'UPLOADED',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at          TIMESTAMPTZ,
+    CONSTRAINT gateway_user_kyc_documents_type_check CHECK (
+        document_type IN ('ID_CARD', 'PASSPORT', 'ADDRESS_PROOF', 'BUSINESS_LICENSE', 'FACE_IMAGE')
+    ),
+    CONSTRAINT gateway_user_kyc_documents_content_type_check CHECK (
+        content_type IN ('application/pdf', 'image/jpeg', 'image/png')
+    ),
+    CONSTRAINT gateway_user_kyc_documents_size_check CHECK (file_size > 0),
+    CONSTRAINT gateway_user_kyc_documents_sha256_check CHECK (sha256 ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT gateway_user_kyc_documents_status_check CHECK (
+        status IN ('UPLOADED', 'SUBMITTED', 'DELETED')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_kyc_documents_user_idx
+    ON gateway_user_kyc_documents (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS gateway_user_kyc_documents_status_idx
+    ON gateway_user_kyc_documents (status, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS gateway_user_risk_tags (
     tag_id                  BIGSERIAL PRIMARY KEY,
     user_id                 BIGINT NOT NULL REFERENCES gateway_users(user_id),

@@ -5,15 +5,21 @@ import com.surprising.gateway.provider.auth.ComplianceModels.AmlCase;
 import com.surprising.gateway.provider.auth.ComplianceModels.AmlCaseCreateRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.AmlCaseStatusUpdateRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.ComplianceUserSummary;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycUpdateRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
 import com.surprising.gateway.provider.config.GatewayTraceFilter;
+import com.surprising.gateway.provider.service.KycDocumentNotFoundException;
+import com.surprising.gateway.provider.service.KycDocumentStorageException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.function.Supplier;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -68,6 +74,7 @@ public class AdminComplianceController {
             return new ComplianceUserDetailResponse(
                     detail.user(),
                     detail.kyc(),
+                    detail.kycDocuments(),
                     detail.riskTags(),
                     detail.amlCases());
         } catch (IllegalArgumentException ex) {
@@ -126,6 +133,45 @@ public class AdminComplianceController {
             KycUpdateRequest request = readBody(body, KycUpdateRequest.class);
             return withApproval(() -> complianceService.adminUpsertKyc(
                     authorization, userId, request, requestMetadata(httpRequest), body));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+        }
+    }
+
+    @GetMapping("/users/{userId}/kyc/documents")
+    public List<KycDocument> kycDocuments(@RequestHeader("Authorization") String authorization,
+                                          @PathVariable long userId) {
+        try {
+            return complianceService.adminKycDocuments(authorization, userId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+        }
+    }
+
+    @GetMapping("/users/{userId}/kyc/documents/{documentId}")
+    public ResponseEntity<byte[]> kycDocument(@RequestHeader("Authorization") String authorization,
+                                              @PathVariable long userId,
+                                              @PathVariable long documentId) {
+        try {
+            ComplianceService.KycDocumentContent content = complianceService.adminKycDocument(
+                    authorization, userId, documentId);
+            MediaType mediaType = MediaType.parseMediaType(content.document().contentType());
+            String extension = MediaType.APPLICATION_PDF.includes(mediaType)
+                    ? ".pdf" : MediaType.IMAGE_PNG.includes(mediaType) ? ".png" : ".jpg";
+            return ResponseEntity.ok()
+                    .contentType(mediaType)
+                    .contentLength(content.content().length)
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "inline; filename=\"kyc-document-" + documentId + extension + "\"")
+                    .body(content.content());
+        } catch (KycDocumentNotFoundException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        } catch (KycDocumentStorageException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -244,6 +290,7 @@ public class AdminComplianceController {
     public record ComplianceUserDetailResponse(
             AuthenticatedUser user,
             KycProfile kyc,
+            List<KycDocument> kycDocuments,
             List<RiskTag> riskTags,
             List<AmlCase> amlCases) {
     }

@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth;
 import java.time.Instant;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import java.util.List;
 
 /**
  * 合规领域在服务层与单表仓储之间共享的数据模型。
@@ -68,7 +69,21 @@ public final class ComplianceModels {
             @Size(max = 40) String provider,
             @Size(max = 240) String providerReference,
             @Size(max = 8000) String submittedDocuments,
-            @Size(max = 40) String faceVerificationStatus) {
+            @Size(max = 40) String faceVerificationStatus,
+            @Size(max = 10) List<Long> documentIds) {
+    }
+
+    public record KycDocument(
+            long documentId,
+            long userId,
+            String documentType,
+            String originalFilename,
+            String contentType,
+            long fileSize,
+            String sha256,
+            String status,
+            Instant createdAt,
+            Instant deletedAt) {
     }
 
     public record RiskTag(

@@ -59,6 +59,10 @@ public class ComplianceKycRepository {
     }
 
     public KycProfile submit(long userId, KycSubmissionRequest request, Instant now) {
+        return submit(userId, request, request.submittedDocuments(), now);
+    }
+
+    public KycProfile submit(long userId, KycSubmissionRequest request, String submittedDocuments, Instant now) {
         return jdbcTemplate.queryForObject("""
                 INSERT INTO gateway_user_kyc_profiles (
                     user_id, kyc_level, status, country, document_type, provider, provider_reference,
@@ -89,7 +93,7 @@ public class ComplianceKycRepository {
                 ComplianceValidation.blankToNull(request.documentType()),
                 ComplianceValidation.blankToNull(request.provider()),
                 ComplianceValidation.blankToNull(request.providerReference()),
-                documents(request.submittedDocuments()),
+                documents(submittedDocuments),
                 applicantType(request.applicantType()),
                 faceStatus(request.faceVerificationStatus()),
                 Timestamp.from(now), Timestamp.from(now));
@@ -134,7 +138,8 @@ public class ComplianceKycRepository {
             if (parsed.size() > 10) {
                 throw new IllegalArgumentException("submittedDocuments may contain at most 10 items");
             }
-            Set<String> allowedTypes = Set.of("ID_CARD", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE");
+            Set<String> allowedTypes = Set.of(
+                    "ID_CARD", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
             for (JsonNode document : parsed) {
                 if (!document.isObject()) {
                     throw new IllegalArgumentException("each submitted document must be an object");

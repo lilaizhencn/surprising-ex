@@ -7,11 +7,14 @@ import com.surprising.gateway.provider.auth.ComplianceModels.ComplianceUserSumma
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycUpdateRequest;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
+import com.surprising.gateway.provider.service.KycDocumentService;
 import java.time.Instant;
 import java.util.List;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
 /**
@@ -26,19 +29,25 @@ public class ComplianceService {
     private final ComplianceAmlCaseRepository amlCaseRepository;
     private final AuthService authService;
     private final AdminApprovalService approvalService;
+    private final KycDocumentService kycDocumentService;
+    private final AdminAuditRepository adminAuditRepository;
 
     public ComplianceService(ComplianceUserProjectionRepository userProjectionRepository,
                              ComplianceKycRepository kycRepository,
                              ComplianceRiskTagRepository riskTagRepository,
                              ComplianceAmlCaseRepository amlCaseRepository,
                              AuthService authService,
-                             AdminApprovalService approvalService) {
+                             AdminApprovalService approvalService,
+                             KycDocumentService kycDocumentService,
+                             AdminAuditRepository adminAuditRepository) {
         this.userProjectionRepository = userProjectionRepository;
         this.kycRepository = kycRepository;
         this.riskTagRepository = riskTagRepository;
         this.amlCaseRepository = amlCaseRepository;
         this.authService = authService;
         this.approvalService = approvalService;
+        this.kycDocumentService = kycDocumentService;
+        this.adminAuditRepository = adminAuditRepository;
     }
 
     public AdminCursorPage.CursorPage<ComplianceUserSummary> adminUsersPage(
@@ -63,6 +72,7 @@ public class ComplianceService {
         return new AdminComplianceUserDetail(
                 user,
                 kyc(userId),
+                kycDocumentService.findForUser(userId),
                 riskTags(userId, null, 200),
                 amlCases(userId, null, 200));
     }
@@ -103,9 +113,52 @@ public class ComplianceService {
         return kycRepository.find(authService.authenticateBearer(authorization).userId());
     }
 
+    public KycDocument uploadUserKycDocument(String authorization, String documentType,
+                                             org.springframework.web.multipart.MultipartFile file) {
+        long userId = authService.authenticateBearer(authorization).userId();
+        return kycDocumentService.upload(userId, documentType, file);
+    }
+
+    public List<KycDocument> userKycDocuments(String authorization) {
+        long userId = authService.authenticateBearer(authorization).userId();
+        return kycDocumentService.findForUser(userId);
+    }
+
+    public KycDocumentContent userKycDocument(String authorization, long documentId) {
+        long userId = authService.authenticateBearer(authorization).userId();
+        KycDocument document = kycDocumentService.requireForUser(userId, documentId);
+        return new KycDocumentContent(document, kycDocumentService.read(document));
+    }
+
+    public List<KycDocument> adminKycDocuments(String authorization, long userId) {
+        authService.requireAdminPermission(authorization, "admin.compliance.read");
+        authService.adminUser(authorization, userId);
+        return kycDocumentService.findForUser(userId);
+    }
+
+    public KycDocumentContent adminKycDocument(String authorization, long userId, long documentId) {
+        AuthModels.JwtPrincipal principal = authService.requireAdminPermission(
+                authorization, "admin.compliance.read");
+        KycDocument document = kycDocumentService.requireForAdmin(userId, documentId);
+        try {
+            KycDocumentContent content = new KycDocumentContent(document, kycDocumentService.read(document));
+            recordDocumentAccess(principal, userId, documentId, true, null);
+            return content;
+        } catch (RuntimeException ex) {
+            recordDocumentAccess(principal, userId, documentId, false, ex.getMessage());
+            throw ex;
+        }
+    }
+
+    @Transactional
     public KycProfile submitUserKyc(String authorization, KycSubmissionRequest request) {
         long userId = authService.authenticateBearer(authorization).userId();
-        return kycRepository.submit(userId, request, Instant.now());
+        List<KycDocument> documents = kycDocumentService.requireSubmissionDocuments(
+                userId, request.documentIds(), request.documentType());
+        String submittedDocuments = kycDocumentService.references(documents);
+        KycProfile profile = kycRepository.submit(userId, request, submittedDocuments, Instant.now());
+        kycDocumentService.markSubmitted(userId, request.documentIds());
+        return profile;
     }
 
     public RiskTag adminCreateRiskTag(String authorization,
@@ -174,6 +227,17 @@ public class ComplianceService {
         return kycRepository.find(userId);
     }
 
+    private void recordDocumentAccess(AuthModels.JwtPrincipal principal,
+                                      long userId,
+                                      long documentId,
+                                      boolean success,
+                                      String errorMessage) {
+        adminAuditRepository.record(new AdminAuditRepository.AdminOperationRecord(
+                principal.userId(), principal.username(), principal.roles(), "gateway", "GET",
+                "/api/v1/admin/compliance/users/" + userId + "/kyc/documents/" + documentId,
+                null, null, null, success ? 200 : 500, null, success, errorMessage, null, null, null, Instant.now()));
+    }
+
     public List<RiskTag> riskTags(Long userId, String status, int limit) {
         return riskTagRepository.find(userId, status, limit);
     }
@@ -229,7 +293,11 @@ public class ComplianceService {
     public record AdminComplianceUserDetail(
             AuthenticatedUser user,
             KycProfile kyc,
+            List<KycDocument> kycDocuments,
             List<RiskTag> riskTags,
             List<AmlCase> amlCases) {
+    }
+
+    public record KycDocumentContent(KycDocument document, byte[] content) {
     }
 }

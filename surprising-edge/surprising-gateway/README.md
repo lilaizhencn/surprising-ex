@@ -80,6 +80,8 @@ Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后
 
 合规风控数据落在 `gateway_user_kyc_profiles`、`gateway_user_risk_tags`、`gateway_user_aml_cases`。合规用户列表 `GET /api/v1/admin/compliance/users` 支持 `updatedAt.desc`、`updatedAt.asc` 游标分页；风险标签列表支持 `createdAt.desc`、`createdAt.asc`、`updatedAt.desc`、`updatedAt.asc`；AML case 列表支持 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`。响应返回 `nextCursor`、`hasMore`、`sort`、`limit`。KYC 更新、风险标签创建/解除、AML case 创建/状态更新均属于本地后台写操作，需要 `admin.compliance.write` 权限和匹配的已批准审批单。
 
+用户 KYC 文件接口为 `POST /api/v1/compliance/kyc/documents`（multipart 字段 `documentType`、`file`）、`GET /api/v1/compliance/kyc/documents` 和 `GET /api/v1/compliance/kyc/documents/{documentId}`；提交 KYC 时必须携带已上传文件的 `documentIds`，服务端会校验文件归属、类型、大小、MIME 与文件头，并把 SHA-256 写入元数据。后台可通过对应的 `/api/v1/admin/compliance/users/{userId}/kyc/documents` 接口查看和读取文件，读取操作写入后台审计日志。文件存储默认关闭并 fail-closed；生产环境必须配置 `GATEWAY_KYC_DOCUMENTS_ENABLED=true`、`GATEWAY_KYC_DOCUMENTS_TYPE=s3`、bucket/endpoint/region/access-key/secret-key，或在受控开发环境使用 `filesystem` 类型。单文件默认上限为 15 MiB，可用 `GATEWAY_KYC_DOCUMENTS_MAX_FILE_SIZE_BYTES` 调整。
+
 gateway 本地核心后台列表使用统一游标分页协议：`/api/v1/admin/approvals`、
 `/api/v1/admin/audit/login-logs` 和 `/api/v1/admin/audit/operations` 支持 `limit`、`cursor`、
 `sort`，响应保留原列表字段并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。

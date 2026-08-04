@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: surprising-gateway-provider
+  servlet:
+    multipart:
+      max-file-size: ${GATEWAY_KYC_MULTIPART_MAX_FILE_SIZE:20MB}
+      max-request-size: ${GATEWAY_KYC_MULTIPART_MAX_REQUEST_SIZE:25MB}
   main:
     keep-alive: true
   threads:
@@ -43,6 +47,17 @@ surprising:
       asset-scales-json: ${GATEWAY_CUSTODY_WALLET_ASSET_SCALES:{}}
       withdrawal-address-ids-json: ${GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS:{}}
       request-timeout: ${GATEWAY_CUSTODY_WALLET_REQUEST_TIMEOUT:10s}
+    kyc-documents:
+      enabled: ${GATEWAY_KYC_DOCUMENTS_ENABLED:false}
+      type: ${GATEWAY_KYC_DOCUMENTS_TYPE:s3}
+      endpoint: ${GATEWAY_KYC_DOCUMENTS_ENDPOINT:}
+      bucket: ${GATEWAY_KYC_DOCUMENTS_BUCKET:}
+      region: ${GATEWAY_KYC_DOCUMENTS_REGION:us-east-1}
+      access-key: ${GATEWAY_KYC_DOCUMENTS_ACCESS_KEY:}
+      secret-key: ${GATEWAY_KYC_DOCUMENTS_SECRET_KEY:}
+      root-path: ${GATEWAY_KYC_DOCUMENTS_ROOT_PATH:/tmp/surprising-kyc-documents}
+      prefix: ${GATEWAY_KYC_DOCUMENTS_PREFIX:kyc}
+      max-file-size-bytes: ${GATEWAY_KYC_DOCUMENTS_MAX_FILE_SIZE_BYTES:15728640}
     binance-api:
       enabled: ${GATEWAY_BINANCE_API_ENABLED:true}
       symbol-aliases-json: ${GATEWAY_BINANCE_SYMBOL_ALIASES:{}}

@@ -20,6 +20,7 @@ public class GatewayProperties {
 
     private Security security = new Security();
     private CustodyWallet custodyWallet = new CustodyWallet();
+    private KycDocuments kycDocuments = new KycDocuments();
     private BinanceApi binanceApi = new BinanceApi();
     private HttpClient httpClient = new HttpClient();
     private Observability observability = new Observability();
@@ -57,6 +58,14 @@ public class GatewayProperties {
 
     public void setCustodyWallet(CustodyWallet custodyWallet) {
         this.custodyWallet = custodyWallet == null ? new CustodyWallet() : custodyWallet;
+    }
+
+    public KycDocuments getKycDocuments() {
+        return kycDocuments;
+    }
+
+    public void setKycDocuments(KycDocuments kycDocuments) {
+        this.kycDocuments = kycDocuments == null ? new KycDocuments() : kycDocuments;
     }
 
     public HttpClient getHttpClient() {
@@ -561,6 +570,99 @@ public class GatewayProperties {
                     .map(Map.Entry::getValue)
                     .findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("symbol scale is not configured: " + symbol));
+        }
+    }
+
+    public static class KycDocuments {
+        private boolean enabled;
+        private String type = "s3";
+        private String endpoint = "";
+        private String bucket = "";
+        private String region = "us-east-1";
+        private String accessKey = "";
+        private String secretKey = "";
+        private String rootPath = "/tmp/surprising-kyc-documents";
+        private String prefix = "kyc";
+        private long maxFileSizeBytes = 15L * 1024L * 1024L;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type == null || type.isBlank() ? "s3" : type.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+
+        public String getEndpoint() {
+            return endpoint;
+        }
+
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint == null ? "" : endpoint.trim().replaceAll("/$", "");
+        }
+
+        public String getBucket() {
+            return bucket;
+        }
+
+        public void setBucket(String bucket) {
+            this.bucket = bucket == null ? "" : bucket.trim();
+        }
+
+        public String getRegion() {
+            return region;
+        }
+
+        public void setRegion(String region) {
+            this.region = region == null || region.isBlank() ? "us-east-1" : region.trim();
+        }
+
+        public String getAccessKey() {
+            return accessKey;
+        }
+
+        public void setAccessKey(String accessKey) {
+            this.accessKey = accessKey == null ? "" : accessKey.trim();
+        }
+
+        public String getSecretKey() {
+            return secretKey;
+        }
+
+        public void setSecretKey(String secretKey) {
+            this.secretKey = secretKey == null ? "" : secretKey;
+        }
+
+        public String getRootPath() {
+            return rootPath;
+        }
+
+        public void setRootPath(String rootPath) {
+            this.rootPath = rootPath == null || rootPath.isBlank() ? "/tmp/surprising-kyc-documents" : rootPath;
+        }
+
+        public String getPrefix() {
+            return prefix;
+        }
+
+        public void setPrefix(String prefix) {
+            this.prefix = prefix == null || prefix.isBlank() ? "kyc" : prefix.trim().replaceAll("^/+|/+$", "");
+        }
+
+        public long getMaxFileSizeBytes() {
+            return maxFileSizeBytes;
+        }
+
+        public void setMaxFileSizeBytes(long maxFileSizeBytes) {
+            this.maxFileSizeBytes = maxFileSizeBytes <= 0 ? 15L * 1024L * 1024L : maxFileSizeBytes;
         }
     }
 
