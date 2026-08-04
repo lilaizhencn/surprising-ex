@@ -78,6 +78,37 @@ class CustodyWithdrawalServiceTest {
     }
 
     @Test
+    void timeoutAfterConcurrentSubmissionDoesNotDowngradeToBroadcastUnknown() {
+        GatewayProperties properties = new GatewayProperties();
+        CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
+        SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
+        WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
+        UUID withdrawalId = UUID.randomUUID();
+        CustodyWithdrawalRepository.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
+                "withdraw-timeout-race");
+        CustodyWithdrawalRepository.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
+                "withdraw-timeout-race");
+        CustodyWithdrawalRepository.WithdrawalRecord submitted = record(withdrawalId, "SUBMITTED",
+                "withdraw-timeout-race");
+        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
+        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
+        when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
+        when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-timeout-race")))
+                .thenThrow(new IllegalStateException("custody request timed out"));
+        when(repository.markBroadcastUnknown(eq(withdrawalId), any(), eq("custody request timed out")))
+                .thenThrow(new IllegalStateException("already submitted"));
+        when(repository.find(withdrawalId)).thenReturn(submitted);
+
+        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+                valuationClient);
+
+        assertThat(service.submit(42L, "withdraw-timeout-race", request()).status()).isEqualTo("SUBMITTED");
+        verify(repository).markBroadcastUnknown(eq(withdrawalId), any(), eq("custody request timed out"));
+    }
+
+    @Test
     void rejectedCustodyResponseRefundsExactlyOnceAndReturnsRejected() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);

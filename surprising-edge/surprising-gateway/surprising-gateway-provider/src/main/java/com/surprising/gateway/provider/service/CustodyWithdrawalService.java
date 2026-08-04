@@ -216,7 +216,15 @@ public class CustodyWithdrawalService {
             refund(record, "custody wallet withdrawal rejected refund", "custody wallet rejected withdrawal");
             throw new WithdrawalRejectedException("custody wallet rejected withdrawal; funds were released", ex);
         } catch (RuntimeException ex) {
-            repository.markBroadcastUnknown(record.withdrawalId(), "{}", message(ex));
+            try {
+                repository.markBroadcastUnknown(record.withdrawalId(), "{}", message(ex));
+            } catch (IllegalStateException stateEx) {
+                CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
+                if (current != null && submissionOutcomeAdvanced(current.status())) {
+                    return response(current);
+                }
+                throw stateEx;
+            }
             throw new WithdrawalUnknownException("custody wallet withdrawal status is unknown", ex);
         }
     }
@@ -246,8 +254,17 @@ public class CustodyWithdrawalService {
         switch (normalizedType) {
             case "WITHDRAWAL.CREATED", "WITHDRAWAL.BROADCAST" -> repository.markSubmitted(
                     record.withdrawalId(), response, walletWithdrawalId);
-            case "WITHDRAWAL.BROADCAST_UNKNOWN" -> repository.markBroadcastUnknown(
-                    record.withdrawalId(), response, "custody wallet broadcast status is unknown", walletWithdrawalId);
+            case "WITHDRAWAL.BROADCAST_UNKNOWN" -> {
+                try {
+                    repository.markBroadcastUnknown(record.withdrawalId(), response,
+                            "custody wallet broadcast status is unknown", walletWithdrawalId);
+                } catch (IllegalStateException ex) {
+                    CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
+                    if (current == null || !submissionOutcomeAdvanced(current.status())) {
+                        throw ex;
+                    }
+                }
+            }
             case "WITHDRAWAL.CONFIRMED" -> repository.markCompleted(
                     record.withdrawalId(), response, walletWithdrawalId);
             case "WITHDRAWAL.FAILED" -> repository.markFailurePending(

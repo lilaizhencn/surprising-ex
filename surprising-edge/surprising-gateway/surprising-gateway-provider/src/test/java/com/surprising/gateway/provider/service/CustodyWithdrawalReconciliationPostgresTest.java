@@ -196,6 +196,16 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void submittedWithdrawalCannotBeDowngradedToBroadcastUnknown() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'SUBMITTED' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        assertThatThrownBy(() -> repository.markBroadcastUnknown(withdrawalId, "{}", "late timeout"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("SUBMITTED");
+    }
+
+    @Test
     void duplicateCompletionForSameTargetIsIdempotent() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'SUBMITTED' WHERE withdrawal_id = ?",
                 withdrawalId);

@@ -218,7 +218,7 @@ public class CustodyWithdrawalRepository {
                    SET status = 'BROADCAST_UNKNOWN', wallet_response = ?::jsonb,
                        wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
                        error_code = 'CUSTODY_UNKNOWN', error_message = ?, updated_at = now()
-                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN')
+                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN')
                 """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
         return requireTransition(id, updated, "cannot mark withdrawal broadcast unknown", "BROADCAST_UNKNOWN");
     }
