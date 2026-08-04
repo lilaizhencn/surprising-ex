@@ -180,6 +180,29 @@ class CustodyWithdrawalServiceTest {
         verify(repository, never()).markRefundPending(any(), any());
     }
 
+    @Test
+    void localHistoryRemainsAvailableWhenCustodyHistoryIsUnavailable() {
+        GatewayProperties properties = new GatewayProperties();
+        CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
+        SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
+        WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
+        when(walletClient.withdrawals(42L, "ETH", "USDT", 50))
+                .thenThrow(new IllegalStateException("custody history unavailable"));
+        when(repository.listForUser(42L, "ETH", "USDT", 50))
+                .thenReturn(java.util.List.of(record(UUID.randomUUID(), "BROADCAST_UNKNOWN", "withdraw-history")));
+
+        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+                valuationClient);
+
+        assertThat(service.history(42L, "ETH", "USDT", 50))
+                .singleElement()
+                .satisfies(row -> {
+                    assertThat(row).containsEntry("status", "BROADCAST_UNKNOWN")
+                            .containsEntry("custodyWalletUnavailable", true);
+                });
+    }
+
     private CustodyWithdrawalService service(GatewayProperties properties,
                                              CustodyWithdrawalRepository repository,
                                              CustodyWalletClient walletClient,

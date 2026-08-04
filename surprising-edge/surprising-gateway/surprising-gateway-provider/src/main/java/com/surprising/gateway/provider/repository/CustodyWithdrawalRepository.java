@@ -83,8 +83,8 @@ public class CustodyWithdrawalRepository {
         Object[] args;
         if (walletWithdrawalId != null && !walletWithdrawalId.isBlank()) {
             if (externalReference != null && !externalReference.isBlank()) {
-                predicate = "wallet_withdrawal_id = ? AND external_reference = ?";
-                args = new Object[]{walletWithdrawalId, externalReference};
+                predicate = "external_reference = ? AND (wallet_withdrawal_id IS NULL OR wallet_withdrawal_id = ?)";
+                args = new Object[]{externalReference, walletWithdrawalId};
             } else {
                 predicate = "wallet_withdrawal_id = ?";
                 args = new Object[]{walletWithdrawalId};
@@ -176,22 +176,34 @@ public class CustodyWithdrawalRepository {
     }
 
     public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error) {
+        return markBroadcastUnknown(id, walletResponse, error, null);
+    }
+
+    public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error,
+                                                 String walletWithdrawalId) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'BROADCAST_UNKNOWN', wallet_response = ?::jsonb,
+                       wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
                        error_code = 'CUSTODY_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN')
-                """, walletResponse == null ? "{}" : walletResponse, error, id);
+                """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
         return requireUpdated(id, updated, "cannot mark withdrawal broadcast unknown");
     }
 
     public WithdrawalRecord markCompleted(UUID id, String walletResponse) {
+        return markCompleted(id, walletResponse, null);
+    }
+
+    public WithdrawalRecord markCompleted(UUID id, String walletResponse, String walletWithdrawalId) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
-                   SET status = 'COMPLETED', wallet_response = ?::jsonb, completed_at = now(), updated_at = now(),
+                   SET status = 'COMPLETED', wallet_response = ?::jsonb,
+                       wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
+                       completed_at = now(), updated_at = now(),
                        error_code = NULL, error_message = NULL
                  WHERE withdrawal_id = ? AND status IN ('SUBMITTED', 'BROADCAST_UNKNOWN')
-                """, walletResponse == null ? "{}" : walletResponse, id);
+                """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
         return requireUpdated(id, updated, "cannot mark withdrawal completed");
     }
 

@@ -10,6 +10,10 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 本地集成测试使用 `localhost:5432` 上由 Homebrew 管理的 PostgreSQL。服务管理和调优命令见
 [本地 Homebrew 中间件](local-homebrew-infra.md)。
 
+生产数据库升级到 custody 提现状态机前，先执行
+`migrations/20260805_gateway_withdrawal_correlation.sql`。该迁移会为存量提现补齐网关生成的外部引用，
+并在发现重复引用时失败停止，不会静默合并提现记录；新建数据库仍通过根目录 `init.sql` 初始化。
+
 ## 管理网关表
 
 `gateway_admin_operation_logs.duration_ms` 保存管理网关代理请求耗时，作为本地安全审计证据。

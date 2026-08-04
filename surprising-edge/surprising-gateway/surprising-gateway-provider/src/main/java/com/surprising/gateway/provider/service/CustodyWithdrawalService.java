@@ -81,8 +81,13 @@ public class CustodyWithdrawalService {
 
     public java.util.List<Map<String, Object>> history(long userId, String chain, String asset, int limit) {
         java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>();
-        for (Map<String, Object> item : walletClient.withdrawals(userId, chain, asset, limit)) {
-            rows.add(new LinkedHashMap<>(item));
+        boolean custodyUnavailable = false;
+        try {
+            for (Map<String, Object> item : walletClient.withdrawals(userId, chain, asset, limit)) {
+                rows.add(new LinkedHashMap<>(item));
+            }
+        } catch (IllegalStateException ex) {
+            custodyUnavailable = true;
         }
         for (CustodyWithdrawalRepository.WithdrawalRecord record
                 : repository.listForUser(userId, chain, asset, limit)) {
@@ -111,6 +116,7 @@ public class CustodyWithdrawalService {
             matched.put("externalReference", record.externalReference());
             matched.put("usdtValue", record.usdtValue());
             matched.put("errorMessage", record.errorMessage());
+            matched.put("custodyWalletUnavailable", custodyUnavailable);
             matched.put("createdAt", record.createdAt());
             matched.put("updatedAt", record.updatedAt());
         }
@@ -168,8 +174,9 @@ public class CustodyWithdrawalService {
             case "WITHDRAWAL.CREATED", "WITHDRAWAL.BROADCAST" -> repository.markSubmitted(
                     record.withdrawalId(), response, walletWithdrawalId);
             case "WITHDRAWAL.BROADCAST_UNKNOWN" -> repository.markBroadcastUnknown(
-                    record.withdrawalId(), response, "custody wallet broadcast status is unknown");
-            case "WITHDRAWAL.CONFIRMED" -> repository.markCompleted(record.withdrawalId(), response);
+                    record.withdrawalId(), response, "custody wallet broadcast status is unknown", walletWithdrawalId);
+            case "WITHDRAWAL.CONFIRMED" -> repository.markCompleted(
+                    record.withdrawalId(), response, walletWithdrawalId);
             case "WITHDRAWAL.FAILED" -> refund(record, "custody wallet withdrawal failed",
                     "custody wallet withdrawal failed");
             default -> throw new IllegalArgumentException("unsupported withdrawal webhook event type");
