@@ -41,7 +41,12 @@ surprising:
       webhook-secret: ${GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET:}
       spot-account-base-url: ${GATEWAY_SPOT_ACCOUNT_BASE_URL:http://localhost:9086}
       asset-scales: ${GATEWAY_CUSTODY_WALLET_ASSET_SCALES:{}}
+      withdrawal-address-ids: ${GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS:{}}
       request-timeout: ${GATEWAY_CUSTODY_WALLET_REQUEST_TIMEOUT:10s}
+    binance-api:
+      enabled: ${GATEWAY_BINANCE_API_ENABLED:true}
+      symbol-aliases: ${GATEWAY_BINANCE_SYMBOL_ALIASES:{}}
+      symbol-scales: ${GATEWAY_BINANCE_SYMBOL_SCALES:{}}
     security:
       user-id-header: X-User-Id
       require-identity-for-private-routes: true

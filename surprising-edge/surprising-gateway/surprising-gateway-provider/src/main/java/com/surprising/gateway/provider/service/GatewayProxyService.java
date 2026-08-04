@@ -122,6 +122,29 @@ public class GatewayProxyService {
                 .body(sanitizePublicContractFields(service, response.getBody()));
     }
 
+    public ResponseEntity<byte[]> proxyCompat(String service,
+                                              String targetSuffix,
+                                              String targetQuery,
+                                              HttpMethod method,
+                                              HttpServletRequest request,
+                                              byte[] body,
+                                              Long authenticatedUserId) {
+        GatewayProperties.BackendRoute route = resolveProductRoute(route(service, false), request, body);
+        GatewayIdentity identity = authenticatedUserId == null
+                ? enforceIdentity(route, request)
+                : userIdentity(Long.toString(authenticatedUserId));
+        enforceUserStatusRestrictions(service, method, request, identity);
+        URI target = compatibilityTarget(route, targetSuffix, targetQuery);
+        ResponseEntity<byte[]> response = exchange(target, method, body, request, identity, route);
+        HttpHeaders responseHeaders = new HttpHeaders();
+        if (response.getHeaders().getContentType() != null) {
+            responseHeaders.setContentType(response.getHeaders().getContentType());
+        }
+        return ResponseEntity.status(response.getStatusCode())
+                .headers(responseHeaders)
+                .body(sanitizePublicContractFields(service, response.getBody()));
+    }
+
     private ResponseEntity<byte[]> exchange(URI target,
                                             HttpMethod method,
                                             byte[] body,
@@ -193,6 +216,19 @@ public class GatewayProxyService {
         StringBuilder target = new StringBuilder(base).append(prefix).append(suffix);
         if (request.getQueryString() != null && !request.getQueryString().isBlank()) {
             target.append('?').append(request.getQueryString());
+        }
+        return URI.create(target.toString());
+    }
+
+    private URI compatibilityTarget(GatewayProperties.BackendRoute route,
+                                    String targetSuffix,
+                                    String targetQuery) {
+        String base = trimTrailingSlash(route.getBaseUrl());
+        String prefix = ensureLeadingSlash(route.getTargetPrefix());
+        String suffix = targetSuffix == null ? "" : ensureLeadingSlash(targetSuffix);
+        StringBuilder target = new StringBuilder(base).append(prefix).append(suffix);
+        if (targetQuery != null && !targetQuery.isBlank()) {
+            target.append('?').append(targetQuery);
         }
         return URI.create(target.toString());
     }

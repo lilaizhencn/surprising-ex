@@ -3397,6 +3397,25 @@ CREATE TABLE IF NOT EXISTS gateway_user_security_scenes (
 CREATE INDEX IF NOT EXISTS gateway_user_security_scenes_updated_idx
     ON gateway_user_security_scenes (user_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS gateway_api_keys (
+    api_key_id          UUID PRIMARY KEY,
+    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    api_key             TEXT NOT NULL UNIQUE,
+    secret_ciphertext   TEXT NOT NULL,
+    label               TEXT NOT NULL,
+    permissions         TEXT NOT NULL DEFAULT 'READ',
+    status              TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at        TIMESTAMPTZ,
+    revoked_at          TIMESTAMPTZ,
+    CONSTRAINT gateway_api_key_status_check CHECK (status IN ('ACTIVE', 'REVOKED')),
+    CONSTRAINT gateway_api_key_label_check CHECK (length(label) BETWEEN 1 AND 80),
+    CONSTRAINT gateway_api_key_permissions_check CHECK (permissions ~ '^(READ|TRADE|WITHDRAW)(,(READ|TRADE|WITHDRAW))*$')
+);
+
+CREATE INDEX IF NOT EXISTS gateway_api_keys_user_status_idx
+    ON gateway_api_keys (user_id, status, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS gateway_wallet_webhook_events (
     event_id            TEXT PRIMARY KEY,
     event_type          TEXT NOT NULL,

@@ -62,6 +62,17 @@ public class CustodyWalletClient {
                 new ParameterizedTypeReference<>() {}, null);
     }
 
+    public List<Map<String, Object>> withdrawals(long userId, String chain, String asset, int limit) {
+        String query = query(Map.of(
+                "chain", optional(chain),
+                "assetSymbol", optional(asset),
+                "search", subject(userId),
+                "limit", Integer.toString(Math.max(1, Math.min(limit, 200))),
+                "offset", "0"));
+        return exchange(HttpMethod.GET, API_PREFIX + "/withdrawals" + query, null,
+                new ParameterizedTypeReference<>() {}, null);
+    }
+
     public Map<String, Object> createWithdrawal(long userId,
                                                  Map<String, Object> withdrawal,
                                                  String idempotencyKey) {

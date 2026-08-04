@@ -16,6 +16,7 @@ public class GatewayProperties {
 
     private Security security = new Security();
     private CustodyWallet custodyWallet = new CustodyWallet();
+    private BinanceApi binanceApi = new BinanceApi();
     private HttpClient httpClient = new HttpClient();
     private Observability observability = new Observability();
     private Map<String, BackendRoute> routes = defaultRoutes();
@@ -40,6 +41,14 @@ public class GatewayProperties {
 
     public CustodyWallet getCustodyWallet() {
         return custodyWallet;
+    }
+
+    public BinanceApi getBinanceApi() {
+        return binanceApi;
+    }
+
+    public void setBinanceApi(BinanceApi binanceApi) {
+        this.binanceApi = binanceApi == null ? new BinanceApi() : binanceApi;
     }
 
     public void setCustodyWallet(CustodyWallet custodyWallet) {
@@ -345,6 +354,7 @@ public class GatewayProperties {
         private String webhookSecret = "";
         private String spotAccountBaseUrl = "http://localhost:9086";
         private Map<String, Long> assetScales = Map.of();
+        private Map<String, String> withdrawalAddressIds = Map.of();
         private Duration requestTimeout = Duration.ofSeconds(10);
 
         public boolean isEnabled() {
@@ -403,6 +413,14 @@ public class GatewayProperties {
             this.assetScales = assetScales == null ? Map.of() : Map.copyOf(assetScales);
         }
 
+        public Map<String, String> getWithdrawalAddressIds() {
+            return withdrawalAddressIds;
+        }
+
+        public void setWithdrawalAddressIds(Map<String, String> withdrawalAddressIds) {
+            this.withdrawalAddressIds = withdrawalAddressIds == null ? Map.of() : Map.copyOf(withdrawalAddressIds);
+        }
+
         public Duration getRequestTimeout() {
             return requestTimeout;
         }
@@ -410,6 +428,75 @@ public class GatewayProperties {
         public void setRequestTimeout(Duration requestTimeout) {
             this.requestTimeout = requestTimeout == null || requestTimeout.isNegative()
                     || requestTimeout.isZero() ? Duration.ofSeconds(10) : requestTimeout;
+        }
+    }
+
+    public static class BinanceApi {
+        private boolean enabled = true;
+        private Map<String, String> symbolAliases = Map.of();
+        private Map<String, SymbolScale> symbolScales = Map.of();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Map<String, String> getSymbolAliases() {
+            return symbolAliases;
+        }
+
+        public void setSymbolAliases(Map<String, String> symbolAliases) {
+            this.symbolAliases = symbolAliases == null ? Map.of() : Map.copyOf(symbolAliases);
+        }
+
+        public Map<String, SymbolScale> getSymbolScales() {
+            return symbolScales;
+        }
+
+        public void setSymbolScales(Map<String, SymbolScale> symbolScales) {
+            this.symbolScales = symbolScales == null ? Map.of() : Map.copyOf(symbolScales);
+        }
+
+        public String backendSymbol(String symbol) {
+            String normalized = symbol == null ? "" : symbol.trim().toUpperCase(java.util.Locale.ROOT);
+            return symbolAliases.entrySet().stream()
+                    .filter(entry -> entry.getKey().equalsIgnoreCase(normalized))
+                    .map(Map.Entry::getValue)
+                    .findFirst()
+                    .orElse(normalized);
+        }
+
+        public SymbolScale scale(String symbol) {
+            String normalized = symbol == null ? "" : symbol.trim().toUpperCase(java.util.Locale.ROOT);
+            return symbolScales.entrySet().stream()
+                    .filter(entry -> entry.getKey().equalsIgnoreCase(normalized))
+                    .map(Map.Entry::getValue)
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("symbol scale is not configured: " + symbol));
+        }
+    }
+
+    public static class SymbolScale {
+        private int priceScale;
+        private int quantityScale;
+
+        public int getPriceScale() {
+            return priceScale;
+        }
+
+        public void setPriceScale(int priceScale) {
+            this.priceScale = priceScale;
+        }
+
+        public int getQuantityScale() {
+            return quantityScale;
+        }
+
+        public void setQuantityScale(int quantityScale) {
+            this.quantityScale = quantityScale;
         }
     }
 
