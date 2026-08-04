@@ -3200,18 +3200,24 @@ CREATE INDEX IF NOT EXISTS market_maker_reference_samples_transport_time_idx
 
 CREATE TABLE IF NOT EXISTS gateway_users (
     user_id             BIGSERIAL PRIMARY KEY,
-    username            TEXT NOT NULL,
+    username            TEXT,
     email               TEXT,
+    phone               TEXT,
     password_hash       TEXT NOT NULL,
     status              TEXT NOT NULL DEFAULT 'NORMAL',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT gateway_users_username_format CHECK (username ~ '^[a-z0-9_]{3,32}$'),
     CONSTRAINT gateway_users_email_length CHECK (email IS NULL OR length(email) <= 254),
+    CONSTRAINT gateway_users_phone_format CHECK (phone IS NULL OR phone ~ '^\+[1-9][0-9]{7,14}$'),
     CONSTRAINT gateway_users_status_check CHECK (
         status IN ('NORMAL', 'FROZEN', 'TRADE_DISABLED', 'WITHDRAW_DISABLED')
     )
 );
+
+ALTER TABLE gateway_users ALTER COLUMN username DROP NOT NULL;
+ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
 
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_username_uidx
     ON gateway_users (lower(username));
@@ -3219,6 +3225,34 @@ CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_username_uidx
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_email_uidx
     ON gateway_users (lower(email))
     WHERE email IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_phone_uidx
+    ON gateway_users (phone)
+    WHERE phone IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_auth_challenges (
+    challenge_id        BIGSERIAL PRIMARY KEY,
+    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    purpose             TEXT NOT NULL,
+    channel             TEXT NOT NULL,
+    destination         TEXT NOT NULL,
+    code_hash           TEXT NOT NULL,
+    expires_at          TIMESTAMPTZ NOT NULL,
+    attempts            INTEGER NOT NULL DEFAULT 0,
+    request_ip          INET,
+    consumed_at         TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_auth_challenges_purpose_check CHECK (
+        purpose IN ('EMAIL_VERIFY', 'PASSWORD_RESET', 'LOGIN', 'SENSITIVE_ACTION')
+    ),
+    CONSTRAINT gateway_auth_challenges_channel_check CHECK (channel IN ('EMAIL', 'PHONE')),
+    CONSTRAINT gateway_auth_challenges_attempts_check CHECK (attempts BETWEEN 0 AND 5)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_auth_challenges_active_idx
+    ON gateway_auth_challenges (user_id, purpose, destination, created_at DESC)
+    WHERE consumed_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS gateway_roles (
     role_id             BIGSERIAL PRIMARY KEY,

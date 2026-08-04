@@ -56,8 +56,21 @@ public class AuthPersistenceService {
         return toAuthenticatedUser(userRepository.create(username, email, passwordHash, now), List.of("USER"));
     }
 
+    public AuthenticatedUser createUser(String username, String email, String phone,
+                                        String passwordHash, Instant now) {
+        return toAuthenticatedUser(userRepository.create(username, email, phone, passwordHash, now), List.of("USER"));
+    }
+
     public Optional<UserCredential> credentialByUsername(String username) {
         return userRepository.findCredentialByUsername(username);
+    }
+
+    public Optional<UserCredential> credentialByEmail(String email) {
+        return userRepository.findCredentialByEmail(email);
+    }
+
+    public Optional<UserCredential> credentialByPhone(String phone) {
+        return userRepository.findCredentialByPhone(phone);
     }
 
     public Optional<AuthenticatedUser> user(long userId) {
@@ -208,6 +221,10 @@ public class AuthPersistenceService {
 
     public int revokeUserRefreshSessions(long userId, Instant now) {
         return refreshSessionRepository.revokeActiveForUser(userId, now);
+    }
+
+    public int updatePasswordHash(long userId, String passwordHash, Instant now) {
+        return userRepository.updatePasswordHash(userId, passwordHash, now);
     }
 
     public void loginLog(long userId, String result, String reason, String userAgent, String ipAddress, Instant now) {

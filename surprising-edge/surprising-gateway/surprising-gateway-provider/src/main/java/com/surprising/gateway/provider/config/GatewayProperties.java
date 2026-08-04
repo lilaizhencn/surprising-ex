@@ -138,6 +138,13 @@ public class GatewayProperties {
         private String adminApprovalHeader = "X-Admin-Approval-Id";
         private Duration adminApprovalTtl = Duration.ofMinutes(30);
         private boolean requireAdminMfa = false;
+        private boolean phoneRegistrationEnabled = false;
+        private boolean requireEmailVerification = true;
+        private String resendApiKey = "";
+        private String resendFrom = "";
+        private String resendBaseUrl = "https://api.resend.com";
+        private String verificationCodePepper = "local-dev-verification-pepper-change-me";
+        private Duration verificationCodeTtl = Duration.ofMinutes(10);
         private String mfaSecretEncryptionKey = "";
         private String issuer = "surprising-ex-gateway";
         private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
@@ -220,6 +227,64 @@ public class GatewayProperties {
 
         public void setRequireAdminMfa(boolean requireAdminMfa) {
             this.requireAdminMfa = requireAdminMfa;
+        }
+
+        public boolean isPhoneRegistrationEnabled() {
+            return phoneRegistrationEnabled;
+        }
+
+        public void setPhoneRegistrationEnabled(boolean phoneRegistrationEnabled) {
+            this.phoneRegistrationEnabled = phoneRegistrationEnabled;
+        }
+
+        public boolean isRequireEmailVerification() {
+            return requireEmailVerification;
+        }
+
+        public void setRequireEmailVerification(boolean requireEmailVerification) {
+            this.requireEmailVerification = requireEmailVerification;
+        }
+
+        public String getResendApiKey() {
+            return resendApiKey;
+        }
+
+        public void setResendApiKey(String resendApiKey) {
+            this.resendApiKey = resendApiKey == null ? "" : resendApiKey;
+        }
+
+        public String getResendFrom() {
+            return resendFrom;
+        }
+
+        public void setResendFrom(String resendFrom) {
+            this.resendFrom = resendFrom == null ? "" : resendFrom;
+        }
+
+        public String getResendBaseUrl() {
+            return resendBaseUrl;
+        }
+
+        public void setResendBaseUrl(String resendBaseUrl) {
+            this.resendBaseUrl = resendBaseUrl == null || resendBaseUrl.isBlank()
+                    ? "https://api.resend.com" : resendBaseUrl.replaceAll("/$", "");
+        }
+
+        public String getVerificationCodePepper() {
+            return verificationCodePepper;
+        }
+
+        public void setVerificationCodePepper(String verificationCodePepper) {
+            this.verificationCodePepper = verificationCodePepper == null ? "" : verificationCodePepper;
+        }
+
+        public Duration getVerificationCodeTtl() {
+            return verificationCodeTtl;
+        }
+
+        public void setVerificationCodeTtl(Duration verificationCodeTtl) {
+            this.verificationCodeTtl = verificationCodeTtl == null || verificationCodeTtl.isNegative()
+                    || verificationCodeTtl.isZero() ? Duration.ofMinutes(10) : verificationCodeTtl;
         }
 
         public String getMfaSecretEncryptionKey() {

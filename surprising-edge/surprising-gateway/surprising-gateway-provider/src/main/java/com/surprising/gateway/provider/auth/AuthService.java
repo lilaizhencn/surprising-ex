@@ -15,6 +15,7 @@ import com.surprising.gateway.provider.auth.AuthModels.AdminUserQueryResponse;
 import com.surprising.gateway.provider.auth.AuthModels.LoginLogQueryResponse;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthModels.LoginRequest;
+import com.surprising.gateway.provider.auth.AuthModels.EmailVerificationRequest;
 import com.surprising.gateway.provider.auth.AuthModels.RefreshRequest;
 import com.surprising.gateway.provider.auth.AuthModels.RegisterRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
@@ -39,42 +40,65 @@ public class AuthService {
     private final PasswordHasher passwordHasher;
     private final JwtTokenService jwtTokenService;
     private final TotpService totpService;
+    private final EmailVerificationService emailVerificationService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(GatewayProperties properties,
                        AuthPersistenceService repository,
                        PasswordHasher passwordHasher,
                        JwtTokenService jwtTokenService,
-                       TotpService totpService) {
+                       TotpService totpService,
+                       EmailVerificationService emailVerificationService) {
         this.properties = properties;
         this.repository = repository;
         this.passwordHasher = passwordHasher;
         this.jwtTokenService = jwtTokenService;
         this.totpService = totpService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @Transactional
     public AuthResponse register(RegisterRequest request, HttpServletRequest httpRequest) {
-        String username = normalizeUsername(request.username());
         validatePassword(request.password());
+        String username = request.username() == null || request.username().isBlank()
+                ? null : normalizeUsername(request.username());
         String email = normalizeEmail(request.email());
+        String phone = normalizePhone(request.phone());
+        if (username != null) {
+            throw new IllegalArgumentException("username registration is disabled; use email or phone");
+        }
+        if (email == null && phone == null) {
+            throw new IllegalArgumentException("email or phone is required");
+        }
+        if (email != null && phone != null) {
+            throw new IllegalArgumentException("choose email or phone registration");
+        }
+        if (phone != null && !properties.getSecurity().isPhoneRegistrationEnabled()) {
+            throw new IllegalArgumentException("phone registration is not enabled");
+        }
         Instant now = Instant.now();
-        AuthenticatedUser user = repository.createUser(username, email, passwordHasher.hash(request.password()), now);
+        String passwordHash = passwordHasher.hash(request.password());
+        AuthenticatedUser user = phone == null
+                ? repository.createUser(username, email, passwordHash, now)
+                : repository.createUser(username, email, phone, passwordHash, now);
         repository.ensureDefaultRole(user.userId(), now);
         AuthenticatedUser withRoles = repository.user(user.userId()).orElse(user);
+        if (email != null && properties.getSecurity().isRequireEmailVerification()) {
+            emailVerificationService.issueEmailVerification(user.userId(), email, ipAddress(httpRequest), now);
+        }
         repository.loginLog(withRoles.userId(), "SUCCESS", "REGISTER", userAgent(httpRequest), ipAddress(httpRequest), now);
         return authResponse(withRoles, httpRequest, now);
     }
 
     @Transactional
     public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
-        String username = normalizeUsername(request.username());
+        String identifier = normalizeLoginIdentifier(request.identifier());
         Instant now = Instant.now();
-        GatewayUserRepository.UserCredential credential = repository.credentialByUsername(username).orElse(null);
+        GatewayUserRepository.UserCredential credential = credential(identifier).orElse(null);
         if (credential == null || !passwordHasher.matches(request.password(), credential.passwordHash())) {
             repository.loginLog(credential == null ? 0L : credential.userId(), "FAILED", "BAD_CREDENTIALS",
                     userAgent(httpRequest), ipAddress(httpRequest), now);
-            throw new IllegalArgumentException("invalid username or password");
+            throw new IllegalArgumentException("invalid identifier or password");
         }
         if ("FROZEN".equals(credential.status())) {
             repository.loginLog(credential.userId(), "FAILED", "USER_" + credential.status(),
@@ -104,6 +128,29 @@ public class AuthService {
             throw new IllegalStateException("user is not active");
         }
         return authResponse(user, httpRequest, now);
+    }
+
+    @Transactional
+    public boolean verifyEmail(String authorizationHeader, EmailVerificationRequest request) {
+        JwtPrincipal principal = authenticateBearer(authorizationHeader);
+        AuthenticatedUser user = repository.user(principal.userId())
+                .orElseThrow(() -> new IllegalStateException("user not found"));
+        if (user.email() == null || !user.email().equalsIgnoreCase(request.email())) {
+            throw new IllegalArgumentException("email does not belong to current user");
+        }
+        return emailVerificationService.verifyEmail(principal.userId(), request.email(), request.code(), Instant.now());
+    }
+
+    @Transactional
+    public EmailVerificationService.IssuedChallenge resendEmailVerification(String authorizationHeader) {
+        JwtPrincipal principal = authenticateBearer(authorizationHeader);
+        AuthenticatedUser user = repository.user(principal.userId())
+                .orElseThrow(() -> new IllegalStateException("user not found"));
+        if (user.email() == null) {
+            throw new IllegalArgumentException("current user has no email");
+        }
+        return emailVerificationService.issueEmailVerification(
+                principal.userId(), user.email(), null, Instant.now());
     }
 
     public JwtPrincipal authenticateBearer(String authorizationHeader) {
@@ -420,6 +467,30 @@ public class AuthService {
         return normalized;
     }
 
+    private String normalizeLoginIdentifier(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            throw new IllegalArgumentException("email, phone or username is required");
+        }
+        String normalized = identifier.trim();
+        if (normalized.contains("@")) {
+            return normalizeEmail(normalized);
+        }
+        if (normalized.startsWith("+")) {
+            return normalizePhone(normalized);
+        }
+        return normalizeUsername(normalized);
+    }
+
+    private java.util.Optional<GatewayUserRepository.UserCredential> credential(String identifier) {
+        if (identifier.contains("@")) {
+            return repository.credentialByEmail(identifier);
+        }
+        if (identifier.startsWith("+")) {
+            return repository.credentialByPhone(identifier);
+        }
+        return repository.credentialByUsername(identifier);
+    }
+
     private void validatePassword(String password) {
         if (password == null || password.length() < 8 || password.length() > 128) {
             throw new IllegalArgumentException("password length must be 8-128");
@@ -433,6 +504,17 @@ public class AuthService {
         String normalized = email.trim().toLowerCase(Locale.ROOT);
         if (normalized.length() > 254 || !normalized.contains("@")) {
             throw new IllegalArgumentException("invalid email");
+        }
+        return normalized;
+    }
+
+    private String normalizePhone(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return null;
+        }
+        String normalized = phone.trim().replace(" ", "").replace("-", "");
+        if (!normalized.matches("\\+[1-9]\\d{7,14}")) {
+            throw new IllegalArgumentException("phone must use E.164 format");
         }
         return normalized;
     }

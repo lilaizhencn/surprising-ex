@@ -13,6 +13,7 @@ import com.surprising.gateway.provider.auth.AuthModels.AdminRefreshSessionRespon
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthModels.LoginRequest;
+import com.surprising.gateway.provider.auth.AuthModels.RegisterRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
@@ -27,8 +28,9 @@ class AuthServiceTest {
     private final PasswordHasher passwordHasher = mock(PasswordHasher.class);
     private final JwtTokenService jwtTokenService = mock(JwtTokenService.class);
     private final TotpService totpService = mock(TotpService.class);
+    private final EmailVerificationService emailVerificationService = mock(EmailVerificationService.class);
     private final AuthService service = new AuthService(new GatewayProperties(), repository,
-            passwordHasher, jwtTokenService, totpService);
+            passwordHasher, jwtTokenService, totpService, emailVerificationService);
 
     @Test
     void adminRefreshSessionsReturnsRepositoryRows() {
@@ -198,6 +200,56 @@ class AuthServiceTest {
 
         assertThat(response.accessToken()).isEqualTo("access");
         verifyNoInteractions(totpService);
+    }
+
+    @Test
+    void emailIsAcceptedAsLoginIdentifier() {
+        Instant now = Instant.parse("2026-07-02T00:00:00Z");
+        when(repository.credentialByEmail("user@example.com")).thenReturn(Optional.of(
+                new GatewayUserRepository.UserCredential(
+                        42L, null, "user@example.com", "hash", "NORMAL", now)));
+        when(passwordHasher.matches("password", "hash")).thenReturn(true);
+        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
+                42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
+        when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
+                .thenReturn("access");
+
+        var response = service.login(new LoginRequest("USER@EXAMPLE.COM", "password", null),
+                new MockHttpServletRequest());
+
+        assertThat(response.user().email()).isEqualTo("user@example.com");
+        verify(repository).credentialByEmail("user@example.com");
+    }
+
+    @Test
+    void registerAcceptsEmailAsPrimaryIdentityWithoutUsername() {
+        Instant now = Instant.parse("2026-07-02T00:00:00Z");
+        AuthenticatedUser user = new AuthenticatedUser(42L, null, "user@example.com", "NORMAL",
+                List.of("USER"), now);
+        when(passwordHasher.hash("StrongPassword1!"))
+                .thenReturn("hash");
+        when(repository.createUser(eq(null), eq("user@example.com"), eq("hash"), any()))
+                .thenReturn(user);
+        when(repository.user(42L)).thenReturn(Optional.of(user));
+        when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
+                .thenReturn("access");
+
+        var response = service.register(
+                new RegisterRequest(null, "StrongPassword1!", "user@example.com"),
+                new MockHttpServletRequest());
+
+        assertThat(response.user().email()).isEqualTo("user@example.com");
+        assertThat(response.user().username()).isNull();
+    }
+
+    @Test
+    void phoneRegistrationRemainsDisabledByDefault() {
+        assertThatThrownBy(() -> service.register(
+                new RegisterRequest(null, "StrongPassword1!", null, "+8613800138000"),
+                new MockHttpServletRequest()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("phone registration is not enabled");
+        verifyNoInteractions(passwordHasher, repository);
     }
 
     private AuthenticatedUser admin(Instant now) {

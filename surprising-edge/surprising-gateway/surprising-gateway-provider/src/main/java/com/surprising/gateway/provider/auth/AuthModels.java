@@ -2,6 +2,7 @@ package com.surprising.gateway.provider.auth;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -12,18 +13,39 @@ public final class AuthModels {
     }
 
     public record RegisterRequest(
-            @NotBlank @Size(min = 3, max = 32) String username,
+            @Size(min = 3, max = 32) String username,
             @NotBlank @Size(min = 8, max = 128) String password,
-            @Size(max = 254) String email) {
+            @Size(max = 254) String email,
+            @Size(max = 32) String phone) {
+        public RegisterRequest(String username, String password, String email) {
+            this(username, password, email, null);
+        }
     }
 
     public record LoginRequest(
-            @NotBlank String username,
+            @NotBlank @JsonAlias({"username", "email", "phone"}) String identifier,
             @NotBlank String password,
             String totpCode) {
     }
 
     public record RefreshRequest(@NotBlank String refreshToken) {
+    }
+
+    public record EmailVerificationRequest(
+            @NotBlank @Size(max = 254) String email,
+            @NotBlank @Size(min = 6, max = 6) String code) {
+    }
+
+    public record PasswordResetRequest(
+            @NotBlank String identifier,
+            @NotBlank @Size(min = 6, max = 6) String code,
+            @NotBlank @Size(min = 8, max = 128) String newPassword) {
+    }
+
+    public record PasswordResetStartRequest(@NotBlank String identifier) {
+    }
+
+    public record PasswordResetResponse(boolean accepted) {
     }
 
     public record AuthenticatedUser(

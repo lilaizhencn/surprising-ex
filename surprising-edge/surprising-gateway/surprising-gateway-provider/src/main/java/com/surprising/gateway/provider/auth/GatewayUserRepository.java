@@ -30,36 +30,57 @@ public class GatewayUserRepository {
     }
 
     public UserRecord create(String username, String email, String passwordHash, Instant now) {
+        return create(username, email, null, passwordHash, now);
+    }
+
+    public UserRecord create(String username, String email, String phone, String passwordHash, Instant now) {
         try {
             return jdbcTemplate.queryForObject("""
-                    INSERT INTO gateway_users (username, email, password_hash, status, created_at, updated_at)
-                    VALUES (?, ?, ?, 'NORMAL', ?, ?)
-                    RETURNING user_id, username, email, status, created_at
+                    INSERT INTO gateway_users (username, email, phone, password_hash, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'NORMAL', ?, ?)
+                    RETURNING user_id, username, email, phone, status, created_at
                     """, (rs, rowNum) -> toUserRecord(rs),
-                    username, email, passwordHash, Timestamp.from(now), Timestamp.from(now));
+                    username, email, phone, passwordHash, Timestamp.from(now), Timestamp.from(now));
         } catch (DuplicateKeyException ex) {
-            throw new IllegalArgumentException("username already exists", ex);
+            throw new IllegalArgumentException("email, phone or username already exists", ex);
         }
     }
 
     public Optional<UserCredential> findCredentialByUsername(String username) {
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, password_hash, status, created_at
+                SELECT user_id, username, email, phone, password_hash, status, created_at
                   FROM gateway_users
                  WHERE username = ?
                 """, (rs, rowNum) -> new UserCredential(
                         rs.getLong("user_id"),
                         rs.getString("username"),
                         rs.getString("email"),
+                        rs.getString("phone"),
                         rs.getString("password_hash"),
                         rs.getString("status"),
                         rs.getTimestamp("created_at").toInstant()),
                 username).stream().findFirst();
     }
 
+    public Optional<UserCredential> findCredentialByEmail(String email) {
+        return jdbcTemplate.query("""
+                SELECT user_id, username, email, phone, password_hash, status, created_at
+                  FROM gateway_users
+                 WHERE lower(email) = lower(?)
+                """, (rs, rowNum) -> toCredential(rs), email).stream().findFirst();
+    }
+
+    public Optional<UserCredential> findCredentialByPhone(String phone) {
+        return jdbcTemplate.query("""
+                SELECT user_id, username, email, phone, password_hash, status, created_at
+                  FROM gateway_users
+                 WHERE phone = ?
+                """, (rs, rowNum) -> toCredential(rs), phone).stream().findFirst();
+    }
+
     public Optional<UserRecord> find(long userId) {
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, status, created_at
+                SELECT user_id, username, email, phone, status, created_at
                   FROM gateway_users
                  WHERE user_id = ?
                 """, (rs, rowNum) -> toUserRecord(rs), userId).stream().findFirst();
@@ -70,14 +91,14 @@ public class GatewayUserRepository {
         String normalizedStatus = normalizeStatusFilter(status);
         int safeLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, status, created_at
+                SELECT user_id, username, email, phone, status, created_at
                   FROM gateway_users
-                 WHERE (CAST(? AS text) IS NULL OR username LIKE ? OR CAST(user_id AS TEXT) = ? OR lower(email) LIKE ?)
+                 WHERE (CAST(? AS text) IS NULL OR username LIKE ? OR CAST(user_id AS TEXT) = ? OR lower(email) LIKE ? OR phone LIKE ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
-                 ORDER BY created_at DESC, user_id DESC
-                 LIMIT ?
+                ORDER BY created_at DESC, user_id DESC
+                LIMIT ?
                 """, (rs, rowNum) -> toUserRecord(rs),
-                normalizedQuery, normalizedQuery, exactIdQuery(query), normalizedQuery,
+                normalizedQuery, normalizedQuery, exactIdQuery(query), normalizedQuery, normalizedQuery,
                 normalizedStatus, normalizedStatus, safeLimit);
     }
 
@@ -96,12 +117,13 @@ public class GatewayUserRepository {
         args.add(normalizedQuery);
         args.add(exactIdQuery(query));
         args.add(normalizedQuery);
+        args.add(normalizedQuery);
         args.add(normalizedStatus);
         args.add(normalizedStatus);
         String sql = """
-                SELECT user_id, username, email, status, created_at
+                SELECT user_id, username, email, phone, status, created_at
                   FROM gateway_users
-                 WHERE (CAST(? AS text) IS NULL OR username LIKE ? OR CAST(user_id AS TEXT) = ? OR lower(email) LIKE ?)
+                 WHERE (CAST(? AS text) IS NULL OR username LIKE ? OR CAST(user_id AS TEXT) = ? OR lower(email) LIKE ? OR phone LIKE ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
                 """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
                  ORDER BY %s %s, user_id %s
@@ -121,9 +143,18 @@ public class GatewayUserRepository {
                    SET status = ?,
                        updated_at = ?
                  WHERE user_id = ?
-                RETURNING user_id, username, email, status, created_at
+                RETURNING user_id, username, email, phone, status, created_at
                 """, (rs, rowNum) -> toUserRecord(rs), normalizeStatus(status),
                 Timestamp.from(now), userId).stream().findFirst();
+    }
+
+    public int updatePasswordHash(long userId, String passwordHash, Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_users
+                   SET password_hash = ?,
+                       updated_at = ?
+                 WHERE user_id = ?
+                """, passwordHash, Timestamp.from(now), userId);
     }
 
     private UserRecord toUserRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -131,6 +162,18 @@ public class GatewayUserRepository {
                 rs.getLong("user_id"),
                 rs.getString("username"),
                 rs.getString("email"),
+                rs.getString("phone"),
+                rs.getString("status"),
+                rs.getTimestamp("created_at").toInstant());
+    }
+
+    private UserCredential toCredential(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new UserCredential(
+                rs.getLong("user_id"),
+                rs.getString("username"),
+                rs.getString("email"),
+                rs.getString("phone"),
+                rs.getString("password_hash"),
                 rs.getString("status"),
                 rs.getTimestamp("created_at").toInstant());
     }
@@ -172,16 +215,25 @@ public class GatewayUserRepository {
             long userId,
             String username,
             String email,
+            String phone,
             String status,
             Instant createdAt) {
+        public UserRecord(long userId, String username, String email, String status, Instant createdAt) {
+            this(userId, username, email, null, status, createdAt);
+        }
     }
 
     public record UserCredential(
             long userId,
             String username,
             String email,
+            String phone,
             String passwordHash,
             String status,
             Instant createdAt) {
+        public UserCredential(long userId, String username, String email, String passwordHash,
+                              String status, Instant createdAt) {
+            this(userId, username, email, null, passwordHash, status, createdAt);
+        }
     }
 }
