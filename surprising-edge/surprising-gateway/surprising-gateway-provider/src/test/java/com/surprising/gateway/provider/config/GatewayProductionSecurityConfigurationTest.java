@@ -61,6 +61,7 @@ class GatewayProductionSecurityConfigurationTest {
         wallet.setApiSecret("wallet-secret");
         wallet.setWebhookSecret("wallet-webhook-secret");
         wallet.setSpotAccountBaseUrl("https://account.example.com");
+        wallet.setWithdrawalAddressIds(Map.of("ETH", "11111111-1111-1111-1111-111111111111"));
 
         GatewayProperties.KycDocuments documents = properties.getKycDocuments();
         documents.setEnabled(true);
@@ -141,6 +142,8 @@ class GatewayProductionSecurityConfigurationTest {
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_KEY", "wallet-key");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_SECRET", "wallet-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET", "wallet-webhook-secret");
+        testEnvironment.put("GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS",
+                "{\"ETH\":\"11111111-1111-1111-1111-111111111111\"}");
         testEnvironment.put("GATEWAY_SPOT_ACCOUNT_BASE_URL", "https://account.example.com");
         testEnvironment.put("GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT", "10000");
         testEnvironment.put("GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT", "50000");
@@ -167,6 +170,8 @@ class GatewayProductionSecurityConfigurationTest {
         assertThat(properties.getSecurity().getAdminIpAllowlist()).containsExactly("10.0.0.0/8");
         assertThat(properties.getSecurity().getTrustedProxyIpAllowlist()).containsExactly("192.0.2.0/24");
         assertThat(properties.getCustodyWallet().isEnabled()).isTrue();
+        assertThat(properties.getCustodyWallet().getWithdrawalAddressIds())
+                .containsEntry("ETH", "11111111-1111-1111-1111-111111111111");
         assertThat(properties.getKycDocuments().isEnabled()).isTrue();
         assertThat(properties.getKycDocuments().getType()).isEqualTo("s3");
         properties.setEnvironment(environment);

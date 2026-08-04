@@ -11,8 +11,9 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 [本地 Homebrew 中间件](local-homebrew-infra.md)。
 
 生产数据库升级到 custody 提现状态机前，先执行
-`migrations/20260805_gateway_withdrawal_correlation.sql`。该迁移会为存量提现补齐网关生成的外部引用，
-并在发现重复引用时失败停止，不会静默合并提现记录；新建数据库仍通过根目录 `init.sql` 初始化。
+`migrations/20260805_gateway_withdrawal_correlation.sql`。该迁移会在缺表的存量数据库中创建提现意图表、
+索引、约束和后台权限，也会为存量提现补齐网关生成的外部引用；发现重复引用时会失败停止，不会静默合并提现记录。
+新建数据库仍通过根目录 `init.sql` 初始化。
 
 ## 管理网关表
 

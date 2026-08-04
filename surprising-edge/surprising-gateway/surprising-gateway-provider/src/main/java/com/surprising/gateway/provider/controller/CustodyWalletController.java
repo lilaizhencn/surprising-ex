@@ -5,6 +5,7 @@ import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,17 +35,20 @@ public class CustodyWalletController {
     private final SensitiveActionVerificationService verificationService;
     private final ComplianceService complianceService;
     private final CustodyWithdrawalService withdrawalService;
+    private final GatewayProperties properties;
 
     public CustodyWalletController(AuthService authService,
                                    CustodyWalletClient walletClient,
                                    SensitiveActionVerificationService verificationService,
                                    ComplianceService complianceService,
-                                   CustodyWithdrawalService withdrawalService) {
+                                   CustodyWithdrawalService withdrawalService,
+                                   GatewayProperties properties) {
         this.authService = authService;
         this.walletClient = walletClient;
         this.verificationService = verificationService;
         this.complianceService = complianceService;
         this.withdrawalService = withdrawalService;
+        this.properties = properties;
     }
 
     @PostMapping("/addresses")
@@ -99,10 +103,11 @@ public class CustodyWalletController {
             JwtPrincipal principal = principal(authorization);
             requireSecurity(principal.userId(), "WITHDRAWAL", emailCode, totpCode);
             requireKyc(principal.userId());
+            java.util.UUID configuredSourceAddressId = configuredSourceAddress(request.chain());
             CustodyWithdrawalService.WithdrawalResponse response = withdrawalService.submit(
                     principal.userId(), idempotencyKey,
                     new CustodyWithdrawalService.WithdrawalRequest(
-                            request.custodyAddressId(), request.chain(), request.assetSymbol(), request.toAddress(),
+                            configuredSourceAddressId, request.chain(), request.assetSymbol(), request.toAddress(),
                             request.amount(), request.externalReference()));
             return Map.of("id", response.walletWithdrawalId() == null
                             ? response.withdrawalId().toString() : response.walletWithdrawalId(),
@@ -132,6 +137,20 @@ public class CustodyWalletController {
         if (!verificationService.verify(userId, scene, emailCode, totpCode, java.time.Instant.now())) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
                     "security verification is required or invalid");
+        }
+    }
+
+    private java.util.UUID configuredSourceAddress(String chain) {
+        String sourceId = properties.getCustodyWallet().getWithdrawalAddressIds().entrySet().stream()
+                .filter(entry -> entry.getKey().equalsIgnoreCase(chain))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "withdrawal source address is not configured for network"));
+        try {
+            return java.util.UUID.fromString(sourceId);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("configured withdrawal source address is invalid", ex);
         }
     }
 

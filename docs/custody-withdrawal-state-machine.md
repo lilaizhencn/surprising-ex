@@ -17,7 +17,9 @@
 | `REFUND_PENDING` | 失败后的现货退款结果未知 | 否 |
 | `REFUNDED` | 失败提现已自动退回现货账户 | 是 |
 
-`BROADCAST_UNKNOWN`、`DEBIT_UNKNOWN` 和 `REFUND_PENDING` 不会因为请求超时而退款。只有收到明确的 custody wallet 失败事件，或明确的 custody wallet 拒绝响应后退款成功，才会进入 `REFUNDED`。
+`BROADCAST_UNKNOWN`、`DEBIT_UNKNOWN` 和 `REFUND_PENDING` 不会因为请求超时而退款。只有收到明确的 custody wallet 失败事件，或 HTTP 400/422 这类确定性拒绝响应后退款成功，才会进入 `REFUNDED`；408、409、429、5xx 和网络异常都保持未知状态。
+
+普通用户不能指定 custody 的资金源地址。网关按网络读取 `GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS`，客户端传入的旧版 `custodyAddressId` 字段不会参与资金源选择。
 
 ## 用户接口
 
@@ -43,5 +45,6 @@
 - `GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT`
 - `GATEWAY_WITHDRAWAL_VALUATION_BASE_URL`
 - `GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE`
+- `GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS`，例如 `{"ETH":"<uuid>"}`，必须为每个已开放提现网络配置受控源地址。
 
 USDT 估值必须来自价格服务且不能超过最大有效期。数据库表 `gateway_wallet_withdrawals` 记录请求哈希、金额最小单位、USDT 估值、账本引用、wallet 引用、状态、错误和后台操作人。

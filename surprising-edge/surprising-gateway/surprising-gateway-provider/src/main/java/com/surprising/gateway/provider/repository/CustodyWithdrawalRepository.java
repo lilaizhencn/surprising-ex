@@ -83,7 +83,7 @@ public class CustodyWithdrawalRepository {
         Object[] args;
         if (walletWithdrawalId != null && !walletWithdrawalId.isBlank()) {
             if (externalReference != null && !externalReference.isBlank()) {
-                predicate = "external_reference = ? AND (wallet_withdrawal_id IS NULL OR wallet_withdrawal_id = ?)";
+                predicate = "external_reference = ? AND wallet_withdrawal_id = ?";
                 args = new Object[]{externalReference, walletWithdrawalId};
             } else {
                 predicate = "wallet_withdrawal_id = ?";

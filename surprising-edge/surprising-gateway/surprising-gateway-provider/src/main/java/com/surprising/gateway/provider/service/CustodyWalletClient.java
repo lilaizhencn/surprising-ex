@@ -149,7 +149,7 @@ public class CustodyWalletClient {
             return response.getBody();
         } catch (RestClientResponseException ex) {
             int status = ex.getStatusCode().value();
-            if (status >= 400 && status < 500) {
+            if (isDeterministicRejection(status)) {
                 throw new CustodyWalletRejectedException("custody wallet rejected request", status, ex);
             }
             throw new IllegalStateException("custody wallet request status is unknown", ex);
@@ -177,7 +177,7 @@ public class CustodyWalletClient {
             return response.getBody();
         } catch (RestClientResponseException ex) {
             int status = ex.getStatusCode().value();
-            if (status >= 400 && status < 500) {
+            if (isDeterministicRejection(status)) {
                 throw new CustodyWalletRejectedException("custody wallet rejected request", status, ex);
             }
             throw new IllegalStateException("custody wallet request status is unknown", ex);
@@ -264,11 +264,15 @@ public class CustodyWalletClient {
     private void requireSuccess(ResponseEntity<?> response, String service) {
         if (response == null || !response.getStatusCode().is2xxSuccessful()) {
             int status = response == null ? 0 : response.getStatusCode().value();
-            if (status >= 400 && status < 500) {
+            if (isDeterministicRejection(status)) {
                 throw new CustodyWalletRejectedException(service + " rejected request", status, null);
             }
             throw new IllegalStateException(service + " returned HTTP " + status);
         }
+    }
+
+    private boolean isDeterministicRejection(int status) {
+        return status == 400 || status == 422;
     }
 
     public static final class CustodyWalletRejectedException extends IllegalStateException {

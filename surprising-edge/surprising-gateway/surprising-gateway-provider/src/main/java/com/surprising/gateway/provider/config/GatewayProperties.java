@@ -89,6 +89,20 @@ public class GatewayProperties implements EnvironmentAware {
         requireNonBlank(failures, "custody-wallet.api-secret", wallet.getApiSecret());
         requireNonBlank(failures, "custody-wallet.webhook-secret", wallet.getWebhookSecret());
         requireNonBlank(failures, "custody-wallet.spot-account-base-url", wallet.getSpotAccountBaseUrl());
+        if (wallet.getWithdrawalAddressIds().isEmpty()) {
+            failures.add("custody-wallet.withdrawal-address-ids must contain at least one network");
+        } else {
+            wallet.getWithdrawalAddressIds().forEach((network, addressId) -> {
+                if (network == null || network.isBlank()) {
+                    failures.add("custody-wallet.withdrawal-address-ids contains a blank network");
+                }
+                try {
+                    java.util.UUID.fromString(addressId);
+                } catch (IllegalArgumentException | NullPointerException ex) {
+                    failures.add("custody-wallet.withdrawal-address-ids contains an invalid address id");
+                }
+            });
+        }
 
         Withdrawal configuredWithdrawal = withdrawal == null ? new Withdrawal() : withdrawal;
         if (configuredWithdrawal.getSingleApprovalThresholdUsdt() == null
