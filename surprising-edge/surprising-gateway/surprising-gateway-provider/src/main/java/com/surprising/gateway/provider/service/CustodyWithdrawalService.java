@@ -6,14 +6,15 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -29,6 +30,7 @@ public class CustodyWithdrawalService {
     private final CustodyWalletClient walletClient;
     private final SpotAccountClient spotAccountClient;
     private final WithdrawalValuationClient valuationClient;
+    private final CustodyWithdrawalRefundService refundService;
     private final ObjectMapper objectMapper;
 
     public CustodyWithdrawalService(GatewayProperties properties,
@@ -36,12 +38,14 @@ public class CustodyWithdrawalService {
                                     CustodyWalletClient walletClient,
                                     SpotAccountClient spotAccountClient,
                                     WithdrawalValuationClient valuationClient,
+                                    CustodyWithdrawalRefundService refundService,
                                     ObjectMapper objectMapper) {
         this.properties = properties;
         this.repository = repository;
         this.walletClient = walletClient;
         this.spotAccountClient = spotAccountClient;
         this.valuationClient = valuationClient;
+        this.refundService = refundService;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     }
 
@@ -83,6 +87,38 @@ public class CustodyWithdrawalService {
 
     public WithdrawalResponse retry(UUID withdrawalId, long adminUserId, String adminUsername, String reason) {
         return continueSubmission(repository.recordAdminRetry(withdrawalId, adminUserId, adminUsername, reason));
+    }
+
+    public List<Map<String, Object>> adminList(String status, int limit) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (CustodyWithdrawalRepository.WithdrawalRecord record : repository.list(status, limit)) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("withdrawalId", record.withdrawalId());
+            row.put("userId", record.userId());
+            row.put("idempotencyKey", record.idempotencyKey());
+            row.put("chain", record.chain());
+            row.put("assetSymbol", record.assetSymbol());
+            row.put("custodyAddressId", record.custodyAddressId());
+            row.put("toAddress", record.toAddress());
+            row.put("amount", record.amount());
+            row.put("amountUnits", record.amountUnits());
+            row.put("usdtValue", record.usdtValue());
+            row.put("externalReference", record.externalReference());
+            row.put("status", record.status());
+            row.put("walletResponse", record.walletResponse());
+            row.put("walletWithdrawalId", record.walletWithdrawalId());
+            row.put("errorCode", record.errorCode());
+            row.put("errorMessage", record.errorMessage());
+            row.put("createdAt", record.createdAt());
+            row.put("updatedAt", record.updatedAt());
+            row.put("submittedAt", record.submittedAt());
+            row.put("completedAt", record.completedAt());
+            row.put("adminUserId", record.adminUserId());
+            row.put("adminUsername", record.adminUsername());
+            row.put("adminReason", record.adminReason());
+            rows.add(row);
+        }
+        return rows;
     }
 
     public java.util.List<Map<String, Object>> history(long userId, String chain, String asset, int limit) {
@@ -129,7 +165,6 @@ public class CustodyWithdrawalService {
         return rows;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.gateway.withdrawal.failure-reconciliation-delay:30s}")
     public void reconcileFailedWithdrawals() {
         for (CustodyWithdrawalRepository.WithdrawalRecord record
                 : repository.listPendingFailures(properties.getWithdrawal().getFailureReconciliationDelay(), 50)) {
@@ -248,21 +283,10 @@ public class CustodyWithdrawalService {
     private void refund(CustodyWithdrawalRepository.WithdrawalRecord record,
                         String spotReason,
                         String stateReason) {
-        if ("REFUNDED".equals(record.status()) || "COMPLETED".equals(record.status())
-                || "REJECTED".equals(record.status())) {
-            return;
-        }
-        CustodyWithdrawalRepository.WithdrawalRecord pending = repository.markRefundPending(
-                record.withdrawalId(), stateReason);
-        if (pending == null || !"REFUND_PENDING".equals(pending.status())) {
-            return;
-        }
         try {
-            spotAccountClient.adjustBalance(pending.userId(), pending.assetSymbol(), pending.amountUnits(),
-                    pending.spotDebitReference() + ":refund", spotReason);
-            repository.markRefunded(pending.withdrawalId(), "{}", stateReason);
+            refundService.refund(record, spotReason, stateReason);
         } catch (RuntimeException ex) {
-            repository.markRefundPending(pending.withdrawalId(), message(ex));
+            repository.markRefundPending(record.withdrawalId(), message(ex));
             throw new WithdrawalUnknownException("withdrawal refund status is unknown", ex);
         }
     }

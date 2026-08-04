@@ -136,24 +136,31 @@ public class CustodyWithdrawalRepository {
                 this::toRecord, seconds);
     }
 
+    @Transactional
     public WithdrawalRecord recordAdminRetry(UUID id, long adminUserId, String adminUsername, String reason) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
                  WHERE withdrawal_id = ?
                 """, adminUserId, adminUsername, reason, id);
-        return requireUpdated(id, updated, "withdrawal does not exist");
+        WithdrawalRecord record = requireUpdated(id, updated, "withdrawal does not exist");
+        insertAdminAction(id, adminUserId, adminUsername, "RETRY", reason);
+        return record;
     }
 
+    @Transactional
     public WithdrawalRecord approve(UUID id, long adminUserId, String adminUsername, String reason) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'PROCESSING', admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status = 'PENDING_APPROVAL'
                 """, adminUserId, adminUsername, reason, id);
-        return requireUpdated(id, updated, "withdrawal is not pending approval");
+        WithdrawalRecord record = requireTransition(id, updated, "withdrawal is not pending approval", "PROCESSING");
+        insertAdminAction(id, adminUserId, adminUsername, "APPROVE", reason);
+        return record;
     }
 
+    @Transactional
     public WithdrawalRecord reject(UUID id, long adminUserId, String adminUsername, String reason) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
@@ -161,7 +168,9 @@ public class CustodyWithdrawalRepository {
                        admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status = 'PENDING_APPROVAL'
                 """, reason, adminUserId, adminUsername, reason, id);
-        return requireUpdated(id, updated, "withdrawal is not pending approval");
+        WithdrawalRecord record = requireTransition(id, updated, "withdrawal is not pending approval", "REJECTED");
+        insertAdminAction(id, adminUserId, adminUsername, "REJECT", reason);
+        return record;
     }
 
     public WithdrawalRecord markDebited(UUID id, String reason) {
@@ -213,7 +222,9 @@ public class CustodyWithdrawalRepository {
         return markCompleted(id, walletResponse, null);
     }
 
+    @Transactional
     public WithdrawalRecord markCompleted(UUID id, String walletResponse, String walletWithdrawalId) {
+        lockWithdrawal(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'COMPLETED', wallet_response = ?::jsonb,
@@ -222,11 +233,13 @@ public class CustodyWithdrawalRepository {
                        error_code = NULL, error_message = NULL
                  WHERE withdrawal_id = ? AND status IN ('SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
                 """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
-        return requireUpdated(id, updated, "cannot mark withdrawal completed");
+        return requireTransition(id, updated, "cannot mark withdrawal completed", "COMPLETED");
     }
 
+    @Transactional
     public WithdrawalRecord markFailurePending(UUID id, String walletResponse, String error,
                                                String walletWithdrawalId) {
+        lockWithdrawal(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'FAILED_PENDING', wallet_response = ?::jsonb,
@@ -234,20 +247,24 @@ public class CustodyWithdrawalRepository {
                        error_code = 'CUSTODY_FAILURE_PENDING', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
                 """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
-        return requireUpdated(id, updated, "cannot mark withdrawal failure pending");
+        return requireTransition(id, updated, "cannot mark withdrawal failure pending", "FAILED_PENDING");
     }
 
+    @Transactional
     public WithdrawalRecord markRefundPending(UUID id, String error) {
+        lockWithdrawal(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REFUND_PENDING', error_code = 'REFUND_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN',
                                                         'FAILED_PENDING', 'REFUND_PENDING')
                 """, error, id);
-        return requireUpdated(id, updated, "cannot mark withdrawal refund pending");
+        return requireTransition(id, updated, "cannot mark withdrawal refund pending", "REFUND_PENDING");
     }
 
+    @Transactional
     public WithdrawalRecord markRefunded(UUID id, String walletResponse, String reason) {
+        lockWithdrawal(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REFUNDED', wallet_response = ?::jsonb, error_code = 'REFUNDED',
@@ -255,7 +272,7 @@ public class CustodyWithdrawalRepository {
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN',
                                                         'FAILED_PENDING', 'REFUND_PENDING')
                 """, walletResponse == null ? "{}" : walletResponse, reason, id);
-        return requireUpdated(id, updated, "cannot mark withdrawal refunded");
+        return requireTransition(id, updated, "cannot mark withdrawal refunded", "REFUNDED");
     }
 
     public WithdrawalRecord markRejected(UUID id, String code, String error) {
@@ -273,6 +290,33 @@ public class CustodyWithdrawalRepository {
             throw new IllegalStateException(message);
         }
         return record;
+    }
+
+    private WithdrawalRecord requireTransition(UUID id, int updated, String message, String targetStatus) {
+        WithdrawalRecord record = find(id);
+        if (updated == 0 && (record == null || !targetStatus.equals(record.status()))) {
+            throw new IllegalStateException(message + "; current status is "
+                    + (record == null ? "missing" : record.status()));
+        }
+        return record;
+    }
+
+    private void insertAdminAction(UUID withdrawalId, long adminUserId, String adminUsername,
+                                   String action, String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("admin action reason is required");
+        }
+        jdbcTemplate.update("""
+                INSERT INTO gateway_wallet_withdrawal_actions
+                    (action_id, withdrawal_id, admin_user_id, admin_username, action, reason)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, UUID.randomUUID(), withdrawalId, adminUserId, adminUsername, action, reason.trim());
+    }
+
+    private void lockWithdrawal(UUID id) {
+        Long lockKey = jdbcTemplate.queryForObject(
+                "SELECT hashtextextended(?::text, 0)", Long.class, id.toString());
+        jdbcTemplate.execute("SELECT pg_advisory_xact_lock(" + lockKey + ")");
     }
 
     private String selectSql(String predicate) {

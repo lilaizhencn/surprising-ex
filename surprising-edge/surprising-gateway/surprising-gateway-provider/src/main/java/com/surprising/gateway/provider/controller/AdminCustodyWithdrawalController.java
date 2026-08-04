@@ -2,9 +2,9 @@ package com.surprising.gateway.provider.controller;
 
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
-import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,24 +22,21 @@ import org.springframework.web.server.ResponseStatusException;
 public class AdminCustodyWithdrawalController {
 
     private final AuthService authService;
-    private final CustodyWithdrawalRepository repository;
     private final CustodyWithdrawalService withdrawalService;
 
     public AdminCustodyWithdrawalController(AuthService authService,
-                                            CustodyWithdrawalRepository repository,
                                             CustodyWithdrawalService withdrawalService) {
         this.authService = authService;
-        this.repository = repository;
         this.withdrawalService = withdrawalService;
     }
 
     @GetMapping
-    public List<CustodyWithdrawalRepository.WithdrawalRecord> list(
+    public List<Map<String, Object>> list(
             @RequestHeader("Authorization") String authorization,
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "limit", defaultValue = "50") int limit) {
         authService.requireAdminPermission(authorization, "admin.wallet.read");
-        return repository.list(status, limit);
+        return withdrawalService.adminList(status, limit);
     }
 
     @PostMapping("/{withdrawalId}/approve")
@@ -64,9 +61,10 @@ public class AdminCustodyWithdrawalController {
             @PathVariable UUID withdrawalId,
             @RequestBody(required = false) ActionRequest request) {
         JwtPrincipal principal = authService.requireAdminPermission(authorization, "admin.wallet.write");
-        String reason = request == null || request.reason() == null ? "admin retry" : request.reason().trim();
-        if (reason.length() > 500) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reason is too long");
+        String reason = request == null || request.reason() == null ? "" : request.reason().trim();
+        if (reason.isBlank() || reason.length() > 500) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "a non-blank reason up to 500 characters is required");
         }
         try {
             return withdrawalService.retry(withdrawalId, principal.userId(), principal.username(), reason);
@@ -81,8 +79,8 @@ public class AdminCustodyWithdrawalController {
                                                                 ActionRequest request, Action action) {
         JwtPrincipal principal = authService.requireAdminPermission(authorization, "admin.wallet.write");
         String reason = request == null || request.reason() == null ? "" : request.reason().trim();
-        if (reason.length() > 500) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reason is too long");
+        if (reason.isBlank() || reason.length() > 500) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "a non-blank reason up to 500 characters is required");
         }
         try {
             return action == Action.APPROVE

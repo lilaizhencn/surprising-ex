@@ -38,7 +38,8 @@
 - `POST /api/v1/admin/wallet/withdrawals/{withdrawalId}/reject`，权限 `admin.wallet.write`
 - `POST /api/v1/admin/wallet/withdrawals/{withdrawalId}/retry`，权限 `admin.wallet.write`
 
-后台动作会保存管理员身份、理由和状态变更时间；网关现有后台操作审计链路继续记录 HTTP 操作。
+后台动作要求管理员提交非空理由，保存管理员身份、理由和状态变更时间；`gateway_wallet_withdrawal_actions`
+以追加方式记录每次 `APPROVE`、`REJECT`、`RETRY`，不会因后续重试覆盖历史动作。当前按产品要求采用单管理员审批，网关现有后台操作审计链路继续记录 HTTP 操作。
 
 ## 生产配置
 
@@ -49,4 +50,5 @@
 - `GATEWAY_WITHDRAWAL_FAILURE_RECONCILIATION_DELAY`
 - `GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS`，例如 `{"ETH":"<uuid>"}`，必须为每个已开放提现网络配置受控源地址。
 
-USDT 估值必须来自价格服务且不能超过最大有效期。数据库表 `gateway_wallet_withdrawals` 记录请求哈希、金额最小单位、USDT 估值、账本引用、wallet 引用、状态、错误和后台操作人。
+USDT 估值必须来自价格服务且不能超过最大有效期。数据库表 `gateway_wallet_withdrawals` 记录请求哈希、金额最小单位、USDT 估值、账本引用、wallet 引用、状态、错误和后台操作人；数据库表
+`gateway_wallet_withdrawal_actions` 记录不可变的后台资金动作历史。

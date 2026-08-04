@@ -50,6 +50,21 @@ ALTER TABLE gateway_wallet_withdrawals
                    'BROADCAST_UNKNOWN', 'COMPLETED', 'REJECTED', 'REFUND_PENDING', 'REFUNDED')
     );
 
+CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_actions (
+    action_id       UUID PRIMARY KEY,
+    withdrawal_id   UUID NOT NULL REFERENCES gateway_wallet_withdrawals(withdrawal_id),
+    admin_user_id   BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    admin_username  TEXT NOT NULL,
+    action          TEXT NOT NULL,
+    reason          TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_wallet_withdrawal_action_type_check CHECK (action IN ('APPROVE', 'REJECT', 'RETRY')),
+    CONSTRAINT gateway_wallet_withdrawal_action_reason_check CHECK (length(trim(reason)) BETWEEN 1 AND 500)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawal_actions_withdrawal_idx
+    ON gateway_wallet_withdrawal_actions (withdrawal_id, created_at DESC);
+
 DO $$
 BEGIN
     EXECUTE 'ALTER TABLE gateway_wallet_withdrawals

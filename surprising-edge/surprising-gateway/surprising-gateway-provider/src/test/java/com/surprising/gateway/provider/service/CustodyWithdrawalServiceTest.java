@@ -3,7 +3,6 @@ package com.surprising.gateway.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,7 +33,7 @@ class CustodyWithdrawalServiceTest {
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(record, true));
         when(repository.markDebited(eq(withdrawalId), any())).thenReturn(record(withdrawalId, "DEBITED"));
-        when(walletClient.createWithdrawal(eq(42L), any(), anyString()))
+        when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-unknown")))
                 .thenThrow(new IllegalStateException("custody request timed out"));
 
         CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
@@ -63,7 +62,7 @@ class CustodyWithdrawalServiceTest {
                 record(withdrawalId, "DEBITED", "withdraw-rejected"));
         when(repository.markRefundPending(eq(withdrawalId), any()))
                 .thenReturn(record(withdrawalId, "REFUND_PENDING", "withdraw-rejected"));
-        when(walletClient.createWithdrawal(eq(42L), any(), anyString()))
+        when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-rejected")))
                 .thenThrow(new CustodyWalletClient.CustodyWalletRejectedException("rejected", 400, null));
 
         CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
@@ -112,7 +111,7 @@ class CustodyWithdrawalServiceTest {
         when(repository.find(withdrawalId)).thenReturn(unknown);
         when(repository.markDebited(eq(withdrawalId), any()))
                 .thenReturn(record(withdrawalId, "DEBITED", "withdraw-retry"));
-        when(walletClient.createWithdrawal(eq(42L), any(), anyString()))
+        when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-retry")))
                 .thenReturn(Map.of("id", "wallet-withdrawal-1"));
         when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-withdrawal-1")))
                 .thenReturn(record(withdrawalId, "SUBMITTED", "withdraw-retry"));
@@ -255,8 +254,10 @@ class CustodyWithdrawalServiceTest {
                                              CustodyWalletClient walletClient,
                                              SpotAccountClient spotAccountClient,
                                              WithdrawalValuationClient valuationClient) {
+        CustodyWithdrawalRefundService refundService =
+                new CustodyWithdrawalRefundService(repository, spotAccountClient);
         return new CustodyWithdrawalService(properties, repository, walletClient, spotAccountClient,
-                valuationClient, new ObjectMapper());
+                valuationClient, refundService, new ObjectMapper());
     }
 
     private CustodyWithdrawalService.WithdrawalRequest request() {
