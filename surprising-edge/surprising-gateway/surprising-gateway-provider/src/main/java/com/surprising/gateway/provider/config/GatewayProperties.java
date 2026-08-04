@@ -10,14 +10,19 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.context.EnvironmentAware;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 @ConfigurationProperties(prefix = "surprising.gateway")
-public class GatewayProperties {
+public class GatewayProperties implements EnvironmentAware {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    private Environment environment = new StandardEnvironment();
     private String deploymentProfile = "local";
     private Security security = new Security();
     private CustodyWallet custodyWallet = new CustodyWallet();
@@ -39,10 +44,15 @@ public class GatewayProperties {
     }
 
     void validateProductionSecurityConfiguration() {
-        if (!"production".equalsIgnoreCase(deploymentProfile)) {
+        boolean springProductionProfile = environment.acceptsProfiles(Profiles.of("production"));
+        boolean configuredProductionProfile = "production".equalsIgnoreCase(deploymentProfile);
+        if (!springProductionProfile && !configuredProductionProfile) {
             return;
         }
         List<String> failures = new ArrayList<>();
+        if (springProductionProfile && !configuredProductionProfile) {
+            failures.add("deployment-profile must remain production when the production Spring profile is active");
+        }
         Security configuredSecurity = security == null ? new Security() : security;
         if (!configuredSecurity.isRequireIdentityForPrivateRoutes()) {
             failures.add("security.require-identity-for-private-routes must be true");
@@ -56,6 +66,10 @@ public class GatewayProperties {
         if (configuredSecurity.getAdminIpAllowlist() == null || configuredSecurity.getAdminIpAllowlist().isEmpty()) {
             failures.add("security.admin-ip-allowlist must not be empty");
         }
+        if (configuredSecurity.getTrustedProxyIpAllowlist() == null
+                || configuredSecurity.getTrustedProxyIpAllowlist().isEmpty()) {
+            failures.add("security.trusted-proxy-ip-allowlist must not be empty");
+        }
         requireProductionSecret(failures, "security.jwt-secret", configuredSecurity.getJwtSecret(), 32,
                 "local-dev-change-me-surprising-ex-gateway-secret-2026");
         requireProductionSecret(failures, "security.verification-code-pepper",
@@ -66,6 +80,7 @@ public class GatewayProperties {
         if (configuredSecurity.isRequireEmailVerification()) {
             requireNonBlank(failures, "security.resend-api-key", configuredSecurity.getResendApiKey());
             requireNonBlank(failures, "security.resend-from", configuredSecurity.getResendFrom());
+            requireHttpsUrl(failures, "security.resend-base-url", configuredSecurity.getResendBaseUrl());
         }
 
         CustodyWallet wallet = custodyWallet == null ? new CustodyWallet() : custodyWallet;
@@ -87,6 +102,7 @@ public class GatewayProperties {
         }
         requireNonBlank(failures, "kyc-documents.endpoint", documents.getEndpoint());
         requireNonBlank(failures, "kyc-documents.bucket", documents.getBucket());
+        requireNonBlank(failures, "kyc-documents.region", documents.getRegion());
         requireNonBlank(failures, "kyc-documents.access-key", documents.getAccessKey());
         requireNonBlank(failures, "kyc-documents.secret-key", documents.getSecretKey());
 
@@ -108,6 +124,22 @@ public class GatewayProperties {
                 || (forbiddenValue != null && forbiddenValue.equals(value))) {
             failures.add(name + " must be a non-default secret of at least " + minimumLength + " characters");
         }
+    }
+
+    private static void requireHttpsUrl(List<String> failures, String name, String value) {
+        try {
+            java.net.URI uri = java.net.URI.create(value);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+                failures.add(name + " must be an HTTPS URL with a host");
+            }
+        } catch (IllegalArgumentException ex) {
+            failures.add(name + " must be an HTTPS URL with a host");
+        }
+    }
+
+    @Override
+    public void setEnvironment(Environment environment) {
+        this.environment = environment == null ? new StandardEnvironment() : environment;
     }
 
     public String getDeploymentProfile() {
@@ -286,6 +318,7 @@ public class GatewayProperties {
         private boolean allowUserIdHeaderFallback = true;
         private List<String> adminRoles = List.of("SUPPORT", "ADMIN", "SUPER_ADMIN");
         private List<String> adminIpAllowlist = List.of();
+        private List<String> trustedProxyIpAllowlist = List.of();
         private boolean requireApprovalForHighRiskAdminWrites = true;
         private String adminApprovalHeader = "X-Admin-Approval-Id";
         private Duration adminApprovalTtl = Duration.ofMinutes(30);
@@ -343,6 +376,15 @@ public class GatewayProperties {
 
         public void setAdminIpAllowlist(List<String> adminIpAllowlist) {
             this.adminIpAllowlist = adminIpAllowlist == null ? List.of() : List.copyOf(adminIpAllowlist);
+        }
+
+        public List<String> getTrustedProxyIpAllowlist() {
+            return trustedProxyIpAllowlist;
+        }
+
+        public void setTrustedProxyIpAllowlist(List<String> trustedProxyIpAllowlist) {
+            this.trustedProxyIpAllowlist = trustedProxyIpAllowlist == null
+                    ? List.of() : List.copyOf(trustedProxyIpAllowlist);
         }
 
         public boolean isRequireApprovalForHighRiskAdminWrites() {

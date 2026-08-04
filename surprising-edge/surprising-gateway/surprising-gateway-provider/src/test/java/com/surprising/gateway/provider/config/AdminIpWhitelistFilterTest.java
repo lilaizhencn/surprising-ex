@@ -43,14 +43,32 @@ class AdminIpWhitelistFilterTest {
     void forwardedIpCanMatchCidrRule() throws ServletException, IOException {
         GatewayProperties properties = new GatewayProperties();
         properties.getSecurity().setAdminIpAllowlist(List.of("10.8.0.0/16"));
+        properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
         AdminIpWhitelistFilter filter = new AdminIpWhitelistFilter(properties);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/admin/gateway/account");
+        request.setRemoteAddr("192.0.2.10");
         request.addHeader("X-Forwarded-For", "10.8.2.3, 192.0.2.10");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         filter.doFilter(request, response, new MockFilterChain());
 
         assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void untrustedRemoteCannotSpoofForwardedAdminIp() throws ServletException, IOException {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getSecurity().setAdminIpAllowlist(List.of("10.8.0.0/16"));
+        properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
+        AdminIpWhitelistFilter filter = new AdminIpWhitelistFilter(properties);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/admin/users");
+        request.setRemoteAddr("203.0.113.10");
+        request.addHeader("X-Forwarded-For", "10.8.2.3");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, new MockFilterChain());
+
+        assertThat(response.getStatus()).isEqualTo(403);
     }
 
     @Test

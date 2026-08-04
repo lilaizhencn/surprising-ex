@@ -29,6 +29,7 @@ surprising:
       require-identity-for-private-routes: true
       allow-user-id-header-fallback: false
       admin-ip-allowlist: ${GATEWAY_ADMIN_IP_ALLOWLIST}
+      trusted-proxy-ip-allowlist: ${GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST}
       require-admin-mfa: true
       phone-registration-enabled: false
       require-email-verification: true

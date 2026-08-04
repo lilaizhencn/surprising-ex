@@ -63,10 +63,13 @@ public class AdminIpWhitelistFilter extends OncePerRequestFilter {
 
     private String clientIp(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
+        String remoteAddress = request.getRemoteAddr();
+        List<String> trustedProxyAllowlist = properties.getSecurity().getTrustedProxyIpAllowlist();
+        if (forwarded != null && !forwarded.isBlank()
+                && isAllowed(remoteAddress, trustedProxyAllowlist)) {
             return forwarded.split(",")[0].trim();
         }
-        return request.getRemoteAddr();
+        return remoteAddress;
     }
 
     private boolean matchesRule(String clientIp, String rule) {
