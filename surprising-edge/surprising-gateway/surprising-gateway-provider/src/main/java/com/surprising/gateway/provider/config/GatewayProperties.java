@@ -84,11 +84,11 @@ public class GatewayProperties implements EnvironmentAware {
         if (!wallet.isEnabled()) {
             failures.add("custody-wallet.enabled must be true");
         }
-        requireNonBlank(failures, "custody-wallet.base-url", wallet.getBaseUrl());
+        requireHttpsUrl(failures, "custody-wallet.base-url", wallet.getBaseUrl());
         requireNonBlank(failures, "custody-wallet.api-key", wallet.getApiKey());
         requireNonBlank(failures, "custody-wallet.api-secret", wallet.getApiSecret());
         requireNonBlank(failures, "custody-wallet.webhook-secret", wallet.getWebhookSecret());
-        requireNonBlank(failures, "custody-wallet.spot-account-base-url", wallet.getSpotAccountBaseUrl());
+        requireHttpsUrl(failures, "custody-wallet.spot-account-base-url", wallet.getSpotAccountBaseUrl());
         if (wallet.getWithdrawalAddressIds().isEmpty()) {
             failures.add("custody-wallet.withdrawal-address-ids must contain at least one network");
         } else {
@@ -103,6 +103,18 @@ public class GatewayProperties implements EnvironmentAware {
                 }
             });
         }
+        if (wallet.getAssetScales().isEmpty()) {
+            failures.add("custody-wallet.asset-scales must contain at least one asset");
+        } else {
+            wallet.getAssetScales().forEach((asset, scale) -> {
+                if (asset == null || asset.isBlank()) {
+                    failures.add("custody-wallet.asset-scales contains a blank asset");
+                }
+                if (scale == null || scale < 0L || scale > 18L) {
+                    failures.add("custody-wallet.asset-scales contains an invalid scale");
+                }
+            });
+        }
 
         Withdrawal configuredWithdrawal = withdrawal == null ? new Withdrawal() : withdrawal;
         if (configuredWithdrawal.getSingleApprovalThresholdUsdt() == null
@@ -113,7 +125,7 @@ public class GatewayProperties implements EnvironmentAware {
                 || configuredWithdrawal.getDailyLimitUsdt().signum() <= 0) {
             failures.add("withdrawal.daily-limit-usdt must be positive");
         }
-        requireServiceUrl(failures, "withdrawal.valuation-base-url",
+        requireHttpsUrl(failures, "withdrawal.valuation-base-url",
                 configuredWithdrawal.getValuationBaseUrl());
         if (configuredWithdrawal.getFailureReconciliationDelay() == null
                 || configuredWithdrawal.getFailureReconciliationDelay().isNegative()

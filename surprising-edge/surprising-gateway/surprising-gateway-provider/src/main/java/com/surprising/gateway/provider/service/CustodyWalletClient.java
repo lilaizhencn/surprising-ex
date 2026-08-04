@@ -14,6 +14,7 @@ import java.util.Locale;
 import java.util.Map;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -36,6 +37,7 @@ public class CustodyWalletClient {
     private final SecureRandom random = new SecureRandom();
 
     public CustodyWalletClient(GatewayProperties properties,
+                               @Qualifier("custodyWalletRestTemplate")
                                RestTemplate restTemplate,
                                ObjectMapper objectMapper) {
         this.properties = properties;

@@ -61,7 +61,10 @@ class GatewayProductionSecurityConfigurationTest {
         wallet.setApiSecret("wallet-secret");
         wallet.setWebhookSecret("wallet-webhook-secret");
         wallet.setSpotAccountBaseUrl("https://account.example.com");
+        wallet.setAssetScales(Map.of("USDT", 6L));
         wallet.setWithdrawalAddressIds(Map.of("ETH", "11111111-1111-1111-1111-111111111111"));
+
+        properties.getWithdrawal().setValuationBaseUrl("https://price.example.com");
 
         GatewayProperties.KycDocuments documents = properties.getKycDocuments();
         documents.setEnabled(true);
@@ -142,6 +145,7 @@ class GatewayProductionSecurityConfigurationTest {
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_KEY", "wallet-key");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_SECRET", "wallet-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET", "wallet-webhook-secret");
+        testEnvironment.put("GATEWAY_CUSTODY_WALLET_ASSET_SCALES", "{\"USDT\":6}");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS",
                 "{\"ETH\":\"11111111-1111-1111-1111-111111111111\"}");
         testEnvironment.put("GATEWAY_SPOT_ACCOUNT_BASE_URL", "https://account.example.com");

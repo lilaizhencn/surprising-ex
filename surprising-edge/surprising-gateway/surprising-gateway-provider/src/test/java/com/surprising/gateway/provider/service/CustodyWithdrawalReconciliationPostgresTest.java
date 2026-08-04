@@ -174,6 +174,16 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThat(repository.find(withdrawalId).status()).isEqualTo("PENDING_APPROVAL");
     }
 
+    @Test
+    void retryCannotBypassPendingApproval() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        assertThatThrownBy(() -> repository.recordAdminRetry(withdrawalId, 99L, "admin", "manual retry"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("PENDING_APPROVAL");
+    }
+
     private DataSource dataSource() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.postgresql.Driver");

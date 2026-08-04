@@ -7,6 +7,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -14,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class CustodyWithdrawalRepository {
+
+    private static final Set<String> RETRYABLE_STATUSES =
+            Set.of("DEBIT_UNKNOWN", "BROADCAST_UNKNOWN", "REFUND_PENDING");
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -141,9 +145,9 @@ public class CustodyWithdrawalRepository {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
-                 WHERE withdrawal_id = ?
+                 WHERE withdrawal_id = ? AND status IN ('DEBIT_UNKNOWN', 'BROADCAST_UNKNOWN', 'REFUND_PENDING')
                 """, adminUserId, adminUsername, reason, id);
-        WithdrawalRecord record = requireUpdated(id, updated, "withdrawal does not exist");
+        WithdrawalRecord record = requireRetryable(id, updated, "withdrawal is not retryable in its current state");
         insertAdminAction(id, adminUserId, adminUsername, "RETRY", reason);
         return record;
     }
@@ -291,6 +295,15 @@ public class CustodyWithdrawalRepository {
     private WithdrawalRecord requireTransition(UUID id, int updated, String message, String targetStatus) {
         WithdrawalRecord record = find(id);
         if (updated == 0 && (record == null || !targetStatus.equals(record.status()))) {
+            throw new IllegalStateException(message + "; current status is "
+                    + (record == null ? "missing" : record.status()));
+        }
+        return record;
+    }
+
+    private WithdrawalRecord requireRetryable(UUID id, int updated, String message) {
+        WithdrawalRecord record = find(id);
+        if (updated == 0 && (record == null || !RETRYABLE_STATUSES.contains(record.status()))) {
             throw new IllegalStateException(message + "; current status is "
                     + (record == null ? "missing" : record.status()));
         }

@@ -23,4 +23,16 @@ class GatewayHttpConfigurationTest {
         assertThat(ReflectionTestUtils.getField(requestFactory, "connectTimeout")).isEqualTo(750);
         assertThat(ReflectionTestUtils.getField(requestFactory, "readTimeout")).isEqualTo(2000);
     }
+
+    @Test
+    void custodyRestTemplateUsesCustodyWalletTimeout() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getCustodyWallet().setRequestTimeout(Duration.ofMillis(1500));
+
+        var restTemplate = new GatewayHttpConfiguration().custodyWalletRestTemplate(properties);
+
+        SimpleClientHttpRequestFactory requestFactory =
+                (SimpleClientHttpRequestFactory) restTemplate.getRequestFactory();
+        assertThat(ReflectionTestUtils.getField(requestFactory, "readTimeout")).isEqualTo(1500);
+    }
 }

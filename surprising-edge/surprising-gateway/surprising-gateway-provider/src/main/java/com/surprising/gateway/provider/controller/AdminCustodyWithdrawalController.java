@@ -72,6 +72,8 @@ public class AdminCustodyWithdrawalController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (CustodyWithdrawalService.WithdrawalUnknownException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
 

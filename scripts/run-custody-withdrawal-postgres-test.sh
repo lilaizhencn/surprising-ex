@@ -7,6 +7,7 @@ DB_NAME="surprising_withdrawal_spring_it_${RANDOM}_$$"
 DB_HOST="${SURPRISING_WITHDRAWAL_IT_DATABASE_HOST:-localhost}"
 DB_PORT="${SURPRISING_WITHDRAWAL_IT_DATABASE_PORT:-5432}"
 DB_USER="${SURPRISING_WITHDRAWAL_IT_DATABASE_USER:-$(whoami)}"
+export PGPASSWORD="${SURPRISING_WITHDRAWAL_IT_DATABASE_PASSWORD:-}"
 
 cleanup() {
     dropdb -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" --if-exists "${DB_NAME}" >/dev/null
