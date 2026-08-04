@@ -88,6 +88,18 @@ class GatewayProductionSecurityConfigurationTest {
     }
 
     @Test
+    void productionProfileRejectsOpenNetworkAllowlist() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.setDeploymentProfile("production");
+        properties.getSecurity().setAdminIpAllowlist(List.of("0.0.0.0/0"));
+        properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
+
+        assertThatThrownBy(properties::validateProductionSecurityConfiguration)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("security.admin-ip-allowlist must not allow all addresses");
+    }
+
+    @Test
     void productionYamlBindsTheFailClosedSecurityBoundary() throws IOException {
         StandardEnvironment environment = new StandardEnvironment();
         environment.setActiveProfiles("production");

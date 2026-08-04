@@ -63,13 +63,9 @@ public class GatewayProperties implements EnvironmentAware {
         if (!configuredSecurity.isRequireAdminMfa()) {
             failures.add("security.require-admin-mfa must be true");
         }
-        if (configuredSecurity.getAdminIpAllowlist() == null || configuredSecurity.getAdminIpAllowlist().isEmpty()) {
-            failures.add("security.admin-ip-allowlist must not be empty");
-        }
-        if (configuredSecurity.getTrustedProxyIpAllowlist() == null
-                || configuredSecurity.getTrustedProxyIpAllowlist().isEmpty()) {
-            failures.add("security.trusted-proxy-ip-allowlist must not be empty");
-        }
+        validateIpAllowlist(failures, "security.admin-ip-allowlist", configuredSecurity.getAdminIpAllowlist());
+        validateIpAllowlist(failures, "security.trusted-proxy-ip-allowlist",
+                configuredSecurity.getTrustedProxyIpAllowlist());
         requireProductionSecret(failures, "security.jwt-secret", configuredSecurity.getJwtSecret(), 32,
                 "local-dev-change-me-surprising-ex-gateway-secret-2026");
         requireProductionSecret(failures, "security.verification-code-pepper",
@@ -123,6 +119,20 @@ public class GatewayProperties implements EnvironmentAware {
         if (value == null || value.isBlank() || value.length() < minimumLength
                 || (forbiddenValue != null && forbiddenValue.equals(value))) {
             failures.add(name + " must be a non-default secret of at least " + minimumLength + " characters");
+        }
+    }
+
+    private static void validateIpAllowlist(List<String> failures, String name, List<String> rules) {
+        if (rules == null || rules.isEmpty()) {
+            failures.add(name + " must not be empty");
+            return;
+        }
+        if (rules.stream().anyMatch(rule -> rule == null || rule.isBlank())) {
+            failures.add(name + " must not contain blank rules");
+        }
+        if (rules.stream().anyMatch(rule -> rule != null
+                && ("0.0.0.0/0".equals(rule.trim()) || "::/0".equals(rule.trim())))) {
+            failures.add(name + " must not allow all addresses");
         }
     }
 
