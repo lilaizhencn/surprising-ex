@@ -11,7 +11,6 @@ import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.util.List;
@@ -172,7 +171,7 @@ public class CustodyWalletController {
                                        @Positive Long addressVersion) {
     }
 
-    public record CreateWithdrawalRequest(@NotNull java.util.UUID custodyAddressId,
+    public record CreateWithdrawalRequest(java.util.UUID custodyAddressId,
                                           @NotBlank @Size(max = 32) String chain,
                                           @NotBlank @Size(max = 32) String assetSymbol,
                                           @NotBlank @Size(max = 160) String toAddress,
