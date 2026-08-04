@@ -201,9 +201,17 @@ public class CustodyWithdrawalService {
         try {
             Map<String, Object> walletResponse = walletClient.createWithdrawal(record.userId(),
                     withdrawalPayload(record), custodyIdempotencyKey(record));
-            record = repository.markSubmitted(record.withdrawalId(), json(walletResponse),
-                    stringValue(walletResponse.get("withdrawalId"), stringValue(walletResponse.get("id"), null)));
-            return response(record);
+            try {
+                record = repository.markSubmitted(record.withdrawalId(), json(walletResponse),
+                        stringValue(walletResponse.get("withdrawalId"), stringValue(walletResponse.get("id"), null)));
+                return response(record);
+            } catch (IllegalStateException ex) {
+                CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
+                if (current != null && submissionOutcomeAdvanced(current.status())) {
+                    return response(current);
+                }
+                throw ex;
+            }
         } catch (CustodyWalletClient.CustodyWalletRejectedException ex) {
             refund(record, "custody wallet withdrawal rejected refund", "custody wallet rejected withdrawal");
             throw new WithdrawalRejectedException("custody wallet rejected withdrawal; funds were released", ex);
@@ -211,6 +219,12 @@ public class CustodyWithdrawalService {
             repository.markBroadcastUnknown(record.withdrawalId(), "{}", message(ex));
             throw new WithdrawalUnknownException("custody wallet withdrawal status is unknown", ex);
         }
+    }
+
+    private boolean submissionOutcomeAdvanced(String status) {
+        return "SUBMITTED".equals(status) || "COMPLETED".equals(status)
+                || "FAILED_PENDING".equals(status) || "REFUND_PENDING".equals(status)
+                || "REFUNDED".equals(status);
     }
 
     public void handleWebhook(String eventType, Map<String, Object> event) {

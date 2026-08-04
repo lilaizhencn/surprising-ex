@@ -159,7 +159,7 @@ public class CustodyWithdrawalRepository {
                    SET status = 'PROCESSING', admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status = 'PENDING_APPROVAL'
                 """, adminUserId, adminUsername, reason, id);
-        WithdrawalRecord record = requireTransition(id, updated, "withdrawal is not pending approval", "PROCESSING");
+        WithdrawalRecord record = requireConditionalUpdate(id, updated, "withdrawal is not pending approval");
         insertAdminAction(id, adminUserId, adminUsername, "APPROVE", reason);
         return record;
     }
@@ -172,7 +172,7 @@ public class CustodyWithdrawalRepository {
                        admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status = 'PENDING_APPROVAL'
                 """, reason, adminUserId, adminUsername, reason, id);
-        WithdrawalRecord record = requireTransition(id, updated, "withdrawal is not pending approval", "REJECTED");
+        WithdrawalRecord record = requireConditionalUpdate(id, updated, "withdrawal is not pending approval");
         insertAdminAction(id, adminUserId, adminUsername, "REJECT", reason);
         return record;
     }
@@ -181,9 +181,9 @@ public class CustodyWithdrawalRepository {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'DEBITED', error_code = NULL, error_message = NULL, updated_at = now()
-                 WHERE withdrawal_id = ? AND status IN ('PROCESSING', 'DEBIT_UNKNOWN')
+                 WHERE withdrawal_id = ? AND status IN ('PROCESSING', 'DEBIT_UNKNOWN', 'DEBITED')
                 """, id);
-        return requireConditionalUpdate(id, updated, "cannot transition withdrawal to DEBITED");
+        return requireTransition(id, updated, "cannot transition withdrawal to DEBITED", "DEBITED");
     }
 
     public WithdrawalRecord markDebitUnknown(UUID id, String error) {
@@ -192,18 +192,19 @@ public class CustodyWithdrawalRepository {
                    SET status = 'DEBIT_UNKNOWN', error_code = 'SPOT_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('PROCESSING', 'DEBIT_UNKNOWN')
                 """, error, id);
-        return requireConditionalUpdate(id, updated, "cannot transition withdrawal to DEBIT_UNKNOWN");
+        return requireTransition(id, updated, "cannot transition withdrawal to DEBIT_UNKNOWN", "DEBIT_UNKNOWN");
     }
 
     public WithdrawalRecord markSubmitted(UUID id, String walletResponse, String walletWithdrawalId) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
-                   SET status = 'SUBMITTED', wallet_response = ?::jsonb, wallet_withdrawal_id = ?,
+                   SET status = 'SUBMITTED', wallet_response = COALESCE(wallet_response, ?::jsonb),
+                       wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
                        submitted_at = COALESCE(submitted_at, now()), updated_at = now(), error_code = NULL,
                        error_message = NULL
-                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN')
+                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN', 'SUBMITTED')
                 """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
-        return requireConditionalUpdate(id, updated, "cannot mark withdrawal submitted");
+        return requireTransition(id, updated, "cannot mark withdrawal submitted", "SUBMITTED");
     }
 
     public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error) {
@@ -219,7 +220,7 @@ public class CustodyWithdrawalRepository {
                        error_code = 'CUSTODY_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN')
                 """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
-        return requireConditionalUpdate(id, updated, "cannot mark withdrawal broadcast unknown");
+        return requireTransition(id, updated, "cannot mark withdrawal broadcast unknown", "BROADCAST_UNKNOWN");
     }
 
     @Transactional
@@ -279,9 +280,9 @@ public class CustodyWithdrawalRepository {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REJECTED', error_code = ?, error_message = ?, updated_at = now()
-                 WHERE withdrawal_id = ? AND status IN ('PENDING_APPROVAL', 'PROCESSING')
+                 WHERE withdrawal_id = ? AND status IN ('PENDING_APPROVAL', 'PROCESSING', 'REJECTED')
                 """, code, error, id);
-        return requireConditionalUpdate(id, updated, "cannot mark withdrawal rejected");
+        return requireTransition(id, updated, "cannot mark withdrawal rejected", "REJECTED");
     }
 
     private WithdrawalRecord requireConditionalUpdate(UUID id, int updated, String message) {

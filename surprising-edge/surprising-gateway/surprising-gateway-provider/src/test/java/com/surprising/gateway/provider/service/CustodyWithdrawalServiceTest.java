@@ -47,6 +47,37 @@ class CustodyWithdrawalServiceTest {
     }
 
     @Test
+    void concurrentSubmissionThatAlreadyPersistedDoesNotDowngradeToBroadcastUnknown() {
+        GatewayProperties properties = new GatewayProperties();
+        CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
+        SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
+        WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
+        UUID withdrawalId = UUID.randomUUID();
+        CustodyWithdrawalRepository.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
+                "withdraw-concurrent");
+        CustodyWithdrawalRepository.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
+                "withdraw-concurrent");
+        CustodyWithdrawalRepository.WithdrawalRecord submitted = record(withdrawalId, "SUBMITTED",
+                "withdraw-concurrent");
+        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
+        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
+        when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
+        when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-concurrent")))
+                .thenReturn(Map.of("id", "wallet-concurrent"));
+        when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-concurrent")))
+                .thenThrow(new IllegalStateException("already submitted"));
+        when(repository.find(withdrawalId)).thenReturn(submitted);
+
+        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+                valuationClient);
+
+        assertThat(service.submit(42L, "withdraw-concurrent", request()).status()).isEqualTo("SUBMITTED");
+        verify(repository, never()).markBroadcastUnknown(any(), any(), any());
+    }
+
+    @Test
     void rejectedCustodyResponseRefundsExactlyOnceAndReturnsRejected() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);

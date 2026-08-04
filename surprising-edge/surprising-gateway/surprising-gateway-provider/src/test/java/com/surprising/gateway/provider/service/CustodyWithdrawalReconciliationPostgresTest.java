@@ -172,6 +172,30 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void repeatedTargetTransitionsAreIdempotentButAdminTransitionsRemainStrict() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PROCESSING' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        repository.markDebited(withdrawalId, "debit");
+        repository.markDebited(withdrawalId, "debit");
+        repository.markSubmitted(withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration");
+        repository.markSubmitted(withdrawalId, "{\"id\":\"different\"}", "different");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("SUBMITTED");
+        assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-integration");
+
+        assertThatThrownBy(() -> repository.approve(withdrawalId, 99L, "admin", "late approval"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> repository.reject(withdrawalId, 99L, "admin", "late rejection"))
+                .isInstanceOf(IllegalStateException.class);
+
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
+                withdrawalId);
+        repository.markRejected(withdrawalId, "REJECTED", "rejected");
+        repository.markRejected(withdrawalId, "REJECTED", "duplicate rejection");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("REJECTED");
+    }
+
+    @Test
     void duplicateCompletionForSameTargetIsIdempotent() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'SUBMITTED' WHERE withdrawal_id = ?",
                 withdrawalId);
