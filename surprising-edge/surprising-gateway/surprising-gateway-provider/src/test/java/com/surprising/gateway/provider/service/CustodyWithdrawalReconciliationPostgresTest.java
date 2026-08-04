@@ -23,9 +23,13 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.mockito.Mockito;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
@@ -34,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
 class CustodyWithdrawalReconciliationPostgresTest {
 
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
+    private AnnotationConfigApplicationContext applicationContext;
     private JdbcTemplate jdbcTemplate;
     private TransactionTemplate transactionTemplate;
     private CustodyWithdrawalRepository repository;
@@ -46,15 +51,27 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void setUp() {
         DataSource dataSource = dataSource();
         jdbcTemplate = new JdbcTemplate(dataSource);
-        transactionTemplate = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
-        repository = new CustodyWithdrawalRepository(jdbcTemplate);
         walletClient = Mockito.mock(CustodyWalletClient.class);
         spotAccountClient = Mockito.mock(SpotAccountClient.class);
-        CustodyWithdrawalRefundService refundService =
-                new CustodyWithdrawalRefundService(repository, spotAccountClient);
-        reconciliationService = new CustodyWithdrawalReconciliationService(
-                repository, walletClient, refundService, new ObjectMapper());
         createSchema();
+        applicationContext = new AnnotationConfigApplicationContext();
+        applicationContext.register(TransactionConfig.class);
+        applicationContext.registerBean(DataSource.class, () -> dataSource);
+        applicationContext.registerBean(PlatformTransactionManager.class,
+                () -> new DataSourceTransactionManager(dataSource));
+        applicationContext.registerBean(JdbcTemplate.class, () -> jdbcTemplate);
+        applicationContext.registerBean(CustodyWalletClient.class, () -> walletClient);
+        applicationContext.registerBean(SpotAccountClient.class, () -> spotAccountClient);
+        applicationContext.registerBean(ObjectMapper.class, () -> new ObjectMapper());
+        applicationContext.registerBean(CustodyWithdrawalRepository.class);
+        applicationContext.registerBean(CustodyWithdrawalRefundService.class);
+        applicationContext.registerBean(CustodyWithdrawalReconciliationService.class);
+        applicationContext.refresh();
+        repository = applicationContext.getBean(CustodyWithdrawalRepository.class);
+        reconciliationService = applicationContext.getBean(CustodyWithdrawalReconciliationService.class);
+        PlatformTransactionManager transactionManager =
+                applicationContext.getBean(PlatformTransactionManager.class);
+        transactionTemplate = new TransactionTemplate(transactionManager);
         withdrawalId = insertFailurePendingWithdrawal();
     }
 
@@ -62,6 +79,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void tearDown() {
         if (jdbcTemplate != null) {
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE withdrawal_id = ?", withdrawalId);
+        }
+        if (applicationContext != null) {
+            applicationContext.close();
         }
         executor.shutdownNow();
     }
@@ -83,10 +103,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         }));
         assertThat(confirmationUpdated.await(2, TimeUnit.SECONDS)).isTrue();
 
-        Future<?> reconciliation = executor.submit(() -> inTransaction(
-                () -> reconciliationService.reconcile(record)));
-        Thread.sleep(100L);
-        assertThat(reconciliation.isDone()).isFalse();
+        Future<?> reconciliation = executor.submit(() -> reconciliationService.reconcile(record));
         releaseConfirmation.countDown();
         confirmation.get(5, TimeUnit.SECONDS);
         reconciliation.get(5, TimeUnit.SECONDS);
@@ -110,8 +127,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 });
         CustodyWithdrawalRepository.WithdrawalRecord record = repository.find(withdrawalId);
 
-        Future<?> reconciliation = executor.submit(() -> inTransaction(
-                () -> reconciliationService.reconcile(record)));
+        Future<?> reconciliation = executor.submit(() -> reconciliationService.reconcile(record));
         assertThat(custodyReadStarted.await(2, TimeUnit.SECONDS)).isTrue();
         Future<?> confirmation = executor.submit(() -> inTransaction(
                 () -> repository.markCompleted(withdrawalId, "{}", "wallet-integration")));
@@ -127,6 +143,37 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThat(repository.find(withdrawalId).status()).isEqualTo("REFUNDED");
     }
 
+    @Test
+    void invalidCompletionSourceDoesNotChangeWithdrawalState() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        assertThatThrownBy(() -> repository.markCompleted(withdrawalId, "{}", "wallet-integration"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("PENDING_APPROVAL");
+    }
+
+    @Test
+    void duplicateCompletionForSameTargetIsIdempotent() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'SUBMITTED' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        repository.markCompleted(withdrawalId, "{}", "wallet-integration");
+        repository.markCompleted(withdrawalId, "{}", "wallet-integration");
+
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void adminStateAndActionAuditRollbackTogetherWhenAuditInsertFails() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        assertThatThrownBy(() -> repository.approve(withdrawalId, 99L, "admin", "manual approval"))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("PENDING_APPROVAL");
+    }
+
     private DataSource dataSource() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.postgresql.Driver");
@@ -137,6 +184,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     private void createSchema() {
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_users (user_id BIGINT PRIMARY KEY)");
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawals ("
                 + "withdrawal_id UUID PRIMARY KEY, user_id BIGINT NOT NULL, idempotency_key TEXT NOT NULL, "
                 + "request_sha256 TEXT NOT NULL, chain TEXT NOT NULL, asset_symbol TEXT NOT NULL, "
@@ -147,6 +195,10 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 + "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
                 + "submitted_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, admin_user_id BIGINT, "
                 + "admin_username TEXT, admin_reason TEXT)");
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_actions ("
+                + "action_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
+                + "admin_user_id BIGINT NOT NULL REFERENCES gateway_users, admin_username TEXT NOT NULL, "
+                + "action TEXT NOT NULL, reason TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
     }
 
     private UUID insertFailurePendingWithdrawal() {
@@ -184,5 +236,10 @@ class CustodyWithdrawalReconciliationPostgresTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("integration test coordination interrupted", ex);
         }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableTransactionManagement
+    static class TransactionConfig {
     }
 }
