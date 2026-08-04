@@ -5,6 +5,8 @@ import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionReques
 import com.surprising.gateway.provider.auth.ComplianceModels.KycUpdateRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Locale;
+import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import tools.jackson.core.JacksonException;
@@ -129,6 +131,23 @@ public class ComplianceKycRepository {
             if (parsed == null || !parsed.isArray()) {
                 throw new IllegalArgumentException("submittedDocuments must be a JSON array");
             }
+            if (parsed.size() > 10) {
+                throw new IllegalArgumentException("submittedDocuments may contain at most 10 items");
+            }
+            Set<String> allowedTypes = Set.of("ID_CARD", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE");
+            for (JsonNode document : parsed) {
+                if (!document.isObject()) {
+                    throw new IllegalArgumentException("each submitted document must be an object");
+                }
+                JsonNode type = document.get("type");
+                JsonNode reference = document.get("reference");
+                String normalizedType = type == null ? "" : type.asText("").trim().toUpperCase(Locale.ROOT);
+                String normalizedReference = reference == null ? "" : reference.asText("").trim();
+                if (!allowedTypes.contains(normalizedType) || normalizedReference.isBlank()
+                        || normalizedReference.length() > 240) {
+                    throw new IllegalArgumentException("submitted document type or reference is invalid");
+                }
+            }
         } catch (JacksonException ex) {
             throw new IllegalArgumentException("submittedDocuments must be valid JSON", ex);
         }
@@ -148,8 +167,8 @@ public class ComplianceKycRepository {
 
     private String faceStatus(String value) {
         String normalized = value == null || value.isBlank() ? "NOT_REQUIRED" : value.trim().toUpperCase();
-        if (!normalized.matches("NOT_REQUIRED|PENDING|PASSED|FAILED")) {
-            throw new IllegalArgumentException("faceVerificationStatus is invalid");
+        if (!normalized.matches("NOT_REQUIRED|PENDING")) {
+            throw new IllegalArgumentException("faceVerificationStatus may only be NOT_REQUIRED or PENDING");
         }
         return normalized;
     }
