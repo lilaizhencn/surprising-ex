@@ -15,6 +15,7 @@ surprising:
       daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT}
       valuation-base-url: ${GATEWAY_WITHDRAWAL_VALUATION_BASE_URL}
       valuation-max-age: ${GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE:30s}
+      failure-reconciliation-delay: ${GATEWAY_WITHDRAWAL_FAILURE_RECONCILIATION_DELAY:30s}
     custody-wallet:
       enabled: ${GATEWAY_CUSTODY_WALLET_ENABLED:true}
       base-url: ${GATEWAY_CUSTODY_WALLET_BASE_URL}

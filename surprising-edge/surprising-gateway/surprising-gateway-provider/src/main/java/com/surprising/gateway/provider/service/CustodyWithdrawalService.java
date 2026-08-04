@@ -10,13 +10,19 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class CustodyWithdrawalService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CustodyWithdrawalService.class);
 
     private final GatewayProperties properties;
     private final CustodyWithdrawalRepository repository;
@@ -75,8 +81,8 @@ public class CustodyWithdrawalService {
         return response(repository.reject(withdrawalId, adminUserId, adminUsername, reason));
     }
 
-    public WithdrawalResponse retry(UUID withdrawalId) {
-        return continueSubmission(requireRecord(withdrawalId));
+    public WithdrawalResponse retry(UUID withdrawalId, long adminUserId, String adminUsername, String reason) {
+        return continueSubmission(repository.recordAdminRetry(withdrawalId, adminUserId, adminUsername, reason));
     }
 
     public java.util.List<Map<String, Object>> history(long userId, String chain, String asset, int limit) {
@@ -123,6 +129,45 @@ public class CustodyWithdrawalService {
         return rows;
     }
 
+    @Scheduled(fixedDelayString = "${surprising.gateway.withdrawal.failure-reconciliation-delay:30s}")
+    public void reconcileFailedWithdrawals() {
+        for (CustodyWithdrawalRepository.WithdrawalRecord record
+                : repository.listPendingFailures(properties.getWithdrawal().getFailureReconciliationDelay(), 50)) {
+            try {
+                reconcileFailedWithdrawal(record);
+            } catch (RuntimeException ex) {
+                LOGGER.warn("custody withdrawal failure reconciliation remains pending: {}", record.withdrawalId(), ex);
+            }
+        }
+    }
+
+    private void reconcileFailedWithdrawal(CustodyWithdrawalRepository.WithdrawalRecord record) {
+        if (record.externalReference() == null || record.externalReference().isBlank()) {
+            return;
+        }
+        Map<String, Object> walletRecord = walletClient.withdrawalsByExternalReference(
+                        record.externalReference(), record.chain(), record.assetSymbol(), 20).stream()
+                .filter(row -> record.externalReference().equals(
+                        stringValue(row.get("externalReference"), stringValue(row.get("external_reference"), null))))
+                .filter(row -> record.walletWithdrawalId() == null
+                        || record.walletWithdrawalId().equals(
+                                stringValue(row.get("withdrawalId"), stringValue(row.get("id"), null))))
+                .findFirst()
+                .orElse(null);
+        if (walletRecord == null) {
+            return;
+        }
+        String walletWithdrawalId = stringValue(walletRecord.get("withdrawalId"),
+                stringValue(walletRecord.get("id"), record.walletWithdrawalId()));
+        String status = stringValue(walletRecord.get("status"), "").toUpperCase(Locale.ROOT);
+        String response = json(walletRecord);
+        if ("CONFIRMED".equals(status)) {
+            repository.markCompleted(record.withdrawalId(), response, walletWithdrawalId);
+        } else if (Set.of("FAILED", "REJECTED", "CANCELLED").contains(status)) {
+            refund(record, "custody wallet withdrawal failed", "custody wallet withdrawal failed");
+        }
+    }
+
     private WithdrawalResponse continueSubmission(CustodyWithdrawalRepository.WithdrawalRecord record) {
         if (record == null) {
             throw new IllegalStateException("withdrawal intent does not exist");
@@ -131,7 +176,7 @@ public class CustodyWithdrawalService {
             refund(record, "custody wallet withdrawal refund retry", "custody wallet withdrawal refund retry");
             return response(repository.find(record.withdrawalId()));
         }
-        if (terminal(record.status())) {
+        if (terminal(record.status()) || "FAILED_PENDING".equals(record.status())) {
             return response(record);
         }
 
@@ -145,7 +190,7 @@ public class CustodyWithdrawalService {
         }
         try {
             Map<String, Object> walletResponse = walletClient.createWithdrawal(record.userId(),
-                    withdrawalPayload(record), record.idempotencyKey());
+                    withdrawalPayload(record), custodyIdempotencyKey(record));
             record = repository.markSubmitted(record.withdrawalId(), json(walletResponse),
                     stringValue(walletResponse.get("withdrawalId"), stringValue(walletResponse.get("id"), null)));
             return response(record);
@@ -168,6 +213,10 @@ public class CustodyWithdrawalService {
             throw new IllegalArgumentException("withdrawal webhook does not match a local withdrawal");
         }
         validateWebhookData(record, data);
+        if ("COMPLETED".equals(record.status()) || "REFUNDED".equals(record.status())
+                || "REJECTED".equals(record.status())) {
+            return;
+        }
         String normalizedType = eventType.toUpperCase(Locale.ROOT);
         String response = json(event);
         switch (normalizedType) {
@@ -177,8 +226,8 @@ public class CustodyWithdrawalService {
                     record.withdrawalId(), response, "custody wallet broadcast status is unknown", walletWithdrawalId);
             case "WITHDRAWAL.CONFIRMED" -> repository.markCompleted(
                     record.withdrawalId(), response, walletWithdrawalId);
-            case "WITHDRAWAL.FAILED" -> refund(record, "custody wallet withdrawal failed",
-                    "custody wallet withdrawal failed");
+            case "WITHDRAWAL.FAILED" -> repository.markFailurePending(
+                    record.withdrawalId(), response, "custody wallet withdrawal failed", walletWithdrawalId);
             default -> throw new IllegalArgumentException("unsupported withdrawal webhook event type");
         }
     }
@@ -332,6 +381,13 @@ public class CustodyWithdrawalService {
 
     private String message(Throwable throwable) {
         return throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage();
+    }
+
+    private String custodyIdempotencyKey(CustodyWithdrawalRepository.WithdrawalRecord record) {
+        if (record.externalReference() != null && !record.externalReference().isBlank()) {
+            return record.externalReference();
+        }
+        return "custody-wallet-idempotency:" + sha256(record.userId() + ":" + record.idempotencyKey());
     }
 
     private WithdrawalResponse response(CustodyWithdrawalRepository.WithdrawalRecord record) {

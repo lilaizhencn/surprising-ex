@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -127,6 +128,23 @@ public class CustodyWithdrawalRepository {
                 : jdbcTemplate.query(selectListSql(predicate, safeLimit), this::toRecord, status.trim().toUpperCase());
     }
 
+    public List<WithdrawalRecord> listPendingFailures(Duration gracePeriod, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        long seconds = Math.max(1L, gracePeriod.getSeconds());
+        return jdbcTemplate.query(selectListSql(
+                "status = 'FAILED_PENDING' AND updated_at <= now() - (? * INTERVAL '1 second')", safeLimit),
+                this::toRecord, seconds);
+    }
+
+    public WithdrawalRecord recordAdminRetry(UUID id, long adminUserId, String adminUsername, String reason) {
+        int updated = jdbcTemplate.update("""
+                UPDATE gateway_wallet_withdrawals
+                   SET admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
+                 WHERE withdrawal_id = ?
+                """, adminUserId, adminUsername, reason, id);
+        return requireUpdated(id, updated, "withdrawal does not exist");
+    }
+
     public WithdrawalRecord approve(UUID id, long adminUserId, String adminUsername, String reason) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
@@ -202,16 +220,29 @@ public class CustodyWithdrawalRepository {
                        wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
                        completed_at = now(), updated_at = now(),
                        error_code = NULL, error_message = NULL
-                 WHERE withdrawal_id = ? AND status IN ('SUBMITTED', 'BROADCAST_UNKNOWN')
+                 WHERE withdrawal_id = ? AND status IN ('SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
                 """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
         return requireUpdated(id, updated, "cannot mark withdrawal completed");
+    }
+
+    public WithdrawalRecord markFailurePending(UUID id, String walletResponse, String error,
+                                               String walletWithdrawalId) {
+        int updated = jdbcTemplate.update("""
+                UPDATE gateway_wallet_withdrawals
+                   SET status = 'FAILED_PENDING', wallet_response = ?::jsonb,
+                       wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
+                       error_code = 'CUSTODY_FAILURE_PENDING', error_message = ?, updated_at = now()
+                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
+                """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
+        return requireUpdated(id, updated, "cannot mark withdrawal failure pending");
     }
 
     public WithdrawalRecord markRefundPending(UUID id, String error) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REFUND_PENDING', error_code = 'REFUND_UNKNOWN', error_message = ?, updated_at = now()
-                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'REFUND_PENDING')
+                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN',
+                                                        'FAILED_PENDING', 'REFUND_PENDING')
                 """, error, id);
         return requireUpdated(id, updated, "cannot mark withdrawal refund pending");
     }
@@ -221,7 +252,8 @@ public class CustodyWithdrawalRepository {
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REFUNDED', wallet_response = ?::jsonb, error_code = 'REFUNDED',
                        error_message = ?, completed_at = COALESCE(completed_at, now()), updated_at = now()
-                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'REFUND_PENDING')
+                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN',
+                                                        'FAILED_PENDING', 'REFUND_PENDING')
                 """, walletResponse == null ? "{}" : walletResponse, reason, id);
         return requireUpdated(id, updated, "cannot mark withdrawal refunded");
     }

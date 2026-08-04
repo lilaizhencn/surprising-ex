@@ -74,6 +74,23 @@ public class CustodyWalletClient {
                 new ParameterizedTypeReference<>() {}, null);
     }
 
+    public List<Map<String, Object>> withdrawalsByExternalReference(String externalReference,
+                                                                     String chain,
+                                                                     String asset,
+                                                                     int limit) {
+        if (externalReference == null || externalReference.isBlank()) {
+            throw new IllegalArgumentException("externalReference is required");
+        }
+        String query = query(Map.of(
+                "chain", optional(chain),
+                "assetSymbol", optional(asset),
+                "search", externalReference.trim(),
+                "limit", Integer.toString(Math.max(1, Math.min(limit, 200))),
+                "offset", "0"));
+        return exchange(HttpMethod.GET, API_PREFIX + "/withdrawals" + query, null,
+                new ParameterizedTypeReference<>() {}, null);
+    }
+
     public Map<String, Object> createWithdrawal(long userId,
                                                  Map<String, Object> withdrawal,
                                                  String idempotencyKey) {

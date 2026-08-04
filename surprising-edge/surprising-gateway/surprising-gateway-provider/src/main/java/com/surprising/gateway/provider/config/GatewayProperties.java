@@ -115,6 +115,11 @@ public class GatewayProperties implements EnvironmentAware {
         }
         requireServiceUrl(failures, "withdrawal.valuation-base-url",
                 configuredWithdrawal.getValuationBaseUrl());
+        if (configuredWithdrawal.getFailureReconciliationDelay() == null
+                || configuredWithdrawal.getFailureReconciliationDelay().isNegative()
+                || configuredWithdrawal.getFailureReconciliationDelay().isZero()) {
+            failures.add("withdrawal.failure-reconciliation-delay must be positive");
+        }
 
         KycDocuments documents = kycDocuments == null ? new KycDocuments() : kycDocuments;
         if (!documents.isEnabled()) {
@@ -681,6 +686,7 @@ public class GatewayProperties implements EnvironmentAware {
         private java.math.BigDecimal dailyLimitUsdt = new java.math.BigDecimal("50000");
         private String valuationBaseUrl = "http://localhost:9082";
         private Duration valuationMaxAge = Duration.ofSeconds(30);
+        private Duration failureReconciliationDelay = Duration.ofSeconds(30);
 
         public java.math.BigDecimal getSingleApprovalThresholdUsdt() {
             return singleApprovalThresholdUsdt;
@@ -712,6 +718,15 @@ public class GatewayProperties implements EnvironmentAware {
 
         public void setValuationMaxAge(Duration value) {
             this.valuationMaxAge = value == null || value.isZero() || value.isNegative()
+                    ? Duration.ofSeconds(30) : value;
+        }
+
+        public Duration getFailureReconciliationDelay() {
+            return failureReconciliationDelay;
+        }
+
+        public void setFailureReconciliationDelay(Duration value) {
+            this.failureReconciliationDelay = value == null || value.isZero() || value.isNegative()
                     ? Duration.ofSeconds(30) : value;
         }
     }

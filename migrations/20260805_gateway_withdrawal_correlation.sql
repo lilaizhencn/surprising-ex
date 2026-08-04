@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawals (
     submitted_at         TIMESTAMPTZ,
     completed_at         TIMESTAMPTZ,
     CONSTRAINT gateway_wallet_withdrawal_status_check CHECK (
-        status IN ('PENDING_APPROVAL', 'PROCESSING', 'DEBIT_UNKNOWN', 'DEBITED', 'SUBMITTED',
+        status IN ('PENDING_APPROVAL', 'PROCESSING', 'DEBIT_UNKNOWN', 'DEBITED', 'SUBMITTED', 'FAILED_PENDING',
                    'BROADCAST_UNKNOWN', 'COMPLETED', 'REJECTED', 'REFUND_PENDING', 'REFUNDED')
     ),
     CONSTRAINT gateway_wallet_withdrawal_amount_check CHECK (amount_units > 0 AND usdt_value > 0),
@@ -41,6 +41,14 @@ CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawals_user_status_idx
 CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawals_wallet_id_idx
     ON gateway_wallet_withdrawals (wallet_withdrawal_id)
     WHERE wallet_withdrawal_id IS NOT NULL;
+
+ALTER TABLE gateway_wallet_withdrawals
+    DROP CONSTRAINT IF EXISTS gateway_wallet_withdrawal_status_check;
+ALTER TABLE gateway_wallet_withdrawals
+    ADD CONSTRAINT gateway_wallet_withdrawal_status_check CHECK (
+        status IN ('PENDING_APPROVAL', 'PROCESSING', 'DEBIT_UNKNOWN', 'DEBITED', 'SUBMITTED', 'FAILED_PENDING',
+                   'BROADCAST_UNKNOWN', 'COMPLETED', 'REJECTED', 'REFUND_PENDING', 'REFUNDED')
+    );
 
 DO $$
 BEGIN

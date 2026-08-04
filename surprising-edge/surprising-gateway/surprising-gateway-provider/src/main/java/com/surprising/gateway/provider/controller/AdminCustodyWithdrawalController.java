@@ -61,10 +61,15 @@ public class AdminCustodyWithdrawalController {
     @PostMapping("/{withdrawalId}/retry")
     public CustodyWithdrawalService.WithdrawalResponse retry(
             @RequestHeader("Authorization") String authorization,
-            @PathVariable UUID withdrawalId) {
-        authService.requireAdminPermission(authorization, "admin.wallet.write");
+            @PathVariable UUID withdrawalId,
+            @RequestBody(required = false) ActionRequest request) {
+        JwtPrincipal principal = authService.requireAdminPermission(authorization, "admin.wallet.write");
+        String reason = request == null || request.reason() == null ? "admin retry" : request.reason().trim();
+        if (reason.length() > 500) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reason is too long");
+        }
         try {
-            return withdrawalService.retry(withdrawalId);
+            return withdrawalService.retry(withdrawalId, principal.userId(), principal.username(), reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (CustodyWithdrawalService.WithdrawalUnknownException ex) {

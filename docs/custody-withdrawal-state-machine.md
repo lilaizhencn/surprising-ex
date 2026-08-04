@@ -11,13 +11,14 @@
 | `DEBIT_UNKNOWN` | 现货扣款请求结果未知，使用原引用号重试 | 否 |
 | `DEBITED` | 现货扣款已被确认 | 否 |
 | `SUBMITTED` | custody wallet 已接受提现 | 否 |
+| `FAILED_PENDING` | 收到失败事件，等待 custody 最终状态核验 | 否 |
 | `BROADCAST_UNKNOWN` | custody wallet 广播结果未知 | 否 |
 | `COMPLETED` | 收到 `WITHDRAWAL.CONFIRMED` | 否 |
 | `REJECTED` | 扣款前或后台拒绝 | 否 |
 | `REFUND_PENDING` | 失败后的现货退款结果未知 | 否 |
 | `REFUNDED` | 失败提现已自动退回现货账户 | 是 |
 
-`BROADCAST_UNKNOWN`、`DEBIT_UNKNOWN` 和 `REFUND_PENDING` 不会因为请求超时而退款。只有收到明确的 custody wallet 失败事件，或 HTTP 400/422 这类确定性拒绝响应后退款成功，才会进入 `REFUNDED`；408、409、429、5xx 和网络异常都保持未知状态。
+`BROADCAST_UNKNOWN`、`DEBIT_UNKNOWN`、`FAILED_PENDING` 和 `REFUND_PENDING` 不会因为请求超时而退款。失败事件先等待配置的最终状态核验窗口，再通过 custody 查询确认仍为失败后退款；如果期间确认成功，则进入 `COMPLETED`。HTTP 400/422 是确定性拒绝，可直接进入退款流程；408、409、429、5xx 和网络异常都保持未知状态。
 
 普通用户不能指定 custody 的资金源地址。网关按网络读取 `GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS`，客户端传入的旧版 `custodyAddressId` 字段不会参与资金源选择。
 
@@ -45,6 +46,7 @@
 - `GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT`
 - `GATEWAY_WITHDRAWAL_VALUATION_BASE_URL`
 - `GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE`
+- `GATEWAY_WITHDRAWAL_FAILURE_RECONCILIATION_DELAY`
 - `GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS`，例如 `{"ETH":"<uuid>"}`，必须为每个已开放提现网络配置受控源地址。
 
 USDT 估值必须来自价格服务且不能超过最大有效期。数据库表 `gateway_wallet_withdrawals` 记录请求哈希、金额最小单位、USDT 估值、账本引用、wallet 引用、状态、错误和后台操作人。
