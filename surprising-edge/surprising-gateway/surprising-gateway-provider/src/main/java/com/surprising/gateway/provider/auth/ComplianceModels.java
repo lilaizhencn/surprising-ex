@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
 import java.time.Instant;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 /**
  * 合规领域在服务层与单表仓储之间共享的数据模型。
@@ -35,7 +37,38 @@ public final class ComplianceModels {
             String rejectionReason,
             Instant expiresAt,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String applicantType,
+            String submittedDocuments,
+            String faceVerificationStatus) {
+        public KycProfile(long userId,
+                          String kycLevel,
+                          String status,
+                          String country,
+                          String documentType,
+                          String provider,
+                          String providerReference,
+                          Long reviewedByUserId,
+                          Instant reviewedAt,
+                          String rejectionReason,
+                          Instant expiresAt,
+                          Instant createdAt,
+                          Instant updatedAt) {
+            this(userId, kycLevel, status, country, documentType, provider, providerReference,
+                    reviewedByUserId, reviewedAt, rejectionReason, expiresAt, createdAt, updatedAt,
+                    "INDIVIDUAL", "[]", "NOT_REQUIRED");
+        }
+    }
+
+    public record KycSubmissionRequest(
+            @NotBlank @Size(max = 20) String applicantType,
+            @NotBlank @Size(max = 20) String kycLevel,
+            @NotBlank @Size(min = 2, max = 2) String country,
+            @NotBlank @Size(max = 40) String documentType,
+            @Size(max = 40) String provider,
+            @Size(max = 240) String providerReference,
+            @Size(max = 8000) String submittedDocuments,
+            @Size(max = 40) String faceVerificationStatus) {
     }
 
     public record RiskTag(

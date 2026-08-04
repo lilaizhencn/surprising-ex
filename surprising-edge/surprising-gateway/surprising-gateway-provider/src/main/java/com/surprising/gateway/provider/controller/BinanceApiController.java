@@ -198,9 +198,16 @@ public class BinanceApiController {
                 "amount", required(params, "amount"),
                 "externalReference", reference,
                 "confirmed", true);
-        Map<String, Object> result = custodyWalletClient.createWithdrawal(userId, payload, idempotencyKey);
-        return json(HttpStatus.OK, Map.of("id", result.getOrDefault("id", idempotencyKey),
-                "msg", "success", "success", true));
+        try {
+            Map<String, Object> result = custodyWalletClient.createWithdrawal(userId, payload, idempotencyKey);
+            return json(HttpStatus.OK, Map.of("id", result.getOrDefault("id", idempotencyKey),
+                    "msg", "success", "success", true));
+        } catch (CustodyWalletClient.CustodyWalletRejectedException ex) {
+            spotAccountClient.adjustBalance(userId, asset, amountUnits, reference + ":refund",
+                    "binance wallet withdrawal rejected refund");
+            return error(HttpStatus.BAD_REQUEST, -2010,
+                    "custody wallet rejected withdrawal; funds were released");
+        }
     }
 
     private ResponseEntity<byte[]> withdrawHistory(HttpServletRequest request) {

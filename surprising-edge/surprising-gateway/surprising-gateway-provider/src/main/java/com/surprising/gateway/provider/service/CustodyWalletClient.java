@@ -21,6 +21,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -146,6 +147,8 @@ public class CustodyWalletClient {
                     method, new HttpEntity<>(body, headers), responseType);
             requireSuccess(response, "custody wallet");
             return response.getBody();
+        } catch (RestClientResponseException ex) {
+            throw new CustodyWalletRejectedException("custody wallet rejected request", ex.getStatusCode().value(), ex);
         } catch (RestClientException ex) {
             throw new IllegalStateException("custody wallet request failed", ex);
         }
@@ -168,6 +171,8 @@ public class CustodyWalletClient {
                     method, new HttpEntity<>(body, headers), responseType);
             requireSuccess(response, "custody wallet");
             return response.getBody();
+        } catch (RestClientResponseException ex) {
+            throw new CustodyWalletRejectedException("custody wallet rejected request", ex.getStatusCode().value(), ex);
         } catch (RestClientException ex) {
             throw new IllegalStateException("custody wallet request failed", ex);
         }
@@ -252,6 +257,19 @@ public class CustodyWalletClient {
         if (response == null || !response.getStatusCode().is2xxSuccessful()) {
             int status = response == null ? 0 : response.getStatusCode().value();
             throw new IllegalStateException(service + " returned HTTP " + status);
+        }
+    }
+
+    public static final class CustodyWalletRejectedException extends IllegalStateException {
+        private final int status;
+
+        public CustodyWalletRejectedException(String message, int status, Throwable cause) {
+            super(message, cause);
+            this.status = status;
+        }
+
+        public int status() {
+            return status;
         }
     }
 }

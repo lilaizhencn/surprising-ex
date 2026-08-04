@@ -3442,6 +3442,9 @@ CREATE TABLE IF NOT EXISTS gateway_user_kyc_profiles (
     document_type           TEXT,
     provider                TEXT,
     provider_reference      TEXT,
+    applicant_type          TEXT NOT NULL DEFAULT 'INDIVIDUAL',
+    submitted_documents     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    face_verification_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED',
     reviewed_by_user_id     BIGINT REFERENCES gateway_users(user_id),
     reviewed_at             TIMESTAMPTZ,
     rejection_reason        TEXT,
@@ -3452,6 +3455,10 @@ CREATE TABLE IF NOT EXISTS gateway_user_kyc_profiles (
     CONSTRAINT gateway_user_kyc_status_check CHECK (status IN ('UNVERIFIED', 'PENDING', 'VERIFIED', 'REJECTED', 'EXPIRED')),
     CONSTRAINT gateway_user_kyc_country_check CHECK (country IS NULL OR country ~ '^[A-Z]{2}$')
 );
+
+ALTER TABLE gateway_user_kyc_profiles ADD COLUMN IF NOT EXISTS applicant_type TEXT NOT NULL DEFAULT 'INDIVIDUAL';
+ALTER TABLE gateway_user_kyc_profiles ADD COLUMN IF NOT EXISTS submitted_documents JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE gateway_user_kyc_profiles ADD COLUMN IF NOT EXISTS face_verification_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED';
 
 CREATE INDEX IF NOT EXISTS gateway_user_kyc_status_idx
     ON gateway_user_kyc_profiles (status, updated_at DESC);

@@ -5,6 +5,7 @@ import com.surprising.gateway.provider.auth.ComplianceModels.AmlCaseCreateReques
 import com.surprising.gateway.provider.auth.ComplianceModels.AmlCaseStatusUpdateRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.ComplianceUserSummary;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycUpdateRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
@@ -96,6 +97,15 @@ public class ComplianceService {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         authService.adminUser(authorization, userId);
         return upsertKyc(userId, principal.userId(), request, Instant.now());
+    }
+
+    public KycProfile userKyc(String authorization) {
+        return kycRepository.find(authService.authenticateBearer(authorization).userId());
+    }
+
+    public KycProfile submitUserKyc(String authorization, KycSubmissionRequest request) {
+        long userId = authService.authenticateBearer(authorization).userId();
+        return kycRepository.submit(userId, request, Instant.now());
     }
 
     public RiskTag adminCreateRiskTag(String authorization,

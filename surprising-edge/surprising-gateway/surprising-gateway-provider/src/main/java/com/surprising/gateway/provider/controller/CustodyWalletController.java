@@ -98,7 +98,14 @@ public class CustodyWalletController {
                     "externalReference", request.externalReference() == null || request.externalReference().isBlank()
                             ? withdrawalReference : request.externalReference(),
                     "confirmed", true);
-            return walletClient.createWithdrawal(principal.userId(), payload, idempotencyKey);
+            try {
+                return walletClient.createWithdrawal(principal.userId(), payload, idempotencyKey);
+            } catch (CustodyWalletClient.CustodyWalletRejectedException ex) {
+                spotAccountClient.adjustBalance(principal.userId(), request.assetSymbol(), amountUnits,
+                        withdrawalReference + ":refund", "custody wallet withdrawal rejected refund");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "custody wallet rejected withdrawal; funds were released", ex);
+            }
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         } catch (IllegalStateException ex) {
