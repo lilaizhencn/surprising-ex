@@ -205,7 +205,7 @@ public class BinanceApiController {
 
     private ResponseEntity<byte[]> withdrawHistory(HttpServletRequest request) {
         long userId = authenticate(request, "READ");
-        return json(HttpStatus.OK, custodyWalletClient.withdrawals(userId, request.getParameter("network"),
+        return json(HttpStatus.OK, withdrawalService.history(userId, request.getParameter("network"),
                 request.getParameter("coin"), capped(request.getParameter("limit"))));
     }
 

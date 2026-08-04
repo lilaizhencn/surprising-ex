@@ -3450,7 +3450,7 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawals (
     amount               TEXT NOT NULL,
     amount_units         BIGINT NOT NULL,
     usdt_value            NUMERIC(38,18) NOT NULL,
-    external_reference   TEXT,
+    external_reference   TEXT NOT NULL,
     spot_debit_reference TEXT NOT NULL,
     request_payload      JSONB NOT NULL,
     status               TEXT NOT NULL,
@@ -3470,6 +3470,7 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawals (
                    'BROADCAST_UNKNOWN', 'COMPLETED', 'REJECTED', 'REFUND_PENDING', 'REFUNDED')
     ),
     CONSTRAINT gateway_wallet_withdrawal_amount_check CHECK (amount_units > 0 AND usdt_value > 0),
+    CONSTRAINT gateway_wallet_withdrawal_external_reference_uq UNIQUE (external_reference),
     CONSTRAINT gateway_wallet_withdrawal_idempotency_uq UNIQUE (user_id, idempotency_key)
 );
 

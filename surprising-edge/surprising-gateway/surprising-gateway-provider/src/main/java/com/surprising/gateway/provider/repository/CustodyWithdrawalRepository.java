@@ -75,10 +75,48 @@ public class CustodyWithdrawalRepository {
     }
 
     public WithdrawalRecord findByWalletReference(String walletWithdrawalId, String externalReference) {
-        List<WithdrawalRecord> rows = jdbcTemplate.query(selectSql(
-                        "wallet_withdrawal_id = ? OR external_reference = ?"), this::toRecord,
-                walletWithdrawalId, externalReference);
+        if ((walletWithdrawalId == null || walletWithdrawalId.isBlank())
+                && (externalReference == null || externalReference.isBlank())) {
+            throw new IllegalArgumentException("withdrawal webhook identifiers are required");
+        }
+        String predicate;
+        Object[] args;
+        if (walletWithdrawalId != null && !walletWithdrawalId.isBlank()) {
+            if (externalReference != null && !externalReference.isBlank()) {
+                predicate = "wallet_withdrawal_id = ? AND external_reference = ?";
+                args = new Object[]{walletWithdrawalId, externalReference};
+            } else {
+                predicate = "wallet_withdrawal_id = ?";
+                args = new Object[]{walletWithdrawalId};
+            }
+        } else {
+            predicate = "external_reference = ?";
+            args = new Object[]{externalReference};
+        }
+        List<WithdrawalRecord> rows = jdbcTemplate.query(selectSql(predicate, 2), this::toRecord, args);
+        if (rows.size() > 1) {
+            throw new IllegalStateException("withdrawal webhook identifiers are ambiguous");
+        }
         return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    public List<WithdrawalRecord> listForUser(long userId, String chain, String asset, int limit) {
+        if (userId <= 0L) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        StringBuilder predicate = new StringBuilder("user_id = ?");
+        List<Object> args = new java.util.ArrayList<>();
+        args.add(userId);
+        if (chain != null && !chain.isBlank()) {
+            predicate.append(" AND chain = ?");
+            args.add(chain.trim());
+        }
+        if (asset != null && !asset.isBlank()) {
+            predicate.append(" AND asset_symbol = ?");
+            args.add(asset.trim().toUpperCase());
+        }
+        return jdbcTemplate.query(selectSql(predicate.toString(), safeLimit), this::toRecord, args.toArray());
     }
 
     public List<WithdrawalRecord> list(String status, int limit) {
@@ -194,6 +232,10 @@ public class CustodyWithdrawalRepository {
     }
 
     private String selectSql(String predicate) {
+        return selectSql(predicate, 1);
+    }
+
+    private String selectSql(String predicate, int limit) {
         return """
                 SELECT withdrawal_id, user_id, idempotency_key, request_sha256, chain, asset_symbol,
                        custody_address_id, to_address, amount, amount_units, usdt_value, external_reference,
@@ -201,11 +243,11 @@ public class CustodyWithdrawalRepository {
                        wallet_withdrawal_id, error_code, error_message, created_at, updated_at,
                        submitted_at, completed_at, admin_user_id, admin_username, admin_reason
                   FROM gateway_wallet_withdrawals
-                 WHERE """ + predicate + " ORDER BY created_at DESC LIMIT 1";
+                 WHERE """ + predicate + " ORDER BY created_at DESC LIMIT " + limit;
     }
 
     private String selectListSql(String predicate, int limit) {
-        return selectSql(predicate).replace(" ORDER BY created_at DESC LIMIT 1", " ORDER BY created_at DESC LIMIT " + limit);
+        return selectSql(predicate, limit);
     }
 
     private WithdrawalRecord toRecord(ResultSet rs, int rowNum) throws SQLException {

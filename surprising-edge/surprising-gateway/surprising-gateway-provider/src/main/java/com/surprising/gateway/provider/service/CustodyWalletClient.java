@@ -148,7 +148,11 @@ public class CustodyWalletClient {
             requireSuccess(response, "custody wallet");
             return response.getBody();
         } catch (RestClientResponseException ex) {
-            throw new CustodyWalletRejectedException("custody wallet rejected request", ex.getStatusCode().value(), ex);
+            int status = ex.getStatusCode().value();
+            if (status >= 400 && status < 500) {
+                throw new CustodyWalletRejectedException("custody wallet rejected request", status, ex);
+            }
+            throw new IllegalStateException("custody wallet request status is unknown", ex);
         } catch (RestClientException ex) {
             throw new IllegalStateException("custody wallet request failed", ex);
         }
@@ -172,7 +176,11 @@ public class CustodyWalletClient {
             requireSuccess(response, "custody wallet");
             return response.getBody();
         } catch (RestClientResponseException ex) {
-            throw new CustodyWalletRejectedException("custody wallet rejected request", ex.getStatusCode().value(), ex);
+            int status = ex.getStatusCode().value();
+            if (status >= 400 && status < 500) {
+                throw new CustodyWalletRejectedException("custody wallet rejected request", status, ex);
+            }
+            throw new IllegalStateException("custody wallet request status is unknown", ex);
         } catch (RestClientException ex) {
             throw new IllegalStateException("custody wallet request failed", ex);
         }

@@ -46,9 +46,9 @@ public class CustodyWithdrawalService {
         BigDecimal amount = new BigDecimal(request.amount().trim());
         BigDecimal usdtValue = valuationClient.toUsdt(request.assetSymbol(), amount);
         String spotReference = "custody-wallet-withdrawal:" + normalizedKey;
-        String externalReference = request.externalReference() == null || request.externalReference().isBlank()
-                ? spotReference : request.externalReference().trim();
-        String payload = payload(request, spotReference);
+        String externalReference = "custody-wallet-withdrawal:"
+                + sha256(userId + ":" + normalizedKey).substring(0, 32);
+        String payload = payload(request, externalReference);
         CustodyWithdrawalRepository.CreateResult result = repository.createOrGet(
                 new CustodyWithdrawalRepository.CreateRequest(
                         userId, normalizedKey, sha256(canonical(request, amountUnits, usdtValue)),
@@ -77,6 +77,44 @@ public class CustodyWithdrawalService {
 
     public WithdrawalResponse retry(UUID withdrawalId) {
         return continueSubmission(requireRecord(withdrawalId));
+    }
+
+    public java.util.List<Map<String, Object>> history(long userId, String chain, String asset, int limit) {
+        java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>();
+        for (Map<String, Object> item : walletClient.withdrawals(userId, chain, asset, limit)) {
+            rows.add(new LinkedHashMap<>(item));
+        }
+        for (CustodyWithdrawalRepository.WithdrawalRecord record
+                : repository.listForUser(userId, chain, asset, limit)) {
+            Map<String, Object> matched = null;
+            if (record.walletWithdrawalId() != null) {
+                for (Map<String, Object> row : rows) {
+                    String walletId = stringValue(row.get("withdrawalId"), stringValue(row.get("id"), null));
+                    if (record.walletWithdrawalId().equals(walletId)) {
+                        matched = row;
+                        break;
+                    }
+                }
+            }
+            if (matched == null) {
+                matched = new LinkedHashMap<>();
+                rows.add(matched);
+            }
+            matched.put("id", record.walletWithdrawalId() == null
+                    ? record.withdrawalId().toString() : record.walletWithdrawalId());
+            matched.put("gatewayWithdrawalId", record.withdrawalId().toString());
+            matched.put("status", record.status());
+            matched.put("chain", record.chain());
+            matched.put("asset", record.assetSymbol());
+            matched.put("amount", record.amount());
+            matched.put("toAddress", record.toAddress());
+            matched.put("externalReference", record.externalReference());
+            matched.put("usdtValue", record.usdtValue());
+            matched.put("errorMessage", record.errorMessage());
+            matched.put("createdAt", record.createdAt());
+            matched.put("updatedAt", record.updatedAt());
+        }
+        return rows;
     }
 
     private WithdrawalResponse continueSubmission(CustodyWithdrawalRepository.WithdrawalRecord record) {
@@ -186,15 +224,17 @@ public class CustodyWithdrawalService {
         return payload;
     }
 
-    private String payload(WithdrawalRequest request, String spotReference) {
+    private String payload(WithdrawalRequest request, String externalReference) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("custodyAddressId", request.custodyAddressId());
         payload.put("chain", request.chain());
         payload.put("assetSymbol", request.assetSymbol());
         payload.put("toAddress", request.toAddress());
         payload.put("amount", request.amount());
-        payload.put("externalReference", request.externalReference() == null || request.externalReference().isBlank()
-                ? spotReference : request.externalReference());
+        payload.put("externalReference", externalReference);
+        if (request.externalReference() != null && !request.externalReference().isBlank()) {
+            payload.put("clientExternalReference", request.externalReference().trim());
+        }
         payload.put("confirmed", true);
         return json(payload);
     }

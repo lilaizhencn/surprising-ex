@@ -57,4 +57,21 @@ class CustodyWalletClientTest {
                 .extracting(ex -> ((CustodyWalletClient.CustodyWalletRejectedException) ex).status())
                 .isEqualTo(400);
     }
+
+    @Test
+    void keepsCustodyServerErrorAsUnknownInsteadOfRejected() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getCustodyWallet().setEnabled(true);
+        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
+        properties.getCustodyWallet().setApiKey("wallet-key");
+        properties.getCustodyWallet().setApiSecret("wallet-secret");
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
+                .thenReturn(ResponseEntity.internalServerError().body(Map.of("error", "unknown")));
+        CustodyWalletClient unknownClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
+
+        assertThatThrownBy(() -> unknownClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
+                .isInstanceOf(IllegalStateException.class)
+                .isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
+    }
 }

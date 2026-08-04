@@ -74,6 +74,20 @@ public class CustodyWalletController {
         }
     }
 
+    @GetMapping("/withdrawals")
+    public List<Map<String, Object>> withdrawals(@RequestHeader("Authorization") String authorization,
+                                                 @RequestParam(required = false) String chain,
+                                                 @RequestParam(required = false) String asset,
+                                                 @RequestParam(defaultValue = "50") int limit) {
+        try {
+            return withdrawalService.history(principal(authorization).userId(), chain, asset, limit);
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        }
+    }
+
     @PostMapping("/withdrawals")
     public Map<String, Object> createWithdrawal(
             @RequestHeader("Authorization") String authorization,
