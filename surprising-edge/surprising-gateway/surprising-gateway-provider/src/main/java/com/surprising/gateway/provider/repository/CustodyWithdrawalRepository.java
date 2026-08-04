@@ -183,7 +183,7 @@ public class CustodyWithdrawalRepository {
                    SET status = 'DEBITED', error_code = NULL, error_message = NULL, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('PROCESSING', 'DEBIT_UNKNOWN')
                 """, id);
-        return requireUpdated(id, updated, "cannot transition withdrawal to DEBITED");
+        return requireConditionalUpdate(id, updated, "cannot transition withdrawal to DEBITED");
     }
 
     public WithdrawalRecord markDebitUnknown(UUID id, String error) {
@@ -192,7 +192,7 @@ public class CustodyWithdrawalRepository {
                    SET status = 'DEBIT_UNKNOWN', error_code = 'SPOT_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('PROCESSING', 'DEBIT_UNKNOWN')
                 """, error, id);
-        return requireUpdated(id, updated, "cannot transition withdrawal to DEBIT_UNKNOWN");
+        return requireConditionalUpdate(id, updated, "cannot transition withdrawal to DEBIT_UNKNOWN");
     }
 
     public WithdrawalRecord markSubmitted(UUID id, String walletResponse, String walletWithdrawalId) {
@@ -203,7 +203,7 @@ public class CustodyWithdrawalRepository {
                        error_message = NULL
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN')
                 """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
-        return requireUpdated(id, updated, "cannot mark withdrawal submitted");
+        return requireConditionalUpdate(id, updated, "cannot mark withdrawal submitted");
     }
 
     public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error) {
@@ -219,7 +219,7 @@ public class CustodyWithdrawalRepository {
                        error_code = 'CUSTODY_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN')
                 """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
-        return requireUpdated(id, updated, "cannot mark withdrawal broadcast unknown");
+        return requireConditionalUpdate(id, updated, "cannot mark withdrawal broadcast unknown");
     }
 
     @Transactional
@@ -281,13 +281,14 @@ public class CustodyWithdrawalRepository {
                    SET status = 'REJECTED', error_code = ?, error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('PENDING_APPROVAL', 'PROCESSING')
                 """, code, error, id);
-        return requireUpdated(id, updated, "cannot mark withdrawal rejected");
+        return requireConditionalUpdate(id, updated, "cannot mark withdrawal rejected");
     }
 
-    private WithdrawalRecord requireUpdated(UUID id, int updated, String message) {
+    private WithdrawalRecord requireConditionalUpdate(UUID id, int updated, String message) {
         WithdrawalRecord record = find(id);
-        if (updated == 0 && record == null) {
-            throw new IllegalStateException(message);
+        if (updated == 0) {
+            throw new IllegalStateException(message + "; current status is "
+                    + (record == null ? "missing" : record.status()));
         }
         return record;
     }

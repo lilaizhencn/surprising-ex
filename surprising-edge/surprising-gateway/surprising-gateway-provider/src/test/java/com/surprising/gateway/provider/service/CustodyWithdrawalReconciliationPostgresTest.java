@@ -154,6 +154,24 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void conditionalTransitionsRejectExistingWithdrawalInInvalidState() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'COMPLETED' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        assertThatThrownBy(() -> repository.markDebited(withdrawalId, "debit"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> repository.markDebitUnknown(withdrawalId, "unknown"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> repository.markSubmitted(withdrawalId, "{}", "wallet-integration"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> repository.markBroadcastUnknown(withdrawalId, "{}", "unknown"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> repository.markRejected(withdrawalId, "INVALID", "invalid"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
     void duplicateCompletionForSameTargetIsIdempotent() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'SUBMITTED' WHERE withdrawal_id = ?",
                 withdrawalId);
