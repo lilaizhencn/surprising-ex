@@ -138,9 +138,14 @@ public class BinanceApiController {
         payload.put("targetAccountType", transferAccount(type, false));
         payload.put("asset", asset.toUpperCase(Locale.ROOT));
         payload.put("amountUnits", decimalUnits(required(params, "amount"), scale.getQuantityScale()));
-        payload.put("referenceId", first(params, "clientTranId", "clientOrderId") == null
-                ? "binance-transfer:" + System.nanoTime()
-                : first(params, "clientTranId", "clientOrderId"));
+        String idempotencyKey = first(params, "clientTranId", "clientOrderId");
+        if (idempotencyKey == null) {
+            idempotencyKey = request.getHeader("Idempotency-Key");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("clientTranId or Idempotency-Key is required");
+        }
+        payload.put("referenceId", "binance-transfer:" + idempotencyKey.trim());
         payload.put("reason", "binance asset transfer");
         ResponseEntity<byte[]> response = proxy("account", "/transfers", request, jsonBytes(payload), userId, null, true);
         if (response.getStatusCode().isError()) return response;
@@ -171,7 +176,12 @@ public class BinanceApiController {
         String asset = required(params, "coin");
         String chain = required(params, "network");
         String idempotencyKey = first(params, "withdrawOrderId", "clientOrderId");
-        if (idempotencyKey == null) throw new IllegalArgumentException("withdrawOrderId is required");
+        if (idempotencyKey == null) {
+            idempotencyKey = request.getHeader("Idempotency-Key");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("withdrawOrderId or Idempotency-Key is required");
+        }
         GatewayProperties.CustodyWallet wallet = properties.getCustodyWallet();
         String sourceId = wallet.getWithdrawalAddressIds().entrySet().stream()
                 .filter(entry -> entry.getKey().equalsIgnoreCase(chain))
