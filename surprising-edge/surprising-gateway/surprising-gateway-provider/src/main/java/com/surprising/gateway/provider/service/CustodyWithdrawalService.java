@@ -154,15 +154,21 @@ public class CustodyWithdrawalService {
     private void refund(CustodyWithdrawalRepository.WithdrawalRecord record,
                         String spotReason,
                         String stateReason) {
-        if ("REFUNDED".equals(record.status())) {
+        if ("REFUNDED".equals(record.status()) || "COMPLETED".equals(record.status())
+                || "REJECTED".equals(record.status())) {
+            return;
+        }
+        CustodyWithdrawalRepository.WithdrawalRecord pending = repository.markRefundPending(
+                record.withdrawalId(), stateReason);
+        if (pending == null || !"REFUND_PENDING".equals(pending.status())) {
             return;
         }
         try {
-            spotAccountClient.adjustBalance(record.userId(), record.assetSymbol(), record.amountUnits(),
-                    record.spotDebitReference() + ":refund", spotReason);
-            repository.markRefunded(record.withdrawalId(), "{}", stateReason);
+            spotAccountClient.adjustBalance(pending.userId(), pending.assetSymbol(), pending.amountUnits(),
+                    pending.spotDebitReference() + ":refund", spotReason);
+            repository.markRefunded(pending.withdrawalId(), "{}", stateReason);
         } catch (RuntimeException ex) {
-            repository.markRefundPending(record.withdrawalId(), message(ex));
+            repository.markRefundPending(pending.withdrawalId(), message(ex));
             throw new WithdrawalUnknownException("withdrawal refund status is unknown", ex);
         }
     }
