@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 /**
  * 用户分区命令结果的本地幂等存储。
@@ -32,11 +32,22 @@ public final class UserPartitionResultStore implements AutoCloseable {
     private final Options options;
     private final RocksDB database;
     private final WriteOptions writeOptions;
-    private final ReentrantLock writeLock = new ReentrantLock();
+    private final UserPartitionCommandLane lane;
+    private final boolean ownsLane;
 
     public UserPartitionResultStore(Path directory) {
+        this(directory, new UserPartitionCommandLane(), true);
+    }
+
+    public UserPartitionResultStore(Path directory, UserPartitionCommandLane lane) {
+        this(directory, lane, false);
+    }
+
+    private UserPartitionResultStore(Path directory, UserPartitionCommandLane lane, boolean ownsLane) {
         try {
             Objects.requireNonNull(directory, "directory");
+            this.lane = Objects.requireNonNull(lane, "lane");
+            this.ownsLane = ownsLane;
             Files.createDirectories(directory);
             options = new Options().setCreateIfMissing(true);
             database = RocksDB.open(options, directory.toString());
@@ -65,21 +76,21 @@ public final class UserPartitionResultStore implements AutoCloseable {
         if (result == null || result.length == 0 || result.length > MAX_RESULT_BYTES) {
             throw new IllegalArgumentException("命令结果大小无效");
         }
-        writeLock.lock();
-        try {
-            byte[] existing = database.get(key(partition, commandId));
-            if (existing != null) {
-                if (!Arrays.equals(existing, result)) {
-                    throw new IllegalStateException("命令结果发生幂等冲突: " + partition.value() + ":" + commandId);
+        execute(partition, () -> {
+            try {
+                byte[] existing = database.get(key(partition, commandId));
+                if (existing != null) {
+                    if (!Arrays.equals(existing, result)) {
+                        throw new IllegalStateException("命令结果发生幂等冲突: " + partition.value() + ":" + commandId);
+                    }
+                    return null;
                 }
-                return;
+                database.put(writeOptions, key(partition, commandId), Arrays.copyOf(result, result.length));
+                return null;
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("写入用户分区命令结果失败: " + partition.value() + ":" + commandId, ex);
             }
-            database.put(writeOptions, key(partition, commandId), Arrays.copyOf(result, result.length));
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("写入用户分区命令结果失败: " + partition.value() + ":" + commandId, ex);
-        } finally {
-            writeLock.unlock();
-        }
+        });
     }
 
     private byte[] key(UserPartitionKey partition, String commandId) {
@@ -100,8 +111,15 @@ public final class UserPartitionResultStore implements AutoCloseable {
         Objects.requireNonNull(partition, "partition");
     }
 
+    private <T> T execute(UserPartitionKey partition, Supplier<T> action) {
+        return lane.execute(partition, action);
+    }
+
     @Override
     public void close() {
+        if (ownsLane) {
+            lane.close();
+        }
         writeOptions.close();
         database.close();
         options.close();

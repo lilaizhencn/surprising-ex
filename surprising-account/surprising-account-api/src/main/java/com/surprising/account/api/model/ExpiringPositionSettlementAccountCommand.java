@@ -4,13 +4,14 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 
-/** User-scoped delivery or option-expiry settlement command. */
+/** 用户分区内执行交割或期权到期行权的结算命令。 */
 public record ExpiringPositionSettlementAccountCommand(
         String symbol,
         long instrumentVersion,
         MarginMode marginMode,
         PositionSide positionSide,
         long settlementPriceTicks,
+        long cashSettlementUnitsPerContract,
         String referenceType,
         String reason,
         Instant eventTime) {
@@ -23,8 +24,8 @@ public record ExpiringPositionSettlementAccountCommand(
         if (!symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
-        if (instrumentVersion <= 0 || settlementPriceTicks < 0) {
-            throw new IllegalArgumentException("invalid expiring settlement price identity");
+        if (instrumentVersion <= 0 || settlementPriceTicks < 0 || cashSettlementUnitsPerContract < 0L) {
+            throw new IllegalArgumentException("到期结算价标识无效");
         }
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
@@ -32,6 +33,15 @@ public record ExpiringPositionSettlementAccountCommand(
             throw new IllegalArgumentException("referenceType and reason are required");
         }
         referenceType = referenceType.trim().toUpperCase();
+        if (!referenceType.equals("DELIVERY_SETTLEMENT") && !referenceType.equals("OPTION_EXERCISE")) {
+            throw new IllegalArgumentException("不支持的到期结算类型: " + referenceType);
+        }
+        if (referenceType.equals("DELIVERY_SETTLEMENT") && settlementPriceTicks <= 0L) {
+            throw new IllegalArgumentException("交割结算价必须为正数");
+        }
+        if (referenceType.equals("DELIVERY_SETTLEMENT") && cashSettlementUnitsPerContract != 0L) {
+            throw new IllegalArgumentException("交割命令不能携带期权现金收益");
+        }
         reason = reason.trim();
         eventTime = eventTime == null ? Instant.now() : eventTime;
     }

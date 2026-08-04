@@ -29,9 +29,18 @@ public class OpenInterestSnapshotInitializer {
 
     @PostConstruct
     public void initialize() {
+        refreshIfNotReady();
+    }
+
+    public void refreshIfNotReady() {
         ProductLine productLine = properties.getKafka().getProductLine();
         if (!productLine.isDerivative()) {
-            cache.replace(productLine, java.util.List.of());
+            if (!cache.ready(productLine)) {
+                cache.replace(productLine, java.util.List.of());
+            }
+            return;
+        }
+        if (cache.ready(productLine)) {
             return;
         }
         cache.markNotReady(productLine);

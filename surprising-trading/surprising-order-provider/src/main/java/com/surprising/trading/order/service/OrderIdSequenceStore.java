@@ -1,5 +1,6 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.eventstore.PartitionOwnerLane;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -30,6 +31,7 @@ public final class OrderIdSequenceStore implements AutoCloseable {
     private final Options options;
     private final RocksDB database;
     private final WriteOptions writeOptions;
+    private final PartitionOwnerLane<String> owner;
     private long lastTimestamp;
     private int sequence;
 
@@ -43,6 +45,7 @@ public final class OrderIdSequenceStore implements AutoCloseable {
             this.options = new Options().setCreateIfMissing(true);
             this.database = RocksDB.open(options, directory.toString());
             this.writeOptions = new WriteOptions().setSync(true);
+            this.owner = new PartitionOwnerLane<>(1, "order-id-owner");
             byte[] value = database.get(KEY);
             if (value != null) {
                 try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(value))) {
@@ -59,7 +62,11 @@ public final class OrderIdSequenceStore implements AutoCloseable {
     }
 
     /** 在同步 RocksDB 写入完成后返回全局唯一、重启后仍单调的订单号。 */
-    public synchronized long next() {
+    public long next() {
+        return owner.execute("order-id", this::nextOwned);
+    }
+
+    private long nextOwned() {
         long now = System.currentTimeMillis();
         if (now < lastTimestamp) {
             now = lastTimestamp;
@@ -103,6 +110,7 @@ public final class OrderIdSequenceStore implements AutoCloseable {
 
     @Override
     public void close() {
+        owner.close();
         writeOptions.close();
         database.close();
         options.close();

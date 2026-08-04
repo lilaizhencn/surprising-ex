@@ -31,11 +31,9 @@ class InstrumentLifecycleServiceTest {
         properties.getLifecycle().setBatchSize(3);
         InstrumentResponse expired = delivery("BTC-USDT-260327", InstrumentStatus.TRADING);
         InstrumentResponse settling = option("BTC-USDT-260327-50000-C", InstrumentStatus.SETTLING);
-        InstrumentResponse closed = option("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED);
         when(storageService.expiringContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(expired));
         when(storageService.settlingContractsDue(any(Instant.class), eq(3))).thenReturn(List.of(settling));
         when(instrumentService.updateStatus("BTC-USDT-260327", InstrumentStatus.SETTLING)).thenReturn(expired);
-        when(instrumentService.closeForSettlement("BTC-USDT-260327-50000-C")).thenReturn(closed);
         when(readinessService.isReady(
                 ProductLine.OPTION, "BTC-USDT-260327-50000-C", 2L)).thenReturn(true);
 
@@ -43,7 +41,8 @@ class InstrumentLifecycleServiceTest {
                 .advanceLifecycle();
 
         verify(instrumentService).updateStatus("BTC-USDT-260327", InstrumentStatus.SETTLING);
-        verify(instrumentService).closeForSettlement("BTC-USDT-260327-50000-C");
+        // 定时任务只能确认排水条件，结算价确认和 CLOSED 事件必须走唯一管理入口。
+        verify(instrumentService, never()).closeForSettlement("BTC-USDT-260327-50000-C");
     }
 
     @Test

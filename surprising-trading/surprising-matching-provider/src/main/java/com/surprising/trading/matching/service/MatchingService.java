@@ -26,6 +26,7 @@ import com.surprising.trading.matching.model.MatchingSymbol;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository.MatchingOutboxWrite;
 import com.surprising.trading.matching.repository.MatchingProtectionRepository;
+import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.L2MarketData;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherTradeEvent;
@@ -42,6 +43,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,7 +70,7 @@ public class MatchingService {
     private final PublicTradePublisher tradePublisher;
     /** 生产构造必须使用本地事实库；旧构造仅供不启动 Spring 的迁移测试。 */
     private final boolean requireLocalState;
-    private final Map<String, DepthState> depthStates = new ConcurrentHashMap<>();
+    private final Map<String, AtomicReference<DepthState>> depthStates = new ConcurrentHashMap<>();
 
     @Autowired
     public MatchingService(ObjectMapper objectMapper,
@@ -279,7 +281,9 @@ public class MatchingService {
         if (publishDepth) {
             publishOrderBookDepth(symbol, response.resultCode, now);
         }
-        publishPublicTrades(command, response, now);
+        if (!requireLocalState) {
+            publishPublicTrades(command, response, now);
+        }
         Map<Long, OrderQuantitySnapshot> makerQuantitySnapshots = new HashMap<>();
         MatchResultEvent result = toResultEvent(command, response, now, makerQuantitySnapshots);
         saveAndPublish(result, command, makerQuantitySnapshots);
@@ -506,31 +510,76 @@ public class MatchingService {
                         requireQuantitySnapshot(trade, makerQuantitySnapshots));
             }
         }
-        if (!persistenceService.commit(result, externalTrades)) {
+        if (requireLocalState) {
+            for (int index = 0; index < externalTrades.size(); index++) {
+                MatchTradeEvent trade = externalTrades.get(index);
+                PublicTradeEvent publicTrade = publicTrade(trade, index + 1);
+                if (latestPublicTradeCache != null) {
+                    latestPublicTradeCache.put(publicTrade);
+                }
+                outboxWrites.add(new MatchingOutboxWrite(
+                        "PUBLIC_TRADE",
+                        trade.tradeId(),
+                        properties.getKafka().getMatchTradesTopic(),
+                        trade.symbol(),
+                        "TRADE",
+                        payload(publicTrade),
+                        trade.eventTime()));
+            }
+        }
+        if (requireLocalState) {
+            enqueueActiveOrderReleaseIfRequired(outboxWrites, result, orderCommand, containsInternalSelfTrade,
+                    lastTakerFinancialCommandId);
+            outboxWrites.add(new MatchingOutboxWrite(
+                    "MATCH_RESULT",
+                    result.commandId(),
+                    properties.getKafka().getMatchResultsTopic(),
+                    result.symbol(),
+                    result.commandType().name(),
+                    payload(result),
+                    result.eventTime()));
+        }
+        boolean committed = requireLocalState
+                ? persistenceService.commit(result, externalTrades, outboxWrites)
+                : persistenceService.commit(result, externalTrades);
+        if (!committed) {
             return;
         }
         if (protectionIndex != null) {
             protectionIndex.apply(orderCommand, result);
         }
-        enqueueActiveOrderReleaseIfRequired(outboxWrites, result, orderCommand, containsInternalSelfTrade,
-                lastTakerFinancialCommandId);
-        outboxWrites.add(new MatchingOutboxWrite(
-                "MATCH_RESULT",
-                result.commandId(),
-                properties.getKafka().getMatchResultsTopic(),
-                result.symbol(),
-                result.commandType().name(),
-                payload(result),
-                result.eventTime()));
         if (requireLocalState) {
-            persistenceService.enqueueOutbox(outboxWrites);
+            return;
         } else {
+            enqueueActiveOrderReleaseIfRequired(outboxWrites, result, orderCommand, containsInternalSelfTrade,
+                    lastTakerFinancialCommandId);
+            outboxWrites.add(new MatchingOutboxWrite(
+                    "MATCH_RESULT",
+                    result.commandId(),
+                    properties.getKafka().getMatchResultsTopic(),
+                    result.symbol(),
+                    result.commandType().name(),
+                    payload(result),
+                    result.eventTime()));
             // 旧测试构造没有装配本地 RocksDB，只验证撮合业务输出，不代表生产回退路径。
             if (outboxRepository == null) {
                 throw new IllegalStateException("迁移测试未提供撮合通知接收器");
             }
             outboxRepository.enqueueBatch(outboxWrites);
         }
+    }
+
+    private PublicTradeEvent publicTrade(MatchTradeEvent trade, int matchIndex) {
+        return new PublicTradeEvent(
+                trade.commandId() + ":" + matchIndex,
+                publicTradeSequence(trade.commandId(), matchIndex),
+                trade.symbol(),
+                trade.takerInstrumentVersion(),
+                trade.takerSide(),
+                trade.priceTicks(),
+                trade.quantitySteps(),
+                trade.eventTime(),
+                trade.traceId());
     }
 
     private void publishOrderBookDepth(MatchingSymbol symbol, CommandResultCode resultCode, Instant eventTime) {
@@ -559,8 +608,9 @@ public class MatchingService {
                     return;
                 }
                 int index = matchIndex.incrementAndGet();
-                long sequence = Math.addExact(
-                        Math.multiplyExact(command.commandId(), PUBLIC_TRADE_SEQUENCE_MULTIPLIER), index);
+                // 生产命令号是雪花号，直接乘百万会超过 long；序列只用于行情缓存排序，
+                // 大命令号保持其单调值即可，同一命令的多笔成交共享一个序列。
+                long sequence = publicTradeSequence(command.commandId(), index);
                 PublicTradeEvent trade = new PublicTradeEvent(
                         command.commandId() + ":" + index,
                         sequence,
@@ -605,11 +655,11 @@ public class MatchingService {
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 commandId,
-                properties.getKafka().getProductLine(),
+                productLine(),
                 userId,
                 AccountUserCommandType.TRADE_SIDE_SETTLE,
                 "MATCHING",
-                properties.getKafka().getProductLine().name() + ":" + trade.symbol() + ":" + trade.tradeId(),
+                productLine().name() + ":" + trade.symbol() + ":" + trade.tradeId(),
                 reservationDependency(orderIdFor(role, trade), quantitySnapshot),
                 payload(side),
                 trade.eventTime(),
@@ -627,7 +677,7 @@ public class MatchingService {
     private void enqueueInternalSelfTradeMakerRelease(List<MatchingOutboxWrite> writes,
                                                       MatchTradeEvent trade,
                                                       OrderQuantitySnapshot quantitySnapshot) {
-        String commandId = "ORDER_RELEASE:" + properties.getKafka().getProductLine().name()
+        String commandId = "ORDER_RELEASE:" + productLine().name()
                 + ":" + trade.makerOrderId() + ":INTERNAL_SELF_TRADE:" + trade.tradeId();
         enqueueOrderRelease(writes, commandId, trade.tradeId(), trade.makerUserId(), trade.makerOrderId(),
                 trade.makerOrderCompleted(), quantitySnapshot.quantitySteps(),
@@ -643,7 +693,7 @@ public class MatchingService {
                                               OrderQuantitySnapshot quantitySnapshot) {
         String settlementCommandId = tradeSideCommandId(
                 trade, TradeParticipantRole.MAKER, trade.makerUserId());
-        String commandId = "ORDER_RELEASE:" + properties.getKafka().getProductLine().name()
+        String commandId = "ORDER_RELEASE:" + productLine().name()
                 + ":" + trade.makerOrderId() + ":ORDER_TERMINAL:" + trade.tradeId();
         enqueueOrderRelease(writes, commandId, trade.tradeId(), trade.makerUserId(), trade.makerOrderId(),
                 true, quantitySnapshot.quantitySteps(), 0L, !quantitySnapshot.reduceOnly(),
@@ -668,7 +718,7 @@ public class MatchingService {
                 : canceled
                         ? "ORDER_CANCELED"
                         : terminal ? "ORDER_TERMINAL" : "INTERNAL_MARKET_MAKER_SELF_TRADE";
-        String commandId = "ORDER_RELEASE:" + properties.getKafka().getProductLine().name()
+        String commandId = "ORDER_RELEASE:" + productLine().name()
                 + ":" + result.orderId() + ":" + result.commandId();
         long remainingQuantitySteps = terminal
                 ? 0L
@@ -703,7 +753,7 @@ public class MatchingService {
         AccountUserCommand command = new AccountUserCommand(
                 AccountUserCommand.CURRENT_SCHEMA_VERSION,
                 commandId,
-                properties.getKafka().getProductLine(),
+                productLine(),
                 userId,
                 AccountUserCommandType.ORDER_RELEASE,
                 "MATCHING",
@@ -723,7 +773,7 @@ public class MatchingService {
     }
 
     private String tradeSideCommandId(MatchTradeEvent trade, TradeParticipantRole role, long userId) {
-        return "TRADE:" + properties.getKafka().getProductLine().name() + ":" + trade.symbol()
+        return "TRADE:" + productLine().name() + ":" + trade.symbol()
                 + ":" + trade.tradeId() + ":" + role.name() + ":" + userId;
     }
 
@@ -737,7 +787,7 @@ public class MatchingService {
                 || quantitySnapshot.reservedUnits() <= 0L) {
             return null;
         }
-        return "ORDER_RESERVE:" + properties.getKafka().getProductLine().name() + ":" + orderId;
+        return "ORDER_RESERVE:" + productLine().name() + ":" + orderId;
     }
 
     private static long orderIdFor(TradeParticipantRole role, MatchTradeEvent trade) {
@@ -757,11 +807,36 @@ public class MatchingService {
         return properties.getProtection().isInternalMarketMaker(userId);
     }
 
+    /** 旧测试构造不启用产品线 Topic 时使用永续默认值；生产产品线 Topic 仍必须显式配置。 */
+    private ProductLine productLine() {
+        ProductLine configured = properties.getKafka().getProductLine();
+        return configured == null ? ProductLine.LINEAR_PERPETUAL : configured;
+    }
+
     private long deterministicTradeId(long commandId, int matchIndex) {
         if (matchIndex <= 0 || matchIndex >= PUBLIC_TRADE_SEQUENCE_MULTIPLIER) {
             throw new IllegalArgumentException("match index is outside deterministic trade-id range");
         }
-        return Math.addExact(Math.multiplyExact(commandId, PUBLIC_TRADE_SEQUENCE_MULTIPLIER), matchIndex);
+        if (commandId <= Long.MAX_VALUE / PUBLIC_TRADE_SEQUENCE_MULTIPLIER) {
+            return Math.addExact(Math.multiplyExact(commandId, PUBLIC_TRADE_SEQUENCE_MULTIPLIER), matchIndex);
+        }
+        // 大命令号无法再拼接低位序号，使用稳定的 64 位混合值，避免撮合线程因溢出停机。
+        long value = commandId ^ (0x9E3779B97F4A7C15L * matchIndex);
+        value ^= (value >>> 30);
+        value *= 0xBF58476D1CE4E5B9L;
+        value ^= (value >>> 27);
+        value *= 0x94D049BB133111EBL;
+        value ^= (value >>> 31);
+        value &= Long.MAX_VALUE;
+        return value == 0L ? 1L : value;
+    }
+
+    /** 生成不会因雪花命令号过大而溢出的公共行情序列。 */
+    private long publicTradeSequence(long commandId, int matchIndex) {
+        if (commandId <= Long.MAX_VALUE / PUBLIC_TRADE_SEQUENCE_MULTIPLIER) {
+            return Math.addExact(Math.multiplyExact(commandId, PUBLIC_TRADE_SEQUENCE_MULTIPLIER), matchIndex);
+        }
+        return commandId;
     }
 
     private OrderQuantitySnapshot requireQuantitySnapshot(
@@ -777,29 +852,29 @@ public class MatchingService {
     private OrderBookDepthEvent orderBookDepthSnapshot(MatchingSymbol symbol, Instant now) {
         int depth = Math.max(1, properties.getEngine().getOrderBookDepthLevels());
         DepthSnapshot current = snapshot(exchangeCoreEngine.requestOrderBook(symbol, depth));
-        DepthState state = depthStates.computeIfAbsent(symbol.symbol(), ignored -> new DepthState());
-        synchronized (state) {
-            if (current.equals(state.snapshot)) {
+        AtomicReference<DepthState> state = depthStates.computeIfAbsent(symbol.symbol(),
+                ignored -> new AtomicReference<>(new DepthState(null, 0L)));
+        while (true) {
+            DepthState previous = state.get();
+            if (current.equals(previous.snapshot())) {
                 return null;
             }
-            long sequence = Math.incrementExact(state.lastSequence);
-            OrderBookDepthEvent event = new OrderBookDepthEvent(symbol.symbol(), sequence, state.lastSequence,
+            long sequence = Math.incrementExact(previous.lastSequence());
+            OrderBookDepthEvent event = new OrderBookDepthEvent(symbol.symbol(), sequence, previous.lastSequence(),
                     OrderBookDepthUpdateType.SNAPSHOT, depth, List.copyOf(current.bids().values()),
                     List.copyOf(current.asks().values()), now);
-            state.snapshot = current;
-            state.lastSequence = sequence;
-            return event;
+            if (state.compareAndSet(previous, new DepthState(current, sequence))) {
+                return event;
+            }
         }
     }
 
     private long lastDepthSequence(String symbol) {
-        DepthState state = depthStates.get(symbol);
+        AtomicReference<DepthState> state = depthStates.get(symbol);
         if (state == null) {
             return 0L;
         }
-        synchronized (state) {
-            return state.lastSequence;
-        }
+        return state.get().lastSequence();
     }
 
     private DepthSnapshot snapshot(L2MarketData book) {
@@ -869,8 +944,6 @@ public class MatchingService {
         private static final ProtectionChecks REQUIRED = new ProtectionChecks(false, false);
     }
 
-    private static final class DepthState {
-        private DepthSnapshot snapshot;
-        private long lastSequence;
+    private record DepthState(DepthSnapshot snapshot, long lastSequence) {
     }
 }

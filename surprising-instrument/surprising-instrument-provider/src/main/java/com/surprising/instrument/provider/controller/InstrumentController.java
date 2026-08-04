@@ -143,6 +143,29 @@ public class InstrumentController {
         }
     }
 
+    @PostMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/{symbol}/settlement")
+    public InstrumentResponse closeForSettlement(@PathVariable("symbol") String symbol,
+                                                 @RequestHeader(value = "X-Product-Line", required = false)
+                                                 String productLineHeader,
+                                                 @RequestParam(value = "productLine", required = false)
+                                                 String productLineValue,
+                                                 @RequestParam("settlementPriceTicks") long settlementPriceTicks,
+                                                 @RequestParam(value = "underlyingSettlementPriceUnits",
+                                                         defaultValue = "0") long underlyingSettlementPriceUnits) {
+        try {
+            ProductLine productLine = productLine(productLineValue, productLineHeader);
+            if (productLine == null) {
+                throw new IllegalArgumentException("settlement productLine is required");
+            }
+            return instrumentService.closeForSettlement(symbol, productLine, settlementPriceTicks,
+                    underlyingSettlementPriceUnits);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
+    }
+
     private ProductLine productLine(String queryValue, String headerValue) {
         String value = queryValue != null && !queryValue.isBlank() ? queryValue : headerValue;
         if (value == null || value.isBlank()) {

@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -44,7 +45,7 @@ public class OrderUserCommandGateway {
 
     public OrderUserCommandGateway(ObjectMapper objectMapper,
                                    TradingOrderProperties properties,
-                                   KafkaTemplate<String, String> kafkaTemplate,
+                                   @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
                                    OrderUserCommandResultWaiter resultWaiter) {
         this.objectMapper = objectMapper;
         this.properties = properties;
@@ -114,7 +115,8 @@ public class OrderUserCommandGateway {
             throw new IllegalArgumentException("持仓事件不能为空");
         }
         publish(event.productLine(), event.userId(), "ORDER_PRUNE_REDUCE_ONLY:" + event.userId() + ":"
-                        + event.symbol() + ":" + event.instrumentVersion() + ":" + event.positionSide(),
+                        + event.symbol() + ":" + event.instrumentVersion() + ":" + event.positionSide()
+                        + ":" + event.eventId(),
                 OrderUserCommandType.PRUNE_REDUCE_ONLY,
                 new OrderUserPruneReduceOnlyCommand(event, reason));
     }

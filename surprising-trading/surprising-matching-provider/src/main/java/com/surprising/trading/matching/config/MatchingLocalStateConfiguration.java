@@ -1,6 +1,7 @@
 package com.surprising.trading.matching.config;
 
 import com.surprising.trading.matching.store.MatchingLocalStateStore;
+import com.surprising.eventstore.PartitionOwnerLane;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
@@ -11,8 +12,17 @@ public class MatchingLocalStateConfiguration {
 
     @Bean(destroyMethod = "close")
     public MatchingLocalStateStore matchingLocalStateStore(MatchingProperties properties,
-                                                           ObjectMapper objectMapper) {
+                                                           ObjectMapper objectMapper,
+                                                           PartitionOwnerLane<String> matchingSymbolOwnerLane) {
         return new MatchingLocalStateStore(
-                properties.getWal().productLineDirectory(properties.getKafka().getProductLine()), objectMapper);
+                properties.getWal().productLineDirectory(properties.getKafka().getProductLine()),
+                objectMapper, matchingSymbolOwnerLane);
+    }
+
+    @Bean(destroyMethod = "close")
+    public PartitionOwnerLane<String> matchingSymbolOwnerLane() {
+        return new PartitionOwnerLane<>(
+                Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 32)),
+                "matching-symbol-owner");
     }
 }

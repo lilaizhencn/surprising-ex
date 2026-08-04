@@ -20,8 +20,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 基于 RocksDB 的用户分区 WAL。
@@ -49,11 +47,22 @@ public final class UserPartitionWal implements AutoCloseable {
     private final Options options;
     private final RocksDB database;
     private final WriteOptions writeOptions;
-    private final ConcurrentHashMap<UserPartitionKey, ReentrantLock> locks = new ConcurrentHashMap<>();
+    private final UserPartitionCommandLane lane;
+    private final boolean ownsLane;
 
     public UserPartitionWal(Path directory) {
+        this(directory, new UserPartitionCommandLane(), true);
+    }
+
+    public UserPartitionWal(Path directory, UserPartitionCommandLane lane) {
+        this(directory, lane, false);
+    }
+
+    private UserPartitionWal(Path directory, UserPartitionCommandLane lane, boolean ownsLane) {
         try {
             this.directory = Objects.requireNonNull(directory, "directory");
+            this.lane = Objects.requireNonNull(lane, "lane");
+            this.ownsLane = ownsLane;
             Files.createDirectories(directory);
             this.options = new Options().setCreateIfMissing(true);
             this.database = RocksDB.open(options, directory.toString());
@@ -70,9 +79,8 @@ public final class UserPartitionWal implements AutoCloseable {
                                      String fingerprint,
                                      Instant occurredAt) {
         requireEventInput(partition, eventId, eventType, payload, fingerprint, occurredAt);
-        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
+        return lane.execute(partition, () -> {
+          try {
             byte[] idempotencyKey = idempotencyKey(partition, eventId);
             byte[] existing = database.get(idempotencyKey);
             if (existing != null) {
@@ -98,11 +106,10 @@ public final class UserPartitionWal implements AutoCloseable {
                 database.write(writeOptions, batch);
             }
             return event;
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("failed to append user partition WAL event", ex);
-        } finally {
-            lock.unlock();
-        }
+          } catch (RocksDBException ex) {
+              throw new IllegalStateException("failed to append user partition WAL event", ex);
+          }
+        });
     }
 
     public Optional<UserPartitionEvent> readEvent(UserPartitionKey partition, long sequence) {
@@ -178,9 +185,8 @@ public final class UserPartitionWal implements AutoCloseable {
     /** 只有数据库事务成功提交后才能推进投影水位。 */
     public void markProjected(UserPartitionKey partition, long sequence) {
         Objects.requireNonNull(partition, "partition");
-        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
+        lane.execute(partition, () -> {
+          try {
             if (sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
                 throw new IllegalArgumentException("projected WAL event must exist");
             }
@@ -195,9 +201,11 @@ public final class UserPartitionWal implements AutoCloseable {
             } catch (RocksDBException ex) {
                 throw new IllegalStateException("failed to mark projected WAL event", ex);
             }
-        } finally {
-            lock.unlock();
-        }
+            return null;
+          } catch (RuntimeException ex) {
+              throw ex;
+          }
+        });
     }
 
     /**
@@ -208,15 +216,14 @@ public final class UserPartitionWal implements AutoCloseable {
      */
     public void markProjectedThrough(UserPartitionKey partition, long sequence) {
         Objects.requireNonNull(partition, "partition");
-        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
+        lane.execute(partition, () -> {
+          try {
             if (sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
                 throw new IllegalArgumentException("projected WAL event must exist");
             }
             long current = lastProjectedSequence(partition);
             if (sequence <= current) {
-                return;
+                return null;
             }
             if (sequence > lastSequence(partition)) {
                 throw new IllegalStateException("projected WAL sequence is ahead of WAL tail: " + sequence);
@@ -227,9 +234,11 @@ public final class UserPartitionWal implements AutoCloseable {
             } catch (RocksDBException ex) {
                 throw new IllegalStateException("failed to mark projected WAL sequence", ex);
             }
-        } finally {
-            lock.unlock();
-        }
+            return null;
+          } catch (RuntimeException ex) {
+              throw ex;
+          }
+        });
     }
 
     /** 返回账户账本异步投影已经完成的最后一条连续事件序号。 */
@@ -246,9 +255,8 @@ public final class UserPartitionWal implements AutoCloseable {
     /** 账本数据库事务成功后推进独立的账本投影水位，不与命令审计水位共用。 */
     public void markLedgerProjected(UserPartitionKey partition, long sequence) {
         Objects.requireNonNull(partition, "partition");
-        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
+        lane.execute(partition, () -> {
+          try {
             if (sequence <= 0L || readEvent(partition, sequence).isEmpty()) {
                 throw new IllegalArgumentException("ledger projected WAL event must exist");
             }
@@ -262,9 +270,11 @@ public final class UserPartitionWal implements AutoCloseable {
             } catch (RocksDBException ex) {
                 throw new IllegalStateException("failed to mark ledger projected WAL event", ex);
             }
-        } finally {
-            lock.unlock();
-        }
+            return null;
+          } catch (RuntimeException ex) {
+              throw ex;
+          }
+        });
     }
 
     /** 投影水位只能覆盖已经存在的每一条连续事件，损坏或缺口必须停住。 */
@@ -484,6 +494,9 @@ public final class UserPartitionWal implements AutoCloseable {
 
     @Override
     public void close() {
+        if (ownsLane) {
+            lane.close();
+        }
         writeOptions.close();
         database.close();
         options.close();

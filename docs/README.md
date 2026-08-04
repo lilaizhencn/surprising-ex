@@ -22,16 +22,20 @@
 - [持仓 Redis 读模型](position-redis-cache.md)
 - [未完成订单 Redis 投影](open-order-redis-cache.md)
 
-PostgreSQL 始终是业务事实源。持仓读模型故障时用户查询返回 503；未完成订单投影故障时整页回退
-PostgreSQL。触发单、ADL 和强平 candidate 的 Redis ZSET 只做候选过滤、排序、lease 和重试调度，
-最终状态必须由 PostgreSQL 复核和条件更新。
+用户分区 WAL、Owner Thread reducer 和可重放的本地状态是在线账户与订单事实源。撮合本地事实、
+资金费结算 WAL 和产品线 Kafka 事件承担各自业务边界的恢复输入；PostgreSQL 只承担异步投影、查询、
+审计、恢复基线和对账。持仓读模型故障时用户查询返回 503；未完成订单 Redis 投影故障时只能回退到
+可重建的本地订单快照或返回不可用，不能把 PostgreSQL 查询重新引入交易裁决。触发单、ADL 和强平
+candidate 的 Redis ZSET 只做候选过滤、排序、lease 和重试调度，最终资金命令仍由产品线账户 Owner
+按版本和数量校验。
 
-上面的说明描述当前稳定版本；永续 JVM 单写者迁移必须按迁移计划分阶段执行，完成正式切换并通过
-资金对账、故障恢复和多节点演练前，不得把 PostgreSQL 事实源声明改为异步投影。
+正式上线前仍必须完成四条产品线各自的资金对账、节点重启恢复、Kafka 重平衡和多节点 fencing 演练；
+未通过验收不得把测试环境的单机结果当作生产可用性证明。
 
 ## 测试
 
 - [产品线测试与资金守恒](product-line-testing-and-funds-reconciliation.md)
+- [生产级全链路验收方案](production-grade-trading-acceptance-plan.md)
 - [本地 Homebrew 中间件](local-homebrew-infra.md)
 
 真实运行报告应保存在 CI 制品、对象存储或临时目录。若结论需要长期保留，应把稳定参数、阈值或

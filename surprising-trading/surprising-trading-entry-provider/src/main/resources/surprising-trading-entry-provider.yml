@@ -46,6 +46,11 @@ surprising:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
         product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
+        # 用户命令按用户键分区；每个分区独占消费者，避免做市流量阻塞普通用户的命令结果。
+        account-command-results-concurrency: ${ORDER_ACCOUNT_COMMAND_RESULTS_CONCURRENCY:32}
+        user-command-concurrency: ${ORDER_USER_COMMAND_CONCURRENCY:32}
+        # 下单结果要覆盖 Kafka 重平衡和账户预占的传播窗口。
+        user-command-timeout: ${ORDER_USER_COMMAND_TIMEOUT:15s}
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
       outbox:

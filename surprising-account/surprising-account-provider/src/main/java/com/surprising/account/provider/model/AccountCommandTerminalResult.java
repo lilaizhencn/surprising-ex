@@ -44,8 +44,8 @@ public record AccountCommandTerminalResult(
                 throw new IllegalArgumentException("账本资产无效");
             }
             asset = asset.trim().toUpperCase();
-            if (amountUnits == 0L || balanceAfterUnits < 0L) {
-                throw new IllegalArgumentException("账本变更金额或余额无效");
+            if (amountUnits == 0L) {
+                throw new IllegalArgumentException("账本变更金额无效");
             }
             if (referenceType == null || referenceType.isBlank()
                     || referenceId == null || referenceId.isBlank()) {

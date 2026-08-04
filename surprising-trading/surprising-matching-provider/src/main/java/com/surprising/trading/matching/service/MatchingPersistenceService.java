@@ -152,8 +152,14 @@ public class MatchingPersistenceService {
     }
 
     public boolean commit(MatchResultEvent result, List<MatchTradeEvent> persistedTrades) {
+        return commit(result, persistedTrades, List.of());
+    }
+
+    public boolean commit(MatchResultEvent result,
+                          List<MatchTradeEvent> persistedTrades,
+                          List<MatchingOutboxWrite> outboxWrites) {
         if (localStateStore != null) {
-            return localStateStore.commit(result, persistedTrades);
+            return localStateStore.commit(result, persistedTrades, outboxWrites);
         }
         if (!saveResult(result)) {
             return false;

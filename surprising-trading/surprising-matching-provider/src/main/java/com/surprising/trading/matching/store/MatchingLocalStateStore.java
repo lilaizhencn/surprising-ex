@@ -8,6 +8,7 @@ import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.eventstore.PartitionOwnerLane;
 import com.surprising.trading.matching.model.MatchedOrderSnapshot;
 import com.surprising.trading.matching.model.RecoveredOrderBookOrder;
 import com.surprising.trading.matching.repository.MatchingOutboxRepository.MatchingOutboxWrite;
@@ -27,8 +28,6 @@ import java.util.Objects;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
@@ -59,11 +58,31 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     private final Options options;
     private final RocksDB database;
     private final WriteOptions writeOptions;
-    private final ConcurrentHashMap<String, ReentrantLock> symbolLocks = new ConcurrentHashMap<>();
+    private final PartitionOwnerLane<String> symbolOwners;
+    private final PartitionOwnerLane<String> outboxOwner;
+    private final boolean ownsSymbolOwners;
 
     public MatchingLocalStateStore(Path directory, ObjectMapper objectMapper) {
+        this(directory, objectMapper, new PartitionOwnerLane<>(
+                Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 32)),
+                "matching-symbol-owner"), true);
+    }
+
+    public MatchingLocalStateStore(Path directory,
+                                   ObjectMapper objectMapper,
+                                   PartitionOwnerLane<String> symbolOwners) {
+        this(directory, objectMapper, symbolOwners, false);
+    }
+
+    private MatchingLocalStateStore(Path directory,
+                                    ObjectMapper objectMapper,
+                                    PartitionOwnerLane<String> symbolOwners,
+                                    boolean ownsSymbolOwners) {
         try {
             this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+            this.symbolOwners = Objects.requireNonNull(symbolOwners, "symbolOwners");
+            this.outboxOwner = new PartitionOwnerLane<>(1, "matching-outbox-owner");
+            this.ownsSymbolOwners = ownsSymbolOwners;
             Files.createDirectories(Objects.requireNonNull(directory, "directory"));
             options = new Options().setCreateIfMissing(true);
             database = RocksDB.open(options, directory.toString());
@@ -79,7 +98,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         if (command.commandType() != com.surprising.trading.api.model.OrderCommandType.PLACE) {
             return;
         }
-        withSymbolLock(command.symbol(), () -> {
+        withSymbolOwner(command.symbol(), () -> {
             try {
                 byte[] existing = database.get(orderKey(command.orderId()));
                 if (existing != null) {
@@ -151,14 +170,21 @@ public final class MatchingLocalStateStore implements AutoCloseable {
      * 将结果、成交和两侧订单状态放进同一个同步 WriteBatch，保证结果已落盘时订单数量也已落盘。
      */
     public boolean commit(MatchResultEvent result, List<MatchTradeEvent> persistedTrades) {
+        return commit(result, persistedTrades, List.of());
+    }
+
+    public boolean commit(MatchResultEvent result,
+                          List<MatchTradeEvent> persistedTrades,
+                          List<MatchingOutboxWrite> outboxWrites) {
         Objects.requireNonNull(result, "result");
         List<MatchTradeEvent> trades = persistedTrades == null ? List.of() : List.copyOf(persistedTrades);
-        return withSymbolLock(result.symbol(), () -> commitLocked(result, trades));
+        List<MatchingOutboxWrite> writes = outboxWrites == null ? List.of() : List.copyOf(outboxWrites);
+        return withSymbolOwner(result.symbol(), () -> commitLocked(result, trades, writes));
     }
 
     public boolean saveResult(MatchResultEvent result) {
         Objects.requireNonNull(result, "result");
-        return withSymbolLock(result.symbol(), () -> {
+        return withSymbolOwner(result.symbol(), () -> {
             try {
                 byte[] key = resultKey(result.commandId());
                 byte[] encoded = encode(result);
@@ -178,7 +204,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     }
 
     public void applyActiveOrderStatus(MatchResultEvent result) {
-        withSymbolLock(result.symbol(), () -> {
+        withSymbolOwner(result.symbol(), () -> {
             StoredOrder current = requireOrder(result.orderId());
             StoredOrder updated = activeOrderUpdate(current, result);
             putOrder(updated);
@@ -190,25 +216,15 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         if (trades == null || trades.isEmpty()) {
             return;
         }
-        Map<Long, MakerFill> fills = new LinkedHashMap<>();
+        Map<String, List<MatchTradeEvent>> bySymbol = new LinkedHashMap<>();
         for (MatchTradeEvent trade : trades) {
-            fills.merge(trade.makerOrderId(), new MakerFill(trade.quantitySteps(),
-                    trade.makerOrderCompleted(), trade.eventTime()), (left, right) -> new MakerFill(
-                    Math.addExact(left.quantitySteps(), right.quantitySteps()),
-                    left.completed() || right.completed(),
-                    left.eventTime().isAfter(right.eventTime()) ? left.eventTime() : right.eventTime()));
+            bySymbol.computeIfAbsent(trade.symbol(), ignored -> new ArrayList<>()).add(trade);
         }
-        for (Map.Entry<Long, MakerFill> entry : fills.entrySet()) {
-            StoredOrder current = requireOrder(entry.getKey());
-            MakerFill fill = entry.getValue();
-            long executed = Math.addExact(current.executedQuantitySteps(), fill.quantitySteps());
-            if (executed > current.command().quantitySteps()) {
-                throw new IllegalStateException("撮合做市方成交超过订单数量 orderId=" + entry.getKey());
-            }
-            putOrder(new StoredOrder(current.command(), executed,
-                    Math.subtractExact(current.command().quantitySteps(), executed),
-                    fill.completed() ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED,
-                    fill.eventTime()));
+        for (Map.Entry<String, List<MatchTradeEvent>> entry : bySymbol.entrySet()) {
+            withSymbolOwner(entry.getKey(), () -> {
+                applyMakerFillsLocked(entry.getValue());
+                return null;
+            });
         }
     }
 
@@ -216,6 +232,19 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         if (trades == null || trades.isEmpty()) {
             return;
         }
+        Map<String, List<MatchTradeEvent>> bySymbol = new LinkedHashMap<>();
+        for (MatchTradeEvent trade : trades) {
+            bySymbol.computeIfAbsent(trade.symbol(), ignored -> new ArrayList<>()).add(trade);
+        }
+        for (Map.Entry<String, List<MatchTradeEvent>> entry : bySymbol.entrySet()) {
+            withSymbolOwner(entry.getKey(), () -> {
+                saveTradesLocked(entry.getValue());
+                return null;
+            });
+        }
+    }
+
+    private void saveTradesLocked(List<MatchTradeEvent> trades) {
         try (WriteBatch batch = new WriteBatch()) {
             for (MatchTradeEvent trade : trades) {
                 byte[] key = tradeKey(trade.tradeId());
@@ -239,25 +268,16 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         if (writes == null || writes.isEmpty()) {
             return;
         }
+        List<MatchingOutboxWrite> copy = List.copyOf(writes);
+        outboxOwner.execute("enqueue", () -> {
+            enqueueOutboxLocked(copy);
+            return null;
+        });
+    }
+
+    private void enqueueOutboxLocked(List<MatchingOutboxWrite> writes) {
         try (WriteBatch batch = new WriteBatch()) {
-            long next = readLong(database.get(OUTBOX_NEXT_KEY), 1L);
-            for (MatchingOutboxWrite write : writes) {
-                if (write == null || write.now() == null || write.payload() == null) {
-                    throw new IllegalArgumentException("撮合本地通知不能为空");
-                }
-                String identity = outboxIdentity(write);
-                byte[] identityKey = key(OUTBOX_IDEMPOTENCY_PREFIX, identity);
-                byte[] existing = database.get(identityKey);
-                if (existing != null) {
-                    continue;
-                }
-                LocalOutboxRecord record = new LocalOutboxRecord(next, write.aggregateType(), write.aggregateId(),
-                        write.topic(), write.eventKey(), write.eventType(), write.payload(), write.now(), false);
-                batch.put(outboxKey(next), encode(record));
-                batch.put(identityKey, encodeLong(next));
-                next = Math.addExact(next, 1L);
-            }
-            batch.put(OUTBOX_NEXT_KEY, encodeLong(next));
+            appendOutbox(batch, writes);
             database.write(writeOptions, batch);
         } catch (RocksDBException ex) {
             throw new IllegalStateException("写入撮合本地通知队列失败", ex);
@@ -281,21 +301,24 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     }
 
     public void markOutboxPublished(long sequence) {
-        try {
-            byte[] value = database.get(outboxKey(sequence));
-            if (value == null) {
-                throw new IllegalStateException("本地通知不存在 sequence=" + sequence);
+        outboxOwner.execute("mark-published", () -> {
+            try {
+                byte[] value = database.get(outboxKey(sequence));
+                if (value == null) {
+                    throw new IllegalStateException("本地通知不存在 sequence=" + sequence);
+                }
+                LocalOutboxRecord current = decode(value, LocalOutboxRecord.class);
+                if (current.published()) {
+                    return null;
+                }
+                database.put(writeOptions, outboxKey(sequence), encode(new LocalOutboxRecord(
+                        current.sequence(), current.aggregateType(), current.aggregateId(), current.topic(),
+                        current.eventKey(), current.eventType(), current.payload(), current.createdAt(), true)));
+                return null;
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("标记撮合本地通知失败 sequence=" + sequence, ex);
             }
-            LocalOutboxRecord current = decode(value, LocalOutboxRecord.class);
-            if (current.published()) {
-                return;
-            }
-            database.put(writeOptions, outboxKey(sequence), encode(new LocalOutboxRecord(
-                    current.sequence(), current.aggregateType(), current.aggregateId(), current.topic(),
-                    current.eventKey(), current.eventType(), current.payload(), current.createdAt(), true)));
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("标记撮合本地通知失败 sequence=" + sequence, ex);
-        }
+        });
     }
 
     public List<RecoveredOrderBookOrder> recoverableOpenOrdersAfter(Instant createdAt,
@@ -326,7 +349,9 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                 .toList();
     }
 
-    private boolean commitLocked(MatchResultEvent result, List<MatchTradeEvent> persistedTrades) {
+    private boolean commitLocked(MatchResultEvent result,
+                                 List<MatchTradeEvent> persistedTrades,
+                                 List<MatchingOutboxWrite> outboxWrites) {
         try {
             byte[] resultKey = resultKey(result.commandId());
             byte[] resultBytes = encode(result);
@@ -360,27 +385,82 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                         fill.completed() ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED,
                         fill.eventTime()));
             }
-            try (WriteBatch batch = new WriteBatch()) {
-                batch.put(resultKey, resultBytes);
-                for (StoredOrder update : updates.values()) {
-                    batch.put(orderKey(update.command().orderId()), encode(update));
-                }
-                for (MatchTradeEvent trade : persistedTrades) {
-                    byte[] key = tradeKey(trade.tradeId());
-                    byte[] value = encode(trade);
-                    byte[] prior = database.get(key);
-                    if (prior != null && !Arrays.equals(prior, value)) {
-                        throw new IllegalStateException("成交编号幂等冲突 tradeId=" + trade.tradeId());
+            outboxOwner.execute("commit-" + result.commandId(), () -> {
+                try {
+                    try (WriteBatch batch = new WriteBatch()) {
+                        batch.put(resultKey, resultBytes);
+                        for (StoredOrder update : updates.values()) {
+                            batch.put(orderKey(update.command().orderId()), encode(update));
+                        }
+                        for (MatchTradeEvent trade : persistedTrades) {
+                            byte[] key = tradeKey(trade.tradeId());
+                            byte[] value = encode(trade);
+                            byte[] prior = database.get(key);
+                            if (prior != null && !Arrays.equals(prior, value)) {
+                                throw new IllegalStateException("成交编号幂等冲突 tradeId=" + trade.tradeId());
+                            }
+                            if (prior == null) {
+                                batch.put(key, value);
+                            }
+                        }
+                        appendOutbox(batch, outboxWrites);
+                        database.write(writeOptions, batch);
+                        return null;
                     }
-                    if (prior == null) {
-                        batch.put(key, value);
-                    }
+                } catch (RocksDBException ex) {
+                    throw new IllegalStateException("提交撮合本地事实失败 commandId=" + result.commandId(), ex);
                 }
-                database.write(writeOptions, batch);
-            }
+            });
             return true;
         } catch (RocksDBException ex) {
             throw new IllegalStateException("提交撮合本地事实失败 commandId=" + result.commandId(), ex);
+        }
+    }
+
+    private void appendOutbox(WriteBatch batch, List<MatchingOutboxWrite> writes) throws RocksDBException {
+        if (writes == null || writes.isEmpty()) {
+            return;
+        }
+        long next = readLong(database.get(OUTBOX_NEXT_KEY), 1L);
+        for (MatchingOutboxWrite write : writes) {
+            if (write == null || write.now() == null || write.payload() == null) {
+                throw new IllegalArgumentException("撮合本地通知不能为空");
+            }
+            String identity = outboxIdentity(write);
+            byte[] identityKey = key(OUTBOX_IDEMPOTENCY_PREFIX, identity);
+            byte[] existing = database.get(identityKey);
+            if (existing != null) {
+                continue;
+            }
+            LocalOutboxRecord record = new LocalOutboxRecord(next, write.aggregateType(), write.aggregateId(),
+                    write.topic(), write.eventKey(), write.eventType(), write.payload(), write.now(), false);
+            batch.put(outboxKey(next), encode(record));
+            batch.put(identityKey, encodeLong(next));
+            next = Math.addExact(next, 1L);
+        }
+        batch.put(OUTBOX_NEXT_KEY, encodeLong(next));
+    }
+
+    private void applyMakerFillsLocked(List<MatchTradeEvent> trades) {
+        Map<Long, MakerFill> fills = new LinkedHashMap<>();
+        for (MatchTradeEvent trade : trades) {
+            fills.merge(trade.makerOrderId(), new MakerFill(trade.quantitySteps(),
+                    trade.makerOrderCompleted(), trade.eventTime()), (left, right) -> new MakerFill(
+                    Math.addExact(left.quantitySteps(), right.quantitySteps()),
+                    left.completed() || right.completed(),
+                    left.eventTime().isAfter(right.eventTime()) ? left.eventTime() : right.eventTime()));
+        }
+        for (Map.Entry<Long, MakerFill> entry : fills.entrySet()) {
+            StoredOrder current = requireOrder(entry.getKey());
+            MakerFill fill = entry.getValue();
+            long executed = Math.addExact(current.executedQuantitySteps(), fill.quantitySteps());
+            if (executed > current.command().quantitySteps()) {
+                throw new IllegalStateException("撮合做市方成交超过订单数量 orderId=" + entry.getKey());
+            }
+            putOrder(new StoredOrder(current.command(), executed,
+                    Math.subtractExact(current.command().quantitySteps(), executed),
+                    fill.completed() ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED,
+                    fill.eventTime()));
         }
     }
 
@@ -418,14 +498,8 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                 || status == OrderStatus.CANCEL_REQUESTED;
     }
 
-    private <T> T withSymbolLock(String symbol, java.util.function.Supplier<T> action) {
-        ReentrantLock lock = symbolLocks.computeIfAbsent(symbol, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
-            return action.get();
-        } finally {
-            lock.unlock();
-        }
+    private <T> T withSymbolOwner(String symbol, java.util.function.Supplier<T> action) {
+        return symbolOwners.execute(Objects.requireNonNull(symbol, "symbol"), action);
     }
 
     private byte[] resultKey(long commandId) {
@@ -512,6 +586,10 @@ public final class MatchingLocalStateStore implements AutoCloseable {
 
     @Override
     public void close() {
+        if (ownsSymbolOwners) {
+            symbolOwners.close();
+        }
+        outboxOwner.close();
         writeOptions.close();
         database.close();
         options.close();
@@ -529,8 +607,14 @@ public final class MatchingLocalStateStore implements AutoCloseable {
             Objects.requireNonNull(command, "command");
             Objects.requireNonNull(status, "status");
             Objects.requireNonNull(updatedAt, "updatedAt");
+            long total = Math.addExact(executedQuantitySteps, remainingQuantitySteps);
+            boolean terminalWithoutFill = status == OrderStatus.CANCELED || status == OrderStatus.REJECTED;
+            // 活跃/完全成交订单必须保持数量守恒；撤单或拒单会丢弃尚未成交数量，
+            // 因此只要求已成交量不超过原始数量且剩余量为零。
             if (executedQuantitySteps < 0L || remainingQuantitySteps < 0L
-                    || executedQuantitySteps + remainingQuantitySteps != command.quantitySteps()) {
+                    || executedQuantitySteps > command.quantitySteps()
+                    || (terminalWithoutFill ? remainingQuantitySteps != 0L
+                    : total != command.quantitySteps())) {
                 throw new IllegalArgumentException("撮合本地订单数量不一致");
             }
         }

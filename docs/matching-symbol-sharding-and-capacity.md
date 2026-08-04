@@ -11,6 +11,7 @@
 - 订单服务通过 outbox 把 `OrderCommandEvent` 写入 order commands topic，Kafka key 使用订单的 `symbol`。
 - matching provider 使用一个共享 `@KafkaListener` 消费 order commands topic，要求 Kafka key 必须等于 payload 中的 `symbol`，保证同一 symbol 能稳定进入同一 Kafka partition。
 - Kafka partition 由单个 listener 线程串行消费，同一 symbol 的命令不再额外获取本地 stripe lock；不同 partition 可以并行进入 exchange-core。
+- 本地撮合事实库把 `ProductLine:symbol:instrumentVersion` 映射到 `PartitionOwnerLane`，结果、成交、订单状态和本地通知由同一 symbol Owner 组织；跨 symbol 的 outbox 序号由独立单 Owner 串行分配，不使用共享 `ReentrantLock`。
 - `ExchangeCoreEngine` 只创建一个 `ExchangeCore` 和一个 `ExchangeApi`。业务代码不会为每个 symbol 创建单独的 `ExchangeCore`、producer 或 consumer。
 - `exchange-core2` 内部把所有命令发布到同一个 Disruptor RingBuffer，底层 producer 类型是 `ProducerType.MULTI`。
 - `exchange-core2` 创建固定数量的 `MatchingEngineRouter`，每个 router 持有一组 `symbolId -> orderBook`。路由规则是 `symbolId & shardMask == shardId`。

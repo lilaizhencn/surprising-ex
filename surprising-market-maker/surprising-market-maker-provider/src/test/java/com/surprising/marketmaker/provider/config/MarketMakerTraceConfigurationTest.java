@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
+import feign.Request;
 import feign.RequestTemplate;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterEach;
@@ -54,5 +55,14 @@ class MarketMakerTraceConfigurationTest {
 
         assertThat(template.headers())
                 .containsEntry("X-Product-Line", java.util.List.of("LINEAR_DELIVERY"));
+    }
+
+    @Test
+    void feignOptionsBoundTheInternalRpcCall() {
+        Request.Options options = new MarketMakerFeignConfiguration().marketMakerRequestOptions();
+
+        assertThat(options.connectTimeoutMillis()).isEqualTo(1000);
+        assertThat(options.readTimeoutMillis()).isEqualTo(5000);
+        assertThat(options.isFollowRedirects()).isTrue();
     }
 }

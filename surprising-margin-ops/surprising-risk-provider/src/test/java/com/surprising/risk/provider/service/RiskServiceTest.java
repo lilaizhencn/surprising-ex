@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.AdminCursorPage;
@@ -249,7 +250,7 @@ class RiskServiceTest {
     }
 
     @Test
-    void positionEventFailsClosedWhenRiskGroupSnapshotIsMissing() {
+    void positionEventKeepsPositionUntilAccountWalletSnapshotArrives() {
         FakeRiskRepository riskRepository = new FakeRiskRepository();
         riskRepository.positions = List.of();
         RiskProperties properties = new RiskProperties();
@@ -274,13 +275,118 @@ class RiskServiceTest {
                 riskRepository.persistence, new FakeRiskSequenceRepository(), outboxRepository, null,
                 transactionManager, stateStore, calculator);
 
-        assertThatThrownBy(() -> service.scanPositionUpdates(List.of(
-                positionEvent(31L, 2002L, "BTC-USDT", 7L, "USDT", "trace-recovery"))))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("禁止回退数据库");
+        service.scanPositionUpdates(List.of(
+                openPositionEvent(31L, 2002L, "BTC-USDT", 7L, "USDT", "trace-recovery")));
 
         assertThat(riskRepository.cachedRiskGroupCalls).isZero();
         assertThat(transactionManager.commits).isZero();
+        assertThat(stored.get()).isNotNull();
+        assertThat(stored.get().walletRevision()).isZero();
+        assertThat(stored.get().positions()).hasSize(1);
+    }
+
+    @Test
+    void accountStateCreatesRiskGroupBeforePositionEventArrives() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        RiskProperties properties = new RiskProperties();
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RedisRiskStateStore stateStore = mock(RedisRiskStateStore.class);
+        RedisRiskCalculator calculator = mock(RedisRiskCalculator.class);
+        AtomicReference<CachedRiskGroup> stored = new AtomicReference<>();
+        when(stateStore.ready(any(ProductLine.class))).thenReturn(true);
+        when(stateStore.read(any(ProductLine.class), any(RiskGroupKey.class)))
+                .thenAnswer(invocation -> stored.get());
+        when(stateStore.replace(any(ProductLine.class), any(RiskGroupKey.class), any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    java.util.function.Supplier<CachedRiskGroup> supplier = invocation.getArgument(2);
+                    CachedRiskGroup state = supplier.get();
+                    stored.set(state);
+                    return new RedisRiskStateStore.ProjectionUpdate(state, true);
+                });
+        when(calculator.calculate(any(CachedRiskGroup.class))).thenReturn(List.of());
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                riskRepository.persistence, new FakeRiskSequenceRepository(), outboxRepository, null,
+                transactionManager, stateStore, calculator);
+
+        service.scanAccountStateUpdates(List.of(new PerpetualAccountStateUpdatedEvent(
+                PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION,
+                1L,
+                1L,
+                ProductLine.LINEAR_PERPETUAL,
+                2002L,
+                "USDT_PERPETUAL",
+                List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 2_000_000L, 0L)),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(new PerpetualAccountStateUpdatedEvent.OrderLock("USDT", 500_000L)),
+                null,
+                Instant.parse("2026-07-01T00:00:00Z"),
+                "trace-account-first")));
+
+        assertThat(stored.get()).isNotNull();
+        assertThat(stored.get().key()).isEqualTo(new RiskGroupKey(2002L, "USDT_PERPETUAL", "USDT"));
+        assertThat(stored.get().walletBalanceUnits()).isEqualTo(1_500_000L);
+        assertThat(stored.get().walletRevision()).isEqualTo(1L);
+
+        service.scanPositionUpdates(List.of(openPositionEvent(2L, 2002L, "BTC-USDT", 7L,
+                "USDT", "trace-position-after-account")));
+
+        assertThat(stored.get().positions()).hasSize(1);
+        assertThat(stored.get().positions().getFirst().symbol()).isEqualTo("BTC-USDT");
+    }
+
+    @Test
+    void optionAccountStateDerivesSettlementAssetWhenMarginRowIsAbsent() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        RiskProperties properties = new RiskProperties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        properties.getKafka().setProductTopicsEnabled(true);
+        FakeRiskOutboxRepository outboxRepository = new FakeRiskOutboxRepository();
+        TrackingTransactionManager transactionManager = new TrackingTransactionManager();
+        RedisRiskStateStore stateStore = mock(RedisRiskStateStore.class);
+        RedisRiskCalculator calculator = mock(RedisRiskCalculator.class);
+        AtomicReference<CachedRiskGroup> stored = new AtomicReference<>();
+        when(stateStore.ready(ProductLine.OPTION)).thenReturn(true);
+        when(stateStore.read(any(ProductLine.class), any(RiskGroupKey.class)))
+                .thenAnswer(invocation -> stored.get());
+        when(stateStore.replace(any(ProductLine.class), any(RiskGroupKey.class), any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    java.util.function.Supplier<CachedRiskGroup> supplier = invocation.getArgument(2);
+                    CachedRiskGroup state = supplier.get();
+                    stored.set(state);
+                    return new RedisRiskStateStore.ProjectionUpdate(state, true);
+                });
+        when(calculator.calculate(any(CachedRiskGroup.class))).thenReturn(List.of());
+        RiskService service = new RiskService(new ObjectMapper(), properties, riskRepository,
+                riskRepository.persistence, new FakeRiskSequenceRepository(), outboxRepository, null,
+                transactionManager, stateStore, calculator);
+
+        service.scanAccountStateUpdates(List.of(new PerpetualAccountStateUpdatedEvent(
+                PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION,
+                1L,
+                1L,
+                ProductLine.OPTION,
+                2002L,
+                "OPTION",
+                List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 2_000_000L, 0L)),
+                List.of(),
+                List.of(new PerpetualAccountStateUpdatedEvent.Position(
+                        "BTC-USDT-260925-59000-C", 7L, MarginMode.CROSS, PositionSide.NET,
+                        1L, 1001L, 1001L, 0L, Instant.parse("2026-07-01T00:00:00Z"))),
+                List.of(),
+                List.of(),
+                null,
+                Instant.parse("2026-07-01T00:00:00Z"),
+                "trace-option-margin-fallback")));
+
+        assertThat(stored.get()).isNotNull();
+        assertThat(stored.get().key()).isEqualTo(new RiskGroupKey(2002L, "OPTION", "USDT"));
+        assertThat(stored.get().walletRevision()).isEqualTo(1L);
+        assertThat(transactionManager.commits).isEqualTo(1);
     }
 
     @Test
@@ -295,7 +401,7 @@ class RiskServiceTest {
         AtomicReference<CachedRiskGroup> stored = new AtomicReference<>();
         AtomicReference<Boolean> redisExpired = new AtomicReference<>(false);
         RiskGroupKey key = new RiskGroupKey(2002L, "USDT");
-        stored.set(new CachedRiskGroup(key, 0L, List.of(), Instant.now()));
+        stored.set(new CachedRiskGroup(key, 0L, 1L, List.of(), Instant.now()));
         when(stateStore.ready(any(ProductLine.class))).thenReturn(true);
         when(stateStore.read(any(ProductLine.class), any(RiskGroupKey.class)))
                 .thenAnswer(invocation -> redisExpired.get() ? null : stored.get());
@@ -355,10 +461,23 @@ class RiskServiceTest {
                 new FakeRiskOutboxRepository(), new TrackingTransactionManager());
 
         assertThatThrownBy(() -> service.scanPositionUpdates(List.of(
-                positionEvent(31L, 1001L, "BTC-USDT", 7L, "", "trace-1"))))
+                openPositionEvent(31L, 1001L, "BTC-USDT", 7L, "", "trace-1"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("asset is required");
         assertThat(riskRepository.calculateCalls).isZero();
+    }
+
+    @Test
+    void flatPositionEventWithoutMarginAssetRemovesPosition() {
+        FakeRiskRepository riskRepository = new FakeRiskRepository();
+        riskRepository.positions = List.of();
+        RiskService service = redisRiskService(new RiskProperties(), riskRepository,
+                new FakeRiskOutboxRepository(), null, new TrackingTransactionManager());
+
+        service.scanPositionUpdates(List.of(
+                positionEvent(31L, 1001L, "BTC-USDT", 7L, "", "trace-flat")));
+
+        assertThat(riskRepository.calculateCalls).isEqualTo(1);
     }
 
     @Test
@@ -604,7 +723,7 @@ class RiskServiceTest {
         when(stateStore.ready(any(ProductLine.class))).thenReturn(true);
         when(stateStore.read(any(ProductLine.class), any(RiskGroupKey.class))).thenAnswer(invocation -> {
             RiskGroupKey key = invocation.getArgument(1);
-            return new CachedRiskGroup(key, riskRepository.walletBalanceUnits, List.of(), Instant.now());
+            return new CachedRiskGroup(key, riskRepository.walletBalanceUnits, 1L, List.of(), Instant.now());
         });
         when(stateStore.replace(
                 any(ProductLine.class), any(RiskGroupKey.class), any())).thenAnswer(invocation -> {
@@ -654,6 +773,21 @@ class RiskServiceTest {
                 eventTime,
                 eventTime,
                 traceId);
+    }
+
+    private PositionUpdatedEvent openPositionEvent(long revision,
+                                                    long userId,
+                                                    String symbol,
+                                                    long instrumentVersion,
+                                                    String marginAsset,
+                                                    String traceId) {
+        PositionUpdatedEvent event = positionEvent(revision, userId, symbol, instrumentVersion,
+                marginAsset, traceId);
+        return new PositionUpdatedEvent(
+                event.schemaVersion(), event.eventId(), event.tradeId(), event.productLine(), event.revision(),
+                event.userId(), event.symbol(), event.instrumentVersion(), event.marginMode(), event.positionSide(),
+                1L, 65_000L, 65_000L, event.realizedPnlUnits(), event.marginAsset(), event.marginUnits(),
+                event.positionUpdatedAt(), event.marginUpdatedAt(), event.eventTime(), event.traceId());
     }
 
     private static final class FakeRiskRepository extends RiskRepository {
@@ -709,7 +843,7 @@ class RiskServiceTest {
         @Override
         public CachedRiskGroup cachedRiskGroup(RiskGroupKey key) {
             cachedRiskGroupCalls++;
-            return new CachedRiskGroup(key, walletBalanceUnits, List.of(), Instant.now());
+            return new CachedRiskGroup(key, walletBalanceUnits, 1L, List.of(), Instant.now());
         }
 
         @Override

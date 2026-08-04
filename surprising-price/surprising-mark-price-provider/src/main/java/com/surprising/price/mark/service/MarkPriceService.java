@@ -117,6 +117,15 @@ import tools.jackson.databind.ObjectMapper;
         if (!fresh(index, now)) {
             return false;
         }
+        MarkPriceEncoding encoding;
+        try {
+            encoding = coordinationService.encoding(symbol);
+        } catch (IllegalStateException ex) {
+            if (ex.getMessage() != null && ex.getMessage().startsWith("mark price encoding not found for ")) {
+                return false;
+            }
+            throw ex;
+        }
         PerpBookTickerEvent book = bookTickers.get(symbol);
         if (!fresh(book, now)) {
             book = syntheticBookTicker(index, now);
@@ -135,7 +144,8 @@ import tools.jackson.databind.ObjectMapper;
                 properties.getCalculation().getScale());
 
         long sequence = coordinationService.nextSequence(SEQUENCE_MODULE, symbol);
-        MarkPriceEncoding encoding = encodings.computeIfAbsent(symbol, coordinationService::encoding);
+        encodings.putIfAbsent(symbol, encoding);
+        encoding = encodings.get(symbol);
         MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
                 fundingRates.get(symbol), basisAverage, encoding, now);
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,

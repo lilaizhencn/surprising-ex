@@ -23,6 +23,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class RedisRiskCalculator {
 
+    public static final class MarkPriceUnavailableException extends IllegalStateException {
+        public MarkPriceUnavailableException(String message) {
+            super(message);
+        }
+    }
+
     private final LatestMarkPriceCache markPriceCache;
     private final RiskRepository repository;
     private final RiskProperties properties;
@@ -58,7 +64,7 @@ public class RedisRiskCalculator {
             RiskInstrumentSpec spec = spec(position.symbol(), position.instrumentVersion());
             MarkPriceEvent mark = markPriceCache.fresh(position.symbol(), properties.getCalculation().getMaxMarkAge())
                     .filter(value -> value.instrumentVersion() == position.instrumentVersion())
-                    .orElseThrow(() -> new IllegalStateException(
+                    .orElseThrow(() -> new MarkPriceUnavailableException(
                             "fresh mark price unavailable for " + position.symbol()));
             long notional = RiskMath.notionalUnits(
                     spec.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),

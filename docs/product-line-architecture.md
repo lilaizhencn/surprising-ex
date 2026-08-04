@@ -11,8 +11,8 @@
 | --- | --- | --- | --- | --- | --- |
 | 现货 | `SPOT` | `SPOT` | `SPOT` | `surprising.spot.*.v1` | 已接入下单、撮合、资产互换、冻结释放、产品账户流水 |
 | U 本位永续 | `LINEAR_PERPETUAL` | `USDT_PERPETUAL` | `LINEAR_PERPETUAL` | `surprising.linear-perp.*.v1` | 已接入保证金、资金费、风控、强平、保险基金、ADL |
-| U 本位交割 | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `LINEAR_DELIVERY` | `surprising.linear-delivery.*.v1` | 已接入产品线隔离、Instrument 和基础订单边界；交割价确认、结算命令仍需单独验收 |
-| 欧式期权 | `OPTION` | `OPTION` | `VANILLA_OPTION` | `surprising.option.*.v1` | 已接入产品线隔离和 Instrument 生命周期事件；权利金、行权和期权 reducer 仍未开放热路径 |
+| U 本位交割 | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `LINEAR_DELIVERY` | `surprising.linear-delivery.*.v1` | 交割价确认后由账户用户分区 reducer 完成现金结算、保证金释放和持仓归零 |
+| 欧式期权 | `OPTION` | `OPTION` | `VANILLA_OPTION` | `surprising.option.*.v1` | 成交时结算买卖双方权利金，结算价确认后自动计算 CALL/PUT payoff、释放保证金并归零持仓 |
 
 `INVERSE_PERPETUAL` 和 `INVERSE_DELIVERY` 的枚举、账户类型和 topic 映射已经保留，当前 smoke 主覆盖集中在 `SPOT`、`LINEAR_PERPETUAL`、`LINEAR_DELIVERY`、`OPTION` 四条线。
 
@@ -22,6 +22,19 @@
 - 隔离的是业务状态：订单簿、Kafka topic、consumer group、账户类型、结算策略、风险扫描、强平候选、生命周期事件。
 - 现阶段不做大规模模块重构。provider 二进制仍复用，通过 `product-line` 和 `product-topics-enabled` 启动为不同产品线实例。
 - 资金安全优先于抽象纯度。每条线必须独立验证余额、流水、持仓、保证金、强平费、资金费、交割/行权和保险基金入账。
+
+## JVM Owner 与持久化边界
+
+在线可变状态不使用共享可变对象加锁更新。账户、订单按 `ProductLine:userId` 分片，撮合按
+`ProductLine:symbol:instrumentVersion` 分片，资金费序列按 symbol 分片；每个分片由
+`PartitionOwnerLane` 的单 Owner 线程执行，跨分片通过不可变 Kafka 事件、幂等 commandId、tradeId
+和结算完成聚合器连接。mailbox 有界，过载时拒绝提交并等待重试，不能丢资金命令。
+
+同步 WAL 是恢复事实：用户命令 WAL、撮合事实和本地 outbox 在确认 Kafka 或业务处理完成前同步落盘。
+用户账户状态快照仅作为可重建 checkpoint，允许异步刷盘，重启时从 WAL 连续重放；账户结果库、撮合
+结果/成交/outbox 和资金费结算事实仍保持同步提交。数据库、Redis 和 WebSocket 只承担投影、查询、
+通知和对账，保险基金的数据库 `FOR UPDATE`、生命周期栅栏等仍是明确的跨节点资金安全边界，不能以
+“无锁”名义删除。
 
 ## 运行边界
 
@@ -36,11 +49,11 @@ LINEAR_PERPETUAL:
 
 LINEAR_DELIVERY:
   trading-entry/order-provider -> matching-provider -> account derivative settlement（基础链路）
-  -> 交割价确认 -> delivery settlement user command（待启用）
+  -> 交割价确认 -> delivery settlement user command -> 交割流水/保证金释放
 
 OPTION:
-  instrument lifecycle -> option exercise event（当前仅事件边界）
-  -> option premium/exercise reducer（待启用，未允许普通下单热路径）
+  instrument lifecycle -> option exercise event（事件中冻结每份合约现金收益）
+  -> option premium/exercise reducer -> 行权流水/保证金释放
 ```
 
 撮合 provider 仍使用同一个 `exchange-core` 封装，但每条产品线实例只消费当前产品线的 `order.commands`，只发布当前产品线的 `match.results`、`match.trades` 和 `orderbook.depth`。consumer 会校验实际 Kafka topic 与当前 `ProductLine` 一致，避免跨线误消费。
@@ -56,9 +69,8 @@ OPTION:
 
 ## 交割合约执行模型（设计边界）
 
-交割的 Kafka 生命周期事件已经有统一格式，但当前账户 reducer 尚未接入交割价来源和
-`DELIVERY_SETTLE` 命令，因此不能把以下步骤描述为已完成生产能力。只有交割价经过独立的
-结算价服务确认、事件携带不可变结算价并通过用户分区单写者验收后，才允许开启本流程。
+交割的 Kafka 生命周期事件携带不可变结算价；管理端只能通过带结算价的 Instrument 关闭入口
+发布事件，账户 reducer 按用户分区单写者执行 `DELIVERY_SETTLE`，不从数据库补查结算价。
 
 交割合约复用永续的下单、撮合、保证金、风控和强平链路，但没有资金费。区别在生命周期：
 
@@ -69,13 +81,10 @@ OPTION:
 5. order 排空确认发布后，account 逐笔核对 `ORDER_RESERVE`、`ORDER_RELEASE` 和成交侧保证金审计，确认冻结资金已全部消费或释放。
 6. instrument 只在 `ORDER`、`TRIGGER`、`ACCOUNT` 三类确认均按相同 symbol、版本和产品线持久化后进入 `CLOSED`。
 7. 交割 lifecycle 事件随后发布到 `surprising.linear-delivery.delivery.settlements.v1`。
-8. 账户 reducer（待实现）按结算价把未平仓位现金结算为 `DELIVERY_SETTLEMENT` 流水，释放持仓保证金，持仓归零。
+8. 账户 reducer 按事件中的不可变结算价把未平仓位现金结算为 `DELIVERY_SETTLEMENT` 流水，释放持仓保证金，持仓归零。
 9. gateway、WebSocket 和后台展示交割状态、结算价、交割流水和最终余额。
 
 ## 期权执行模型（设计边界）
-
-期权当前只保留 Instrument 生命周期事件和产品线 topic 隔离。账户 reducer 尚未支持期权开仓、
-权利金、卖方保证金和自动行权，OPTION 订单入口会失败关闭，不能按下面的目标流程运行。
 
 当前期权路线是现金结算欧式期权，先不做提前行权：
 
@@ -83,7 +92,7 @@ OPTION:
 2. 买方成交时支付权利金，最大亏损为权利金。
 3. 卖方冻结保证金，后续可升级组合保证金和希腊值风控。
 4. 到期先复用上述 `SETTLING -> 订单/触发单排空 -> 账户冻结核对 -> CLOSED` 屏障。
-5. 到期自动行权，CALL payoff 为 `max(标的结算价 - 行权价, 0)`，PUT payoff 为 `max(行权价 - 标的结算价, 0)`。
+5. 到期自动行权，Instrument 入口按标的价格档位计算并冻结每份合约现金收益；CALL 为 `max(标的结算价 - 行权价, 0)`，PUT 为 `max(行权价 - 标的结算价, 0)`。
 6. lifecycle 事件发布到 `surprising.option.option.exercises.v1`。
 7. account 写入 `OPTION_PREMIUM` 和 `OPTION_EXERCISE` 流水，释放持仓保证金，持仓归零。
 

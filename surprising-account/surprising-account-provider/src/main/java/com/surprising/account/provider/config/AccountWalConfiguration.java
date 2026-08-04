@@ -13,26 +13,29 @@ import org.springframework.context.annotation.Configuration;
 public class AccountWalConfiguration {
 
     @Bean(destroyMethod = "close")
-    public UserPartitionWal accountUserPartitionWal(AccountProperties properties) {
+    public UserPartitionWal accountUserPartitionWal(AccountProperties properties,
+                                                    UserPartitionCommandLane lane) {
         Path directory = Path.of(properties.getWal().getDirectory(), properties.getKafka().getProductLine().name());
-        return new UserPartitionWal(directory);
+        return new UserPartitionWal(directory, lane);
     }
 
     @Bean(destroyMethod = "close")
-    public UserPartitionStateStore accountUserPartitionStateStore(AccountProperties properties) {
+    public UserPartitionStateStore accountUserPartitionStateStore(AccountProperties properties,
+                                                                  UserPartitionCommandLane lane) {
         Path directory = Path.of(properties.getWal().getDirectory(),
                 properties.getKafka().getProductLine().name(), "state");
-        return new UserPartitionStateStore(directory);
+        return new UserPartitionStateStore(directory, lane);
     }
 
     @Bean(destroyMethod = "close")
-    public UserPartitionResultStore accountUserPartitionResultStore(AccountProperties properties) {
+    public UserPartitionResultStore accountUserPartitionResultStore(AccountProperties properties,
+                                                                    UserPartitionCommandLane lane) {
         Path directory = Path.of(properties.getWal().getDirectory(),
                 properties.getKafka().getProductLine().name(), "results");
-        return new UserPartitionResultStore(directory);
+        return new UserPartitionResultStore(directory, lane);
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     public UserPartitionCommandLane accountUserPartitionCommandLane() {
         return new UserPartitionCommandLane();
     }

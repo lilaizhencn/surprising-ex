@@ -34,9 +34,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
 public class OrderController {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderController.class);
 
     private final OrderService orderService;
     private final AlgoOrderService algoOrderService;
@@ -58,6 +62,10 @@ public class OrderController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             // 账户快照尚未具备或发生修订冲突时安全拒绝，不应伪装成服务内部错误。
+            log.warn("下单因本地状态未就绪或命令冲突被拒绝 userId={} clientOrderId={} symbol={} 原因={}",
+                    request == null ? null : request.userId(),
+                    request == null ? null : request.clientOrderId(),
+                    request == null ? null : request.symbol(), ex.getMessage());
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         }
     }

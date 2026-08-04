@@ -41,14 +41,29 @@ public class AccountUserCommandWalIngress {
         UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
         wal.append(partition, command.commandId(), command.commandType().name(),
                 envelope.serializedEnvelope().getBytes(StandardCharsets.UTF_8),
-                fingerprint(envelope.serializedEnvelope()), command.occurredAt());
+                fingerprint(command), command.occurredAt());
         return AppendOutcome.DURABLE;
     }
 
-    private String fingerprint(String serializedEnvelope) {
+    /**
+     * 命令编号是客户端重试的幂等键，发生时间和链路追踪号不是业务意图的一部分。
+     * 网关在 503/超时后重试时允许这两个字段变化，否则同一笔资金命令会被 WAL
+     * 错误识别为幂等冲突并阻塞该用户分区后续所有命令。
+     */
+    private String fingerprint(AccountUserCommand command) {
         try {
+            String canonical = String.join("\u0000",
+                    Integer.toString(command.schemaVersion()),
+                    command.commandId(),
+                    command.productLine().name(),
+                    Long.toString(command.userId()),
+                    command.commandType().name(),
+                    command.source(),
+                    command.sourceReference(),
+                    command.dependsOnCommandId() == null ? "" : command.dependsOnCommandId(),
+                    command.payload());
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(serializedEnvelope.getBytes(StandardCharsets.UTF_8)));
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 不可用", ex);
         }

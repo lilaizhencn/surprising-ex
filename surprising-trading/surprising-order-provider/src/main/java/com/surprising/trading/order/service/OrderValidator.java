@@ -68,7 +68,7 @@ public class OrderValidator {
             return ValidationResult.reject("quantity is above maximum step limit", rule.version(), rule.instrumentType());
         }
         if (request.reduceOnly() && rule.spot()) {
-            return ValidationResult.reject("reduce-only is only supported for perpetual instruments",
+            return ValidationResult.reject("reduce-only is only supported for derivative instruments",
                     rule.version(), rule.instrumentType());
         }
         if (request.reduceOnly() && !rule.reduceOnlyEnabled()) {

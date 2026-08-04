@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.AdlTargetSettlementAccountCommand;
 import com.surprising.account.api.model.BalanceAdjustmentAccountCommand;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.OrderReleaseAccountCommand;
@@ -359,6 +360,218 @@ class AccountUserStateReducerTest {
         }
     }
 
+    @Test
+    void deliverySettlementReleasesMarginClosesPositionAndIsIdempotent() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-delivery-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
+        instruments.replace(ProductLine.LINEAR_DELIVERY, List.of(deliveryInstrument("BTC-USDT-260327", 4L)),
+                java.util.Map.of("USDT", 1L));
+        PerpetualAccountStateUpdatedEvent initial = new PerpetualAccountStateUpdatedEvent(
+                PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
+                ProductLine.LINEAR_DELIVERY, 1001L, AccountType.USDT_DELIVERY.name(),
+                List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 900L, 100L)), List.of(),
+                List.of(new PerpetualAccountStateUpdatedEvent.Position("BTC-USDT-260327", 4L,
+                        MarginMode.CROSS, PositionSide.NET, 10L, 100L, 1_000L, 0L,
+                        Instant.parse("2026-08-02T00:00:00Z"))),
+                List.of(new PerpetualAccountStateUpdatedEvent.PositionMargin("BTC-USDT-260327", "USDT",
+                        MarginMode.CROSS, PositionSide.NET, 100L)), List.of(), PositionMode.ONE_WAY,
+                Instant.parse("2026-08-02T00:00:00Z"), "delivery");
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(objectMapper, store,
+                    new UserPartitionCommandLane(), instruments, new PositionCalculator());
+            reducer.initialize(initial);
+            AccountUserCommand command = command(ProductLine.LINEAR_DELIVERY, "delivery-settle-1",
+                    AccountUserCommandType.DELIVERY_SETTLE, objectMapper.writeValueAsString(
+                            new com.surprising.account.api.model.ExpiringPositionSettlementAccountCommand(
+                                    "BTC-USDT-260327", 4L, MarginMode.CROSS, PositionSide.NET, 130L, 0L,
+                                    "DELIVERY_SETTLEMENT", "到期交割", Instant.now())));
+
+            assertThat(reducer.apply(command, 1L).status())
+                    .isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            AccountUserReducerState settled = reducer.state(new UserPartitionKey(
+                    ProductLine.LINEAR_DELIVERY, 1001L)).orElseThrow();
+            assertThat(settled.snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 1_300L, 0L));
+            assertThat(settled.snapshot().positions()).singleElement()
+                    .satisfies(position -> assertThat(position.signedQuantitySteps()).isZero());
+            assertThat(settled.snapshot().positionMargins()).isEmpty();
+
+            AccountUserCommand replay = command(ProductLine.LINEAR_DELIVERY, "delivery-settle-replay",
+                    AccountUserCommandType.DELIVERY_SETTLE, command.payload());
+            assertThat(reducer.apply(replay, 2L).status())
+                    .isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            assertThat(reducer.state(new UserPartitionKey(ProductLine.LINEAR_DELIVERY, 1001L))
+                    .orElseThrow().snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 1_300L, 0L));
+        }
+    }
+
+    @Test
+    void optionExercisePaysIntrinsicValueToLongAndChargesShortWithoutDoubleSettlement() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-option-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
+        instruments.replace(ProductLine.OPTION, List.of(optionInstrument("BTC-USDT-260327-50000-C", 6L)),
+                java.util.Map.of("USDT", 1L));
+        PerpetualAccountStateUpdatedEvent initial = new PerpetualAccountStateUpdatedEvent(
+                PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
+                ProductLine.OPTION, 1001L, AccountType.OPTION.name(),
+                List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 800L, 100L)), List.of(),
+                List.of(new PerpetualAccountStateUpdatedEvent.Position("BTC-USDT-260327-50000-C", 6L,
+                        MarginMode.CROSS, PositionSide.NET, -2L, 120L, 240L, 0L,
+                        Instant.parse("2026-08-02T00:00:00Z"))),
+                List.of(new PerpetualAccountStateUpdatedEvent.PositionMargin(
+                        "BTC-USDT-260327-50000-C", "USDT", MarginMode.CROSS, PositionSide.NET, 100L)),
+                List.of(), PositionMode.ONE_WAY, Instant.parse("2026-08-02T00:00:00Z"), "option");
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(objectMapper, store,
+                    new UserPartitionCommandLane(), instruments, new PositionCalculator());
+            reducer.initialize(initial);
+            AccountUserCommand command = command(ProductLine.OPTION, "option-exercise-1",
+                    AccountUserCommandType.OPTION_EXERCISE, objectMapper.writeValueAsString(
+                            new com.surprising.account.api.model.ExpiringPositionSettlementAccountCommand(
+                                    "BTC-USDT-260327-50000-C", 6L, MarginMode.CROSS, PositionSide.NET, 0L, 30L,
+                                    "OPTION_EXERCISE", "欧式自动行权", Instant.now())));
+
+            assertThat(reducer.apply(command, 1L).status())
+                    .isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            AccountUserReducerState settled = reducer.state(new UserPartitionKey(
+                    ProductLine.OPTION, 1001L)).orElseThrow();
+            // 空头向买方支付 2 * 30，先释放 100 风险保证金后可用余额为 840。
+            assertThat(settled.snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 840L, 0L));
+            assertThat(settled.snapshot().positions()).singleElement()
+                    .satisfies(position -> assertThat(position.signedQuantitySteps()).isZero());
+            assertThat(settled.snapshot().positionMargins()).isEmpty();
+
+            AccountUserCommand replay = command(ProductLine.OPTION, "option-exercise-replay",
+                    AccountUserCommandType.OPTION_EXERCISE, command.payload());
+            assertThat(reducer.apply(replay, 2L).status())
+                    .isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            assertThat(reducer.state(new UserPartitionKey(ProductLine.OPTION, 1001L))
+                    .orElseThrow().snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 840L, 0L));
+        }
+    }
+
+    @Test
+    void optionTradeMovesPremiumBetweenBuyerAndSellerAndKeepsOnlySellerRiskMarginLocked() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-option-trade-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
+        instruments.replace(ProductLine.OPTION, List.of(optionInstrument("BTC-USDT-260327-50000-C", 6L)),
+                java.util.Map.of("USDT", 1L));
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(objectMapper, store,
+                    new UserPartitionCommandLane(), instruments, new PositionCalculator());
+            reducer.initialize(optionTradeSnapshot(1001L, 1_000L));
+            reducer.initialize(optionTradeSnapshot(1002L, 1_000L));
+            AccountUserCommand buyerReserve = commandForUser(ProductLine.OPTION, 1001L, "option-buyer-reserve",
+                    AccountUserCommandType.ORDER_RESERVE, objectMapper.writeValueAsString(new OrderReserveAccountCommand(
+                            9101L, "BTC-USDT-260327-50000-C", OrderSide.BUY, OrderReservationKind.DERIVATIVE_MARGIN,
+                            AccountType.OPTION, "USDT", MarginMode.CROSS, PositionSide.NET, 2L, false, 240L, 0L)));
+            AccountUserCommand sellerReserve = commandForUser(ProductLine.OPTION, 1002L, "option-seller-reserve",
+                    AccountUserCommandType.ORDER_RESERVE, objectMapper.writeValueAsString(new OrderReserveAccountCommand(
+                            9102L, "BTC-USDT-260327-50000-C", OrderSide.SELL, OrderReservationKind.DERIVATIVE_MARGIN,
+                            AccountType.OPTION, "USDT", MarginMode.CROSS, PositionSide.NET, 2L, false, 264L, 0L)));
+            reducer.apply(buyerReserve, 1L);
+            reducer.apply(sellerReserve, 1L);
+            MatchTradeEvent trade = new MatchTradeEvent(8301L, 7301L, "BTC-USDT-260327-50000-C",
+                    9101L, 6L, 1001L, OrderSide.BUY, MarginMode.CROSS, PositionSide.NET,
+                    9102L, 6L, 1002L, MarginMode.CROSS, PositionSide.NET,
+                    0L, 0L, 120L, 2L, true, true,
+                    Instant.parse("2026-08-02T00:00:01Z"), "option-premium");
+            AccountUserCommand buyerTrade = commandForUser(ProductLine.OPTION, 1001L, "option-buyer-trade",
+                    AccountUserCommandType.TRADE_SIDE_SETTLE, objectMapper.writeValueAsString(
+                            new TradeSideSettlementCommand(trade, TradeParticipantRole.TAKER, 2L, false,
+                                    AccountType.OPTION, "USDT", 240L)));
+            AccountUserCommand sellerTrade = commandForUser(ProductLine.OPTION, 1002L, "option-seller-trade",
+                    AccountUserCommandType.TRADE_SIDE_SETTLE, objectMapper.writeValueAsString(
+                            new TradeSideSettlementCommand(trade, TradeParticipantRole.MAKER, 2L, false,
+                                    AccountType.OPTION, "USDT", 264L)));
+            AccountUserStateReducer.Reduction buyerReduction = reducer.apply(buyerTrade, 2L);
+            AccountUserStateReducer.Reduction sellerReduction = reducer.apply(sellerTrade, 2L);
+            assertThat(buyerReduction.resultPayload()).contains("\"premiumUnits\":-240");
+            assertThat(sellerReduction.resultPayload()).contains("\"premiumUnits\":240");
+
+            assertThat(reducer.state(new UserPartitionKey(ProductLine.OPTION, 1001L)).orElseThrow()
+                    .snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 760L, 0L));
+            AccountUserReducerState seller = reducer.state(new UserPartitionKey(ProductLine.OPTION, 1002L))
+                    .orElseThrow();
+            assertThat(seller.snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 1_216L, 24L));
+            assertThat(seller.snapshot().positionMargins()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.PositionMargin(
+                            "BTC-USDT-260327-50000-C", "USDT", MarginMode.CROSS, PositionSide.NET, 24L));
+
+            MatchTradeEvent closeTrade = new MatchTradeEvent(8302L, 7302L, "BTC-USDT-260327-50000-C",
+                    9103L, 6L, 1001L, OrderSide.SELL, MarginMode.CROSS, PositionSide.NET,
+                    9104L, 6L, 1002L, MarginMode.CROSS, PositionSide.NET,
+                    0L, 0L, 130L, 2L, true, true,
+                    Instant.parse("2026-08-02T00:00:02Z"), "option-premium-close");
+            AccountUserCommand buyerClose = commandForUser(ProductLine.OPTION, 1001L, "option-buyer-close",
+                    AccountUserCommandType.TRADE_SIDE_SETTLE, objectMapper.writeValueAsString(
+                            new TradeSideSettlementCommand(closeTrade, TradeParticipantRole.TAKER, 2L, true,
+                                    null, null, 0L)));
+            AccountUserCommand sellerClose = commandForUser(ProductLine.OPTION, 1002L, "option-seller-close",
+                    AccountUserCommandType.TRADE_SIDE_SETTLE, objectMapper.writeValueAsString(
+                            new TradeSideSettlementCommand(closeTrade, TradeParticipantRole.MAKER, 2L, true,
+                                    null, null, 0L)));
+            AccountUserStateReducer.Reduction buyerCloseReduction = reducer.apply(buyerClose, 3L);
+            AccountUserStateReducer.Reduction sellerCloseReduction = reducer.apply(sellerClose, 3L);
+            assertThat(buyerCloseReduction.resultPayload()).contains("\"realizedPnlUnits\":0");
+            assertThat(sellerCloseReduction.resultPayload()).contains("\"realizedPnlUnits\":0");
+            assertThat(reducer.state(new UserPartitionKey(ProductLine.OPTION, 1001L)).orElseThrow()
+                    .snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 1_020L, 0L));
+            assertThat(reducer.state(new UserPartitionKey(ProductLine.OPTION, 1002L)).orElseThrow()
+                    .snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 980L, 0L));
+        }
+    }
+
+    @Test
+    void adlTargetSettlementClosesOnlyPlannedQuantityAndTransfersCoveredProfitLocally() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-reducer-adl-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
+        instruments.replace(ProductLine.LINEAR_PERPETUAL, List.of(instrument("BTC-USDT", 1L)),
+                java.util.Map.of("USDT", 1L));
+        PerpetualAccountStateUpdatedEvent initial = new PerpetualAccountStateUpdatedEvent(
+                PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
+                ProductLine.LINEAR_PERPETUAL, 1001L, AccountType.USDT_PERPETUAL.name(),
+                List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 100L, 50L)), List.of(),
+                List.of(new PerpetualAccountStateUpdatedEvent.Position("BTC-USDT", 1L,
+                        MarginMode.CROSS, PositionSide.NET, 10L, 100L, 1_000L, 0L,
+                        Instant.parse("2026-08-02T00:00:00Z"))),
+                List.of(new PerpetualAccountStateUpdatedEvent.PositionMargin("BTC-USDT", "USDT",
+                        MarginMode.CROSS, PositionSide.NET, 50L)), List.of(), PositionMode.ONE_WAY,
+                Instant.parse("2026-08-02T00:00:00Z"), "adl");
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            AccountUserStateReducer reducer = new AccountUserStateReducer(objectMapper, store,
+                    new UserPartitionCommandLane(), instruments, new PositionCalculator());
+            reducer.initialize(initial);
+            AccountUserCommand command = command(ProductLine.LINEAR_PERPETUAL, "adl-target-1",
+                    AccountUserCommandType.ADL_TARGET_SETTLE, objectMapper.writeValueAsString(
+                            new AdlTargetSettlementAccountCommand(7001L, 2002L, "USDT", "BTC-USDT",
+                                    MarginMode.CROSS, PositionSide.NET, 10L, 5L, 100L, 120L, 100L, 80L)));
+
+            assertThat(reducer.apply(command, 1L).status())
+                    .isEqualTo(AccountUserStateReducer.ApplyStatus.APPLIED);
+            AccountUserReducerState settled = reducer.state(new UserPartitionKey(
+                    ProductLine.LINEAR_PERPETUAL, 1001L)).orElseThrow();
+            assertThat(settled.snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 145L, 25L));
+            assertThat(settled.snapshot().positions()).singleElement()
+                    .satisfies(position -> {
+                        assertThat(position.signedQuantitySteps()).isEqualTo(5L);
+                        assertThat(position.realizedPnlUnits()).isEqualTo(100L);
+                    });
+        }
+    }
+
     private PerpetualAccountStateUpdatedEvent snapshot() {
         return new PerpetualAccountStateUpdatedEvent(
                 PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
@@ -371,9 +584,35 @@ class AccountUserStateReducerTest {
     private AccountUserCommand command(String commandId,
                                        AccountUserCommandType type,
                                        String payload) {
+        return command(ProductLine.LINEAR_PERPETUAL, commandId, type, payload);
+    }
+
+    private AccountUserCommand command(ProductLine productLine,
+                                       String commandId,
+                                       AccountUserCommandType type,
+                                       String payload) {
         return new AccountUserCommand(AccountUserCommand.CURRENT_SCHEMA_VERSION, commandId,
-                ProductLine.LINEAR_PERPETUAL, 1001L, type, "TEST", commandId, null,
-                payload, Instant.parse("2026-08-02T00:00:00Z"), "trace-" + commandId);
+                productLine, 1001L, type, "TEST", commandId, null, payload,
+                Instant.parse("2026-08-02T00:00:00Z"), "trace-" + commandId);
+    }
+
+    private AccountUserCommand commandForUser(ProductLine productLine,
+                                              long userId,
+                                              String commandId,
+                                              AccountUserCommandType type,
+                                              String payload) {
+        return new AccountUserCommand(AccountUserCommand.CURRENT_SCHEMA_VERSION, commandId,
+                productLine, userId, type, "TEST", commandId, null, payload,
+                Instant.parse("2026-08-02T00:00:00Z"), "trace-" + commandId);
+    }
+
+    private PerpetualAccountStateUpdatedEvent optionTradeSnapshot(long userId, long availableUnits) {
+        return new PerpetualAccountStateUpdatedEvent(
+                PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
+                ProductLine.OPTION, userId, AccountType.OPTION.name(),
+                List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", availableUnits, 0L)), List.of(),
+                List.of(), List.of(), List.of(), PositionMode.ONE_WAY,
+                Instant.parse("2026-08-02T00:00:00Z"), "option-trade");
     }
 
     private InstrumentResponse instrument(String symbol, long version) {
@@ -398,5 +637,30 @@ class AccountUserStateReducerTest {
                 10_000L, 10_000L, 0L, 0L, 0L, 0, 0L, 0L, 0L, 0L, 1,
                 null, null, null, null, null, null, null, InstrumentStatus.TRADING,
                 now, now, now, List.of(), List.of());
+    }
+
+    private InstrumentResponse deliveryInstrument(String symbol, long version) {
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        return new InstrumentResponse(symbol, version, InstrumentType.DELIVERY,
+                ContractType.LINEAR_DELIVERY, "BTC", "USDT", "USDT", 1L, "USDT",
+                1L, 1L, 1L, 100_000L, 1L, 1_000_000L, 1L, 1, 3,
+                List.of("LIMIT"), List.of("GTC"), true, true, true,
+                100_000_000L, 100_000L, 50_000L, 0L, 0L, 1_000_000L,
+                0L, 0L, 0, 0L, 0L, 0L, 0L, 1, now, now, null, null,
+                null, null, null, InstrumentStatus.CLOSED, now, now, now, List.of(), List.of());
+    }
+
+    private InstrumentResponse optionInstrument(String symbol, long version) {
+        Instant now = Instant.parse("2026-07-01T00:00:00Z");
+        return new InstrumentResponse(symbol, version, InstrumentType.OPTION,
+                ContractType.VANILLA_OPTION, "BTC", "USDT", "USDT", 1L, "USDT",
+                1L, 1L, 1L, 100_000L, 1L, 1_000_000L, 1L, 1, 3,
+                List.of("LIMIT"), List.of("GTC"), true, true, true,
+                100_000_000L, 100_000L, 50_000L, 0L, 0L, 1_000_000L,
+                0L, 0L, 0, 0L, 0L, 0L, 0L, 1, now, now, "BTC-USDT", 50_000L,
+                com.surprising.instrument.api.model.OptionType.CALL,
+                com.surprising.instrument.api.model.OptionExerciseStyle.EUROPEAN,
+                com.surprising.instrument.api.model.ContractSettlementMethod.CASH,
+                InstrumentStatus.CLOSED, now, now, now, List.of(), List.of());
     }
 }

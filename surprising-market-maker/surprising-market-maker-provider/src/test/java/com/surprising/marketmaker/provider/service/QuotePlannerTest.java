@@ -12,6 +12,7 @@ import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.QuotePlan;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.price.api.model.PriceStatus;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -55,9 +56,35 @@ class QuotePlannerTest {
     }
 
     @Test
+    void spotAssetBalanceDoesNotDisableBuyQuotes() {
+        MarketMakerProperties.Strategy strategy = strategy();
+        strategy.setProductLine(ProductLine.SPOT);
+        strategy.setMaxInventorySteps(100L);
+
+        // 现货基础资产余额可能远大于衍生品库存档位，但仍应生成双边报价。
+        QuotePlan plan = quotePlanner.plan(strategy, quoting(), risk(), spotInstrument(),
+                orderBook(49_990L, 50_010L), null, 100_000_000_000L);
+
+        assertThat(plan.quotes()).extracting(quote -> quote.side())
+                .containsExactly(OrderSide.BUY, OrderSide.SELL, OrderSide.BUY, OrderSide.SELL);
+    }
+
+    @Test
     void fallsBackToOrderBookMidWhenMarkPriceIsUnavailable() {
         QuotePlan plan = quotePlanner.plan(strategy(), quoting(), risk(), instrument(),
                 orderBook(49_900L, 50_100L), null, 0L);
+
+        assertThat(plan.anchorPriceTicks()).isEqualTo(50_000L);
+    }
+
+    @Test
+    void usesExplicitInitialAnchorOnlyWhenAllMarketDataIsEmpty() {
+        MarketMakerProperties.Strategy strategy = strategy();
+        strategy.setInitialAnchorPriceTicks(50_000L);
+
+        QuotePlan plan = quotePlanner.plan(strategy, quoting(), risk(), instrument(),
+                new OrderBookSnapshotResponse("BTC-USDT", 1L, 50,
+                        List.of(), List.of(), Instant.now()), null, 0L);
 
         assertThat(plan.anchorPriceTicks()).isEqualTo(50_000L);
     }
@@ -133,6 +160,17 @@ class QuotePlannerTest {
         return new InstrumentResponse("BTC-USDT", 1L, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
                 "BTC", "USDT", "USDT", 1_000_000L, "BTC", 100L, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTX"), true,
+                true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
+                1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
+                10_000_000L, 3, null, null, null, null, null, null, null,
+                InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
+    }
+
+    private InstrumentResponse spotInstrument() {
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        return new InstrumentResponse("BTC-USDT", 1L, InstrumentType.SPOT, ContractType.SPOT,
+                "BTC", "USDT", "USDT", 1_000_000L, "BTC", 100L, 1L, 1L, 1_000_000L,
+                1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
                 10_000_000L, 3, null, null, null, null, null, null, null,

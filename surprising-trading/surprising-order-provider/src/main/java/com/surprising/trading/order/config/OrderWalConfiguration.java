@@ -16,26 +16,29 @@ import org.springframework.context.annotation.Configuration;
 public class OrderWalConfiguration {
 
     @Bean(destroyMethod = "close")
-    public UserPartitionWal orderUserPartitionWal(TradingOrderProperties properties) {
+    public UserPartitionWal orderUserPartitionWal(TradingOrderProperties properties,
+                                                  UserPartitionCommandLane lane) {
         Path directory = Path.of(properties.getWal().getDirectory(),
                 properties.getKafka().getProductLine().name());
-        return new UserPartitionWal(directory);
+        return new UserPartitionWal(directory, lane);
     }
 
     @Bean(destroyMethod = "close")
-    public UserPartitionStateStore orderUserPartitionStateStore(TradingOrderProperties properties) {
+    public UserPartitionStateStore orderUserPartitionStateStore(TradingOrderProperties properties,
+                                                                UserPartitionCommandLane lane) {
         Path directory = Path.of(properties.getWal().getDirectory(),
                 properties.getKafka().getProductLine().name(), "state");
-        return new UserPartitionStateStore(directory);
+        return new UserPartitionStateStore(directory, lane);
     }
 
     @Bean(destroyMethod = "close")
-    public UserPartitionResultStore orderUserPartitionResultStore(TradingOrderProperties properties) {
+    public UserPartitionResultStore orderUserPartitionResultStore(TradingOrderProperties properties,
+                                                                  UserPartitionCommandLane lane) {
         return new UserPartitionResultStore(Path.of(properties.getWal().getDirectory(),
-                properties.getKafka().getProductLine().name(), "results"));
+                properties.getKafka().getProductLine().name(), "results"), lane);
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     public UserPartitionCommandLane orderUserPartitionCommandLane() {
         return new UserPartitionCommandLane();
     }

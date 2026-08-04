@@ -1201,8 +1201,6 @@ CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     CONSTRAINT trading_trigger_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
     CONSTRAINT trading_trigger_orders_symbol_fk
         FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
-    CONSTRAINT trading_trigger_orders_placed_order_fk
-        FOREIGN KEY (placed_order_id) REFERENCES trading_orders(order_id),
     CONSTRAINT trading_trigger_orders_side_check CHECK (side IN ('BUY', 'SELL')),
     CONSTRAINT trading_trigger_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
     CONSTRAINT trading_trigger_orders_type_check CHECK (
@@ -1348,8 +1346,6 @@ CREATE TABLE IF NOT EXISTS trading_order_events (
     trace_id            TEXT,
     event_time          TIMESTAMPTZ NOT NULL,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT trading_order_events_order_fk
-        FOREIGN KEY (order_id) REFERENCES trading_orders(order_id),
     CONSTRAINT trading_order_events_type_check CHECK (
         event_type IN ('RESERVE_PENDING', 'ACCEPTED', 'REJECTED', 'CANCEL_REQUESTED')
     ),
@@ -1421,8 +1417,6 @@ CREATE TABLE IF NOT EXISTS trading_match_results (
     trace_id                TEXT,
     event_time              TIMESTAMPTZ NOT NULL,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT trading_match_results_order_fk
-        FOREIGN KEY (order_id) REFERENCES trading_orders(order_id),
     CONSTRAINT trading_match_results_instrument_fk
         FOREIGN KEY (symbol, instrument_version) REFERENCES instruments(symbol, version),
     CONSTRAINT trading_match_results_command_type_check CHECK (command_type IN ('PLACE', 'CANCEL')),
@@ -1944,9 +1938,7 @@ CREATE TABLE IF NOT EXISTS account_spot_order_reservations (
     ),
     CONSTRAINT account_spot_reservations_status_check CHECK (
         status IN ('ACTIVE', 'PARTIALLY_SETTLED', 'PARTIALLY_RELEASED', 'SETTLED', 'RELEASED')
-    ),
-    CONSTRAINT account_spot_reservations_order_fk
-        FOREIGN KEY (order_id) REFERENCES trading_orders(order_id)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS account_spot_reservations_user_idx
@@ -1954,6 +1946,15 @@ CREATE INDEX IF NOT EXISTS account_spot_reservations_user_idx
 
 CREATE INDEX IF NOT EXISTS account_spot_reservations_symbol_idx
     ON account_spot_order_reservations (symbol, status, updated_at DESC);
+
+ALTER TABLE trading_trigger_orders
+    DROP CONSTRAINT IF EXISTS trading_trigger_orders_placed_order_fk;
+ALTER TABLE trading_order_events
+    DROP CONSTRAINT IF EXISTS trading_order_events_order_fk;
+ALTER TABLE trading_match_results
+    DROP CONSTRAINT IF EXISTS trading_match_results_order_fk;
+ALTER TABLE account_spot_order_reservations
+    DROP CONSTRAINT IF EXISTS account_spot_reservations_order_fk;
 
 CREATE SEQUENCE IF NOT EXISTS account_position_cache_revision_seq AS BIGINT START WITH 1;
 CREATE SEQUENCE IF NOT EXISTS account_outbox_id_seq AS BIGINT START WITH 1;

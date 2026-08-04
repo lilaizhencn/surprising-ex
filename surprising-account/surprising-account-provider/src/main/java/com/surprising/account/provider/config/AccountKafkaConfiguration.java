@@ -1,6 +1,7 @@
 package com.surprising.account.provider.config;
 
 import com.surprising.account.provider.service.AccountCommandPoisonPillException;
+import com.surprising.account.provider.service.PositionCacheRebalanceListener;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -100,6 +101,22 @@ public class AccountKafkaConfiguration {
      */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> accountPositionCacheKafkaListenerContainerFactory(
+            ConsumerFactory<String, String> accountConsumerFactory,
+            AccountProperties properties,
+            PositionCacheRebalanceListener rebalanceListener) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(accountConsumerFactory);
+        factory.setConcurrency(properties.getKafka().getConcurrency());
+        factory.setBatchListener(false);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.getContainerProperties().setConsumerRebalanceListener(rebalanceListener);
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
+        return factory;
+    }
+
+    /** 账户状态异步投影使用独立容器，不能改变持仓 JVM 快照的就绪状态。 */
+    @Bean(name = "accountStateProjectionKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, String> accountStateProjectionKafkaListenerContainerFactory(
             ConsumerFactory<String, String> accountConsumerFactory,
             AccountProperties properties) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();

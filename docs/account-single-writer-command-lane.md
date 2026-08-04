@@ -28,6 +28,11 @@ surprising.<product-segment>.account.command.results.v1
 <PRODUCT_LINE>:<userId>
 ```
 
+进程内由 `PartitionOwnerLane<UserPartitionKey>` 承担用户分区所有权。每个分区只在一个 Owner
+线程执行，跨线程提交进入无锁并发队列；mailbox 有界，满载时拒绝并保留 Kafka offset，等待该分区
+恢复，不在调用方并发修改余额、持仓或订单状态。不同用户分区可由不同 shard 并行，同一用户的
+账户和订单服务必须复用同一个分区键规则。
+
 三个 Topic 都创建 32 个分区，account-provider 的独立 user-command batch listener 并发度默认也是 32，
 每次 poll 最多 500 条并先同步追加本地 WAL。同一产品线、同一用户的所有指令进入同一分区并保持顺序；不同用户可并行。总消费者并发超过 32
 不会增加该产品线吞吐。某个技术故障会阻塞所在分区，系统不会为了可用性跳过资金指令。
@@ -40,7 +45,7 @@ surprising.<product-segment>.account.command.results.v1
 本方案不使用 XA，也不把 Kafka 事务当作数据库事务：
 
 1. 业务模块把 `AccountUserCommand` 发送到产品线账户命令 Topic；账户消费者校验产品线、key 和命令指纹后同步追加用户 WAL。
-2. 本地单写者按用户分区顺序读取 WAL，先保存终态结果，再提交 RocksDB 状态序号；重复 commandId 或重复事件不会重复扣款。
+2. 本地单写者按用户分区顺序读取 WAL，先保存终态结果，再提交 RocksDB 状态序号；状态快照是可由 WAL 重放的异步 checkpoint，结果库仍同步保存终态，重复 commandId 或重复事件不会重复扣款。
 3. 账户状态快照通过 Kafka 发布给订单、撮合、风控、强平、资金费等模块，各模块只使用自己的 JVM 快照。
 4. 数据库审计投影器异步登记原始命令和终态；数据库不可用时不影响本地 reducer，重启依据 WAL、状态库和结果库恢复。
 
@@ -135,7 +140,7 @@ insurance-provider 先在本地事务预留保险基金，再发 `INSURANCE_DEFI
 
 ### 交割、行权和管理操作
 
-交割/行权事件先按持仓用户 fan-out 为单用户命令。充值、冲正、产品账户调整、产品账户划转、
+交割/行权事件先按本地 JVM 持仓快照 fan-out 为单用户命令，结算价必须随事件固化。充值、冲正、产品账户调整、产品账户划转、
 仓位模式和逐仓保证金调整同样经过账户命令通道，并要求 `referenceId`。
 
 ## 监控与告警

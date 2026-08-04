@@ -8,6 +8,11 @@ DB_NAME="${DB_NAME:-surprising_product_line_smoke}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:${POSTGRES_PORT}/${DB_NAME}?reWriteBatchedInserts=true}"
 KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+# 测试机同时运行多个 provider 时，命令行 Kafka 工具不需要 512M 堆，降低其
+# 启动内存可以避免标记价补发被 JVM 资源竞争拖到业务等待窗口之外。
+export KAFKA_HEAP_OPTS="${KAFKA_HEAP_OPTS:--Xms32M -Xmx128M}"
+ACCOUNT_COMMAND_PARTITIONS="${ACCOUNT_COMMAND_PARTITIONS:-32}"
+MARKET_MAKER_CYCLE_DELAY_MS="${MARKET_MAKER_CYCLE_DELAY_MS:-1000}"
 PRODUCT_LINES="${PRODUCT_LINES:-LINEAR_PERPETUAL LINEAR_DELIVERY OPTION SPOT}"
 BUILD_SERVICES="${BUILD_SERVICES:-true}"
 KEEP_TMP="${KEEP_TMP:-true}"
@@ -17,6 +22,7 @@ KAFKA_INCLUDE_SHARED_TOPICS="${KAFKA_INCLUDE_SHARED_TOPICS:-true}"
 KAFKA_INCLUDE_LEGACY_PERP_TOPICS="${KAFKA_INCLUDE_LEGACY_PERP_TOPICS:-false}"
 KAFKA_RESET_SHARED_TOPICS="${KAFKA_RESET_SHARED_TOPICS:-false}"
 KAFKA_RESET_LEGACY_PERP_TOPICS="${KAFKA_RESET_LEGACY_PERP_TOPICS:-false}"
+KAFKA_TRUNCATE_TOPICS="${KAFKA_TRUNCATE_TOPICS:-false}"
 RECONCILE_FUNDS="${RECONCILE_FUNDS:-true}"
 RUN_ID="${RUN_ID:-$(date +%s%N)}"
 RUN_SEQ=$((RUN_ID % 1000000000))
@@ -75,6 +81,8 @@ STRESS_RESET_PG_STAT_STATEMENTS="${STRESS_RESET_PG_STAT_STATEMENTS:-true}"
 STRESS_KAFKA_LAG_SAMPLE_SECONDS="${STRESS_KAFKA_LAG_SAMPLE_SECONDS:-2}"
 ACCOUNT_RESTART_RECOVERY="${ACCOUNT_RESTART_RECOVERY:-false}"
 ACCOUNT_RESTART_MODE="${ACCOUNT_RESTART_MODE:-kill}"
+RUN_WEBSOCKET_SMOKE="${RUN_WEBSOCKET_SMOKE:-false}"
+WS_TIMEOUT_MS="${WS_TIMEOUT_MS:-300000}"
 STRESS_PG_STAT_STATEMENTS_AVAILABLE=false
 STRESS_KAFKA_LAG_FILE=""
 STRESS_KAFKA_LAG_STOP_FILE=""
@@ -106,9 +114,16 @@ STRESS_TAKER_USER_START=$((BASE_USER + 20000))
 
 PROVIDER_NAMES=()
 PROVIDER_PIDS=()
+WEBSOCKET_SMOKE_PID=""
+WEBSOCKET_SMOKE_LOG=""
+WEBSOCKET_SMOKE_EVIDENCE=""
 
 cleanup() {
   stop_stress_kafka_lag_monitor || true
+  if [[ -n "${WEBSOCKET_SMOKE_PID}" ]] && kill -0 "${WEBSOCKET_SMOKE_PID}" >/dev/null 2>&1; then
+    kill "${WEBSOCKET_SMOKE_PID}" >/dev/null 2>&1 || true
+    wait "${WEBSOCKET_SMOKE_PID}" >/dev/null 2>&1 || true
+  fi
   local i
   for ((i = 0; i < ${#PROVIDER_PIDS[@]}; i++)); do
     local pid="${PROVIDER_PIDS[$i]}"
@@ -205,6 +220,22 @@ kafka_producer_cmd() {
   fi
 }
 
+kafka_delete_records_cmd() {
+  if command -v kafka-delete-records >/dev/null 2>&1; then
+    echo kafka-delete-records
+  else
+    echo kafka-delete-records.sh
+  fi
+}
+
+kafka_get_offsets_cmd() {
+  if command -v kafka-get-offsets >/dev/null 2>&1; then
+    echo kafka-get-offsets
+  else
+    echo kafka-get-offsets.sh
+  fi
+}
+
 kafka_consumer_groups_cmd() {
   if command -v kafka-consumer-groups >/dev/null 2>&1; then
     echo kafka-consumer-groups
@@ -290,10 +321,36 @@ wait_http() {
   local port="$2"
   local log_file="${TMP_DIR}/${name}.log"
   local deadline=$((SECONDS + 180))
-  until curl -fsS "http://localhost:${port}/actuator/health" | grep -q 'UP'; do
+  # readiness 组只判断服务是否已完成启动；聚合 health 还可能包含可选的审计/投影指标。
+  until curl -fsS "http://localhost:${port}/actuator/health/readiness" | grep -q 'UP'; do
     if ((SECONDS >= deadline)); then
       echo "Timed out waiting for ${name} health on port ${port}" >&2
       tail -n 160 "${log_file}" >&2 || true
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+wait_stress_mark_price_readiness() {
+  local product_line="$1"
+  local deadline=$((SECONDS + STRESS_WAIT_SECONDS))
+  local port ready
+  while true; do
+    ready=true
+    for port in 9085 9084; do
+      if ! curl -fsS "http://localhost:${port}/actuator/health/readiness" | grep -q '"status":"UP"'; then
+        ready=false
+        break
+      fi
+    done
+    if [[ "${ready}" == "true" ]]; then
+      return
+    fi
+    if ((SECONDS >= deadline)); then
+      echo "Timed out waiting for ${product_line} mark-price readiness" >&2
+      tail -n 160 "${TMP_DIR}/${product_line}-matching.log" >&2 || true
+      tail -n 160 "${TMP_DIR}/${product_line}-trading-entry.log" >&2 || true
       exit 1
     fi
     sleep 1
@@ -586,6 +643,23 @@ INSERT INTO instrument_risk_brackets (
 ('BTC-USDT-260925-59000-C', 1, 1, 0, 1000000000000000000, 100000000, 10000, 5000),
 ('BTC-USDT-SPOT', 1, 1, 0, 1000000000000000000, 1000000, 1000000, 1000000)
 ON CONFLICT (symbol, version, bracket_no) DO NOTHING;
+
+INSERT INTO instrument_index_sources (
+    symbol, version, source, enabled, base_url, path, source_symbol, parser,
+    quote_currency, target_quote_currency, conversion_base_url, conversion_path,
+    conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm,
+    websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm
+) VALUES
+('BTC-USDT-260925', 1, 'SYNTHETIC', TRUE, 'http://localhost:9082', '/api/v1/index', 'BTC-USDT', 'SYNTHETIC',
+ 'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
+ FALSE, NULL, NULL, NULL, 1000000),
+('BTC-USDT-260925-59000-C', 1, 'SYNTHETIC', TRUE, 'http://localhost:9082', '/api/v1/index', 'BTC-USDT', 'SYNTHETIC',
+ 'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
+ FALSE, NULL, NULL, NULL, 1000000),
+('BTC-USDT-SPOT', 1, 'SYNTHETIC', TRUE, 'http://localhost:9082', '/api/v1/index', 'BTC-USDT', 'SYNTHETIC',
+ 'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
+ FALSE, NULL, NULL, NULL, 1000000)
+ON CONFLICT (symbol, version, source) DO NOTHING;
 SQL
 }
 
@@ -615,6 +689,7 @@ elif product_line == "OPTION":
 else:
     raise SystemExit(f"unsupported stress product line {product_line}")
 PY
+
 }
 
 stress_price_ticks_for_index() {
@@ -943,22 +1018,12 @@ tick_units = 10_000_000
 scale = decimal.Decimal(100_000_000)
 for symbol, (ticks, sequence) in deduped.items():
     price = (decimal.Decimal(ticks * tick_units) / scale).quantize(decimal.Decimal("0.00000001"))
-    bid = (decimal.Decimal((ticks - 1) * tick_units) / scale).quantize(decimal.Decimal("0.00000001"))
-    ask = (decimal.Decimal((ticks + 1) * tick_units) / scale).quantize(decimal.Decimal("0.00000001"))
     price_value = float(price)
     payload = {
-        "result": {
-            "productLine": product_line, "symbol": symbol, "instrumentVersion": 1,
-            "markPriceUnits": ticks * tick_units, "markPriceTicks": ticks, "markPrice": price_value,
-            "indexPrice": price_value, "price1": price_value, "price2": price_value,
-            "lastTradePrice": price_value, "bestBidPrice": float(bid), "bestAskPrice": float(ask),
-            "fundingRate": 0, "nextFundingTime": event_time, "timeUntilFundingSeconds": 0,
-            "basisAverage": 0, "basisWindowSeconds": 60, "clampLow": price_value,
-            "clampHigh": price_value, "sequence": sequence, "status": "HEALTHY",
-            "eventTime": event_time, "publishedAt": event_time,
-        },
-        "indexInput": None, "bookInput": None, "tradeInput": None, "fundingInput": None,
-        "basisAverage": 0, "basisWindowSeconds": 60, "calculatedAt": event_time,
+        # 标记价由服务根据指数价、盘口和成交快照计算；这里仅注入指数事件。
+        "symbol": symbol, "indexPrice": price_value, "sequence": sequence,
+        "status": "HEALTHY", "componentCount": 1, "validComponentCount": 1,
+        "totalConfiguredWeight": 1, "eventTime": event_time, "components": [],
     }
     try:
         print(f"{symbol}:{json.dumps(payload, separators=(',', ':'))}")
@@ -971,13 +1036,48 @@ PY
 seed_stress_prices() {
   local product_line="$1"
   local producer_cmd topic
-  topic="$(topic_name "${product_line}" "mark.price")"
+  # 当前生产链路由指数价计算服务生成标记价；烟测必须从指数价入口注入，
+  # 不能绕过标记价计算器直接伪造标记价事件。
+  topic="$(topic_name "${product_line}" "index.price")"
   producer_cmd="$(kafka_producer_cmd)"
   emit_stress_price_payloads "${product_line}" | "${producer_cmd}" \
     --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
     --topic "${topic}" \
     --property parse.key=true \
     --property key.separator=: >/dev/null
+}
+
+delete_topic_list() {
+  local topics="$1"
+  local topics_cmd
+  topics_cmd="$(kafka_topics_cmd)"
+  if [[ -z "${topics}" ]]; then
+    return
+  fi
+  while IFS= read -r topic; do
+    [[ -n "${topic}" ]] || continue
+    "${topics_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --delete --if-exists --topic "${topic}" >/dev/null 2>&1 || true
+  done <<<"${topics}"
+  local deadline=$((SECONDS + KAFKA_TOPIC_RESET_TIMEOUT_SECONDS))
+  while true; do
+    local current_topics remaining=false topic
+    current_topics="$(${topics_cmd} --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list 2>/dev/null || true)"
+    while IFS= read -r topic; do
+      [[ -n "${topic}" ]] || continue
+      if grep -Fqx -- "${topic}" <<<"${current_topics}"; then
+        remaining=true
+        break
+      fi
+    done <<<"${topics}"
+    if [[ "${remaining}" == "false" ]]; then
+      return
+    fi
+    if (( SECONDS >= deadline )); then
+      echo "Timed out waiting for Kafka topics to be deleted before recreation" >&2
+      return 1
+    fi
+    sleep 1
+  done
 }
 
 delete_surprising_topics() {
@@ -1038,6 +1138,84 @@ delete_surprising_topics() {
   done
 }
 
+truncate_surprising_topics() {
+  local product_line="${1:-}"
+  local topics_cmd offsets_cmd delete_records_cmd topics all_offsets offsets_json
+  local truncatable_topics="" compacted_topics="" topic
+  topics_cmd="$(kafka_topics_cmd)"
+  offsets_cmd="$(kafka_get_offsets_cmd)"
+  delete_records_cmd="$(kafka_delete_records_cmd)"
+  topics="$(${topics_cmd} --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list 2>/dev/null | grep '^surprising\.' || true)"
+  if [[ -n "${product_line}" ]]; then
+    local product_topic_line
+    product_topic_line="$(product_slug "${product_line}")"
+    topics="$(printf '%s\n' "${topics}" | grep -E "^surprising\\.${product_topic_line}\\." || true)"
+    if [[ "${KAFKA_RESET_SHARED_TOPICS}" == "true" ]]; then
+      topics+=$'\n'
+      topics+="surprising.instrument.events.v1"$'\n'
+      topics+="surprising.account.position.events.v1"$'\n'
+      topics+="surprising.account.liquidation-fee.events.v1"$'\n'
+      topics+="surprising.account.state.events.v1"$'\n'
+      topics+="surprising.risk.account.events.v1"$'\n'
+      topics+="surprising.risk.position.events.v1"
+    fi
+    if [[ "${product_line}" == "LINEAR_PERPETUAL" && "${KAFKA_RESET_LEGACY_PERP_TOPICS}" == "true" ]]; then
+      local legacy_topics
+      legacy_topics="$(${topics_cmd} --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list 2>/dev/null | grep '^surprising\\.perp\\.' || true)"
+      if [[ -n "${legacy_topics}" ]]; then
+        topics+=$'\n'
+        topics+="${legacy_topics}"
+      fi
+    fi
+  fi
+  if [[ -z "${topics}" ]]; then
+    return
+  fi
+  while IFS= read -r topic; do
+    [[ -n "${topic}" ]] || continue
+    case "${topic}" in
+      *.order.state.events.v1|*.account.state.events.v1|surprising.instrument.events.v1)
+        compacted_topics+="${topic}"$'\n'
+        ;;
+      *)
+        truncatable_topics+="${topic}"$'\n'
+        ;;
+    esac
+  done < <(printf '%s\n' "${topics}" | sort -u)
+  delete_topic_list "${compacted_topics}"
+  if [[ -z "${truncatable_topics}" ]]; then
+    return
+  fi
+  all_offsets="${TMP_DIR}/kafka-latest-offsets.txt"
+  offsets_json="${TMP_DIR}/kafka-delete-records.json"
+  "${offsets_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+    --time -1 >"${all_offsets}"
+  python3 - "${all_offsets}" "${offsets_json}" ${truncatable_topics} <<'PY'
+import json
+import pathlib
+import sys
+
+offsets_path = pathlib.Path(sys.argv[1])
+output_path = pathlib.Path(sys.argv[2])
+selected = set(sys.argv[3:])
+partitions = []
+for line in offsets_path.read_text().splitlines():
+    topic, partition, offset = line.rsplit(":", 2)
+    if topic in selected:
+        partitions.append({"topic": topic, "partition": int(partition), "offset": int(offset)})
+output_path.write_text(json.dumps({"partitions": partitions, "version": 1}))
+PY
+  if [[ "$(python3 - "${offsets_json}" <<'PY'
+import json
+import sys
+print(len(json.load(open(sys.argv[1]))["partitions"]))
+PY
+)" != "0" ]]; then
+    "${delete_records_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+      --offset-json-file "${offsets_json}" >/dev/null
+  fi
+}
+
 create_topics() {
   local product_line="$1"
   local product_topic_line symbol_count=0 stream_threads=2
@@ -1057,14 +1235,106 @@ create_topics() {
     "${ROOT_DIR}/scripts/create-topics.sh" >/dev/null
 }
 
+wait_product_topics_ready() {
+  local product_line="$1"
+  local product_topic_line prefix topic topics ready=false topic_metadata
+  product_topic_line="$(product_slug "${product_line}")"
+  prefix="surprising.${product_topic_line}"
+  # 启动前检查当前产品线全部会被 provider 使用的 Topic；确认 leader 已选出后再启动，
+  # 避免刚建 Topic 时 Producer 把短暂的 metadata 未就绪误判为业务失败。
+  topics=(
+    "${prefix}.trade.events.v1"
+    "${prefix}.candle.events.v1"
+    "${prefix}.order.commands.v1"
+    "${prefix}.order.events.v1"
+    "${prefix}.fee.schedule.events.v1"
+    "${prefix}.leverage.setting.events.v1"
+    "${prefix}.trigger-order.events.v1"
+    "${prefix}.order.user.commands.v1"
+    "${prefix}.order.user.command.results.v1"
+    "${prefix}.account.user.commands.v1"
+    "${prefix}.account.user.commands.dlt.v1"
+    "${prefix}.account.command.results.v1"
+    "${prefix}.match.results.v1"
+    "${prefix}.match.trades.v1"
+    "${prefix}.orderbook.depth.v1"
+    "${prefix}.mark.price.v1"
+    "${prefix}.order.state.events.v1"
+  )
+  if is_margin_product "${product_line}"; then
+    topics+=(
+      "${prefix}.index.price.v1"
+      "${prefix}.book.ticker.v1"
+      "${prefix}.account.position.events.v1"
+      "${prefix}.account.open-interest.events.v1"
+      "${prefix}.account.liquidation-fee.events.v1"
+      "${prefix}.account.state.events.v1"
+      "${prefix}.risk.account.events.v1"
+      "${prefix}.risk.position.events.v1"
+      "${prefix}.liquidation.candidates.v1"
+    )
+  fi
+  if is_funding_product "${product_line}"; then
+    topics+=("${prefix}.funding.rate.v1")
+  elif is_delivery_product "${product_line}"; then
+    topics+=("${prefix}.delivery.settlements.v1")
+  elif is_option_product "${product_line}"; then
+    topics+=("${prefix}.option.exercises.v1")
+  fi
+  local deadline=$((SECONDS + 90))
+  while (( SECONDS < deadline )); do
+    ready=true
+    # Kafka CLI 每次启动 JVM 成本很高，必须一次性读取元数据，否则多分区 Topic
+    # 会让逐 Topic 检查超过等待窗口。
+    topic_metadata="$(kafka-topics --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+      --describe 2>/dev/null || true)"
+    for topic in "${topics[@]}"; do
+      if ! printf '%s\n' "${topic_metadata}" \
+          | grep -F "${topic}" \
+          | grep -qE 'Leader: [0-9]'; then
+        ready=false
+        break
+      fi
+    done
+    if [[ "${ready}" == "true" ]]; then
+      # 主题 leader 已出现后还需要给单节点 Kafka 加载全部分区日志；
+      # 再启动撮合，避免首个盘口快照发送时仍收到 UNKNOWN_TOPIC_OR_PARTITION。
+      # 这里不能只依赖 describe 返回，因为 Kafka 元数据传播和日志目录初始化
+      # 可能比 leader 选举晚几个心跳周期。
+      sleep 30
+      return
+    fi
+    sleep 1
+  done
+  echo "Kafka product topics leader 在等待窗口内未就绪: ${product_line}" >&2
+  return 1
+}
+
 reset_kafka_topics() {
   local product_line="$1"
   if [[ "${RESET_KAFKA}" == "true" ]]; then
     delete_surprising_topics "${product_line}"
+    if [[ "${KAFKA_RESET_SHARED_TOPICS}" == "true" ]]; then
+      local groups_cmd
+      groups_cmd="$(kafka_consumer_groups_cmd)"
+      "${groups_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+        --delete --group "$(product_slug "${product_line}")-account-state-projection-v1" \
+        >/dev/null 2>&1 || true
+    fi
+  elif [[ "${KAFKA_TRUNCATE_TOPICS}" == "true" ]]; then
+    truncate_surprising_topics "${product_line}"
+    if [[ "${KAFKA_RESET_SHARED_TOPICS}" == "true" ]]; then
+      local groups_cmd
+      groups_cmd="$(kafka_consumer_groups_cmd)"
+      "${groups_cmd}" --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
+        --delete --group "$(product_slug "${product_line}")-account-state-projection-v1" \
+        >/dev/null 2>&1 || true
+    fi
   fi
   if [[ "${CREATE_KAFKA_TOPICS}" == "true" ]]; then
     create_topics "${product_line}"
   fi
+  wait_product_topics_ready "${product_line}"
 }
 
 boot_jar() {
@@ -1218,6 +1488,7 @@ product_provider_args() {
       printf '%s\n' \
         "--surprising.clients.order.base-url=http://localhost:9084" \
         "--surprising.clients.trigger.base-url=http://localhost:9084" \
+        "--surprising.trading.order.wal.directory=${TMP_DIR}/order-wal" \
         "--surprising.trading.order.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.trading.order.kafka.product-line=${product_line}" \
         "--surprising.trading.order.kafka.product-topics-enabled=true" \
@@ -1225,11 +1496,21 @@ product_provider_args() {
         "--surprising.trading.order.outbox.publish-delay-ms=${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS}" \
         "--surprising.trading.order.outbox.max-in-flight=${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT}" \
         "--surprising.trading.order.outbox.max-rows-per-key=${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY}" \
+        "--surprising.trading.order.kafka.user-command-concurrency=${ACCOUNT_COMMAND_PARTITIONS}" \
         "--surprising.trading.order.risk.market-max-mark-age-ms=30000" \
+        "--surprising.trading.order.risk.limit-price-max-mark-age-ms=30000" \
+        "--surprising.price.consumer.concurrency=4" \
         "--surprising.trading.trigger.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.trading.trigger.kafka.product-line=${product_line}" \
         "--surprising.trading.trigger.kafka.product-topics-enabled=true" \
         "--surprising.trading.trigger.kafka.group-id=product-smoke-${RUN_ID}-${slug}-trigger"
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+        local readiness_index readiness_symbol
+        for ((readiness_index = 0; readiness_index < STRESS_SYMBOL_COUNT; readiness_index++)); do
+          readiness_symbol="$(stress_symbol_for_index "${product_line}" "${readiness_index}")"
+          printf '%s\n' "--surprising.price.consumer.required-symbols[${readiness_index}]=${readiness_symbol}"
+        done
+      fi
       ;;
     order)
       printf '%s\n' \
@@ -1240,6 +1521,7 @@ product_provider_args() {
         "--surprising.trading.order.outbox.publish-delay-ms=${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS}" \
         "--surprising.trading.order.outbox.max-in-flight=${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT}" \
         "--surprising.trading.order.outbox.max-rows-per-key=${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY}" \
+        "--surprising.trading.order.kafka.user-command-concurrency=${ACCOUNT_COMMAND_PARTITIONS}" \
         "--surprising.trading.order.risk.market-max-mark-age-ms=30000"
       ;;
     matching)
@@ -1260,9 +1542,18 @@ product_provider_args() {
         "--surprising.trading.matching.outbox.publish-delay-ms=${STRESS_MATCHING_OUTBOX_PUBLISH_DELAY_MS}" \
         "--surprising.trading.matching.outbox.max-in-flight=${STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT}" \
         "--surprising.trading.matching.outbox.max-rows-per-key=${STRESS_MATCHING_OUTBOX_MAX_ROWS_PER_KEY}" \
+        "--surprising.trading.matching.wal.directory=${TMP_DIR}/matching-wal" \
         "--surprising.trading.matching.engine.exchange-id=product-smoke-${slug}" \
         "--surprising.trading.matching.engine.matching-engines=${STRESS_MATCHING_ENGINE_SHARDS}" \
         "--surprising.trading.matching.engine.risk-engines=${STRESS_MATCHING_RISK_SHARDS}"
+      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+        printf '%s\n' "--surprising.price.consumer.concurrency=4"
+        local readiness_index readiness_symbol
+        for ((readiness_index = 0; readiness_index < STRESS_SYMBOL_COUNT; readiness_index++)); do
+          readiness_symbol="$(stress_symbol_for_index "${product_line}" "${readiness_index}")"
+          printf '%s\n' "--surprising.price.consumer.required-symbols[${readiness_index}]=${readiness_symbol}"
+        done
+      fi
       if [[ "${MULTI_SYMBOL_STRESS}" == "true"
             && "${STRESS_INTERNAL_MARKET_MAKER_WHITELIST}" == "true" ]]; then
         local maker_index maker_user
@@ -1295,6 +1586,8 @@ product_provider_args() {
         "--surprising.account.kafka.group-id=product-smoke-${RUN_ID}-${slug}-account" \
         "--surprising.account.kafka.client-id=product-smoke-${RUN_ID}-${slug}-account" \
         "--surprising.account.kafka.concurrency=${account_concurrency}" \
+        "--surprising.account.kafka.user-command-concurrency=${ACCOUNT_COMMAND_PARTITIONS}" \
+        "--surprising.account.wal.directory=${TMP_DIR}/account-wal" \
         "--surprising.account.outbox.batch-size=${account_outbox_batch_size}" \
         "--surprising.account.outbox.publish-delay-ms=${account_outbox_publish_delay_ms}" \
         "--surprising.account.outbox.max-in-flight=${account_outbox_max_in_flight}" \
@@ -1316,6 +1609,7 @@ product_provider_args() {
         "--surprising.risk.kafka.product-topics-enabled=true" \
         "--surprising.risk.kafka.group-id=product-smoke-${RUN_ID}-${slug}-risk" \
         "--surprising.risk.kafka.concurrency=${risk_concurrency}" \
+        "--surprising.risk.local-state.wal-directory=${TMP_DIR}/risk-projection-wal" \
         "--surprising.risk.calculation.scan-delay-ms=500" \
         "--surprising.risk.outbox.batch-size=${risk_outbox_batch_size}" \
         "--surprising.risk.outbox.publish-delay-ms=${risk_outbox_publish_delay_ms}" \
@@ -1376,6 +1670,7 @@ product_provider_args() {
         "--surprising.risk.kafka.product-topics-enabled=true" \
         "--surprising.risk.kafka.group-id=product-smoke-${RUN_ID}-${slug}-risk" \
         "--surprising.risk.kafka.concurrency=${risk_concurrency}" \
+        "--surprising.risk.local-state.wal-directory=${TMP_DIR}/risk-projection-wal" \
         "--surprising.risk.calculation.scan-delay-ms=500" \
         "--surprising.risk.outbox.batch-size=${risk_outbox_batch_size}" \
         "--surprising.risk.outbox.publish-delay-ms=${risk_outbox_publish_delay_ms}" \
@@ -1392,6 +1687,7 @@ product_provider_args() {
         "--surprising.funding.settlement.enabled=${funding_enabled}" \
         "--surprising.funding.settlement.scan-delay-ms=500" \
         "--surprising.funding.coordination.node-id=product-smoke-${RUN_ID}-${slug}-funding" \
+        "--surprising.funding.wal.directory=${TMP_DIR}/funding-wal" \
         "--surprising.insurance.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.insurance.kafka.product-line=${product_line}" \
         "--surprising.insurance.kafka.product-topics-enabled=true" \
@@ -1427,6 +1723,7 @@ product_provider_args() {
     market-maker)
       local symbol
       symbol="$(symbol_for "${product_line}")"
+      # 单节点业务烟测不需要分布式租约，避免做市报价被非交易主链路的数据库租约阻塞。
       printf '%s\n' \
         "--surprising.clients.account.base-url=http://localhost:9086" \
         "--surprising.clients.instrument.base-url=http://localhost:9080" \
@@ -1434,13 +1731,15 @@ product_provider_args() {
         "--surprising.clients.matching.base-url=http://localhost:9085" \
         "--surprising.clients.order.base-url=http://localhost:9084" \
         "--surprising.market-maker.engine.enabled=true" \
-        "--surprising.market-maker.engine.cycle-delay-ms=250" \
+        "--surprising.market-maker.engine.cycle-delay-ms=${MARKET_MAKER_CYCLE_DELAY_MS}" \
         "--surprising.market-maker.engine.node-id=product-smoke-${RUN_ID}-${slug}-mm" \
-        "--surprising.market-maker.coordination.enabled=true" \
+        "--surprising.market-maker.coordination.enabled=false" \
         "--surprising.market-maker.quoting.order-levels=2" \
         "--surprising.market-maker.quoting.min-spread-ticks=20" \
         "--surprising.market-maker.quoting.level-spacing-ticks=10" \
         "--surprising.market-maker.quoting.max-open-orders-per-account-symbol=12" \
+        "--surprising.price.consumer.concurrency=4" \
+        "--surprising.price.consumer.max-poll-records=1000" \
         "--surprising.market-maker.trade.enabled=false"
       if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
         local i stress_symbol stress_price maker_user maker_quantity_steps
@@ -1456,8 +1755,11 @@ product_provider_args() {
             "--surprising.market-maker.strategies[${i}].account-ids[0]=${maker_user}" \
             "--surprising.market-maker.strategies[${i}].symbols[0]=${stress_symbol}" \
             "--surprising.market-maker.strategies[${i}].base-quantity-steps=${maker_quantity_steps}" \
+            "--surprising.market-maker.strategies[${i}].initialAnchorPriceTicks=${stress_price}" \
             "--surprising.market-maker.strategies[${i}].margin-mode=CROSS" \
             "--surprising.market-maker.strategies[${i}].order-levels=2"
+          printf '%s\n' \
+            "--surprising.price.consumer.required-symbols[${i}]=${stress_symbol}"
         done
       else
         printf '%s\n' \
@@ -1468,6 +1770,7 @@ product_provider_args() {
           "--surprising.market-maker.strategies[0].account-ids[1]=${MM_USER_B}" \
           "--surprising.market-maker.strategies[0].symbols[0]=${symbol}" \
           "--surprising.market-maker.strategies[0].base-quantity-steps=2" \
+          "--surprising.market-maker.strategies[0].initialAnchorPriceTicks=$(price_ticks_for "${product_line}")" \
           "--surprising.market-maker.strategies[0].margin-mode=CROSS" \
           "--surprising.market-maker.strategies[0].order-levels=2"
       fi
@@ -1485,13 +1788,17 @@ start_provider() {
   jar="$(boot_jar "${module}" "${artifact}")"
   log_file="${TMP_DIR}/${product_line}-${name}.log"
   local java_args=()
+  local mark_price_max_age=30s
+  if [[ "${name}" == "trading-entry" ]]; then
+    mark_price_max_age=15s
+  fi
   local app_args=(
     "--server.port=${port}"
     "--surprising.price.consumer.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}"
     "--surprising.price.consumer.product-line=${product_line}"
     "--surprising.price.consumer.product-topics-enabled=true"
     "--surprising.price.consumer.group-id=product-smoke-${RUN_ID}-$(product_slug "${product_line}")-${name}-mark-price"
-    "--surprising.price.consumer.max-age=30s"
+    "--surprising.price.consumer.max-age=${mark_price_max_age}"
   )
   local arg
   if [[ "${name}" == "matching" ]]; then
@@ -1509,6 +1816,7 @@ start_provider() {
       "SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}" \
       "SPRING_DATASOURCE_USERNAME=${DB_USER}" \
       "SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}" \
+      "ACCOUNT_WAL_DIR=${TMP_DIR}/account-wal" \
       "PRODUCT_LINE=${product_line}" \
       "PRODUCT_TOPICS_ENABLED=true" \
       java ${java_args[@]+"${java_args[@]}"} -jar "${jar}" "${app_args[@]}"
@@ -1520,6 +1828,9 @@ start_provider() {
 start_providers_for_line() {
   local product_line="$1"
   start_provider instrument "${product_line}"
+  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    start_provider price "${product_line}"
+  fi
   start_provider matching "${product_line}"
   start_provider account "${product_line}"
   if is_margin_product "${product_line}"; then
@@ -1527,10 +1838,9 @@ start_providers_for_line() {
   fi
   start_provider trading-entry "${product_line}"
   start_provider edge "${product_line}"
-  start_provider market-maker "${product_line}"
-  # Start the combined index/mark-price provider after every downstream
-  # consumer so retained price events cannot age in an unconsumed backlog.
-  start_provider price "${product_line}"
+  if [[ "${MULTI_SYMBOL_STRESS}" != "true" ]]; then
+    start_provider price "${product_line}"
+  fi
 }
 
 start_price_refresher() {
@@ -1543,7 +1853,8 @@ start_price_refresher() {
   fi
   echo "Starting ${product_line} synthetic mark-price refresher"
   producer_cmd="$(kafka_producer_cmd)"
-  topic="$(topic_name "${product_line}" "mark.price")"
+  # 当前生产链路由指数价计算服务生成标记价；常驻刷新器从指数价入口注入。
+  topic="$(topic_name "${product_line}" "index.price")"
   fifo="${TMP_DIR}/${product_line}-price-refresher.fifo"
   rm -f "${fifo}"
   mkfifo "${fifo}"
@@ -1586,14 +1897,20 @@ publish_mark_price() {
   local tick_units="$3"
   local sequence="$4"
   local price_ticks="$5"
-  local price bid ask units event_time payload
+  local output_fifo="${6:-}"
+  local price event_time payload
   price="$(decimal_price "${price_ticks}" "${tick_units}")"
-  bid="$(decimal_price "$((price_ticks - 1))" "${tick_units}")"
-  ask="$(decimal_price "$((price_ticks + 1))" "${tick_units}")"
-  units=$((price_ticks * tick_units))
   event_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  payload="{\"result\":{\"productLine\":\"${product_line}\",\"symbol\":\"${symbol}\",\"instrumentVersion\":1,\"markPriceUnits\":${units},\"markPriceTicks\":${price_ticks},\"markPrice\":${price},\"indexPrice\":${price},\"price1\":${price},\"price2\":${price},\"lastTradePrice\":${price},\"bestBidPrice\":${bid},\"bestAskPrice\":${ask},\"fundingRate\":0,\"nextFundingTime\":\"${event_time}\",\"timeUntilFundingSeconds\":0,\"basisAverage\":0,\"basisWindowSeconds\":60,\"clampLow\":${price},\"clampHigh\":${price},\"sequence\":${sequence},\"status\":\"HEALTHY\",\"eventTime\":\"${event_time}\",\"publishedAt\":\"${event_time}\"},\"indexInput\":null,\"bookInput\":null,\"tradeInput\":null,\"fundingInput\":null,\"basisAverage\":0,\"basisWindowSeconds\":60,\"calculatedAt\":\"${event_time}\"}"
-  produce_json "$(topic_name "${product_line}" "mark.price")" "${symbol}" "${payload}"
+  payload="{\"symbol\":\"${symbol}\",\"indexPrice\":${price},\"sequence\":${sequence},\"status\":\"HEALTHY\",\"componentCount\":1,\"validComponentCount\":1,\"totalConfiguredWeight\":1,\"eventTime\":\"${event_time}\",\"components\":[]}"
+  if [[ -n "${output_fifo}" ]]; then
+    # 常驻生产者已经打开 FIFO；单行写入不再启动新的 Kafka JVM，且不超过
+    # PIPE_BUF，多个测试线程同时刷新时不会产生半条 JSON。
+    # FIFO 在生产者 JVM 尚未完成打开时会阻塞写端；放到后台等待读端，不能
+    # 让做市商健康检查被测试工具自身的启动竞态卡住。
+    printf '%s:%s\n' "${symbol}" "${payload}" >"${output_fifo}" &
+  else
+    produce_json "$(topic_name "${product_line}" "index.price")" "${symbol}" "${payload}"
+  fi
 }
 
 next_mark_sequence() {
@@ -1645,12 +1962,24 @@ api_post() {
   local user_id="$3"
   local trace_id="$4"
   local payload="$5"
-  curl -fsS -X POST "http://localhost:9094/api/v1/gateway/${path}" \
+  local response_file="${TMP_DIR}/${product_line}-api-post-response-${RANDOM}.json"
+  local http_code
+  # 网关启动后的 Kafka consumer 重平衡期间可能短暂返回 503；相同 trace 和业务
+  # 请求重试必须命中 WAL 幂等键。启动阶段允许更长的重平衡窗口，不能把瞬态
+  # 503 误判为资金链路失败，也不能让调用方生成第二个业务幂等键。
+  http_code="$(curl --retry 20 --retry-delay 1 --retry-max-time 90 --retry-all-errors \
+    -sS -o "${response_file}" -w "%{http_code}" -X POST "http://localhost:9094/api/v1/gateway/${path}" \
     -H "Content-Type: application/json" \
     -H "X-User-Id: ${user_id}" \
     -H "X-Product-Line: ${product_line}" \
     -H "X-Trace-Id: ${trace_id}" \
-    -d "${payload}"
+    -d "${payload}")"
+  if [[ ! "${http_code}" =~ ^2 ]]; then
+    echo "API 请求失败 HTTP ${http_code}: ${path} user=${user_id} trace=${trace_id}" >&2
+    cat "${response_file}" >&2 || true
+    return 22
+  fi
+  cat "${response_file}"
 }
 
 api_get() {
@@ -1682,11 +2011,26 @@ adjust_product_balance() {
     }" >/dev/null
 }
 
+initialize_account_snapshot() {
+  local product_line="$1"
+  local user_id="$2"
+  # 只有这个内部入口允许在 JVM 快照缺失时读取一次数据库基线；下单和资金热路径不会回退查库。
+  psql_exec <<SQL >/dev/null
+INSERT INTO account_risk_state_revisions (product_line, user_id, revision, updated_at)
+VALUES ('${product_line}', ${user_id}, 1, now())
+ON CONFLICT (product_line, user_id) DO NOTHING;
+SQL
+  curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS \
+    "http://localhost:9086/internal/v1/accounts/perpetual-state/snapshot?productLine=${product_line}&userId=${user_id}" \
+    >/dev/null
+}
+
 fund_user_for_line() {
   local product_line="$1"
   local user_id="$2"
   local asset amount type
   type="$(account_type "${product_line}")"
+  initialize_account_snapshot "${product_line}" "${user_id}"
   if is_spot "${product_line}"; then
     adjust_product_balance "${user_id}" "${type}" "USDT" 200000000000000 "smoke-${RUN_ID}-${product_line}-${user_id}-usdt"
     adjust_product_balance "${user_id}" "${type}" "BTC" 100000000000 "smoke-${RUN_ID}-${product_line}-${user_id}-btc"
@@ -1695,6 +2039,9 @@ fund_user_for_line() {
     amount="$(settle_funding_amount "${asset}")"
     adjust_product_balance "${user_id}" "${type}" "${asset}" "${amount}" "smoke-${RUN_ID}-${product_line}-${user_id}-${asset}"
   fi
+  # 资金调整命令会产生新的账户状态版本；再次调用显式初始化入口，确保下游
+  # 做市、下单和风控在启动前已经拿到包含最新余额的 JVM 快照。
+  initialize_account_snapshot "${product_line}" "${user_id}"
 }
 
 fund_liquidation_user_for_line() {
@@ -1702,6 +2049,7 @@ fund_liquidation_user_for_line() {
   local user_id="$2"
   local asset amount type
   type="$(account_type "${product_line}")"
+  initialize_account_snapshot "${product_line}" "${user_id}"
   asset="$(settle_asset_for "${product_line}")"
   amount="$(liquidation_test_margin_amount "${asset}")"
   adjust_product_balance "${user_id}" "${type}" "${asset}" "${amount}" "smoke-${RUN_ID}-${product_line}-${user_id}-${asset}-liq-margin"
@@ -1754,7 +2102,8 @@ place_order_expect_rejected() {
   symbol="$(symbol_for "${product_line}")"
   seed_prices_for_line "${product_line}"
   body_file="${TMP_DIR}/${product_line}-${client_order_id}.response.json"
-  http_code="$(curl -sS -o "${body_file}" -w "%{http_code}" -X POST "http://localhost:9094/api/v1/gateway/trading" \
+  http_code="$(curl --retry 20 --retry-delay 1 --retry-max-time 90 --retry-all-errors \
+    -sS -o "${body_file}" -w "%{http_code}" -X POST "http://localhost:9094/api/v1/gateway/trading" \
     -H "Content-Type: application/json" \
     -H "X-User-Id: ${user_id}" \
     -H "X-Product-Line: ${product_line}" \
@@ -1803,6 +2152,17 @@ cancel_order() {
     "{\"userId\": ${user_id}, \"orderId\": ${order_id}}" >/dev/null
 }
 
+cancel_order_if_open() {
+  local product_line="$1"
+  local user_id="$2"
+  local order_id="$3"
+  if ! cancel_order "${product_line}" "${user_id}" "${order_id}"; then
+    local status
+    status="$(query_value "SELECT COALESCE((SELECT status FROM trading_orders WHERE product_line = '${product_line}' AND order_id = ${order_id}), '')")"
+    [[ "${status}" == "FILLED" || "${status}" == "CANCELED" ]]
+  fi
+}
+
 amend_order() {
   local product_line="$1"
   local user_id="$2"
@@ -1825,6 +2185,24 @@ wait_order_status() {
     "${expected}"
 }
 
+wait_order_terminal() {
+  local product_line="$1"
+  local order_id="$2"
+  local deadline=$((SECONDS + 180))
+  local status
+  while true; do
+    status="$(query_value "SELECT COALESCE((SELECT status FROM trading_orders WHERE product_line = '${product_line}' AND order_id = ${order_id}), '')")"
+    if [[ "${status}" == "FILLED" || "${status}" == "CANCELED" ]]; then
+      return
+    fi
+    if ((SECONDS >= deadline)); then
+      echo "Timed out waiting for order ${order_id} terminal status: got '${status}'" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
 wait_order_filled() {
   local product_line="$1"
   local order_id="$2"
@@ -1837,8 +2215,16 @@ wait_order_filled() {
 wait_account_processed_order() {
   local product_line="$1"
   local order_id="$2"
+  # 账户主状态已经迁移到 JVM 单写者；account_trade_settlement_completions
+  # 只属于旧的数据库投影，不能再作为热链路完成条件。account_commands
+  # 仍保留异步审计记录，因此用其已应用的成交结算结果确认账户命令已执行。
   wait_sql_nonzero "account processed order ${order_id}" \
-    "SELECT count(*) FROM account_trade_settlement_completions s JOIN trading_match_trades t ON t.product_line = s.product_line AND t.symbol = s.symbol AND t.trade_id = s.trade_id WHERE t.product_line = '${product_line}' AND (t.taker_order_id = ${order_id} OR t.maker_order_id = ${order_id})"
+    "SELECT count(*)
+       FROM account_commands
+      WHERE product_line = '${product_line}'
+        AND command_type = 'TRADE_SIDE_SETTLE'
+        AND status = 'APPLIED'
+        AND (result_payload ->> 'orderId')::bigint = ${order_id}"
 }
 
 wait_position() {
@@ -1857,6 +2243,9 @@ close_market_maker_inventory() {
   local symbol="$2"
   local close_price="$3"
   local a_qty b_qty short_user long_user close_qty resting_order taking_order
+  wait_sql_equals "market-maker inventory projection balanced ${product_line}" \
+    "SELECT COALESCE(sum(signed_quantity_steps), 0) FROM account_positions WHERE product_line = '${product_line}' AND symbol = '${symbol}' AND user_id IN (${MM_USER_A}, ${MM_USER_B})" \
+    "0"
   a_qty="$(query_value "SELECT COALESCE((SELECT signed_quantity_steps FROM account_positions WHERE product_line = '${product_line}' AND user_id = ${MM_USER_A} AND symbol = '${symbol}' AND margin_mode = 'CROSS' AND position_side = 'NET'), 0)")"
   b_qty="$(query_value "SELECT COALESCE((SELECT signed_quantity_steps FROM account_positions WHERE product_line = '${product_line}' AND user_id = ${MM_USER_B} AND symbol = '${symbol}' AND margin_mode = 'CROSS' AND position_side = 'NET'), 0)")"
   if ((a_qty == 0 && b_qty == 0)); then
@@ -2044,49 +2433,50 @@ block_requests AS (
 ),
 allocated_blocks AS MATERIALIZED (
     SELECT block_index,
-           nextval('account_ledger_entry_seq') AS high
+           nextval('account_product_ledger_entry_seq') AS high
       FROM block_requests
 ),
 ledger_rows AS (
-    INSERT INTO account_ledger_entries (
-        entry_id, user_id, asset, amount_units, balance_after_units,
+    INSERT INTO account_product_ledger_entries (
+        entry_id, user_id, account_type, asset, amount_units, balance_after_units,
         reference_type, reference_id, reason, created_at
     )
     SELECT ((allocated_blocks.high - 1) * 10000
               + numbered.rn - allocated_blocks.block_index * 10000)::bigint,
            numbered.user_id,
+           'USDT_PERPETUAL',
            numbered.asset,
            numbered.amount_units,
            numbered.amount_units,
-           'BALANCE_ADJUSTMENT',
+           'PRODUCT_BALANCE_ADJUSTMENT',
            numbered.reference_id,
            'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
            now()
       FROM numbered
       JOIN allocated_blocks
         ON allocated_blocks.block_index = ((numbered.rn - 1) / 10000)::bigint
-    ON CONFLICT (reference_type, reference_id, user_id, asset) DO NOTHING
-    RETURNING user_id, asset, amount_units, reference_id
+    ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
+    RETURNING user_id, account_type, asset, amount_units, reference_id
 ),
 balance_rows AS (
-    INSERT INTO account_balances (user_id, asset, available_units, locked_units, updated_at)
-    SELECT user_id, asset, amount_units, 0, now()
+    INSERT INTO account_product_balances (account_type, user_id, asset, available_units, locked_units, updated_at)
+    SELECT account_type, user_id, asset, amount_units, 0, now()
       FROM ledger_rows
-    ON CONFLICT (user_id, asset) DO UPDATE SET
-        available_units = account_balances.available_units + EXCLUDED.available_units,
+    ON CONFLICT (account_type, user_id, asset) DO UPDATE SET
+        available_units = account_product_balances.available_units + EXCLUDED.available_units,
         updated_at = EXCLUDED.updated_at
-    RETURNING user_id, asset
+    RETURNING account_type, user_id, asset
 )
 INSERT INTO account_admin_balance_adjustments (
     reference_key, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
     asset, amount_units, balance_after_units, reference_id, reason, created_at
 )
-SELECT 'BASIC|' || user_id || '||' || asset || '|' || reference_id,
-       'BASIC',
+SELECT 'PRODUCT|' || user_id || '|' || account_type || '|' || asset || '|' || reference_id,
+       'PRODUCT',
        1,
        'product-line-stress',
        user_id,
-       NULL,
+       account_type,
        asset,
        amount_units,
        amount_units,
@@ -2095,6 +2485,18 @@ SELECT 'BASIC|' || user_id || '||' || asset || '|' || reference_id,
        now()
   FROM ledger_rows
 ON CONFLICT (reference_key) DO NOTHING;
+SQL
+    psql_exec <<SQL >/dev/null
+INSERT INTO account_risk_state_revisions (product_line, user_id, revision, updated_at)
+SELECT 'LINEAR_PERPETUAL', user_id, 1, now()
+  FROM (
+    SELECT generate_series(${STRESS_MM_USER_START}, $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))) AS user_id
+    UNION ALL
+    SELECT generate_series(${STRESS_BOOK_USER_START}, $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT - 1))) AS user_id
+    UNION ALL
+    SELECT generate_series(${STRESS_TAKER_USER_START}, $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))) AS user_id
+  ) users
+ON CONFLICT (product_line, user_id) DO NOTHING;
 SQL
     # 直接写入余额表只适合资金数值准备，不能产生账户修订号和完整账户快照。
     # 永续订单入口严格依赖 JVM 账户快照，因此补一笔真实的账户调整命令，
@@ -2106,7 +2508,7 @@ SQL
           snapshot_user_id++)); do
       snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
       snapshot_commands+=(
-        "curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
+        "curl -fsS 'http://localhost:9086/internal/v1/accounts/perpetual-state/snapshot?productLine=${product_line}&userId=${snapshot_user_id}' >/dev/null && curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
       )
     done
     for ((snapshot_user_id = STRESS_BOOK_USER_START;
@@ -2114,7 +2516,7 @@ SQL
           snapshot_user_id++)); do
       snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
       snapshot_commands+=(
-        "curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
+        "curl -fsS 'http://localhost:9086/internal/v1/accounts/perpetual-state/snapshot?productLine=${product_line}&userId=${snapshot_user_id}' >/dev/null && curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
       )
     done
     for ((snapshot_user_id = STRESS_TAKER_USER_START;
@@ -2122,7 +2524,7 @@ SQL
           snapshot_user_id++)); do
       snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
       snapshot_commands+=(
-        "curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
+        "curl -fsS 'http://localhost:9086/internal/v1/accounts/perpetual-state/snapshot?productLine=${product_line}&userId=${snapshot_user_id}' >/dev/null && curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
       )
     done
     run_with_concurrency 16 "${snapshot_commands[@]}"
@@ -2233,6 +2635,42 @@ SELECT 'PRODUCT|' || user_id || '|' || account_type || '|' || asset || '|' || re
 ON CONFLICT (reference_key) DO NOTHING;
 """)
 PY
+
+  psql_exec <<SQL >/dev/null
+INSERT INTO account_risk_state_revisions (product_line, user_id, revision, updated_at)
+SELECT '${product_line}', user_id, 1, now()
+  FROM (
+    SELECT generate_series(${STRESS_MM_USER_START}, $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))) AS user_id
+    UNION ALL
+    SELECT generate_series(${STRESS_BOOK_USER_START}, $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT - 1))) AS user_id
+    UNION ALL
+    SELECT generate_series(${STRESS_TAKER_USER_START}, $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))) AS user_id
+  ) users
+ON CONFLICT (product_line, user_id) DO NOTHING;
+SQL
+
+  local snapshot_commands=()
+  local snapshot_user_id
+  for ((snapshot_user_id = STRESS_MM_USER_START;
+        snapshot_user_id < STRESS_MM_USER_START + STRESS_SYMBOL_COUNT;
+        snapshot_user_id++)); do
+    snapshot_commands+=("initialize_account_snapshot '${product_line}' '${snapshot_user_id}'")
+  done
+  for ((snapshot_user_id = STRESS_BOOK_USER_START;
+        snapshot_user_id < STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT;
+        snapshot_user_id++)); do
+    snapshot_commands+=("initialize_account_snapshot '${product_line}' '${snapshot_user_id}'")
+  done
+  for ((snapshot_user_id = STRESS_TAKER_USER_START;
+        snapshot_user_id < STRESS_TAKER_USER_START + STRESS_USER_COUNT;
+        snapshot_user_id++)); do
+    snapshot_commands+=("initialize_account_snapshot '${product_line}' '${snapshot_user_id}'")
+  done
+  run_with_concurrency 32 "${snapshot_commands[@]}"
+  if ((RUN_FAILURES > 0)); then
+    echo "${product_line} 压测账户 JVM 快照初始化失败: ${RUN_FAILURES}" >&2
+    exit 1
+  fi
 }
 
 stress_order_payload() {
@@ -3511,8 +3949,8 @@ assert_stress_state() {
   wait_sql_equals "stress valid order reservation snapshots ${product_line}" \
     "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND reserved_units < 0 OR (product_line = '${product_line}' AND reserved_units = 0 AND (reservation_account_type IS NOT NULL OR reservation_asset IS NOT NULL)) OR (product_line = '${product_line}' AND reserved_units > 0 AND (reservation_account_type IS NULL OR reservation_asset IS NULL))" \
     "0" 60
-  wait_sql_equals "stress no over-released spot reservations ${product_line}" \
-    "SELECT count(*) FROM account_spot_order_reservations WHERE ${scope} AND settled_units + released_units > reserved_units" \
+  wait_sql_equals "stress spot lock projection is non-negative ${product_line}" \
+    "SELECT count(*) FROM account_state_order_locks WHERE product_line = '${product_line}' AND locked_units < 0" \
     "0" 60
   wait_sql_equals "stress no product deficits ${product_line}" \
     "SELECT count(*) FROM account_product_deficits WHERE account_type = '${type}' AND ${scope} AND deficit_units <> 0" \
@@ -3563,6 +4001,7 @@ run_multi_symbol_liquidation_stress_flow() {
   seed_stress_prices "${product_line}"
   echo "Warming matching mark-price cache for ${STRESS_PRICE_WARMUP_SECONDS}s"
   sleep "${STRESS_PRICE_WARMUP_SECONDS}"
+  wait_stress_mark_price_readiness "${product_line}"
 
   echo "Placing ${product_line} initial maker book"
   while IFS= read -r command; do commands+=("${command}"); done \
@@ -3895,12 +4334,65 @@ PY
 
 wait_market_maker_running() {
   local product_line="$1"
-  local symbol
+  local symbol tick_units sequence market_maker_log market_price_fifo
   symbol="$(symbol_for "${product_line}")"
+  tick_units="$(price_tick_units_for "${product_line}")"
+  market_maker_log="${TMP_DIR}/${product_line}-market-maker.log"
+  market_price_fifo="${TMP_DIR}/${product_line}-price-refresher.fifo"
+  # 做市商健康检查完成时，Kafka 标记价消费者可能仍在进行首次分区分配。
+  # latest 会在分配回调中定位到当时的末尾，必须等回调完成后再补发实时价格，
+  # 否则启动阶段的种子消息会被故意跳过，做市商会持续判定标记价不可用。
+  wait_until "market-maker mark price consumer assigned ${product_line}" 90 \
+    grep -Eq 'Adding newly assigned partitions: \[.*mark\.price\.v1-|partitions assigned: \[.*mark\.price\.v1-' \
+      "${market_maker_log}"
+  sleep 1
+  sequence="$(current_epoch_millis)"
+  publish_mark_price "${product_line}" "${symbol}" "${tick_units}" "${sequence}" "$(price_ticks_for "${product_line}")" "${market_price_fifo}"
+  if is_option_product "${product_line}"; then
+    publish_mark_price "${product_line}" "BTC-USDT" 10000000 "$((sequence + 1))" 600000 "${market_price_fifo}"
+  fi
   wait_sql_nonzero "market-maker cycle success ${product_line}" \
     "SELECT count(*) FROM market_maker_strategy_run_events WHERE product_line = '${product_line}' AND strategy_id = 'product-smoke-mm' AND event_type = 'CYCLE_SUCCESS'"
   wait_sql_nonzero "market-maker open quotes ${product_line}" \
     "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND symbol = '${symbol}' AND user_id IN (${MM_USER_A}, ${MM_USER_B}) AND client_order_id LIKE 'mm-%' AND status IN ('ACCEPTED', 'PARTIALLY_FILLED')"
+}
+
+wait_stress_market_maker_ready() {
+  local product_line="$1"
+  local market_maker_log="${TMP_DIR}/${product_line}-market-maker.log"
+  wait_until "stress market-maker mark price consumer assigned ${product_line}" 90 \
+    grep -Eq 'Adding newly assigned partitions: \[.*mark\.price\.v1-|partitions assigned: \[.*mark\.price\.v1-' \
+      "${market_maker_log}"
+  sleep 1
+  seed_stress_prices "${product_line}"
+  wait_sql_nonzero "stress market-maker first successful cycle ${product_line}" \
+    "SELECT count(*) FROM market_maker_strategy_run_events WHERE product_line = '${product_line}' AND strategy_id LIKE 'stress-mm-%' AND event_type = 'CYCLE_SUCCESS'" \
+    90
+}
+
+start_live_websocket_smoke() {
+  local product_line="$1"
+  local symbol="$2"
+  WEBSOCKET_SMOKE_EVIDENCE="${TMP_DIR}/${product_line}-websocket.json"
+  WEBSOCKET_SMOKE_LOG="${TMP_DIR}/${product_line}-websocket.log"
+  PRODUCT_LINE="${product_line}" \
+    SYMBOL="${symbol}" \
+    WS_USER_ID="${TAKER_USER}" \
+    WS_OTHER_USER_ID="$((TAKER_USER + 1))" \
+    WS_TIMEOUT_MS="${WS_TIMEOUT_MS}" \
+    WS_EVIDENCE="${WEBSOCKET_SMOKE_EVIDENCE}" \
+    node "${ROOT_DIR}/scripts/product-line-websocket-smoke.mjs" \
+    >"${WEBSOCKET_SMOKE_LOG}" 2>&1 &
+  WEBSOCKET_SMOKE_PID=$!
+}
+
+finish_live_websocket_smoke() {
+  if [[ -z "${WEBSOCKET_SMOKE_PID}" ]]; then
+    return
+  fi
+  wait "${WEBSOCKET_SMOKE_PID}"
+  cat "${WEBSOCKET_SMOKE_LOG}"
+  WEBSOCKET_SMOKE_PID=""
 }
 
 run_market_maker_taker_flow() {
@@ -3911,17 +4403,32 @@ run_market_maker_taker_flow() {
   qty=1
   echo "Scenario ${product_line}: user taker trades against continuously running market-maker"
   wait_market_maker_running "${product_line}"
+  # 做市周期成功只代表策略完成一次计算，报价预占仍由账户单写者异步确认。
+  # 下单前必须确认买卖两侧都已进入撮合订单簿，避免在撤旧单/等预占窗口内
+  # 发起 IOC，随后把流动性竞态误报为撮合或资金故障。
+  wait_sql_nonzero "market-maker ask quote ready ${product_line}" \
+    "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND symbol = '${symbol}' AND user_id IN (${MM_USER_A}, ${MM_USER_B}) AND side = 'SELL' AND status IN ('ACCEPTED', 'PARTIALLY_FILLED') AND price_ticks <= $(price_with_offset "${product_line}" "${price}" 2000)"
   buy_order="$(place_order "${product_line}" "${TAKER_USER}" "mm-taker-buy-${product_line}-${RUN_ID}" "BUY" "LIMIT" "IOC" "$(price_with_offset "${product_line}" "${price}" 1000)" "${qty}" false false)"
   wait_order_filled "${product_line}" "${buy_order}" "${qty}"
   wait_account_processed_order "${product_line}" "${buy_order}"
   if is_margin_product "${product_line}"; then
-    wait_position "${product_line}" "${TAKER_USER}" "${symbol}" "${qty}" "$(query_value "SELECT price_ticks FROM trading_match_trades WHERE product_line = '${product_line}' AND taker_order_id = ${buy_order} ORDER BY event_time DESC LIMIT 1")"
+    # 订单状态和账户命令可能先于异步成交审计落库；先等待成交价格，再用
+    # 同一笔成交的价格校验持仓，避免把尚未写入审计表的空值当成期望值。
+    wait_sql_nonzero "market-maker trade price ${buy_order}" \
+      "SELECT count(*) FROM trading_match_trades WHERE product_line = '${product_line}' AND taker_order_id = ${buy_order}"
+    local entry_price
+    entry_price="$(query_value "SELECT price_ticks FROM trading_match_trades WHERE product_line = '${product_line}' AND taker_order_id = ${buy_order} ORDER BY event_time DESC LIMIT 1")"
+    wait_position "${product_line}" "${TAKER_USER}" "${symbol}" "${qty}" "${entry_price}"
+    wait_sql_nonzero "market-maker bid quote ready ${product_line}" \
+      "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND symbol = '${symbol}' AND user_id IN (${MM_USER_A}, ${MM_USER_B}) AND side = 'BUY' AND status IN ('ACCEPTED', 'PARTIALLY_FILLED') AND price_ticks >= $(price_with_offset "${product_line}" "${price}" -2000)"
     sell_order="$(place_order "${product_line}" "${TAKER_USER}" "mm-taker-close-${product_line}-${RUN_ID}" "SELL" "LIMIT" "IOC" "$(price_with_offset "${product_line}" "${price}" -1000)" "${qty}" true false)"
     wait_order_filled "${product_line}" "${sell_order}" "${qty}"
     wait_account_processed_order "${product_line}" "${sell_order}"
     wait_position "${product_line}" "${TAKER_USER}" "${symbol}" "0" "0"
     close_market_maker_inventory "${product_line}" "${symbol}" "${price}"
   else
+    wait_sql_nonzero "market-maker bid quote ready ${product_line}" \
+      "SELECT count(*) FROM trading_orders WHERE product_line = '${product_line}' AND symbol = '${symbol}' AND user_id IN (${MM_USER_A}, ${MM_USER_B}) AND side = 'BUY' AND status IN ('ACCEPTED', 'PARTIALLY_FILLED') AND price_ticks >= $(price_with_offset "${product_line}" "${price}" -2000)"
     sell_order="$(place_order "${product_line}" "${TAKER_USER}" "mm-taker-spot-sell-${product_line}-${RUN_ID}" "SELL" "LIMIT" "IOC" "$(price_with_offset "${product_line}" "${price}" -1000)" "${qty}" false false)"
     wait_order_filled "${product_line}" "${sell_order}" "${qty}"
     wait_account_processed_order "${product_line}" "${sell_order}"
@@ -3997,12 +4504,12 @@ run_manual_open_close_flow() {
     return
   fi
   symbol="$(symbol_for "${product_line}")"
-  price="$(price_ticks_for "${product_line}")"
+  price="$(price_with_offset "${product_line}" "$(price_ticks_for "${product_line}")" 5)"
   qty=3
   echo "Scenario ${product_line}: user opens position and closes by reduce-only API order"
   fund_user_for_line "${product_line}" "${MANUAL_MAKER_USER}"
   fund_user_for_line "${product_line}" "${TAKER_USER}"
-  maker_order="$(place_order "${product_line}" "${MANUAL_MAKER_USER}" "manual-open-maker-${product_line}-${RUN_ID}" "SELL" "LIMIT" "GTC" "${price}" "${qty}" false false)"
+  maker_order="$(place_order "${product_line}" "${MANUAL_MAKER_USER}" "manual-open-maker-${product_line}-${RUN_ID}" "SELL" "LIMIT" "GTC" "${price}" "${qty}" false true)"
   wait_order_status "${product_line}" "${maker_order}" "ACCEPTED"
   taker_order="$(place_order "${product_line}" "${TAKER_USER}" "manual-open-taker-${product_line}-${RUN_ID}" "BUY" "LIMIT" "IOC" "${price}" "${qty}" false false)"
   if [[ "${ACCOUNT_RESTART_RECOVERY}" == "true" ]]; then
@@ -4018,7 +4525,7 @@ run_manual_open_close_flow() {
     run_funding_settlement_flow "${product_line}" "${symbol}"
   fi
 
-  close_maker="$(place_order "${product_line}" "${MANUAL_MAKER_USER}" "manual-close-maker-${product_line}-${RUN_ID}" "BUY" "LIMIT" "GTC" "${price}" "${qty}" true false)"
+  close_maker="$(place_order "${product_line}" "${MANUAL_MAKER_USER}" "manual-close-maker-${product_line}-${RUN_ID}" "BUY" "LIMIT" "GTC" "${price}" "${qty}" true true)"
   wait_order_status "${product_line}" "${close_maker}" "ACCEPTED"
   close_taker="$(place_order "${product_line}" "${TAKER_USER}" "manual-close-taker-${product_line}-${RUN_ID}" "SELL" "LIMIT" "IOC" "${price}" "${qty}" true false)"
   wait_order_filled "${product_line}" "${close_taker}" "${qty}"
@@ -4030,16 +4537,12 @@ run_manual_open_close_flow() {
 run_funding_settlement_flow() {
   local product_line="$1"
   local symbol="$2"
+  local funding_time event_time payload
   echo "Scenario ${product_line}: funding settlement while positions are open"
-  psql_exec <<SQL >/dev/null
-INSERT INTO funding_rate_ticks (
-    symbol, sequence, funding_time, funding_interval_hours,
-    premium_rate_ppm, interest_rate_ppm, funding_rate_ppm, status, event_time, created_at
-) VALUES (
-    '${symbol}', ${RUN_SEQ}, now() - interval '1 second', 8,
-    1000, 0, 1000, 'FINAL', now(), now()
-) ON CONFLICT (symbol, sequence) DO NOTHING;
-SQL
+  funding_time="$(date -u -v-1S '+%Y-%m-%dT%H:%M:%SZ')"
+  event_time="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  payload="{\"symbol\":\"${symbol}\",\"fundingRate\":0.001,\"nextFundingTime\":\"${funding_time}\",\"fundingIntervalHours\":8,\"sequence\":${RUN_SEQ},\"eventTime\":\"${event_time}\"}"
+  produce_json "$(topic_name "${product_line}" "funding.rate")" "${symbol}" "${payload}"
   wait_sql_nonzero "funding settlement completed ${product_line}" \
     "SELECT count(*) FROM funding_settlements WHERE symbol = '${symbol}' AND funding_rate_ppm = 1000 AND status = 'COMPLETED' AND position_count > 0" \
     180
@@ -4073,7 +4576,7 @@ run_liquidation_flow() {
     return
   fi
   symbol="$(symbol_for "${product_line}")"
-  price="$(price_ticks_for "${product_line}")"
+  price="$(price_with_offset "${product_line}" "$(price_ticks_for "${product_line}")" 5)"
   qty=2
   open_maker_side="SELL"
   open_taker_side="BUY"
@@ -4088,7 +4591,7 @@ run_liquidation_flow() {
   echo "Scenario ${product_line}: risk creates liquidation candidate and liquidation closes position"
   fund_liquidation_user_for_line "${product_line}" "${LIQ_USER}"
   fund_user_for_line "${product_line}" "${LIQ_MAKER_USER}"
-  open_maker="$(place_order "${product_line}" "${LIQ_MAKER_USER}" "liq-open-maker-${product_line}-${RUN_ID}" "${open_maker_side}" "LIMIT" "GTC" "${price}" "${qty}" false false)"
+  open_maker="$(place_order "${product_line}" "${LIQ_MAKER_USER}" "liq-open-maker-${product_line}-${RUN_ID}" "${open_maker_side}" "LIMIT" "GTC" "${price}" "${qty}" false true)"
   wait_order_status "${product_line}" "${open_maker}" "ACCEPTED"
   open_taker="$(place_order "${product_line}" "${LIQ_USER}" "liq-open-taker-${product_line}-${RUN_ID}" "${open_taker_side}" "LIMIT" "IOC" "${price}" "${qty}" false false)"
   wait_order_filled "${product_line}" "${open_taker}" "${qty}"
@@ -4096,22 +4599,30 @@ run_liquidation_flow() {
   wait_position "${product_line}" "${LIQ_USER}" "${symbol}" "${expected_liq_qty}" "${price}"
   wait_sql_nonzero "risk snapshot after open ${product_line}" \
     "SELECT count(*) FROM risk_account_snapshots WHERE product_line = '${product_line}' AND user_id = ${LIQ_USER} AND maintenance_margin_units > 0 AND margin_ratio_ppm > 1"
-  pre_ratio="$(query_value "SELECT margin_ratio_ppm FROM risk_account_snapshots WHERE product_line = '${product_line}' AND user_id = ${LIQ_USER} ORDER BY event_time DESC, snapshot_id DESC LIMIT 1")"
+  pre_ratio="$(query_value "SELECT margin_ratio_ppm FROM risk_account_snapshots WHERE product_line = '${product_line}' AND user_id = ${LIQ_USER} AND maintenance_margin_units > 0 AND margin_ratio_ppm > 1 ORDER BY event_time DESC, snapshot_id DESC LIMIT 1")"
   liq_threshold=$((pre_ratio * 80 / 100))
   if ((liq_threshold <= 1)); then
     echo "Unable to derive liquidation threshold from margin ratio ${pre_ratio}" >&2
     exit 1
   fi
   warning=$((liq_threshold - 1))
-  close_maker="$(place_order "${product_line}" "${LIQ_MAKER_USER}" "liq-close-maker-${product_line}-${RUN_ID}" "${close_maker_side}" "LIMIT" "GTC" "${price}" "${qty}" false false)"
+  close_maker="$(place_order "${product_line}" "${LIQ_MAKER_USER}" "liq-close-maker-${product_line}-${RUN_ID}" "${close_maker_side}" "LIMIT" "GTC" "${price}" "${qty}" false true)"
   wait_order_status "${product_line}" "${close_maker}" "ACCEPTED"
   update_liquidation_runtime_config "${liq_threshold}"
   update_risk_runtime_config "${warning}" "${liq_threshold}"
+  adjust_product_balance "${LIQ_USER}" "$(account_type "${product_line}")" "$(settle_asset_for "${product_line}")" 1 \
+    "smoke-${RUN_ID}-${product_line}-${LIQ_USER}-risk-recheck"
   wait_sql_nonzero "liquidation candidate ${product_line}" \
     "SELECT count(*) FROM risk_liquidation_candidates WHERE product_line = '${product_line}' AND user_id = ${LIQ_USER} AND symbol = '${symbol}'"
   wait_sql_nonzero "liquidation order filled ${product_line}" \
     "SELECT count(*) FROM liquidation_orders l JOIN risk_liquidation_candidates c ON c.candidate_id = l.candidate_id WHERE c.product_line = '${product_line}' AND l.user_id = ${LIQ_USER} AND l.symbol = '${symbol}' AND l.status = 'FILLED'"
   wait_position "${product_line}" "${LIQ_USER}" "${symbol}" "0" "0"
+  local close_maker_status
+  close_maker_status="$(query_value "SELECT status FROM trading_orders WHERE product_line = '${product_line}' AND order_id = ${close_maker}")"
+  if [[ "${close_maker_status}" == "ACCEPTED" || "${close_maker_status}" == "PARTIALLY_FILLED" ]]; then
+    cancel_order_if_open "${product_line}" "${LIQ_MAKER_USER}" "${close_maker}"
+    wait_order_terminal "${product_line}" "${close_maker}"
+  fi
   update_risk_runtime_config 800000 1000000
   update_liquidation_runtime_config 3000000
 }
@@ -4188,47 +4699,75 @@ produce_json() {
 publish_lifecycle_event() {
   local product_line="$1"
   local symbol="$2"
-  local event_time instrument payload topic strike
-  event_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  psql_exec -c "UPDATE instruments SET status = 'CLOSED', updated_at = now() WHERE symbol = '${symbol}' AND version = 1" >/dev/null
-  instrument="$(instrument_json "${symbol}")"
-  if is_delivery_product "${product_line}"; then
-    topic="$(topic_name "${product_line}" "delivery.settlements")"
-    payload="{\"symbol\":\"${symbol}\",\"version\":1,\"contractType\":\"$(contract_type "${product_line}")\",\"expiryTime\":\"${event_time}\",\"deliveryTime\":\"${event_time}\",\"settlementMethod\":\"CASH\",\"status\":\"CLOSED\",\"eventTime\":\"${event_time}\",\"instrument\":${instrument}}"
-  else
-    topic="$(topic_name "${product_line}" "option.exercises")"
-    strike="$(query_value "SELECT strike_price_units FROM instruments WHERE symbol = '${symbol}' AND version = 1")"
-    payload="{\"symbol\":\"${symbol}\",\"version\":1,\"underlyingSymbol\":\"BTC-USDT\",\"strikePriceUnits\":${strike},\"optionType\":\"CALL\",\"optionExerciseStyle\":\"EUROPEAN\",\"expiryTime\":\"${event_time}\",\"deliveryTime\":\"${event_time}\",\"settlementMethod\":\"CASH\",\"status\":\"CLOSED\",\"eventTime\":\"${event_time}\",\"instrument\":${instrument}}"
+  local settlement_price underlying_price
+  settlement_price="$(( $(price_ticks_for "${product_line}") + 100 ))"
+  underlying_price=0
+  if is_option_product "${product_line}"; then
+    # 期权事件使用资产最小单位，行情 tick 需要按价格精度转换，不能直接把 tick 当成 units。
+    underlying_price=$((600100 * 10000000))
   fi
-  produce_json "${topic}" "${symbol}" "${payload}"
+  # 生命周期测试必须走 instrument 唯一管理入口：先推进 SETTLING，再由入口固化
+  # 结算价并发布不可变交割/行权事件，禁止脚本直接改表或伪造 Kafka 资金事件。
+  curl --retry 3 --retry-delay 1 --retry-max-time 30 --retry-all-errors -fsS -X POST \
+    "http://localhost:9080/api/v1/instruments/admin/${symbol}/status?status=SETTLING&productLine=${product_line}" \
+    -H "X-Product-Line: ${product_line}" >/dev/null
+  curl --retry 3 --retry-delay 1 --retry-max-time 30 --retry-all-errors -fsS -X POST \
+    "http://localhost:9080/api/v1/instruments/admin/${symbol}/settlement?productLine=${product_line}&settlementPriceTicks=${settlement_price}&underlyingSettlementPriceUnits=${underlying_price}" \
+    -H "X-Product-Line: ${product_line}" >/dev/null
 }
 
 run_lifecycle_flow() {
   local product_line="$1"
-  local symbol price qty maker taker
+  local symbol price lifecycle_price qty maker taker settlement_price underlying_price lifecycle_ledger_count lifecycle_ledger_count_after expected_lifecycle_ledger_count
   if ! is_delivery_product "${product_line}" && ! is_option_product "${product_line}"; then
     return
   fi
   symbol="$(symbol_for "${product_line}")"
   price="$(price_ticks_for "${product_line}")"
+  lifecycle_price="$(price_with_offset "${product_line}" "${price}" 5)"
   qty=2
   echo "Scenario ${product_line}: lifecycle settlement/exercise closes open positions"
   fund_user_for_line "${product_line}" "${LIFECYCLE_USER}"
   fund_user_for_line "${product_line}" "${LIFECYCLE_MAKER_USER}"
-  maker="$(place_order "${product_line}" "${LIFECYCLE_MAKER_USER}" "life-open-maker-${product_line}-${RUN_ID}" "SELL" "LIMIT" "GTC" "${price}" "${qty}" false false)"
+  maker="$(place_order "${product_line}" "${LIFECYCLE_MAKER_USER}" "life-open-maker-${product_line}-${RUN_ID}" "SELL" "LIMIT" "GTC" "${lifecycle_price}" "${qty}" false true)"
   wait_order_status "${product_line}" "${maker}" "ACCEPTED"
-  taker="$(place_order "${product_line}" "${LIFECYCLE_USER}" "life-open-taker-${product_line}-${RUN_ID}" "BUY" "LIMIT" "IOC" "${price}" "${qty}" false false)"
+  taker="$(place_order "${product_line}" "${LIFECYCLE_USER}" "life-open-taker-${product_line}-${RUN_ID}" "BUY" "LIMIT" "IOC" "${lifecycle_price}" "${qty}" false false)"
   wait_order_filled "${product_line}" "${taker}" "${qty}"
   wait_account_processed_order "${product_line}" "${taker}"
-  wait_position "${product_line}" "${LIFECYCLE_USER}" "${symbol}" "${qty}" "${price}"
+  wait_position "${product_line}" "${LIFECYCLE_USER}" "${symbol}" "${qty}" "${lifecycle_price}"
   stop_provider_by_name price-refresher
   seed_lifecycle_settlement_price "${product_line}"
   sleep 1
   publish_lifecycle_event "${product_line}" "${symbol}"
   wait_position "${product_line}" "${LIFECYCLE_USER}" "${symbol}" "0" "0"
   wait_position "${product_line}" "${LIFECYCLE_MAKER_USER}" "${symbol}" "0" "0"
-  wait_sql_nonzero "lifecycle ledger ${product_line}" \
-    "SELECT count(*) FROM account_product_ledger_entries WHERE user_id IN (${LIFECYCLE_USER}, ${LIFECYCLE_MAKER_USER}) AND account_type = '$(account_type "${product_line}")' AND reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE') AND amount_units <> 0"
+  wait_sql_equals "${product_line} lifecycle risk position projection zero" \
+    "SELECT count(*) FROM (SELECT DISTINCT ON (user_id, symbol, margin_mode, position_side) signed_quantity_steps FROM risk_position_snapshots WHERE product_line = '${product_line}' AND user_id IN (${LIFECYCLE_USER}, ${LIFECYCLE_MAKER_USER}) AND symbol = '${symbol}' ORDER BY user_id, symbol, margin_mode, position_side, event_time DESC, snapshot_id DESC) latest WHERE signed_quantity_steps <> 0" \
+    "0"
+  wait_sql_equals "${product_line} instrument closed" \
+    "SELECT count(*) FROM instrument_product_current_versions p JOIN instruments i ON i.symbol = p.symbol AND i.version = p.version WHERE p.product_line = '${product_line}' AND p.symbol = '${symbol}' AND i.status = 'CLOSED'" \
+    "1"
+  expected_lifecycle_ledger_count=2
+  wait_sql_equals "${product_line} lifecycle ledger projection" \
+    "SELECT count(*) FROM account_product_ledger_entries WHERE user_id IN (${LIFECYCLE_USER}, ${LIFECYCLE_MAKER_USER}) AND account_type = '$(account_type "${product_line}")' AND reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE') AND amount_units <> 0" \
+    "${expected_lifecycle_ledger_count}"
+  lifecycle_ledger_count="$(query_value "SELECT count(*) FROM account_product_ledger_entries WHERE user_id IN (${LIFECYCLE_USER}, ${LIFECYCLE_MAKER_USER}) AND account_type = '$(account_type "${product_line}")' AND reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE') AND amount_units <> 0")"
+  if [[ "${product_line}" == "OPTION" ]]; then
+    underlying_price=$((600100 * 10000000))
+  else
+    underlying_price=0
+  fi
+  settlement_price="$(( $(price_ticks_for "${product_line}") + 100 ))"
+  # CLOSED 状态的重复确认只能返回当前版本，不能再次发布生命周期事件或重复记账。
+  curl --retry 3 --retry-delay 1 --retry-max-time 30 --retry-all-errors -fsS -X POST \
+    "http://localhost:9080/api/v1/instruments/admin/${symbol}/settlement?productLine=${product_line}&settlementPriceTicks=${settlement_price}&underlyingSettlementPriceUnits=${underlying_price}" \
+    -H "X-Product-Line: ${product_line}" >/dev/null
+  sleep 2
+  lifecycle_ledger_count_after="$(query_value "SELECT count(*) FROM account_product_ledger_entries WHERE user_id IN (${LIFECYCLE_USER}, ${LIFECYCLE_MAKER_USER}) AND account_type = '$(account_type "${product_line}")' AND reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE') AND amount_units <> 0")"
+  if [[ "${lifecycle_ledger_count_after}" != "${lifecycle_ledger_count}" ]]; then
+    echo "${product_line} lifecycle duplicate settlement changed ledger count: before=${lifecycle_ledger_count} after=${lifecycle_ledger_count_after}" >&2
+    exit 1
+  fi
 }
 
 run_spot_asset_flow() {
@@ -4255,14 +4794,17 @@ run_spot_asset_flow() {
   wait_sql_equals "spot has no derivative positions" \
     "SELECT count(*) FROM account_positions WHERE product_line = 'SPOT' AND user_id IN (${MANUAL_MAKER_USER}, ${TAKER_USER})" \
     "0"
+  wait_sql_equals "spot asset balances projected after recovery" \
+    "SELECT CASE WHEN COALESCE((SELECT available_units FROM account_product_balances WHERE user_id = ${TAKER_USER} AND account_type = 'SPOT' AND asset = 'BTC'), 0) > COALESCE((SELECT available_units FROM account_product_balances WHERE user_id = ${MANUAL_MAKER_USER} AND account_type = 'SPOT' AND asset = 'BTC'), 0) THEN 1 ELSE 0 END" \
+    "1"
   seller_btc="$(query_value "SELECT COALESCE((SELECT available_units FROM account_product_balances WHERE user_id = ${MANUAL_MAKER_USER} AND account_type = 'SPOT' AND asset = 'BTC'), 0)")"
   buyer_btc="$(query_value "SELECT COALESCE((SELECT available_units FROM account_product_balances WHERE user_id = ${TAKER_USER} AND account_type = 'SPOT' AND asset = 'BTC'), 0)")"
   if ((buyer_btc <= seller_btc)); then
     echo "Expected spot buyer BTC to increase relative to seller after trade, seller=${seller_btc}, buyer=${buyer_btc}" >&2
     exit 1
   fi
-  wait_sql_equals "spot reservations released or terminal" \
-    "SELECT count(*) FROM account_spot_order_reservations WHERE order_id IN (${maker}, ${taker}) AND status NOT IN ('RELEASED', 'SETTLED')" \
+  wait_sql_equals "spot order locks released or terminal" \
+    "SELECT COALESCE(SUM(locked_units), 0) FROM account_state_order_locks WHERE product_line = 'SPOT' AND user_id IN (${MANUAL_MAKER_USER}, ${TAKER_USER})" \
     "0"
 }
 
@@ -4387,8 +4929,31 @@ validate_topic_reset_config() {
       exit 1
       ;;
   esac
+  case "${KAFKA_TRUNCATE_TOPICS}" in
+    true|false) ;;
+    *)
+      echo "KAFKA_TRUNCATE_TOPICS 必须是 true 或 false" >&2
+      exit 1
+      ;;
+  esac
+  if [[ "${RESET_KAFKA}" == "true" && "${KAFKA_TRUNCATE_TOPICS}" == "true" ]]; then
+    echo "RESET_KAFKA 与 KAFKA_TRUNCATE_TOPICS 不能同时启用" >&2
+    exit 1
+  fi
   if [[ "${RESET_KAFKA}" == "true" && "${KAFKA_RESET_SHARED_TOPICS}" != "true" ]]; then
     echo "重建测试数据库时必须同时设置 KAFKA_RESET_SHARED_TOPICS=true，避免 earliest 重放旧共享命令" >&2
+    exit 1
+  fi
+  if [[ "${KAFKA_RESET_SHARED_TOPICS}" == "true" && "${RESET_KAFKA}" != "true" && "${KAFKA_TRUNCATE_TOPICS}" != "true" ]]; then
+    echo "KAFKA_RESET_SHARED_TOPICS=true 必须同时启用 RESET_KAFKA 或 KAFKA_TRUNCATE_TOPICS" >&2
+    exit 1
+  fi
+  if [[ "${KAFKA_TRUNCATE_TOPICS}" == "true" && "${KAFKA_RESET_SHARED_TOPICS}" != "true" ]]; then
+    echo "KAFKA_TRUNCATE_TOPICS=true 时必须同时清理共享 Topic，避免 earliest 重放旧共享命令" >&2
+    exit 1
+  fi
+  if [[ "${KAFKA_TRUNCATE_TOPICS}" == "true" && "${CREATE_KAFKA_TOPICS}" != "true" ]]; then
+    echo "KAFKA_TRUNCATE_TOPICS=true 时必须同时设置 CREATE_KAFKA_TOPICS=true，以便重建 compact Topic" >&2
     exit 1
   fi
   if [[ "${RESET_KAFKA}" == "true" && "${CREATE_KAFKA_TOPICS}" != "true" ]]; then
@@ -4408,17 +4973,26 @@ run_line() {
   else
     seed_prices_for_line "${product_line}"
   fi
+  # 价格生产者先于业务 provider 启动，给常驻 Kafka 客户端预留连接和元数据
+  # 初始化时间；否则本机同时拉起多个 JVM 时，做市商已经分配分区，生产者仍
+  # 可能没有打开 FIFO，启动补发会被阻塞。
+  start_price_refresher "${product_line}"
   start_providers_for_line "${product_line}"
   if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
     seed_stress_prices "${product_line}"
   else
     seed_prices_for_line "${product_line}"
   fi
-  start_price_refresher "${product_line}"
   if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
+    # 先完成账户快照初始化，再启动做市，避免启动竞态把账户命令投递到未初始化分区。
     if [[ "${STRESS_SCENARIO}" == "liquidation" ]]; then
+      fund_stress_accounts_for_line "${product_line}"
+      start_provider market-maker "${product_line}"
       run_multi_symbol_liquidation_stress_flow "${product_line}"
     else
+      fund_stress_accounts_for_line "${product_line}"
+      start_provider market-maker "${product_line}"
+      wait_stress_market_maker_ready "${product_line}"
       run_multi_symbol_stress_flow "${product_line}"
     fi
     stop_provider_by_name market-maker
@@ -4450,12 +5024,19 @@ run_line() {
   fund_user_for_line "${product_line}" "${MM_USER_A}"
   fund_user_for_line "${product_line}" "${MM_USER_B}"
   fund_user_for_line "${product_line}" "${TAKER_USER}"
+  start_provider market-maker "${product_line}"
+  if [[ "${RUN_WEBSOCKET_SMOKE}" == "true" ]]; then
+    start_live_websocket_smoke "${product_line}" "$(symbol_for "${product_line}")"
+  fi
   run_market_maker_taker_flow "${product_line}"
   run_order_api_controls "${product_line}"
   run_manual_open_close_flow "${product_line}"
   run_liquidation_flow "${product_line}"
   run_lifecycle_flow "${product_line}"
   run_spot_asset_flow "${product_line}"
+  if [[ "${RUN_WEBSOCKET_SMOKE}" == "true" ]]; then
+    finish_live_websocket_smoke
+  fi
   stop_provider_by_name market-maker
   assert_no_negative_balances "${product_line}"
   assert_outbox_drained "${product_line}"

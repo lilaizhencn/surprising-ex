@@ -5,6 +5,7 @@ import com.surprising.trading.api.model.FeeScheduleEvent;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -18,6 +19,7 @@ public class FeeScheduleSnapshotConsumer {
     private final FeeScheduleSnapshotCache cache;
     private final OrderFeeRepository projectionRepository;
 
+    @Autowired
     public FeeScheduleSnapshotConsumer(ObjectMapper objectMapper,
                                        TradingOrderProperties properties,
                                        FeeScheduleSnapshotCache cache,

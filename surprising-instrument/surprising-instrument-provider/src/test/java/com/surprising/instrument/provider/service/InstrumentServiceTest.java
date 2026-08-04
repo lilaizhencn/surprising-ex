@@ -3,6 +3,7 @@ package com.surprising.instrument.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -33,7 +34,7 @@ class InstrumentServiceTest {
         InstrumentService service = service(outboxService, new InstrumentProperties());
         InstrumentResponse instrument = delivery("BTC-USDT-260327", InstrumentStatus.CLOSED);
 
-        service.publishProductLifecycleEvent(instrument);
+        service.publishProductLifecycleEvent(instrument, 100_000L, 0L);
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
         verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L),
@@ -48,10 +49,14 @@ class InstrumentServiceTest {
     @Test
     void publishesOptionExerciseToProductTopic() {
         InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);
-        InstrumentService service = service(outboxService, new InstrumentProperties());
+        InstrumentStorageService storageService = mock(InstrumentStorageService.class);
+        when(storageService.latest("BTC-USDT"))
+                .thenReturn(Optional.of(delivery("BTC-USDT", InstrumentStatus.TRADING)));
+        InstrumentService service = new InstrumentService(storageService, mock(InstrumentValidator.class),
+                new InstrumentProperties(), outboxService);
         InstrumentResponse instrument = option("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED);
 
-        service.publishProductLifecycleEvent(instrument);
+        service.publishProductLifecycleEvent(instrument, 0L, 71_000_000L);
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
         verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L),
@@ -61,6 +66,7 @@ class InstrumentServiceTest {
         OptionExerciseEvent optionEvent = (OptionExerciseEvent) event.getValue();
         assertThat(optionEvent.underlyingSymbol()).isEqualTo("BTC-USDT");
         assertThat(optionEvent.optionType()).isEqualTo(OptionType.CALL);
+        assertThat(optionEvent.cashSettlementUnitsPerContract()).isZero();
     }
 
     @Test
@@ -70,7 +76,7 @@ class InstrumentServiceTest {
         properties.getKafka().setDeliverySettlementsTopic("custom.delivery.settlements");
         InstrumentService service = service(outboxService, properties);
 
-        service.publishProductLifecycleEvent(delivery("BTC-USDT-260327", InstrumentStatus.CLOSED));
+        service.publishProductLifecycleEvent(delivery("BTC-USDT-260327", InstrumentStatus.CLOSED), 100_000L, 0L);
 
         verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L), eq("custom.delivery.settlements"),
                 eq("BTC-USDT-260327"), eq("DELIVERY_SETTLEMENT"), any(Object.class), any(Instant.class));
@@ -114,6 +120,20 @@ class InstrumentServiceTest {
         assertThatThrownBy(() -> service.latest("BTC-USDT-260327", ProductLine.OPTION))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("instrument product current mismatch");
+    }
+
+    @Test
+    void settlementConfirmationRejectsInstrumentThatWasNotDrainedToSettling() {
+        InstrumentStorageService storageService = mock(InstrumentStorageService.class);
+        InstrumentService service = service(storageService);
+        when(storageService.latest("BTC-USDT-260327", ProductLine.LINEAR_DELIVERY))
+                .thenReturn(Optional.of(delivery("BTC-USDT-260327", InstrumentStatus.TRADING)));
+
+        assertThatThrownBy(() -> service.closeForSettlement("BTC-USDT-260327", ProductLine.LINEAR_DELIVERY,
+                100_000L, 0L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("必须先进入 SETTLING");
+        verify(storageService, org.mockito.Mockito.never()).insert(any(), anyLong(), any(), any());
     }
 
     private InstrumentService service(InstrumentOutboxService outboxService, InstrumentProperties properties) {

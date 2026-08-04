@@ -103,7 +103,7 @@ public class ProductLedgerRepository {
                                     String symbol,
                                     Instant now) {
         if (entryId <= 0L || userId <= 0L || accountType == null || asset == null || asset.isBlank()
-                || amountUnits == 0L || balanceAfterUnits < 0L || referenceType == null
+                || amountUnits == 0L || referenceType == null
                 || referenceType.isBlank() || referenceId == null || referenceId.isBlank()) {
             throw new IllegalArgumentException("产品账本异步投影参数无效");
         }

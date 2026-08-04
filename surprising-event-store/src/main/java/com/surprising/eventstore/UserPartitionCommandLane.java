@@ -1,27 +1,39 @@
 package com.surprising.eventstore;
 
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
  * JVM 内按用户分区的单写入队列。
- * Kafka 同一分区保证跨节点顺序，本地锁保证同一节点上的批量回调不会并发修改同一用户状态。
+ * Kafka 同一分区保证跨节点顺序，本地 Owner 线程保证同一节点上的批量回调不会并发修改同一用户状态。
  */
-public final class UserPartitionCommandLane {
+public final class UserPartitionCommandLane implements AutoCloseable {
 
-    private final ConcurrentHashMap<UserPartitionKey, ReentrantLock> locks = new ConcurrentHashMap<>();
+    private final PartitionOwnerLane<UserPartitionKey> owners;
+
+    public UserPartitionCommandLane() {
+        this(new PartitionOwnerLane<>(Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 32)),
+                "user-partition-owner"));
+    }
+
+    public UserPartitionCommandLane(int shardCount) {
+        this(new PartitionOwnerLane<>(shardCount, "user-partition-owner"));
+    }
+
+    public UserPartitionCommandLane(PartitionOwnerLane<UserPartitionKey> owners) {
+        this.owners = Objects.requireNonNull(owners, "owners");
+    }
 
     public <T> T execute(UserPartitionKey partition, Supplier<T> action) {
-        Objects.requireNonNull(partition, "partition");
-        Objects.requireNonNull(action, "action");
-        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
-            return action.get();
-        } finally {
-            lock.unlock();
-        }
+        return owners.execute(partition, action);
+    }
+
+    public boolean isOwnerThread(UserPartitionKey partition) {
+        return owners.isOwnerThread(partition);
+    }
+
+    @Override
+    public void close() {
+        owners.close();
     }
 }

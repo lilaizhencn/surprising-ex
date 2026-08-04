@@ -123,7 +123,8 @@ public class MatchingSymbolService {
     }
 
     private ProductLine productLine() {
-        return properties.getKafka().getProductLine();
+        ProductLine configured = properties.getKafka().getProductLine();
+        return configured == null ? ProductLine.LINEAR_PERPETUAL : configured;
     }
 
     private static InstrumentSymbol toInstrumentSymbol(InstrumentResponse instrument) {

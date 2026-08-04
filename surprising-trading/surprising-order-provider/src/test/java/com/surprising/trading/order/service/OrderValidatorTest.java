@@ -133,7 +133,7 @@ class OrderValidatorTest {
 
         assertThat(result.accepted()).isFalse();
         assertThat(result.instrumentType()).isEqualTo(InstrumentType.SPOT);
-        assertThat(result.rejectReason()).isEqualTo("reduce-only is only supported for perpetual instruments");
+        assertThat(result.rejectReason()).isEqualTo("reduce-only is only supported for derivative instruments");
     }
 
     @Test

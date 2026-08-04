@@ -43,6 +43,7 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.client.MarketDataRpcApi;
 import com.surprising.trading.api.client.OrderRpcApi;
+import feign.FeignException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -68,7 +69,10 @@ import org.springframework.stereotype.Service;
 public class MarketMakerService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketMakerService.class);
-    private static final Set<OrderStatus> LIVE_STATUSES = EnumSet.of(OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED);
+    // 预占结果通过账户 Kafka 异步返回。预占中的报价仍然占用一个报价槽位，
+    // 若在下一轮被当成非活动订单撤掉，会形成“永远预占不成功”的并发活锁。
+    private static final Set<OrderStatus> LIVE_STATUSES = EnumSet.of(
+            OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED, OrderStatus.PENDING_RESERVE);
 
     private final MarketMakerProperties properties;
     private final InstrumentSnapshotCache instrumentSnapshotCache;
@@ -354,8 +358,6 @@ public class MarketMakerService {
                     1, 0, state.lastError()));
         }
         try {
-            PositionResponse position = accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(),
-                    PositionSide.NET.name());
             List<OrderResponse> openOrders = openOrders(accountId, symbol);
             List<OrderResponse> ownedLive = openOrders.stream()
                     .filter(order -> ownsOrder(accountPrefix, order))
@@ -363,9 +365,10 @@ public class MarketMakerService {
                     .toList();
             long staleOwned = ownedLive.stream().filter(order -> isStale(order, now)).count();
             InstrumentResponse instrument = currentInstrument(productLine, symbol);
+            PositionResponse position = currentPosition(strategy, accountId, symbol, instrument);
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                     properties.getQuoting().getOrderBookDepth());
-            MarkPriceResponse markPrice = latestMarkPrice(symbol, instrument.version());
+            MarkPriceResponse markPrice = currentMarkPrice(productLine, symbol, instrument.version());
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, productLine, instrument);
             QuotePlan plan = !isTradableForProduct(instrument, productLine)
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of())
@@ -618,7 +621,7 @@ public class MarketMakerService {
                 requireTradable(instrument, strategy.getProductLine());
                 OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                         properties.getQuoting().getOrderBookDepth());
-                MarkPriceResponse markPrice = latestMarkPrice(symbol, instrument.version());
+                MarkPriceResponse markPrice = currentMarkPrice(strategy.getProductLine(), symbol, instrument.version());
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol,
                         strategy.getProductLine(), instrument);
                 recordReferenceSample(strategy, symbol, cycleSequence, referenceOrderBook, traceId, now);
@@ -653,8 +656,7 @@ public class MarketMakerService {
                               long accountId,
                               Instant now,
                               String traceId) {
-        PositionResponse position = accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(),
-                PositionSide.NET.name());
+        PositionResponse position = currentPosition(strategy, accountId, symbol, instrument);
         QuotePlan plan = quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                 orderBook, markPrice, position.signedQuantitySteps(), referenceOrderBook);
         List<OrderResponse> openOrders = openOrders(accountId, symbol);
@@ -663,7 +665,7 @@ public class MarketMakerService {
         state.addSubmitted(result.submitted());
         state.addRejected(result.rejected());
         recordRunEvent(strategy, symbol, accountId, cycleSequence, "QUOTE_RECONCILED",
-                result.submitted(), result.canceled(), result.rejected(), null, null, traceId, now);
+                result.submitted(), result.canceled(), result.rejected(), null, result.rejectionReason(), traceId, now);
     }
 
     private ReconcileResult reconcile(MarketMakerProperties.Strategy strategy,
@@ -691,6 +693,7 @@ public class MarketMakerService {
 
         long submitted = 0L;
         long rejected = 0L;
+        String rejectionReason = null;
         int maxOpenOrders = properties.getQuoting().getMaxOpenOrdersPerAccountSymbol();
         List<DesiredQuote> missingQuotes = new ArrayList<>();
         for (DesiredQuote quote : plan.quotes()) {
@@ -716,6 +719,8 @@ public class MarketMakerService {
                                 quoteRequest(strategy, accountId, symbol, quote, cycleSequence));
                         if (response == null || response.status() == OrderStatus.REJECTED) {
                             rejected++;
+                            rejectionReason = firstReason(rejectionReason, response == null
+                                    ? "订单服务未返回报价结果" : response.rejectReason());
                             continue;
                         }
                         submitted++;
@@ -726,7 +731,7 @@ public class MarketMakerService {
                             kept.add(response);
                         }
                     }
-                    return new ReconcileResult(submitted, canceled, rejected);
+                    return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
                 }
                 for (int i = 0; i < requests.size(); i++) {
                     int resultIndex = i;
@@ -738,6 +743,9 @@ public class MarketMakerService {
                     if (item == null || !item.success() || response == null
                             || response.status() == OrderStatus.REJECTED) {
                         rejected++;
+                        rejectionReason = firstReason(rejectionReason,
+                                item == null ? "批量下单缺少结果" : firstReason(item.message(),
+                                        response == null ? null : response.rejectReason()));
                         continue;
                     }
                     submitted++;
@@ -756,6 +764,8 @@ public class MarketMakerService {
                             quoteRequest(strategy, accountId, symbol, quote, cycleSequence));
                     if (response == null || response.status() == OrderStatus.REJECTED) {
                         rejected++;
+                        rejectionReason = firstReason(rejectionReason, response == null
+                                ? "订单服务未返回报价结果" : response.rejectReason());
                         continue;
                     }
                     submitted++;
@@ -770,9 +780,18 @@ public class MarketMakerService {
                 // 批量请求失败时只跳过当前账户的报价，不能让一个账户阻断其他产品线。
                 // 下一周期会重新读取 JVM 快照并重试；资金校验仍由下单与账户单写者严格执行。
                 rejected += requests.size();
+                rejectionReason = firstReason(rejectionReason, ex.getMessage());
             }
         }
-        return new ReconcileResult(submitted, canceled, rejected);
+        return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
+    }
+
+    /** 只保留第一条拒单原因，避免一次批量报价把运行事件写得不可读。 */
+    private String firstReason(String current, String candidate) {
+        if (current != null && !current.isBlank()) {
+            return current;
+        }
+        return candidate == null || candidate.isBlank() ? "报价被拒绝" : candidate;
     }
 
     private boolean shouldKeep(OrderResponse order,
@@ -857,8 +876,7 @@ public class MarketMakerService {
 
         OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                 properties.getQuoting().getOrderBookDepth());
-        PositionResponse position = accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(),
-                PositionSide.NET.name());
+        PositionResponse position = currentPosition(strategy, accountId, symbol, instrument);
         OrderSide side = tradeSide(tradeKey, trade, instrument, orderBook, markPrice,
                 position.signedQuantitySteps());
         if (side == null) {
@@ -1044,7 +1062,12 @@ public class MarketMakerService {
     }
 
     private void cancel(long accountId, long orderId) {
-        orderRpcApi.cancel(new CancelOrderRequest(accountId, orderId));
+        try {
+            orderRpcApi.cancel(new CancelOrderRequest(accountId, orderId));
+        } catch (FeignException.NotFound ex) {
+            // 订单在读取开放订单和撤单之间已被撮合或其他周期撤掉，按幂等成功处理。
+            log.debug("做市撤单时订单已不存在 accountId={} orderId={}", accountId, orderId);
+        }
     }
 
     private List<OrderResponse> openOrders(long accountId, String symbol) {
@@ -1064,6 +1087,30 @@ public class MarketMakerService {
                 event.fundingRate(), event.nextFundingTime(), event.timeUntilFundingSeconds(), event.basisAverage(),
                 event.basisWindowSeconds(), event.clampLow(), event.clampHigh(), event.sequence(), event.status(),
                 event.eventTime());
+    }
+
+    /** 现货没有持仓对象，做市库存由资产余额约束；这里不能调用永续持仓接口。 */
+    private PositionResponse currentPosition(MarketMakerProperties.Strategy strategy,
+                                             long accountId,
+                                             String symbol,
+                                             InstrumentResponse instrument) {
+        if (strategy.getProductLine() == ProductLine.SPOT) {
+            if (instrument == null || instrument.baseAsset() == null || instrument.baseAsset().isBlank()) {
+                throw new IllegalStateException("现货做市缺少基础资产快照");
+            }
+            // 现货没有持仓对象，使用账户 JVM 快照中的基础资产权益作为库存约束。
+            // AccountRpcApi 只访问账户服务本地快照，不会在报价周期内查询数据库。
+            var balance = accountRpcApi.balance(accountId, instrument.baseAsset());
+            long inventory = balance == null ? 0L : Math.max(0L, balance.equityUnits());
+            return new PositionResponse(accountId, symbol, instrument.version(),
+                    strategy.getMarginMode(), PositionSide.NET, inventory, 0L, 0L, Instant.now());
+        }
+        return accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(), PositionSide.NET.name());
+    }
+
+    /** 现货报价锚定盘口，不消费标记价 Topic。 */
+    private MarkPriceResponse currentMarkPrice(ProductLine productLine, String symbol, long instrumentVersion) {
+        return productLine == ProductLine.SPOT ? null : latestMarkPrice(symbol, instrumentVersion);
     }
 
     private void requireTradable(InstrumentResponse instrument, ProductLine productLine) {
@@ -1168,6 +1215,8 @@ public class MarketMakerService {
         effective.setEnabled(override != null && override.enabled() != null ? override.enabled() : configured.isEnabled());
         effective.setAccountIds(new ArrayList<>(configured.getAccountIds()));
         effective.setSymbols(new ArrayList<>(configured.getSymbols()));
+        // 复制只读配置中的启动锚定价，避免数据库覆盖对象重建策略时丢失现货初始化参数。
+        effective.setInitialAnchorPriceTicks(configured.getInitialAnchorPriceTicks());
         effective.setBaseQuantitySteps(override != null && override.baseQuantitySteps() != null
                 ? override.baseQuantitySteps()
                 : configured.getBaseQuantitySteps());
@@ -1489,7 +1538,7 @@ public class MarketMakerService {
                                            String message) {
     }
 
-    private record ReconcileResult(long submitted, long canceled, long rejected) {
+    private record ReconcileResult(long submitted, long canceled, long rejected, String rejectionReason) {
     }
 
     private record TradeTarget(long priceTicks, long availableQuantitySteps) {

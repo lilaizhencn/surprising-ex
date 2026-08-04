@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -55,7 +54,6 @@ public class AccountUserCommandAuditProjectionWorker {
         this.ledgerProjectionService = ledgerProjectionService;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.account.wal.projection-delay-ms:25}")
     public void projectAudit() {
         for (UserPartitionKey partition : wal.partitions()) {
             try {

@@ -2,6 +2,7 @@ package com.surprising.trading.order.service;
 
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.AccountUserCommandType;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +51,11 @@ public class OrderAccountCommandResultConsumer {
                 if (result.productLine() != properties.getKafka().getProductLine()) {
                     throw new IllegalArgumentException("account command result product line mismatch");
                 }
-                results.add(result);
+                // 账户结果 Topic 是共享的，只有订单自己发出的预占/释放结果才属于订单状态机。
+                // 余额调整、成交结算、资金费等结果必须留在账户模块，不能被当成订单预占结果。
+                if (isOrderReservationResult(result)) {
+                    results.add(result);
+                }
             }
             for (AccountCommandResultEvent result : results) {
                 commandGateway.forwardAccountResult(result);
@@ -66,5 +71,13 @@ public class OrderAccountCommandResultConsumer {
 
     public String groupId() {
         return properties.getKafka().getAccountCommandResultsGroupId();
+    }
+
+    /** 判断账户结果是否属于订单预占状态机，避免共享 Topic 的无关事件阻塞消费分区。 */
+    private boolean isOrderReservationResult(AccountCommandResultEvent result) {
+        // 订单用户状态只等待预占结果。取消前释放结果由账户服务幂等落账即可，
+        // 不再转发到订单用户分区，避免被误按预占命令校验而阻塞后续消息。
+        return "ORDER".equals(result.source())
+                && result.commandType() == AccountUserCommandType.ORDER_RESERVE;
     }
 }

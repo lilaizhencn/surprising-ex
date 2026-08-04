@@ -39,6 +39,8 @@ public class FundingDueRateRepository {
         if (snapshotCache == null || !snapshotCache.initialized(productLine) || !productLine.isFundingProduct()) {
             return List.of();
         }
+        // 不可拆原因：该单次查询的 anti-join 必须在同一个数据库快照中筛选 FINAL 费率并排除
+        // 已有非 PROCESSING 结算记录；拆成两次查询会在并发结算下重复发现同一批次。
         List<FundingRateResponse> rows = jdbcTemplate.query("""
                 SELECT DISTINCT ON (r.symbol, r.funding_time) r.*
                   FROM funding_rate_ticks r

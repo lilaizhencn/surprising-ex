@@ -433,6 +433,44 @@ class MatchingServiceTest {
     }
 
     @Test
+    void productionSnowflakeCommandIdDoesNotOverflowTradeIdentifiers() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("matching-service-large-command-test");
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        properties.getProtection().setSelfTradePreventionEnabled(false);
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 301, 11, 12);
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol), new FakeRecoveryRepository());
+        FakeResultRepository resultRepository = new FakeResultRepository();
+        FakeOutboxRepository outboxRepository = new FakeOutboxRepository();
+        FakePublicTradePublisher tradePublisher = new FakePublicTradePublisher(true);
+        MatchingService service = new MatchingService(new ObjectMapper(), properties, engine,
+                new FakeProtectionRepository(), resultRepository, outboxRepository,
+                OrderBookDepthPublisher.NOOP, tradePublisher);
+        long orderCommandId = 7_489_898_671_534_772_225L;
+        try {
+            engine.start();
+            service.process(perpetualCommand(OrderCommandType.PLACE, orderCommandId - 1L, 101L, 1001L,
+                    "large-maker", "BTC-USDT", 5L, OrderSide.SELL, OrderType.LIMIT, TimeInForce.GTC,
+                    100L, 3L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:00Z")));
+            service.process(perpetualCommand(OrderCommandType.PLACE, orderCommandId, 202L, 2002L,
+                    "large-taker", "BTC-USDT", 7L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.IOC,
+                    100L, 1L, 2L, 5L, false, false, Instant.parse("2026-07-01T00:00:01Z")));
+            assertThat(resultRepository.trades).singleElement().satisfies(trade -> {
+                assertThat(trade.tradeId()).isPositive();
+                assertThat(trade.commandId()).isEqualTo(orderCommandId);
+            });
+            assertThat(tradePublisher.events).singleElement().satisfies(event -> {
+                assertThat(event.sequence()).isEqualTo(orderCommandId);
+                assertThat(event.tradeId()).isEqualTo(orderCommandId + ":1");
+            });
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
     void skipsCommandWhenOrderIsMissingFromDatabase() throws Exception {
         MatchingProperties properties = new MatchingProperties();
         properties.getEngine().setExchangeId("matching-service-missing-order-test");

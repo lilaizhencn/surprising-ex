@@ -3,6 +3,7 @@ package com.surprising.risk.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -48,6 +49,22 @@ class PositionRiskTriggerConsumerTest {
 
         assertThat(cache.position(event.userId(), event.symbol(), event.marginMode(), event.positionSide()))
                 .contains(event);
+    }
+
+    @Test
+    void doesNotRescanDuplicatePositionRevision() {
+        RiskService riskService = mock(RiskService.class);
+        RiskProperties properties = new RiskProperties();
+        PositionSnapshotCache cache = new PositionSnapshotCache(ProductLine.LINEAR_PERPETUAL);
+        PositionRiskTriggerConsumer consumer = new PositionRiskTriggerConsumer(new ObjectMapper(), riskService,
+                properties, cache);
+        ConsumerRecord<String, String> record = record("LINEAR_PERPETUAL:1001",
+                positionPayload(ProductLine.LINEAR_PERPETUAL, "BTC-USDT"));
+
+        consumer.onPositionUpdated(List.of(record));
+        consumer.onPositionUpdated(List.of(record));
+
+        verify(riskService, times(1)).scanPositionUpdates(org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test

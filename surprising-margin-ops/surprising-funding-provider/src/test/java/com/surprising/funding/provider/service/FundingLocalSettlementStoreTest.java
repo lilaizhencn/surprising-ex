@@ -38,6 +38,7 @@ class FundingLocalSettlementStoreTest {
                     com.surprising.funding.provider.model.FundingPaymentCursor.from(candidate), false);
             var payments = first.appendPage(work, page);
             assertThat(payments).hasSize(1);
+            assertThat(payments.getFirst().commandOccurredAt()).isEqualTo(fundingTime);
             assertThat(first.pendingPayments(10)).extracting(FundingLocalSettlementStore.PendingPayment::commandId)
                     .containsExactly(payments.getFirst().commandId());
             assertThat(first.begin(rate, mark).settlementId()).isEqualTo(work.settlementId());
@@ -47,8 +48,16 @@ class FundingLocalSettlementStoreTest {
             var pending = restarted.pendingPayments(10);
             assertThat(pending).hasSize(1);
             restarted.markPublished(pending.getFirst().commandId());
+            restarted.completePayment(pending.getFirst().commandId(), 1001L, "APPLIED", null, null,
+                    fundingTime.plusSeconds(1L));
             assertThat(restarted.pendingPayments(10)).isEmpty();
             assertThat(restarted.activeSettlements()).isEmpty();
+            assertThat(restarted.projectionSnapshots()).singleElement().satisfies(snapshot -> {
+                assertThat(snapshot.completed()).isTrue();
+                assertThat(snapshot.payments()).singleElement()
+                        .extracting(FundingLocalSettlementStore.PendingPayment::status)
+                        .isEqualTo("APPLIED");
+            });
         }
     }
 }

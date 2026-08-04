@@ -4,6 +4,8 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
+import java.util.List;
+import java.util.Locale;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -21,6 +23,7 @@ public class MarkPriceConsumerProperties {
     private Duration allowedFutureSkew = Duration.ofSeconds(1);
     private int concurrency = 1;
     private int maxPollRecords = 500;
+    private List<String> requiredSymbols = List.of();
 
     /** 启动时拒绝未隔离的标记价格消费配置。 */
     @PostConstruct
@@ -102,5 +105,17 @@ public class MarkPriceConsumerProperties {
 
     public void setMaxPollRecords(int maxPollRecords) {
         this.maxPollRecords = maxPollRecords;
+    }
+
+    public List<String> getRequiredSymbols() {
+        return requiredSymbols;
+    }
+
+    public void setRequiredSymbols(List<String> requiredSymbols) {
+        this.requiredSymbols = requiredSymbols == null ? List.of() : requiredSymbols.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.trim().toUpperCase(Locale.ROOT))
+                .distinct()
+                .toList();
     }
 }

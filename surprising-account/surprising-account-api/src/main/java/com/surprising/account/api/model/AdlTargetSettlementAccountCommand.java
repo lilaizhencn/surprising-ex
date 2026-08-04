@@ -3,7 +3,7 @@ package com.surprising.account.api.model;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 
-/** Immutable target-side snapshot for a conditional ADL settlement. */
+/** ADL 条件结算时目标用户侧的不可变持仓快照。 */
 public record AdlTargetSettlementAccountCommand(
         long executionId,
         long deficitUserId,

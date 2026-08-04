@@ -9,6 +9,7 @@ import java.util.Set;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +25,7 @@ import tools.jackson.databind.ObjectMapper;
  * 都必须抛错让 Kafka 重试，不能回查账户数据库，也不能把缺失事件当成零余额。</p>
  */
 @Service("riskAccountStateSnapshotConsumer")
-@ConditionalOnExpression("'${surprising.risk.kafka.product-line:LINEAR_PERPETUAL}' == 'LINEAR_PERPETUAL'")
+@ConditionalOnExpression("'${surprising.risk.kafka.product-line:LINEAR_PERPETUAL}' matches 'LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION'")
 public class AccountStateSnapshotConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(AccountStateSnapshotConsumer.class);
@@ -34,6 +35,7 @@ public class AccountStateSnapshotConsumer {
     private final PerpetualAccountStateSnapshotCache snapshotCache;
     private final RiskService riskService;
 
+    @Autowired
     public AccountStateSnapshotConsumer(ObjectMapper objectMapper,
                                        RiskProperties properties,
                                        @Qualifier("riskAccountStateSnapshot")

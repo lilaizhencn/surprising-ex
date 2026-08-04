@@ -141,12 +141,12 @@ class ExpiringContractSettlementConsumerTest {
     }
 
     private static DeliverySettlementEvent deliveryEvent(String symbol) {
-        return new DeliverySettlementEvent(symbol, 4L, ContractType.LINEAR_DELIVERY,
+        return new DeliverySettlementEvent(symbol, 4L, ContractType.LINEAR_DELIVERY, 100L,
                 EVENT_TIME, EVENT_TIME, ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null);
     }
 
     private static OptionExerciseEvent optionEvent(String symbol) {
-        return new OptionExerciseEvent(symbol, 6L, "BTC-USDT", 70_000_000L,
+        return new OptionExerciseEvent(symbol, 6L, "BTC-USDT", 70_000_000L, 71_000_000L, 1_000L,
                 OptionType.CALL, OptionExerciseStyle.EUROPEAN, EVENT_TIME, EVENT_TIME,
                 ContractSettlementMethod.CASH, InstrumentStatus.CLOSED, EVENT_TIME, null);
     }

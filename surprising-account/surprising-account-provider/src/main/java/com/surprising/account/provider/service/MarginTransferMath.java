@@ -86,17 +86,6 @@ public final class MarginTransferMath {
         return Math.multiplyExact(Math.multiplyExact(priceTicks, quantitySteps), spec.notionalMultiplierUnits());
     }
 
-    public static long optionExercisePayoffUnits(ContractSpec spec, long payoffPriceTicks, long signedQuantitySteps) {
-        if (!spec.contractType().isOption()) {
-            throw new IllegalArgumentException("option payoff requires an option contract");
-        }
-        if (payoffPriceTicks < 0 || signedQuantitySteps == 0) {
-            throw new IllegalArgumentException("payoffPriceTicks must be non-negative and quantity must be non-zero");
-        }
-        return Math.multiplyExact(Math.multiplyExact(payoffPriceTicks, signedQuantitySteps),
-                spec.notionalMultiplierUnits());
-    }
-
     private static long optionSellerInitialMarginUnits(ContractSpec spec, long priceTicks, long openSteps) {
         long premiumUnits = optionPremiumUnits(spec, priceTicks, openSteps);
         long riskMarginUnits = PerpetualContractMath.initialMarginUnits(spec.contractType(), openSteps, priceTicks,

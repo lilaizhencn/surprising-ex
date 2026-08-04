@@ -401,8 +401,11 @@ class KafkaFanoutConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        PositionUpdatedEvent event = new PositionUpdatedEvent(2L, 91L, 1001L, "BTC-USDT", 7L,
-                MarginMode.CROSS, PositionSide.LONG, 10L, 65_000L, 0L, eventTime, "trace-position-1");
+        PositionUpdatedEvent event = new PositionUpdatedEvent(
+                PositionUpdatedEvent.CURRENT_SCHEMA_VERSION, 91L, 2L, ProductLine.LINEAR_PERPETUAL,
+                7L, 1001L, "BTC-USDT", 1L, MarginMode.CROSS, PositionSide.LONG,
+                10L, 65_000L, 650_000L, 0L, "USDT", 100_000L,
+                eventTime, eventTime, eventTime, "trace-position-1");
 
         consumer.onPosition(new ConsumerRecord<>("surprising.account.position.events.v1", 0, 0L,
                 event.partitionKey(), objectMapper.writeValueAsString(event)));

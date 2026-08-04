@@ -15,6 +15,7 @@ import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.nio.charset.StandardCharsets;
+import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -182,6 +183,14 @@ public class InstrumentService {
 
     @Transactional
     public void publishProductLifecycleEvent(InstrumentResponse response) {
+        throw new IllegalStateException("生命周期事件必须由结算价确认入口发布");
+    }
+
+    /** 只有带不可变结算价的入口才能发布到期结算事件。 */
+    @Transactional
+    public void publishProductLifecycleEvent(InstrumentResponse response,
+                                             long settlementPriceTicks,
+                                             long underlyingSettlementPriceUnits) {
         Instant eventTime = Instant.now();
         if (response.instrumentType() == InstrumentType.DELIVERY) {
             outboxService.enqueue("INSTRUMENT", response.version(), deliverySettlementsTopic(response),
@@ -189,6 +198,7 @@ public class InstrumentService {
                     response.symbol(),
                     response.version(),
                     response.contractType(),
+                    settlementPriceTicks,
                     response.expiryTime(),
                     response.deliveryTime(),
                     response.settlementMethod(),
@@ -204,6 +214,8 @@ public class InstrumentService {
                     response.version(),
                     response.underlyingSymbol(),
                     response.strikePriceUnits(),
+                    underlyingSettlementPriceUnits,
+                    optionCashSettlementUnitsPerContract(response, underlyingSettlementPriceUnits),
                     response.optionType(),
                     response.optionExerciseStyle(),
                     response.expiryTime(),
@@ -220,9 +232,60 @@ public class InstrumentService {
      */
     @Transactional
     public InstrumentResponse closeForSettlement(String symbol) {
-        InstrumentResponse closed = updateStatus(symbol, InstrumentStatus.CLOSED);
-        publishProductLifecycleEvent(closed);
+        throw new IllegalStateException("关闭到期合约前必须确认结算价");
+    }
+
+    @Transactional
+    public InstrumentResponse closeForSettlement(String symbol,
+                                                 ProductLine productLine,
+                                                 long settlementPriceTicks,
+                                                 long underlyingSettlementPriceUnits) {
+        if (productLine == null || (!productLine.isDeliveryProduct() && productLine != ProductLine.OPTION)) {
+            throw new IllegalArgumentException("交割或行权必须指定到期产品线");
+        }
+        InstrumentResponse current = latest(symbol, productLine);
+        // 已关闭合约的重复请求必须幂等返回，不能再次创建版本或重复发布资金事件。
+        if (current.status() == InstrumentStatus.CLOSED) {
+            return current;
+        }
+        if (current.status() != InstrumentStatus.SETTLING) {
+            throw new IllegalStateException("合约必须先进入 SETTLING 才能确认结算: " + current.symbol());
+        }
+        InstrumentResponse closed = updateStatus(symbol, productLine, InstrumentStatus.CLOSED);
+        publishProductLifecycleEvent(closed, settlementPriceTicks, underlyingSettlementPriceUnits);
         return closed;
+    }
+
+    /**
+     * 在 Instrument 唯一入口冻结每份期权的现金收益，避免账户模块按自身价格精度重复换算。
+     * 标的价格必须落在标的最小价格档位上；否则拒绝发布不可审计的舍入结果。
+     */
+    private long optionCashSettlementUnitsPerContract(InstrumentResponse option,
+                                                       long underlyingSettlementPriceUnits) {
+        if (underlyingSettlementPriceUnits <= 0L || option.strikePriceUnits() == null
+                || option.underlyingSymbol() == null || option.underlyingSymbol().isBlank()
+                || option.optionType() == null) {
+            throw new IllegalArgumentException("期权行权缺少完整标的结算信息");
+        }
+        InstrumentResponse underlying = latest(option.underlyingSymbol());
+        if (underlying.instrumentType() == InstrumentType.OPTION
+                || underlying.priceTickUnits() <= 0L
+                || !underlying.settleAsset().equalsIgnoreCase(option.settleAsset())) {
+            throw new IllegalStateException("期权标的合约规格不可用于现金结算: " + option.underlyingSymbol());
+        }
+        BigInteger underlyingPrice = BigInteger.valueOf(underlyingSettlementPriceUnits);
+        BigInteger strike = BigInteger.valueOf(option.strikePriceUnits());
+        BigInteger intrinsic = option.optionType() == com.surprising.instrument.api.model.OptionType.CALL
+                ? underlyingPrice.subtract(strike).max(BigInteger.ZERO)
+                : strike.subtract(underlyingPrice).max(BigInteger.ZERO);
+        BigInteger tick = BigInteger.valueOf(underlying.priceTickUnits());
+        BigInteger[] quotientAndRemainder = intrinsic.divideAndRemainder(tick);
+        if (quotientAndRemainder[1].signum() != 0) {
+            throw new IllegalArgumentException("标的结算价未落在标的价格档位");
+        }
+        return quotientAndRemainder[0]
+                .multiply(BigInteger.valueOf(option.notionalMultiplierUnits()))
+                .longValueExact();
     }
 
     private String deliverySettlementsTopic(InstrumentResponse response) {

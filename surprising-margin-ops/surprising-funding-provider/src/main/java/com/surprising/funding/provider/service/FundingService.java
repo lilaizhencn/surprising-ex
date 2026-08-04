@@ -231,7 +231,7 @@ public class FundingService {
                         localSettlementStore.appendPage(settlement, page);
                 for (FundingLocalSettlementStore.PendingPayment payment : payments) {
                     accountCommandWalService.append(toCommand(payment.settlementId(), payment.paymentId(),
-                            payment.commandId(), payment.payment(), now));
+                            payment.commandId(), payment.payment(), payment.commandOccurredAt()));
                     localSettlementStore.markPublished(payment.commandId());
                 }
                 if (page.hasMore()) {
@@ -250,7 +250,7 @@ public class FundingService {
         int limit = Math.max(1, properties.getSettlement().getReconcileBatchSize());
         for (FundingLocalSettlementStore.PendingPayment payment : localSettlementStore.pendingPayments(limit)) {
             accountCommandWalService.append(toCommand(payment.settlementId(), payment.paymentId(),
-                    payment.commandId(), payment.payment(), Instant.now()));
+                    payment.commandId(), payment.payment(), payment.commandOccurredAt()));
             localSettlementStore.markPublished(payment.commandId());
         }
     }

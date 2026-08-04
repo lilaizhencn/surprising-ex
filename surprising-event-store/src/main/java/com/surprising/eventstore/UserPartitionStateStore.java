@@ -19,8 +19,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 /**
  * 用户分区状态快照存储。
@@ -43,15 +42,26 @@ public final class UserPartitionStateStore implements AutoCloseable {
     private final Options options;
     private final RocksDB database;
     private final WriteOptions writeOptions;
-    private final ConcurrentHashMap<UserPartitionKey, ReentrantLock> locks = new ConcurrentHashMap<>();
+    private final UserPartitionCommandLane lane;
+    private final boolean ownsLane;
 
     public UserPartitionStateStore(Path directory) {
+        this(directory, new UserPartitionCommandLane(), true);
+    }
+
+    public UserPartitionStateStore(Path directory, UserPartitionCommandLane lane) {
+        this(directory, lane, false);
+    }
+
+    private UserPartitionStateStore(Path directory, UserPartitionCommandLane lane, boolean ownsLane) {
         try {
             Objects.requireNonNull(directory, "directory");
+            this.lane = Objects.requireNonNull(lane, "lane");
+            this.ownsLane = ownsLane;
             Files.createDirectories(directory);
             options = new Options().setCreateIfMissing(true);
             database = RocksDB.open(options, directory.toString());
-            writeOptions = new WriteOptions().setSync(true);
+            writeOptions = new WriteOptions().setSync(false);
         } catch (Exception ex) {
             throw new IllegalStateException("failed to open user partition state store: " + directory, ex);
         }
@@ -80,27 +90,26 @@ public final class UserPartitionStateStore implements AutoCloseable {
     /** 启动恢复或内部 RPC 初始化使用；已存在状态不能被覆盖。 */
     public void initialize(UserPartitionKey partition, byte[] state) {
         requireState(partition, state);
-        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
-            byte[] existing = database.get(stateKey(partition));
-            if (existing != null) {
-                if (!Arrays.equals(existing, state)) {
-                    throw new IllegalStateException("用户分区初始化快照冲突: " + partition.value());
+        execute(partition, () -> {
+            try {
+                byte[] existing = database.get(stateKey(partition));
+                if (existing != null) {
+                    if (!Arrays.equals(existing, state)) {
+                        throw new IllegalStateException("用户分区初始化快照冲突: " + partition.value());
+                    }
+                    return null;
                 }
-                return;
+                try (WriteBatch batch = new WriteBatch()) {
+                    batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
+                    batch.put(sequenceKey(partition), encodeLong(0L));
+                    batch.put(partitionKey(partition), new byte[]{1});
+                    database.write(writeOptions, batch);
+                }
+                return null;
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("failed to initialize user partition state: " + partition.value(), ex);
             }
-            try (WriteBatch batch = new WriteBatch()) {
-                batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
-                batch.put(sequenceKey(partition), encodeLong(0L));
-                batch.put(partitionKey(partition), new byte[]{1});
-                database.write(writeOptions, batch);
-            }
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("failed to initialize user partition state: " + partition.value(), ex);
-        } finally {
-            lock.unlock();
-        }
+        });
     }
 
     /**
@@ -112,23 +121,22 @@ public final class UserPartitionStateStore implements AutoCloseable {
      */
     public void replaceIfUnapplied(UserPartitionKey partition, byte[] state) {
         requireState(partition, state);
-        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
-            if (currentSequence(partition) != 0L) {
-                throw new IllegalStateException("用户分区已经应用事实，不能替换启动快照: " + partition.value());
+        execute(partition, () -> {
+            try {
+                if (currentSequence(partition) != 0L) {
+                    throw new IllegalStateException("用户分区已经应用事实，不能替换启动快照: " + partition.value());
+                }
+                try (WriteBatch batch = new WriteBatch()) {
+                    batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
+                    batch.put(sequenceKey(partition), encodeLong(0L));
+                    batch.put(partitionKey(partition), new byte[]{1});
+                    database.write(writeOptions, batch);
+                }
+                return null;
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("替换用户分区启动快照失败: " + partition.value(), ex);
             }
-            try (WriteBatch batch = new WriteBatch()) {
-                batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
-                batch.put(sequenceKey(partition), encodeLong(0L));
-                batch.put(partitionKey(partition), new byte[]{1});
-                database.write(writeOptions, batch);
-            }
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("替换用户分区启动快照失败: " + partition.value(), ex);
-        } finally {
-            lock.unlock();
-        }
+        });
     }
 
     /**
@@ -139,33 +147,32 @@ public final class UserPartitionStateStore implements AutoCloseable {
         if (sequence <= 0L) {
             throw new IllegalArgumentException("state sequence must be positive");
         }
-        ReentrantLock lock = locks.computeIfAbsent(partition, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
-            long current = currentSequence(partition);
-            byte[] existing = database.get(stateKey(partition));
-            if (sequence <= current) {
-                if (sequence == current && Arrays.equals(existing, state)) {
-                    return;
+        execute(partition, () -> {
+            try {
+                long current = currentSequence(partition);
+                byte[] existing = database.get(stateKey(partition));
+                if (sequence <= current) {
+                    if (sequence == current && Arrays.equals(existing, state)) {
+                        return null;
+                    }
+                    throw new IllegalStateException("conflicting user partition state sequence: partition="
+                            + partition.value() + " current=" + current + " requested=" + sequence);
                 }
-                throw new IllegalStateException("conflicting user partition state sequence: partition="
-                        + partition.value() + " current=" + current + " requested=" + sequence);
+                if (sequence != current + 1L) {
+                    throw new IllegalStateException("user partition state sequence must be continuous: partition="
+                            + partition.value() + " current=" + current + " requested=" + sequence);
+                }
+                try (WriteBatch batch = new WriteBatch()) {
+                    batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
+                    batch.put(sequenceKey(partition), encodeLong(sequence));
+                    batch.put(partitionKey(partition), new byte[]{1});
+                    database.write(writeOptions, batch);
+                }
+                return null;
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("failed to apply user partition state: " + partition.value(), ex);
             }
-            if (sequence != current + 1L) {
-                throw new IllegalStateException("user partition state sequence must be continuous: partition="
-                        + partition.value() + " current=" + current + " requested=" + sequence);
-            }
-            try (WriteBatch batch = new WriteBatch()) {
-                batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
-                batch.put(sequenceKey(partition), encodeLong(sequence));
-                batch.put(partitionKey(partition), new byte[]{1});
-                database.write(writeOptions, batch);
-            }
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("failed to apply user partition state: " + partition.value(), ex);
-        } finally {
-            lock.unlock();
-        }
+        });
     }
 
     public long lastAppliedSequence(UserPartitionKey partition) {
@@ -259,8 +266,15 @@ public final class UserPartitionStateStore implements AutoCloseable {
         return true;
     }
 
+    private <T> T execute(UserPartitionKey partition, Supplier<T> action) {
+        return lane.execute(partition, action);
+    }
+
     @Override
     public void close() {
+        if (ownsLane) {
+            lane.close();
+        }
         writeOptions.close();
         database.close();
         options.close();

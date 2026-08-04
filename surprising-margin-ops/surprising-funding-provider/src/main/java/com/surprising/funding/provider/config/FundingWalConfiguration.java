@@ -1,5 +1,6 @@
 package com.surprising.funding.provider.config;
 
+import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
 import com.surprising.funding.provider.service.FundingLocalSequenceStore;
@@ -13,15 +14,17 @@ import org.springframework.context.annotation.Configuration;
 public class FundingWalConfiguration {
 
     @Bean(destroyMethod = "close")
-    public UserPartitionWal fundingAccountCommandWal(FundingProperties properties) {
+    public UserPartitionWal fundingAccountCommandWal(FundingProperties properties,
+                                                     UserPartitionCommandLane lane) {
         return new UserPartitionWal(Path.of(properties.getWal().getDirectory(),
-                properties.getKafka().getProductLine().name(), "account-commands"));
+                properties.getKafka().getProductLine().name(), "account-commands"), lane);
     }
 
     @Bean(destroyMethod = "close")
-    public UserPartitionStateStore fundingAccountCommandPublishState(FundingProperties properties) {
+    public UserPartitionStateStore fundingAccountCommandPublishState(FundingProperties properties,
+                                                                      UserPartitionCommandLane lane) {
         return new UserPartitionStateStore(Path.of(properties.getWal().getDirectory(),
-                properties.getKafka().getProductLine().name(), "account-command-publish-state"));
+                properties.getKafka().getProductLine().name(), "account-command-publish-state"), lane);
     }
 
     @Bean(destroyMethod = "close")
@@ -35,5 +38,10 @@ public class FundingWalConfiguration {
                                                                    tools.jackson.databind.ObjectMapper objectMapper) {
         return new FundingLocalSettlementStore(Path.of(properties.getWal().getDirectory(),
                 properties.getKafka().getProductLine().name(), "settlements"), objectMapper);
+    }
+
+    @Bean(destroyMethod = "close")
+    public UserPartitionCommandLane fundingUserPartitionCommandLane() {
+        return new UserPartitionCommandLane();
     }
 }

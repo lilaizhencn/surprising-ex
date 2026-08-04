@@ -4,8 +4,10 @@ import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountCommandStatus;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.api.model.ExpiringPositionSettlementAccountCommand;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
 import com.surprising.eventstore.UserPartitionCommandLane;
@@ -18,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,8 +29,8 @@ import org.apache.kafka.common.KafkaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -70,7 +73,6 @@ public class AccountUserStateCommandWorker {
         this.kafkaTemplate = kafkaTemplate;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.account.wal.projection-delay-ms:25}")
     public void applyPending() {
         for (UserPartitionKey partition : wal.partitions()) {
             try {
@@ -103,9 +105,10 @@ public class AccountUserStateCommandWorker {
     }
 
     private Void applyPartition(UserPartitionKey partition) {
-        ensureInitialized(partition);
         long applied = stateStore.lastAppliedSequence(partition);
         List<UserPartitionEvent> events = wal.replay(partition);
+        initializeEmptyReservationPartition(partition, events);
+        ensureInitialized(partition);
         for (UserPartitionEvent event : events) {
             AccountUserCommand command = decode(event, partition);
             AccountCommandTerminalResult existing = readResult(partition, command.commandId()).orElse(null);
@@ -115,10 +118,12 @@ public class AccountUserStateCommandWorker {
                     throw new IllegalStateException("账户状态已提交但命令终态缺失 commandId="
                             + command.commandId() + " sequence=" + event.sequence());
                 }
-                publishStateSnapshot(reducer.state(partition)
-                        .orElseThrow(() -> new AccountStateUnavailableException(
-                                "账户状态快照不存在: " + partition.value()))
-                        .snapshot());
+                if (!publishedCommands.contains(command.commandId())) {
+                    publishStateSnapshot(reducer.state(partition)
+                            .orElseThrow(() -> new AccountStateUnavailableException(
+                                    "账户状态快照不存在: " + partition.value()))
+                            .snapshot());
+                }
                 publishOnce(event.sequence(), command, existing);
                 continue;
             }
@@ -146,7 +151,7 @@ public class AccountUserStateCommandWorker {
                             .orElseThrow(() -> new AccountStateUnavailableException(
                                     "账户状态快照不存在: " + partition.value()));
                     AccountCommandTerminalResult recomputed = toTerminal(command, before, recovery);
-                    if (!existing.equals(recomputed)) {
+                    if (!terminalEquivalent(existing, recomputed)) {
                         throw new IllegalStateException("账户命令终态重算不一致 commandId="
                                 + command.commandId());
                     }
@@ -181,6 +186,45 @@ public class AccountUserStateCommandWorker {
             applied = event.sequence();
         }
         return null;
+    }
+
+    boolean terminalEquivalent(AccountCommandTerminalResult left, AccountCommandTerminalResult right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null
+                || left.status() != right.status()
+                || !Objects.equals(left.errorCode(), right.errorCode())
+                || !Objects.equals(left.errorMessage(), right.errorMessage())
+                || !Objects.equals(left.ledgerDeltas(), right.ledgerDeltas())) {
+            return false;
+        }
+        if (Objects.equals(left.resultPayload(), right.resultPayload())) {
+            return true;
+        }
+        if (left.resultPayload() == null || right.resultPayload() == null) {
+            return false;
+        }
+        try {
+            return objectMapper.readTree(left.resultPayload()).equals(objectMapper.readTree(right.resultPayload()));
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    /**
+     * 首条命令是订单预占且本地没有快照时，先建立零余额状态，让 reducer 返回明确的余额不足终态。
+     * 其他命令仍必须等待正式的内部 RPC/Kafka 快照初始化，不能用零状态掩盖充值或持仓数据缺失。
+     */
+    private void initializeEmptyReservationPartition(UserPartitionKey partition,
+                                                     List<UserPartitionEvent> events) {
+        if (stateStore.read(partition).isPresent() || events == null || events.isEmpty()) {
+            return;
+        }
+        AccountUserCommand first = decode(events.get(0), partition);
+        if (first.commandType() == AccountUserCommandType.ORDER_RESERVE) {
+            reducer.initializeEmpty(partition);
+        }
     }
 
     private AccountUserStateReducer.Reduction reduce(AccountUserCommand command, long sequence) {
@@ -289,8 +333,11 @@ public class AccountUserStateCommandWorker {
                 || reduction.nextState() == null) {
             return List.of();
         }
+        if (command.commandType() == AccountUserCommandType.TRADE_SIDE_SETTLE) {
+            return tradeLedgerDeltas(command, reduction);
+        }
         String referenceType = ledgerReferenceType(command);
-        String referenceId = command.commandId();
+        String referenceId = ledgerReferenceId(command);
         String symbol = null;
         java.util.Map<String, Long> beforeEquity = equity(before.snapshot());
         java.util.Map<String, Long> afterEquity = equity(reduction.nextState().snapshot());
@@ -326,12 +373,112 @@ public class AccountUserStateCommandWorker {
         return List.copyOf(deltas);
     }
 
+    /**
+     * 成交结果已经由 reducer 按确定性规则计算完成，这里只拆分账本明细，不重新计算资金。
+     * 这样数据库账本可以分别审计成交本金、已实现盈亏、权利金和手续费，同时保持数据库不参与在线裁决。
+     */
+    private List<AccountCommandTerminalResult.LedgerDelta> tradeLedgerDeltas(
+            AccountUserCommand command,
+            AccountUserStateReducer.Reduction reduction) {
+        JsonNode detail = readResultPayload(reduction.resultPayload(), "成交账本明细");
+        if (detail.path("duplicate").asBoolean(false)) {
+            return List.of();
+        }
+        long tradeId = requiredLong(detail, "tradeId");
+        long orderId = requiredLong(detail, "orderId");
+        String referenceId = tradeId + ":" + orderId;
+        String symbol = requiredText(detail, "symbol");
+        java.util.Map<String, Long> afterEquity = equity(reduction.nextState().snapshot());
+        List<AccountCommandTerminalResult.LedgerDelta> deltas = new java.util.ArrayList<>();
+        if (command.productLine() == com.surprising.product.api.ProductLine.SPOT) {
+            String baseAsset = requiredText(detail, "baseAsset");
+            String quoteAsset = requiredText(detail, "quoteAsset");
+            addLedgerDelta(deltas, baseAsset, detail.path("baseUnits").asLong(),
+                    afterEquity, "SPOT_TRADE", referenceId, "SPOT_TRADE", symbol);
+            addLedgerDelta(deltas, quoteAsset, detail.path("quotePrincipalUnits").asLong(),
+                    afterEquity, "SPOT_TRADE", referenceId, "SPOT_TRADE", symbol);
+            addLedgerDelta(deltas, quoteAsset, detail.path("feeUnits").asLong(),
+                    afterEquity, "TRADE_FEE", referenceId, "TRADE_FEE", symbol);
+            return List.copyOf(deltas);
+        }
+        String settleAsset = requiredText(detail, "settleAsset");
+        addLedgerDelta(deltas, settleAsset, detail.path("realizedPnlUnits").asLong(),
+                afterEquity, "TRADE_PNL", referenceId, "TRADE_PNL", symbol);
+        if (command.productLine() == com.surprising.product.api.ProductLine.OPTION) {
+            addLedgerDelta(deltas, settleAsset, detail.path("premiumUnits").asLong(),
+                    afterEquity, "OPTION_PREMIUM", referenceId, "OPTION_PREMIUM", symbol);
+        }
+        addLedgerDelta(deltas, settleAsset, detail.path("feeUnits").asLong(),
+                afterEquity, "TRADE_FEE", referenceId, "TRADE_FEE", symbol);
+        return List.copyOf(deltas);
+    }
+
+    private void addLedgerDelta(List<AccountCommandTerminalResult.LedgerDelta> deltas,
+                                String asset,
+                                long amount,
+                                java.util.Map<String, Long> afterEquity,
+                                String referenceType,
+                                String referenceId,
+                                String reason,
+                                String symbol) {
+        if (amount == 0L) {
+            return;
+        }
+        deltas.add(new AccountCommandTerminalResult.LedgerDelta(asset, amount,
+                afterEquity.getOrDefault(asset, 0L), referenceType, referenceId, reason, symbol));
+    }
+
+    private JsonNode readResultPayload(String payload, String description) {
+        if (payload == null || payload.isBlank()) {
+            throw new AccountCommandPoisonPillException(description + "为空");
+        }
+        try {
+            return objectMapper.readTree(payload);
+        } catch (Exception ex) {
+            throw new AccountCommandPoisonPillException(description + "无法解析", ex);
+        }
+    }
+
+    private long requiredLong(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        if (!value.isNumber() || value.asLong() <= 0L) {
+            throw new AccountCommandPoisonPillException("成交账本明细缺少有效" + field);
+        }
+        return value.asLong();
+    }
+
+    private String requiredText(JsonNode node, String field) {
+        String value = node.path(field).asText(null);
+        if (value == null || value.isBlank()) {
+            throw new AccountCommandPoisonPillException("成交账本明细缺少有效" + field);
+        }
+        return value;
+    }
+
+    /** 生命周期流水使用稳定业务引用，便于同一事件重放时按合约、版本和持仓边界幂等。 */
+    private String ledgerReferenceId(AccountUserCommand command) {
+        if (command.commandType() != AccountUserCommandType.DELIVERY_SETTLE
+                && command.commandType() != AccountUserCommandType.OPTION_EXERCISE) {
+            return command.commandId();
+        }
+        try {
+            ExpiringPositionSettlementAccountCommand request = objectMapper.readValue(
+                    command.payload(), ExpiringPositionSettlementAccountCommand.class);
+            return command.commandType().name() + ":" + request.symbol() + ":" + request.instrumentVersion()
+                    + ":" + command.userId() + ":" + request.marginMode().name() + ":"
+                    + request.positionSide().name();
+        } catch (Exception ex) {
+            throw new AccountCommandPoisonPillException("生命周期账本引用无法解析", ex);
+        }
+    }
+
     private String ledgerReferenceType(AccountUserCommand command) {
         return switch (command.commandType()) {
             case BALANCE_ADJUST -> "BALANCE_ADJUSTMENT";
             case PRODUCT_BALANCE_ADJUST -> "PRODUCT_BALANCE_ADJUSTMENT";
             case FUNDING_SETTLE -> "FUNDING";
-            case TRADE_SIDE_SETTLE -> "TRADE_SETTLEMENT";
+            case TRADE_SIDE_SETTLE -> command.productLine() == com.surprising.product.api.ProductLine.OPTION
+                    ? "OPTION_PREMIUM" : "TRADE_SETTLEMENT";
             case POSITION_MARGIN_ADJUST -> "POSITION_MARGIN_ADJUSTMENT";
             case DELIVERY_SETTLE -> "DELIVERY_SETTLEMENT";
             case OPTION_EXERCISE -> "OPTION_EXERCISE";
@@ -341,11 +488,24 @@ public class AccountUserStateCommandWorker {
         };
     }
 
+    /**
+     * 账本余额使用净权益，而不是余额表的毛余额。账户出现穿仓时，亏空必须在同一条
+     * 业务流水的 balanceAfter 中体现，否则异步账本无法和本地事实流完成守恒核对。
+     */
     private java.util.Map<String, Long> equity(
             com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) {
         java.util.Map<String, Long> values = new java.util.HashMap<>();
         for (var balance : snapshot.balances()) {
-            values.put(balance.asset(), Math.addExact(balance.availableUnits(), balance.lockedUnits()));
+            long gross = Math.addExact(balance.availableUnits(), balance.lockedUnits());
+            long deficit = snapshot.deficits().stream()
+                    .filter(value -> value.asset().equalsIgnoreCase(balance.asset()))
+                    .mapToLong(com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent.Deficit::deficitUnits)
+                    .reduce(0L, Math::addExact);
+            values.put(balance.asset(), Math.subtractExact(gross, deficit));
+        }
+        // 亏空资产可能在余额表中没有行，仍要把净权益变化投影到账本。
+        for (var deficit : snapshot.deficits()) {
+            values.putIfAbsent(deficit.asset(), Math.negateExact(deficit.deficitUnits()));
         }
         return values;
     }
@@ -372,7 +532,7 @@ public class AccountUserStateCommandWorker {
         AccountCommandResultEvent event = new AccountCommandResultEvent(
                 sequence, command.commandId(), command.productLine(), command.userId(), command.commandType(),
                 result.status(), command.source(), command.sourceReference(), result.resultPayload(),
-                result.errorCode(), result.errorMessage(), Instant.now(), command.traceId());
+                result.errorCode(), result.errorMessage(), command.occurredAt(), command.traceId());
         try {
             kafkaTemplate.send(properties.getKafka().getCommandResultsTopic(), command.partitionKey(),
                     objectMapper.writeValueAsString(event)).get(3L, TimeUnit.SECONDS);
@@ -417,6 +577,9 @@ public class AccountUserStateCommandWorker {
                     .filter(value -> value.marginMode() == position.marginMode())
                     .filter(value -> value.positionSide() == position.positionSide())
                     .findFirst();
+            String marginAsset = margin.map(value -> value.asset())
+                    .orElseGet(() -> reducer.settleAsset(snapshot.productLine(), position.symbol(),
+                            position.instrumentVersion()));
             PositionUpdatedEvent event = new PositionUpdatedEvent(
                     PositionUpdatedEvent.CURRENT_SCHEMA_VERSION,
                     snapshot.eventId(),
@@ -432,7 +595,7 @@ public class AccountUserStateCommandWorker {
                     position.entryPriceTicks(),
                     position.entryValueTicks(),
                     position.realizedPnlUnits(),
-                    margin.map(value -> value.asset()).orElse(""),
+                    marginAsset,
                     margin.map(value -> value.marginUnits()).orElse(0L),
                     position.updatedAt(),
                     position.updatedAt(),

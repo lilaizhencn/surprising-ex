@@ -9,7 +9,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -22,6 +25,8 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class OrderUserCommandConsumer {
 
+    private static final Logger log = LoggerFactory.getLogger(OrderUserCommandConsumer.class);
+
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final OrderUserStateService stateService;
@@ -30,7 +35,7 @@ public class OrderUserCommandConsumer {
     public OrderUserCommandConsumer(ObjectMapper objectMapper,
                                     TradingOrderProperties properties,
                                     OrderUserStateService stateService,
-                                    KafkaTemplate<String, String> kafkaTemplate) {
+                                    @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.stateService = stateService;
@@ -46,9 +51,18 @@ public class OrderUserCommandConsumer {
             return;
         }
         for (ConsumerRecord<String, String> record : records) {
-            OrderUserCommand command = decode(record);
-            OrderUserCommandResult result = stateService.executeUserCommand(command);
-            publishResult(result);
+            OrderUserCommand command = null;
+            try {
+                command = decode(record);
+                OrderUserCommandResult result = stateService.executeUserCommand(command);
+                publishResult(result);
+            } catch (RuntimeException ex) {
+                // 记录分区和偏移，便于定位某一条坏命令导致分区后续命令持续重试。
+                log.error("订单用户命令处理失败 topic={} partition={} offset={} key={} commandId={}",
+                        record.topic(), record.partition(), record.offset(), record.key(),
+                        command == null ? "unknown" : command.commandId(), ex);
+                throw ex;
+            }
         }
     }
 

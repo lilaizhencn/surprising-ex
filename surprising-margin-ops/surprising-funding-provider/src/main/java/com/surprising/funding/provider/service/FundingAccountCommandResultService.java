@@ -6,7 +6,10 @@ import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.model.FundingPaymentResult;
 import com.surprising.funding.provider.repository.FundingPaymentCompletionRepository;
 import com.surprising.funding.provider.repository.FundingPendingCommandRepository;
+import com.surprising.funding.provider.repository.FundingLocalSettlementProjectionRepository;
 import java.util.List;
+import java.time.Instant;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,13 +19,26 @@ public class FundingAccountCommandResultService {
     private final FundingPaymentCompletionRepository completionRepository;
     private final FundingPendingCommandRepository pendingCommandRepository;
     private final FundingProperties properties;
+    private final FundingLocalSettlementStore localSettlementStore;
+    private final FundingLocalSettlementProjectionRepository localProjectionRepository;
 
+    @Autowired
     public FundingAccountCommandResultService(FundingPaymentCompletionRepository completionRepository,
                                               FundingPendingCommandRepository pendingCommandRepository,
-                                              FundingProperties properties) {
+                                              FundingProperties properties,
+                                              FundingLocalSettlementStore localSettlementStore,
+                                              FundingLocalSettlementProjectionRepository localProjectionRepository) {
         this.completionRepository = completionRepository;
         this.pendingCommandRepository = pendingCommandRepository;
         this.properties = properties;
+        this.localSettlementStore = localSettlementStore;
+        this.localProjectionRepository = localProjectionRepository;
+    }
+
+    FundingAccountCommandResultService(FundingPaymentCompletionRepository completionRepository,
+                                       FundingPendingCommandRepository pendingCommandRepository,
+                                       FundingProperties properties) {
+        this(completionRepository, pendingCommandRepository, properties, null, null);
     }
 
     @Transactional
@@ -37,6 +53,17 @@ public class FundingAccountCommandResultService {
                         && "FUNDING".equals(event.source()))
                 .map(this::toPaymentResult)
                 .toList();
+        if (localSettlementStore != null) {
+            for (AccountCommandResultEvent event : events) {
+                if (event.commandType() == AccountUserCommandType.FUNDING_SETTLE
+                        && "FUNDING".equals(event.source())) {
+                    localSettlementStore.completePayment(event.commandId(), event.userId(), event.status().name(),
+                            event.errorCode(), event.errorMessage(), event.completedAt());
+                }
+            }
+            localProjectionRepository.project(localSettlementStore.projectionSnapshots(), Instant.now());
+            return;
+        }
         completionRepository.completeBatch(results);
     }
 
@@ -49,6 +76,10 @@ public class FundingAccountCommandResultService {
      */
     @Transactional
     public void reconcileTerminalCommands() {
+        if (localSettlementStore != null) {
+            localProjectionRepository.project(localSettlementStore.projectionSnapshots(), Instant.now());
+            return;
+        }
         List<FundingPaymentResult> results = pendingCommandRepository
                 .findTerminal(
                         Math.max(1, properties.getSettlement().getReconcileBatchSize()));

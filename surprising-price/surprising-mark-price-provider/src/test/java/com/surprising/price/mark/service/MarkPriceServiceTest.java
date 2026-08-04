@@ -195,6 +195,26 @@ class MarkPriceServiceTest {
     }
 
     @Test
+    void skipsIndexOnlyUnderlyingWithoutMarkPriceEncoding() throws Exception {
+        MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
+        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+        when(coordinationService.encoding("BTC-USDT"))
+                .thenThrow(new IllegalStateException("mark price encoding not found for BTC-USDT"));
+        MarkPriceProperties properties = properties();
+        properties.getKafka().setProductLine(ProductLine.OPTION);
+        MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
+                new MarkPriceCalculator(properties), coordinationService, kafkaTemplate);
+        Instant now = Instant.now();
+
+        service.onIndexPrice(new ObjectMapper().writeValueAsString(
+                new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 2, PriceStatus.HEALTHY, 3, 3,
+                        BigDecimal.valueOf(3), now, List.of())));
+        service.publishMarkPrices();
+
+        verify(kafkaTemplate, never()).send(any(), any(), any());
+    }
+
+    @Test
     void rejectsFundingRateFromOtherProductTopicBeforeCaching() throws Exception {
         MarkPriceCoordinationService coordinationService = mock(MarkPriceCoordinationService.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);

@@ -28,7 +28,12 @@ import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
+import com.surprising.instrument.api.model.ContractSettlementMethod;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
+import com.surprising.instrument.api.model.OptionExerciseStyle;
+import com.surprising.instrument.api.model.OptionType;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -323,16 +328,57 @@ public class AccountService {
         return commandGateway.adjustPositionMargin(request);
     }
 
-    /**
-     * 交割和期权尚未接入用户分区 reducer 时必须停止，不得重新调用旧的数据库结算服务。
-     * 接入对应产品线 reducer 后，这些入口改为追加生命周期命令。
-     */
     public List<UserExpiringSettlementPlan> planDeliverySettlement(DeliverySettlementEvent event) {
-        throw unsupportedLifecycle("交割结算");
+        if (event == null || event.status() != com.surprising.instrument.api.model.InstrumentStatus.CLOSED) {
+            throw new IllegalArgumentException("交割结算事件必须是 CLOSED");
+        }
+        if (event.settlementPriceTicks() <= 0L || event.settlementMethod() != ContractSettlementMethod.CASH) {
+            throw new IllegalArgumentException("交割结算必须携带有效现金结算价");
+        }
+        InstrumentResponse instrument = requireLifecycleInstrument(event.instrument(), event.symbol(), event.version());
+        if (instrument.contractType() != event.contractType() || !instrument.contractType().isDelivery()) {
+            throw new IllegalArgumentException("交割事件合约类型不匹配");
+        }
+        ProductLine productLine = instrument.contractType().productLine();
+        Instant settlementTime = event.deliveryTime() != null ? event.deliveryTime() : event.eventTime();
+        return stateReducer.partitionsForSymbol(productLine, instrument.symbol()).stream()
+                .flatMap(partition -> stateReducer.snapshot(partition).orElseThrow().positions().stream()
+                        .filter(position -> position.symbol().equalsIgnoreCase(instrument.symbol())
+                                && position.signedQuantitySteps() != 0L)
+                        .map(position -> new UserExpiringSettlementPlan(productLine, partition.userId(),
+                                new ExpiringPositionSettlementAccountCommand(instrument.symbol(), position.instrumentVersion(),
+                                        position.marginMode(), position.positionSide(), event.settlementPriceTicks(), 0L,
+                                        "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT", settlementTime))))
+                .toList();
     }
 
     public List<UserExpiringSettlementPlan> planOptionExercise(OptionExerciseEvent event) {
-        throw unsupportedLifecycle("期权行权");
+        if (event == null || event.status() != com.surprising.instrument.api.model.InstrumentStatus.CLOSED) {
+            throw new IllegalArgumentException("期权行权事件必须是 CLOSED");
+        }
+        if (event.settlementMethod() != ContractSettlementMethod.CASH
+                || event.underlyingSettlementPriceUnits() <= 0L) {
+            throw new IllegalArgumentException("期权行权必须携带有效标的结算价");
+        }
+        InstrumentResponse instrument = requireLifecycleInstrument(event.instrument(), event.symbol(), event.version());
+        if (instrument.contractType() != ContractType.VANILLA_OPTION
+                || instrument.optionType() != event.optionType()
+                || instrument.optionExerciseStyle() != OptionExerciseStyle.EUROPEAN
+                || !normalizeSymbol(event.underlyingSymbol()).equals(normalizeSymbol(instrument.underlyingSymbol()))) {
+            throw new IllegalArgumentException("期权行权事件合约快照不匹配");
+        }
+        Instant settlementTime = event.deliveryTime() != null ? event.deliveryTime() : event.eventTime();
+        ProductLine productLine = ProductLine.OPTION;
+        return stateReducer.partitionsForSymbol(productLine, instrument.symbol()).stream()
+                .flatMap(partition -> stateReducer.snapshot(partition).orElseThrow().positions().stream()
+                        .filter(position -> position.symbol().equalsIgnoreCase(instrument.symbol())
+                                && position.signedQuantitySteps() != 0L)
+                        .map(position -> new UserExpiringSettlementPlan(productLine, partition.userId(),
+                                new ExpiringPositionSettlementAccountCommand(instrument.symbol(), position.instrumentVersion(),
+                                        position.marginMode(), position.positionSide(), 0L,
+                                        event.cashSettlementUnitsPerContract(),
+                                        "OPTION_EXERCISE", "OPTION_EXERCISE", settlementTime))))
+                .toList();
     }
 
     public record UserExpiringSettlementPlan(ProductLine productLine,
@@ -410,9 +456,16 @@ public class AccountService {
         }
     }
 
-    private static RuntimeException unsupportedLifecycle(String operation) {
-        return new IllegalStateException(operation + "尚未接入账户用户分区 reducer，禁止回退数据库");
+    private InstrumentResponse requireLifecycleInstrument(InstrumentResponse instrument,
+                                                          String symbol,
+                                                          long version) {
+        if (instrument == null || !normalizeSymbol(symbol).equals(normalizeSymbol(instrument.symbol()))
+                || instrument.version() != version) {
+            throw new IllegalArgumentException("生命周期事件缺少匹配的不可变 instrument 快照");
+        }
+        return instrument;
     }
+
 
     private static void requireRequest(Object request) {
         if (request == null) {

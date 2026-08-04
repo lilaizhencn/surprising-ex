@@ -32,6 +32,8 @@ import com.surprising.trading.api.model.PositionSide;
 import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +75,7 @@ import tools.jackson.databind.ObjectMapper;
     private String projectionGeneration;
     /** 事件快速路径使用的本地风险组；Redis 仍负责跨节点投影和协调。 */
     private final ConcurrentMap<LocalGroupKey, CachedRiskGroup> localGroups = new ConcurrentHashMap<>();
+    private final ConcurrentMap<LocalGroupKey, Object> groupMutationLocks = new ConcurrentHashMap<>();
     /** 完整账户快照先到、持仓事件后到时暂存钱包修订，保证两条 Kafka 流最终汇合。 */
     private final ConcurrentMap<WalletKey, WalletSnapshot> pendingWallets = new ConcurrentHashMap<>();
 
@@ -217,26 +220,26 @@ import tools.jackson.databind.ObjectMapper;
         if (!stateStore.ready(productLine)) {
             throw new IllegalStateException("风险 JVM/Redis 快照尚未完成恢复，暂停事件计算");
         }
-        List<CachedRiskGroup> states = new ArrayList<>(groups.size());
         try {
-            for (RiskGroupKey key : groups.keySet()) {
-                PositionEventGroup eventGroup = groups.get(key);
-                // 先读取本地/Redis 基础状态；Redis 短暂过期时仍可用本地快照重建，
-                // 不能因为跨节点投影暂时缺失而让 Kafka 分区永久重试。
-                ProjectionUpdate base = refreshState(productLine, key, true);
-                CachedRiskGroup state = stateStore.replace(productLine, key, () -> {
-                    CachedRiskGroup current = stateStore.read(productLine, key);
-                    CachedRiskGroup merged = mergePositionEvents(current == null ? base.state() : current, eventGroup);
-                    return applyPendingWallet(key, merged);
-                }).state();
-                localGroups.put(new LocalGroupKey(productLine, key), state);
-                states.add(state);
-            }
+            List<CachedRiskGroup> states = new ArrayList<>(groups.size());
+            withGroupLocks(productLine, groups.keySet(), () -> {
+                for (RiskGroupKey key : groups.keySet()) {
+                    PositionEventGroup eventGroup = groups.get(key);
+                    ProjectionUpdate base = refreshPositionState(productLine, key);
+                    CachedRiskGroup state = stateStore.replace(productLine, key, () -> {
+                        CachedRiskGroup current = stateStore.read(productLine, key);
+                        CachedRiskGroup merged = mergePositionEvents(current == null ? base.state() : current, eventGroup);
+                        return applyPendingWallet(key, merged);
+                    }).state();
+                    localGroups.put(new LocalGroupKey(productLine, key), state);
+                    states.add(state);
+                }
+                evaluateBatch(states, groups);
+            });
         } catch (RuntimeException ex) {
             invalidateProjection();
             throw ex;
         }
-        evaluateBatch(states, groups);
         if (initialProjectionComplete) {
             stateStore.markReady(productLine);
         }
@@ -278,30 +281,38 @@ import tools.jackson.databind.ObjectMapper;
         if (!stateStore.ready(productLine)) {
             throw new IllegalStateException("风险 JVM/Redis 快照尚未完成恢复，暂停账户状态计算");
         }
-        List<CachedRiskGroup> states = new ArrayList<>(latest.size());
         try {
-            for (Map.Entry<WalletKey, WalletSnapshot> entry : latest.entrySet()) {
+            List<CachedRiskGroup> states = new ArrayList<>(latest.size());
+            List<RiskGroupKey> keys = latest.keySet().stream()
+                    .map(WalletKey::riskGroupKey)
+                    .toList();
+            withGroupLocks(productLine, keys, () -> {
+                for (Map.Entry<WalletKey, WalletSnapshot> entry : latest.entrySet()) {
                 pendingWallets.merge(entry.getKey(), entry.getValue(), (oldValue, newValue) ->
                         newValue.revision() >= oldValue.revision() ? newValue : oldValue);
                 RiskGroupKey key = entry.getKey().riskGroupKey();
-                CachedRiskGroup current = localGroups.get(new LocalGroupKey(productLine, key));
-                if (current == null) {
-                    current = stateStore.read(productLine, key);
+                    CachedRiskGroup state = stateStore.replace(productLine, key, () -> {
+                        CachedRiskGroup current = stateStore.read(productLine, key);
+                        if (current == null) {
+                            current = localGroups.get(new LocalGroupKey(productLine, key));
+                        }
+                        if (current == null) {
+                            current = new CachedRiskGroup(key, 0L, 0L, List.of(), Instant.now());
+                        }
+                        return applyPendingWallet(key, current);
+                    }).state();
+                    localGroups.put(new LocalGroupKey(productLine, key), state);
+                    states.add(state);
                 }
-                if (current == null) {
-                    // 账户状态可能先于持仓事件到达；钱包先暂存，持仓事件到达后再创建风险组。
-                    continue;
+                try {
+                    evaluateBatch(states, Map.of());
+                } catch (RedisRiskCalculator.MarkPriceUnavailableException ignored) {
                 }
-                CachedRiskGroup next = applyPendingWallet(key, current);
-                CachedRiskGroup state = stateStore.replace(productLine, key, () -> next).state();
-                localGroups.put(new LocalGroupKey(productLine, key), state);
-                states.add(state);
-            }
+            });
         } catch (RuntimeException ex) {
             invalidateProjection();
             throw ex;
         }
-        evaluateBatch(states, Map.of());
         if (initialProjectionComplete) {
             stateStore.markReady(productLine);
         }
@@ -318,12 +329,19 @@ import tools.jackson.databind.ObjectMapper;
         event.positionMargins().forEach(row -> margins.merge(row.asset(), row.marginUnits(), Math::addExact));
         Map<String, Long> locks = new LinkedHashMap<>();
         event.orderLocks().forEach(row -> locks.merge(row.asset(), row.lockedUnits(), Math::addExact));
-        Set<String> assets = new java.util.LinkedHashSet<>(margins.keySet());
+        Set<String> assets = new java.util.LinkedHashSet<>(balances.keySet());
+        assets.addAll(deficits.keySet());
+        assets.addAll(margins.keySet());
+        assets.addAll(locks.keySet());
         assets.addAll(additionalAssets);
-        if (event.positions().stream().anyMatch(position -> !marginAsset(event, position).isPresent())) {
-            throw new IllegalStateException("完整账户状态的持仓缺少保证金资产");
-        }
-        event.positions().forEach(position -> marginAsset(event, position).ifPresent(assets::add));
+        event.positions().forEach(position -> {
+            if (position.signedQuantitySteps() == 0L) {
+                marginAsset(event, position).ifPresent(assets::add);
+                return;
+            }
+            assets.add(marginAsset(event, position)
+                    .orElseGet(() -> defaultSettlementAsset(event.productLine(), normalizeSymbol(position.symbol()))));
+        });
         Map<String, Long> result = new LinkedHashMap<>();
         for (String asset : assets) {
             long wallet = balances.getOrDefault(asset, 0L);
@@ -392,6 +410,19 @@ import tools.jackson.databind.ObjectMapper;
         return new ProjectionUpdate(update.state(), update.changed());
     }
 
+    private ProjectionUpdate refreshPositionState(ProductLine productLine, RiskGroupKey key) {
+        CachedRiskGroup local = localGroups.get(new LocalGroupKey(productLine, key));
+        if (local != null && !local.capturedAt().isBefore(
+                Instant.now().minus(properties.getRedisState().getStateTtl()))) {
+            return new ProjectionUpdate(local, false);
+        }
+        CachedRiskGroup projected = stateStore.read(productLine, key);
+        if (projected != null) {
+            return new ProjectionUpdate(projected, false);
+        }
+        return new ProjectionUpdate(new CachedRiskGroup(key, 0L, 0L, List.of(), Instant.now()), true);
+    }
+
     private CachedRiskGroup mergePositionEvents(CachedRiskGroup state, PositionEventGroup eventGroup) {
         if (eventGroup == null || eventGroup.events().isEmpty()) {
             return state;
@@ -417,13 +448,46 @@ import tools.jackson.databind.ObjectMapper;
                 List.copyOf(positions.values()), Instant.now());
     }
 
+    private Object mutationLock(ProductLine productLine, RiskGroupKey key) {
+        return groupMutationLocks.computeIfAbsent(new LocalGroupKey(productLine, key), ignored -> new Object());
+    }
+
+    private void withGroupLocks(ProductLine productLine,
+                                Collection<RiskGroupKey> keys,
+                                Runnable action) {
+        List<RiskGroupKey> ordered = keys.stream()
+                .distinct()
+                .sorted(Comparator.comparing(RiskGroupKey::toString))
+                .toList();
+        withGroupLock(productLine, ordered, 0, action);
+    }
+
+    private void withGroupLock(ProductLine productLine,
+                               List<RiskGroupKey> keys,
+                               int index,
+                               Runnable action) {
+        if (index >= keys.size()) {
+            action.run();
+            return;
+        }
+        synchronized (mutationLock(productLine, keys.get(index))) {
+            withGroupLock(productLine, keys, index + 1, action);
+        }
+    }
+
     private void evaluateBatch(List<CachedRiskGroup> states,
                                Map<RiskGroupKey, PositionEventGroup> eventGroups) {
+        List<CachedRiskGroup> evaluableStates = states.stream()
+                .filter(state -> state.walletRevision() > 0L)
+                .toList();
+        if (evaluableStates.isEmpty()) {
+            return;
+        }
         Instant now = Instant.now();
-        List<GroupEvaluation> evaluations = new ArrayList<>(states.size());
+        List<GroupEvaluation> evaluations = new ArrayList<>(evaluableStates.size());
         int positionWriteCount = 0;
         int candidateCount = 0;
-        for (CachedRiskGroup state : states) {
+        for (CachedRiskGroup state : evaluableStates) {
             PositionEventGroup eventGroup = eventGroups.get(state.key());
             GroupEvaluation evaluation = evaluateGroup(state.key(), state.walletBalanceUnits(),
                     redisCalculator.calculate(state), eventGroup == null ? List.of() : eventGroup.targets(),
@@ -984,7 +1048,37 @@ import tools.jackson.databind.ObjectMapper;
                 PositionSide.defaultIfNull(event.positionSide()),
                 event.instrumentVersion(),
                 event.productLine().accountTypeCode(),
-                normalizeAsset(event.marginAsset()));
+                normalizeAsset(positionEventAsset(event)));
+    }
+
+    private String positionEventAsset(PositionUpdatedEvent event) {
+        if (event.marginAsset() != null && !event.marginAsset().isBlank()) {
+            return event.marginAsset();
+        }
+        if (event.signedQuantitySteps() != 0L) {
+            return event.marginAsset();
+        }
+        String symbol = normalizeSymbol(event.symbol());
+        String accountType = event.productLine().accountTypeCode();
+        return localGroups.entrySet().stream()
+                .filter(entry -> entry.getKey().productLine() == event.productLine())
+                .filter(entry -> entry.getKey().key().userId() == event.userId())
+                .filter(entry -> entry.getKey().key().accountType().equals(accountType))
+                .filter(entry -> entry.getValue().positions().stream().anyMatch(position ->
+                        position.symbol().equals(symbol)
+                                && position.marginMode() == event.marginMode()
+                                && position.positionSide() == event.positionSide()))
+                .map(entry -> entry.getKey().key().settleAsset())
+                .findFirst()
+                .orElseGet(() -> defaultSettlementAsset(event.productLine(), symbol));
+    }
+
+    private String defaultSettlementAsset(ProductLine productLine, String symbol) {
+        return switch (productLine) {
+            case LINEAR_PERPETUAL, LINEAR_DELIVERY, OPTION -> "USDT";
+            case INVERSE_PERPETUAL, INVERSE_DELIVERY -> symbol.substring(0, symbol.indexOf('-'));
+            case SPOT -> throw new IllegalArgumentException("现货持仓事件不支持风险结算");
+        };
     }
 
     private RiskRuleOverride override(List<RiskRuleOverride> overrides, String ruleCode) {

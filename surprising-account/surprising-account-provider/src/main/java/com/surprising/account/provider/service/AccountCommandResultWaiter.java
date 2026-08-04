@@ -72,7 +72,7 @@ import tools.jackson.databind.ObjectMapper;
     @KafkaListener(
             topics = "#{__listener.topic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "accountKafkaListenerContainerFactory")
+            containerFactory = "accountStateProjectionKafkaListenerContainerFactory")
     public void onResult(ConsumerRecord<String, String> record) {
         try {
             AccountCommandResultEvent event = objectMapper.readValue(record.value(),

@@ -621,6 +621,12 @@ public class MarketMakerProperties {
         private List<@NotBlank @Size(max = 64) String> symbols = new ArrayList<>();
         @Positive
         private long baseQuantitySteps = 1L;
+        /**
+         * 没有盘口、外部参考行情时使用的显式启动锚点。默认关闭，生产环境必须依赖实时行情；
+         * 仅测试或刚上架且已由运营确认价格的策略可以显式配置。
+         */
+        @PositiveOrZero
+        private long initialAnchorPriceTicks;
         private MarginMode marginMode = MarginMode.CROSS;
         @PositiveOrZero
         private long spreadTicks;
@@ -680,6 +686,14 @@ public class MarketMakerProperties {
 
         public void setBaseQuantitySteps(long baseQuantitySteps) {
             this.baseQuantitySteps = baseQuantitySteps;
+        }
+
+        public long getInitialAnchorPriceTicks() {
+            return initialAnchorPriceTicks;
+        }
+
+        public void setInitialAnchorPriceTicks(long initialAnchorPriceTicks) {
+            this.initialAnchorPriceTicks = initialAnchorPriceTicks;
         }
 
         public MarginMode getMarginMode() {

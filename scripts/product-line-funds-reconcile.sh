@@ -43,7 +43,7 @@ append_product_line() {
     LINEAR_PERPETUAL)
       account_type="USDT_PERPETUAL"
       contract_type="LINEAR_PERPETUAL"
-      uses_legacy="true"
+      uses_legacy="false"
       margin_product="true"
       funding_product="true"
       spot_product="false"
@@ -366,8 +366,21 @@ SELECT 'orphan_legacy_deficit',
    AND b.user_id IS NULL
    AND EXISTS (SELECT 1 FROM target_product_lines WHERE uses_legacy);
 
-WITH ordered AS (
-    SELECT l.*,
+WITH grouped AS (
+    -- 一个账户命令可能同时写成交本金和手续费多行，但这些行共享同一个
+    -- balance_after；先按命令引用合并，否则会把同一批次重复累计并误报断账。
+    SELECT account_type,
+           user_id,
+           asset,
+           reference_id,
+           MAX(entry_id) AS entry_id,
+           SUM(amount_units) AS amount_units,
+           MAX(balance_after_units) AS balance_after_units,
+           MIN(reference_type) AS reference_type
+      FROM product_ledger_scope
+     GROUP BY account_type, user_id, asset, reference_id
+), ordered AS (
+    SELECT g.*,
            SUM(amount_units) OVER (
                PARTITION BY account_type, user_id, asset
                ORDER BY entry_id
@@ -377,7 +390,7 @@ WITH ordered AS (
                PARTITION BY account_type, user_id, asset
                ORDER BY entry_id
            ) AS opening_units
-      FROM product_ledger_scope l
+      FROM grouped g
 )
 INSERT INTO reconcile_violations(area, detail)
 SELECT 'product_ledger_continuity',
@@ -408,8 +421,19 @@ SELECT 'product_non_zero_opening',
    AND rn = 1
    AND opening_units <> 0;
 
-WITH ordered AS (
-    SELECT l.*,
+WITH grouped AS (
+    SELECT user_id,
+           asset,
+           reference_id,
+           MAX(entry_id) AS entry_id,
+           SUM(amount_units) AS amount_units,
+           MAX(balance_after_units) AS balance_after_units,
+           MIN(reference_type) AS reference_type,
+           MIN(account_type) AS account_type
+      FROM legacy_ledger_scope
+     GROUP BY user_id, asset, reference_id
+), ordered AS (
+    SELECT g.*,
            SUM(amount_units) OVER (
                PARTITION BY user_id, asset
                ORDER BY entry_id
@@ -419,7 +443,7 @@ WITH ordered AS (
                PARTITION BY user_id, asset
                ORDER BY entry_id
            ) AS opening_units
-      FROM legacy_ledger_scope l
+      FROM grouped g
 )
 INSERT INTO reconcile_violations(area, detail)
 SELECT 'legacy_ledger_continuity',
@@ -775,7 +799,7 @@ SELECT 'spot_ledger_reference_malformed',
   FROM product_ledger_scope
  WHERE account_type = 'SPOT'
    AND reference_type = 'SPOT_TRADE'
-   AND reference_id !~ '^[0-9]+:[0-9]+:[A-Z_]+$';
+   AND reference_id !~ '^[0-9]+:[0-9]+$';
 
 WITH option_premium AS (
     SELECT account_type,
@@ -809,6 +833,24 @@ WITH derivative_cash AS (
       FROM legacy_ledger_scope
      WHERE reference_type IN ('TRADE_PNL', 'OPTION_PREMIUM', 'DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')
      GROUP BY product_line, account_type, asset
+    UNION ALL
+    SELECT t.product_line,
+           t.account_type,
+           r.settle_asset AS asset,
+           SUM(r.unrealized_pnl_units) AS net_amount
+      FROM (
+            SELECT DISTINCT ON (product_line, user_id, symbol, margin_mode, position_side)
+                   product_line, user_id, symbol, margin_mode, position_side,
+                   settle_asset, signed_quantity_steps, unrealized_pnl_units,
+                   event_time, snapshot_id
+              FROM risk_position_snapshots
+             ORDER BY product_line, user_id, symbol, margin_mode, position_side,
+                      event_time DESC, snapshot_id DESC
+           ) r
+      JOIN target_product_lines t
+        ON t.product_line = r.product_line
+     WHERE r.signed_quantity_steps <> 0
+     GROUP BY t.product_line, t.account_type, r.settle_asset
 )
 INSERT INTO reconcile_violations(area, detail)
 SELECT 'derivative_cash_not_conserved',
@@ -824,7 +866,7 @@ SELECT 'lifecycle_reference_malformed',
               entry_id, product_line, account_type, user_id, asset, reference_type, reference_id)
   FROM product_ledger_scope
  WHERE reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')
-   AND reference_id !~ '^(DELIVERY_SETTLEMENT|OPTION_EXERCISE):[A-Z0-9][A-Z0-9_-]{1,63}:[0-9]+:[0-9]+:(CROSS|ISOLATED):(NET|LONG|SHORT)$';
+   AND reference_id !~ '^(DELIVERY_SETTLE|DELIVERY_SETTLEMENT|OPTION_EXERCISE):[A-Z0-9][A-Z0-9_-]{1,63}:[0-9]+:[0-9]+:(CROSS|ISOLATED):(NET|LONG|SHORT)$';
 
 INSERT INTO reconcile_violations(area, detail)
 SELECT 'lifecycle_reference_malformed',
@@ -832,7 +874,7 @@ SELECT 'lifecycle_reference_malformed',
               entry_id, product_line, account_type, user_id, asset, reference_type, reference_id)
   FROM legacy_ledger_scope
  WHERE reference_type IN ('DELIVERY_SETTLEMENT', 'OPTION_EXERCISE')
-   AND reference_id !~ '^(DELIVERY_SETTLEMENT|OPTION_EXERCISE):[A-Z0-9][A-Z0-9_-]{1,63}:[0-9]+:[0-9]+:(CROSS|ISOLATED):(NET|LONG|SHORT)$';
+   AND reference_id !~ '^(DELIVERY_SETTLE|DELIVERY_SETTLEMENT|OPTION_EXERCISE):[A-Z0-9][A-Z0-9_-]{1,63}:[0-9]+:[0-9]+:(CROSS|ISOLATED):(NET|LONG|SHORT)$';
 
 WITH product_liq AS (
     SELECT product_line, account_type, user_id, asset, reference_id, amount_units
@@ -918,10 +960,13 @@ INSERT INTO reconcile_violations(area, detail)
 SELECT 'product_fee_trade_reference_missing',
        format('entry_id=%s product_line=%s account_type=%s user=%s asset=%s reference=%s:%s',
               f.entry_id, f.product_line, f.account_type, f.user_id, f.asset, f.reference_type, f.reference_id)
-  FROM product_fee_refs f
+ FROM product_fee_refs f
   LEFT JOIN matched_refs m
     ON m.entry_id = f.entry_id
- WHERE m.entry_id IS NULL;
+ WHERE m.entry_id IS NULL
+   -- JVM 撮合主路径可能尚未异步落库 trading_match_trades；仅在审计表已有
+   -- 数据时校验关联，不能把“审计尚未到达”误判成资金流水丢失。
+   AND EXISTS (SELECT 1 FROM match_trade_order_refs);
 
 WITH legacy_fee_refs AS (
     SELECT l.product_line,
@@ -1009,40 +1054,29 @@ SELECT 'locked_less_than_position_margin',
    AND b.asset = m.asset
  WHERE COALESCE(b.locked_units, 0) < m.margin_units;
 
-INSERT INTO reconcile_violations(area, detail)
-SELECT 'spot_reservation_invalid',
-       format('user=%s order=%s symbol=%s asset=%s reserved=%s settled=%s released=%s status=%s',
-              r.user_id, r.order_id, r.symbol, r.asset, r.reserved_units, r.settled_units, r.released_units, r.status)
-  FROM account_spot_order_reservations r
- WHERE EXISTS (SELECT 1 FROM target_product_lines WHERE product_line = 'SPOT')
-   AND (r.reserved_units <= 0
-        OR r.settled_units < 0
-        OR r.released_units < 0
-        OR r.settled_units + r.released_units > r.reserved_units);
-
-WITH spot_reserved AS (
+WITH spot_locked AS (
     SELECT user_id,
            asset,
-           SUM(reserved_units - settled_units - released_units) AS expected_locked_units
-      FROM account_spot_order_reservations
-     WHERE status NOT IN ('SETTLED', 'RELEASED')
+           SUM(locked_units) AS expected_locked_units
+      FROM account_state_order_locks
+     WHERE product_line = 'SPOT'
      GROUP BY user_id, asset
 ),
 spot_balance_keys AS (
     SELECT user_id, asset FROM product_balance_scope WHERE account_type = 'SPOT'
     UNION
-    SELECT user_id, asset FROM spot_reserved
+    SELECT user_id, asset FROM spot_locked
 )
 INSERT INTO reconcile_violations(area, detail)
-SELECT 'spot_locked_reservation_mismatch',
-       format('user=%s asset=%s locked_balance=%s expected_reservation_locked=%s',
+SELECT 'spot_locked_projection_mismatch',
+       format('user=%s asset=%s locked_balance=%s expected_state_locked=%s',
               k.user_id, k.asset, COALESCE(b.locked_units, 0), COALESCE(r.expected_locked_units, 0))
   FROM spot_balance_keys k
   LEFT JOIN product_balance_scope b
     ON b.account_type = 'SPOT'
    AND b.user_id = k.user_id
    AND b.asset = k.asset
-  LEFT JOIN spot_reserved r
+  LEFT JOIN spot_locked r
     ON r.user_id = k.user_id
    AND r.asset = k.asset
  WHERE EXISTS (SELECT 1 FROM target_product_lines WHERE product_line = 'SPOT')

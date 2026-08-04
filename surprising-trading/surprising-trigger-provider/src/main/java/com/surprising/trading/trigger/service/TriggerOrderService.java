@@ -928,7 +928,10 @@ import org.springframework.transaction.support.TransactionTemplate;
     }
 
     private ProductLine currentProductLine() {
-        return properties.getKafka().getProductLine();
+        ProductLine configured = properties.getKafka().getProductLine();
+        // 未开启产品线 Topic 的单实例开发模式只允许承载永续默认链路；生产四线部署
+        // 必须打开产品线 Topic 并显式配置产品线，不能把该默认值用于跨线共享。
+        return configured != null ? configured : ProductLine.LINEAR_PERPETUAL;
     }
 
     private void cleanupCandidateIndex(String symbol, List<Long> candidateIds) {

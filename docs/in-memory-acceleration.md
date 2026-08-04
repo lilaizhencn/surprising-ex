@@ -1,6 +1,6 @@
 # 内存与无锁热点路径
 
-本文记录当前已经落地的第一批、第二批内存化改造。内存结构只服务于读多写少或由单线程/分区顺序驱动的热点路径，资金事实、恢复数据和最终审计仍保留在 PostgreSQL、Redis 或 Kafka 日志中。
+本文记录当前已经落地的 JVM 内存化和 Owner Thread 改造。内存结构只服务于读多写少或由单线程/分区顺序驱动的热点路径；同步 WAL、产品线 Kafka 事件和可重放的本地事实负责恢复，PostgreSQL、Redis 只承担投影、查询、协调和审计。
 
 ## 撮合保护
 
@@ -10,7 +10,8 @@
 - `productLine + symbol`：合约规格标识一致性检查；
 - `orderId`：成交、撤单后的无锁更新。
 
-撮合订单簿恢复成功后由 `ExchangeCoreEngine` 重建索引，恢复完成前 `MatchingProtectionRepository` 失败关闭，绝不在撮合热路径回查数据库。撮合结果和成交持久化成功后才应用索引变更，避免未提交状态被后续指令看到。
+撮合订单簿恢复成功后由 `ExchangeCoreEngine` 重建索引，恢复完成前 `MatchingProtectionRepository` 失败关闭，绝不在撮合热路径回查数据库。`MatchingLocalStateStore` 按 symbol 进入
+`PartitionOwnerLane`，同一交易对只有一个 Owner 写入；全局本地 outbox 序号由独立单 Owner 写入器分配，结果、成交、订单更新和 outbox 仍在同一 WriteBatch 中提交。撮合结果和成交持久化成功后才应用索引变更，避免未提交状态被后续指令看到。
 
 ## 行情与 K 线
 
@@ -30,9 +31,9 @@ Instrument Service 通过统一聚合 Service 组装合约正文、风险档位�
 下单、撮合、账户、风控、指数价、标记价、K 线和做市热路径只读本 JVM 快照，数据库仅保留 Instrument 写入、
 启动恢复和审计回源边界。
 
-资金费率发布和结算都从 JVM 快照读取 funding 参数、资产精度和持仓；结算游标、支付命令和发布状态
-先同步写入资金费 RocksDB，再追加账户用户分区 WAL。数据库只承担异步历史投影、启动恢复和审计，不能
-参与资金费候选计算或决定重复扣款。
+资金费率发布和结算都从 JVM 快照读取 funding 参数、资产精度和持仓；费率序列按 symbol 进入 Owner
+Lane，结算游标、支付命令和发布状态先由资金结算 Owner 同步写入资金费 RocksDB，再追加账户用户分区
+WAL。数据库只承担异步历史投影、启动恢复和审计，不能参与资金费候选计算或决定重复扣款。
 
 `RedisRiskCalculator` 使用不可变快照和 `AtomicReference` 整体替换，风控计算不为规格参数查询数据库；
 `instrumentVersion` 是历史订单、持仓和 Kafka 事件定位开仓规格的内部字段，不能删除。

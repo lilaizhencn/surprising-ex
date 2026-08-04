@@ -31,7 +31,7 @@ public class AccountStateSnapshotReducerConsumer {
     @KafkaListener(
             topics = "#{__listener.topic()}",
             groupId = "#{__listener.groupId()}",
-            containerFactory = "accountKafkaListenerContainerFactory")
+            containerFactory = "accountStateProjectionKafkaListenerContainerFactory")
     public void onSnapshot(ConsumerRecord<String, String> record) {
         try {
             if (!topic().equals(record.topic())) {

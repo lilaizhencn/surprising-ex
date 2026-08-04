@@ -62,7 +62,8 @@ public class PerpetualAccountStateSnapshotService {
      * <p>该入口不会写账户 outbox，也不会被下单热路径直接调用；下游成功初始化后仍由
      * Kafka 增量事件保持一致。没有账户修订号的用户不能被伪造为默认零余额快照。</p>
      */
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    // 快照读取主体是只读的，但需要分配账户状态事件序号；不能使用 readOnly 事务执行 nextval。
+    @Transactional(isolation = Isolation.REPEATABLE_READ)
     public PerpetualAccountStateUpdatedEvent snapshot(ProductLine productLine, long userId) {
         AccountType accountType = accountType(productLine);
         if (accountType == null) {

@@ -1,5 +1,6 @@
 package com.surprising.funding.provider.service;
 
+import com.surprising.eventstore.PartitionOwnerLane;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.model.FundingPaymentCandidate;
 import com.surprising.funding.provider.model.FundingPaymentCursor;
@@ -12,9 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.locks.ReentrantLock;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
@@ -44,7 +45,7 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
     private final RocksDB database;
     private final WriteOptions writeOptions;
     private final ObjectMapper objectMapper;
-    private final ReentrantLock lock = new ReentrantLock();
+    private final PartitionOwnerLane<String> owner;
 
     public FundingLocalSettlementStore(Path directory, ObjectMapper objectMapper) {
         try {
@@ -54,6 +55,7 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
             options = new Options().setCreateIfMissing(true);
             database = RocksDB.open(options, directory.toString());
             writeOptions = new WriteOptions().setSync(true);
+            owner = new PartitionOwnerLane<>(1, "funding-settlement-owner");
         } catch (Exception ex) {
             throw new IllegalStateException("资金费本地结算库打开失败: " + directory, ex);
         }
@@ -63,8 +65,7 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
     public FundingSettlementWork begin(FundingRateResponse rate, MarkPriceEvent markPrice) {
         Objects.requireNonNull(rate, "rate");
         Objects.requireNonNull(markPrice, "markPrice");
-        lock.lock();
-        try {
+        return owner.execute("funding-settlement", () -> {
             byte[] key = settlementKey(rate.symbol(), rate.fundingTime());
             SettlementRecord existing = read(key, SettlementRecord.class);
             if (existing != null) {
@@ -76,9 +77,7 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
                     new FundingPaymentCursor(0L, "", ""), false);
             write(key, created);
             return created.work();
-        } finally {
-            lock.unlock();
-        }
+        });
     }
 
     /**
@@ -88,8 +87,7 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
                                            FundingPaymentPage page) {
         Objects.requireNonNull(settlement, "settlement");
         Objects.requireNonNull(page, "page");
-        lock.lock();
-        try {
+        return owner.execute("funding-settlement", () -> {
             List<PendingPayment> payments = new ArrayList<>();
             for (FundingPaymentCandidate candidate : page.items()) {
                 if (candidate.amountUnits() == 0L) {
@@ -98,7 +96,7 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
                 long paymentId = nextId(PAYMENT_SEQUENCE_KEY);
                 String commandId = "FUNDING:LOCAL:" + settlement.settlementId() + ":" + paymentId;
                 PendingPayment payment = new PendingPayment(paymentId, settlement.settlementId(), commandId,
-                        candidate, false);
+                        candidate, settlement.fundingTime(), false, "PENDING", null, null, null);
                 write(paymentKey(settlement.settlementId(), paymentId), payment);
                 write(commandKey(commandId), new CommandIndex(payment.settlementId(), payment.paymentId()));
                 payments.add(payment);
@@ -108,35 +106,31 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
                     settlement.markPriceTicks(), page.nextCursor(), !page.hasMore());
             write(settlementKey(settlement.symbol(), settlement.fundingTime()), updated);
             return List.copyOf(payments);
-        } finally {
-            lock.unlock();
-        }
+        });
     }
 
     /** 读取尚未追加到账户 WAL 的命令，用于崩溃恢复。 */
     public List<PendingPayment> pendingPayments(int limit) {
-        lock.lock();
-        try (RocksIterator iterator = database.newIterator()) {
-            List<PendingPayment> result = new ArrayList<>();
-            iterator.seek(PAYMENT_PREFIX);
-            while (iterator.isValid() && startsWith(iterator.key(), PAYMENT_PREFIX)
-                    && result.size() < Math.max(1, limit)) {
-                PendingPayment payment = readValue(iterator.value(), PendingPayment.class);
-                if (payment != null && !payment.published()) {
-                    result.add(payment);
+        return owner.execute("funding-settlement", () -> {
+            try (RocksIterator iterator = database.newIterator()) {
+                List<PendingPayment> result = new ArrayList<>();
+                iterator.seek(PAYMENT_PREFIX);
+                while (iterator.isValid() && startsWith(iterator.key(), PAYMENT_PREFIX)
+                        && result.size() < Math.max(1, limit)) {
+                    PendingPayment payment = readValue(iterator.value(), PendingPayment.class);
+                    if (payment != null && !payment.published()) {
+                        result.add(payment);
+                    }
+                    iterator.next();
                 }
-                iterator.next();
+                return List.copyOf(result);
             }
-            return List.copyOf(result);
-        } finally {
-            lock.unlock();
-        }
+        });
     }
 
     /** 账户 WAL 追加成功后标记命令；重复标记必须幂等。 */
     public void markPublished(String commandId) {
-        lock.lock();
-        try {
+        owner.execute("funding-settlement", () -> {
             CommandIndex index = read(commandKey(commandId), CommandIndex.class);
             if (index == null) {
                 throw new IllegalStateException("资金费本地命令不存在: " + commandId);
@@ -145,33 +139,85 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
             PendingPayment payment = read(key, PendingPayment.class);
             if (payment != null && !payment.published()) {
                 write(key, new PendingPayment(payment.paymentId(), payment.settlementId(), payment.commandId(),
-                        payment.payment(), true));
+                        payment.payment(), payment.commandOccurredAt(), true, payment.status(),
+                        payment.errorCode(), payment.errorMessage(), payment.completedAt()));
             }
-        } finally {
-            lock.unlock();
+            return null;
+        });
+    }
+
+    public void completePayment(String commandId,
+                                long userId,
+                                String status,
+                                String errorCode,
+                                String errorMessage,
+                                Instant completedAt) {
+        if (commandId == null || commandId.isBlank() || userId <= 0L
+                || (!"APPLIED".equals(status) && !"REJECTED".equals(status)) || completedAt == null) {
+            throw new IllegalArgumentException("资金费本地支付终态参数无效");
         }
+        owner.execute("funding-settlement", () -> {
+            CommandIndex index = read(commandKey(commandId), CommandIndex.class);
+            if (index == null) {
+                throw new IllegalStateException("资金费本地命令不存在: " + commandId);
+            }
+            byte[] key = paymentKey(index.settlementId(), index.paymentId());
+            PendingPayment payment = read(key, PendingPayment.class);
+            if (payment == null || payment.payment().userId() != userId) {
+                throw new IllegalStateException("资金费本地支付用户不匹配: " + commandId);
+            }
+            if (!"PENDING".equals(payment.status())) {
+                    if (!payment.status().equals(status) || !java.util.Objects.equals(payment.errorCode(), errorCode)
+                        || !java.util.Objects.equals(payment.errorMessage(), errorMessage)) {
+                    throw new IllegalStateException("资金费本地支付终态冲突: " + commandId);
+                }
+                return null;
+            }
+            write(key, new PendingPayment(payment.paymentId(), payment.settlementId(), payment.commandId(),
+                    payment.payment(), payment.commandOccurredAt(), payment.published(), status, errorCode,
+                    errorMessage, completedAt));
+            return null;
+        });
+    }
+
+    public List<ProjectionSnapshot> projectionSnapshots() {
+        return owner.execute("funding-settlement", () -> {
+            try (RocksIterator iterator = database.newIterator()) {
+                List<ProjectionSnapshot> result = new ArrayList<>();
+                iterator.seek(SETTLEMENT_PREFIX);
+                while (iterator.isValid() && startsWith(iterator.key(), SETTLEMENT_PREFIX)) {
+                    SettlementRecord settlement = readValue(iterator.value(), SettlementRecord.class);
+                    if (settlement != null) {
+                        List<PendingPayment> payments = payments(settlement.settlementId());
+                        result.add(new ProjectionSnapshot(settlement.work(), settlement.completed(), payments));
+                    }
+                    iterator.next();
+                }
+                return List.copyOf(result);
+            }
+        });
     }
 
     public List<FundingSettlementWork> activeSettlements() {
-        lock.lock();
-        try (RocksIterator iterator = database.newIterator()) {
-            List<FundingSettlementWork> result = new ArrayList<>();
-            iterator.seek(SETTLEMENT_PREFIX);
-            while (iterator.isValid() && startsWith(iterator.key(), SETTLEMENT_PREFIX)) {
-                SettlementRecord settlement = readValue(iterator.value(), SettlementRecord.class);
-                if (settlement != null && !settlement.completed()) {
-                    result.add(settlement.work());
+        return owner.execute("funding-settlement", () -> {
+            try (RocksIterator iterator = database.newIterator()) {
+                List<FundingSettlementWork> result = new ArrayList<>();
+                iterator.seek(SETTLEMENT_PREFIX);
+                while (iterator.isValid() && startsWith(iterator.key(), SETTLEMENT_PREFIX)) {
+                    SettlementRecord settlement = readValue(iterator.value(), SettlementRecord.class);
+                    if (settlement != null && !settlement.completed()) {
+                        result.add(settlement.work());
+                    }
+                    iterator.next();
                 }
-                iterator.next();
+                return List.copyOf(result);
             }
-            return List.copyOf(result);
-        } finally {
-            lock.unlock();
-        }
+        });
     }
 
     @Override
     public void close() {
+        owner.close();
         writeOptions.close();
         database.close();
         options.close();
@@ -202,6 +248,22 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
             return objectMapper.readValue(value, type);
         } catch (Exception ex) {
             throw new IllegalStateException("资金费本地状态读取失败", ex);
+        }
+    }
+
+    private List<PendingPayment> payments(long settlementId) {
+        try (RocksIterator iterator = database.newIterator()) {
+            List<PendingPayment> result = new ArrayList<>();
+            iterator.seek(PAYMENT_PREFIX);
+            while (iterator.isValid() && startsWith(iterator.key(), PAYMENT_PREFIX)) {
+                PendingPayment payment = readValue(iterator.value(), PendingPayment.class);
+                if (payment != null && payment.settlementId() == settlementId) {
+                    result.add(payment);
+                }
+                iterator.next();
+            }
+            result.sort(Comparator.comparingLong(PendingPayment::paymentId));
+            return List.copyOf(result);
         }
     }
 
@@ -249,7 +311,24 @@ public final class FundingLocalSettlementStore implements AutoCloseable {
                                  long settlementId,
                                  String commandId,
                                  FundingPaymentCandidate payment,
-                                 boolean published) {
+                                 Instant commandOccurredAt,
+                                 boolean published,
+                                 String status,
+                                 String errorCode,
+                                 String errorMessage,
+                                 Instant completedAt) {
+        public PendingPayment {
+            commandOccurredAt = commandOccurredAt == null ? Instant.EPOCH : commandOccurredAt;
+            status = status == null ? "PENDING" : status;
+        }
+    }
+
+    public record ProjectionSnapshot(FundingSettlementWork settlement,
+                                     boolean completed,
+                                     List<PendingPayment> payments) {
+        public ProjectionSnapshot {
+            payments = List.copyOf(payments == null ? List.of() : payments);
+        }
     }
 
     private record CommandIndex(long settlementId, long paymentId) {

@@ -56,7 +56,10 @@ import org.springframework.stereotype.Service;
                         instrument.contractType().productLine(), instrument.symbol(), instrument.version())) {
                     continue;
                 }
-                instrumentService.closeForSettlement(instrument.symbol());
+                // 结算价必须由唯一的人工/内部确认入口固化；定时任务只能推进到 SETTLING，
+                // 不能自行猜测结算价后关闭合约或发布不可逆资金事件。
+                log.info("Settling instrument is ready for settlement price confirmation: symbol={} version={}",
+                        instrument.symbol(), instrument.version());
             } catch (Exception ex) {
                 log.error("Failed to close settled instrument: symbol={} version={}",
                         instrument.symbol(), instrument.version(), ex);

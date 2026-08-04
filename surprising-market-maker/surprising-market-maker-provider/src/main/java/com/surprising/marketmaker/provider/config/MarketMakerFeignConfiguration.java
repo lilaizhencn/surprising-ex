@@ -3,6 +3,7 @@ package com.surprising.marketmaker.provider.config;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
 import feign.RequestInterceptor;
+import feign.Request;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -18,5 +19,10 @@ public class MarketMakerFeignConfiguration {
                 template.header("X-Product-Line", productLine.name());
             }
         };
+    }
+
+    @Bean
+    public Request.Options marketMakerRequestOptions() {
+        return new Request.Options(1000, 5000, true);
     }
 }

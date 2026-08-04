@@ -1,5 +1,6 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.eventstore.PartitionOwnerLane;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.CancelAllAfterTimer;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +35,7 @@ public final class CancelAllAfterLocalStateStore implements AutoCloseable {
     private final Options options;
     private final RocksDB database;
     private final WriteOptions writeOptions;
+    private final PartitionOwnerLane<String> owner;
 
     public CancelAllAfterLocalStateStore(Path directory, ObjectMapper objectMapper) {
         try {
@@ -42,88 +44,101 @@ public final class CancelAllAfterLocalStateStore implements AutoCloseable {
             options = new Options().setCreateIfMissing(true);
             database = RocksDB.open(options, directory.toString());
             writeOptions = new WriteOptions().setSync(true);
+            owner = new PartitionOwnerLane<>(1, "cancel-after-owner");
         } catch (Exception ex) {
             throw new IllegalStateException("打开取消全部倒计时本地状态库失败: " + directory, ex);
         }
     }
 
-    public synchronized CancelAllAfterTimer upsert(ProductLine productLine,
-                                                    long userId,
-                                                    String symbolScope,
-                                                    long countdownMs,
-                                                    Instant triggerAt,
-                                                    String status,
-                                                    Instant now) {
+    public CancelAllAfterTimer upsert(ProductLine productLine,
+                                      long userId,
+                                      String symbolScope,
+                                      long countdownMs,
+                                      Instant triggerAt,
+                                      String status,
+                                      Instant now) {
         CancelAllAfterTimer timer = new CancelAllAfterTimer(userId, symbolScope, countdownMs, status, triggerAt,
                 now, 0, 0);
-        put(productLine, timer);
-        return timer;
-    }
-
-    public synchronized List<CancelAllAfterTimer> due(ProductLine productLine, Instant now, int limit) {
-        return scan(productLine).stream()
-                .filter(value -> "ACTIVE".equals(value.status()) && value.triggerAt() != null
-                        && !value.triggerAt().isAfter(now))
-                .sorted(Comparator.comparing(CancelAllAfterTimer::triggerAt)
-                        .thenComparingLong(CancelAllAfterTimer::userId)
-                        .thenComparing(CancelAllAfterTimer::symbolScope))
-                .limit(Math.max(1, limit))
-                .toList();
-    }
-
-    public synchronized Optional<CancelAllAfterTimer> claim(ProductLine productLine,
-                                                             long userId,
-                                                             String symbolScope,
-                                                             Instant now) {
-        Optional<CancelAllAfterTimer> current = read(productLine, userId, symbolScope);
-        if (current.isEmpty() || !"ACTIVE".equals(current.get().status())
-                || current.get().triggerAt() == null || current.get().triggerAt().isAfter(now)) {
-            return Optional.empty();
-        }
-        CancelAllAfterTimer claimed = withStatus(current.get(), "TRIGGERING", now,
-                current.get().canceledOrders(), current.get().canceledTriggerOrders());
-        put(productLine, claimed);
-        return Optional.of(claimed);
-    }
-
-    public synchronized List<CancelAllAfterTimer> activeTimersForIndex(ProductLine productLine,
-                                                                         long afterUserId,
-                                                                         String afterSymbolScope,
-                                                                         int limit) {
-        String cursorScope = afterSymbolScope == null ? "" : afterSymbolScope;
-        return scan(productLine).stream()
-                .filter(value -> "ACTIVE".equals(value.status()) && value.triggerAt() != null)
-                .filter(value -> value.userId() > afterUserId
-                        || value.userId() == afterUserId && value.symbolScope().compareTo(cursorScope) > 0)
-                .sorted(Comparator.comparingLong(CancelAllAfterTimer::userId)
-                        .thenComparing(CancelAllAfterTimer::symbolScope))
-                .limit(Math.max(1, limit))
-                .toList();
-    }
-
-    public synchronized void markTriggered(ProductLine productLine,
-                                            long userId,
-                                            String symbolScope,
-                                            int canceledOrders,
-                                            int canceledTriggerOrders,
-                                            Instant now) {
-        read(productLine, userId, symbolScope).ifPresent(timer -> {
-            if ("TRIGGERING".equals(timer.status())) {
-                put(productLine, withStatus(timer, "TRIGGERED", now, canceledOrders, canceledTriggerOrders));
-            }
+        return owner.execute(ownerKey(productLine, userId, symbolScope), () -> {
+            put(productLine, timer);
+            return timer;
         });
     }
 
-    public synchronized void releaseForRetry(ProductLine productLine,
-                                              long userId,
-                                              String symbolScope,
-                                              String ignoredError,
-                                              Instant now) {
-        read(productLine, userId, symbolScope).ifPresent(timer -> {
+    public List<CancelAllAfterTimer> due(ProductLine productLine, Instant now, int limit) {
+        return owner.execute(productLine.name(), () -> scan(productLine).stream()
+                    .filter(value -> "ACTIVE".equals(value.status()) && value.triggerAt() != null
+                            && !value.triggerAt().isAfter(now))
+                    .sorted(Comparator.comparing(CancelAllAfterTimer::triggerAt)
+                            .thenComparingLong(CancelAllAfterTimer::userId)
+                            .thenComparing(CancelAllAfterTimer::symbolScope))
+                    .limit(Math.max(1, limit))
+                    .toList());
+    }
+
+    public Optional<CancelAllAfterTimer> claim(ProductLine productLine,
+                                               long userId,
+                                               String symbolScope,
+                                               Instant now) {
+        return owner.execute(ownerKey(productLine, userId, symbolScope), () -> {
+            Optional<CancelAllAfterTimer> current = readLocked(productLine, userId, symbolScope);
+            if (current.isEmpty() || !"ACTIVE".equals(current.get().status())
+                    || current.get().triggerAt() == null || current.get().triggerAt().isAfter(now)) {
+                return Optional.empty();
+            }
+            CancelAllAfterTimer claimed = withStatus(current.get(), "TRIGGERING", now,
+                    current.get().canceledOrders(), current.get().canceledTriggerOrders());
+            put(productLine, claimed);
+            return Optional.of(claimed);
+        });
+    }
+
+    public List<CancelAllAfterTimer> activeTimersForIndex(ProductLine productLine,
+                                                           long afterUserId,
+                                                           String afterSymbolScope,
+                                                           int limit) {
+        return owner.execute(productLine.name(), () -> {
+            String cursorScope = afterSymbolScope == null ? "" : afterSymbolScope;
+            return scan(productLine).stream()
+                    .filter(value -> "ACTIVE".equals(value.status()) && value.triggerAt() != null)
+                    .filter(value -> value.userId() > afterUserId
+                            || value.userId() == afterUserId && value.symbolScope().compareTo(cursorScope) > 0)
+                    .sorted(Comparator.comparingLong(CancelAllAfterTimer::userId)
+                            .thenComparing(CancelAllAfterTimer::symbolScope))
+                    .limit(Math.max(1, limit))
+                    .toList();
+        });
+    }
+
+    public void markTriggered(ProductLine productLine,
+                              long userId,
+                              String symbolScope,
+                              int canceledOrders,
+                              int canceledTriggerOrders,
+                              Instant now) {
+        owner.execute(ownerKey(productLine, userId, symbolScope), () -> {
+            readLocked(productLine, userId, symbolScope).ifPresent(timer -> {
+            if ("TRIGGERING".equals(timer.status())) {
+                put(productLine, withStatus(timer, "TRIGGERED", now, canceledOrders, canceledTriggerOrders));
+            }
+            });
+            return null;
+        });
+    }
+
+    public void releaseForRetry(ProductLine productLine,
+                                long userId,
+                                String symbolScope,
+                                String ignoredError,
+                                Instant now) {
+        owner.execute(ownerKey(productLine, userId, symbolScope), () -> {
+            readLocked(productLine, userId, symbolScope).ifPresent(timer -> {
             if ("TRIGGERING".equals(timer.status())) {
                 put(productLine, withStatus(timer, "ACTIVE", now,
                         timer.canceledOrders(), timer.canceledTriggerOrders()));
             }
+            });
+            return null;
         });
     }
 
@@ -141,7 +156,12 @@ public final class CancelAllAfterLocalStateStore implements AutoCloseable {
     }
 
     /** 读取本地倒计时事实，供服务层返回状态和测试恢复路径使用。 */
-    public synchronized Optional<CancelAllAfterTimer> read(ProductLine productLine, long userId, String symbolScope) {
+    public Optional<CancelAllAfterTimer> read(ProductLine productLine, long userId, String symbolScope) {
+        return owner.execute(ownerKey(productLine, userId, symbolScope),
+                () -> readLocked(productLine, userId, symbolScope));
+    }
+
+    private Optional<CancelAllAfterTimer> readLocked(ProductLine productLine, long userId, String symbolScope) {
         try {
             byte[] value = database.get(key(PREFIX, timerKey(productLine, userId, symbolScope)));
             return value == null ? Optional.empty() : Optional.of(decode(value));
@@ -203,8 +223,13 @@ public final class CancelAllAfterLocalStateStore implements AutoCloseable {
 
     @Override
     public void close() {
+        owner.close();
         writeOptions.close();
         database.close();
         options.close();
+    }
+
+    private String ownerKey(ProductLine productLine, long userId, String symbolScope) {
+        return productLine.name();
     }
 }

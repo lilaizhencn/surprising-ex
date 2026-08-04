@@ -7,6 +7,7 @@ import com.surprising.marketmaker.provider.model.QuotePlan;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.price.api.model.MarkPriceResponse;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -37,7 +38,7 @@ public class QuotePlanner {
                           MarkPriceResponse markPrice,
                           long signedPositionSteps,
                           ReferenceOrderBookSnapshot referenceOrderBook) {
-        long anchor = anchorPriceTicks(instrument, orderBook, markPrice, referenceOrderBook);
+        long anchor = anchorPriceTicks(strategy, instrument, orderBook, markPrice, referenceOrderBook);
         int levels = orderLevels(strategy, quoting);
         long halfSpread = Math.max(1L, spreadTicks(strategy, quoting) / 2L);
         long spacing = levelSpacingTicks(strategy, quoting);
@@ -47,6 +48,10 @@ public class QuotePlanner {
         long bestBid = bestBid(orderBook);
         long bestAsk = bestAsk(orderBook);
         List<DesiredQuote> quotes = new ArrayList<>(levels * 2);
+        // 现货库存是基础资产余额，单位和衍生品持仓不同，不能拿它与合约的
+        // maxInventorySteps 比较。现货是否有足够资产由账户预占原子校验，
+        // 做市报价只负责生成双边价格；衍生品仍使用持仓库存风控。
+        long riskPositionSteps = strategy.getProductLine() == ProductLine.SPOT ? 0L : signedPositionSteps;
         for (int level = 0; level < levels; level++) {
             long bidDistance = referenceDistance(referenceOrderBook, OrderSide.BUY, level);
             long askDistance = referenceDistance(referenceOrderBook, OrderSide.SELL, level);
@@ -54,14 +59,14 @@ public class QuotePlanner {
             if (bestAsk > 0) {
                 bidPrice = Math.min(bidPrice, bestAsk - 1L);
             }
-            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice, signedPositionSteps,
+            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice, riskPositionSteps,
                     referenceQuantity(referenceOrderBook, OrderSide.BUY, level));
 
             long askPrice = Math.min(maxPrice, anchor + (askDistance > 0 ? askDistance : halfSpread + spacing * level));
             if (bestBid > 0) {
                 askPrice = Math.max(askPrice, bestBid + 1L);
             }
-            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice, signedPositionSteps,
+            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice, riskPositionSteps,
                     referenceQuantity(referenceOrderBook, OrderSide.SELL, level));
         }
         return new QuotePlan(anchor, signedPositionSteps, List.copyOf(quotes));
@@ -115,7 +120,8 @@ public class QuotePlanner {
         return multiplyDiv(base, scale, ONE_PPM);
     }
 
-    private long anchorPriceTicks(InstrumentResponse instrument,
+    private long anchorPriceTicks(MarketMakerProperties.Strategy strategy,
+                                  InstrumentResponse instrument,
                                   OrderBookSnapshotResponse orderBook,
                                   MarkPriceResponse markPrice,
                                   ReferenceOrderBookSnapshot referenceOrderBook) {
@@ -138,7 +144,12 @@ public class QuotePlanner {
         if (bestAsk > 0) {
             return bestAsk;
         }
-        throw new IllegalStateException("cannot resolve quote anchor price");
+        // 启动时没有任何盘口时，只接受策略显式提供的锚点，禁止凭空生成价格。
+        if (strategy != null && strategy.getInitialAnchorPriceTicks() > 0) {
+            return strategy.getInitialAnchorPriceTicks();
+        }
+        throw new IllegalStateException("cannot resolve quote anchor price; configuredInitialAnchor="
+                + (strategy == null ? "null" : strategy.getInitialAnchorPriceTicks()));
     }
 
     private long markToTicks(InstrumentResponse instrument, MarkPriceResponse markPrice) {

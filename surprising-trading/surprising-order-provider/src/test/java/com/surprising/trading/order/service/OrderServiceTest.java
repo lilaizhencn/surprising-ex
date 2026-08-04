@@ -116,13 +116,17 @@ class OrderServiceTest {
     }
 
     @Test
-    void optionProductLineFailsClosedUntilItsAccountReducerIsReady() {
+    void optionProductLineUsesTheLocalAccountFactStream() {
         OrderService service = service(ProductLine.OPTION);
+        when(userState.nextOrderId()).thenReturn(905L);
+        when(commandGateway.place(any(OrderRecord.class)))
+                .thenReturn(response(905L, "option-1", OrderStatus.REJECTED));
+        PlaceOrderRequest optionRequest = new PlaceOrderRequest(1001L, "option-1", "BTC-USDT",
+                OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 10L,
+                MarginMode.CROSS, PositionSide.NET, false, false);
 
-        assertThatThrownBy(() -> service.place(request("option-1")))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("尚未接入本地账户事实流");
-        verify(userState, never()).place(any(OrderRecord.class));
+        assertThat(service.place(optionRequest)).isNotNull();
+        verify(commandGateway).place(any(OrderRecord.class));
     }
 
     private OrderService service(ProductLine productLine) {

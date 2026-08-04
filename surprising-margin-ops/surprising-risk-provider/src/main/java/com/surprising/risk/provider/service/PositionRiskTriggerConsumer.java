@@ -66,6 +66,7 @@ public class PositionRiskTriggerConsumer {
                 requireUserPartitionKey(record.key(), event);
                 events.add(event);
             }
+            List<PositionUpdatedEvent> currentEvents = new ArrayList<>(events.size());
             for (PositionUpdatedEvent event : events) {
                 PositionSnapshotCache.ApplyResult result = snapshotCache.apply(event);
                 if (result == PositionSnapshotCache.ApplyResult.PRODUCT_LINE_MISMATCH) {
@@ -75,8 +76,13 @@ public class PositionRiskTriggerConsumer {
                     snapshotCache.markNotReady();
                     throw new IllegalStateException("风险持仓 JVM 快照同一修订号出现不同状态");
                 }
+                if (result == PositionSnapshotCache.ApplyResult.APPLIED) {
+                    currentEvents.add(event);
+                }
             }
-            riskService.scanPositionUpdates(events);
+            if (!currentEvents.isEmpty()) {
+                riskService.scanPositionUpdates(currentEvents);
+            }
         } catch (Exception ex) {
             int recordCount = records == null ? 0 : records.size();
             log.error("Failed to process position risk trigger batch records={}: {}",

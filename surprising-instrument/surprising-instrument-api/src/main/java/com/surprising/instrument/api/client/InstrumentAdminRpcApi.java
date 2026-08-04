@@ -70,4 +70,12 @@ public interface InstrumentAdminRpcApi {
     InstrumentResponse updateStatus(@PathVariable("symbol") @NotBlank String symbol,
                                     @RequestParam(value = "productLine", required = false) ProductLine productLine,
                                     @RequestParam("status") @NotNull InstrumentStatus status);
+
+    /** 带不可变结算价关闭到期合约并发布交割/行权事件。 */
+    @PostMapping("/{symbol}/settlement")
+    InstrumentResponse closeForSettlement(@PathVariable("symbol") @NotBlank String symbol,
+                                          @RequestParam("productLine") @NotNull ProductLine productLine,
+                                          @RequestParam("settlementPriceTicks") long settlementPriceTicks,
+                                          @RequestParam(value = "underlyingSettlementPriceUnits", required = false,
+                                                  defaultValue = "0") long underlyingSettlementPriceUnits);
 }

@@ -3,7 +3,9 @@ package com.surprising.trading.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.eventstore.UserPartitionCommandLane;
@@ -33,6 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.KafkaTemplate;
 import tools.jackson.databind.ObjectMapper;
@@ -56,6 +59,28 @@ class OrderUserStateServiceTest {
                     ProductLine.LINEAR_PERPETUAL, 1001L))).hasSize(1);
             assertThat(service.get(1001L, order.orderId()).status()).isEqualTo(OrderStatus.ACCEPTED);
         }
+    }
+
+    @Test
+    void preservesTraceIdWhenPublishingOrderCommand() throws Exception {
+        Path root = Files.createTempDirectory("order-user-state-trace-");
+        TradingOrderProperties properties = properties();
+        KafkaTemplate<String, String> kafka = kafka();
+        String traceId = "trace-order-1";
+        OrderRecord order = new OrderRecord(9002L, ProductLine.LINEAR_PERPETUAL, 1001L, "trace-1", "BTC-USDT",
+                1L, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 100L, 1L, 0L, 1L, MarginMode.CROSS,
+                PositionSide.NET, 100L, 200L, false, false, null, null, 0L, OrderStatus.ACCEPTED, null,
+                Instant.now(), Instant.now(), 1L, traceId);
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka);
+            service.place(order);
+        }
+
+        ArgumentCaptor<String> payloads = ArgumentCaptor.forClass(String.class);
+        verify(kafka, atLeastOnce()).send(anyString(), anyString(), payloads.capture());
+        assertThat(payloads.getAllValues()).anyMatch(payload -> payload.contains("\"traceId\":\"" + traceId + "\""));
     }
 
     @Test
@@ -194,6 +219,34 @@ class OrderUserStateServiceTest {
     }
 
     @Test
+    void lateCancelResultCannotDowngradeFilledOrder() throws Exception {
+        Path root = Files.createTempDirectory("order-user-state-late-cancel-");
+        TradingOrderProperties properties = properties();
+        Instant time = Instant.parse("2026-07-01T00:00:01Z");
+        MatchTradeEvent trade = new MatchTradeEvent(7201L, 8201L, "BTC-USDT", 9301L, 1L, 1001L,
+                OrderSide.BUY, 9401L, 1L, 2002L, 0L, 0L, 100L, 1L, true, false, time, "trace");
+        MatchResultEvent fill = new MatchResultEvent(8201L, 9301L, 1001L, "BTC-USDT", 1L,
+                OrderCommandType.PLACE, "SUCCESS", 1L, OrderStatus.FILLED, time, java.util.List.of(trade), "trace");
+        MatchResultEvent lateCancel = new MatchResultEvent(8202L, 9301L, 1001L, "BTC-USDT", 1L,
+                OrderCommandType.CANCEL, "MATCHING_UNKNOWN_ORDER_ID", 0L, OrderStatus.CANCEL_REQUESTED,
+                time.plusSeconds(1), java.util.List.of(), "trace-cancel");
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            service.place(order("late-cancel", 9301L, 1L));
+            service.cancel(1001L, 9301L, "position update");
+            service.processMatchResultForUser(1001L, fill);
+            service.processMatchResultForUser(1001L, lateCancel);
+
+            var result = service.get(1001L, 9301L);
+            assertThat(result.status()).isEqualTo(OrderStatus.FILLED);
+            assertThat(result.executedQuantitySteps()).isEqualTo(1L);
+            assertThat(result.remainingQuantitySteps()).isZero();
+        }
+    }
+
+    @Test
     void rejectsMatchResultWhenFilledQuantityHasNoMatchingTradeFacts() throws Exception {
         Path root = Files.createTempDirectory("order-user-state-invalid-match-");
         TradingOrderProperties properties = properties();
@@ -208,6 +261,26 @@ class OrderUserStateServiceTest {
             assertThatThrownBy(() -> service.processMatchResultForUser(9301L, invalid))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("缺少成交事实");
+        }
+    }
+
+    @Test
+    void rejectsMatchResultForUserThatIsNotATakerOrMaker() throws Exception {
+        Path root = Files.createTempDirectory("order-user-state-invalid-user-");
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties(), wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            Instant time = Instant.parse("2026-07-01T00:00:01Z");
+            MatchTradeEvent trade = new MatchTradeEvent(8301L, 8401L, "BTC-USDT", 9301L, 1L, 1001L,
+                    OrderSide.BUY, 9401L, 1L, 2002L, 0L, 0L, 100L, 2L, false, false, time, "trace");
+            MatchResultEvent result = new MatchResultEvent(8401L, 9301L, 1001L, "BTC-USDT", 1L,
+                    OrderCommandType.PLACE, "MATCHED", 1L, OrderStatus.PARTIALLY_FILLED, time,
+                    java.util.List.of(trade), "trace");
+
+            assertThatThrownBy(() -> service.processMatchResultForUser(3003L, result))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("不属于目标用户分区");
         }
     }
 
@@ -227,8 +300,12 @@ class OrderUserStateServiceTest {
 
             var first = service.executeUserCommand(command);
             var retry = service.executeUserCommand(command);
+            var retryWithNewMetadata = new OrderUserCommand(OrderUserCommand.CURRENT_SCHEMA_VERSION,
+                    command.commandId(), command.productLine(), command.userId(), command.commandType(),
+                    command.payload(), Instant.now().plusSeconds(1), "转发节点-2");
 
             assertThat(retry).isEqualTo(first);
+            assertThat(service.executeUserCommand(retryWithNewMetadata)).isEqualTo(first);
             assertThat(wal.replay(new com.surprising.eventstore.UserPartitionKey(
                     ProductLine.LINEAR_PERPETUAL, order.userId()))).hasSize(1);
             OrderRecord conflicting = orderFor(order.userId(), "command-2", 9402L, 10L);
@@ -266,6 +343,27 @@ class OrderUserStateServiceTest {
             service.processAccountCommandResultForUser(accepted);
 
             assertThat(service.get(1001L, pending.orderId()).status()).isEqualTo(OrderStatus.CANCELED);
+            org.mockito.Mockito.verify(kafka, org.mockito.Mockito.atLeastOnce())
+                    .send(anyString(), anyString(), anyString());
+        }
+    }
+
+    @Test
+    void cancelAcceptedOrderPublishesCancelAndAdvancesUserState() throws Exception {
+        Path root = Files.createTempDirectory("order-user-cancel-accepted-");
+        TradingOrderProperties properties = properties();
+        try (UserPartitionWal wal = new UserPartitionWal(root.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(root.resolve("state"))) {
+            KafkaTemplate<String, String> kafka = kafka();
+            OrderUserStateService service = new OrderUserStateService(new ObjectMapper(), properties, wal, state,
+                    new UserPartitionCommandLane(), kafka);
+            OrderRecord accepted = order("cancel-accepted", 9701L, 10L);
+
+            service.place(accepted);
+            assertThat(service.cancel(accepted.userId(), accepted.orderId(), "user cancel").status())
+                    .isEqualTo(OrderStatus.CANCEL_REQUESTED);
+            assertThat(service.get(accepted.userId(), accepted.orderId()).status())
+                    .isEqualTo(OrderStatus.CANCEL_REQUESTED);
             org.mockito.Mockito.verify(kafka, org.mockito.Mockito.atLeastOnce())
                     .send(anyString(), anyString(), anyString());
         }

@@ -38,7 +38,8 @@ public class ExpiringContractSettlementFanoutService {
             var payload = plan.command();
             String commandId = type.name() + ":" + plan.productLine().name() + ":" + payload.symbol()
                     + ":" + payload.instrumentVersion() + ":" + plan.userId() + ":"
-                    + payload.marginMode().name() + ":" + payload.positionSide().name();
+                    + payload.marginMode().name() + ":" + payload.positionSide().name() + ":"
+                    + payload.settlementPriceTicks() + ":" + payload.cashSettlementUnitsPerContract();
             AccountUserCommand command = new AccountUserCommand(
                     AccountUserCommand.CURRENT_SCHEMA_VERSION,
                     commandId,

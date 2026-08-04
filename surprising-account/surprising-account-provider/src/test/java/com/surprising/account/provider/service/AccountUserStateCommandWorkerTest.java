@@ -42,6 +42,21 @@ import tools.jackson.databind.ObjectMapper;
 class AccountUserStateCommandWorkerTest {
 
     @Test
+    void acceptsEquivalentJsonResultFieldOrderDuringRecovery() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountUserStateCommandWorker worker = new AccountUserStateCommandWorker(
+                objectMapper, null, null, null, null, null, null, null);
+        AccountCommandTerminalResult persisted = new AccountCommandTerminalResult(
+                com.surprising.account.api.model.AccountCommandStatus.APPLIED,
+                "{\"tradeId\":1,\"orderId\":2}", null, null, List.of());
+        AccountCommandTerminalResult recomputed = new AccountCommandTerminalResult(
+                com.surprising.account.api.model.AccountCommandStatus.APPLIED,
+                "{\"orderId\":2,\"tradeId\":1}", null, null, List.of());
+
+        assertThat(worker.terminalEquivalent(persisted, recomputed)).isTrue();
+    }
+
+    @Test
     void persistsDeterministicLedgerDeltaAlongsideTheLocalTerminalResult() throws Exception {
         Path directory = Files.createTempDirectory("account-state-worker-ledger-");
         ObjectMapper objectMapper = new ObjectMapper();
@@ -163,6 +178,60 @@ class AccountUserStateCommandWorkerTest {
             assertThat(topic.getAllValues()).containsExactly(
                     properties.getKafka().getAccountStateEventsTopic(),
                     properties.getKafka().getCommandResultsTopic());
+
+            AccountUserStateReducer restartedReducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane());
+            AccountUserStateCommandWorker restartedWorker = new AccountUserStateCommandWorker(
+                    objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
+                    restartedReducer, kafkaTemplate);
+            restartedWorker.applyPending();
+            org.mockito.ArgumentCaptor<String> payload = org.mockito.ArgumentCaptor.forClass(String.class);
+            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(4))
+                    .send(anyString(), anyString(), payload.capture());
+            assertThat(payload.getAllValues().get(1)).isEqualTo(payload.getAllValues().get(3));
+            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(4))
+                    .send(anyString(), anyString(), anyString());
+        }
+    }
+
+    @Test
+    void rejectsReserveOnMissingSnapshotInsteadOfPoisoningUserPartition() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-worker-empty-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture((SendResult<String, String>) null));
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1002L);
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION, "worker-empty-reserve", ProductLine.LINEAR_PERPETUAL,
+                1002L, AccountUserCommandType.ORDER_RESERVE, "ORDER", "9100", null,
+                objectMapper.writeValueAsString(new OrderReserveAccountCommand(
+                        9100L, "BTC-USDT", OrderSide.BUY, OrderReservationKind.DERIVATIVE_MARGIN,
+                        AccountType.USDT_PERPETUAL, "USDT", MarginMode.CROSS, PositionSide.NET,
+                        1L, false, 100L)), Instant.parse("2026-08-02T00:00:00Z"), "worker-empty");
+
+        try (UserPartitionWal wal = new UserPartitionWal(directory.resolve("wal"));
+             UserPartitionStateStore stateStore = new UserPartitionStateStore(directory.resolve("state"));
+             UserPartitionResultStore resultStore = new UserPartitionResultStore(directory.resolve("result"))) {
+            wal.append(partition, command.commandId(), command.commandType().name(),
+                    objectMapper.writeValueAsString(command).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "worker-empty-fingerprint", command.occurredAt());
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane());
+            AccountUserStateCommandWorker worker = new AccountUserStateCommandWorker(
+                    objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
+                    reducer, kafkaTemplate);
+
+            worker.applyPending();
+
+            AccountCommandTerminalResult terminal = objectMapper.readValue(
+                    new String(resultStore.read(partition, command.commandId()).orElseThrow(),
+                            java.nio.charset.StandardCharsets.UTF_8), AccountCommandTerminalResult.class);
+            assertThat(terminal.status()).isEqualTo(com.surprising.account.api.model.AccountCommandStatus.REJECTED);
+            assertThat(terminal.errorCode()).isEqualTo("INSUFFICIENT_AVAILABLE_BALANCE");
+            assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
         }
     }
 

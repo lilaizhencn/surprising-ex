@@ -67,6 +67,7 @@ surprising:
       option-exercises-topic: surprising.option.option.exercises.v1
       instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
       concurrency: 2
+      # 用户命令按用户键分区；每个分区独占消费者，避免做市流量阻塞资金命令。
       user-command-concurrency: ${ACCOUNT_USER_COMMAND_CONCURRENCY:32}
       max-poll-records: 500
     cache:

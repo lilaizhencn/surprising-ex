@@ -9,7 +9,6 @@ import com.surprising.trading.order.model.OrderUserState;
 import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -42,7 +41,6 @@ public class OrderStateProjectionWorker {
         this.projectionService = projectionService;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.wal.projection-delay-ms:25}")
     public void projectPending() {
         for (UserPartitionKey partition : wal.partitions()) {
             try {

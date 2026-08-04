@@ -49,7 +49,7 @@ class ProductLineTest {
         assertThat(ProductLine.INVERSE_PERPETUAL.supportsUserPositionMarginFlow()).isTrue();
         assertThat(ProductLine.LINEAR_DELIVERY.supportsUserPositionMarginFlow()).isTrue();
         assertThat(ProductLine.INVERSE_DELIVERY.supportsUserPositionMarginFlow()).isTrue();
-        assertThat(ProductLine.OPTION.supportsUserPositionMarginFlow()).isFalse();
+        assertThat(ProductLine.OPTION.supportsUserPositionMarginFlow()).isTrue();
     }
 
     @Test

@@ -7,7 +7,6 @@ import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /** 撮合本地通知队列发布器；数据库不参与重试和顺序控制。 */
@@ -26,7 +25,6 @@ public class MatchingLocalOutboxPublisher {
         this.kafkaTemplate = kafkaTemplate;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.matching.outbox.publish-delay-ms:20}")
     public void publishPending() {
         List<MatchingLocalStateStore.LocalOutboxRecord> records = stateStore.pendingOutbox(
                 Math.max(1, properties.getOutbox().getBatchSize()));

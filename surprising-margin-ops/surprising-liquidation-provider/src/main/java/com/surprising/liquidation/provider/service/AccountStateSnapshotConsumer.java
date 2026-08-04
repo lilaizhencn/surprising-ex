@@ -24,7 +24,7 @@ import tools.jackson.databind.ObjectMapper;
  * 也不允许丢弃版本间隙，否则重启后可能把旧持仓当成当前持仓执行强平。</p>
  */
 @Service("liquidationAccountStateSnapshotConsumer")
-@ConditionalOnExpression("'${surprising.liquidation.kafka.product-line:LINEAR_PERPETUAL}' == 'LINEAR_PERPETUAL'")
+@ConditionalOnExpression("'${surprising.liquidation.kafka.product-line:LINEAR_PERPETUAL}' matches 'LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION'")
 public class AccountStateSnapshotConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(AccountStateSnapshotConsumer.class);

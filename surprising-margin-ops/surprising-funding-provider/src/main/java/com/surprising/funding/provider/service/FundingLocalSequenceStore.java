@@ -1,12 +1,11 @@
 package com.surprising.funding.provider.service;
 
+import com.surprising.eventstore.PartitionOwnerLane;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
@@ -29,7 +28,7 @@ public final class FundingLocalSequenceStore implements AutoCloseable {
     private final Options options;
     private final RocksDB database;
     private final WriteOptions writeOptions;
-    private final ConcurrentHashMap<String, ReentrantLock> locks = new ConcurrentHashMap<>();
+    private final PartitionOwnerLane<String> owners;
 
     public FundingLocalSequenceStore(Path directory) {
         try {
@@ -38,6 +37,9 @@ public final class FundingLocalSequenceStore implements AutoCloseable {
             options = new Options().setCreateIfMissing(true);
             database = RocksDB.open(options, directory.toString());
             writeOptions = new WriteOptions().setSync(true);
+            owners = new PartitionOwnerLane<>(
+                    Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 8)),
+                    "funding-rate-owner");
         } catch (Exception ex) {
             throw new IllegalStateException("资金费本地序号库打开失败: " + directory, ex);
         }
@@ -48,19 +50,17 @@ public final class FundingLocalSequenceStore implements AutoCloseable {
             throw new IllegalArgumentException("资金费序号合约不能为空");
         }
         String normalized = symbol.trim().toUpperCase();
-        ReentrantLock lock = locks.computeIfAbsent(normalized, ignored -> new ReentrantLock());
-        lock.lock();
-        try {
-            byte[] key = key(normalized);
-            byte[] current = database.get(key);
-            long next = current == null ? 1L : Math.addExact(ByteBuffer.wrap(current).getLong(), 1L);
-            database.put(writeOptions, key, ByteBuffer.allocate(Long.BYTES).putLong(next).array());
-            return next;
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("资金费本地序号写入失败: " + normalized, ex);
-        } finally {
-            lock.unlock();
-        }
+        return owners.execute(normalized, () -> {
+            try {
+                byte[] key = key(normalized);
+                byte[] current = database.get(key);
+                long next = current == null ? 1L : Math.addExact(ByteBuffer.wrap(current).getLong(), 1L);
+                database.put(writeOptions, key, ByteBuffer.allocate(Long.BYTES).putLong(next).array());
+                return next;
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("资金费本地序号写入失败: " + normalized, ex);
+            }
+        });
     }
 
     public long current(String symbol) {
@@ -77,6 +77,7 @@ public final class FundingLocalSequenceStore implements AutoCloseable {
 
     @Override
     public void close() {
+        owners.close();
         writeOptions.close();
         database.close();
         options.close();

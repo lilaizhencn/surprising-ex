@@ -43,6 +43,26 @@ public class FundingKafkaConfiguration {
     }
 
     @Bean
+    public ProducerFactory<String, String> fundingAccountCommandProducerFactory(FundingProperties properties) {
+        Map<String, Object> config = new HashMap<>();
+        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        config.put(ProducerConfig.ACKS_CONFIG, "all");
+        config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
+        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+        return new DefaultKafkaProducerFactory<>(config);
+    }
+
+    @Bean
+    public KafkaTemplate<String, String> fundingAccountCommandKafkaTemplate(
+            @Qualifier("fundingAccountCommandProducerFactory")
+            ProducerFactory<String, String> fundingAccountCommandProducerFactory) {
+        return new KafkaTemplate<>(fundingAccountCommandProducerFactory);
+    }
+
+    @Bean
     public ConsumerFactory<String, String> fundingRateCacheConsumerFactory(FundingProperties properties) {
         return new DefaultKafkaConsumerFactory<>(consumerProperties(
                 properties, properties.getKafka().getCacheGroupId()));

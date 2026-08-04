@@ -34,6 +34,11 @@ management:
 surprising:
   edge:
     local-base-url: http://localhost:9094
+  gateway:
+    http-client:
+      # 订单接口会等待用户分区命令的 Kafka 结果；读超时必须覆盖命令等待和一次重平衡窗口。
+      connect-timeout: ${GATEWAY_CONNECT_TIMEOUT:1s}
+      read-timeout: ${GATEWAY_READ_TIMEOUT:30s}
   websocket:
     kafka:
       bootstrap-servers: localhost:9092

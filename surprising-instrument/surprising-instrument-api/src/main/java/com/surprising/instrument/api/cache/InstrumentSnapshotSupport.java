@@ -61,6 +61,9 @@ public final class InstrumentSnapshotSupport {
                                           String serviceName) {
         try {
             InstrumentEvent event = decode(objectMapper, record);
+            if (event.productLine() != productLine) {
+                return event;
+            }
             apply(snapshotCache, record.key(), event, productLine, serviceName);
             return event;
         } catch (Exception ex) {

@@ -14,8 +14,8 @@ import java.util.HexFormat;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.kafka.common.KafkaException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -33,14 +33,15 @@ public class FundingAccountCommandWalService {
     private final FundingProperties properties;
     private final UserPartitionWal wal;
     private final UserPartitionStateStore publishState;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final KafkaTemplate<String, String> kafkaTemplate;
     private final AtomicBoolean publishing = new AtomicBoolean();
 
     public FundingAccountCommandWalService(ObjectMapper objectMapper,
                                            FundingProperties properties,
                                            UserPartitionWal wal,
                                            UserPartitionStateStore publishState,
-                                           KafkaTemplate<String, Object> kafkaTemplate) {
+                                           @Qualifier("fundingAccountCommandKafkaTemplate")
+                                           KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.wal = wal;
@@ -67,7 +68,6 @@ public class FundingAccountCommandWalService {
                 serialized.getBytes(StandardCharsets.UTF_8), fingerprint(serialized), command.occurredAt());
     }
 
-    @Scheduled(fixedDelayString = "${surprising.funding.account-command.publish-delay-ms:25}")
     public void publishPending() {
         if (!publishing.compareAndSet(false, true)) {
             return;

@@ -185,7 +185,9 @@ public class MatchingProperties {
         }
 
         public String getAccountUserCommandsTopic() {
-            return productTopics().accountUserCommandsTopic();
+            return productTopicsEnabled
+                    ? productTopics().accountUserCommandsTopic()
+                    : "surprising.perp.account.user.commands.v1";
         }
 
         public String getOrderBookDepthTopic() {

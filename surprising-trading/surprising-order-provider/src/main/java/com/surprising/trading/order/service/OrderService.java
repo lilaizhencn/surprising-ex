@@ -5,6 +5,7 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AmendOrderBatchItemResponse;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -160,13 +161,15 @@ public class OrderService {
                 feeSnapshot.takerFeeRatePpm(), normalized.reduceOnly(), normalized.postOnly(),
                 reservation == null ? null : reservation.accountType().name(),
                 reservation == null ? null : reservation.asset(), reservation == null ? 0L : reservation.reservedUnits(),
-                status, validation.rejectReason(), now, now, 1L);
+                status, validation.rejectReason(), now, now, 1L, TraceContext.currentOrCreate());
         return orderUserCommandGateway.place(order);
     }
 
     /** 订单事实流只开放已接入本地账户 reducer 的产品线，未接入的产品线必须失败关闭。 */
     private void requireLocalAccountProductLine(ProductLine productLine) {
-        if (productLine == null || productLine == ProductLine.OPTION) {
+        // 现货没有持仓保证金流，但同样由账户 reducer 维护资产余额和冻结事实，不能误判为未接入。
+        if (productLine == null
+                || (!productLine.supportsUserPositionMarginFlow() && productLine != ProductLine.SPOT)) {
             throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
         }
     }
@@ -176,9 +179,6 @@ public class OrderService {
                                                              PlaceOrderRequest request) {
         if (productLine == ProductLine.SPOT) {
             return ValidationResult.ok();
-        }
-        if (productLine == ProductLine.OPTION) {
-            throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
         }
         if (request.reduceOnly()) {
             // 只减仓不会新增保证金模式状态；仓位模式和仓位快照由只减仓校验统一确认。

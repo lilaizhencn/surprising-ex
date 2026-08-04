@@ -16,10 +16,10 @@
 每次只启动当前产品线所需 provider，不需要把四条撮合业务全部启动：
 
 ```bash
-PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=OPTION BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
-PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true RESET_KAFKA=true KAFKA_RESET_SHARED_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=LINEAR_DELIVERY BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true RESET_KAFKA=true KAFKA_RESET_SHARED_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=OPTION BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true RESET_KAFKA=true KAFKA_RESET_SHARED_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
+PRODUCT_LINES=SPOT BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true RESET_KAFKA=true KAFKA_RESET_SHARED_TOPICS=true KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false KEEP_TMP=true ./scripts/product-line-api-flow-smoke.sh
 ```
 
 钱包服务不参与本地 smoke。测试资金通过 account/admin 产品账户调整接口或脚本 fixture 注入，核对脚本会把这些调整作为期初之后的 `adjustment_units` 单独列出。
@@ -33,6 +33,7 @@ PRODUCT_LINES=LINEAR_PERPETUAL \
 MULTI_SYMBOL_STRESS=true \
 RESET_KAFKA=true \
 CREATE_KAFKA_TOPICS=true \
+KAFKA_RESET_SHARED_TOPICS=true \
 STRESS_MATCHING_KAFKA_CONCURRENCY=8 \
 STRESS_MATCHING_ENGINE_SHARDS=8 \
 STRESS_MATCHING_RISK_SHARDS=4 \
@@ -84,8 +85,9 @@ MATRIX_REPEATS=3 \
 ```
 
 预置 profile 分别是 `4/4/2`、`8/8/4`、`16/8/4`，依次对应
-Kafka listener concurrency、matching engines、risk engines。每个 case 会重建测试 topic、清理稳定
-consumer group 对应的旧 topic 状态、执行资金守恒核对，并生成独立报告。报告新增：
+Kafka listener concurrency、matching engines、risk engines。每个 case 默认使用 DeleteRecords 清空
+普通业务 topic 并保留 topic/分区配置；只有 compacted 状态 topic 才重建，随后清理稳定 consumer group
+对应的旧 topic 状态、执行资金守恒核对，并生成独立报告。报告新增：
 
 - `order created → ACCEPTED → order command published → matching started → match result/account command published → 双边结算`
   分段延迟；

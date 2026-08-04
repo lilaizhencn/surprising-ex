@@ -25,6 +25,11 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,markPriceReadiness
 
 surprising:
   price:
@@ -47,7 +52,11 @@ surprising:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
         product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
+        # 用户命令按用户键分区；每个分区独占消费者，避免做市流量阻塞普通用户的命令结果。
         account-command-results-concurrency: ${ORDER_ACCOUNT_COMMAND_RESULTS_CONCURRENCY:32}
+        user-command-concurrency: ${ORDER_USER_COMMAND_CONCURRENCY:32}
+        # 用户命令包含 Kafka 发送和单写者落盘，等待时间必须覆盖启动重平衡窗口。
+        user-command-timeout: ${ORDER_USER_COMMAND_TIMEOUT:15s}
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
         instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1

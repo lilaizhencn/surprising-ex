@@ -60,14 +60,15 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.lang.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -94,8 +95,7 @@ public class OrderUserStateService {
     private final OrderIdSequenceStore orderIdSequenceStore;
     private final OrderMarginSnapshotCache marginSnapshotCache;
     private final Map<UserPartitionKey, Long> publishedSnapshotRevisions = new ConcurrentHashMap<>();
-    private long lastTimestamp;
-    private int sequence;
+    private final AtomicReference<LocalSequence> localSequence = new AtomicReference<>(new LocalSequence(0L, -1));
 
     public OrderUserStateService(ObjectMapper objectMapper,
                                  TradingOrderProperties properties,
@@ -112,7 +112,7 @@ public class OrderUserStateService {
                                  UserPartitionWal wal,
                                  UserPartitionStateStore stateStore,
                                  UserPartitionCommandLane lane,
-                                 KafkaTemplate<String, String> kafkaTemplate,
+                                 @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
                                  @Nullable PerpetualAccountStateSnapshotCache accountStateSnapshotCache,
                                  @Nullable OrderIdSequenceStore orderIdSequenceStore,
                                  @Nullable OrderMarginSnapshotCache marginSnapshotCache,
@@ -143,33 +143,36 @@ public class OrderUserStateService {
     }
 
     /** 订单编号不依赖数据库序列；低两位预留给同一订单的命令编号。 */
-    public synchronized long nextOrderId() {
+    public long nextOrderId() {
         if (orderIdSequenceStore != null) {
             return orderIdSequenceStore.next();
         }
-        long now = System.currentTimeMillis();
-        if (now < lastTimestamp) {
-            now = lastTimestamp;
-        }
-        if (now == lastTimestamp) {
-            if (sequence >= 1_023) {
-                // 同一毫秒的 1024 个编号已用尽，逻辑时钟前移一毫秒，避免自旋和重复编号。
-                now = Math.addExact(lastTimestamp, 1L);
-                sequence = 0;
-            } else {
-                sequence++;
+        while (true) {
+            LocalSequence previous = localSequence.get();
+            long now = System.currentTimeMillis();
+            if (now < previous.timestamp()) {
+                now = previous.timestamp();
             }
-        } else {
-            sequence = 0;
+            int current;
+            if (now == previous.timestamp()) {
+                if (previous.sequence() >= 1_023) {
+                    now = Math.addExact(previous.timestamp(), 1L);
+                    current = 0;
+                } else {
+                    current = previous.sequence() + 1;
+                }
+            } else {
+                current = 0;
+            }
+            long value = Math.addExact(Math.multiplyExact(now, 1L << 22),
+                    Math.addExact(((long) properties.getWal().getNodeId()) << 12, ((long) current) << 2));
+            if (value <= 0L) {
+                throw new IllegalStateException("订单编号溢出");
+            }
+            if (localSequence.compareAndSet(previous, new LocalSequence(now, current))) {
+                return value;
+            }
         }
-        lastTimestamp = now;
-        long current = sequence;
-        long value = Math.addExact(Math.multiplyExact(now, 1L << 22),
-                Math.addExact(((long) properties.getWal().getNodeId()) << 12, current << 2));
-        if (value <= 0L) {
-            throw new IllegalStateException("订单编号溢出");
-        }
-        return value;
     }
 
     /**
@@ -285,11 +288,24 @@ public class OrderUserStateService {
 
     private String commandFingerprint(OrderUserCommand command) {
         try {
+            // occurredAt 和 traceId 只是传输元数据。Kafka 重试、重新封装或跨节点转发时可能变化，
+            // 不能把它们作为同一幂等命令的载荷指纹，否则重复撮合结果会被错误地判定为冲突。
+            CommandFingerprint fingerprint = new CommandFingerprint(command.schemaVersion(), command.commandId(),
+                    command.productLine(), command.userId(), command.commandType(), command.payload());
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(
-                    serialize(command)));
+                    serialize(fingerprint)));
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 不可用", ex);
         }
+    }
+
+    /** 订单用户命令参与幂等校验的稳定字段。 */
+    private record CommandFingerprint(int schemaVersion,
+                                      String commandId,
+                                      ProductLine productLine,
+                                      long userId,
+                                      OrderUserCommandType commandType,
+                                      String payload) {
     }
 
     public OrderResponse place(OrderRecord order) {
@@ -804,7 +820,7 @@ public class OrderUserStateService {
         if (result == null || userId <= 0L) {
             throw new IllegalArgumentException("撮合结果用户分区参数无效");
         }
-        validateMatchResult(result);
+        validateMatchResult(userId, result);
         appendMatch(userId, result);
     }
 
@@ -818,9 +834,9 @@ public class OrderUserStateService {
     }
 
     /** Service 入口也必须重复校验 Kafka Consumer 已做的产品线和参与方边界。 */
-    private void validateMatchResult(MatchResultEvent result) {
+    private void validateMatchResult(long targetUserId, MatchResultEvent result) {
         requireCurrentProductLine(properties.getKafka().getProductLine());
-        if (result.commandId() <= 0L || result.orderId() <= 0L || result.userId() <= 0L
+        if (targetUserId <= 0L || result.commandId() <= 0L || result.orderId() <= 0L || result.userId() <= 0L
                 || result.symbol() == null || result.symbol().isBlank() || result.instrumentVersion() <= 0L
                 || result.filledQuantitySteps() < 0L || result.orderStatus() == null
                 || result.trades() == null) {
@@ -830,6 +846,7 @@ public class OrderUserStateService {
             throw new IllegalArgumentException("撮合结果包含成交数量但缺少成交事实");
         }
         Set<Long> tradeIds = new HashSet<>();
+        boolean targetParticipates = targetUserId == result.userId();
         long tradeQuantity = 0L;
         for (MatchTradeEvent trade : result.trades()) {
             if (trade == null || !result.symbol().equalsIgnoreCase(trade.symbol())
@@ -848,14 +865,17 @@ public class OrderUserStateService {
             if (!tradeIds.add(trade.tradeId())) {
                 throw new IllegalArgumentException("撮合结果包含重复成交编号");
             }
+            targetParticipates = targetParticipates || trade.makerUserId() == targetUserId;
             tradeQuantity = Math.addExact(tradeQuantity, trade.quantitySteps());
+        }
+        if (!targetParticipates) {
+            throw new IllegalArgumentException("撮合结果不属于目标用户分区");
         }
         if (tradeQuantity != result.filledQuantitySteps()) {
             throw new IllegalArgumentException("撮合结果成交数量与成交事实不一致");
         }
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.wal.worker-delay-ms:25}")
     public void applyPending() {
         for (UserPartitionKey partition : wal.partitions()) {
             try {
@@ -1071,13 +1091,15 @@ public class OrderUserStateService {
             }
             long executed = Math.addExact(order.executedQuantitySteps(), filled);
             long remaining = Math.subtractExact(order.quantitySteps(), executed);
+            OrderStatus appliedStatus = executed == order.quantitySteps() || order.status() == OrderStatus.FILLED
+                    ? OrderStatus.FILLED : nextStatus;
             updatedOrders.add(new OrderRecord(order.orderId(), order.productLine(), order.userId(),
                     order.clientOrderId(), order.symbol(), order.instrumentVersion(), order.side(),
                     order.orderType(), order.timeInForce(), order.priceTicks(), order.quantitySteps(), executed,
                     remaining, order.marginMode(), order.positionSide(), order.makerFeeRatePpm(),
                     order.takerFeeRatePpm(), order.reduceOnly(), order.postOnly(), order.reservationAccountType(),
-                    order.reservationAsset(), order.reservedUnits(), nextStatus, order.rejectReason(),
-                    order.createdAt(), Instant.now(), Math.addExact(order.revision(), 1L)));
+                    order.reservationAsset(), order.reservedUnits(), appliedStatus, order.rejectReason(),
+                    order.createdAt(), Instant.now(), Math.addExact(order.revision(), 1L), order.traceId()));
             touched = true;
         }
         if (!touched) {
@@ -1276,7 +1298,7 @@ public class OrderUserStateService {
                 order.timeInForce(), order.priceTicks(), order.quantitySteps(), order.marginMode(),
                 order.positionSide(), order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.reduceOnly(),
                 order.postOnly(), order.reservationAccountType(), order.reservationAsset(), order.reservedUnits(),
-                Instant.now(), null);
+                Instant.now(), order.traceId());
         send(properties.getKafka().getOrderCommandsTopic(), order.symbol(), objectMapper.writeValueAsString(command),
                 "ORDER_COMMAND:" + commandId);
     }
@@ -1284,7 +1306,8 @@ public class OrderUserStateService {
     private void publishOrderEvent(OrderRecord order, OrderEventType type, String reason) {
         OrderEvent event = new OrderEvent(orderEventId(order.orderId(), type), order.orderId(),
                 order.userId(), order.symbol(), type, order.status(), reason, Instant.now(), null);
-        send(properties.getKafka().getOrderEventsTopic(), order.userId() + ":" + order.orderId(),
+        // 订单事件按交易对分区，WebSocket 和其他行情消费者据此校验并路由；用户编号只存在于载荷。
+        send(properties.getKafka().getOrderEventsTopic(), order.symbol(),
                 objectMapper.writeValueAsString(event), "ORDER_EVENT:" + order.orderId() + ":" + type.name());
     }
 
@@ -1371,7 +1394,7 @@ public class OrderUserStateService {
                 order.remainingQuantitySteps(), order.marginMode(), order.positionSide(), order.makerFeeRatePpm(),
                 order.takerFeeRatePpm(), order.reduceOnly(), order.postOnly(), order.reservationAccountType(),
                 order.reservationAsset(), order.reservedUnits(), status, reason, order.createdAt(), Instant.now(),
-                Math.addExact(order.revision(), 1L));
+                Math.addExact(order.revision(), 1L), order.traceId());
     }
 
     private void requireSameIntent(OrderRecord left, OrderRecord right) {
@@ -1402,9 +1425,28 @@ public class OrderUserStateService {
     }
 
     private long orderEventId(long orderId, OrderEventType type) {
-        // 订单事件使用独立的低位编码；不能直接 orderId + ordinal，否则新增第五种事件
-        // 会和下一个订单的第一种事件碰撞。
-        return Math.addExact(Math.multiplyExact(orderId, 8L), type.ordinal() + 1L);
+        if (orderId <= 0L || type == null) {
+            throw new IllegalArgumentException("订单事件编号参数无效");
+        }
+        // 订单号生成器固定将低两位保留为零，因此前四种事件可以安全复用低位编码。
+        // CANCELED 使用负号域，避免与四种正数编码冲突，也不再对雪花订单号做乘法溢出。
+        if ((orderId & 3L) == 0L) {
+            return switch (type) {
+                case RESERVE_PENDING -> orderId;
+                case ACCEPTED -> orderId | 1L;
+                case REJECTED -> orderId | 2L;
+                case CANCEL_REQUESTED -> orderId | 3L;
+                case CANCELED -> -orderId;
+            };
+        }
+        // 单元测试或外部导入的非标准订单号没有预留低位，仍使用不溢出的稳定编号。
+        return switch (type) {
+            case RESERVE_PENDING -> orderId;
+            case ACCEPTED -> orderId == Long.MAX_VALUE ? orderId - 1L : orderId + 1L;
+            case REJECTED -> orderId == Long.MAX_VALUE ? orderId - 2L : orderId + 2L;
+            case CANCEL_REQUESTED -> orderId == Long.MAX_VALUE ? orderId - 3L : orderId + 3L;
+            case CANCELED -> -orderId;
+        };
     }
 
     public static String reservationCommandId(ProductLine productLine, long orderId) {
@@ -1417,5 +1459,8 @@ public class OrderUserStateService {
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(), order.marginMode(),
                 order.positionSide(), order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.reduceOnly(),
                 order.postOnly(), order.status(), order.rejectReason(), order.createdAt(), order.updatedAt());
+    }
+
+    private record LocalSequence(long timestamp, int sequence) {
     }
 }
