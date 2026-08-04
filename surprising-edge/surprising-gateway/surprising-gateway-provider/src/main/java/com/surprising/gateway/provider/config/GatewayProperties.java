@@ -18,6 +18,7 @@ public class GatewayProperties {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    private String deploymentProfile = "local";
     private Security security = new Security();
     private CustodyWallet custodyWallet = new CustodyWallet();
     private KycDocuments kycDocuments = new KycDocuments();
@@ -29,11 +30,93 @@ public class GatewayProperties {
 
     /** 仅在启用 Kafka 监控时校验其产品线，避免监控配置影响网关启动。 */
     @PostConstruct
-    void validateProductLineConfiguration() {
+    void validateConfiguration() {
         if (observability.kafka.enabled) {
             ProductLineConfiguration.require(observability.kafka.productLine,
                     observability.kafka.productTopicsEnabled, "gateway-admin-monitor");
         }
+        validateProductionSecurityConfiguration();
+    }
+
+    void validateProductionSecurityConfiguration() {
+        if (!"production".equalsIgnoreCase(deploymentProfile)) {
+            return;
+        }
+        List<String> failures = new ArrayList<>();
+        Security configuredSecurity = security == null ? new Security() : security;
+        if (!configuredSecurity.isRequireIdentityForPrivateRoutes()) {
+            failures.add("security.require-identity-for-private-routes must be true");
+        }
+        if (configuredSecurity.isAllowUserIdHeaderFallback()) {
+            failures.add("security.allow-user-id-header-fallback must be false");
+        }
+        if (!configuredSecurity.isRequireAdminMfa()) {
+            failures.add("security.require-admin-mfa must be true");
+        }
+        if (configuredSecurity.getAdminIpAllowlist() == null || configuredSecurity.getAdminIpAllowlist().isEmpty()) {
+            failures.add("security.admin-ip-allowlist must not be empty");
+        }
+        requireProductionSecret(failures, "security.jwt-secret", configuredSecurity.getJwtSecret(), 32,
+                "local-dev-change-me-surprising-ex-gateway-secret-2026");
+        requireProductionSecret(failures, "security.verification-code-pepper",
+                configuredSecurity.getVerificationCodePepper(), 32,
+                "local-dev-verification-pepper-change-me");
+        requireProductionSecret(failures, "security.mfa-secret-encryption-key",
+                configuredSecurity.getMfaSecretEncryptionKey(), 32, null);
+        if (configuredSecurity.isRequireEmailVerification()) {
+            requireNonBlank(failures, "security.resend-api-key", configuredSecurity.getResendApiKey());
+            requireNonBlank(failures, "security.resend-from", configuredSecurity.getResendFrom());
+        }
+
+        CustodyWallet wallet = custodyWallet == null ? new CustodyWallet() : custodyWallet;
+        if (!wallet.isEnabled()) {
+            failures.add("custody-wallet.enabled must be true");
+        }
+        requireNonBlank(failures, "custody-wallet.base-url", wallet.getBaseUrl());
+        requireNonBlank(failures, "custody-wallet.api-key", wallet.getApiKey());
+        requireNonBlank(failures, "custody-wallet.api-secret", wallet.getApiSecret());
+        requireNonBlank(failures, "custody-wallet.webhook-secret", wallet.getWebhookSecret());
+        requireNonBlank(failures, "custody-wallet.spot-account-base-url", wallet.getSpotAccountBaseUrl());
+
+        KycDocuments documents = kycDocuments == null ? new KycDocuments() : kycDocuments;
+        if (!documents.isEnabled()) {
+            failures.add("kyc-documents.enabled must be true");
+        }
+        if (!"s3".equalsIgnoreCase(documents.getType())) {
+            failures.add("kyc-documents.type must be s3");
+        }
+        requireNonBlank(failures, "kyc-documents.endpoint", documents.getEndpoint());
+        requireNonBlank(failures, "kyc-documents.bucket", documents.getBucket());
+        requireNonBlank(failures, "kyc-documents.access-key", documents.getAccessKey());
+        requireNonBlank(failures, "kyc-documents.secret-key", documents.getSecretKey());
+
+        if (!failures.isEmpty()) {
+            throw new IllegalStateException("production gateway security configuration is invalid: "
+                    + String.join("; ", failures));
+        }
+    }
+
+    private static void requireNonBlank(List<String> failures, String name, String value) {
+        if (value == null || value.isBlank()) {
+            failures.add(name + " must be configured");
+        }
+    }
+
+    private static void requireProductionSecret(List<String> failures, String name, String value,
+                                                int minimumLength, String forbiddenValue) {
+        if (value == null || value.isBlank() || value.length() < minimumLength
+                || (forbiddenValue != null && forbiddenValue.equals(value))) {
+            failures.add(name + " must be a non-default secret of at least " + minimumLength + " characters");
+        }
+    }
+
+    public String getDeploymentProfile() {
+        return deploymentProfile;
+    }
+
+    public void setDeploymentProfile(String deploymentProfile) {
+        this.deploymentProfile = deploymentProfile == null || deploymentProfile.isBlank()
+                ? "local" : deploymentProfile.trim();
     }
 
     public Security getSecurity() {
