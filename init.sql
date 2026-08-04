@@ -3397,6 +3397,24 @@ CREATE TABLE IF NOT EXISTS gateway_user_security_scenes (
 CREATE INDEX IF NOT EXISTS gateway_user_security_scenes_updated_idx
     ON gateway_user_security_scenes (user_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS gateway_wallet_webhook_events (
+    event_id            TEXT PRIMARY KEY,
+    event_type          TEXT NOT NULL,
+    body_sha256         TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'PROCESSING',
+    attempts            INTEGER NOT NULL DEFAULT 1,
+    error_message       TEXT,
+    received_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    processed_at        TIMESTAMPTZ,
+    CONSTRAINT gateway_wallet_webhook_status_check CHECK (
+        status IN ('PROCESSING', 'PROCESSED', 'FAILED')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS gateway_wallet_webhook_events_status_idx
+    ON gateway_wallet_webhook_events (status, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS gateway_user_kyc_profiles (
     user_id                 BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),
     kyc_level               TEXT NOT NULL DEFAULT 'NONE',

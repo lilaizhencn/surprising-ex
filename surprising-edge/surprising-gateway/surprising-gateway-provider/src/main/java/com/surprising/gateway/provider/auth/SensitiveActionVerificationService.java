@@ -70,15 +70,16 @@ public class SensitiveActionVerificationService {
             challengeRepository.incrementAttempts(challenge.challengeId(), userId, now);
             return false;
         }
-        if (!challengeRepository.consume(challenge.challengeId(), userId, now)) {
-            return false;
-        }
         var credential = persistence.mfaCredential(userId).orElse(null);
         if (credential == null || !credential.enabled()) {
-            return true;
+            return challengeRepository.consume(challenge.challengeId(), userId, now);
         }
         String secret = totpService.decryptSecret(credential.totpSecretCiphertext());
-        return totpService.verify(secret, totpCode, now);
+        if (!totpService.verify(secret, totpCode, now)) {
+            challengeRepository.incrementAttempts(challenge.challengeId(), userId, now);
+            return false;
+        }
+        return challengeRepository.consume(challenge.challengeId(), userId, now);
     }
 
     private String digest(String code, String sceneCode, String destination) {

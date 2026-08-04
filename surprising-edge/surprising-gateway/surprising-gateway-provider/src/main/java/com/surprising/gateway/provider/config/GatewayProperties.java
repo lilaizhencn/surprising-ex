@@ -15,6 +15,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class GatewayProperties {
 
     private Security security = new Security();
+    private CustodyWallet custodyWallet = new CustodyWallet();
     private HttpClient httpClient = new HttpClient();
     private Observability observability = new Observability();
     private Map<String, BackendRoute> routes = defaultRoutes();
@@ -35,6 +36,14 @@ public class GatewayProperties {
 
     public void setSecurity(Security security) {
         this.security = security;
+    }
+
+    public CustodyWallet getCustodyWallet() {
+        return custodyWallet;
+    }
+
+    public void setCustodyWallet(CustodyWallet custodyWallet) {
+        this.custodyWallet = custodyWallet == null ? new CustodyWallet() : custodyWallet;
     }
 
     public HttpClient getHttpClient() {
@@ -325,6 +334,82 @@ public class GatewayProperties {
 
         public void setRefreshTokenTtl(Duration refreshTokenTtl) {
             this.refreshTokenTtl = refreshTokenTtl;
+        }
+    }
+
+    public static class CustodyWallet {
+        private boolean enabled = false;
+        private String baseUrl = "http://localhost:8002";
+        private String apiKey = "";
+        private String apiSecret = "";
+        private String webhookSecret = "";
+        private String spotAccountBaseUrl = "http://localhost:9086";
+        private Map<String, Long> assetScales = Map.of();
+        private Duration requestTimeout = Duration.ofSeconds(10);
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public String getApiSecret() {
+            return apiSecret;
+        }
+
+        public void setApiSecret(String apiSecret) {
+            this.apiSecret = apiSecret;
+        }
+
+        public String getWebhookSecret() {
+            return webhookSecret;
+        }
+
+        public void setWebhookSecret(String webhookSecret) {
+            this.webhookSecret = webhookSecret;
+        }
+
+        public String getSpotAccountBaseUrl() {
+            return spotAccountBaseUrl;
+        }
+
+        public void setSpotAccountBaseUrl(String spotAccountBaseUrl) {
+            this.spotAccountBaseUrl = spotAccountBaseUrl;
+        }
+
+        public Map<String, Long> getAssetScales() {
+            return assetScales;
+        }
+
+        public void setAssetScales(Map<String, Long> assetScales) {
+            this.assetScales = assetScales == null ? Map.of() : Map.copyOf(assetScales);
+        }
+
+        public Duration getRequestTimeout() {
+            return requestTimeout;
+        }
+
+        public void setRequestTimeout(Duration requestTimeout) {
+            this.requestTimeout = requestTimeout == null || requestTimeout.isNegative()
+                    || requestTimeout.isZero() ? Duration.ofSeconds(10) : requestTimeout;
         }
     }
 

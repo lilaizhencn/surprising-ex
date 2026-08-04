@@ -33,6 +33,15 @@ management:
 
 surprising:
   gateway:
+    custody-wallet:
+      enabled: ${GATEWAY_CUSTODY_WALLET_ENABLED:false}
+      base-url: ${GATEWAY_CUSTODY_WALLET_BASE_URL:http://localhost:8002}
+      api-key: ${GATEWAY_CUSTODY_WALLET_API_KEY:}
+      api-secret: ${GATEWAY_CUSTODY_WALLET_API_SECRET:}
+      webhook-secret: ${GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET:}
+      spot-account-base-url: ${GATEWAY_SPOT_ACCOUNT_BASE_URL:http://localhost:9086}
+      asset-scales: ${GATEWAY_CUSTODY_WALLET_ASSET_SCALES:{}}
+      request-timeout: ${GATEWAY_CUSTODY_WALLET_REQUEST_TIMEOUT:10s}
     security:
       user-id-header: X-User-Id
       require-identity-for-private-routes: true
