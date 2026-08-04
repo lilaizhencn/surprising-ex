@@ -198,20 +198,10 @@ public class CustodyWithdrawalService {
         if ("SUBMITTED".equals(record.status())) {
             return response(record);
         }
+        Map<String, Object> walletResponse;
         try {
-            Map<String, Object> walletResponse = walletClient.createWithdrawal(record.userId(),
+            walletResponse = walletClient.createWithdrawal(record.userId(),
                     withdrawalPayload(record), custodyIdempotencyKey(record));
-            try {
-                record = repository.markSubmitted(record.withdrawalId(), json(walletResponse),
-                        stringValue(walletResponse.get("withdrawalId"), stringValue(walletResponse.get("id"), null)));
-                return response(record);
-            } catch (IllegalStateException ex) {
-                CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
-                if (current != null && submissionOutcomeAdvanced(current.status())) {
-                    return response(current);
-                }
-                throw ex;
-            }
         } catch (CustodyWalletClient.CustodyWalletRejectedException ex) {
             refund(record, "custody wallet withdrawal rejected refund", "custody wallet rejected withdrawal");
             throw new WithdrawalRejectedException("custody wallet rejected withdrawal; funds were released", ex);
@@ -227,12 +217,28 @@ public class CustodyWithdrawalService {
             }
             throw new WithdrawalUnknownException("custody wallet withdrawal status is unknown", ex);
         }
+        try {
+            record = repository.markSubmitted(record.withdrawalId(), json(walletResponse),
+                    stringValue(walletResponse.get("withdrawalId"), stringValue(walletResponse.get("id"), null)));
+            return response(record);
+        } catch (IllegalStateException ex) {
+            CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
+            if (current != null && submissionOutcomeAdvanced(current.status())) {
+                return response(current);
+            }
+            throw ex;
+        }
     }
 
     private boolean submissionOutcomeAdvanced(String status) {
         return "SUBMITTED".equals(status) || "COMPLETED".equals(status)
                 || "FAILED_PENDING".equals(status) || "REFUND_PENDING".equals(status)
                 || "REFUNDED".equals(status);
+    }
+
+    private boolean lateBroadcastUnknownCanBeIgnored(String status) {
+        return "SUBMITTED".equals(status) || "COMPLETED".equals(status)
+                || "REFUNDED".equals(status) || "REJECTED".equals(status);
     }
 
     public void handleWebhook(String eventType, Map<String, Object> event) {
@@ -260,7 +266,7 @@ public class CustodyWithdrawalService {
                             "custody wallet broadcast status is unknown", walletWithdrawalId);
                 } catch (IllegalStateException ex) {
                     CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
-                    if (current == null || !submissionOutcomeAdvanced(current.status())) {
+                    if (current == null || !lateBroadcastUnknownCanBeIgnored(current.status())) {
                         throw ex;
                     }
                 }

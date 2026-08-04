@@ -109,6 +109,36 @@ class CustodyWithdrawalServiceTest {
     }
 
     @Test
+    void localSubmissionStateConflictDoesNotBecomeBroadcastUnknown() {
+        GatewayProperties properties = new GatewayProperties();
+        CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
+        SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
+        WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
+        UUID withdrawalId = UUID.randomUUID();
+        CustodyWithdrawalRepository.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
+                "withdraw-local-conflict");
+        CustodyWithdrawalRepository.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
+                "withdraw-local-conflict");
+        when(walletClient.amountUnits("USDT", "25")).thenReturn(25_000_000L);
+        when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
+        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
+        when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
+        when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-local-conflict")))
+                .thenReturn(Map.of("id", "wallet-local-conflict"));
+        when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-local-conflict")))
+                .thenThrow(new IllegalStateException("invalid local status"));
+        when(repository.find(withdrawalId)).thenReturn(debited);
+
+        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+                valuationClient);
+
+        assertThatThrownBy(() -> service.submit(42L, "withdraw-local-conflict", request()))
+                .isInstanceOf(IllegalStateException.class);
+        verify(repository, never()).markBroadcastUnknown(any(), any(), any());
+    }
+
+    @Test
     void rejectedCustodyResponseRefundsExactlyOnceAndReturnsRejected() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
@@ -258,6 +288,31 @@ class CustodyWithdrawalServiceTest {
 
         verify(spotAccountClient, never()).adjustBalance(any(Long.class), any(), any(Long.class), any(), any());
         verify(repository, never()).markRefundPending(any(), any());
+    }
+
+    @Test
+    void broadcastUnknownWebhookDoesNotSilentlyAcceptFailurePendingState() {
+        GatewayProperties properties = new GatewayProperties();
+        CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
+        SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
+        WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
+        UUID withdrawalId = UUID.randomUUID();
+        CustodyWithdrawalRepository.WithdrawalRecord pending =
+                record(withdrawalId, "FAILED_PENDING", "withdraw-webhook-conflict");
+        when(repository.findByWalletReference("wallet-webhook-conflict",
+                "custody-wallet-withdrawal:withdraw-webhook-conflict")).thenReturn(pending);
+        when(repository.markBroadcastUnknown(eq(withdrawalId), any(), any(), eq("wallet-webhook-conflict")))
+                .thenThrow(new IllegalStateException("invalid webhook source status"));
+
+        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+                valuationClient);
+
+        assertThatThrownBy(() -> service.handleWebhook("WITHDRAWAL.BROADCAST_UNKNOWN", Map.of(
+                "data", Map.of("withdrawalId", "wallet-webhook-conflict",
+                        "externalReference", "custody-wallet-withdrawal:withdraw-webhook-conflict",
+                        "asset", "USDT", "chain", "ETH", "amount", "25"))))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
