@@ -2,10 +2,18 @@ package com.surprising.gateway.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+import java.util.Map;
 import org.springframework.web.client.RestTemplate;
 import tools.jackson.databind.ObjectMapper;
 
@@ -30,5 +38,23 @@ class CustodyWalletClientTest {
         assertThatThrownBy(() -> client.createWithdrawal(42L, java.util.Map.of(), "bad"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Idempotency-Key");
+    }
+
+    @Test
+    void mapsDeterministicWalletHttpRejectionToRejectedException() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getCustodyWallet().setEnabled(true);
+        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
+        properties.getCustodyWallet().setApiKey("wallet-key");
+        properties.getCustodyWallet().setApiSecret("wallet-secret");
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
+                .thenReturn(ResponseEntity.badRequest().body(Map.of("error", "rejected")));
+        CustodyWalletClient rejectedClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
+
+        assertThatThrownBy(() -> rejectedClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
+                .isInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class)
+                .extracting(ex -> ((CustodyWalletClient.CustodyWalletRejectedException) ex).status())
+                .isEqualTo(400);
     }
 }
