@@ -256,8 +256,10 @@ class CustodyWithdrawalServiceTest {
                                              WithdrawalValuationClient valuationClient) {
         CustodyWithdrawalRefundService refundService =
                 new CustodyWithdrawalRefundService(repository, spotAccountClient);
+        CustodyWithdrawalReconciliationService reconciliationService =
+                new CustodyWithdrawalReconciliationService(repository, walletClient, refundService, new ObjectMapper());
         return new CustodyWithdrawalService(properties, repository, walletClient, spotAccountClient,
-                valuationClient, refundService, new ObjectMapper());
+                valuationClient, refundService, reconciliationService, new ObjectMapper());
     }
 
     private CustodyWithdrawalService.WithdrawalRequest request() {

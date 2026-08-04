@@ -12,7 +12,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
@@ -31,6 +30,7 @@ public class CustodyWithdrawalService {
     private final SpotAccountClient spotAccountClient;
     private final WithdrawalValuationClient valuationClient;
     private final CustodyWithdrawalRefundService refundService;
+    private final CustodyWithdrawalReconciliationService reconciliationService;
     private final ObjectMapper objectMapper;
 
     public CustodyWithdrawalService(GatewayProperties properties,
@@ -39,6 +39,7 @@ public class CustodyWithdrawalService {
                                     SpotAccountClient spotAccountClient,
                                     WithdrawalValuationClient valuationClient,
                                     CustodyWithdrawalRefundService refundService,
+                                    CustodyWithdrawalReconciliationService reconciliationService,
                                     ObjectMapper objectMapper) {
         this.properties = properties;
         this.repository = repository;
@@ -46,6 +47,7 @@ public class CustodyWithdrawalService {
         this.spotAccountClient = spotAccountClient;
         this.valuationClient = valuationClient;
         this.refundService = refundService;
+        this.reconciliationService = reconciliationService;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     }
 
@@ -169,37 +171,10 @@ public class CustodyWithdrawalService {
         for (CustodyWithdrawalRepository.WithdrawalRecord record
                 : repository.listPendingFailures(properties.getWithdrawal().getFailureReconciliationDelay(), 50)) {
             try {
-                reconcileFailedWithdrawal(record);
+                reconciliationService.reconcile(record);
             } catch (RuntimeException ex) {
                 LOGGER.warn("custody withdrawal failure reconciliation remains pending: {}", record.withdrawalId(), ex);
             }
-        }
-    }
-
-    private void reconcileFailedWithdrawal(CustodyWithdrawalRepository.WithdrawalRecord record) {
-        if (record.externalReference() == null || record.externalReference().isBlank()) {
-            return;
-        }
-        Map<String, Object> walletRecord = walletClient.withdrawalsByExternalReference(
-                        record.externalReference(), record.chain(), record.assetSymbol(), 20).stream()
-                .filter(row -> record.externalReference().equals(
-                        stringValue(row.get("externalReference"), stringValue(row.get("external_reference"), null))))
-                .filter(row -> record.walletWithdrawalId() == null
-                        || record.walletWithdrawalId().equals(
-                                stringValue(row.get("withdrawalId"), stringValue(row.get("id"), null))))
-                .findFirst()
-                .orElse(null);
-        if (walletRecord == null) {
-            return;
-        }
-        String walletWithdrawalId = stringValue(walletRecord.get("withdrawalId"),
-                stringValue(walletRecord.get("id"), record.walletWithdrawalId()));
-        String status = stringValue(walletRecord.get("status"), "").toUpperCase(Locale.ROOT);
-        String response = json(walletRecord);
-        if ("CONFIRMED".equals(status)) {
-            repository.markCompleted(record.withdrawalId(), response, walletWithdrawalId);
-        } else if (Set.of("FAILED", "REJECTED", "CANCELLED").contains(status)) {
-            refund(record, "custody wallet withdrawal failed", "custody wallet withdrawal failed");
         }
     }
 

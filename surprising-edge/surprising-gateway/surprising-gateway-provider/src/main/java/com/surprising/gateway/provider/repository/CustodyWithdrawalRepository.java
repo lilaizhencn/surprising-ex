@@ -218,13 +218,9 @@ public class CustodyWithdrawalRepository {
         return requireUpdated(id, updated, "cannot mark withdrawal broadcast unknown");
     }
 
-    public WithdrawalRecord markCompleted(UUID id, String walletResponse) {
-        return markCompleted(id, walletResponse, null);
-    }
-
     @Transactional
     public WithdrawalRecord markCompleted(UUID id, String walletResponse, String walletWithdrawalId) {
-        lockWithdrawal(id);
+        lockForOutcome(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'COMPLETED', wallet_response = ?::jsonb,
@@ -239,7 +235,7 @@ public class CustodyWithdrawalRepository {
     @Transactional
     public WithdrawalRecord markFailurePending(UUID id, String walletResponse, String error,
                                                String walletWithdrawalId) {
-        lockWithdrawal(id);
+        lockForOutcome(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'FAILED_PENDING', wallet_response = ?::jsonb,
@@ -252,7 +248,7 @@ public class CustodyWithdrawalRepository {
 
     @Transactional
     public WithdrawalRecord markRefundPending(UUID id, String error) {
-        lockWithdrawal(id);
+        lockForOutcome(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REFUND_PENDING', error_code = 'REFUND_UNKNOWN', error_message = ?, updated_at = now()
@@ -264,7 +260,7 @@ public class CustodyWithdrawalRepository {
 
     @Transactional
     public WithdrawalRecord markRefunded(UUID id, String walletResponse, String reason) {
-        lockWithdrawal(id);
+        lockForOutcome(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REFUNDED', wallet_response = ?::jsonb, error_code = 'REFUNDED',
@@ -313,7 +309,7 @@ public class CustodyWithdrawalRepository {
                 """, UUID.randomUUID(), withdrawalId, adminUserId, adminUsername, action, reason.trim());
     }
 
-    private void lockWithdrawal(UUID id) {
+    public void lockForOutcome(UUID id) {
         Long lockKey = jdbcTemplate.queryForObject(
                 "SELECT hashtextextended(?::text, 0)", Long.class, id.toString());
         jdbcTemplate.execute("SELECT pg_advisory_xact_lock(" + lockKey + ")");
@@ -331,7 +327,8 @@ public class CustodyWithdrawalRepository {
                        wallet_withdrawal_id, error_code, error_message, created_at, updated_at,
                        submitted_at, completed_at, admin_user_id, admin_username, admin_reason
                   FROM gateway_wallet_withdrawals
-                 WHERE """ + predicate + " ORDER BY created_at DESC LIMIT " + limit;
+                 WHERE
+                """ + predicate + " ORDER BY created_at DESC LIMIT " + limit;
     }
 
     private String selectListSql(String predicate, int limit) {
