@@ -36,7 +36,7 @@ class GatewayApiKeyServiceTest {
 
         assertThat(service.binanceCanonicalQuery(request,
                 "symbol=BTCUSDT&side=BUY".getBytes(StandardCharsets.UTF_8)))
-                .isEqualTo("timestamp=123&symbol=BTCUSDT&side=BUY");
+                .isEqualTo("timestamp=123symbol=BTCUSDT&side=BUY");
     }
 
     @Test

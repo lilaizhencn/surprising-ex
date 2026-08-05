@@ -150,7 +150,7 @@ public class GatewayApiKeyService {
         String requestBody = body == null || body.length == 0
                 ? "" : canonicalQuery(new String(body, StandardCharsets.UTF_8));
         if (!query.isBlank() && !requestBody.isBlank()) {
-            return query + "&" + requestBody;
+            return query + requestBody;
         }
         if (!query.isBlank()) {
             return query;

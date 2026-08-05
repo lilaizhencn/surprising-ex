@@ -62,10 +62,12 @@ class GatewayApiKeyAuthenticationIpTest {
         request.addHeader("X-MBX-APIKEY", apiKey);
         String query = "timestamp=" + System.currentTimeMillis();
         String signedBody = "symbol=BTCUSDT&side=BUY";
-        String signature = service.sign("secret", query + "&" + signedBody);
+        String signature = service.sign("secret", query + signedBody);
         request.setQueryString(query + "&signature=" + signature);
         request.addParameter("timestamp", query.substring("timestamp=".length()));
         request.addParameter("signature", signature);
+
+        service.authenticate(request, "READ", signedBody.getBytes(StandardCharsets.UTF_8));
 
         assertThatThrownBy(() -> service.authenticate(request, "READ",
                         "symbol=ETHUSDT&side=BUY".getBytes(StandardCharsets.UTF_8)))
