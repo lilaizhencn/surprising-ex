@@ -65,6 +65,8 @@ class GatewayProductionSecurityConfigurationTest {
         wallet.setSpotAccountInternalSecret("spot-account-internal-secret-with-at-least-thirty-two-characters");
         wallet.setAssetScales(Map.of("USDT", 6L));
         wallet.setWithdrawalAddressIds(Map.of("ETH", "11111111-1111-1111-1111-111111111111"));
+        properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");
+        properties.getAdminRoutes().get("wallet-admin").setBasicAuthPassword("wallet-admin-secret");
 
         properties.getWithdrawal().setValuationBaseUrl("https://price.example.com");
 
@@ -150,6 +152,8 @@ class GatewayProductionSecurityConfigurationTest {
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_ASSET_SCALES", "{\"USDT\":6}");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS",
                 "{\"ETH\":\"11111111-1111-1111-1111-111111111111\"}");
+        testEnvironment.put("SW_WALLET_ADMIN_USERNAME", "wallet-admin");
+        testEnvironment.put("SW_WALLET_ADMIN_PASSWORD", "wallet-admin-secret");
         testEnvironment.put("GATEWAY_SPOT_ACCOUNT_BASE_URL", "https://account.example.com");
         testEnvironment.put("GATEWAY_SPOT_ACCOUNT_INTERNAL_SECRET",
                 "spot-account-internal-secret-with-at-least-thirty-two-characters");
@@ -182,6 +186,8 @@ class GatewayProductionSecurityConfigurationTest {
                 .containsEntry("ETH", "11111111-1111-1111-1111-111111111111");
         assertThat(properties.getKycDocuments().isEnabled()).isTrue();
         assertThat(properties.getKycDocuments().getType()).isEqualTo("s3");
+        properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");
+        properties.getAdminRoutes().get("wallet-admin").setBasicAuthPassword("wallet-admin-secret");
         properties.setEnvironment(environment);
         assertThatCode(properties::validateProductionSecurityConfiguration)
                 .doesNotThrowAnyException();

@@ -92,6 +92,10 @@ public class GatewayProperties implements EnvironmentAware {
         requireHttpsUrl(failures, "custody-wallet.spot-account-base-url", wallet.getSpotAccountBaseUrl());
         requireProductionSecret(failures, "custody-wallet.spot-account-internal-secret",
                 wallet.getSpotAccountInternalSecret(), 32, "local-dev-spot-account-internal-secret-change-me");
+        BackendRoute walletAdmin = adminRoutes == null ? null : adminRoutes.get("wallet-admin");
+        if (walletAdmin == null || !walletAdmin.hasBasicAuth()) {
+            failures.add("admin-routes.wallet-admin.basic-auth must be configured");
+        }
         if (wallet.getWithdrawalAddressIds().isEmpty()) {
             failures.add("custody-wallet.withdrawal-address-ids must contain at least one network");
         } else {
