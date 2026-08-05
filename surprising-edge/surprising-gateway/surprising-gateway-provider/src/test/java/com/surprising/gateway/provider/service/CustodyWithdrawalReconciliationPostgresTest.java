@@ -306,6 +306,22 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void idempotentTerminalWebhookAppendsAuditEvent() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'COMPLETED' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED", Map.of(
+                "data", Map.of("withdrawalId", "wallet-integration",
+                        "externalReference", "custody-wallet-withdrawal:integration",
+                        "asset", "USDT", "chain", "ETH", "amount", "25")));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM gateway_wallet_withdrawal_events
+                 WHERE withdrawal_id = ? AND event_type = 'WEBHOOK_IDEMPOTENT'
+                """, Integer.class, withdrawalId)).isEqualTo(1);
+    }
+
+    @Test
     void webhookBindsWalletIdByExternalReferenceAndRejectsConflictingBinding() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
                 withdrawalId);

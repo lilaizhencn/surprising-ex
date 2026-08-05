@@ -3509,7 +3509,7 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_events (
     reason               TEXT,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT gateway_wallet_withdrawal_event_type_check CHECK (event_type IN (
-        'INTENT_CREATED', 'WALLET_ID_BOUND', 'ADMIN_RETRY', 'ADMIN_APPROVED', 'ADMIN_REJECTED',
+        'INTENT_CREATED', 'WALLET_ID_BOUND', 'WEBHOOK_IDEMPOTENT', 'ADMIN_RETRY', 'ADMIN_APPROVED', 'ADMIN_REJECTED',
         'DEBITED', 'DEBIT_UNKNOWN', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'COMPLETED',
         'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED', 'REJECTED'
     )),

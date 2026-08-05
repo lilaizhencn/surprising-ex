@@ -84,6 +84,16 @@ public class CustodyWithdrawalRepository {
     }
 
     @Transactional
+    public void recordWebhookObservation(UUID id, String walletWithdrawalId, String payload, String reason) {
+        WithdrawalRecord record = find(id);
+        if (record == null) {
+            throw new IllegalStateException("withdrawal intent does not exist");
+        }
+        insertTransitionEvent(id, "WEBHOOK_IDEMPOTENT", "CUSTODY_WALLET", record.status(), record.status(),
+                walletWithdrawalId, payload, reason);
+    }
+
+    @Transactional
     public WithdrawalRecord findByWalletReference(String walletWithdrawalId, String externalReference) {
         if ((walletWithdrawalId == null || walletWithdrawalId.isBlank())
                 && (externalReference == null || externalReference.isBlank())) {

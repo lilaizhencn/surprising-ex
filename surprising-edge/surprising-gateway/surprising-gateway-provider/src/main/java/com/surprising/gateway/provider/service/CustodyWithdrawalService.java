@@ -252,6 +252,9 @@ public class CustodyWithdrawalService {
         Map<String, Object> data = mapValue(event.get("data"));
         String walletWithdrawalId = stringValue(data.get("withdrawalId"), null);
         String externalReference = stringValue(data.get("externalReference"), null);
+        if (walletWithdrawalId == null || externalReference == null) {
+            throw new IllegalArgumentException("withdrawal webhook wallet id and external reference are required");
+        }
         CustodyWithdrawalRepository.WithdrawalRecord record = repository.findByWalletReference(
                 walletWithdrawalId, externalReference);
         if (record == null) {
@@ -262,6 +265,8 @@ public class CustodyWithdrawalService {
         if ("COMPLETED".equals(record.status()) || "REFUNDED".equals(record.status())
                 || "REJECTED".equals(record.status())) {
             if (terminalWebhookIsIdempotent(record.status(), normalizedType)) {
+                repository.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, json(event),
+                        "idempotent terminal webhook: " + normalizedType);
                 return;
             }
             throw new IllegalStateException("withdrawal webhook conflicts with terminal local status");
