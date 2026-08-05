@@ -63,6 +63,18 @@ public class CustodyWalletController {
         }
     }
 
+    @GetMapping("/chains")
+    public List<Map<String, Object>> chains(@RequestHeader("Authorization") String authorization) {
+        try {
+            principal(authorization);
+            return walletClient.chains();
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        }
+    }
+
     @GetMapping("/deposits")
     public List<Map<String, Object>> deposits(@RequestHeader("Authorization") String authorization,
                                               @RequestParam(required = false) String chain,

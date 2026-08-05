@@ -70,4 +70,20 @@ class CustodyWalletControllerTest {
                 .submit(eq(42L), eq("withdraw-1"), requests.capture());
         assertThat(requests.getValue().custodyAddressId()).isEqualTo(configuredSource);
     }
+
+    @Test
+    void requiresUserAuthenticationBeforeReturningEnabledWalletChains() {
+        AuthService authService = mock(AuthService.class);
+        CustodyWalletClient walletClient = mock(CustodyWalletClient.class);
+        when(authService.authenticateBearer("Bearer token"))
+                .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of(), Instant.now().plusSeconds(600)));
+        when(walletClient.chains()).thenReturn(List.of(Map.of("chain", "ETH", "enabled", true)));
+        CustodyWalletController controller = new CustodyWalletController(
+                authService, walletClient, mock(SensitiveActionVerificationService.class),
+                mock(ComplianceService.class), mock(CustodyWithdrawalService.class), new GatewayProperties());
+
+        assertThat(controller.chains("Bearer token"))
+                .containsExactly(Map.of("chain", "ETH", "enabled", true));
+        verify(walletClient).chains();
+    }
 }

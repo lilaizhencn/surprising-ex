@@ -54,6 +54,11 @@ public class CustodyWalletClient {
         return exchange(HttpMethod.POST, path, body, Map.class, null);
     }
 
+    public List<Map<String, Object>> chains() {
+        return exchange(HttpMethod.GET, API_PREFIX + "/chains", null,
+                new ParameterizedTypeReference<>() {}, null);
+    }
+
     public List<Map<String, Object>> deposits(long userId, String chain, String asset, int limit) {
         String query = query(Map.of(
                 "chain", optional(chain),
