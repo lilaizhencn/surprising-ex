@@ -103,6 +103,10 @@ public class CustodyWalletController {
             requireSecurity(principal.userId(), "WITHDRAWAL", emailCode, totpCode);
             requireKyc(principal.userId());
             java.util.UUID configuredSourceAddressId = configuredSourceAddress(request.chain());
+            if (request.custodyAddressId() != null
+                    && !configuredSourceAddressId.equals(request.custodyAddressId())) {
+                throw new IllegalArgumentException("withdrawal source address does not match configured custody address");
+            }
             CustodyWithdrawalService.WithdrawalResponse response = withdrawalService.submit(
                     principal.userId(), idempotencyKey,
                     new CustodyWithdrawalService.WithdrawalRequest(

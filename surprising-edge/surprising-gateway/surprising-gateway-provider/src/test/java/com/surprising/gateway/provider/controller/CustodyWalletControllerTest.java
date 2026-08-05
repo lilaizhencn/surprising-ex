@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -22,11 +23,13 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 class CustodyWalletControllerTest {
 
     @Test
-    void usesConfiguredSourceAddressWhenLegacyClientAddressIsForgedOrOmitted() {
+    void rejectsForgedSourceAddressAndUsesConfiguredAddressWhenOmitted() {
         AuthService authService = mock(AuthService.class);
         CustodyWalletClient walletClient = mock(CustodyWalletClient.class);
         SensitiveActionVerificationService verificationService = mock(SensitiveActionVerificationService.class);
@@ -51,18 +54,20 @@ class CustodyWalletControllerTest {
         CustodyWalletController controller = new CustodyWalletController(
                 authService, walletClient, verificationService, complianceService, withdrawalService, properties);
 
-        controller.createWithdrawal("Bearer token", "withdraw-1", null, null,
+        assertThatThrownBy(() -> controller.createWithdrawal("Bearer token", "withdraw-1", null, null,
                 new CustodyWalletController.CreateWithdrawalRequest(
-                        forgedSource, "ETH", "USDT", "0xrecipient", "25", null));
+                        forgedSource, "ETH", "USDT", "0xrecipient", "25", null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode())
+                        .isEqualTo(HttpStatus.BAD_REQUEST));
         controller.createWithdrawal("Bearer token", "withdraw-1", null, null,
                 new CustodyWalletController.CreateWithdrawalRequest(
                         null, "ETH", "USDT", "0xrecipient", "25", null));
 
         ArgumentCaptor<CustodyWithdrawalService.WithdrawalRequest> requests =
                 ArgumentCaptor.forClass(CustodyWithdrawalService.WithdrawalRequest.class);
-        verify(withdrawalService, org.mockito.Mockito.times(2))
+        verify(withdrawalService)
                 .submit(eq(42L), eq("withdraw-1"), requests.capture());
-        assertThat(requests.getAllValues()).allSatisfy(request ->
-                assertThat(request.custodyAddressId()).isEqualTo(configuredSource));
+        assertThat(requests.getValue().custodyAddressId()).isEqualTo(configuredSource);
     }
 }

@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -33,18 +34,18 @@ public class CustodyWithdrawalReconciliationService {
             return;
         }
         repository.lockForOutcome(record.withdrawalId());
-        Map<String, Object> walletRecord = walletClient.withdrawalsByExternalReference(
+        List<Map<String, Object>> matches = walletClient.withdrawalsByExternalReference(
                         record.externalReference(), record.chain(), record.assetSymbol(), 20).stream()
                 .filter(row -> record.externalReference().equals(
                         stringValue(row.get("externalReference"), stringValue(row.get("external_reference"), null))))
                 .filter(row -> record.walletWithdrawalId() == null
                         || record.walletWithdrawalId().equals(
                                 stringValue(row.get("withdrawalId"), stringValue(row.get("id"), null))))
-                .findFirst()
-                .orElse(null);
-        if (walletRecord == null) {
+                .toList();
+        if (matches.size() != 1) {
             return;
         }
+        Map<String, Object> walletRecord = matches.getFirst();
         String walletWithdrawalId = stringValue(walletRecord.get("withdrawalId"),
                 stringValue(walletRecord.get("id"), record.walletWithdrawalId()));
         String status = stringValue(walletRecord.get("status"), "").toUpperCase(Locale.ROOT);

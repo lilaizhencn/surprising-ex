@@ -6,6 +6,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     private CustodyWalletClient walletClient;
     private SpotAccountClient spotAccountClient;
     private CustodyWithdrawalReconciliationService reconciliationService;
+    private CustodyWithdrawalService withdrawalService;
     private UUID withdrawalId;
 
     @BeforeEach
@@ -62,13 +64,18 @@ class CustodyWithdrawalReconciliationPostgresTest {
         applicationContext.registerBean(JdbcTemplate.class, () -> jdbcTemplate);
         applicationContext.registerBean(CustodyWalletClient.class, () -> walletClient);
         applicationContext.registerBean(SpotAccountClient.class, () -> spotAccountClient);
+        applicationContext.registerBean(GatewayProperties.class, GatewayProperties::new);
+        applicationContext.registerBean(WithdrawalValuationClient.class,
+                () -> Mockito.mock(WithdrawalValuationClient.class));
         applicationContext.registerBean(ObjectMapper.class, () -> new ObjectMapper());
         applicationContext.registerBean(CustodyWithdrawalRepository.class);
         applicationContext.registerBean(CustodyWithdrawalRefundService.class);
         applicationContext.registerBean(CustodyWithdrawalReconciliationService.class);
+        applicationContext.registerBean(CustodyWithdrawalService.class);
         applicationContext.refresh();
         repository = applicationContext.getBean(CustodyWithdrawalRepository.class);
         reconciliationService = applicationContext.getBean(CustodyWithdrawalReconciliationService.class);
+        withdrawalService = applicationContext.getBean(CustodyWithdrawalService.class);
         PlatformTransactionManager transactionManager =
                 applicationContext.getBean(PlatformTransactionManager.class);
         transactionTemplate = new TransactionTemplate(transactionManager);
@@ -179,7 +186,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
         repository.markDebited(withdrawalId, "debit");
         repository.markDebited(withdrawalId, "debit");
         repository.markSubmitted(withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration");
-        repository.markSubmitted(withdrawalId, "{\"id\":\"different\"}", "different");
+        assertThatThrownBy(() -> repository.markSubmitted(
+                withdrawalId, "{\"id\":\"different\"}", "different"))
+                .isInstanceOf(IllegalStateException.class);
         assertThat(repository.find(withdrawalId).status()).isEqualTo("SUBMITTED");
         assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-integration");
 
@@ -206,6 +215,38 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void invalidWebhookDoesNotPersistWalletIdBinding() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        assertThatThrownBy(() -> withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED", Map.of(
+                "data", Map.of("withdrawalId", "wallet-invalid",
+                        "externalReference", "custody-wallet-withdrawal:integration",
+                        "asset", "USDT", "chain", "ETH", "amount", "26"))))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(repository.find(withdrawalId).walletWithdrawalId()).isNull();
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
+    }
+
+    @Test
+    void ambiguousCustodyResultDoesNotCompleteOrRefundWithdrawal() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
+                withdrawalId);
+        when(walletClient.withdrawalsByExternalReference(
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
+                .thenReturn(List.of(walletRow("CONFIRMED"), walletRow("FAILED")));
+
+        reconciliationService.reconcile(repository.find(withdrawalId));
+
+        verify(spotAccountClient, never()).adjustBalance(
+                42L, "USDT", 25_000_000L,
+                "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
+        assertThat(repository.find(withdrawalId).walletWithdrawalId()).isNull();
+    }
+
+    @Test
     void webhookBindsWalletIdByExternalReferenceAndRejectsConflictingBinding() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
                 withdrawalId);
@@ -227,6 +268,23 @@ class CustodyWithdrawalReconciliationPostgresTest {
             assertThatThrownBy(() -> repository.findByWalletReference(
                     "wallet-other", "custody-wallet-withdrawal:integration"))
                     .isInstanceOf(IllegalStateException.class);
+        } finally {
+            jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE withdrawal_id = ?", otherId);
+        }
+    }
+
+    @Test
+    void stateTransitionRejectsWalletIdOwnedByAnotherWithdrawal() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'DEBITED', wallet_withdrawal_id = NULL "
+                + "WHERE withdrawal_id = ?", withdrawalId);
+        UUID otherId = insertWithdrawal("custody-wallet-withdrawal:other-state", "wallet-owned-state");
+
+        try {
+            assertThatThrownBy(() -> repository.markSubmitted(
+                    withdrawalId, "{}", "wallet-owned-state"))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThat(repository.find(withdrawalId).status()).isEqualTo("DEBITED");
+            assertThat(repository.find(withdrawalId).walletWithdrawalId()).isNull();
         } finally {
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE withdrawal_id = ?", otherId);
         }

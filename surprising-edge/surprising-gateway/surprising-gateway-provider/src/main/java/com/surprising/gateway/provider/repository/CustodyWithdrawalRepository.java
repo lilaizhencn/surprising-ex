@@ -240,59 +240,84 @@ public class CustodyWithdrawalRepository {
         return requireTransition(id, updated, "cannot transition withdrawal to DEBIT_UNKNOWN", "DEBIT_UNKNOWN");
     }
 
+    @Transactional
     public WithdrawalRecord markSubmitted(UUID id, String walletResponse, String walletWithdrawalId) {
-        int updated = jdbcTemplate.update("""
-                UPDATE gateway_wallet_withdrawals
-                   SET status = 'SUBMITTED', wallet_response = COALESCE(wallet_response, ?::jsonb),
-                       wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
-                       submitted_at = COALESCE(submitted_at, now()), updated_at = now(), error_code = NULL,
-                       error_message = NULL
-                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN', 'SUBMITTED')
-                """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
+        lockAndValidateWalletReference(id, walletWithdrawalId);
+        int updated;
+        try {
+            updated = jdbcTemplate.update("""
+                    UPDATE gateway_wallet_withdrawals
+                       SET status = 'SUBMITTED', wallet_response = COALESCE(wallet_response, ?::jsonb),
+                           wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
+                           submitted_at = COALESCE(submitted_at, now()), updated_at = now(), error_code = NULL,
+                           error_message = NULL
+                     WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN', 'SUBMITTED')
+                    """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
+        } catch (DataIntegrityViolationException ex) {
+            throw new IllegalStateException("wallet withdrawal id is already bound", ex);
+        }
         return requireTransition(id, updated, "cannot mark withdrawal submitted", "SUBMITTED");
     }
 
+    @Transactional
     public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error) {
         return markBroadcastUnknown(id, walletResponse, error, null);
     }
 
+    @Transactional
     public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error,
                                                  String walletWithdrawalId) {
-        int updated = jdbcTemplate.update("""
-                UPDATE gateway_wallet_withdrawals
-                   SET status = 'BROADCAST_UNKNOWN', wallet_response = ?::jsonb,
-                       wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
-                       error_code = 'CUSTODY_UNKNOWN', error_message = ?, updated_at = now()
-                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN')
-                """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
+        lockAndValidateWalletReference(id, walletWithdrawalId);
+        int updated;
+        try {
+            updated = jdbcTemplate.update("""
+                    UPDATE gateway_wallet_withdrawals
+                       SET status = 'BROADCAST_UNKNOWN', wallet_response = ?::jsonb,
+                           wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
+                           error_code = 'CUSTODY_UNKNOWN', error_message = ?, updated_at = now()
+                     WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN')
+                    """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
+        } catch (DataIntegrityViolationException ex) {
+            throw new IllegalStateException("wallet withdrawal id is already bound", ex);
+        }
         return requireTransition(id, updated, "cannot mark withdrawal broadcast unknown", "BROADCAST_UNKNOWN");
     }
 
     @Transactional
     public WithdrawalRecord markCompleted(UUID id, String walletResponse, String walletWithdrawalId) {
-        lockForOutcome(id);
-        int updated = jdbcTemplate.update("""
-                UPDATE gateway_wallet_withdrawals
-                   SET status = 'COMPLETED', wallet_response = ?::jsonb,
-                       wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
-                       completed_at = now(), updated_at = now(),
-                       error_code = NULL, error_message = NULL
-                 WHERE withdrawal_id = ? AND status IN ('SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
-                """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
+        lockAndValidateWalletReference(id, walletWithdrawalId);
+        int updated;
+        try {
+            updated = jdbcTemplate.update("""
+                    UPDATE gateway_wallet_withdrawals
+                       SET status = 'COMPLETED', wallet_response = ?::jsonb,
+                           wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
+                           completed_at = now(), updated_at = now(),
+                           error_code = NULL, error_message = NULL
+                     WHERE withdrawal_id = ? AND status IN ('SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
+                    """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
+        } catch (DataIntegrityViolationException ex) {
+            throw new IllegalStateException("wallet withdrawal id is already bound", ex);
+        }
         return requireTransition(id, updated, "cannot mark withdrawal completed", "COMPLETED");
     }
 
     @Transactional
     public WithdrawalRecord markFailurePending(UUID id, String walletResponse, String error,
                                                String walletWithdrawalId) {
-        lockForOutcome(id);
-        int updated = jdbcTemplate.update("""
-                UPDATE gateway_wallet_withdrawals
-                   SET status = 'FAILED_PENDING', wallet_response = ?::jsonb,
-                       wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
-                       error_code = 'CUSTODY_FAILURE_PENDING', error_message = ?, updated_at = now()
-                 WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
-                """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
+        lockAndValidateWalletReference(id, walletWithdrawalId);
+        int updated;
+        try {
+            updated = jdbcTemplate.update("""
+                    UPDATE gateway_wallet_withdrawals
+                       SET status = 'FAILED_PENDING', wallet_response = ?::jsonb,
+                           wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
+                           error_code = 'CUSTODY_FAILURE_PENDING', error_message = ?, updated_at = now()
+                     WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
+                    """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
+        } catch (DataIntegrityViolationException ex) {
+            throw new IllegalStateException("wallet withdrawal id is already bound", ex);
+        }
         return requireTransition(id, updated, "cannot mark withdrawal failure pending", "FAILED_PENDING");
     }
 
@@ -355,6 +380,19 @@ public class CustodyWithdrawalRepository {
                     + (record == null ? "missing" : record.status()));
         }
         return record;
+    }
+
+    private void lockAndValidateWalletReference(UUID id, String walletWithdrawalId) {
+        lockForOutcome(id);
+        WithdrawalRecord current = find(id);
+        if (current == null) {
+            throw new IllegalStateException("withdrawal intent does not exist");
+        }
+        if (walletWithdrawalId != null && !walletWithdrawalId.isBlank()
+                && current.walletWithdrawalId() != null
+                && !current.walletWithdrawalId().equals(walletWithdrawalId)) {
+            throw new IllegalStateException("wallet withdrawal id does not match local intent");
+        }
     }
 
     private void insertAdminAction(UUID withdrawalId, long adminUserId, String adminUsername,
