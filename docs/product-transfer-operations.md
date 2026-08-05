@@ -25,9 +25,9 @@ The gateway owns the user-facing transfer flow. The account provider is a single
 | `COIN_DELIVERY` | `INVERSE_DELIVERY` |
 | `OPTION` | `OPTION` |
 
-`FUNDING` 与 `SPOT` 不产生实际账户间移动，互转会被拒绝。每个 product route 必须在 gateway 配置中显式提供，未配置时 fail-closed。
+`FUNDING` 与 `SPOT` 不产生实际账户间移动，互转会被拒绝。每条产品线必须在 gateway 配置中显式提供非空的 `base-url`；`target-prefix` 可以继承 account 父路由，但解析后的最终路由仍必须完整，否则 fail-closed。
 
-`FUNDING` and `SPOT` are aliases of the same underlying funding account and cannot be transferred between each other. Each product route must be explicitly configured; an absent route fails closed.
+`FUNDING` and `SPOT` are aliases of the same underlying funding account and cannot be transferred between each other. Each product route must explicitly provide a non-blank `base-url`; `target-prefix` may inherit from the account parent route, but the resolved route must be complete or fail closed.
 
 ## 幂等与状态 / Idempotency and states
 

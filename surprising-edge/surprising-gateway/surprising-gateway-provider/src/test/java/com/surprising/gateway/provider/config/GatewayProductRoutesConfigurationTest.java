@@ -53,6 +53,25 @@ class GatewayProductRoutesConfigurationTest {
         assertThat(deliveryAccount.getTargetPrefix()).isEqualTo("/api/v1/admin/accounts");
     }
 
+    @Test
+    void accountProductRoutesResolveInheritedTargetPrefixForEveryProductLine() throws IOException {
+        GatewayProperties properties = bindApplicationProperties(Map.of(
+                "GATEWAY_ROUTE_ACCOUNT_SPOT_BASE_URL", "http://account-spot:9186",
+                "GATEWAY_ROUTE_ACCOUNT_LINEAR_PERPETUAL_BASE_URL", "http://account-linear:9186",
+                "GATEWAY_ROUTE_ACCOUNT_INVERSE_PERPETUAL_BASE_URL", "http://account-inverse:9186",
+                "GATEWAY_ROUTE_ACCOUNT_LINEAR_DELIVERY_BASE_URL", "http://account-linear-delivery:9186",
+                "GATEWAY_ROUTE_ACCOUNT_INVERSE_DELIVERY_BASE_URL", "http://account-inverse-delivery:9186",
+                "GATEWAY_ROUTE_ACCOUNT_OPTION_BASE_URL", "http://account-option:9186"));
+
+        GatewayProperties.BackendRoute account = properties.getRoutes().get("account");
+        for (ProductLine productLine : ProductLine.values()) {
+            GatewayProperties.BackendRoute resolved = account.resolve(productLine);
+            assertThat(resolved).isNotNull();
+            assertThat(resolved.getBaseUrl()).isNotBlank();
+            assertThat(resolved.getTargetPrefix()).isEqualTo("/api/v1/accounts");
+        }
+    }
+
     private static GatewayProperties bindApplicationProperties(Map<String, Object> overrides) throws IOException {
         StandardEnvironment environment = new StandardEnvironment();
         environment.getPropertySources().addFirst(new MapPropertySource("test-overrides", overrides));

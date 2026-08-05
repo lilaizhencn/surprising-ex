@@ -64,6 +64,28 @@ class HttpProductAccountClientTest {
     }
 
     @Test
+    void inheritsAccountTargetPrefixWhenProductRouteOnlyOverridesBaseUrl() {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
+                "http://account-default:9086", "/api/v1/accounts", true);
+        account.setProductRoutes(Map.of(ProductLine.LINEAR_PERPETUAL,
+                new GatewayProperties.ProductRoute("http://account-linear:9186", "")));
+        properties.setRoutes(Map.of("account", account));
+        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("{}"));
+
+        new HttpProductAccountClient(properties, restTemplate)
+                .adjust("USDT_PERPETUAL", -1L, "transfer-inherited-prefix", "test", 42L, "USDT");
+
+        ArgumentCaptor<URI> uri = ArgumentCaptor.forClass(URI.class);
+        verify(restTemplate).exchange(uri.capture(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
+        assertThat(uri.getValue()).isEqualTo(URI.create(
+                "http://account-linear:9186/api/v1/accounts/admin/product-balance-adjustments"));
+    }
+
+    @Test
     void mapsProviderClientErrorsToPermanentRejection() {
         GatewayProperties properties = propertiesWithLinearRoute();
         properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
@@ -107,12 +129,12 @@ class HttpProductAccountClientTest {
     }
 
     @Test
-    void refusesToFallbackWhenTheSelectedProductRouteIsBlank() {
+    void refusesWhenTheSelectedProductRouteHasNoBaseUrl() {
         GatewayProperties properties = new GatewayProperties();
         GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
                 "http://account:9086", "/api/v1/accounts", true);
         account.setProductRoutes(Map.of(ProductLine.LINEAR_PERPETUAL,
-                new GatewayProperties.ProductRoute("", "")));
+                new GatewayProperties.ProductRoute("", "/api/v1/accounts")));
         properties.setRoutes(Map.of("account", account));
 
         assertThatThrownBy(() -> new HttpProductAccountClient(properties, mock(RestTemplate.class))
