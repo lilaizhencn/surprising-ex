@@ -203,6 +203,10 @@ public class AuthPersistenceService {
         refreshSessionRepository.revoke(sessionId, now);
     }
 
+    public int consumeRefreshSession(long sessionId, Instant now) {
+        return refreshSessionRepository.consume(sessionId, now);
+    }
+
     public List<AdminRefreshSessionResponse> refreshSessions(Long userId, Boolean active, int limit) {
         return refreshSessionRepository.find(userId, active, limit);
     }

@@ -122,7 +122,9 @@ public class AuthService {
         if (session.revokedAt() != null || !session.expiresAt().isAfter(now)) {
             throw new IllegalArgumentException("invalid refresh token");
         }
-        repository.revokeRefreshSession(session.sessionId(), now);
+        if (repository.consumeRefreshSession(session.sessionId(), now) != 1) {
+            throw new IllegalArgumentException("invalid refresh token");
+        }
         AuthenticatedUser user = repository.user(session.userId())
                 .orElseThrow(() -> new IllegalStateException("user not found"));
         if ("FROZEN".equals(user.status())) {

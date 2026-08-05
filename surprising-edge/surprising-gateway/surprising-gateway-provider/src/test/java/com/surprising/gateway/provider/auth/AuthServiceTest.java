@@ -14,6 +14,7 @@ import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthModels.LoginRequest;
 import com.surprising.gateway.provider.auth.AuthModels.RegisterRequest;
+import com.surprising.gateway.provider.auth.AuthModels.RefreshRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
@@ -200,6 +201,24 @@ class AuthServiceTest {
 
         assertThat(response.accessToken()).isEqualTo("access");
         verifyNoInteractions(totpService);
+    }
+
+    @Test
+    void refreshConsumesOnlyOneActiveSession() {
+        Instant now = Instant.now();
+        when(repository.refreshSession(any())).thenReturn(Optional.of(
+                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600), null)));
+        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
+        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
+                42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
+        when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
+                .thenReturn("access");
+
+        var response = service.refresh(new RefreshRequest("refresh-token"), new MockHttpServletRequest());
+
+        assertThat(response.accessToken()).isEqualTo("access");
+        verify(repository).consumeRefreshSession(eq(88L), any());
+        verify(repository, org.mockito.Mockito.never()).revokeRefreshSession(any(Long.class), any());
     }
 
     @Test

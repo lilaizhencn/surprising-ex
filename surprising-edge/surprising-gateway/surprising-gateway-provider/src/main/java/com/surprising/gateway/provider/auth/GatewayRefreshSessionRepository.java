@@ -64,6 +64,17 @@ public class GatewayRefreshSessionRepository {
                 """, Timestamp.from(now), Timestamp.from(now), sessionId);
     }
 
+    public int consume(long sessionId, Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = ?,
+                       updated_at = ?
+                 WHERE session_id = ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), sessionId, Timestamp.from(now));
+    }
+
     public List<AdminRefreshSessionResponse> find(Long userId, Boolean active, int limit) {
         return findPage(userId, active, limit, null, null).items();
     }
