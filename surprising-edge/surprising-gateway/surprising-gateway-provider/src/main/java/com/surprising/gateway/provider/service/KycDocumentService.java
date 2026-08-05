@@ -106,6 +106,15 @@ public class KycDocumentService {
     }
 
     public List<KycDocument> requireSubmissionDocuments(long userId, List<Long> documentIds, String documentType) {
+        return requireSubmissionDocuments(userId, documentIds, documentType, null, null, null);
+    }
+
+    public List<KycDocument> requireSubmissionDocuments(long userId,
+                                                        List<Long> documentIds,
+                                                        String documentType,
+                                                        String applicantType,
+                                                        String kycLevel,
+                                                        String faceVerificationStatus) {
         if (documentIds == null || documentIds.isEmpty()) {
             throw new IllegalArgumentException("upload KYC documents before submitting verification");
         }
@@ -117,7 +126,58 @@ public class KycDocumentService {
         if (documents.stream().noneMatch(document -> requestedType.equals(document.documentType()))) {
             throw new IllegalArgumentException("KYC document type does not match submitted verification");
         }
+        requireProfileDocuments(documents, applicantType, kycLevel, faceVerificationStatus);
         return documents;
+    }
+
+    private void requireProfileDocuments(List<KycDocument> documents,
+                                         String applicantType,
+                                         String kycLevel,
+                                         String faceVerificationStatus) {
+        if (applicantType == null && kycLevel == null && faceVerificationStatus == null) {
+            return;
+        }
+        String normalizedApplicantType = normalizeProfileValue(applicantType, "applicantType");
+        if (!Set.of("INDIVIDUAL", "BUSINESS").contains(normalizedApplicantType)) {
+            throw new IllegalArgumentException("applicantType must be INDIVIDUAL or BUSINESS");
+        }
+        String normalizedKycLevel = normalizeProfileValue(kycLevel, "kycLevel");
+        if (!Set.of("BASIC", "STANDARD", "ENHANCED").contains(normalizedKycLevel)) {
+            throw new IllegalArgumentException("kycLevel must be BASIC, STANDARD or ENHANCED");
+        }
+        String normalizedFaceStatus = faceVerificationStatus == null || faceVerificationStatus.isBlank()
+                ? "NOT_REQUIRED" : normalizeProfileValue(faceVerificationStatus, "faceVerificationStatus");
+        if (!Set.of("NOT_REQUIRED", "PENDING").contains(normalizedFaceStatus)) {
+            throw new IllegalArgumentException("faceVerificationStatus may only be NOT_REQUIRED or PENDING");
+        }
+
+        boolean identity = documents.stream().anyMatch(document ->
+                Set.of("ID_CARD", "PASSPORT").contains(document.documentType()));
+        if (!identity) {
+            throw new IllegalArgumentException("an identity document is required for KYC");
+        }
+        if ("BUSINESS".equals(normalizedApplicantType)
+                && documents.stream().noneMatch(document -> "BUSINESS_LICENSE".equals(document.documentType()))) {
+            throw new IllegalArgumentException("a business license is required for business KYC");
+        }
+        if (Set.of("STANDARD", "ENHANCED").contains(normalizedKycLevel)
+                && documents.stream().noneMatch(document -> "ADDRESS_PROOF".equals(document.documentType()))) {
+            throw new IllegalArgumentException("an address proof is required for this KYC level");
+        }
+        if ("ENHANCED".equals(normalizedKycLevel) && !"PENDING".equals(normalizedFaceStatus)) {
+            throw new IllegalArgumentException("enhanced KYC requires face verification");
+        }
+        if ("PENDING".equals(normalizedFaceStatus)
+                && documents.stream().noneMatch(document -> "FACE_IMAGE".equals(document.documentType()))) {
+            throw new IllegalArgumentException("a face image is required when face verification is enabled");
+        }
+    }
+
+    private String normalizeProfileValue(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return value.trim().toUpperCase(Locale.ROOT);
     }
 
     public String references(List<KycDocument> documents) {

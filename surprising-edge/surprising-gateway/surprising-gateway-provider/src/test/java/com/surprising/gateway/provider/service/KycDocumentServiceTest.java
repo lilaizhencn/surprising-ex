@@ -79,6 +79,45 @@ class KycDocumentServiceTest {
     }
 
     @Test
+    void requiresEvidenceForSelectedKycProfile() {
+        GatewayProperties properties = new GatewayProperties();
+        KycDocumentRepository repository = mock(KycDocumentRepository.class);
+        KycDocumentService service = new KycDocumentService(
+                repository, mock(KycDocumentStorageService.class), properties, new ObjectMapper());
+        List<KycDocument> documents = List.of(
+                document(10L, "PASSPORT"), document(11L, "ADDRESS_PROOF"));
+        when(repository.findOwnedForSubmission(7L, List.of(10L, 11L))).thenReturn(documents);
+        when(repository.findOwnedForSubmission(7L, List.of(10L))).thenReturn(List.of(documents.getFirst()));
+
+        assertThat(service.requireSubmissionDocuments(7L, List.of(10L, 11L), "PASSPORT",
+                "INDIVIDUAL", "STANDARD", "NOT_REQUIRED")).containsExactlyElementsOf(documents);
+        assertThatThrownBy(() -> service.requireSubmissionDocuments(7L, List.of(10L), "PASSPORT",
+                "INDIVIDUAL", "STANDARD", "NOT_REQUIRED"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("address proof");
+    }
+
+    @Test
+    void requiresBusinessAndFaceEvidenceWhenSelected() {
+        GatewayProperties properties = new GatewayProperties();
+        KycDocumentRepository repository = mock(KycDocumentRepository.class);
+        KycDocumentService service = new KycDocumentService(
+                repository, mock(KycDocumentStorageService.class), properties, new ObjectMapper());
+        List<Long> ids = List.of(10L, 11L, 12L, 13L);
+        when(repository.findOwnedForSubmission(7L, ids)).thenReturn(List.of(
+                document(10L, "PASSPORT"), document(11L, "ADDRESS_PROOF"),
+                document(12L, "BUSINESS_LICENSE"), document(13L, "FACE_IMAGE")));
+
+        assertThat(service.requireSubmissionDocuments(7L, ids, "PASSPORT",
+                "BUSINESS", "ENHANCED", "PENDING")).hasSize(4);
+    }
+
+    private KycDocument document(long id, String type) {
+        return new KycDocument(id, 7L, type, type.toLowerCase() + ".pdf", "application/pdf",
+                8L, "a".repeat(64), "UPLOADED", Instant.now(), null);
+    }
+
+    @Test
     void storageRemainsUnavailableUntilExplicitlyEnabled() {
         GatewayProperties properties = new GatewayProperties();
         KycDocumentStorageService storage = new KycDocumentStorageService(properties);

@@ -154,7 +154,8 @@ public class ComplianceService {
     public KycProfile submitUserKyc(String authorization, KycSubmissionRequest request) {
         long userId = authService.authenticateBearer(authorization).userId();
         List<KycDocument> documents = kycDocumentService.requireSubmissionDocuments(
-                userId, request.documentIds(), request.documentType());
+                userId, request.documentIds(), request.documentType(), request.applicantType(),
+                request.kycLevel(), request.faceVerificationStatus());
         String submittedDocuments = kycDocumentService.references(documents);
         KycProfile profile = kycRepository.submit(userId, request, submittedDocuments, Instant.now());
         kycDocumentService.markSubmitted(userId, request.documentIds());
