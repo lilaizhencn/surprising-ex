@@ -52,8 +52,9 @@ public class ComplianceKycRepository {
                 userId, ComplianceValidation.kycLevel(request.kycLevel()),
                 ComplianceValidation.kycStatus(request.status()), ComplianceValidation.country(request.country()),
                 ComplianceValidation.blankToNull(request.documentType()),
-                ComplianceValidation.blankToNull(request.provider()),
-                ComplianceValidation.blankToNull(request.providerReference()), adminUserId, Timestamp.from(now),
+                ComplianceValidation.provider(request.provider()),
+                ComplianceValidation.providerReference(ComplianceValidation.provider(request.provider()),
+                        request.providerReference()), adminUserId, Timestamp.from(now),
                 ComplianceValidation.blankToNull(request.rejectionReason()),
                 ComplianceValidation.timestamp(request.expiresAt()), Timestamp.from(now), Timestamp.from(now));
     }
@@ -91,8 +92,9 @@ public class ComplianceKycRepository {
                 userId, ComplianceValidation.kycLevel(request.kycLevel()),
                 ComplianceValidation.country(request.country()),
                 ComplianceValidation.blankToNull(request.documentType()),
-                ComplianceValidation.blankToNull(request.provider()),
-                ComplianceValidation.blankToNull(request.providerReference()),
+                ComplianceValidation.provider(request.provider()),
+                ComplianceValidation.providerReference(ComplianceValidation.provider(request.provider()),
+                        request.providerReference()),
                 documents(submittedDocuments),
                 applicantType(request.applicantType()),
                 faceStatus(request.faceVerificationStatus()),

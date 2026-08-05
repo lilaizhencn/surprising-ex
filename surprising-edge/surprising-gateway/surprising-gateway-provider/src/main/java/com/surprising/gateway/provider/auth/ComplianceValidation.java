@@ -29,6 +29,25 @@ final class ComplianceValidation {
         return normalized;
     }
 
+    static String provider(String value) {
+        String normalized = defaultString(value, "SELF").trim().toUpperCase(Locale.ROOT);
+        if (!List.of("SELF", "THIRD_PARTY").contains(normalized)) {
+            throw new IllegalArgumentException("provider must be SELF or THIRD_PARTY");
+        }
+        return normalized;
+    }
+
+    static String providerReference(String provider, String value) {
+        String normalized = blankToNull(value);
+        if ("THIRD_PARTY".equals(provider) && normalized == null) {
+            throw new IllegalArgumentException("providerReference is required for THIRD_PARTY");
+        }
+        if (normalized != null && normalized.length() > 240) {
+            throw new IllegalArgumentException("providerReference is too long");
+        }
+        return normalized;
+    }
+
     static String amlStatus(String value) {
         String normalized = defaultString(value, "OPEN").trim().toUpperCase(Locale.ROOT);
         if (!List.of("OPEN", "REVIEWING", "CLEARED", "ESCALATED", "RESTRICTED", "CLOSED").contains(normalized)) {
