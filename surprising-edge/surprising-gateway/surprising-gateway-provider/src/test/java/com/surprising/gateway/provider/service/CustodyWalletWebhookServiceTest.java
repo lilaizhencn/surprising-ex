@@ -15,8 +15,6 @@ import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.RestTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 class CustodyWalletWebhookServiceTest {
@@ -25,9 +23,9 @@ class CustodyWalletWebhookServiceTest {
     private final CustodyWalletWebhookRepository repository = mock(CustodyWalletWebhookRepository.class);
     private final CustodyWalletClient walletClient = mock(CustodyWalletClient.class);
     private final CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
-    private final RestTemplate restTemplate = mock(RestTemplate.class);
+    private final SpotAccountClient spotAccountClient = mock(SpotAccountClient.class);
     private final CustodyWalletWebhookService service = new CustodyWalletWebhookService(
-            properties, repository, walletClient, withdrawalService, restTemplate, new ObjectMapper());
+            properties, repository, walletClient, withdrawalService, spotAccountClient, new ObjectMapper());
 
     @BeforeEach
     void setUp() {
@@ -57,13 +55,11 @@ class CustodyWalletWebhookServiceTest {
         when(repository.claim(eq("event-1"), eq("DEPOSIT.CONFIRMED"), any(), any()))
                 .thenReturn(CustodyWalletWebhookRepository.ClaimResult.CLAIMED);
         when(walletClient.amountUnits("USDT", "1.25")).thenReturn(1_250_000L);
-        when(restTemplate.exchange(any(java.net.URI.class), any(), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{}"));
-
         service.handle("event-1", "DEPOSIT.CONFIRMED", Long.toString(timestamp),
-                service.signature("webhook-secret", timestamp, body), body);
+                service.signature("webhook-secret", "event-1", "DEPOSIT.CONFIRMED", timestamp, body), body);
 
-        verify(restTemplate).exchange(any(java.net.URI.class), any(), any(), eq(String.class));
+        verify(spotAccountClient).adjustBalance(42L, "USDT", 1_250_000L,
+                "custody-wallet:event-1:deposit.confirmed", "custody wallet DEPOSIT.CONFIRMED");
         verify(repository).markProcessed(eq("event-1"), any());
     }
 
@@ -77,6 +73,19 @@ class CustodyWalletWebhookServiceTest {
     }
 
     @Test
+    void rejectsHeaderIdentityThatDoesNotMatchSignedPayload() {
+        byte[] body = "{\"id\":\"event-1\",\"type\":\"DEPOSIT.CONFIRMED\",\"data\":{}}"
+                .getBytes(StandardCharsets.UTF_8);
+        long timestamp = Instant.now().getEpochSecond();
+
+        assertThatThrownBy(() -> service.handle("event-2", "DEPOSIT.CONFIRMED", Long.toString(timestamp),
+                service.signature("webhook-secret", "event-2", "DEPOSIT.CONFIRMED", timestamp, body), body))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("event id");
+        verify(repository, org.mockito.Mockito.never()).claim(any(), any(), any(), any());
+    }
+
+    @Test
     void dispatchesWithdrawalWebhookToTheWithdrawalStateMachine() {
         byte[] body = ("{\"id\":\"withdrawal-event-1\",\"type\":\"WITHDRAWAL.CONFIRMED\","
                 + "\"data\":{\"withdrawalId\":\"wallet-withdrawal-1\","
@@ -87,7 +96,7 @@ class CustodyWalletWebhookServiceTest {
                 .thenReturn(CustodyWalletWebhookRepository.ClaimResult.CLAIMED);
 
         service.handle("withdrawal-event-1", "WITHDRAWAL.CONFIRMED", Long.toString(timestamp),
-                service.signature("webhook-secret", timestamp, body), body);
+                service.signature("webhook-secret", "withdrawal-event-1", "WITHDRAWAL.CONFIRMED", timestamp, body), body);
 
         verify(withdrawalService).handleWebhook(eq("WITHDRAWAL.CONFIRMED"), any());
         verify(repository).markProcessed(eq("withdrawal-event-1"), any());

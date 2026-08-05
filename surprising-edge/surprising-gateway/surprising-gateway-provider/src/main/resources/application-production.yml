@@ -23,6 +23,7 @@ surprising:
       api-secret: ${GATEWAY_CUSTODY_WALLET_API_SECRET}
       webhook-secret: ${GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET}
       spot-account-base-url: ${GATEWAY_SPOT_ACCOUNT_BASE_URL}
+      spot-account-internal-secret: ${GATEWAY_SPOT_ACCOUNT_INTERNAL_SECRET}
       asset-scales-json: ${GATEWAY_CUSTODY_WALLET_ASSET_SCALES}
       withdrawal-address-ids-json: ${GATEWAY_CUSTODY_WALLET_WITHDRAWAL_ADDRESS_IDS}
     kyc-documents:

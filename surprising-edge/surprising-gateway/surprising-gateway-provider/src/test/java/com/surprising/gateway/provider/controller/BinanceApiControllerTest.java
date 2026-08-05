@@ -13,6 +13,7 @@ import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.GatewayApiKeyService;
+import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
 import com.surprising.gateway.provider.service.GatewayProxyService;
@@ -60,7 +61,8 @@ class BinanceApiControllerTest {
                 .thenReturn(ResponseEntity.ok(payload.getBytes(StandardCharsets.UTF_8)));
 
         BinanceApiController controller = new BinanceApiController(properties, proxy,
-                mock(GatewayApiKeyService.class), authService, mock(ComplianceService.class),
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
+                mock(ComplianceService.class),
                 mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
 
         var response = controller.handle(request, null);
@@ -97,7 +99,8 @@ class BinanceApiControllerTest {
                 any(), isNull(), isNull()))
                 .thenReturn(ResponseEntity.ok(payload.getBytes(StandardCharsets.UTF_8)));
         BinanceApiController controller = new BinanceApiController(properties, proxy,
-                mock(GatewayApiKeyService.class), authService, mock(ComplianceService.class),
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
+                mock(ComplianceService.class),
                 mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
 
         var response = controller.handle(request, null);
@@ -132,7 +135,8 @@ class BinanceApiControllerTest {
         request.addHeader("Authorization", "Bearer token");
         request.setParameter("symbol", "BTCUSDT");
         BinanceApiController controller = new BinanceApiController(properties, proxy,
-                mock(GatewayApiKeyService.class), authService, mock(ComplianceService.class),
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
+                mock(ComplianceService.class),
                 mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
 
         var response = controller.handle(request, null);

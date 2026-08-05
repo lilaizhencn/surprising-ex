@@ -5,6 +5,7 @@ import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.GatewayApiKeyService;
+import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.GatewayProxyService;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
@@ -38,6 +39,7 @@ public class BinanceApiController {
     private final GatewayProperties properties;
     private final GatewayProxyService gatewayProxyService;
     private final GatewayApiKeyService apiKeyService;
+    private final SensitiveActionVerificationService verificationService;
     private final AuthService authService;
     private final ComplianceService complianceService;
     private final CustodyWalletClient custodyWalletClient;
@@ -47,6 +49,7 @@ public class BinanceApiController {
     public BinanceApiController(GatewayProperties properties,
                                 GatewayProxyService gatewayProxyService,
                                 GatewayApiKeyService apiKeyService,
+                                SensitiveActionVerificationService verificationService,
                                 AuthService authService,
                                 ComplianceService complianceService,
                                 CustodyWalletClient custodyWalletClient,
@@ -55,6 +58,7 @@ public class BinanceApiController {
         this.properties = properties;
         this.gatewayProxyService = gatewayProxyService;
         this.apiKeyService = apiKeyService;
+        this.verificationService = verificationService;
         this.authService = authService;
         this.complianceService = complianceService;
         this.custodyWalletClient = custodyWalletClient;
@@ -177,7 +181,10 @@ public class BinanceApiController {
 
     private ResponseEntity<byte[]> withdraw(HttpServletRequest request) {
         Map<String, Object> params = parameters(request, null);
+        boolean apiKeyRequest = request.getHeader("X-MBX-APIKEY") != null
+                && !request.getHeader("X-MBX-APIKEY").isBlank();
         long userId = authenticate(request, "WITHDRAW");
+        requireWithdrawalSecurity(request, userId, apiKeyRequest ? "API_WITHDRAWAL" : "WITHDRAWAL");
         requireKyc(userId);
         String asset = required(params, "coin");
         String chain = required(params, "network");
@@ -215,6 +222,15 @@ public class BinanceApiController {
                 || (profile.expiresAt() != null && profile.expiresAt().isBefore(Instant.now()))) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
                     "verified KYC is required for withdrawals");
+        }
+    }
+
+    private void requireWithdrawalSecurity(HttpServletRequest request, long userId, String scene) {
+        if (!verificationService.verify(userId, scene,
+                request.getHeader("X-Security-Email-Code"),
+                request.getHeader("X-Security-TOTP-Code"), Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                    "security verification is required or invalid");
         }
     }
 

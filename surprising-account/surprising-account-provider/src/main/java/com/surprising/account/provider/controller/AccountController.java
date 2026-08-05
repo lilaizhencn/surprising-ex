@@ -25,7 +25,15 @@ import com.surprising.account.provider.service.AccountService;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.account.provider.service.AccountCommandTimeoutException;
 import com.surprising.account.provider.service.PositionCacheUnavailableException;
+import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,17 +47,27 @@ import org.springframework.web.server.ResponseStatusException;
 public class AccountController {
 
     private static final String ADMIN_BASE_PATH = "/api/v1/admin/accounts";
+    private static final String INTERNAL_SERVICE = "surprising-gateway";
+    private static final long MAX_CLOCK_SKEW_SECONDS = 300L;
 
     private final AccountService accountService;
     private final AccountCommandGateway commandGateway;
+    private final AccountProperties properties;
 
-    public AccountController(AccountService accountService, AccountCommandGateway commandGateway) {
+    public AccountController(AccountService accountService, AccountCommandGateway commandGateway,
+                             AccountProperties properties) {
         this.accountService = accountService;
         this.commandGateway = commandGateway;
+        this.properties = properties;
     }
 
     @PostMapping(AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/balance-adjustments")
-    public BalanceResponse adjustBalance(@RequestBody BalanceAdjustmentRequest request) {
+    public BalanceResponse adjustBalance(
+            @RequestHeader(value = "X-Internal-Service", required = false) String service,
+            @RequestHeader(value = "X-Internal-Timestamp", required = false) String timestamp,
+            @RequestHeader(value = "X-Internal-Signature", required = false) String signature,
+            @Valid @RequestBody BalanceAdjustmentRequest request) {
+        requireInternalService(service, timestamp, signature, request);
         try {
             return commandGateway.adjustBalance(request, null, null);
         } catch (AccountCommandTimeoutException ex) {
@@ -77,7 +95,12 @@ public class AccountController {
     }
 
     @PostMapping(AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/product-balance-adjustments")
-    public ProductBalanceResponse adjustProductBalance(@RequestBody ProductBalanceAdjustmentRequest request) {
+    public ProductBalanceResponse adjustProductBalance(
+            @RequestHeader(value = "X-Internal-Service", required = false) String service,
+            @RequestHeader(value = "X-Internal-Timestamp", required = false) String timestamp,
+            @RequestHeader(value = "X-Internal-Signature", required = false) String signature,
+            @Valid @RequestBody ProductBalanceAdjustmentRequest request) {
+        requireInternalProductService(service, timestamp, signature, request);
         try {
             return commandGateway.adjustProductBalance(request, null, null);
         } catch (AccountCommandTimeoutException ex) {
@@ -369,6 +392,100 @@ public class AccountController {
     private void requireAdmin(String adminUserId) {
         if (adminUserId == null || adminUserId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin gateway header is required");
+        }
+    }
+
+    private void requireInternalService(String service, String timestamp, String signature,
+                                         BalanceAdjustmentRequest request) {
+        if (!INTERNAL_SERVICE.equals(service == null ? "" : service.trim())
+                || timestamp == null || timestamp.isBlank()
+                || signature == null || signature.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service authentication is required");
+        }
+        String secret = properties.getInternalServiceSecret();
+        if (secret == null || secret.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "internal service authentication is not configured");
+        }
+        long timestampSeconds;
+        try {
+            timestampSeconds = Long.parseLong(timestamp.trim());
+        } catch (NumberFormatException ex) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is invalid", ex);
+        }
+        if (Math.abs(Instant.now().getEpochSecond() - timestampSeconds) > MAX_CLOCK_SKEW_SECONDS) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is expired");
+        }
+        String expected = sign(secret, timestampSeconds, request);
+        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
+                signature.trim().getBytes(StandardCharsets.UTF_8))) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service signature is invalid");
+        }
+    }
+
+    private String sign(String secret, long timestamp, BalanceAdjustmentRequest request) {
+        String canonical = INTERNAL_SERVICE + "\n" + timestamp + "\n" + request.userId() + "\n"
+                + request.asset().trim().toUpperCase(java.util.Locale.ROOT) + "\n"
+                + request.amountUnits() + "\n" + request.referenceId() + "\n"
+                + (request.reason() == null ? "" : request.reason());
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return "v1=" + Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "internal service signing is unavailable", ex);
+        }
+    }
+
+    private void requireInternalProductService(String service, String timestamp, String signature,
+                                                ProductBalanceAdjustmentRequest request) {
+        requireInternalHeaders(service, timestamp, signature);
+        long timestampSeconds = parseInternalTimestamp(timestamp);
+        if (Math.abs(Instant.now().getEpochSecond() - timestampSeconds) > MAX_CLOCK_SKEW_SECONDS) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is expired");
+        }
+        String secret = properties.getInternalServiceSecret();
+        if (secret == null || secret.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "internal service authentication is not configured");
+        }
+        String canonical = INTERNAL_SERVICE + "\n" + timestampSeconds + "\n" + request.userId() + "\n"
+                + request.accountType().name() + "\n" + request.asset().trim().toUpperCase(java.util.Locale.ROOT)
+                + "\n" + request.amountUnits() + "\n" + request.referenceId() + "\n"
+                + (request.reason() == null ? "" : request.reason());
+        if (!MessageDigest.isEqual(signCanonical(secret, canonical).getBytes(StandardCharsets.UTF_8),
+                signature.trim().getBytes(StandardCharsets.UTF_8))) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service signature is invalid");
+        }
+    }
+
+    private void requireInternalHeaders(String service, String timestamp, String signature) {
+        if (!INTERNAL_SERVICE.equals(service == null ? "" : service.trim())
+                || timestamp == null || timestamp.isBlank()
+                || signature == null || signature.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service authentication is required");
+        }
+    }
+
+    private long parseInternalTimestamp(String timestamp) {
+        try {
+            return Long.parseLong(timestamp.trim());
+        } catch (NumberFormatException ex) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is invalid", ex);
+        }
+    }
+
+    private String signCanonical(String secret, String canonical) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return "v1=" + Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "internal service signing is unavailable", ex);
         }
     }
 }

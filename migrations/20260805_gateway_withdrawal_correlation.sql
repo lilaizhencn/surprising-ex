@@ -65,6 +65,21 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_actions (
 CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawal_actions_withdrawal_idx
     ON gateway_wallet_withdrawal_actions (withdrawal_id, created_at DESC);
 
+CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_actions_immutable_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'gateway wallet withdrawal actions are immutable';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS gateway_wallet_withdrawal_actions_immutable_trigger
+    ON gateway_wallet_withdrawal_actions;
+CREATE TRIGGER gateway_wallet_withdrawal_actions_immutable_trigger
+    BEFORE UPDATE OR DELETE ON gateway_wallet_withdrawal_actions
+    FOR EACH ROW EXECUTE FUNCTION gateway_wallet_withdrawal_actions_immutable_guard();
+
 CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_events (
     event_id             UUID PRIMARY KEY,
     withdrawal_id        UUID NOT NULL REFERENCES gateway_wallet_withdrawals(withdrawal_id),

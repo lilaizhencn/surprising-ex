@@ -218,9 +218,26 @@ public class CustodyWithdrawalService {
             }
             throw new WithdrawalUnknownException("custody wallet withdrawal status is unknown", ex);
         }
+        String walletWithdrawalId = walletWithdrawalId(walletResponse);
+        String walletExternalReference = stringValue(walletResponse == null ? null
+                        : walletResponse.get("externalReference"),
+                stringValue(walletResponse == null ? null : walletResponse.get("external_reference"), null));
+        if (walletWithdrawalId == null || walletExternalReference == null
+                || !record.externalReference().equals(walletExternalReference)) {
+            try {
+                repository.markBroadcastUnknown(record.withdrawalId(), json(walletResponse),
+                        "custody wallet response identity does not match local withdrawal", null);
+            } catch (IllegalStateException stateEx) {
+                CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
+                if (current != null && submissionOutcomeAdvanced(current.status())) {
+                    return response(current);
+                }
+                throw stateEx;
+            }
+            throw new WithdrawalUnknownException("custody wallet withdrawal identity is unknown", null);
+        }
         try {
-            record = repository.markSubmitted(record.withdrawalId(), json(walletResponse),
-                    stringValue(walletResponse.get("withdrawalId"), stringValue(walletResponse.get("id"), null)));
+            record = repository.markSubmitted(record.withdrawalId(), json(walletResponse), walletWithdrawalId);
             return response(record);
         } catch (IllegalStateException ex) {
             CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
@@ -235,6 +252,13 @@ public class CustodyWithdrawalService {
         return "SUBMITTED".equals(status) || "COMPLETED".equals(status)
                 || "FAILED_PENDING".equals(status) || "REFUND_PENDING".equals(status)
                 || "REFUNDED".equals(status);
+    }
+
+    private String walletWithdrawalId(Map<String, Object> walletResponse) {
+        if (walletResponse == null) {
+            return null;
+        }
+        return stringValue(walletResponse.get("withdrawalId"), stringValue(walletResponse.get("id"), null));
     }
 
     private boolean lateBroadcastUnknownCanBeIgnored(String status) {

@@ -88,8 +88,14 @@ class CustodyWithdrawalReconciliationPostgresTest {
         if (jdbcTemplate != null) {
             jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_events "
                     + "DISABLE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger");
+            jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_actions "
+                    + "DISABLE TRIGGER gateway_wallet_withdrawal_actions_immutable_trigger");
+            jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawal_actions WHERE withdrawal_id = ?", withdrawalId);
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawal_events WHERE withdrawal_id = ?", withdrawalId);
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE withdrawal_id = ?", withdrawalId);
+            jdbcTemplate.update("DELETE FROM gateway_users WHERE user_id = 99");
+            jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_actions "
+                    + "ENABLE TRIGGER gateway_wallet_withdrawal_actions_immutable_trigger");
             jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_events "
                     + "ENABLE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger");
         }
@@ -455,6 +461,24 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThat(repository.find(withdrawalId).status()).isEqualTo("PENDING_APPROVAL");
     }
 
+    @Test
+    void adminActionAuditIsImmutable() {
+        jdbcTemplate.update("INSERT INTO gateway_users (user_id) VALUES (99) ON CONFLICT DO NOTHING");
+        UUID actionId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO gateway_wallet_withdrawal_actions (
+                    action_id, withdrawal_id, admin_user_id, admin_username, action, reason
+                ) VALUES (?, ?, 99, 'admin', 'RETRY', 'manual retry')
+                """, actionId, withdrawalId);
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE gateway_wallet_withdrawal_actions SET reason = 'tampered' WHERE action_id = ?", actionId))
+                .hasMessageContaining("gateway wallet withdrawal actions are immutable");
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "DELETE FROM gateway_wallet_withdrawal_actions WHERE action_id = ?", actionId))
+                .hasMessageContaining("gateway wallet withdrawal actions are immutable");
+    }
+
     private DataSource dataSource() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.postgresql.Driver");
@@ -481,6 +505,19 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 + "action_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
                 + "admin_user_id BIGINT NOT NULL REFERENCES gateway_users, admin_username TEXT NOT NULL, "
                 + "action TEXT NOT NULL, reason TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+        jdbcTemplate.execute("""
+                CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_actions_immutable_guard()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'gateway wallet withdrawal actions are immutable';
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS gateway_wallet_withdrawal_actions_immutable_trigger "
+                + "ON gateway_wallet_withdrawal_actions");
+        jdbcTemplate.execute("CREATE TRIGGER gateway_wallet_withdrawal_actions_immutable_trigger "
+                + "BEFORE UPDATE OR DELETE ON gateway_wallet_withdrawal_actions FOR EACH ROW "
+                + "EXECUTE FUNCTION gateway_wallet_withdrawal_actions_immutable_guard()");
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_events ("
                 + "event_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
                 + "event_type TEXT NOT NULL, source TEXT NOT NULL, from_status TEXT, to_status TEXT, "

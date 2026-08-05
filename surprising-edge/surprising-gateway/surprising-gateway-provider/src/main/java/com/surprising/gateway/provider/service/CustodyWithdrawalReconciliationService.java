@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.service;
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -16,6 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 public class CustodyWithdrawalReconciliationService {
 
     private static final int PAGE_SIZE = 20;
+    private static final int MAX_PAGES = 1_000;
 
     private final CustodyWithdrawalRepository repository;
     private final CustodyWalletClient walletClient;
@@ -39,15 +41,23 @@ public class CustodyWithdrawalReconciliationService {
         }
         repository.lockForOutcome(record.withdrawalId());
         List<Map<String, Object>> matches = new ArrayList<>();
+        Set<String> seenPages = new HashSet<>();
         boolean complete = false;
         long offset = 0L;
+        int pageCount = 0;
         while (true) {
+            if (++pageCount > MAX_PAGES) {
+                return;
+            }
             List<Map<String, Object>> rows = offset == 0
                     ? walletClient.withdrawalsByExternalReference(
                             record.externalReference(), record.chain(), record.assetSymbol(), PAGE_SIZE)
                     : walletClient.withdrawalsByExternalReference(
                             record.externalReference(), record.chain(), record.assetSymbol(), PAGE_SIZE, offset);
             if (rows == null) {
+                return;
+            }
+            if (!seenPages.add(json(rows))) {
                 return;
             }
             for (Map<String, Object> row : rows) {
@@ -60,7 +70,11 @@ public class CustodyWithdrawalReconciliationService {
                 complete = true;
                 break;
             }
-            offset += rows.size();
+            long nextOffset = offset + rows.size();
+            if (nextOffset <= offset) {
+                return;
+            }
+            offset = nextOffset;
         }
         if (!complete || matches.size() != 1 || !matchesRecord(record, matches.getFirst())) {
             return;

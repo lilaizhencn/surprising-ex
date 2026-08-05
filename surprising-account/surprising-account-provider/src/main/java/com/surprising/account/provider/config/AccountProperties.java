@@ -19,6 +19,7 @@ public class AccountProperties {
     private TradeSettlement tradeSettlement = new TradeSettlement();
     private CommandWait commandWait = new CommandWait();
     private Wal wal = new Wal();
+    private String internalServiceSecret = "";
 
     /** 启动时拒绝未隔离的旧版 Topic 配置。 */
     @PostConstruct
@@ -88,6 +89,14 @@ public class AccountProperties {
 
     public void setWal(Wal wal) {
         this.wal = wal == null ? new Wal() : wal;
+    }
+
+    public String getInternalServiceSecret() {
+        return internalServiceSecret;
+    }
+
+    public void setInternalServiceSecret(String internalServiceSecret) {
+        this.internalServiceSecret = internalServiceSecret;
     }
 
     public static class Kafka {

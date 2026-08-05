@@ -2,8 +2,13 @@ package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Base64;
 import java.util.Locale;
 import java.util.Map;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -16,6 +21,7 @@ import org.springframework.web.client.RestTemplate;
 @Service
 public class SpotAccountClient {
 
+    private static final String INTERNAL_SERVICE = "surprising-gateway";
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
 
@@ -33,15 +39,24 @@ public class SpotAccountClient {
         if (wallet.getSpotAccountBaseUrl() == null || wallet.getSpotAccountBaseUrl().isBlank()) {
             throw new IllegalStateException("spot account endpoint is not configured");
         }
+        if (wallet.getSpotAccountInternalSecret() == null || wallet.getSpotAccountInternalSecret().isBlank()) {
+            throw new IllegalStateException("spot account internal authentication is not configured");
+        }
+        String normalizedAsset = asset.trim().toUpperCase(Locale.ROOT);
+        String normalizedReason = reason == null ? "" : reason;
+        long timestamp = Instant.now().getEpochSecond();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("X-Internal-Source", "custody-wallet-withdrawal");
+        headers.set("X-Internal-Service", INTERNAL_SERVICE);
+        headers.set("X-Internal-Timestamp", Long.toString(timestamp));
         Map<String, Object> payload = Map.of(
                 "userId", userId,
-                "asset", asset.trim().toUpperCase(Locale.ROOT),
+                "asset", normalizedAsset,
                 "amountUnits", amountUnits,
                 "referenceId", referenceId,
-                "reason", reason == null ? "" : reason);
+                "reason", normalizedReason);
+        headers.set("X-Internal-Signature", signature(wallet.getSpotAccountInternalSecret(), timestamp,
+                userId, normalizedAsset, amountUnits, referenceId, normalizedReason));
         try {
             ResponseEntity<String> response = restTemplate.exchange(
                     URI.create(trimTrailingSlash(wallet.getSpotAccountBaseUrl())
@@ -61,6 +76,25 @@ public class SpotAccountClient {
 
     private String trimTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    String signature(String secret, long timestamp, long userId, String asset, long amountUnits,
+                     String referenceId, String reason) {
+        String canonical = canonical(timestamp, userId, asset, amountUnits, referenceId, reason);
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return "v1=" + Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            throw new IllegalStateException("spot account internal signing failed", ex);
+        }
+    }
+
+    static String canonical(long timestamp, long userId, String asset, long amountUnits,
+                            String referenceId, String reason) {
+        return INTERNAL_SERVICE + "\n" + timestamp + "\n" + userId + "\n"
+                + asset + "\n" + amountUnits + "\n" + referenceId + "\n" + reason;
     }
 
     public static class SpotAccountRejectedException extends IllegalStateException {

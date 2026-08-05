@@ -2,7 +2,6 @@ package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.CustodyWalletWebhookRepository;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -12,14 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -34,20 +26,20 @@ public class CustodyWalletWebhookService {
     private final CustodyWalletWebhookRepository repository;
     private final CustodyWalletClient walletClient;
     private final CustodyWithdrawalService withdrawalService;
-    private final RestTemplate restTemplate;
+    private final SpotAccountClient spotAccountClient;
     private final ObjectMapper objectMapper;
 
     public CustodyWalletWebhookService(GatewayProperties properties,
                                        CustodyWalletWebhookRepository repository,
                                        CustodyWalletClient walletClient,
                                        CustodyWithdrawalService withdrawalService,
-                                       RestTemplate restTemplate,
+                                       SpotAccountClient spotAccountClient,
                                        ObjectMapper objectMapper) {
         this.properties = properties;
         this.repository = repository;
         this.walletClient = walletClient;
         this.withdrawalService = withdrawalService;
-        this.restTemplate = restTemplate;
+        this.spotAccountClient = spotAccountClient;
         this.objectMapper = objectMapper;
     }
 
@@ -66,11 +58,16 @@ public class CustodyWalletWebhookService {
         if (Math.abs(Instant.now().getEpochSecond() - eventTimestamp) > MAX_CLOCK_SKEW_SECONDS) {
             throw new IllegalArgumentException("wallet webhook timestamp is outside the allowed window");
         }
-        verifySignature(wallet.getWebhookSecret(), eventTimestamp, signature, rawBody);
+        verifySignature(wallet.getWebhookSecret(), eventId.trim(), normalizedEventType(eventType),
+                eventTimestamp, signature, rawBody);
         Map<String, Object> event = readEvent(rawBody);
-        String normalizedType = eventType.trim().toUpperCase(Locale.ROOT);
-        Object payloadType = event.get("type");
-        if (payloadType != null && !normalizedType.equals(String.valueOf(payloadType).toUpperCase(Locale.ROOT))) {
+        String normalizedType = normalizedEventType(eventType);
+        String payloadEventId = stringValue(event.get("id"), "wallet webhook id");
+        if (!eventId.trim().equals(payloadEventId)) {
+            throw new IllegalArgumentException("wallet webhook event id does not match its payload");
+        }
+        String payloadType = stringValue(event.get("type"), "wallet webhook event type");
+        if (!normalizedType.equals(payloadType)) {
             throw new IllegalArgumentException("wallet webhook event type does not match its payload");
         }
         CustodyWalletWebhookRepository.ClaimResult claim = repository.claim(
@@ -94,11 +91,12 @@ public class CustodyWalletWebhookService {
         }
     }
 
-    String signature(String secret, long timestamp, byte[] body) {
+    String signature(String secret, String eventId, String eventType, long timestamp, byte[] body) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] message = (timestamp + "." + new String(body, StandardCharsets.UTF_8))
+            byte[] message = (timestamp + "." + eventId + "." + eventType + "."
+                    + new String(body, StandardCharsets.UTF_8))
                     .getBytes(StandardCharsets.UTF_8);
             return "v1=" + Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(message));
         } catch (Exception ex) {
@@ -119,35 +117,17 @@ public class CustodyWalletWebhookService {
             units = Math.negateExact(units);
         }
         String referenceId = "custody-wallet:" + eventId + ":" + eventType.toLowerCase(Locale.ROOT);
-        Map<String, Object> payload = Map.of(
-                "userId", userId,
-                "asset", asset,
-                "amountUnits", units,
-                "referenceId", referenceId,
-                "reason", "custody wallet " + eventType);
-        GatewayProperties.CustodyWallet wallet = properties.getCustodyWallet();
-        String baseUrl = wallet.getSpotAccountBaseUrl();
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("spot account endpoint is not configured");
-        }
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("X-Internal-Source", "custody-wallet-webhook");
-        try {
-            ResponseEntity<String> response = restTemplate.exchange(
-                    URI.create(trimTrailingSlash(baseUrl) + "/api/v1/accounts/admin/balance-adjustments"),
-                    HttpMethod.POST, new HttpEntity<>(payload, headers), String.class);
-            if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new IllegalStateException("spot account adjustment returned " + response.getStatusCode().value());
-            }
-        } catch (RestClientException ex) {
-            throw new IllegalStateException("spot account adjustment failed", ex);
-        }
+        spotAccountClient.adjustBalance(userId, asset, units, referenceId,
+                "custody wallet " + eventType);
     }
 
     private Map<String, Object> readEvent(byte[] body) {
         try {
-            return objectMapper.readValue(body, Map.class);
+            Map<String, Object> event = objectMapper.readValue(body, Map.class);
+            if (event == null) {
+                throw new IllegalArgumentException("wallet webhook body must be a JSON object");
+            }
+            return event;
         } catch (JacksonException ex) {
             throw new IllegalArgumentException("wallet webhook body is invalid JSON", ex);
         }
@@ -190,8 +170,9 @@ public class CustodyWalletWebhookService {
         }
     }
 
-    private void verifySignature(String secret, long timestamp, String signature, byte[] body) {
-        String expected = signature(secret, timestamp, body);
+    private void verifySignature(String secret, String eventId, String eventType, long timestamp,
+                                 String signature, byte[] body) {
+        String expected = signature(secret, eventId, eventType, timestamp, body);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
                 signature.trim().getBytes(StandardCharsets.UTF_8))) {
             throw new IllegalArgumentException("wallet webhook signature is invalid");
@@ -206,7 +187,8 @@ public class CustodyWalletWebhookService {
         }
     }
 
-    private String trimTrailingSlash(String value) {
-        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    private String normalizedEventType(String eventType) {
+        return eventType.trim().toUpperCase(Locale.ROOT);
     }
+
 }

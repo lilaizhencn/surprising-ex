@@ -89,6 +89,8 @@ public class GatewayProperties implements EnvironmentAware {
         requireNonBlank(failures, "custody-wallet.api-secret", wallet.getApiSecret());
         requireNonBlank(failures, "custody-wallet.webhook-secret", wallet.getWebhookSecret());
         requireHttpsUrl(failures, "custody-wallet.spot-account-base-url", wallet.getSpotAccountBaseUrl());
+        requireProductionSecret(failures, "custody-wallet.spot-account-internal-secret",
+                wallet.getSpotAccountInternalSecret(), 32, "local-dev-spot-account-internal-secret-change-me");
         if (wallet.getWithdrawalAddressIds().isEmpty()) {
             failures.add("custody-wallet.withdrawal-address-ids must contain at least one network");
         } else {
@@ -603,6 +605,7 @@ public class GatewayProperties implements EnvironmentAware {
         private String apiSecret = "";
         private String webhookSecret = "";
         private String spotAccountBaseUrl = "http://localhost:9086";
+        private String spotAccountInternalSecret = "";
         private Map<String, Long> assetScales = Map.of();
         private Map<String, String> withdrawalAddressIds = Map.of();
         private Duration requestTimeout = Duration.ofSeconds(10);
@@ -653,6 +656,14 @@ public class GatewayProperties implements EnvironmentAware {
 
         public void setSpotAccountBaseUrl(String spotAccountBaseUrl) {
             this.spotAccountBaseUrl = spotAccountBaseUrl;
+        }
+
+        public String getSpotAccountInternalSecret() {
+            return spotAccountInternalSecret;
+        }
+
+        public void setSpotAccountInternalSecret(String spotAccountInternalSecret) {
+            this.spotAccountInternalSecret = spotAccountInternalSecret;
         }
 
         public Map<String, Long> getAssetScales() {

@@ -31,6 +31,6 @@ public class CustodyWithdrawalRefundService {
         }
         spotAccountClient.adjustBalance(pending.userId(), pending.assetSymbol(), pending.amountUnits(),
                 pending.spotDebitReference() + ":refund", spotReason);
-        repository.markRefunded(pending.withdrawalId(), "{}", stateReason);
+        repository.markRefunded(pending.withdrawalId(), pending.walletResponse(), stateReason);
     }
 }

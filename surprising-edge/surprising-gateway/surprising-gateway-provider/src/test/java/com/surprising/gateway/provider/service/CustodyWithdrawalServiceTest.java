@@ -65,7 +65,8 @@ class CustodyWithdrawalServiceTest {
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
         when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-concurrent")))
-                .thenReturn(Map.of("id", "wallet-concurrent"));
+                .thenReturn(Map.of("id", "wallet-concurrent",
+                        "externalReference", "custody-wallet-withdrawal:withdraw-concurrent"));
         when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-concurrent")))
                 .thenThrow(new IllegalStateException("already submitted"));
         when(repository.find(withdrawalId)).thenReturn(submitted);
@@ -125,7 +126,8 @@ class CustodyWithdrawalServiceTest {
         when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
         when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-local-conflict")))
-                .thenReturn(Map.of("id", "wallet-local-conflict"));
+                .thenReturn(Map.of("id", "wallet-local-conflict",
+                        "externalReference", "custody-wallet-withdrawal:withdraw-local-conflict"));
         when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-local-conflict")))
                 .thenThrow(new IllegalStateException("invalid local status"));
         when(repository.find(withdrawalId)).thenReturn(debited);
@@ -204,7 +206,8 @@ class CustodyWithdrawalServiceTest {
         when(repository.markDebited(eq(withdrawalId), any()))
                 .thenReturn(record(withdrawalId, "DEBITED", "withdraw-retry"));
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-retry")))
-                .thenReturn(Map.of("id", "wallet-withdrawal-1"));
+                .thenReturn(Map.of("id", "wallet-withdrawal-1",
+                        "externalReference", "custody-wallet-withdrawal:withdraw-retry"));
         when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-withdrawal-1")))
                 .thenReturn(record(withdrawalId, "SUBMITTED", "withdraw-retry"));
 

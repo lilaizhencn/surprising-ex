@@ -50,6 +50,7 @@ surprising:
       concurrency: 1
       max-poll-records: 500
   account:
+    internal-service-secret: ${ACCOUNT_INTERNAL_SERVICE_SECRET:}
     kafka:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}

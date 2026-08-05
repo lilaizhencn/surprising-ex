@@ -340,7 +340,7 @@ public class CustodyWithdrawalRepository {
                            wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
                            completed_at = now(), updated_at = now(),
                            error_code = NULL, error_message = NULL
-                     WHERE withdrawal_id = ? AND status IN ('SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
+                     WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
                     """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
         } catch (DataIntegrityViolationException ex) {
             throw new IllegalStateException("wallet withdrawal id is already bound", ex);
