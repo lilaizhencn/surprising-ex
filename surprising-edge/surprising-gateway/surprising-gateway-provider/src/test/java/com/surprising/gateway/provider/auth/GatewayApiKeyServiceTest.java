@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
 import java.util.Map;
 import java.util.List;
 
@@ -16,6 +17,15 @@ class GatewayApiKeyServiceTest {
     void removesOnlySignatureFromBinanceCanonicalQuery() {
         assertThat(service.canonicalQuery("symbol=BTCUSDT&timestamp=123&signature=abc&recvWindow=5000"))
                 .isEqualTo("symbol=BTCUSDT&timestamp=123&recvWindow=5000");
+    }
+
+    @Test
+    void preservesBinanceRawQueryOrderAndEncoding() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v3/order");
+        request.setQueryString("timestamp=123&symbol=BTC%2FUSDT&signature=abc");
+
+        assertThat(service.binanceCanonicalQuery(request))
+                .isEqualTo("timestamp=123&symbol=BTC%2FUSDT");
     }
 
     @Test

@@ -112,7 +112,7 @@ public class GatewayApiKeyService {
         if (signature == null || signature.isBlank()) {
             throw new IllegalArgumentException("signature is required");
         }
-        String canonical = canonicalRequest(request);
+        String canonical = binanceCanonicalQuery(request);
         String expected = sign(totpService.decryptSecret(record.secretCiphertext()), canonical);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
                 signature.getBytes(StandardCharsets.UTF_8))) {
@@ -127,9 +127,20 @@ public class GatewayApiKeyService {
             return "";
         }
         return java.util.Arrays.stream(queryString.split("&"))
-                .filter(item -> !item.startsWith("signature="))
+                .filter(item -> {
+                    int separator = item.indexOf('=');
+                    String key = separator < 0 ? item : item.substring(0, separator);
+                    return !"signature".equals(key);
+                })
                 .reduce((left, right) -> left + "&" + right)
                 .orElse("");
+    }
+
+    String binanceCanonicalQuery(HttpServletRequest request) {
+        String queryString = request.getQueryString();
+        return queryString == null || queryString.isBlank()
+                ? canonicalParameters(request.getParameterMap())
+                : canonicalQuery(queryString);
     }
 
     String canonicalRequest(HttpServletRequest request) {
@@ -137,6 +148,10 @@ public class GatewayApiKeyService {
     }
 
     String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap) {
+        return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + canonicalParameters(parameterMap);
+    }
+
+    private String canonicalParameters(java.util.Map<String, String[]> parameterMap) {
         List<String> parameters = new ArrayList<>();
         parameterMap.entrySet().stream()
                 .filter(entry -> !"signature".equals(entry.getKey()))
@@ -151,7 +166,7 @@ public class GatewayApiKeyService {
                         }
                     }
                 });
-        return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + String.join("&", parameters);
+        return String.join("&", parameters);
     }
 
     private String encodeParameter(String key, String value) {

@@ -59,8 +59,10 @@ class GatewayApiKeyAuthenticationIpTest {
         request.setRemoteAddr(remoteAddress);
         request.addHeader("X-MBX-APIKEY", apiKey);
         request.addHeader("X-Forwarded-For", forwardedFor);
-        request.addParameter("timestamp", Long.toString(System.currentTimeMillis()));
-        request.addParameter("signature", service.sign("secret", service.canonicalRequest(request)));
+        String query = "timestamp=" + System.currentTimeMillis();
+        request.setQueryString(query + "&signature=" + service.sign("secret", query));
+        request.addParameter("timestamp", query.substring("timestamp=".length()));
+        request.addParameter("signature", service.sign("secret", query));
         return request;
     }
 }
