@@ -243,7 +243,7 @@ class CustodyWithdrawalServiceTest {
                 .thenReturn(java.util.List.of(Map.of(
                         "id", "wallet-withdrawal-1",
                         "externalReference", "custody-wallet-withdrawal:withdraw-failed",
-                        "status", "FAILED")));
+                        "status", "FAILED", "asset", "USDT", "chain", "ETH", "amount", "25")));
         when(repository.markRefundPending(eq(withdrawalId), any()))
                 .thenReturn(record(withdrawalId, "REFUND_PENDING", "withdraw-failed"));
         when(repository.markRefunded(eq(withdrawalId), any(), eq("custody wallet withdrawal failed")))

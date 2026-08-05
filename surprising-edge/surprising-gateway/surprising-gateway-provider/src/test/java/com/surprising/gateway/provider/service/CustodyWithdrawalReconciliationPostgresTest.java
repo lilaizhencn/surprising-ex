@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -242,6 +243,45 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
         assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
         assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-integration");
+    }
+
+    @Test
+    void duplicateCustodyResultOnLaterPageDoesNotCompleteOrRefundWithdrawal() {
+        List<Map<String, Object>> firstPage = new ArrayList<>();
+        firstPage.add(walletRow("CONFIRMED"));
+        for (int index = 0; index < 19; index++) {
+            firstPage.add(Map.of("id", "unrelated-" + index, "externalReference", "unrelated-" + index));
+        }
+        when(walletClient.withdrawalsByExternalReference(
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
+                .thenReturn(firstPage);
+        when(walletClient.withdrawalsByExternalReference(
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20, 20))
+                .thenReturn(List.of(walletRow("FAILED", "wallet-other")));
+
+        reconciliationService.reconcile(repository.find(withdrawalId));
+
+        verify(spotAccountClient, never()).adjustBalance(
+                42L, "USDT", 25_000_000L,
+                "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
+    }
+
+    @Test
+    void custodyResultWithMismatchedAmountDoesNotCompleteOrRefundWithdrawal() {
+        when(walletClient.withdrawalsByExternalReference(
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
+                .thenReturn(List.of(Map.of(
+                        "id", "wallet-integration",
+                        "externalReference", "custody-wallet-withdrawal:integration",
+                        "status", "CONFIRMED", "asset", "USDT", "chain", "ETH", "amount", "26")));
+
+        reconciliationService.reconcile(repository.find(withdrawalId));
+
+        verify(spotAccountClient, never()).adjustBalance(
+                42L, "USDT", 25_000_000L,
+                "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
     }
 
     @Test
