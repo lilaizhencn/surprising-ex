@@ -1,0 +1,15 @@
+spring:
+  config:
+    activate:
+      on-profile: production
+
+surprising:
+  websocket:
+    kafka:
+      bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS}
+      product-topics-enabled: true
+      group-id: ${SURPRISING_WEBSOCKET_GROUP_ID}
+    security:
+      allow-query-user-id-fallback: false
+      jwt-secret: ${SURPRISING_WEBSOCKET_JWT_SECRET}
+      allowed-origins: ${SURPRISING_WS_ALLOWED_ORIGINS}

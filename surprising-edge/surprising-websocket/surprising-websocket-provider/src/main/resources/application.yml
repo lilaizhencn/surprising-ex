@@ -41,11 +41,11 @@ surprising:
       send-timeout: 5s
     security:
       user-id-header: X-User-Id
-      allow-query-user-id-fallback: true
+      allow-query-user-id-fallback: ${SURPRISING_WS_QUERY_USER_ID:true}
       issuer: surprising-ex-gateway
       jwt-secret: ${SURPRISING_WEBSOCKET_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
       allowed-origins:
-        - "*"
+        - ${SURPRISING_WS_ALLOWED_ORIGIN:*}
     fanout:
       candle-partial-coalesce-window: 250ms
       mark-price-max-age: 3s
