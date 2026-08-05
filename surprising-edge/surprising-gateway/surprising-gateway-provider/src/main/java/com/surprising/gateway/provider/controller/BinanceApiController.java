@@ -199,24 +199,41 @@ public class BinanceApiController {
         if (!wallet.isEnabled()) {
             return json(HttpStatus.OK, List.of());
         }
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (String asset : wallet.getAssetScales().keySet()) {
-            String normalizedAsset = asset.toUpperCase(Locale.ROOT);
-            List<Map<String, Object>> networks = new ArrayList<>();
-            for (String chain : wallet.getWithdrawalAddressIds().keySet()) {
-                String normalizedChain = chain.toUpperCase(Locale.ROOT);
+        Map<String, List<Map<String, Object>>> networksByAsset = new LinkedHashMap<>();
+        for (Map<String, Object> chain : custodyWalletClient.chains()) {
+            if (!Boolean.TRUE.equals(chain.get("enabled"))) {
+                continue;
+            }
+            String network = stringValue(chain.get("chain"));
+            if (network.isBlank()) {
+                continue;
+            }
+            boolean withdrawEnabled = Boolean.TRUE.equals(chain.get("withdrawalEnabled"));
+            Object assets = chain.get("assetSymbols");
+            if (!(assets instanceof List<?> assetList)) {
+                continue;
+            }
+            for (Object asset : assetList) {
+                String normalizedAsset = String.valueOf(asset).trim().toUpperCase(Locale.ROOT);
+                if (normalizedAsset.isBlank()) {
+                    continue;
+                }
+                List<Map<String, Object>> networks = networksByAsset.computeIfAbsent(
+                        normalizedAsset, ignored -> new ArrayList<>());
                 networks.add(Map.of(
                         "coin", normalizedAsset,
-                        "network", normalizedChain,
+                        "network", network.toUpperCase(Locale.ROOT),
                         "depositEnable", true,
-                        "withdrawEnable", true,
+                        "withdrawEnable", withdrawEnabled,
                         "isDefault", networks.isEmpty()));
             }
-            result.add(Map.of(
-                    "coin", normalizedAsset,
-                    "name", normalizedAsset,
-                    "networkList", networks));
         }
+        List<Map<String, Object>> result = networksByAsset.entrySet().stream()
+                .map(entry -> Map.<String, Object>of(
+                        "coin", entry.getKey(),
+                        "name", entry.getKey(),
+                        "networkList", entry.getValue()))
+                .toList();
         return json(HttpStatus.OK, result);
     }
 

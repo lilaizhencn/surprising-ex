@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,7 +39,7 @@ public class UserApiKeyController {
             @Valid @RequestBody CreateApiKeyRequest request,
             HttpServletRequest httpRequest) {
         try {
-            return service.create(authorization, request.label(), request.permissions(), emailCode, totpCode,
+            return service.create(authorization, request.label(), request.permissions(), request.ipAllowlist(), emailCode, totpCode,
                     httpRequest.getRemoteAddr());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -59,9 +60,29 @@ public class UserApiKeyController {
         }
     }
 
-    public record CreateApiKeyRequest(@NotBlank @Size(max = 80) String label, List<String> permissions) {
+    @PatchMapping
+    public void updateIpAllowlist(
+            @RequestHeader("Authorization") String authorization,
+            @RequestHeader(value = "X-Security-Email-Code", required = false) String emailCode,
+            @RequestHeader(value = "X-Security-TOTP-Code", required = false) String totpCode,
+            @Valid @RequestBody UpdateApiKeyRequest request,
+            HttpServletRequest httpRequest) {
+        try {
+            service.updateIpAllowlist(authorization, request.apiKey(), request.ipAllowlist(), emailCode, totpCode,
+                    httpRequest.getRemoteAddr());
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    public record CreateApiKeyRequest(@NotBlank @Size(max = 80) String label,
+                                      List<String> permissions,
+                                      List<String> ipAllowlist) {
     }
 
     public record RevokeApiKeyRequest(@NotBlank String apiKey) {
+    }
+
+    public record UpdateApiKeyRequest(@NotBlank String apiKey, List<String> ipAllowlist) {
     }
 }

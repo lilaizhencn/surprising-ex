@@ -3408,6 +3408,7 @@ CREATE TABLE IF NOT EXISTS gateway_api_keys (
     secret_ciphertext   TEXT NOT NULL,
     label               TEXT NOT NULL,
     permissions         TEXT NOT NULL DEFAULT 'READ',
+    ip_allowlist        TEXT NOT NULL DEFAULT '',
     status              TEXT NOT NULL DEFAULT 'ACTIVE',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at        TIMESTAMPTZ,

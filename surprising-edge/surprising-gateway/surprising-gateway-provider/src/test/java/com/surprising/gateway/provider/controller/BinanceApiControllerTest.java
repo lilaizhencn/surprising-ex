@@ -307,8 +307,15 @@ class BinanceApiControllerTest {
         properties.getCustodyWallet().setWithdrawalAddressIds(Map.of(
                 "TRX", UUID.randomUUID().toString(), "ETH", UUID.randomUUID().toString()));
         AuthService authService = bearerAuth();
-        BinanceApiController controller = controller(properties, authService,
-                mock(SensitiveActionVerificationService.class), mock(CustodyWithdrawalService.class));
+        CustodyWalletClient walletClient = mock(CustodyWalletClient.class);
+        when(walletClient.chains()).thenReturn(List.of(
+                Map.of("chain", "TRX", "enabled", true, "withdrawalEnabled", true,
+                        "assetSymbols", List.of("USDT")),
+                Map.of("chain", "ETH", "enabled", true, "withdrawalEnabled", false,
+                        "assetSymbols", List.of("USDT"))));
+        BinanceApiController controller = new BinanceApiController(properties, mock(GatewayProxyService.class),
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
+                mock(ComplianceService.class), walletClient, mock(CustodyWithdrawalService.class), new ObjectMapper());
 
         MockHttpServletRequest configRequest = new MockHttpServletRequest(
                 "GET", "/sapi/v1/capital/config/getall");
@@ -319,6 +326,8 @@ class BinanceApiControllerTest {
         assertThat(config.getStatusCode().value()).isEqualTo(200);
         assertThat(coins).hasSize(1);
         assertThat((List<?>) coins.getFirst().get("networkList")).hasSize(2);
+        assertThat(((List<Map<String, Object>>) coins.getFirst().get("networkList")).get(1))
+                .containsEntry("withdrawEnable", false);
 
         MockHttpServletRequest statusRequest = new MockHttpServletRequest(
                 "GET", "/sapi/v1/account/status");

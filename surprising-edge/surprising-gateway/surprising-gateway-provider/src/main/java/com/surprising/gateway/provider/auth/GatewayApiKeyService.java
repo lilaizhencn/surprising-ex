@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
@@ -39,6 +41,7 @@ public class GatewayApiKeyService {
     }
 
     public CreatedApiKey create(String authorization, String label, List<String> permissions,
+                                List<String> ipAllowlist,
                                 String emailCode, String totpCode, String requestIp) {
         JwtPrincipal principal = authService.authenticateBearer(authorization);
         requireSecurity(principal.userId(), emailCode, totpCode, requestIp);
@@ -47,11 +50,12 @@ public class GatewayApiKeyService {
             throw new IllegalArgumentException("api key label must be 1-80 characters");
         }
         String normalizedPermissions = normalizePermissions(permissions);
+        String normalizedIpAllowlist = normalizeIpAllowlist(ipAllowlist);
         String apiKey = "sx_" + randomToken(24);
         String secret = randomToken(32);
         GatewayApiKeyRepository.ApiKeyRecord record = repository.create(
                 UUID.randomUUID(), principal.userId(), apiKey, totpService.encryptSecret(secret),
-                normalizedLabel, normalizedPermissions, Instant.now());
+                normalizedLabel, normalizedPermissions, normalizedIpAllowlist, Instant.now());
         return new CreatedApiKey(view(record), secret);
     }
 
@@ -69,10 +73,21 @@ public class GatewayApiKeyService {
         }
     }
 
+    public void updateIpAllowlist(String authorization, String apiKey, List<String> ipAllowlist,
+                                  String emailCode, String totpCode, String requestIp) {
+        JwtPrincipal principal = authService.authenticateBearer(authorization);
+        requireSecurity(principal.userId(), emailCode, totpCode, requestIp);
+        if (!repository.updateIpAllowlist(principal.userId(), requireApiKey(apiKey),
+                normalizeIpAllowlist(ipAllowlist))) {
+            throw new IllegalArgumentException("active api key not found");
+        }
+    }
+
     public long authenticate(HttpServletRequest request, String requiredPermission) {
         String apiKey = requireApiKey(request.getHeader("X-MBX-APIKEY"));
         GatewayApiKeyRepository.ApiKeyRecord record = repository.active(apiKey)
                 .orElseThrow(() -> new IllegalArgumentException("invalid api key"));
+        requireIpAllowlist(record.ipAllowlist(), request.getRemoteAddr());
         requirePermission(record.permissions(), requiredPermission);
         String timestamp = request.getParameter("timestamp");
         long timestampValue = parseLong(timestamp, "timestamp");
@@ -151,7 +166,7 @@ public class GatewayApiKeyService {
 
     private ApiKeyView view(GatewayApiKeyRepository.ApiKeyRecord record) {
         return new ApiKeyView(record.apiKey(), record.label(), record.permissions(), record.status(),
-                record.createdAt(), record.lastUsedAt(), record.revokedAt());
+                splitIpAllowlist(record.ipAllowlist()), record.createdAt(), record.lastUsedAt(), record.revokedAt());
     }
 
     private String normalizePermissions(List<String> permissions) {
@@ -165,6 +180,89 @@ public class GatewayApiKeyService {
         }
         normalized.add("READ");
         return String.join(",", normalized);
+    }
+
+    String normalizeIpAllowlist(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        if (values.size() > 100) {
+            throw new IllegalArgumentException("api key IP allowlist cannot contain more than 100 addresses");
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String value : values) {
+            String item = value == null ? "" : value.trim();
+            if (item.isBlank() || item.length() > 64 || !validCidr(item)) {
+                throw new IllegalArgumentException("api key IP allowlist contains an invalid address");
+            }
+            normalized.add(item);
+        }
+        return String.join(",", normalized);
+    }
+
+    private List<String> splitIpAllowlist(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return List.of(value.split(","));
+    }
+
+    private void requireIpAllowlist(String value, String remoteAddress) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        if (remoteAddress == null || remoteAddress.isBlank()
+                || splitIpAllowlist(value).stream().noneMatch(item -> matchesCidr(remoteAddress, item))) {
+            throw new IllegalArgumentException("api key IP address is not allowed");
+        }
+    }
+
+    private boolean validCidr(String value) {
+        String[] parts = value.split("/", -1);
+        if (parts.length > 2 || parts[0].isBlank()) {
+            return false;
+        }
+        try {
+            InetAddress address = InetAddress.getByName(parts[0]);
+            if (parts.length == 1) {
+                return parts[0].matches("\\d{1,3}(?:\\.\\d{1,3}){3}") || parts[0].contains(":");
+            }
+            int prefix = Integer.parseInt(parts[1]);
+            return prefix >= 0 && prefix <= address.getAddress().length * 8;
+        } catch (UnknownHostException | NumberFormatException ex) {
+            return false;
+        }
+    }
+
+    private boolean matchesCidr(String remoteAddress, String cidr) {
+        try {
+            String[] parts = cidr.split("/", -1);
+            InetAddress remote = InetAddress.getByName(remoteAddress);
+            InetAddress network = InetAddress.getByName(parts[0]);
+            if (remote.getAddress().length != network.getAddress().length) {
+                return false;
+            }
+            if (parts.length == 1) {
+                return remote.equals(network);
+            }
+            int prefix = Integer.parseInt(parts[1]);
+            byte[] remoteBytes = remote.getAddress();
+            byte[] networkBytes = network.getAddress();
+            int fullBytes = prefix / 8;
+            int remainingBits = prefix % 8;
+            for (int index = 0; index < fullBytes; index++) {
+                if (remoteBytes[index] != networkBytes[index]) {
+                    return false;
+                }
+            }
+            if (remainingBits == 0) {
+                return true;
+            }
+            int mask = 0xFF << (8 - remainingBits);
+            return (remoteBytes[fullBytes] & mask) == (networkBytes[fullBytes] & mask);
+        } catch (UnknownHostException | NumberFormatException ex) {
+            return false;
+        }
     }
 
     private void requirePermission(String permissions, String required) {
@@ -200,7 +298,7 @@ public class GatewayApiKeyService {
     }
 
     public record ApiKeyView(String apiKey, String label, String permissions, String status,
-                             Instant createdAt, Instant lastUsedAt, Instant revokedAt) {
+                             List<String> ipAllowlist, Instant createdAt, Instant lastUsedAt, Instant revokedAt) {
     }
 
     private static final class HexFormatSupport {

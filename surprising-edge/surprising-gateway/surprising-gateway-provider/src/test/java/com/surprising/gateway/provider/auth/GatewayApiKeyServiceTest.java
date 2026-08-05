@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import org.junit.jupiter.api.Test;
 import java.util.Map;
+import java.util.List;
 
 class GatewayApiKeyServiceTest {
 
@@ -31,5 +32,18 @@ class GatewayApiKeyServiceTest {
                 "signature", new String[]{"ignored"},
                 "timestamp", new String[]{"123"})))
                 .isEqualTo("POST\n/sapi/v1/capital/withdraw/apply\namount=1.25&coin=USDT&timestamp=123");
+    }
+
+    @Test
+    void normalizesAndValidatesIpAllowlist() {
+        assertThat(service.normalizeIpAllowlist(List.of("203.0.113.10", "203.0.113.0/24", "203.0.113.10")))
+                .isEqualTo("203.0.113.10,203.0.113.0/24");
+    }
+
+    @Test
+    void rejectsHostNamesInIpAllowlist() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> service.normalizeIpAllowlist(List.of("api.example.com")))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

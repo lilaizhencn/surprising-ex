@@ -18,20 +18,20 @@ public class GatewayApiKeyRepository {
     }
 
     public ApiKeyRecord create(UUID apiKeyId, long userId, String apiKey, String secretCiphertext,
-                               String label, String permissions, Instant now) {
+                               String label, String permissions, String ipAllowlist, Instant now) {
         return jdbcTemplate.queryForObject("""
                 INSERT INTO gateway_api_keys (
-                    api_key_id, user_id, api_key, secret_ciphertext, label, permissions, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                RETURNING api_key_id, user_id, api_key, secret_ciphertext, label, permissions,
+                    api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist,
                           status, created_at, last_used_at, revoked_at
                 """, (rs, rowNum) -> toRecord(rs), apiKeyId, userId, apiKey, secretCiphertext,
-                label, permissions, Timestamp.from(now));
+                label, permissions, ipAllowlist, Timestamp.from(now));
     }
 
     public Optional<ApiKeyRecord> active(String apiKey) {
         return jdbcTemplate.query("""
-                SELECT api_key_id, user_id, api_key, secret_ciphertext, label, permissions,
+                SELECT api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist,
                        status, created_at, last_used_at, revoked_at
                   FROM gateway_api_keys
                  WHERE api_key = ? AND status = 'ACTIVE'
@@ -40,7 +40,7 @@ public class GatewayApiKeyRepository {
 
     public List<ApiKeyRecord> list(long userId) {
         return jdbcTemplate.query("""
-                SELECT api_key_id, user_id, api_key, secret_ciphertext, label, permissions,
+                SELECT api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist,
                        status, created_at, last_used_at, revoked_at
                   FROM gateway_api_keys
                  WHERE user_id = ?
@@ -54,6 +54,14 @@ public class GatewayApiKeyRepository {
                    SET status = 'REVOKED', revoked_at = ?, last_used_at = last_used_at
                  WHERE user_id = ? AND api_key = ? AND status = 'ACTIVE'
                 """, Timestamp.from(now), userId, apiKey) == 1;
+    }
+
+    public boolean updateIpAllowlist(long userId, String apiKey, String ipAllowlist) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_api_keys
+                   SET ip_allowlist = ?
+                 WHERE user_id = ? AND api_key = ? AND status = 'ACTIVE'
+                """, ipAllowlist, userId, apiKey) == 1;
     }
 
     public void markUsed(UUID apiKeyId, Instant now) {
@@ -73,6 +81,7 @@ public class GatewayApiKeyRepository {
                 rs.getString("secret_ciphertext"),
                 rs.getString("label"),
                 rs.getString("permissions"),
+                rs.getString("ip_allowlist"),
                 rs.getString("status"),
                 rs.getTimestamp("created_at").toInstant(),
                 lastUsedAt == null ? null : lastUsedAt.toInstant(),
@@ -80,7 +89,7 @@ public class GatewayApiKeyRepository {
     }
 
     public record ApiKeyRecord(UUID apiKeyId, long userId, String apiKey, String secretCiphertext,
-                               String label, String permissions, String status, Instant createdAt,
+                               String label, String permissions, String ipAllowlist, String status, Instant createdAt,
                                Instant lastUsedAt, Instant revokedAt) {
     }
 }
