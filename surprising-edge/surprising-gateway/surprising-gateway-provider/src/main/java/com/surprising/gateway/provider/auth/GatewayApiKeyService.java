@@ -6,8 +6,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
@@ -17,6 +15,7 @@ import java.util.Set;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -28,16 +27,28 @@ public class GatewayApiKeyService {
     private final AuthService authService;
     private final TotpService totpService;
     private final SensitiveActionVerificationService verificationService;
+    private final ClientIpResolver clientIpResolver;
     private final SecureRandom random = new SecureRandom();
+
+    @Autowired
+    public GatewayApiKeyService(GatewayApiKeyRepository repository,
+                                AuthService authService,
+                                TotpService totpService,
+                                SensitiveActionVerificationService verificationService,
+                                com.surprising.gateway.provider.config.GatewayProperties properties) {
+        this.repository = repository;
+        this.authService = authService;
+        this.totpService = totpService;
+        this.verificationService = verificationService;
+        this.clientIpResolver = new ClientIpResolver(properties);
+    }
 
     public GatewayApiKeyService(GatewayApiKeyRepository repository,
                                 AuthService authService,
                                 TotpService totpService,
                                 SensitiveActionVerificationService verificationService) {
-        this.repository = repository;
-        this.authService = authService;
-        this.totpService = totpService;
-        this.verificationService = verificationService;
+        this(repository, authService, totpService, verificationService,
+                new com.surprising.gateway.provider.config.GatewayProperties());
     }
 
     public CreatedApiKey create(String authorization, String label, List<String> permissions,
@@ -87,7 +98,7 @@ public class GatewayApiKeyService {
         String apiKey = requireApiKey(request.getHeader("X-MBX-APIKEY"));
         GatewayApiKeyRepository.ApiKeyRecord record = repository.active(apiKey)
                 .orElseThrow(() -> new IllegalArgumentException("invalid api key"));
-        requireIpAllowlist(record.ipAllowlist(), request.getRemoteAddr());
+        requireIpAllowlist(record.ipAllowlist(), clientIpResolver.resolve(request));
         requirePermission(record.permissions(), requiredPermission);
         String timestamp = request.getParameter("timestamp");
         long timestampValue = parseLong(timestamp, "timestamp");
@@ -192,7 +203,7 @@ public class GatewayApiKeyService {
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         for (String value : values) {
             String item = value == null ? "" : value.trim();
-            if (item.isBlank() || item.length() > 64 || !validCidr(item)) {
+            if (item.isBlank() || item.length() > 64 || !clientIpResolver.isValidRule(item)) {
                 throw new IllegalArgumentException("api key IP allowlist contains an invalid address");
             }
             normalized.add(item);
@@ -212,56 +223,8 @@ public class GatewayApiKeyService {
             return;
         }
         if (remoteAddress == null || remoteAddress.isBlank()
-                || splitIpAllowlist(value).stream().noneMatch(item -> matchesCidr(remoteAddress, item))) {
+                || !clientIpResolver.isAllowed(remoteAddress, splitIpAllowlist(value))) {
             throw new IllegalArgumentException("api key IP address is not allowed");
-        }
-    }
-
-    private boolean validCidr(String value) {
-        String[] parts = value.split("/", -1);
-        if (parts.length > 2 || parts[0].isBlank()) {
-            return false;
-        }
-        try {
-            InetAddress address = InetAddress.getByName(parts[0]);
-            if (parts.length == 1) {
-                return parts[0].matches("\\d{1,3}(?:\\.\\d{1,3}){3}") || parts[0].contains(":");
-            }
-            int prefix = Integer.parseInt(parts[1]);
-            return prefix >= 0 && prefix <= address.getAddress().length * 8;
-        } catch (UnknownHostException | NumberFormatException ex) {
-            return false;
-        }
-    }
-
-    private boolean matchesCidr(String remoteAddress, String cidr) {
-        try {
-            String[] parts = cidr.split("/", -1);
-            InetAddress remote = InetAddress.getByName(remoteAddress);
-            InetAddress network = InetAddress.getByName(parts[0]);
-            if (remote.getAddress().length != network.getAddress().length) {
-                return false;
-            }
-            if (parts.length == 1) {
-                return remote.equals(network);
-            }
-            int prefix = Integer.parseInt(parts[1]);
-            byte[] remoteBytes = remote.getAddress();
-            byte[] networkBytes = network.getAddress();
-            int fullBytes = prefix / 8;
-            int remainingBits = prefix % 8;
-            for (int index = 0; index < fullBytes; index++) {
-                if (remoteBytes[index] != networkBytes[index]) {
-                    return false;
-                }
-            }
-            if (remainingBits == 0) {
-                return true;
-            }
-            int mask = 0xFF << (8 - remainingBits);
-            return (remoteBytes[fullBytes] & mask) == (networkBytes[fullBytes] & mask);
-        } catch (UnknownHostException | NumberFormatException ex) {
-            return false;
         }
     }
 

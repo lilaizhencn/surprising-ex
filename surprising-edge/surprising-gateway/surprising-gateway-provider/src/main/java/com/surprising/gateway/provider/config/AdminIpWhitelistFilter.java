@@ -1,13 +1,11 @@
 package com.surprising.gateway.provider.config;
 
+import com.surprising.gateway.provider.auth.ClientIpResolver;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.math.BigInteger;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.List;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -18,9 +16,11 @@ public class AdminIpWhitelistFilter extends OncePerRequestFilter {
     private static final String ADMIN_PREFIX = "/api/v1/admin/";
 
     private final GatewayProperties properties;
+    private final ClientIpResolver clientIpResolver;
 
     public AdminIpWhitelistFilter(GatewayProperties properties) {
         this.properties = properties;
+        this.clientIpResolver = new ClientIpResolver(properties);
     }
 
     @Override
@@ -36,7 +36,7 @@ public class AdminIpWhitelistFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        String clientIp = clientIp(request);
+        String clientIp = clientIpResolver.resolve(request);
         if (isAllowed(clientIp, allowlist)) {
             filterChain.doFilter(request, response);
             return;
@@ -45,15 +45,7 @@ public class AdminIpWhitelistFilter extends OncePerRequestFilter {
     }
 
     boolean isAllowed(String clientIp, List<String> allowlist) {
-        if (clientIp == null || clientIp.isBlank() || allowlist == null || allowlist.isEmpty()) {
-            return false;
-        }
-        for (String rule : allowlist) {
-            if (matchesRule(clientIp.trim(), rule)) {
-                return true;
-            }
-        }
-        return false;
+        return clientIpResolver.isAllowed(clientIp, allowlist);
     }
 
     private boolean isAdminRequest(HttpServletRequest request) {
@@ -61,59 +53,4 @@ public class AdminIpWhitelistFilter extends OncePerRequestFilter {
         return uri != null && (uri.equals("/api/v1/admin") || uri.startsWith(ADMIN_PREFIX));
     }
 
-    private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        String remoteAddress = request.getRemoteAddr();
-        List<String> trustedProxyAllowlist = properties.getSecurity().getTrustedProxyIpAllowlist();
-        if (forwarded != null && !forwarded.isBlank()
-                && isAllowed(remoteAddress, trustedProxyAllowlist)) {
-            String[] chain = forwarded.split(",");
-            for (int index = chain.length - 1; index >= 0; index--) {
-                if (!chain[index].isBlank()) {
-                    return chain[index].trim();
-                }
-            }
-        }
-        return remoteAddress;
-    }
-
-    private boolean matchesRule(String clientIp, String rule) {
-        if (rule == null || rule.isBlank()) {
-            return false;
-        }
-        String normalizedRule = rule.trim();
-        if (normalizedRule.contains("/")) {
-            return matchesCidr(clientIp, normalizedRule);
-        }
-        return clientIp.equals(normalizedRule);
-    }
-
-    private boolean matchesCidr(String clientIp, String cidr) {
-        String[] parts = cidr.split("/", -1);
-        if (parts.length != 2) {
-            return false;
-        }
-        try {
-            InetAddress address = InetAddress.getByName(clientIp);
-            InetAddress network = InetAddress.getByName(parts[0]);
-            byte[] addressBytes = address.getAddress();
-            byte[] networkBytes = network.getAddress();
-            if (addressBytes.length != networkBytes.length) {
-                return false;
-            }
-            int prefixLength = Integer.parseInt(parts[1]);
-            int maxPrefix = addressBytes.length * 8;
-            if (prefixLength < 0 || prefixLength > maxPrefix) {
-                return false;
-            }
-            BigInteger addressValue = new BigInteger(1, addressBytes);
-            BigInteger networkValue = new BigInteger(1, networkBytes);
-            BigInteger mask = BigInteger.ONE.shiftLeft(maxPrefix).subtract(BigInteger.ONE)
-                    .shiftRight(maxPrefix - prefixLength)
-                    .shiftLeft(maxPrefix - prefixLength);
-            return addressValue.and(mask).equals(networkValue.and(mask));
-        } catch (NumberFormatException | UnknownHostException ex) {
-            return false;
-        }
-    }
 }
