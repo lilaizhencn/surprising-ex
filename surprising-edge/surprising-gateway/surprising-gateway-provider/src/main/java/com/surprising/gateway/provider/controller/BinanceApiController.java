@@ -96,6 +96,9 @@ public class BinanceApiController {
             if (path.endsWith("/capital/deposit/hisrec")) {
                 return depositHistory(request);
             }
+            if (path.endsWith("/capital/config/getall")) {
+                return capitalConfig(request);
+            }
             if (path.endsWith("/capital/withdraw/history")) {
                 return withdrawHistory(request);
             }
@@ -105,6 +108,10 @@ public class BinanceApiController {
             if (path.endsWith("/account")) {
                 long userId = authenticate(request, "READ");
                 return account(request, body, userId);
+            }
+            if (path.endsWith("/account/status")) {
+                authenticate(request, "READ");
+                return json(HttpStatus.OK, Map.of("data", "Normal"));
             }
             if (path.endsWith("/openOrders")) {
                 long userId = authenticate(request, "READ");
@@ -177,6 +184,33 @@ public class BinanceApiController {
         String asset = request.getParameter("coin");
         return json(HttpStatus.OK, custodyWalletClient.deposits(userId, chain, asset,
                 capped(request.getParameter("limit"))));
+    }
+
+    private ResponseEntity<byte[]> capitalConfig(HttpServletRequest request) {
+        authenticate(request, "READ");
+        GatewayProperties.CustodyWallet wallet = properties.getCustodyWallet();
+        if (!wallet.isEnabled()) {
+            return json(HttpStatus.OK, List.of());
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (String asset : wallet.getAssetScales().keySet()) {
+            String normalizedAsset = asset.toUpperCase(Locale.ROOT);
+            List<Map<String, Object>> networks = new ArrayList<>();
+            for (String chain : wallet.getWithdrawalAddressIds().keySet()) {
+                String normalizedChain = chain.toUpperCase(Locale.ROOT);
+                networks.add(Map.of(
+                        "coin", normalizedAsset,
+                        "network", normalizedChain,
+                        "depositEnable", true,
+                        "withdrawEnable", true,
+                        "isDefault", networks.isEmpty()));
+            }
+            result.add(Map.of(
+                    "coin", normalizedAsset,
+                    "name", normalizedAsset,
+                    "networkList", networks));
+        }
+        return json(HttpStatus.OK, result);
     }
 
     private ResponseEntity<byte[]> withdraw(HttpServletRequest request) {

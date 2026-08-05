@@ -299,6 +299,36 @@ class BinanceApiControllerTest {
         assertThat(verified).containsEntry("canWithdraw", true).containsEntry("canDeposit", true);
     }
 
+    @Test
+    void exposesConfiguredCapitalNetworksAndAccountStatus() throws Exception {
+        GatewayProperties properties = withdrawalProperties();
+        properties.getCustodyWallet().setEnabled(true);
+        properties.getCustodyWallet().setAssetScales(Map.of("USDT", 6L));
+        properties.getCustodyWallet().setWithdrawalAddressIds(Map.of(
+                "TRX", UUID.randomUUID().toString(), "ETH", UUID.randomUUID().toString()));
+        AuthService authService = bearerAuth();
+        BinanceApiController controller = controller(properties, authService,
+                mock(SensitiveActionVerificationService.class), mock(CustodyWithdrawalService.class));
+
+        MockHttpServletRequest configRequest = new MockHttpServletRequest(
+                "GET", "/sapi/v1/capital/config/getall");
+        configRequest.addHeader("Authorization", "Bearer token");
+        ResponseEntity<byte[]> config = controller.handle(configRequest, null);
+        List<Map<String, Object>> coins = new ObjectMapper().readValue(config.getBody(), List.class);
+
+        assertThat(config.getStatusCode().value()).isEqualTo(200);
+        assertThat(coins).hasSize(1);
+        assertThat((List<?>) coins.getFirst().get("networkList")).hasSize(2);
+
+        MockHttpServletRequest statusRequest = new MockHttpServletRequest(
+                "GET", "/sapi/v1/account/status");
+        statusRequest.addHeader("Authorization", "Bearer token");
+        Map<String, Object> status = new ObjectMapper().readValue(
+                controller.handle(statusRequest, null).getBody(), Map.class);
+
+        assertThat(status).containsEntry("data", "Normal");
+    }
+
     private BinanceApiController controller(GatewayProperties properties, AuthService authService,
                                              SensitiveActionVerificationService verification,
                                              CustodyWithdrawalService withdrawalService) {
