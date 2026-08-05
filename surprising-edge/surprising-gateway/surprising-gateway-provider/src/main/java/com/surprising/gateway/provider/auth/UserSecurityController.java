@@ -99,8 +99,13 @@ public class UserSecurityController {
             @PathVariable String sceneCode,
             @Valid @RequestBody UserSecuritySceneUpdateRequest request) {
         try {
-            return securityService.updateScene(principal(authorization).userId(), sceneCode,
-                    request.enabled(), request.totpCode());
+            long userId = principal(authorization).userId();
+            if (!verificationService.verify(userId, "SECURITY_SETTINGS", request.emailCode(),
+                    request.totpCode(), java.time.Instant.now())) {
+                throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                        "security verification is required or invalid");
+            }
+            return securityService.updateScene(userId, sceneCode, request.enabled(), request.totpCode());
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         }

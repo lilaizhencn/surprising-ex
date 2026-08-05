@@ -16,6 +16,7 @@ public class SensitiveActionVerificationService {
 
     private static final String PURPOSE = "SENSITIVE_ACTION";
     private static final Set<String> MANDATORY_SCENES = Set.of("WITHDRAWAL", "API_WITHDRAWAL");
+    private static final Set<String> ALWAYS_VERIFIED_SCENES = Set.of("SECURITY_SETTINGS");
     private final GatewayProperties properties;
     private final AuthPersistenceService persistence;
     private final UserSecurityService securityService;
@@ -41,7 +42,7 @@ public class SensitiveActionVerificationService {
     @Transactional
     public IssuedChallenge issue(long userId, String sceneCode, String requestIp, Instant now) {
         String normalizedScene = normalizeScene(sceneCode);
-        if (!isEnabled(userId, normalizedScene)) {
+        if (!isEnabled(userId, normalizedScene) && !ALWAYS_VERIFIED_SCENES.contains(normalizedScene)) {
             return new IssuedChallenge(0L, "", now);
         }
         var user = persistence.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
@@ -58,7 +59,7 @@ public class SensitiveActionVerificationService {
     @Transactional
     public boolean verify(long userId, String sceneCode, String emailCode, String totpCode, Instant now) {
         String normalizedScene = normalizeScene(sceneCode);
-        if (!isEnabled(userId, normalizedScene)) {
+        if (!isEnabled(userId, normalizedScene) && !ALWAYS_VERIFIED_SCENES.contains(normalizedScene)) {
             return true;
         }
         var user = persistence.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));

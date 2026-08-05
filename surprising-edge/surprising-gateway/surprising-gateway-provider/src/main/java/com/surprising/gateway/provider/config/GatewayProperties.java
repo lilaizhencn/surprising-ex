@@ -770,6 +770,7 @@ public class GatewayProperties implements EnvironmentAware {
     public static class ProductTransfer {
         private Duration reconciliationDelay = Duration.ofSeconds(5);
         private int reconciliationBatchSize = 100;
+        private java.math.BigDecimal verificationThresholdUsdt = new java.math.BigDecimal("10000");
 
         public Duration getReconciliationDelay() {
             return reconciliationDelay;
@@ -786,6 +787,15 @@ public class GatewayProperties implements EnvironmentAware {
 
         public void setReconciliationBatchSize(int value) {
             reconciliationBatchSize = value <= 0 ? 100 : Math.min(value, 1000);
+        }
+
+        public java.math.BigDecimal getVerificationThresholdUsdt() {
+            return verificationThresholdUsdt;
+        }
+
+        public void setVerificationThresholdUsdt(java.math.BigDecimal value) {
+            verificationThresholdUsdt = value == null || value.signum() < 0
+                    ? new java.math.BigDecimal("10000") : value;
         }
     }
 

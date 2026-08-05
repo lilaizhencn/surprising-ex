@@ -69,6 +69,20 @@ class SensitiveActionVerificationServiceTest {
         assertThat(service.issue(42L, "WITHDRAWAL", "127.0.0.1", now).challengeId()).isEqualTo(2L);
     }
 
+    @Test
+    void securitySettingsAlwaysRequiresEmailVerificationEvenWhenSceneIsDisabled() {
+        Instant now = Instant.parse("2026-08-04T00:00:00Z");
+        when(securityService.isSceneEnabled(42L, "SECURITY_SETTINGS")).thenReturn(false);
+        when(persistence.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
+                42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
+        when(challengeRepository.create(any(Long.class), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new GatewayAuthChallengeRepository.Challenge(
+                        3L, 42L, "SENSITIVE_ACTION", "EMAIL", "user@example.com", "hash",
+                        now.plusSeconds(600), 0, null));
+
+        assertThat(service.issue(42L, "SECURITY_SETTINGS", "127.0.0.1", now).challengeId()).isEqualTo(3L);
+    }
+
     private String digest(String code, String scene, String destination) {
         try {
             var bytes = java.security.MessageDigest.getInstance("SHA-256")

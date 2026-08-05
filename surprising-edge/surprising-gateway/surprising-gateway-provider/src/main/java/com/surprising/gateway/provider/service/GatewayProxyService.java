@@ -54,6 +54,7 @@ public class GatewayProxyService {
     private final AdminApprovalRepository adminApprovalRepository;
     private final ObjectMapper objectMapper;
     private final ProductTransferCoordinator productTransferCoordinator;
+    private final ProductTransferSecurityService productTransferSecurityService;
 
     public GatewayProxyService(GatewayProperties properties, RestTemplate restTemplate) {
         this(properties, restTemplate, null, null, null, new ObjectMapper(), null);
@@ -82,7 +83,6 @@ public class GatewayProxyService {
                 objectMapper, null);
     }
 
-    @Autowired
     public GatewayProxyService(GatewayProperties properties,
                                RestTemplate restTemplate,
                                AuthService authService,
@@ -90,6 +90,19 @@ public class GatewayProxyService {
                                AdminApprovalRepository adminApprovalRepository,
                                ObjectMapper objectMapper,
                                ProductTransferCoordinator productTransferCoordinator) {
+        this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository,
+                objectMapper, productTransferCoordinator, null);
+    }
+
+    @Autowired
+    public GatewayProxyService(GatewayProperties properties,
+                               RestTemplate restTemplate,
+                               AuthService authService,
+                               AdminAuditRepository adminAuditRepository,
+                               AdminApprovalRepository adminApprovalRepository,
+                               ObjectMapper objectMapper,
+                               ProductTransferCoordinator productTransferCoordinator,
+                               ProductTransferSecurityService productTransferSecurityService) {
         this.properties = properties;
         this.restTemplate = restTemplate;
         this.authService = authService;
@@ -97,6 +110,7 @@ public class GatewayProxyService {
         this.adminApprovalRepository = adminApprovalRepository;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.productTransferCoordinator = productTransferCoordinator;
+        this.productTransferSecurityService = productTransferSecurityService;
     }
 
     public ResponseEntity<byte[]> proxy(String service,
@@ -180,6 +194,11 @@ public class GatewayProxyService {
                     "product transfer coordinator is not configured");
         }
         try {
+            if (productTransferSecurityService != null) {
+                productTransferSecurityService.requireIfNeeded(Long.parseLong(identity.userId()), body,
+                        request.getHeader("X-Security-Email-Code"),
+                        request.getHeader("X-Security-TOTP-Code"), Instant.now());
+            }
             ProductTransferResult result = productTransferCoordinator.transferJson(
                     Long.parseLong(identity.userId()), body, request.getHeader("Idempotency-Key"), objectMapper);
             HttpStatus status = result.status() == ProductTransferStatus.COMPLETED
