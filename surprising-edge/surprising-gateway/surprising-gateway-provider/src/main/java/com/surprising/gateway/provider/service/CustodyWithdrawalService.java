@@ -372,22 +372,23 @@ public class CustodyWithdrawalService {
     private void validateWebhookData(CustodyWithdrawalRepository.WithdrawalRecord record,
                                      Map<String, Object> data) {
         String asset = stringValue(data.get("assetSymbol"), stringValue(data.get("asset"), null));
-        if (asset != null && !record.assetSymbol().equalsIgnoreCase(asset)) {
+        if (asset == null || !record.assetSymbol().equalsIgnoreCase(asset)) {
             throw new IllegalArgumentException("withdrawal webhook asset does not match local intent");
         }
         String chain = stringValue(data.get("chain"), stringValue(data.get("chainId"), null));
-        if (chain != null && !record.chain().equalsIgnoreCase(chain)) {
+        if (chain == null || !record.chain().equalsIgnoreCase(chain)) {
             throw new IllegalArgumentException("withdrawal webhook chain does not match local intent");
         }
         String amount = stringValue(data.get("amount"), stringValue(data.get("withdrawalAmount"), null));
-        if (amount != null) {
-            try {
-                if (new BigDecimal(amount).compareTo(new BigDecimal(record.amount())) != 0) {
-                    throw new IllegalArgumentException("withdrawal webhook amount does not match local intent");
-                }
-            } catch (NumberFormatException ex) {
-                throw new IllegalArgumentException("withdrawal webhook amount is invalid", ex);
+        if (amount == null) {
+            throw new IllegalArgumentException("withdrawal webhook amount does not match local intent");
+        }
+        try {
+            if (new BigDecimal(amount).compareTo(new BigDecimal(record.amount())) != 0) {
+                throw new IllegalArgumentException("withdrawal webhook amount does not match local intent");
             }
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("withdrawal webhook amount is invalid", ex);
         }
     }
 

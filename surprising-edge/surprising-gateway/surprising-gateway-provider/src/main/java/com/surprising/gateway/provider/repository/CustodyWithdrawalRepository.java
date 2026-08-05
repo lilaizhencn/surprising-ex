@@ -242,6 +242,7 @@ public class CustodyWithdrawalRepository {
 
     @Transactional
     public WithdrawalRecord markDebited(UUID id, String reason) {
+        lockForOutcome(id);
         WithdrawalRecord before = find(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
@@ -256,6 +257,7 @@ public class CustodyWithdrawalRepository {
 
     @Transactional
     public WithdrawalRecord markDebitUnknown(UUID id, String error) {
+        lockForOutcome(id);
         WithdrawalRecord before = find(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
@@ -396,6 +398,7 @@ public class CustodyWithdrawalRepository {
 
     @Transactional
     public WithdrawalRecord markRejected(UUID id, String code, String error) {
+        lockForOutcome(id);
         WithdrawalRecord before = find(id);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
@@ -452,8 +455,7 @@ public class CustodyWithdrawalRepository {
     private void recordTransitionEvent(UUID id, String eventType, String source,
                                        WithdrawalRecord before, WithdrawalRecord after, int updated,
                                        String walletWithdrawalId, String payload, String reason) {
-        if (updated == 1 && before != null && after != null
-                && !before.status().equals(after.status())) {
+        if (updated == 1 && before != null && after != null) {
             insertTransitionEvent(id, eventType, source, before.status(), after.status(),
                     walletWithdrawalId, payload, reason);
         }

@@ -40,7 +40,7 @@ public class CustodyWithdrawalReconciliationService {
         repository.lockForOutcome(record.withdrawalId());
         List<Map<String, Object>> matches = new ArrayList<>();
         boolean complete = false;
-        int offset = 0;
+        long offset = 0L;
         while (true) {
             List<Map<String, Object>> rows = offset == 0
                     ? walletClient.withdrawalsByExternalReference(
@@ -50,12 +50,11 @@ public class CustodyWithdrawalReconciliationService {
             if (rows == null) {
                 return;
             }
-            matches.addAll(rows.stream()
-                    .filter(row -> record.externalReference().equals(
-                            stringValue(row.get("externalReference"), stringValue(row.get("external_reference"), null))))
-                    .toList());
-            if (matches.size() > 1) {
-                return;
+            for (Map<String, Object> row : rows) {
+                if (matches.size() < 2 && record.externalReference().equals(
+                        stringValue(row.get("externalReference"), stringValue(row.get("external_reference"), null)))) {
+                    matches.add(row);
+                }
             }
             if (rows.size() < PAGE_SIZE) {
                 complete = true;
@@ -82,6 +81,9 @@ public class CustodyWithdrawalReconciliationService {
                                   Map<String, Object> walletRecord) {
         String walletWithdrawalId = stringValue(walletRecord.get("withdrawalId"),
                 stringValue(walletRecord.get("id"), null));
+        if (walletWithdrawalId == null) {
+            return false;
+        }
         if (record.walletWithdrawalId() != null
                 && !record.walletWithdrawalId().equals(walletWithdrawalId)) {
             return false;

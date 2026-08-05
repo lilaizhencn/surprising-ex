@@ -261,7 +261,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
                 .thenReturn(firstPage);
         when(walletClient.withdrawalsByExternalReference(
-                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20, 20))
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20, 20L))
                 .thenReturn(List.of(walletRow("FAILED", "wallet-other")));
 
         reconciliationService.reconcile(repository.find(withdrawalId));
@@ -287,6 +287,22 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 42L, "USDT", 25_000_000L,
                 "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
         assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
+    }
+
+    @Test
+    void custodyResultWithoutWalletIdDoesNotCompleteOrRefundUnboundWithdrawal() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
+                withdrawalId);
+        when(walletClient.withdrawalsByExternalReference(
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
+                .thenReturn(List.of(Map.of(
+                        "externalReference", "custody-wallet-withdrawal:integration",
+                        "status", "CONFIRMED", "asset", "USDT", "chain", "ETH", "amount", "25")));
+
+        reconciliationService.reconcile(repository.find(withdrawalId));
+
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
+        assertThat(repository.find(withdrawalId).walletWithdrawalId()).isNull();
     }
 
     @Test
@@ -371,6 +387,36 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 SELECT COUNT(*) FROM gateway_wallet_withdrawal_events
                  WHERE withdrawal_id = ? AND event_type = 'SUBMITTED'
                 """, Integer.class, withdrawalId)).isEqualTo(1);
+    }
+
+    @Test
+    void eventInsertFailureRollsBackWithdrawalState() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'DEBITED' WHERE withdrawal_id = ?",
+                withdrawalId);
+        jdbcTemplate.execute("""
+                CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_events_reject_insert()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'test audit insert failure';
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("CREATE TRIGGER gateway_wallet_withdrawal_events_reject_insert_trigger "
+                + "BEFORE INSERT ON gateway_wallet_withdrawal_events FOR EACH ROW "
+                + "EXECUTE FUNCTION gateway_wallet_withdrawal_events_reject_insert()");
+        try {
+            assertThatThrownBy(() -> repository.markSubmitted(
+                    withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration"))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(repository.find(withdrawalId).status()).isEqualTo("DEBITED");
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM gateway_wallet_withdrawal_events WHERE withdrawal_id = ?
+                    """, Integer.class, withdrawalId)).isZero();
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER gateway_wallet_withdrawal_events_reject_insert_trigger "
+                    + "ON gateway_wallet_withdrawal_events");
+            jdbcTemplate.execute("DROP FUNCTION gateway_wallet_withdrawal_events_reject_insert()");
+        }
     }
 
     @Test

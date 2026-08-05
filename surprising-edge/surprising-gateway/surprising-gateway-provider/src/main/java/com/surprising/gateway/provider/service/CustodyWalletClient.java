@@ -88,15 +88,26 @@ public class CustodyWalletClient {
                                                                      String asset,
                                                                      int limit,
                                                                      int offset) {
+        return withdrawalsByExternalReference(externalReference, chain, asset, limit, (long) offset);
+    }
+
+    public List<Map<String, Object>> withdrawalsByExternalReference(String externalReference,
+                                                                     String chain,
+                                                                     String asset,
+                                                                     int limit,
+                                                                     long offset) {
         if (externalReference == null || externalReference.isBlank()) {
             throw new IllegalArgumentException("externalReference is required");
+        }
+        if (offset < 0L) {
+            throw new IllegalArgumentException("offset must not be negative");
         }
         String query = query(Map.of(
                 "chain", optional(chain),
                 "assetSymbol", optional(asset),
                 "search", externalReference.trim(),
                 "limit", Integer.toString(Math.max(1, Math.min(limit, 200))),
-                "offset", Integer.toString(Math.max(0, Math.min(offset, 1_000_000)))));
+                "offset", Long.toString(offset)));
         return exchange(HttpMethod.GET, API_PREFIX + "/withdrawals" + query, null,
                 new ParameterizedTypeReference<>() {}, null);
     }
