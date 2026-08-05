@@ -100,6 +100,18 @@ public class CustodyWithdrawalRepository {
     }
 
     @Transactional
+    public boolean recordLateBroadcastUnknownObservation(UUID id, String walletWithdrawalId, String payload,
+                                                         String reason, String providerEventId) {
+        WithdrawalRecord record = lockAndValidateWalletReference(id, walletWithdrawalId);
+        if (!Set.of("SUBMITTED", "COMPLETED", "REFUNDED", "REJECTED").contains(record.status())) {
+            return false;
+        }
+        insertTransitionEvent(id, "WEBHOOK_IDEMPOTENT", "CUSTODY_WALLET", record.status(), record.status(),
+                walletWithdrawalId, providerEventId, payload, reason);
+        return true;
+    }
+
+    @Transactional
     public WithdrawalRecord findByWalletReference(String walletWithdrawalId, String externalReference) {
         return findByWalletReference(walletWithdrawalId, externalReference, null);
     }

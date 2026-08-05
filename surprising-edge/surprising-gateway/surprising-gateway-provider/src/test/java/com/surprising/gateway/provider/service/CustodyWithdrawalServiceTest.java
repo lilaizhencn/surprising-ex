@@ -306,6 +306,8 @@ class CustodyWithdrawalServiceTest {
                 record(withdrawalId, "FAILED_PENDING", "withdraw-webhook-conflict");
         when(repository.findByWalletReference("wallet-webhook-conflict",
                 "custody-wallet-withdrawal:withdraw-webhook-conflict")).thenReturn(pending);
+        when(repository.recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-conflict"),
+                any(), any(), eq(null))).thenReturn(false);
         when(repository.markBroadcastUnknown(eq(withdrawalId), any(), any(), eq("wallet-webhook-conflict")))
                 .thenThrow(new IllegalStateException("invalid webhook source status"));
 
@@ -332,10 +334,8 @@ class CustodyWithdrawalServiceTest {
         when(repository.findByWalletReference("wallet-webhook-late",
                 "custody-wallet-withdrawal:withdraw-webhook-late", "provider-event-late"))
                 .thenReturn(submitted);
-        when(repository.markBroadcastUnknown(eq(withdrawalId), any(), any(), eq("wallet-webhook-late"),
-                eq("provider-event-late")))
-                .thenThrow(new IllegalStateException("invalid webhook source status"));
-        when(repository.find(withdrawalId)).thenReturn(submitted);
+        when(repository.recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-late"),
+                any(), any(), eq("provider-event-late"))).thenReturn(true);
 
         CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
                 valuationClient);
@@ -345,8 +345,8 @@ class CustodyWithdrawalServiceTest {
                         "externalReference", "custody-wallet-withdrawal:withdraw-webhook-late",
                         "asset", "USDT", "chain", "ETH", "amount", "25")));
 
-        verify(repository).recordWebhookObservation(eq(withdrawalId), eq("wallet-webhook-late"), any(),
-                eq("late broadcast-unknown webhook ignored after local status advanced"),
+        verify(repository).recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-late"),
+                any(), eq("late broadcast-unknown webhook ignored after local status advanced"),
                 eq("provider-event-late"));
     }
 

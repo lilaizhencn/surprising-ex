@@ -317,25 +317,16 @@ public class CustodyWithdrawalService {
                 }
             }
             case "WITHDRAWAL.BROADCAST_UNKNOWN" -> {
-                try {
+                boolean observed = repository.recordLateBroadcastUnknownObservation(record.withdrawalId(),
+                        walletWithdrawalId, response,
+                        "late broadcast-unknown webhook ignored after local status advanced", providerEventId);
+                if (!observed) {
                     if (providerEventId == null) {
                         repository.markBroadcastUnknown(record.withdrawalId(), response,
                                 "custody wallet broadcast status is unknown", walletWithdrawalId);
                     } else {
                         repository.markBroadcastUnknown(record.withdrawalId(), response,
                                 "custody wallet broadcast status is unknown", walletWithdrawalId, providerEventId);
-                    }
-                } catch (IllegalStateException ex) {
-                    CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
-                    if (current == null || !lateBroadcastUnknownCanBeIgnored(current.status())) {
-                        throw ex;
-                    }
-                    if (providerEventId == null) {
-                        repository.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, response,
-                                "late broadcast-unknown webhook ignored after local status advanced");
-                    } else {
-                        repository.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, response,
-                                "late broadcast-unknown webhook ignored after local status advanced", providerEventId);
                     }
                 }
             }
