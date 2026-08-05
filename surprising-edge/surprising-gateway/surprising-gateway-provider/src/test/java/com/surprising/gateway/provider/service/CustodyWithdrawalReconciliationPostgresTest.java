@@ -206,6 +206,20 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void webhookBindsWalletIdByExternalReferenceAndRejectsConflictingBinding() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        CustodyWithdrawalRepository.WithdrawalRecord bound = repository.findByWalletReference(
+                "wallet-bound", "custody-wallet-withdrawal:integration");
+        assertThat(bound.walletWithdrawalId()).isEqualTo("wallet-bound");
+        assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-bound");
+        assertThatThrownBy(() -> repository.findByWalletReference(
+                "wallet-other", "custody-wallet-withdrawal:integration"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void duplicateCompletionForSameTargetIsIdempotent() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'SUBMITTED' WHERE withdrawal_id = ?",
                 withdrawalId);

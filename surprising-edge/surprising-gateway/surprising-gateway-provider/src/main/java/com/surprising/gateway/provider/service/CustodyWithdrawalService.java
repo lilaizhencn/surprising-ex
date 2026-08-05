@@ -241,6 +241,11 @@ public class CustodyWithdrawalService {
                 || "REFUNDED".equals(status) || "REJECTED".equals(status);
     }
 
+    private boolean terminalWebhookIsIdempotent(String status, String eventType) {
+        return ("COMPLETED".equals(status) && "WITHDRAWAL.CONFIRMED".equals(eventType))
+                || ("REFUNDED".equals(status) && "WITHDRAWAL.FAILED".equals(eventType));
+    }
+
     public void handleWebhook(String eventType, Map<String, Object> event) {
         Map<String, Object> data = mapValue(event.get("data"));
         String walletWithdrawalId = stringValue(data.get("withdrawalId"), null);
@@ -250,12 +255,15 @@ public class CustodyWithdrawalService {
         if (record == null) {
             throw new IllegalArgumentException("withdrawal webhook does not match a local withdrawal");
         }
+        String normalizedType = eventType.toUpperCase(Locale.ROOT);
         validateWebhookData(record, data);
         if ("COMPLETED".equals(record.status()) || "REFUNDED".equals(record.status())
                 || "REJECTED".equals(record.status())) {
-            return;
+            if (terminalWebhookIsIdempotent(record.status(), normalizedType)) {
+                return;
+            }
+            throw new IllegalStateException("withdrawal webhook conflicts with terminal local status");
         }
-        String normalizedType = eventType.toUpperCase(Locale.ROOT);
         String response = json(event);
         switch (normalizedType) {
             case "WITHDRAWAL.CREATED", "WITHDRAWAL.BROADCAST" -> repository.markSubmitted(

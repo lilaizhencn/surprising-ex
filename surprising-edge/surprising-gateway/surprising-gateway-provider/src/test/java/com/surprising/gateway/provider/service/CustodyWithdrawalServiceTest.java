@@ -281,10 +281,11 @@ class CustodyWithdrawalServiceTest {
         CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
                 valuationClient);
 
-        service.handleWebhook("WITHDRAWAL.FAILED", Map.of(
+        assertThatThrownBy(() -> service.handleWebhook("WITHDRAWAL.FAILED", Map.of(
                 "data", Map.of("withdrawalId", "wallet-withdrawal-1",
                         "externalReference", "custody-wallet-withdrawal:withdraw-late",
-                        "asset", "USDT", "chain", "ETH", "amount", "25")));
+                        "asset", "USDT", "chain", "ETH", "amount", "25"))))
+                .isInstanceOf(IllegalStateException.class);
 
         verify(spotAccountClient, never()).adjustBalance(any(Long.class), any(), any(Long.class), any(), any());
         verify(repository, never()).markRefundPending(any(), any());

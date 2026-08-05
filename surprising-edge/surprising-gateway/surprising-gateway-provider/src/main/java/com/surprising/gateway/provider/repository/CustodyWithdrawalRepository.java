@@ -79,25 +79,51 @@ public class CustodyWithdrawalRepository {
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
+    @Transactional
     public WithdrawalRecord findByWalletReference(String walletWithdrawalId, String externalReference) {
         if ((walletWithdrawalId == null || walletWithdrawalId.isBlank())
                 && (externalReference == null || externalReference.isBlank())) {
             throw new IllegalArgumentException("withdrawal webhook identifiers are required");
         }
-        String predicate;
-        Object[] args;
-        if (walletWithdrawalId != null && !walletWithdrawalId.isBlank()) {
-            if (externalReference != null && !externalReference.isBlank()) {
-                predicate = "external_reference = ? AND wallet_withdrawal_id = ?";
-                args = new Object[]{externalReference, walletWithdrawalId};
-            } else {
-                predicate = "wallet_withdrawal_id = ?";
-                args = new Object[]{walletWithdrawalId};
+        if (externalReference != null && !externalReference.isBlank()) {
+            List<WithdrawalRecord> rows = jdbcTemplate.query(
+                    selectSql("external_reference = ?", 2), this::toRecord, externalReference);
+            if (rows.size() > 1) {
+                throw new IllegalStateException("withdrawal webhook external reference is ambiguous");
             }
-        } else {
-            predicate = "external_reference = ?";
-            args = new Object[]{externalReference};
+            if (rows.isEmpty()) {
+                return null;
+            }
+            WithdrawalRecord record = rows.getFirst();
+            if (walletWithdrawalId == null || walletWithdrawalId.isBlank()) {
+                return record;
+            }
+            if (record.walletWithdrawalId() != null
+                    && !record.walletWithdrawalId().equals(walletWithdrawalId)) {
+                throw new IllegalStateException("withdrawal webhook wallet id does not match local intent");
+            }
+            if (record.walletWithdrawalId() == null) {
+                int updated = jdbcTemplate.update("""
+                        UPDATE gateway_wallet_withdrawals
+                           SET wallet_withdrawal_id = ?, updated_at = now()
+                         WHERE withdrawal_id = ? AND wallet_withdrawal_id IS NULL
+                        """, walletWithdrawalId, record.withdrawalId());
+                if (updated == 0) {
+                    WithdrawalRecord current = find(record.withdrawalId());
+                    if (current == null) {
+                        return null;
+                    }
+                    if (current.walletWithdrawalId() != null
+                            && !current.walletWithdrawalId().equals(walletWithdrawalId)) {
+                        throw new IllegalStateException("withdrawal webhook wallet id does not match local intent");
+                    }
+                }
+                return find(record.withdrawalId());
+            }
+            return record;
         }
+        String predicate = "wallet_withdrawal_id = ?";
+        Object[] args = new Object[]{walletWithdrawalId};
         List<WithdrawalRecord> rows = jdbcTemplate.query(selectSql(predicate, 2), this::toRecord, args);
         if (rows.size() > 1) {
             throw new IllegalStateException("withdrawal webhook identifiers are ambiguous");
