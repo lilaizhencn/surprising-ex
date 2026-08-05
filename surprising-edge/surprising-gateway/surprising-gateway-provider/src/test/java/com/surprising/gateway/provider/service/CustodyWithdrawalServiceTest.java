@@ -320,6 +320,37 @@ class CustodyWithdrawalServiceTest {
     }
 
     @Test
+    void lateBroadcastUnknownWebhookKeepsProviderEventIdOnWithdrawalAudit() {
+        GatewayProperties properties = new GatewayProperties();
+        CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
+        SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
+        WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
+        UUID withdrawalId = UUID.randomUUID();
+        CustodyWithdrawalRepository.WithdrawalRecord submitted =
+                record(withdrawalId, "SUBMITTED", "withdraw-webhook-late");
+        when(repository.findByWalletReference("wallet-webhook-late",
+                "custody-wallet-withdrawal:withdraw-webhook-late", "provider-event-late"))
+                .thenReturn(submitted);
+        when(repository.markBroadcastUnknown(eq(withdrawalId), any(), any(), eq("wallet-webhook-late"),
+                eq("provider-event-late")))
+                .thenThrow(new IllegalStateException("invalid webhook source status"));
+        when(repository.find(withdrawalId)).thenReturn(submitted);
+
+        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+                valuationClient);
+
+        service.handleWebhook("provider-event-late", "WITHDRAWAL.BROADCAST_UNKNOWN", Map.of(
+                "data", Map.of("withdrawalId", "wallet-webhook-late",
+                        "externalReference", "custody-wallet-withdrawal:withdraw-webhook-late",
+                        "asset", "USDT", "chain", "ETH", "amount", "25")));
+
+        verify(repository).recordWebhookObservation(eq(withdrawalId), eq("wallet-webhook-late"), any(),
+                eq("late broadcast-unknown webhook ignored after local status advanced"),
+                eq("provider-event-late"));
+    }
+
+    @Test
     void confirmationWinsAfterFailureIsHeldForAuthoritativeReconciliation() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);

@@ -222,6 +222,20 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void lateBroadcastUnknownObservationKeepsProviderEventId() {
+        forceStatus("SUBMITTED");
+
+        repository.recordWebhookObservation(withdrawalId, "wallet-integration", "{}",
+                "late broadcast-unknown webhook ignored after local status advanced", "provider-event-late");
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT provider_event_id FROM gateway_wallet_withdrawal_events
+                 WHERE withdrawal_id = ? AND event_type = 'WEBHOOK_IDEMPOTENT'
+                 ORDER BY created_at DESC LIMIT 1
+                """, String.class, withdrawalId)).isEqualTo("provider-event-late");
+    }
+
+    @Test
     void invalidWebhookDoesNotPersistWalletIdBinding() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
                 withdrawalId);

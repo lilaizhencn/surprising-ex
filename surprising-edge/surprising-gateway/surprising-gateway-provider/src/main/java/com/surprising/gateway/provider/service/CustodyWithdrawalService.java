@@ -330,6 +330,13 @@ public class CustodyWithdrawalService {
                     if (current == null || !lateBroadcastUnknownCanBeIgnored(current.status())) {
                         throw ex;
                     }
+                    if (providerEventId == null) {
+                        repository.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, response,
+                                "late broadcast-unknown webhook ignored after local status advanced");
+                    } else {
+                        repository.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, response,
+                                "late broadcast-unknown webhook ignored after local status advanced", providerEventId);
+                    }
                 }
             }
             case "WITHDRAWAL.CONFIRMED" -> {
