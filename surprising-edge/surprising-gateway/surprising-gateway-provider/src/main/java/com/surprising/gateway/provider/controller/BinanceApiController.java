@@ -67,7 +67,7 @@ public class BinanceApiController {
         this.objectMapper = objectMapper;
     }
 
-    @RequestMapping(path = {"/api/v3/**", "/sapi/v1/**"}, method = {
+    @RequestMapping(path = {"/api/v3/**", "/sapi/v1/**", "/fapi/v1/**", "/dapi/v1/**", "/eapi/v1/**"}, method = {
             RequestMethod.GET, RequestMethod.POST, RequestMethod.DELETE, RequestMethod.PUT})
     public ResponseEntity<byte[]> handle(HttpServletRequest request,
                                          @RequestBody(required = false) byte[] body) {

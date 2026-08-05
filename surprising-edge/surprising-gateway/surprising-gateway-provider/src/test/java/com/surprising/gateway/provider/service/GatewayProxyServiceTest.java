@@ -16,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -285,6 +287,32 @@ class GatewayProxyServiceTest {
 
         assertThat(restTemplate.url.toString())
                 .isEqualTo("http://order-linear-delivery:9184/api/v1/trading/orders?productLine=LINEAR_DELIVERY");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "/fapi/v1/order, LINEAR_PERPETUAL, http://order-linear-perpetual:9084",
+            "/dapi/v1/order, INVERSE_PERPETUAL, http://order-inverse-perpetual:9184",
+            "/eapi/v1/order, OPTION, http://order-option:9284"
+    })
+    void binanceProductPathSelectsProductRoute(String requestPath,
+                                                String productLineName,
+                                                String backendUrl) {
+        GatewayProperties properties = properties();
+        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.valueOf(productLineName),
+                new GatewayProperties.ProductRoute(backendUrl,
+                        "/api/v1/trading/orders"));
+        CapturingRestTemplate restTemplate = new CapturingRestTemplate();
+        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate,
+                userAuthService("NORMAL"));
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", requestPath);
+        request.addHeader("Authorization", "Bearer user");
+
+        controller.proxy("trading", HttpMethod.POST, request, "{}".getBytes());
+
+        assertThat(restTemplate.url.toString())
+                .isEqualTo(backendUrl + "/api/v1/trading/orders");
     }
 
     @Test

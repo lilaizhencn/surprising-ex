@@ -26,14 +26,26 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.bind.annotation.RequestMapping;
 import tools.jackson.databind.ObjectMapper;
 
 class BinanceApiControllerTest {
+
+    @Test
+    void exposesBinanceProductApiNamespaces() throws NoSuchMethodException {
+        RequestMapping mapping = BinanceApiController.class
+                .getMethod("handle", HttpServletRequest.class, byte[].class)
+                .getAnnotation(RequestMapping.class);
+
+        assertThat(List.of(mapping.path()))
+                .contains("/fapi/v1/**", "/dapi/v1/**", "/eapi/v1/**");
+    }
 
     @Test
     void assetTransferUsesSharedGatewayCoordinatorRoute() throws Exception {

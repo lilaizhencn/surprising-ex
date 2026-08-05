@@ -344,11 +344,28 @@ public class GatewayProxyService {
                 request.getParameter("contractType"),
                 request.getParameter("contract-type"),
                 request.getParameter("contract_type"),
-                bodyProductLine(body));
+                bodyProductLine(body),
+                pathProductLine(request.getRequestURI()));
         if (value == null) {
             return null;
         }
         return parseProductLine(value);
+    }
+
+    private String pathProductLine(String requestUri) {
+        if (requestUri == null) {
+            return null;
+        }
+        if (requestUri.equals("/fapi/v1") || requestUri.startsWith("/fapi/v1/")) {
+            return ProductLine.LINEAR_PERPETUAL.name();
+        }
+        if (requestUri.equals("/dapi/v1") || requestUri.startsWith("/dapi/v1/")) {
+            return ProductLine.INVERSE_PERPETUAL.name();
+        }
+        if (requestUri.equals("/eapi/v1") || requestUri.startsWith("/eapi/v1/")) {
+            return ProductLine.OPTION.name();
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
