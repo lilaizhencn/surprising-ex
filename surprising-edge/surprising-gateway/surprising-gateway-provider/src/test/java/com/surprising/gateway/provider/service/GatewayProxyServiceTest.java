@@ -316,6 +316,30 @@ class GatewayProxyServiceTest {
     }
 
     @Test
+    void explicitProductLineOverridesBinancePathDefault() {
+        GatewayProperties properties = properties();
+        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.LINEAR_PERPETUAL,
+                new GatewayProperties.ProductRoute("http://order-linear-perpetual:9084",
+                        "/api/v1/trading/orders"));
+        properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.OPTION,
+                new GatewayProperties.ProductRoute("http://order-option:9284",
+                        "/api/v1/trading/orders"));
+        CapturingRestTemplate restTemplate = new CapturingRestTemplate();
+        GatewayProxyService controller = new GatewayProxyService(properties, restTemplate,
+                userAuthService("NORMAL"));
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/fapi/v1/order");
+        request.setQueryString("productLine=OPTION");
+        request.addParameter("productLine", "OPTION");
+        request.addHeader("Authorization", "Bearer user");
+
+        controller.proxy("trading", HttpMethod.POST, request, "{}".getBytes());
+
+        assertThat(restTemplate.url.toString())
+                .isEqualTo("http://order-option:9284/api/v1/trading/orders?productLine=OPTION");
+    }
+
+    @Test
     void productLineBodyRoutesTradingRequestToProductBackend() {
         GatewayProperties properties = properties();
         properties.getRoutes().get("trading").getProductRoutes().put(ProductLine.OPTION,
