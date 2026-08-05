@@ -114,6 +114,7 @@ public class CustodyWalletController {
             JwtPrincipal principal = principal(authorization);
             requireSecurity(principal.userId(), "WITHDRAWAL", emailCode, totpCode);
             requireKyc(principal.userId());
+            complianceService.requireWithdrawalEligibility(principal.userId());
             java.util.UUID configuredSourceAddressId = configuredSourceAddress(request.chain());
             if (request.custodyAddressId() != null
                     && !configuredSourceAddressId.equals(request.custodyAddressId())) {

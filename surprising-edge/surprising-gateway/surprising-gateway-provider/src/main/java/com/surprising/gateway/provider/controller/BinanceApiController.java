@@ -186,6 +186,7 @@ public class BinanceApiController {
         long userId = authenticate(request, "WITHDRAW");
         requireWithdrawalSecurity(request, userId, apiKeyRequest ? "API_WITHDRAWAL" : "WITHDRAWAL");
         requireKyc(userId);
+        complianceService.requireWithdrawalEligibility(userId);
         String asset = required(params, "coin");
         String chain = required(params, "network");
         String idempotencyKey = first(params, "withdrawOrderId", "clientOrderId");

@@ -14,6 +14,7 @@ import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -226,6 +227,23 @@ public class ComplianceService {
 
     public KycProfile kyc(long userId) {
         return kycRepository.find(userId);
+    }
+
+    public void requireWithdrawalEligibility(long userId) {
+        List<RiskTag> activeTags = riskTags(userId, "ACTIVE", 100);
+        boolean blockedByRiskTag = activeTags.stream().anyMatch(tag ->
+                "HIGH".equalsIgnoreCase(tag.severity()) || "CRITICAL".equalsIgnoreCase(tag.severity()));
+        if (blockedByRiskTag) {
+            throw new IllegalStateException("withdrawals are restricted by active account risk controls");
+        }
+        boolean blockedByAmlCase = amlCases(userId, null, 200).stream().anyMatch(caseRecord ->
+                switch (caseRecord.status().toUpperCase(Locale.ROOT)) {
+                    case "OPEN", "REVIEWING", "ESCALATED", "RESTRICTED" -> true;
+                    default -> false;
+                });
+        if (blockedByAmlCase) {
+            throw new IllegalStateException("withdrawals are restricted by an open compliance case");
+        }
     }
 
     private void recordDocumentAccess(AuthModels.JwtPrincipal principal,
