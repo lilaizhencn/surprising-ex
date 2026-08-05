@@ -30,13 +30,16 @@ public class UserSecurityService {
     private final AuthPersistenceService persistence;
     private final GatewayUserSecuritySceneRepository sceneRepository;
     private final TotpService totpService;
+    private final PasswordHasher passwordHasher;
 
     public UserSecurityService(AuthPersistenceService persistence,
                                GatewayUserSecuritySceneRepository sceneRepository,
-                               TotpService totpService) {
+                               TotpService totpService,
+                               PasswordHasher passwordHasher) {
         this.persistence = persistence;
         this.sceneRepository = sceneRepository;
         this.totpService = totpService;
+        this.passwordHasher = passwordHasher;
     }
 
     public UserMfaStatus status(long userId) {
@@ -99,6 +102,26 @@ public class UserSecurityService {
                 .findFirst()
                 .map(Scene::enabled)
                 .orElseThrow(() -> new IllegalArgumentException("unsupported security scene"));
+    }
+
+    public void requireCurrentPassword(long userId, String currentPassword) {
+        var credential = persistence.credential(userId)
+                .orElseThrow(() -> new IllegalArgumentException("user not found"));
+        if (!passwordHasher.matches(currentPassword, credential.passwordHash())) {
+            throw new IllegalArgumentException("current password is invalid");
+        }
+    }
+
+    @Transactional
+    public void updatePassword(long userId, String newPassword) {
+        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 128) {
+            throw new IllegalArgumentException("password length must be 8-128");
+        }
+        Instant now = Instant.now();
+        if (persistence.updatePasswordHash(userId, passwordHasher.hash(newPassword), now) != 1) {
+            throw new IllegalArgumentException("user not found");
+        }
+        persistence.revokeUserRefreshSessions(userId, now);
     }
 
     @Transactional

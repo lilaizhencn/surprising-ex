@@ -392,7 +392,7 @@ public class GatewayProperties implements EnvironmentAware {
 
     private static BackendRoute walletAdminRoute() {
         BackendRoute route = new BackendRoute("http://localhost:8002", "/wallet/v1/admin", true);
-        route.setBasicAuthUsername(System.getenv().getOrDefault("SW_WALLET_ADMIN_USERNAME", "admin"));
+        route.setBasicAuthUsername(System.getenv().getOrDefault("SW_WALLET_ADMIN_USERNAME", ""));
         route.setBasicAuthPassword(System.getenv().getOrDefault("SW_WALLET_ADMIN_PASSWORD", ""));
         return route;
     }

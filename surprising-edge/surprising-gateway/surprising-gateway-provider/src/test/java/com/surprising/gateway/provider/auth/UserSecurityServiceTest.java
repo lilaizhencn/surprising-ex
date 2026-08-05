@@ -19,8 +19,9 @@ class UserSecurityServiceTest {
     private final AuthPersistenceService persistence = mock(AuthPersistenceService.class);
     private final GatewayUserSecuritySceneRepository sceneRepository = mock(GatewayUserSecuritySceneRepository.class);
     private final TotpService totpService = mock(TotpService.class);
+    private final PasswordHasher passwordHasher = mock(PasswordHasher.class);
     private final UserSecurityService service = new UserSecurityService(
-            persistence, sceneRepository, totpService);
+            persistence, sceneRepository, totpService, passwordHasher);
 
     @Test
     void enrollsAndConfirmsUserTotp() {
@@ -67,6 +68,22 @@ class UserSecurityServiceTest {
         assertThatThrownBy(() -> service.updateScene(42L, "WITHDRAWAL", false, "000000"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("withdrawal security scene cannot be disabled");
+    }
+
+    @Test
+    void validatesCurrentPasswordAndRevokesRefreshSessionsAfterUpdate() {
+        Instant now = Instant.parse("2026-08-04T00:00:00Z");
+        when(persistence.credential(42L)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
+                42L, null, "user@example.com", null, "stored-hash", "NORMAL", now)));
+        when(passwordHasher.matches("old-password", "stored-hash")).thenReturn(true);
+        when(passwordHasher.hash("new-password")).thenReturn("new-hash");
+        when(persistence.updatePasswordHash(eq(42L), eq("new-hash"), any())).thenReturn(1);
+
+        service.requireCurrentPassword(42L, "old-password");
+        service.updatePassword(42L, "new-password");
+
+        verify(persistence).updatePasswordHash(eq(42L), eq("new-hash"), any());
+        verify(persistence).revokeUserRefreshSessions(eq(42L), any());
     }
 
     private AuthenticatedUser user(Instant now) {

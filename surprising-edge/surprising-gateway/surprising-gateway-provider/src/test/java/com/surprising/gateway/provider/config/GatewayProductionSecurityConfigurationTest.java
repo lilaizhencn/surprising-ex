@@ -24,6 +24,7 @@ class GatewayProductionSecurityConfigurationTest {
 
         assertThatCode(properties::validateProductionSecurityConfiguration)
                 .doesNotThrowAnyException();
+        assertThat(properties.getAdminRoutes().get("wallet-admin").hasBasicAuth()).isFalse();
     }
 
     @Test

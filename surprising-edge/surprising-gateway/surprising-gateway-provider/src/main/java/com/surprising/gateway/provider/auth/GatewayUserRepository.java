@@ -73,9 +73,17 @@ public class GatewayUserRepository {
     public Optional<UserCredential> findCredentialByPhone(String phone) {
         return jdbcTemplate.query("""
                 SELECT user_id, username, email, phone, password_hash, status, created_at
-                  FROM gateway_users
-                 WHERE phone = ?
+                 FROM gateway_users
+                WHERE phone = ?
                 """, (rs, rowNum) -> toCredential(rs), phone).stream().findFirst();
+    }
+
+    public Optional<UserCredential> findCredentialByUserId(long userId) {
+        return jdbcTemplate.query("""
+                SELECT user_id, username, email, phone, password_hash, status, created_at
+                  FROM gateway_users
+                 WHERE user_id = ?
+                """, (rs, rowNum) -> toCredential(rs), userId).stream().findFirst();
     }
 
     public Optional<UserRecord> find(long userId) {

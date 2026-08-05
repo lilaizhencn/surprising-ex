@@ -73,6 +73,10 @@ public class AuthPersistenceService {
         return userRepository.findCredentialByPhone(phone);
     }
 
+    public Optional<UserCredential> credential(long userId) {
+        return userRepository.findCredentialByUserId(userId);
+    }
+
     public Optional<AuthenticatedUser> user(long userId) {
         return userRepository.find(userId).map(user -> toAuthenticatedUser(user, roles(userId)));
     }

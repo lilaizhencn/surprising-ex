@@ -58,6 +58,13 @@ public final class AuthModels {
             @Size(min = 6, max = 6) String totpCode) {
     }
 
+    public record ChangePasswordRequest(
+            @NotBlank String currentPassword,
+            @NotBlank @Size(min = 8, max = 128) String newPassword,
+            @Size(min = 6, max = 6) String emailCode,
+            @Size(min = 6, max = 6) String totpCode) {
+    }
+
     public record SensitiveChallengeRequest(@NotBlank String sceneCode) {
     }
 

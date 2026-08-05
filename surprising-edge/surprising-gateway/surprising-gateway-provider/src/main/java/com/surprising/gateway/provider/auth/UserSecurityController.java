@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.AuthModels.UserMfaVerificationRequest;
+import com.surprising.gateway.provider.auth.AuthModels.ChangePasswordRequest;
 import com.surprising.gateway.provider.auth.AuthModels.SensitiveChallengeRequest;
 import com.surprising.gateway.provider.auth.AuthModels.SensitiveChallengeVerificationRequest;
 import com.surprising.gateway.provider.auth.AuthModels.UserSecuritySceneUpdateRequest;
@@ -35,6 +36,23 @@ public class UserSecurityController {
     @GetMapping("/mfa")
     public UserSecurityService.UserMfaStatus mfaStatus(@RequestHeader("Authorization") String authorization) {
         return securityService.status(principal(authorization).userId());
+    }
+
+    @PostMapping("/password")
+    public void changePassword(@RequestHeader("Authorization") String authorization,
+                               @Valid @RequestBody ChangePasswordRequest request) {
+        try {
+            long userId = principal(authorization).userId();
+            securityService.requireCurrentPassword(userId, request.currentPassword());
+            if (!verificationService.verify(userId, "CHANGE_PASSWORD", request.emailCode(),
+                    request.totpCode(), java.time.Instant.now())) {
+                throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                        "security verification is required or invalid");
+            }
+            securityService.updatePassword(userId, request.newPassword());
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        }
     }
 
     @PostMapping("/mfa/enroll")
