@@ -6,11 +6,13 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
@@ -19,9 +21,11 @@ import com.surprising.gateway.provider.service.CustodyWalletClient;
 import com.surprising.gateway.provider.service.GatewayProxyService;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +33,57 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 
 class BinanceApiControllerTest {
+
+    @Test
+    void rejectsWithdrawBeforeCallingCustodyWhenSensitiveVerificationFails() {
+        GatewayProperties properties = withdrawalProperties();
+        AuthService authService = bearerAuth();
+        SensitiveActionVerificationService verification = mock(SensitiveActionVerificationService.class);
+        when(verification.verify(eq(1001L), eq("WITHDRAWAL"), eq("email-code"), eq("totp-code"), any()))
+                .thenReturn(false);
+        CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
+        BinanceApiController controller = controller(properties, authService, verification, withdrawalService);
+
+        MockHttpServletRequest request = withdrawalRequest();
+        request.addHeader("X-Security-Email-Code", "email-code");
+        request.addHeader("X-Security-TOTP-Code", "totp-code");
+
+        var response = controller.handle(request, null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(428);
+        verify(withdrawalService, never()).submit(any(Long.class), anyString(), any());
+    }
+
+    @Test
+    void acceptsVerifiedWithdrawAndSubmitsCustodyRequest() {
+        GatewayProperties properties = withdrawalProperties();
+        AuthService authService = bearerAuth();
+        SensitiveActionVerificationService verification = mock(SensitiveActionVerificationService.class);
+        when(verification.verify(eq(1001L), eq("WITHDRAWAL"), eq("email-code"), eq("totp-code"), any()))
+                .thenReturn(true);
+        ComplianceService compliance = mock(ComplianceService.class);
+        when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "BASIC", "VERIFIED", "US",
+                "PASSPORT", "self", null, null, null, null, null, null, null));
+        CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
+        UUID withdrawalId = UUID.randomUUID();
+        Instant now = Instant.now();
+        when(withdrawalService.submit(eq(1001L), eq("withdraw-1"), any()))
+                .thenReturn(new CustodyWithdrawalService.WithdrawalResponse(
+                        withdrawalId, "SUBMITTED", "wallet-withdrawal-1", BigDecimal.ONE, now, now));
+        BinanceApiController controller = new BinanceApiController(properties, mock(GatewayProxyService.class),
+                mock(GatewayApiKeyService.class), verification, authService, compliance,
+                mock(CustodyWalletClient.class), withdrawalService, new ObjectMapper());
+
+        MockHttpServletRequest request = withdrawalRequest();
+        request.addHeader("X-Security-Email-Code", "email-code");
+        request.addHeader("X-Security-TOTP-Code", "totp-code");
+
+        var response = controller.handle(request, null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(verification).verify(eq(1001L), eq("WITHDRAWAL"), eq("email-code"), eq("totp-code"), any());
+        verify(withdrawalService).submit(eq(1001L), eq("withdraw-1"), any());
+    }
 
     @Test
     void allOrdersReadsHistoryRouteAndReturnsAscendingBinanceOrderList() throws Exception {
@@ -144,5 +199,43 @@ class BinanceApiControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(ticker).containsEntry("symbol", "BTCUSDT").containsEntry("price", "123.45");
+    }
+
+    private BinanceApiController controller(GatewayProperties properties, AuthService authService,
+                                             SensitiveActionVerificationService verification,
+                                             CustodyWithdrawalService withdrawalService) {
+        ComplianceService compliance = mock(ComplianceService.class);
+        when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "BASIC", "VERIFIED", "US",
+                "PASSPORT", "self", null, null, null, null, null, null, null));
+        return new BinanceApiController(properties, mock(GatewayProxyService.class),
+                mock(GatewayApiKeyService.class), verification, authService, compliance,
+                mock(CustodyWalletClient.class), withdrawalService, new ObjectMapper());
+    }
+
+    private GatewayProperties withdrawalProperties() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getBinanceApi().setEnabled(true);
+        properties.getCustodyWallet().setWithdrawalAddressIds(
+                Map.of("ETH", UUID.randomUUID().toString()));
+        return properties;
+    }
+
+    private AuthService bearerAuth() {
+        AuthService authService = mock(AuthService.class);
+        when(authService.authenticateBearer("Bearer token"))
+                .thenReturn(new JwtPrincipal(1001L, "alice", "ACTIVE", List.of(), Instant.now().plusSeconds(60)));
+        return authService;
+    }
+
+    private MockHttpServletRequest withdrawalRequest() {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/sapi/v1/capital/withdraw/apply");
+        request.addHeader("Authorization", "Bearer token");
+        request.addParameter("coin", "USDT");
+        request.addParameter("network", "ETH");
+        request.addParameter("address", "0x1111111111111111111111111111111111111111");
+        request.addParameter("amount", "1");
+        request.addParameter("withdrawOrderId", "withdraw-1");
+        return request;
     }
 }

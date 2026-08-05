@@ -53,17 +53,21 @@ public class CustodyWalletWebhookService {
                 || timestamp == null || timestamp.isBlank() || signature == null || signature.isBlank()) {
             throw new IllegalArgumentException("wallet webhook headers are required");
         }
+        String normalizedEventId = eventId.trim();
+        String normalizedType = normalizedEventType(eventType);
+        if (!eventId.equals(normalizedEventId) || !eventType.equals(normalizedType)) {
+            throw new IllegalArgumentException("wallet webhook identity headers must be normalized");
+        }
         byte[] rawBody = body == null ? new byte[0] : body;
         long eventTimestamp = parseTimestamp(timestamp);
         if (Math.abs(Instant.now().getEpochSecond() - eventTimestamp) > MAX_CLOCK_SKEW_SECONDS) {
             throw new IllegalArgumentException("wallet webhook timestamp is outside the allowed window");
         }
-        verifySignature(wallet.getWebhookSecret(), eventId.trim(), normalizedEventType(eventType),
+        verifySignature(wallet.getWebhookSecret(), normalizedEventId, normalizedType,
                 eventTimestamp, signature, rawBody);
         Map<String, Object> event = readEvent(rawBody);
-        String normalizedType = normalizedEventType(eventType);
         String payloadEventId = stringValue(event.get("id"), "wallet webhook id");
-        if (!eventId.trim().equals(payloadEventId)) {
+        if (!normalizedEventId.equals(payloadEventId)) {
             throw new IllegalArgumentException("wallet webhook event id does not match its payload");
         }
         String payloadType = stringValue(event.get("type"), "wallet webhook event type");
@@ -71,7 +75,7 @@ public class CustodyWalletWebhookService {
             throw new IllegalArgumentException("wallet webhook event type does not match its payload");
         }
         CustodyWalletWebhookRepository.ClaimResult claim = repository.claim(
-                eventId, normalizedType, sha256(rawBody), Instant.now());
+                normalizedEventId, normalizedType, sha256(rawBody), Instant.now());
         if (claim == CustodyWalletWebhookRepository.ClaimResult.PROCESSED) {
             return;
         }
@@ -82,11 +86,11 @@ public class CustodyWalletWebhookService {
             if (normalizedType.startsWith("WITHDRAWAL.")) {
                 withdrawalService.handleWebhook(normalizedType, event);
             } else if (DEPOSIT_CONFIRMED.equals(normalizedType) || DEPOSIT_REORGED.equals(normalizedType)) {
-                postSpotAdjustment(eventId, normalizedType, event);
+                postSpotAdjustment(normalizedEventId, normalizedType, event);
             }
-            repository.markProcessed(eventId, Instant.now());
+            repository.markProcessed(normalizedEventId, Instant.now());
         } catch (RuntimeException ex) {
-            repository.markFailed(eventId, ex.getMessage(), Instant.now());
+            repository.markFailed(normalizedEventId, ex.getMessage(), Instant.now());
             throw ex;
         }
     }
