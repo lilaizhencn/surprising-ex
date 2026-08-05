@@ -66,11 +66,11 @@ public class CustodyWalletWebhookService {
         verifySignature(wallet.getWebhookSecret(), normalizedEventId, normalizedType,
                 eventTimestamp, signature, rawBody);
         Map<String, Object> event = readEvent(rawBody);
-        String payloadEventId = stringValue(event.get("id"), "wallet webhook id");
+        String payloadEventId = identityValue(event.get("id"), "wallet webhook id");
         if (!normalizedEventId.equals(payloadEventId)) {
             throw new IllegalArgumentException("wallet webhook event id does not match its payload");
         }
-        String payloadType = stringValue(event.get("type"), "wallet webhook event type");
+        String payloadType = identityValue(event.get("type"), "wallet webhook event type");
         if (!normalizedType.equals(payloadType)) {
             throw new IllegalArgumentException("wallet webhook event type does not match its payload");
         }
@@ -148,6 +148,13 @@ public class CustodyWalletWebhookService {
     private String stringValue(Object value, String field) {
         String result = value == null ? "" : String.valueOf(value).trim();
         if (result.isBlank() && !field.isBlank()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return result;
+    }
+
+    private String identityValue(Object value, String field) {
+        if (!(value instanceof String result) || result.isBlank()) {
             throw new IllegalArgumentException(field + " is required");
         }
         return result;

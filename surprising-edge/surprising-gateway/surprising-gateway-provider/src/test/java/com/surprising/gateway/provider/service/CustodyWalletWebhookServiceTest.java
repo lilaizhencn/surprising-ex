@@ -99,6 +99,19 @@ class CustodyWalletWebhookServiceTest {
     }
 
     @Test
+    void rejectsIdentityWhitespaceInsideSignedBody() {
+        byte[] body = "{\"id\":\"event-1 \",\"type\":\"DEPOSIT.CONFIRMED\",\"data\":{}}"
+                .getBytes(StandardCharsets.UTF_8);
+        long timestamp = Instant.now().getEpochSecond();
+
+        assertThatThrownBy(() -> service.handle("event-1", "DEPOSIT.CONFIRMED", Long.toString(timestamp),
+                service.signature("webhook-secret", "event-1", "DEPOSIT.CONFIRMED", timestamp, body), body))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("event id");
+        verify(repository, org.mockito.Mockito.never()).claim(any(), any(), any(), any());
+    }
+
+    @Test
     void dispatchesWithdrawalWebhookToTheWithdrawalStateMachine() {
         byte[] body = ("{\"id\":\"withdrawal-event-1\",\"type\":\"WITHDRAWAL.CONFIRMED\","
                 + "\"data\":{\"withdrawalId\":\"wallet-withdrawal-1\","
