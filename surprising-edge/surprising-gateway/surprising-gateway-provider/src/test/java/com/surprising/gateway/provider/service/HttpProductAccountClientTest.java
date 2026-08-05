@@ -1,0 +1,61 @@
+package com.surprising.gateway.provider.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.product.api.ProductLine;
+import java.net.URI;
+import java.time.Instant;
+import java.util.EnumMap;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.RestTemplate;
+
+class HttpProductAccountClientTest {
+
+    @Test
+    void resolvesProductAccountRouteAndSignsExactInternalPayload() {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
+                "http://account-default:9086", "/api/v1/accounts", true);
+        EnumMap<ProductLine, GatewayProperties.ProductRoute> productRoutes = new EnumMap<>(ProductLine.class);
+        productRoutes.put(ProductLine.LINEAR_PERPETUAL,
+                new GatewayProperties.ProductRoute("http://account-linear:9186", "/api/v1/accounts"));
+        account.setProductRoutes(productRoutes);
+        properties.setRoutes(Map.of("account", account));
+        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("{}"));
+        HttpProductAccountClient client = new HttpProductAccountClient(properties, restTemplate);
+
+        ProductAccountAdjustment result = client.adjust("USDT_PERPETUAL", -1_250L, "transfer-007:debit",
+                "test", 42L, "usdt");
+
+        assertThat(result.status()).isEqualTo(ProductAccountAdjustment.Status.APPLIED);
+        ArgumentCaptor<URI> uri = ArgumentCaptor.forClass(URI.class);
+        ArgumentCaptor<HttpEntity> request = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(uri.capture(), eq(HttpMethod.POST), request.capture(), eq(String.class));
+        assertThat(uri.getValue()).isEqualTo(URI.create(
+                "http://account-linear:9186/api/v1/accounts/admin/product-balance-adjustments"));
+        assertThat(request.getValue().getBody()).isEqualTo(Map.of(
+                "userId", 42L, "accountType", "USDT_PERPETUAL", "asset", "USDT",
+                "amountUnits", -1_250L, "referenceId", "transfer-007:debit", "reason", "test"));
+        String timestamp = request.getValue().getHeaders().getFirst("X-Internal-Timestamp");
+        assertThat(request.getValue().getHeaders().getFirst("X-Internal-Service"))
+                .isEqualTo("surprising-gateway");
+        assertThat(request.getValue().getHeaders().getFirst("X-Internal-Signature"))
+                .isEqualTo(client.signature("account-internal-secret-for-tests-32", Long.parseLong(timestamp), 42L,
+                        "USDT_PERPETUAL", "USDT", -1_250L, "transfer-007:debit", "test"));
+        assertThat(Math.abs(Instant.now().getEpochSecond() - Long.parseLong(timestamp))).isLessThanOrEqualTo(1L);
+    }
+}

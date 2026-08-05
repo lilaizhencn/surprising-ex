@@ -27,12 +27,49 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 
 class BinanceApiControllerTest {
+
+    @Test
+    void assetTransferUsesSharedGatewayCoordinatorRoute() throws Exception {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
+        scale.setQuantityScale(6);
+        properties.getBinanceApi().setSymbolScales(Map.of("USDT", scale));
+        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        AuthService authService = bearerAuth();
+        when(proxy.proxyCompat(anyString(), eq("/transfers"), isNull(), eq(HttpMethod.POST), any(), any(), eq(1001L)))
+                .thenReturn(ResponseEntity.ok("{\"transferId\":7123,\"status\":\"COMPLETED\"}"
+                        .getBytes(StandardCharsets.UTF_8)));
+        BinanceApiController controller = new BinanceApiController(properties, proxy,
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
+                mock(ComplianceService.class), mock(CustodyWalletClient.class),
+                mock(CustodyWithdrawalService.class), new ObjectMapper());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/sapi/v1/asset/transfer");
+        request.addHeader("Authorization", "Bearer token");
+        request.setParameter("type", "MAIN_UMFUTURE");
+        request.setParameter("asset", "USDT");
+        request.setParameter("amount", "1.25");
+        request.setParameter("clientTranId", "binance-transfer-1");
+
+        ResponseEntity<byte[]> response = controller.handle(request, null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(new ObjectMapper().readValue(response.getBody(), Map.class))
+                .containsEntry("tranId", 7123);
+        ArgumentCaptor<byte[]> body = ArgumentCaptor.forClass(byte[].class);
+        verify(proxy).proxyCompat(anyString(), eq("/transfers"), isNull(), eq(HttpMethod.POST), any(), body.capture(),
+                eq(1001L));
+        assertThat(new String(body.getValue(), StandardCharsets.UTF_8))
+                .contains("\"sourceAccountType\":\"FUNDING\"")
+                .contains("\"targetAccountType\":\"USDT_PERPETUAL\"")
+                .contains("\"amountUnits\":1250000");
+    }
 
     @Test
     void rejectsWithdrawBeforeCallingCustodyWhenSensitiveVerificationFails() {

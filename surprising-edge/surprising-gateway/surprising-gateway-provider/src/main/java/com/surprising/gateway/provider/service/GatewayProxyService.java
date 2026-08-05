@@ -21,6 +21,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
@@ -52,13 +53,14 @@ public class GatewayProxyService {
     private final AdminAuditRepository adminAuditRepository;
     private final AdminApprovalRepository adminApprovalRepository;
     private final ObjectMapper objectMapper;
+    private final ProductTransferCoordinator productTransferCoordinator;
 
     public GatewayProxyService(GatewayProperties properties, RestTemplate restTemplate) {
-        this(properties, restTemplate, null, null, null);
+        this(properties, restTemplate, null, null, null, new ObjectMapper(), null);
     }
 
     public GatewayProxyService(GatewayProperties properties, RestTemplate restTemplate, AuthService authService) {
-        this(properties, restTemplate, authService, null, null);
+        this(properties, restTemplate, authService, null, null, new ObjectMapper(), null);
     }
 
     public GatewayProxyService(GatewayProperties properties,
@@ -66,7 +68,8 @@ public class GatewayProxyService {
                                AuthService authService,
                                AdminAuditRepository adminAuditRepository,
                                AdminApprovalRepository adminApprovalRepository) {
-        this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository, new ObjectMapper());
+        this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository,
+                new ObjectMapper(), null);
     }
 
     @Autowired
@@ -75,13 +78,15 @@ public class GatewayProxyService {
                                AuthService authService,
                                AdminAuditRepository adminAuditRepository,
                                AdminApprovalRepository adminApprovalRepository,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               ProductTransferCoordinator productTransferCoordinator) {
         this.properties = properties;
         this.restTemplate = restTemplate;
         this.authService = authService;
         this.adminAuditRepository = adminAuditRepository;
         this.adminApprovalRepository = adminApprovalRepository;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.productTransferCoordinator = productTransferCoordinator;
     }
 
     public ResponseEntity<byte[]> proxy(String service,
@@ -96,6 +101,9 @@ public class GatewayProxyService {
             enforceAdminPermission(service, method, identity);
         }
         enforceUserStatusRestrictions(service, method, request, identity);
+        if (!adminRequest && method == HttpMethod.POST && isProductTransferRequest(service, request)) {
+            return transferResponse(identity, request, body);
+        }
         URI target = targetUri(service, route, request);
         String bodyHash = bodySha256(body);
         ResponseEntity<byte[]> response;
@@ -134,6 +142,10 @@ public class GatewayProxyService {
                 ? enforceIdentity(route, request)
                 : userIdentity(Long.toString(authenticatedUserId));
         enforceUserStatusRestrictions(service, method, request, identity);
+        if (method == HttpMethod.POST && "account".equalsIgnoreCase(service)
+                && "/transfers".equalsIgnoreCase(targetSuffix)) {
+            return transferResponse(identity, request, body);
+        }
         URI target = compatibilityTarget(route, targetSuffix, targetQuery);
         ResponseEntity<byte[]> response = exchange(target, method, body, request, identity, route);
         HttpHeaders responseHeaders = new HttpHeaders();
@@ -143,6 +155,33 @@ public class GatewayProxyService {
         return ResponseEntity.status(response.getStatusCode())
                 .headers(responseHeaders)
                 .body(sanitizePublicContractFields(service, response.getBody()));
+    }
+
+    private boolean isProductTransferRequest(String service, HttpServletRequest request) {
+        return "account".equalsIgnoreCase(service)
+                && request.getRequestURI().endsWith("/account/transfers");
+    }
+
+    private ResponseEntity<byte[]> transferResponse(GatewayIdentity identity,
+                                                     HttpServletRequest request,
+                                                     byte[] body) {
+        if (productTransferCoordinator == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "product transfer coordinator is not configured");
+        }
+        try {
+            ProductTransferResult result = productTransferCoordinator.transferJson(
+                    Long.parseLong(identity.userId()), body, request.getHeader("Idempotency-Key"), objectMapper);
+            HttpStatus status = result.status() == ProductTransferStatus.COMPLETED
+                    ? HttpStatus.OK
+                    : result.status().terminal() ? HttpStatus.CONFLICT : HttpStatus.SERVICE_UNAVAILABLE;
+            return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
+                    .body(objectMapper.writeValueAsBytes(result));
+        } catch (ProductTransferConflictException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 
     private ResponseEntity<byte[]> exchange(URI target,
