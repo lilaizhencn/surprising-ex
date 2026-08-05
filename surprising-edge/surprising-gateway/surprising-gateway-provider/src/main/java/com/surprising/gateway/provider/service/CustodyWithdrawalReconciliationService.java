@@ -16,7 +16,6 @@ import tools.jackson.databind.ObjectMapper;
 public class CustodyWithdrawalReconciliationService {
 
     private static final int PAGE_SIZE = 20;
-    private static final int MAX_PAGES = 100;
 
     private final CustodyWithdrawalRepository repository;
     private final CustodyWalletClient walletClient;
@@ -42,7 +41,7 @@ public class CustodyWithdrawalReconciliationService {
         List<Map<String, Object>> matches = new ArrayList<>();
         boolean complete = false;
         int offset = 0;
-        for (int page = 0; page < MAX_PAGES; page++) {
+        while (true) {
             List<Map<String, Object>> rows = offset == 0
                     ? walletClient.withdrawalsByExternalReference(
                             record.externalReference(), record.chain(), record.assetSymbol(), PAGE_SIZE)

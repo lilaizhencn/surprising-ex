@@ -65,6 +65,45 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_actions (
 CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawal_actions_withdrawal_idx
     ON gateway_wallet_withdrawal_actions (withdrawal_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_events (
+    event_id             UUID PRIMARY KEY,
+    withdrawal_id        UUID NOT NULL REFERENCES gateway_wallet_withdrawals(withdrawal_id),
+    event_type           TEXT NOT NULL,
+    source               TEXT NOT NULL,
+    from_status          TEXT,
+    to_status            TEXT,
+    wallet_withdrawal_id TEXT,
+    payload              JSONB NOT NULL DEFAULT '{}'::jsonb,
+    reason               TEXT,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_wallet_withdrawal_event_type_check CHECK (event_type IN (
+        'INTENT_CREATED', 'WALLET_ID_BOUND', 'ADMIN_RETRY', 'ADMIN_APPROVED', 'ADMIN_REJECTED',
+        'DEBITED', 'DEBIT_UNKNOWN', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'COMPLETED',
+        'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED', 'REJECTED'
+    )),
+    CONSTRAINT gateway_wallet_withdrawal_event_source_check CHECK (
+        source IN ('USER', 'ADMIN', 'SPOT_ACCOUNT', 'CUSTODY_WALLET', 'RECONCILIATION', 'SYSTEM')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawal_events_withdrawal_idx
+    ON gateway_wallet_withdrawal_events (withdrawal_id, created_at ASC, event_id ASC);
+
+CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_events_immutable_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'gateway wallet withdrawal events are immutable';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS gateway_wallet_withdrawal_events_immutable_trigger
+    ON gateway_wallet_withdrawal_events;
+CREATE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger
+    BEFORE UPDATE OR DELETE ON gateway_wallet_withdrawal_events
+    FOR EACH ROW EXECUTE FUNCTION gateway_wallet_withdrawal_events_immutable_guard();
+
 DO $$
 BEGIN
     EXECUTE 'ALTER TABLE gateway_wallet_withdrawals

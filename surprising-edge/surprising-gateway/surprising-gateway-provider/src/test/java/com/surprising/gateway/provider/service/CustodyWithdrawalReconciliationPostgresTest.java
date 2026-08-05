@@ -86,7 +86,12 @@ class CustodyWithdrawalReconciliationPostgresTest {
     @AfterEach
     void tearDown() {
         if (jdbcTemplate != null) {
+            jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_events "
+                    + "DISABLE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger");
+            jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawal_events WHERE withdrawal_id = ?", withdrawalId);
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE withdrawal_id = ?", withdrawalId);
+            jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_events "
+                    + "ENABLE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger");
         }
         if (applicationContext != null) {
             applicationContext.close();
@@ -340,6 +345,35 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void automaticStateChangesAppendImmutableWithdrawalEvents() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'DEBITED' WHERE withdrawal_id = ?",
+                withdrawalId);
+
+        repository.markSubmitted(withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration");
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM gateway_wallet_withdrawal_events
+                 WHERE withdrawal_id = ? AND event_type = 'SUBMITTED'
+                """, Integer.class, withdrawalId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT from_status || ':' || to_status FROM gateway_wallet_withdrawal_events
+                 WHERE withdrawal_id = ? AND event_type = 'SUBMITTED'
+                """, String.class, withdrawalId)).isEqualTo("DEBITED:SUBMITTED");
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                UPDATE gateway_wallet_withdrawal_events SET reason = 'tampered' WHERE withdrawal_id = ?
+                """, withdrawalId))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "DELETE FROM gateway_wallet_withdrawal_events WHERE withdrawal_id = ?", withdrawalId))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM gateway_wallet_withdrawal_events
+                 WHERE withdrawal_id = ? AND event_type = 'SUBMITTED'
+                """, Integer.class, withdrawalId)).isEqualTo(1);
+    }
+
+    @Test
     void adminStateAndActionAuditRollbackTogetherWhenAuditInsertFails() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
                 withdrawalId);
@@ -385,6 +419,24 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 + "action_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
                 + "admin_user_id BIGINT NOT NULL REFERENCES gateway_users, admin_username TEXT NOT NULL, "
                 + "action TEXT NOT NULL, reason TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_events ("
+                + "event_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
+                + "event_type TEXT NOT NULL, source TEXT NOT NULL, from_status TEXT, to_status TEXT, "
+                + "wallet_withdrawal_id TEXT, payload JSONB NOT NULL DEFAULT '{}'::jsonb, reason TEXT, "
+                + "created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+        jdbcTemplate.execute("""
+                CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_events_immutable_guard()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'gateway wallet withdrawal events are immutable';
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS gateway_wallet_withdrawal_events_immutable_trigger "
+                + "ON gateway_wallet_withdrawal_events");
+        jdbcTemplate.execute("CREATE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger "
+                + "BEFORE UPDATE OR DELETE ON gateway_wallet_withdrawal_events FOR EACH ROW "
+                + "EXECUTE FUNCTION gateway_wallet_withdrawal_events_immutable_guard()");
     }
 
     private UUID insertFailurePendingWithdrawal() {
