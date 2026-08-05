@@ -119,7 +119,7 @@ public class GatewayApiKeyService {
         String canonical = binanceCanonicalQuery(request, body);
         String expected = sign(totpService.decryptSecret(record.secretCiphertext()), canonical);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                signature.getBytes(StandardCharsets.UTF_8))) {
+                signature.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8))) {
             throw new IllegalArgumentException("invalid api signature");
         }
         repository.markUsed(record.apiKeyId(), Instant.now());

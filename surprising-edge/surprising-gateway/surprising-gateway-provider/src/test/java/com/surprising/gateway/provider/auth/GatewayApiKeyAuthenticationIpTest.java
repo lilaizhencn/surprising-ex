@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,7 @@ class GatewayApiKeyAuthenticationIpTest {
         String apiKey = "sx_" + "a".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "10.8.0.0/16");
         when(repository.active(apiKey)).thenReturn(Optional.of(record));
-        MockHttpServletRequest request = signedRequest(service, apiKey, "192.0.2.10", "10.8.2.3");
+        MockHttpServletRequest request = signedRequest(service, apiKey, "192.0.2.10", "10.8.2.3", true);
 
         service.authenticate(request, "READ");
     }
@@ -83,14 +84,24 @@ class GatewayApiKeyAuthenticationIpTest {
 
     private MockHttpServletRequest signedRequest(GatewayApiKeyService service, String apiKey,
                                                  String remoteAddress, String forwardedFor) {
+        return signedRequest(service, apiKey, remoteAddress, forwardedFor, false);
+    }
+
+    private MockHttpServletRequest signedRequest(GatewayApiKeyService service, String apiKey,
+                                                 String remoteAddress, String forwardedFor,
+                                                 boolean uppercaseSignature) {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v3/account");
         request.setRemoteAddr(remoteAddress);
         request.addHeader("X-MBX-APIKEY", apiKey);
         request.addHeader("X-Forwarded-For", forwardedFor);
         String query = "timestamp=" + System.currentTimeMillis();
-        request.setQueryString(query + "&signature=" + service.sign("secret", query));
+        String signature = service.sign("secret", query);
+        if (uppercaseSignature) {
+            signature = signature.toUpperCase(Locale.ROOT);
+        }
+        request.setQueryString(query + "&signature=" + signature);
         request.addParameter("timestamp", query.substring("timestamp=".length()));
-        request.addParameter("signature", service.sign("secret", query));
+        request.addParameter("signature", signature);
         return request;
     }
 }
