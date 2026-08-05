@@ -66,7 +66,7 @@ class UserSecurityServiceTest {
 
         assertThatThrownBy(() -> service.updateScene(42L, "WITHDRAWAL", false, "000000"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("invalid totp code");
+                .hasMessage("withdrawal security scene cannot be disabled");
     }
 
     private AuthenticatedUser user(Instant now) {

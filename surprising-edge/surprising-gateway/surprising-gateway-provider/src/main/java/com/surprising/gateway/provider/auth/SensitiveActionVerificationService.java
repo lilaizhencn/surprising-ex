@@ -7,6 +7,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class SensitiveActionVerificationService {
 
     private static final String PURPOSE = "SENSITIVE_ACTION";
+    private static final Set<String> MANDATORY_SCENES = Set.of("WITHDRAWAL", "API_WITHDRAWAL");
     private final GatewayProperties properties;
     private final AuthPersistenceService persistence;
     private final UserSecurityService securityService;
@@ -39,7 +41,7 @@ public class SensitiveActionVerificationService {
     @Transactional
     public IssuedChallenge issue(long userId, String sceneCode, String requestIp, Instant now) {
         String normalizedScene = normalizeScene(sceneCode);
-        if (!securityService.isSceneEnabled(userId, normalizedScene)) {
+        if (!isEnabled(userId, normalizedScene)) {
             return new IssuedChallenge(0L, "", now);
         }
         var user = persistence.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
@@ -56,7 +58,7 @@ public class SensitiveActionVerificationService {
     @Transactional
     public boolean verify(long userId, String sceneCode, String emailCode, String totpCode, Instant now) {
         String normalizedScene = normalizeScene(sceneCode);
-        if (!securityService.isSceneEnabled(userId, normalizedScene)) {
+        if (!isEnabled(userId, normalizedScene)) {
             return true;
         }
         var user = persistence.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
@@ -92,6 +94,10 @@ public class SensitiveActionVerificationService {
         } catch (java.security.NoSuchAlgorithmException ex) {
             throw new IllegalStateException("verification code digest unavailable", ex);
         }
+    }
+
+    private boolean isEnabled(long userId, String sceneCode) {
+        return MANDATORY_SCENES.contains(sceneCode) || securityService.isSceneEnabled(userId, sceneCode);
     }
 
     private String normalizeScene(String sceneCode) {

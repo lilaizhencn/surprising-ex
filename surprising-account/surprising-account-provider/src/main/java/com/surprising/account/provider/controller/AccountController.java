@@ -397,7 +397,7 @@ public class AccountController {
 
     private void requireInternalService(String service, String timestamp, String signature,
                                          BalanceAdjustmentRequest request) {
-        if (!INTERNAL_SERVICE.equals(service == null ? "" : service.trim())
+        if (!INTERNAL_SERVICE.equals(service)
                 || timestamp == null || timestamp.isBlank()
                 || signature == null || signature.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service authentication is required");
@@ -409,7 +409,7 @@ public class AccountController {
         }
         long timestampSeconds;
         try {
-            timestampSeconds = Long.parseLong(timestamp.trim());
+            timestampSeconds = Long.parseLong(timestamp);
         } catch (NumberFormatException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is invalid", ex);
         }
@@ -418,7 +418,7 @@ public class AccountController {
         }
         String expected = sign(secret, timestampSeconds, request);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                signature.trim().getBytes(StandardCharsets.UTF_8))) {
+                signature.getBytes(StandardCharsets.UTF_8))) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service signature is invalid");
         }
     }

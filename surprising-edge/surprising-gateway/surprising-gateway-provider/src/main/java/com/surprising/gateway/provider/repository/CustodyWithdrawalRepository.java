@@ -85,16 +85,28 @@ public class CustodyWithdrawalRepository {
 
     @Transactional
     public void recordWebhookObservation(UUID id, String walletWithdrawalId, String payload, String reason) {
+        recordWebhookObservation(id, walletWithdrawalId, payload, reason, null);
+    }
+
+    @Transactional
+    public void recordWebhookObservation(UUID id, String walletWithdrawalId, String payload, String reason,
+                                         String providerEventId) {
         WithdrawalRecord record = find(id);
         if (record == null) {
             throw new IllegalStateException("withdrawal intent does not exist");
         }
         insertTransitionEvent(id, "WEBHOOK_IDEMPOTENT", "CUSTODY_WALLET", record.status(), record.status(),
-                walletWithdrawalId, payload, reason);
+                walletWithdrawalId, providerEventId, payload, reason);
     }
 
     @Transactional
     public WithdrawalRecord findByWalletReference(String walletWithdrawalId, String externalReference) {
+        return findByWalletReference(walletWithdrawalId, externalReference, null);
+    }
+
+    @Transactional
+    public WithdrawalRecord findByWalletReference(String walletWithdrawalId, String externalReference,
+                                                  String providerEventId) {
         if ((walletWithdrawalId == null || walletWithdrawalId.isBlank())
                 && (externalReference == null || externalReference.isBlank())) {
             throw new IllegalArgumentException("withdrawal webhook identifiers are required");
@@ -143,7 +155,7 @@ public class CustodyWithdrawalRepository {
                 }
                 if (updated == 1) {
                     insertTransitionEvent(record.withdrawalId(), "WALLET_ID_BOUND", "CUSTODY_WALLET",
-                            record.status(), record.status(), walletWithdrawalId, "{}",
+                            record.status(), record.status(), walletWithdrawalId, providerEventId, "{}",
                             "wallet withdrawal id correlated by external reference");
                 }
                 return find(record.withdrawalId());
@@ -282,6 +294,12 @@ public class CustodyWithdrawalRepository {
 
     @Transactional
     public WithdrawalRecord markSubmitted(UUID id, String walletResponse, String walletWithdrawalId) {
+        return markSubmitted(id, walletResponse, walletWithdrawalId, null);
+    }
+
+    @Transactional
+    public WithdrawalRecord markSubmitted(UUID id, String walletResponse, String walletWithdrawalId,
+                                          String providerEventId) {
         WithdrawalRecord before = lockAndValidateWalletReference(id, walletWithdrawalId);
         int updated;
         try {
@@ -298,7 +316,7 @@ public class CustodyWithdrawalRepository {
         }
         WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal submitted", "SUBMITTED");
         recordTransitionEvent(id, "SUBMITTED", "CUSTODY_WALLET", before, record, updated,
-                walletWithdrawalId, walletResponse, null);
+                walletWithdrawalId, walletResponse, null, providerEventId);
         return record;
     }
 
@@ -310,6 +328,12 @@ public class CustodyWithdrawalRepository {
     @Transactional
     public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error,
                                                  String walletWithdrawalId) {
+        return markBroadcastUnknown(id, walletResponse, error, walletWithdrawalId, null);
+    }
+
+    @Transactional
+    public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error,
+                                                 String walletWithdrawalId, String providerEventId) {
         WithdrawalRecord before = lockAndValidateWalletReference(id, walletWithdrawalId);
         int updated;
         try {
@@ -325,12 +349,18 @@ public class CustodyWithdrawalRepository {
         }
         WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal broadcast unknown", "BROADCAST_UNKNOWN");
         recordTransitionEvent(id, "BROADCAST_UNKNOWN", "CUSTODY_WALLET", before, record, updated,
-                walletWithdrawalId, walletResponse, error);
+                walletWithdrawalId, walletResponse, error, providerEventId);
         return record;
     }
 
     @Transactional
     public WithdrawalRecord markCompleted(UUID id, String walletResponse, String walletWithdrawalId) {
+        return markCompleted(id, walletResponse, walletWithdrawalId, null);
+    }
+
+    @Transactional
+    public WithdrawalRecord markCompleted(UUID id, String walletResponse, String walletWithdrawalId,
+                                          String providerEventId) {
         WithdrawalRecord before = lockAndValidateWalletReference(id, walletWithdrawalId);
         int updated;
         try {
@@ -347,13 +377,19 @@ public class CustodyWithdrawalRepository {
         }
         WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal completed", "COMPLETED");
         recordTransitionEvent(id, "COMPLETED", "CUSTODY_WALLET", before, record, updated,
-                walletWithdrawalId, walletResponse, null);
+                walletWithdrawalId, walletResponse, null, providerEventId);
         return record;
     }
 
     @Transactional
     public WithdrawalRecord markFailurePending(UUID id, String walletResponse, String error,
                                                String walletWithdrawalId) {
+        return markFailurePending(id, walletResponse, error, walletWithdrawalId, null);
+    }
+
+    @Transactional
+    public WithdrawalRecord markFailurePending(UUID id, String walletResponse, String error,
+                                               String walletWithdrawalId, String providerEventId) {
         WithdrawalRecord before = lockAndValidateWalletReference(id, walletWithdrawalId);
         int updated;
         try {
@@ -369,23 +405,29 @@ public class CustodyWithdrawalRepository {
         }
         WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal failure pending", "FAILED_PENDING");
         recordTransitionEvent(id, "FAILED_PENDING", "CUSTODY_WALLET", before, record, updated,
-                walletWithdrawalId, walletResponse, error);
+                walletWithdrawalId, walletResponse, error, providerEventId);
         return record;
     }
 
     @Transactional
     public WithdrawalRecord markRefundPending(UUID id, String error) {
+        return markRefundPending(id, error, null);
+    }
+
+    @Transactional
+    public WithdrawalRecord markRefundPending(UUID id, String error, String walletResponse) {
         lockForOutcome(id);
         WithdrawalRecord before = find(id);
         int updated = jdbcTemplate.update("""
-                UPDATE gateway_wallet_withdrawals
-                   SET status = 'REFUND_PENDING', error_code = 'REFUND_UNKNOWN', error_message = ?, updated_at = now()
+                   UPDATE gateway_wallet_withdrawals
+                   SET status = 'REFUND_PENDING', wallet_response = COALESCE(?::jsonb, wallet_response),
+                       error_code = 'REFUND_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN',
                                                         'FAILED_PENDING', 'REFUND_PENDING')
-                """, error, id);
+                """, walletResponse, error, id);
         WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal refund pending", "REFUND_PENDING");
         recordTransitionEvent(id, "REFUND_PENDING", "RECONCILIATION", before, record, updated,
-                record == null ? null : record.walletWithdrawalId(), "{}", error);
+                record == null ? null : record.walletWithdrawalId(), walletResponse, error);
         return record;
     }
 
@@ -465,22 +507,36 @@ public class CustodyWithdrawalRepository {
     private void recordTransitionEvent(UUID id, String eventType, String source,
                                        WithdrawalRecord before, WithdrawalRecord after, int updated,
                                        String walletWithdrawalId, String payload, String reason) {
+        recordTransitionEvent(id, eventType, source, before, after, updated,
+                walletWithdrawalId, payload, reason, null);
+    }
+
+    private void recordTransitionEvent(UUID id, String eventType, String source,
+                                       WithdrawalRecord before, WithdrawalRecord after, int updated,
+                                       String walletWithdrawalId, String payload, String reason,
+                                       String providerEventId) {
         if (updated == 1 && before != null && after != null) {
             insertTransitionEvent(id, eventType, source, before.status(), after.status(),
-                    walletWithdrawalId, payload, reason);
+                    walletWithdrawalId, providerEventId, payload, reason);
         }
     }
 
     private void insertTransitionEvent(UUID id, String eventType, String source,
                                        String fromStatus, String toStatus, String walletWithdrawalId,
                                        String payload, String reason) {
+        insertTransitionEvent(id, eventType, source, fromStatus, toStatus, walletWithdrawalId, null, payload, reason);
+    }
+
+    private void insertTransitionEvent(UUID id, String eventType, String source,
+                                       String fromStatus, String toStatus, String walletWithdrawalId,
+                                       String providerEventId, String payload, String reason) {
         jdbcTemplate.update("""
                 INSERT INTO gateway_wallet_withdrawal_events (
                     event_id, withdrawal_id, event_type, source, from_status, to_status,
-                    wallet_withdrawal_id, payload, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+                    wallet_withdrawal_id, provider_event_id, payload, reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
                 """, UUID.randomUUID(), id, eventType, source, fromStatus, toStatus,
-                walletWithdrawalId, payload == null || payload.isBlank() ? "{}" : payload,
+                walletWithdrawalId, providerEventId, payload == null || payload.isBlank() ? "{}" : payload,
                 reason == null ? null : reason.substring(0, Math.min(reason.length(), 2000)));
     }
 

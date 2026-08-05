@@ -3520,6 +3520,7 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_events (
     from_status          TEXT,
     to_status            TEXT,
     wallet_withdrawal_id TEXT,
+    provider_event_id    TEXT,
     payload              JSONB NOT NULL DEFAULT '{}'::jsonb,
     reason               TEXT,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -3535,6 +3536,9 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_events (
 
 CREATE INDEX IF NOT EXISTS gateway_wallet_withdrawal_events_withdrawal_idx
     ON gateway_wallet_withdrawal_events (withdrawal_id, created_at ASC, event_id ASC);
+
+ALTER TABLE gateway_wallet_withdrawal_events
+    ADD COLUMN IF NOT EXISTS provider_event_id TEXT;
 
 ALTER TABLE gateway_wallet_withdrawal_events
     DROP CONSTRAINT IF EXISTS gateway_wallet_withdrawal_event_type_check;
@@ -3559,6 +3563,44 @@ DROP TRIGGER IF EXISTS gateway_wallet_withdrawal_events_immutable_trigger
 CREATE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger
     BEFORE UPDATE OR DELETE ON gateway_wallet_withdrawal_events
     FOR EACH ROW EXECUTE FUNCTION gateway_wallet_withdrawal_events_immutable_guard();
+
+CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_status_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF OLD.status <> NEW.status AND NOT (
+        (OLD.status = 'PENDING_APPROVAL' AND NEW.status IN ('PROCESSING', 'REJECTED'))
+        OR (OLD.status = 'PROCESSING' AND NEW.status IN ('DEBIT_UNKNOWN', 'DEBITED', 'REJECTED'))
+        OR (OLD.status = 'DEBIT_UNKNOWN' AND NEW.status = 'DEBITED')
+        OR (OLD.status = 'DEBITED' AND NEW.status IN ('SUBMITTED', 'BROADCAST_UNKNOWN', 'COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
+        OR (OLD.status = 'SUBMITTED' AND NEW.status IN ('COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
+        OR (OLD.status = 'BROADCAST_UNKNOWN' AND NEW.status IN ('SUBMITTED', 'COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
+        OR (OLD.status = 'FAILED_PENDING' AND NEW.status IN ('COMPLETED', 'REFUND_PENDING', 'REFUNDED'))
+        OR (OLD.status = 'REFUND_PENDING' AND NEW.status = 'REFUNDED')
+    ) THEN
+        RAISE EXCEPTION 'illegal gateway wallet withdrawal status transition: % -> %', OLD.status, NEW.status;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+          FROM gateway_wallet_withdrawal_events
+         WHERE withdrawal_id = NEW.withdrawal_id
+           AND from_status IS NOT DISTINCT FROM OLD.status
+           AND to_status IS NOT DISTINCT FROM NEW.status
+           AND created_at >= transaction_timestamp()
+    ) THEN
+        RAISE EXCEPTION 'gateway wallet withdrawal status transition is missing an immutable audit event';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS gateway_wallet_withdrawal_status_guard_trigger
+    ON gateway_wallet_withdrawals;
+CREATE CONSTRAINT TRIGGER gateway_wallet_withdrawal_status_guard_trigger
+    AFTER UPDATE OF status ON gateway_wallet_withdrawals
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION gateway_wallet_withdrawal_status_guard();
 
 CREATE TABLE IF NOT EXISTS gateway_user_kyc_profiles (
     user_id                 BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),

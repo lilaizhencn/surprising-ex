@@ -164,8 +164,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void invalidCompletionSourceDoesNotChangeWithdrawalState() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("PENDING_APPROVAL");
 
         assertThatThrownBy(() -> repository.markCompleted(withdrawalId, "{}", "wallet-integration"))
                 .isInstanceOf(IllegalStateException.class);
@@ -174,8 +173,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void conditionalTransitionsRejectExistingWithdrawalInInvalidState() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'COMPLETED' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("COMPLETED");
 
         assertThatThrownBy(() -> repository.markDebited(withdrawalId, "debit"))
                 .isInstanceOf(IllegalStateException.class);
@@ -192,8 +190,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void repeatedTargetTransitionsAreIdempotentButAdminTransitionsRemainStrict() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PROCESSING' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("PROCESSING");
 
         repository.markDebited(withdrawalId, "debit");
         repository.markDebited(withdrawalId, "debit");
@@ -209,8 +206,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThatThrownBy(() -> repository.reject(withdrawalId, 99L, "admin", "late rejection"))
                 .isInstanceOf(IllegalStateException.class);
 
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("PENDING_APPROVAL");
         repository.markRejected(withdrawalId, "REJECTED", "rejected");
         repository.markRejected(withdrawalId, "REJECTED", "duplicate rejection");
         assertThat(repository.find(withdrawalId).status()).isEqualTo("REJECTED");
@@ -218,8 +214,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void submittedWithdrawalCannotBeDowngradedToBroadcastUnknown() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'SUBMITTED' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("SUBMITTED");
 
         assertThatThrownBy(() -> repository.markBroadcastUnknown(withdrawalId, "{}", "late timeout"))
                 .isInstanceOf(IllegalStateException.class);
@@ -313,18 +308,21 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void idempotentTerminalWebhookAppendsAuditEvent() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'COMPLETED' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("COMPLETED");
 
-        withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED", Map.of(
+        withdrawalService.handleWebhook("provider-event-terminal-1", "WITHDRAWAL.CONFIRMED", Map.of(
                 "data", Map.of("withdrawalId", "wallet-integration",
                         "externalReference", "custody-wallet-withdrawal:integration",
                         "asset", "USDT", "chain", "ETH", "amount", "25")));
 
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM gateway_wallet_withdrawal_events
-                 WHERE withdrawal_id = ? AND event_type = 'WEBHOOK_IDEMPOTENT'
+                WHERE withdrawal_id = ? AND event_type = 'WEBHOOK_IDEMPOTENT'
                 """, Integer.class, withdrawalId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT provider_event_id FROM gateway_wallet_withdrawal_events
+                 WHERE withdrawal_id = ? AND event_type = 'WEBHOOK_IDEMPOTENT'
+                """, String.class, withdrawalId)).isEqualTo("provider-event-terminal-1");
     }
 
     @Test
@@ -356,8 +354,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void stateTransitionRejectsWalletIdOwnedByAnotherWithdrawal() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'DEBITED', wallet_withdrawal_id = NULL "
-                + "WHERE withdrawal_id = ?", withdrawalId);
+        forceStatusAndClearWallet("DEBITED");
         UUID otherId = insertWithdrawal("custody-wallet-withdrawal:other-state", "wallet-owned-state");
 
         try {
@@ -373,8 +370,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void duplicateCompletionForSameTargetIsIdempotent() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'SUBMITTED' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("SUBMITTED");
 
         repository.markCompleted(withdrawalId, "{}", "wallet-integration");
         repository.markCompleted(withdrawalId, "{}", "wallet-integration");
@@ -384,8 +380,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void automaticStateChangesAppendImmutableWithdrawalEvents() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'DEBITED' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("DEBITED");
 
         repository.markSubmitted(withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration");
 
@@ -412,9 +407,18 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void databaseRejectsDirectStatusChangeWithoutLegalTransitionAudit() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE gateway_wallet_withdrawals SET status = 'COMPLETED' WHERE withdrawal_id = ?",
+                withdrawalId))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class)
+                .hasMessageContaining("status transition");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
+    }
+
+    @Test
     void eventInsertFailureRollsBackWithdrawalState() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'DEBITED' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("DEBITED");
         jdbcTemplate.execute("""
                 CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_events_reject_insert()
                 RETURNS trigger LANGUAGE plpgsql AS $$
@@ -443,8 +447,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void adminStateAndActionAuditRollbackTogetherWhenAuditInsertFails() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("PENDING_APPROVAL");
 
         assertThatThrownBy(() -> repository.approve(withdrawalId, 99L, "admin", "manual approval"))
                 .isInstanceOf(RuntimeException.class);
@@ -453,8 +456,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void retryCannotBypassPendingApproval() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = 'PENDING_APPROVAL' WHERE withdrawal_id = ?",
-                withdrawalId);
+        forceStatus("PENDING_APPROVAL");
 
         assertThatThrownBy(() -> repository.recordAdminRetry(withdrawalId, 99L, "admin", "manual retry"))
                 .isInstanceOf(IllegalStateException.class);
@@ -521,8 +523,11 @@ class CustodyWithdrawalReconciliationPostgresTest {
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_events ("
                 + "event_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
                 + "event_type TEXT NOT NULL, source TEXT NOT NULL, from_status TEXT, to_status TEXT, "
-                + "wallet_withdrawal_id TEXT, payload JSONB NOT NULL DEFAULT '{}'::jsonb, reason TEXT, "
+                + "wallet_withdrawal_id TEXT, provider_event_id TEXT, "
+                + "payload JSONB NOT NULL DEFAULT '{}'::jsonb, reason TEXT, "
                 + "created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+        jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_events "
+                + "ADD COLUMN IF NOT EXISTS provider_event_id TEXT");
         jdbcTemplate.execute("""
                 CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_events_immutable_guard()
                 RETURNS trigger LANGUAGE plpgsql AS $$
@@ -536,6 +541,64 @@ class CustodyWithdrawalReconciliationPostgresTest {
         jdbcTemplate.execute("CREATE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger "
                 + "BEFORE UPDATE OR DELETE ON gateway_wallet_withdrawal_events FOR EACH ROW "
                 + "EXECUTE FUNCTION gateway_wallet_withdrawal_events_immutable_guard()");
+        jdbcTemplate.execute("""
+                CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_status_guard()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    IF OLD.status <> NEW.status AND NOT (
+                        (OLD.status = 'PENDING_APPROVAL' AND NEW.status IN ('PROCESSING', 'REJECTED'))
+                        OR (OLD.status = 'PROCESSING' AND NEW.status IN ('DEBIT_UNKNOWN', 'DEBITED', 'REJECTED'))
+                        OR (OLD.status = 'DEBIT_UNKNOWN' AND NEW.status = 'DEBITED')
+                        OR (OLD.status = 'DEBITED' AND NEW.status IN ('SUBMITTED', 'BROADCAST_UNKNOWN', 'COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
+                        OR (OLD.status = 'SUBMITTED' AND NEW.status IN ('COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
+                        OR (OLD.status = 'BROADCAST_UNKNOWN' AND NEW.status IN ('SUBMITTED', 'COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
+                        OR (OLD.status = 'FAILED_PENDING' AND NEW.status IN ('COMPLETED', 'REFUND_PENDING', 'REFUNDED'))
+                        OR (OLD.status = 'REFUND_PENDING' AND NEW.status = 'REFUNDED')
+                    ) THEN
+                        RAISE EXCEPTION 'illegal gateway wallet withdrawal status transition: % -> %', OLD.status, NEW.status;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1 FROM gateway_wallet_withdrawal_events
+                         WHERE withdrawal_id = NEW.withdrawal_id
+                           AND from_status IS NOT DISTINCT FROM OLD.status
+                           AND to_status IS NOT DISTINCT FROM NEW.status
+                           AND created_at >= transaction_timestamp()
+                    ) THEN
+                        RAISE EXCEPTION 'gateway wallet withdrawal status transition is missing an immutable audit event';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS gateway_wallet_withdrawal_status_guard_trigger "
+                + "ON gateway_wallet_withdrawals");
+        jdbcTemplate.execute("CREATE CONSTRAINT TRIGGER gateway_wallet_withdrawal_status_guard_trigger "
+                + "AFTER UPDATE OF status ON gateway_wallet_withdrawals DEFERRABLE INITIALLY DEFERRED "
+                + "FOR EACH ROW EXECUTE FUNCTION gateway_wallet_withdrawal_status_guard()");
+    }
+
+    private void forceStatus(String status) {
+        jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawals "
+                + "DISABLE TRIGGER gateway_wallet_withdrawal_status_guard_trigger");
+        try {
+            jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = ? WHERE withdrawal_id = ?",
+                    status, withdrawalId);
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawals "
+                    + "ENABLE TRIGGER gateway_wallet_withdrawal_status_guard_trigger");
+        }
+    }
+
+    private void forceStatusAndClearWallet(String status) {
+        jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawals "
+                + "DISABLE TRIGGER gateway_wallet_withdrawal_status_guard_trigger");
+        try {
+            jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET status = ?, wallet_withdrawal_id = NULL "
+                    + "WHERE withdrawal_id = ?", status, withdrawalId);
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawals "
+                    + "ENABLE TRIGGER gateway_wallet_withdrawal_status_guard_trigger");
+        }
     }
 
     private UUID insertFailurePendingWithdrawal() {

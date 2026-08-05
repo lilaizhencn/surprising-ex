@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -52,6 +53,20 @@ class SensitiveActionVerificationServiceTest {
         when(totpService.verify("SECRET", "654321", now)).thenReturn(true);
 
         assertThat(service.verify(42L, "WITHDRAWAL", "123456", "654321", now)).isTrue();
+    }
+
+    @Test
+    void mandatoryWithdrawalSceneCannotBeBypassedByUserSceneSetting() {
+        Instant now = Instant.parse("2026-08-04T00:00:00Z");
+        when(securityService.isSceneEnabled(42L, "WITHDRAWAL")).thenReturn(false);
+        when(persistence.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
+                42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
+        when(challengeRepository.create(any(Long.class), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new GatewayAuthChallengeRepository.Challenge(
+                        2L, 42L, "SENSITIVE_ACTION", "EMAIL", "user@example.com", "hash",
+                        now.plusSeconds(600), 0, null));
+
+        assertThat(service.issue(42L, "WITHDRAWAL", "127.0.0.1", now).challengeId()).isEqualTo(2L);
     }
 
     private String digest(String code, String scene, String destination) {

@@ -84,7 +84,7 @@ public class CustodyWalletWebhookService {
         }
         try {
             if (normalizedType.startsWith("WITHDRAWAL.")) {
-                withdrawalService.handleWebhook(normalizedType, event);
+                withdrawalService.handleWebhook(normalizedEventId, normalizedType, event);
             } else if (DEPOSIT_CONFIRMED.equals(normalizedType) || DEPOSIT_REORGED.equals(normalizedType)) {
                 postSpotAdjustment(normalizedEventId, normalizedType, event);
             }
@@ -99,9 +99,11 @@ public class CustodyWalletWebhookService {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] message = (timestamp + "." + eventId + "." + eventType + "."
-                    + new String(body, StandardCharsets.UTF_8))
+            byte[] prefix = (timestamp + "." + eventId + "." + eventType + ".")
                     .getBytes(StandardCharsets.UTF_8);
+            byte[] message = new byte[prefix.length + body.length];
+            System.arraycopy(prefix, 0, message, 0, prefix.length);
+            System.arraycopy(body, 0, message, prefix.length, body.length);
             return "v1=" + Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(message));
         } catch (Exception ex) {
             throw new IllegalStateException("wallet webhook signing failed", ex);
@@ -185,7 +187,7 @@ public class CustodyWalletWebhookService {
                                  String signature, byte[] body) {
         String expected = signature(secret, eventId, eventType, timestamp, body);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                signature.trim().getBytes(StandardCharsets.UTF_8))) {
+                signature.getBytes(StandardCharsets.UTF_8))) {
             throw new IllegalArgumentException("wallet webhook signature is invalid");
         }
     }

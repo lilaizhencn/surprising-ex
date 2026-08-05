@@ -124,7 +124,7 @@ class CustodyWalletWebhookServiceTest {
         service.handle("withdrawal-event-1", "WITHDRAWAL.CONFIRMED", Long.toString(timestamp),
                 service.signature("webhook-secret", "withdrawal-event-1", "WITHDRAWAL.CONFIRMED", timestamp, body), body);
 
-        verify(withdrawalService).handleWebhook(eq("WITHDRAWAL.CONFIRMED"), any());
+        verify(withdrawalService).handleWebhook(eq("withdrawal-event-1"), eq("WITHDRAWAL.CONFIRMED"), any());
         verify(repository).markProcessed(eq("withdrawal-event-1"), any());
     }
 }

@@ -188,7 +188,8 @@ public class CustodyWalletClient {
         } catch (RestClientResponseException ex) {
             int status = ex.getStatusCode().value();
             if (isDeterministicRejection(status)) {
-                throw new CustodyWalletRejectedException("custody wallet rejected request", status, ex);
+                throw new CustodyWalletRejectedException("custody wallet rejected request", status,
+                        ex.getResponseBodyAsString(), ex);
             }
             throw new IllegalStateException("custody wallet request status is unknown", ex);
         } catch (RestClientException ex) {
@@ -315,14 +316,24 @@ public class CustodyWalletClient {
 
     public static final class CustodyWalletRejectedException extends IllegalStateException {
         private final int status;
+        private final String responseBody;
 
         public CustodyWalletRejectedException(String message, int status, Throwable cause) {
+            this(message, status, null, cause);
+        }
+
+        public CustodyWalletRejectedException(String message, int status, String responseBody, Throwable cause) {
             super(message, cause);
             this.status = status;
+            this.responseBody = responseBody;
         }
 
         public int status() {
             return status;
+        }
+
+        public String responseBody() {
+            return responseBody;
         }
     }
 }

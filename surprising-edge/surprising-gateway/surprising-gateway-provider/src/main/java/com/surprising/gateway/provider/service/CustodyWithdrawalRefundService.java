@@ -20,12 +20,21 @@ public class CustodyWithdrawalRefundService {
     public void refund(CustodyWithdrawalRepository.WithdrawalRecord record,
                        String spotReason,
                        String stateReason) {
+        refund(record, spotReason, stateReason, null);
+    }
+
+    @Transactional
+    public void refund(CustodyWithdrawalRepository.WithdrawalRecord record,
+                       String spotReason,
+                       String stateReason,
+                       String walletResponse) {
         if ("REFUNDED".equals(record.status()) || "COMPLETED".equals(record.status())
                 || "REJECTED".equals(record.status())) {
             return;
         }
-        CustodyWithdrawalRepository.WithdrawalRecord pending = repository.markRefundPending(
-                record.withdrawalId(), stateReason);
+        CustodyWithdrawalRepository.WithdrawalRecord pending = walletResponse == null
+                ? repository.markRefundPending(record.withdrawalId(), stateReason)
+                : repository.markRefundPending(record.withdrawalId(), stateReason, walletResponse);
         if (pending == null || !"REFUND_PENDING".equals(pending.status())) {
             return;
         }

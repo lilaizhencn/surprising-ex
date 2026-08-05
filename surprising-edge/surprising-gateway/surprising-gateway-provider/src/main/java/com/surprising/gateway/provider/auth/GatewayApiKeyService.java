@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -85,7 +86,7 @@ public class GatewayApiKeyService {
         if (signature == null || signature.isBlank()) {
             throw new IllegalArgumentException("signature is required");
         }
-        String canonical = canonicalQuery(request.getQueryString());
+        String canonical = canonicalRequest(request);
         String expected = sign(totpService.decryptSecret(record.secretCiphertext()), canonical);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
                 signature.getBytes(StandardCharsets.UTF_8))) {
@@ -103,6 +104,33 @@ public class GatewayApiKeyService {
                 .filter(item -> !item.startsWith("signature="))
                 .reduce((left, right) -> left + "&" + right)
                 .orElse("");
+    }
+
+    String canonicalRequest(HttpServletRequest request) {
+        return canonicalRequest(request.getMethod(), request.getRequestURI(), request.getParameterMap());
+    }
+
+    String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap) {
+        List<String> parameters = new ArrayList<>();
+        parameterMap.entrySet().stream()
+                .filter(entry -> !"signature".equals(entry.getKey()))
+                .sorted(java.util.Map.Entry.comparingByKey())
+                .forEach(entry -> {
+                    String[] values = entry.getValue();
+                    if (values == null || values.length == 0) {
+                        parameters.add(encodeParameter(entry.getKey(), ""));
+                    } else {
+                        for (String value : values) {
+                            parameters.add(encodeParameter(entry.getKey(), value == null ? "" : value));
+                        }
+                    }
+                });
+        return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + String.join("&", parameters);
+    }
+
+    private String encodeParameter(String key, String value) {
+        return java.net.URLEncoder.encode(key, StandardCharsets.UTF_8)
+                + "=" + java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     String sign(String secret, String canonicalQuery) {

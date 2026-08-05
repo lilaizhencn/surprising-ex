@@ -64,6 +64,16 @@ class AccountControllerInternalAuthTest {
                 .hasMessageContaining("signature is invalid");
     }
 
+    @Test
+    void rejectsWhitespaceAroundInternalIdentityHeaders() {
+        long timestamp = Instant.now().getEpochSecond();
+
+        assertThatThrownBy(() -> controller.adjustBalance(" " + SERVICE,
+                Long.toString(timestamp), signature(timestamp, request), request))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("authentication is required");
+    }
+
     private String signature(long timestamp, BalanceAdjustmentRequest value) {
         String canonical = SERVICE + "\n" + timestamp + "\n" + value.userId() + "\n"
                 + value.asset().toUpperCase() + "\n" + value.amountUnits() + "\n"

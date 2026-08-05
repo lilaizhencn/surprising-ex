@@ -25,6 +25,7 @@ public class UserSecurityService {
     private static final Set<String> SCENE_CODES = DEFAULT_SCENES.stream()
             .map(Scene::sceneCode)
             .collect(Collectors.toUnmodifiableSet());
+    private static final Set<String> MANDATORY_SCENES = Set.of("WITHDRAWAL", "API_WITHDRAWAL");
 
     private final AuthPersistenceService persistence;
     private final GatewayUserSecuritySceneRepository sceneRepository;
@@ -85,7 +86,8 @@ public class UserSecurityService {
         return DEFAULT_SCENES.stream()
                 .map(defaultScene -> configured.containsKey(defaultScene.sceneCode())
                         ? new Scene(defaultScene.sceneCode(), defaultScene.label(),
-                        configured.get(defaultScene.sceneCode()).enabled())
+                        MANDATORY_SCENES.contains(defaultScene.sceneCode())
+                                || configured.get(defaultScene.sceneCode()).enabled())
                         : defaultScene)
                 .toList();
     }
@@ -102,6 +104,9 @@ public class UserSecurityService {
     @Transactional
     public Scene updateScene(long userId, String sceneCode, boolean enabled, String currentTotpCode) {
         String normalized = normalizeScene(sceneCode);
+        if (!enabled && MANDATORY_SCENES.contains(normalized)) {
+            throw new IllegalArgumentException("withdrawal security scene cannot be disabled");
+        }
         if (!enabled && status(userId).enabled()) {
             verifyCurrentTotp(userId, currentTotpCode);
         }
