@@ -10,9 +10,9 @@ Binance 兼容入口是：
 
 `POST /sapi/v1/asset/transfer`
 
-账户 provider 的 `/api/v1/accounts/transfers` 不是用户公开入口。账户 provider 按单产品线运行，不能独立完成跨产品线划转；该入口保持 fail-closed，禁止回退到直接数据库余额写入。跨产品线流程由 gateway 负责编排，并通过各产品线的签名 `product-balance-adjustments` 命令进入用户分区 WAL/reducer。
+账户 provider 的 `/api/v1/accounts/transfers` 不是用户公开入口。账户 provider 按单产品线运行，不能独立完成跨产品线划转；该入口固定 fail-closed 并返回 HTTP 409，禁止回退到直接数据库余额写入。跨产品线流程由 gateway 负责编排，并通过各产品线的签名 `product-balance-adjustments` 命令进入用户分区 WAL/reducer。
 
-The gateway owns the user-facing transfer flow. The account provider is a single-product-line command worker and must not implement cross-product transfers by writing balance tables directly. Its direct transfer contract therefore fails closed unless a future multi-account command lane is introduced.
+The gateway owns the user-facing transfer flow. The account provider is a single-product-line command worker and must not implement cross-product transfers by writing balance tables directly. Its direct transfer contract always fails closed with HTTP 409 unless a future multi-account command lane is introduced.
 
 ## 账户类型 / Account types
 
@@ -56,6 +56,6 @@ Signature uses HMAC-SHA256 over the ordered, length-prefixed UTF-8 fields: servi
 
 ## 恢复与部署 / Recovery and deployment
 
-先执行 `init.sql`，再执行 `migrations/20260805_gateway_product_transfer.sql`。迁移可重复执行。Gateway 的 `ProductTransferReconciliationTask` 按 `GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_DELAY` 和 `GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_BATCH_SIZE` 扫描所有非终态并重试；生产必须为六条产品线路配置独立、可达且使用正确 product-line 的 account route。
+全新数据库先执行 `init.sql`。已执行过旧版 `20260805_gateway_product_transfer.sql` 的环境还必须执行 `migrations/20260806_gateway_product_transfer_events.sql`，因为它是事件表的前向补充迁移；若新版本的 `20260805` 已包含事件表，执行 `20260806` 仍然安全且幂等。每个迁移文件都要由部署系统登记并按版本顺序执行，升级后验证事件表、外键和索引存在。Gateway 的 `ProductTransferReconciliationTask` 按 `GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_DELAY` 和 `GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_BATCH_SIZE` 扫描所有非终态并重试；生产必须为六条产品线路配置独立、可达且使用正确 product-line 的 account route。
 
-Before production, apply `init.sql` and then `migrations/20260805_gateway_product_transfer.sql`. The migration is repeatable. The reconciliation task scans every non-terminal state. Configure reachable, correctly product-scoped account routes for all six product lines and monitor `COMPENSATION_REQUIRED` as a financial incident.
+For a new database, apply `init.sql`. For an installation that already recorded the old `20260805` migration, also apply `migrations/20260806_gateway_product_transfer_events.sql`; it is the forward-only event-table supplement. When the current `20260805` already contains the event table, applying `20260806` remains safe and idempotent. Register both files in the deployment migration ledger, apply them in version order, and verify the event table, foreign key, and index after upgrade. The reconciliation task scans every non-terminal state. Configure reachable, correctly product-scoped account routes for all six product lines and monitor `COMPENSATION_REQUIRED` as a financial incident.

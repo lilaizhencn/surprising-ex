@@ -43,7 +43,8 @@ public class HttpProductAccountClient implements ProductAccountClient {
                                            String asset) {
         GatewayProperties.BackendRoute accountRoute = properties.getRoutes().get("account");
         ProductLine line = ProductTransferCoordinator.productLine(accountType);
-        GatewayProperties.BackendRoute route = accountRoute == null ? null : accountRoute.resolve(line);
+        GatewayProperties.BackendRoute route = accountRoute == null || !accountRoute.hasProductRoutes()
+                ? null : accountRoute.resolve(line);
         if (route == null || route.getBaseUrl() == null || route.getBaseUrl().isBlank()
                 || route.getTargetPrefix() == null || route.getTargetPrefix().isBlank()) {
             throw new IllegalStateException("account route is not configured for " + line);

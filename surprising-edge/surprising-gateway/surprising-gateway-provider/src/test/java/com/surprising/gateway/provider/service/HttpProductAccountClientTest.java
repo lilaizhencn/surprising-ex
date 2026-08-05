@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -64,9 +65,7 @@ class HttpProductAccountClientTest {
 
     @Test
     void mapsProviderClientErrorsToPermanentRejection() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.setRoutes(Map.of("account", new GatewayProperties.BackendRoute(
-                "http://account:9086", "/api/v1/accounts", true)));
+        GatewayProperties properties = propertiesWithLinearRoute();
         properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
         RestTemplate restTemplate = mock(RestTemplate.class);
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
@@ -81,9 +80,7 @@ class HttpProductAccountClientTest {
 
     @Test
     void keepsAuthenticationAndRateLimitErrorsRecoverable() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.setRoutes(Map.of("account", new GatewayProperties.BackendRoute(
-                "http://account:9086", "/api/v1/accounts", true)));
+        GatewayProperties properties = propertiesWithLinearRoute();
         properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
         RestTemplate restTemplate = mock(RestTemplate.class);
         when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
@@ -94,5 +91,28 @@ class HttpProductAccountClientTest {
                 .adjust("USDT_PERPETUAL", -1L, "transfer-009", "test", 42L, "USDT");
 
         assertThat(result.status()).isEqualTo(ProductAccountAdjustment.Status.UNKNOWN);
+    }
+
+    @Test
+    void refusesToFallbackToAnUnscopedAccountRoute() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.setRoutes(Map.of("account", new GatewayProperties.BackendRoute(
+                "http://account:9086", "/api/v1/accounts", true)));
+        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
+
+        assertThatThrownBy(() -> new HttpProductAccountClient(properties, mock(RestTemplate.class))
+                .adjust("USDT_PERPETUAL", -1L, "transfer-010", "test", 42L, "USDT"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("route is not configured");
+    }
+
+    private GatewayProperties propertiesWithLinearRoute() {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
+                "http://account:9086", "/api/v1/accounts", true);
+        account.setProductRoutes(Map.of(ProductLine.LINEAR_PERPETUAL,
+                new GatewayProperties.ProductRoute("http://account-linear:9186", "/api/v1/accounts")));
+        properties.setRoutes(Map.of("account", account));
+        return properties;
     }
 }
