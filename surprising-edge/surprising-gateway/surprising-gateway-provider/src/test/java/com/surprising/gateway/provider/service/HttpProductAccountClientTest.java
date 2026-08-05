@@ -106,6 +106,21 @@ class HttpProductAccountClientTest {
                 .hasMessageContaining("route is not configured");
     }
 
+    @Test
+    void refusesToFallbackWhenTheSelectedProductRouteIsBlank() {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
+                "http://account:9086", "/api/v1/accounts", true);
+        account.setProductRoutes(Map.of(ProductLine.LINEAR_PERPETUAL,
+                new GatewayProperties.ProductRoute("", "")));
+        properties.setRoutes(Map.of("account", account));
+
+        assertThatThrownBy(() -> new HttpProductAccountClient(properties, mock(RestTemplate.class))
+                .adjust("USDT_PERPETUAL", -1L, "transfer-011", "test", 42L, "USDT"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("route is not configured");
+    }
+
     private GatewayProperties propertiesWithLinearRoute() {
         GatewayProperties properties = new GatewayProperties();
         GatewayProperties.BackendRoute account = new GatewayProperties.BackendRoute(
