@@ -222,6 +222,21 @@ class AuthServiceTest {
     }
 
     @Test
+    void refreshRejectsSessionConsumedByAnotherRequest() {
+        Instant now = Instant.now();
+        when(repository.refreshSession(any())).thenReturn(Optional.of(
+                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600), null)));
+        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(0);
+
+        assertThatThrownBy(() -> service.refresh(
+                new RefreshRequest("refresh-token"), new MockHttpServletRequest()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("invalid refresh token");
+        verify(repository, org.mockito.Mockito.never()).user(any(Long.class));
+        verifyNoInteractions(jwtTokenService);
+    }
+
+    @Test
     void emailIsAcceptedAsLoginIdentifier() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         when(repository.credentialByEmail("user@example.com")).thenReturn(Optional.of(
