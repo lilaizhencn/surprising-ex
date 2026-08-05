@@ -269,6 +269,36 @@ class BinanceApiControllerTest {
         assertThat(ticker).containsEntry("symbol", "BTCUSDT").containsEntry("price", "123.45");
     }
 
+    @Test
+    void accountReportsWithdrawalCapabilityOnlyWhenWalletAndKycAreReady() throws Exception {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getCustodyWallet().setEnabled(true);
+        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        when(proxy.proxyCompat(anyString(), eq("/balances"), eq("userId=1001"), eq(HttpMethod.GET),
+                any(), isNull(), eq(1001L)))
+                .thenReturn(ResponseEntity.ok("{\"balances\":[]}".getBytes(StandardCharsets.UTF_8)));
+        ComplianceService compliance = mock(ComplianceService.class);
+        when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "STANDARD", "PENDING", "US",
+                "PASSPORT", "SELF", null, null, null, null, null, null, null));
+        BinanceApiController controller = new BinanceApiController(properties, proxy,
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), bearerAuth(),
+                compliance, mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v3/account");
+        request.addHeader("Authorization", "Bearer token");
+
+        Map<String, Object> pending = new ObjectMapper().readValue(
+                controller.handle(request, null).getBody(), Map.class);
+
+        assertThat(pending).containsEntry("canWithdraw", false).containsEntry("canDeposit", true);
+
+        when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "STANDARD", "VERIFIED", "US",
+                "PASSPORT", "SELF", null, null, null, null, null, null, null));
+        Map<String, Object> verified = new ObjectMapper().readValue(
+                controller.handle(request, null).getBody(), Map.class);
+
+        assertThat(verified).containsEntry("canWithdraw", true).containsEntry("canDeposit", true);
+    }
+
     private BinanceApiController controller(GatewayProperties properties, AuthService authService,
                                              SensitiveActionVerificationService verification,
                                              CustodyWithdrawalService withdrawalService) {

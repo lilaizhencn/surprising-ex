@@ -218,11 +218,15 @@ public class BinanceApiController {
 
     private void requireKyc(long userId) {
         KycProfile profile = complianceService.kyc(userId);
-        if (profile == null || !"VERIFIED".equalsIgnoreCase(profile.status())
-                || (profile.expiresAt() != null && profile.expiresAt().isBefore(Instant.now()))) {
+        if (!isKycVerified(profile)) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
                     "verified KYC is required for withdrawals");
         }
+    }
+
+    private boolean isKycVerified(KycProfile profile) {
+        return profile != null && "VERIFIED".equalsIgnoreCase(profile.status())
+                && (profile.expiresAt() == null || !profile.expiresAt().isBefore(Instant.now()));
     }
 
     private void requireWithdrawalSecurity(HttpServletRequest request, long userId, String scene) {
@@ -346,6 +350,8 @@ public class BinanceApiController {
         ResponseEntity<byte[]> response = proxy("account", "/balances", request, null, userId,
                 "userId=" + userId, true);
         if (response.getStatusCode().isError()) return response;
+        boolean canWithdraw = properties.getCustodyWallet().isEnabled()
+                && isKycVerified(complianceService.kyc(userId));
         Map<String, Object> payload = readMap(response.getBody());
         List<Map<String, Object>> balances = new ArrayList<>();
         Object rows = payload.get("balances");
@@ -361,7 +367,8 @@ public class BinanceApiController {
         }
         return json(HttpStatus.OK, Map.of("makerCommission", 0, "takerCommission", 0,
                 "buyerCommission", 0, "sellerCommission", 0, "canTrade", true,
-                "canWithdraw", true, "canDeposit", true, "updateTime", System.currentTimeMillis(),
+                "canWithdraw", canWithdraw, "canDeposit", properties.getCustodyWallet().isEnabled(),
+                "updateTime", System.currentTimeMillis(),
                 "accountType", "SPOT", "balances", balances));
     }
 
