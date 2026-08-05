@@ -95,6 +95,10 @@ public class GatewayApiKeyService {
     }
 
     public long authenticate(HttpServletRequest request, String requiredPermission) {
+        return authenticate(request, requiredPermission, null);
+    }
+
+    public long authenticate(HttpServletRequest request, String requiredPermission, byte[] body) {
         String apiKey = requireApiKey(request.getHeader("X-MBX-APIKEY"));
         GatewayApiKeyRepository.ApiKeyRecord record = repository.active(apiKey)
                 .orElseThrow(() -> new IllegalArgumentException("invalid api key"));
@@ -112,7 +116,7 @@ public class GatewayApiKeyService {
         if (signature == null || signature.isBlank()) {
             throw new IllegalArgumentException("signature is required");
         }
-        String canonical = binanceCanonicalQuery(request);
+        String canonical = binanceCanonicalQuery(request, body);
         String expected = sign(totpService.decryptSecret(record.secretCiphertext()), canonical);
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
                 signature.getBytes(StandardCharsets.UTF_8))) {
@@ -137,10 +141,24 @@ public class GatewayApiKeyService {
     }
 
     String binanceCanonicalQuery(HttpServletRequest request) {
+        return binanceCanonicalQuery(request, null);
+    }
+
+    String binanceCanonicalQuery(HttpServletRequest request, byte[] body) {
         String queryString = request.getQueryString();
-        return queryString == null || queryString.isBlank()
-                ? canonicalParameters(request.getParameterMap())
-                : canonicalQuery(queryString);
+        String query = queryString == null || queryString.isBlank() ? "" : canonicalQuery(queryString);
+        String requestBody = body == null || body.length == 0
+                ? "" : canonicalQuery(new String(body, StandardCharsets.UTF_8));
+        if (!query.isBlank() && !requestBody.isBlank()) {
+            return query + "&" + requestBody;
+        }
+        if (!query.isBlank()) {
+            return query;
+        }
+        if (!requestBody.isBlank()) {
+            return requestBody;
+        }
+        return canonicalParameters(request.getParameterMap());
     }
 
     String canonicalRequest(HttpServletRequest request) {

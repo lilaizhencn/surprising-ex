@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import jakarta.servlet.http.HttpServletRequest;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -45,6 +46,31 @@ class GatewayApiKeyAuthenticationIpTest {
         assertThatThrownBy(() -> service.authenticate(request, "READ"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("api key IP address is not allowed");
+    }
+
+    @Test
+    void rejectsSignedQueryWhenFormBodyIsChanged() {
+        GatewayProperties properties = new GatewayProperties();
+        TotpService totpService = new TotpService(properties);
+        GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, null, totpService, null, properties);
+        String apiKey = "sx_" + "c".repeat(24);
+        GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "");
+        when(repository.active(apiKey)).thenReturn(Optional.of(record));
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v3/order");
+        request.setRemoteAddr("203.0.113.10");
+        request.addHeader("X-MBX-APIKEY", apiKey);
+        String query = "timestamp=" + System.currentTimeMillis();
+        String signedBody = "symbol=BTCUSDT&side=BUY";
+        String signature = service.sign("secret", query + "&" + signedBody);
+        request.setQueryString(query + "&signature=" + signature);
+        request.addParameter("timestamp", query.substring("timestamp=".length()));
+        request.addParameter("signature", signature);
+
+        assertThatThrownBy(() -> service.authenticate(request, "READ",
+                        "symbol=ETHUSDT&side=BUY".getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("invalid api signature");
     }
 
     private GatewayApiKeyRepository.ApiKeyRecord record(TotpService totpService, String apiKey, String allowlist) {

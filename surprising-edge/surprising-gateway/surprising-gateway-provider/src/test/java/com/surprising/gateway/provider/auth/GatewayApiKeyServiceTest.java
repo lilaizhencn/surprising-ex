@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import java.util.Map;
@@ -26,6 +27,27 @@ class GatewayApiKeyServiceTest {
 
         assertThat(service.binanceCanonicalQuery(request))
                 .isEqualTo("timestamp=123&symbol=BTC%2FUSDT");
+    }
+
+    @Test
+    void combinesBinanceQueryAndFormBodyForSigning() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v3/order");
+        request.setQueryString("timestamp=123&signature=abc");
+
+        assertThat(service.binanceCanonicalQuery(request,
+                "symbol=BTCUSDT&side=BUY".getBytes(StandardCharsets.UTF_8)))
+                .isEqualTo("timestamp=123&symbol=BTCUSDT&side=BUY");
+    }
+
+    @Test
+    void usesDeterministicParametersWhenRawQueryIsAbsent() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v3/order");
+        request.addParameter("timestamp", "123");
+        request.addParameter("symbol", "BTCUSDT");
+        request.addParameter("signature", "abc");
+
+        assertThat(service.binanceCanonicalQuery(request))
+                .isEqualTo("symbol=BTCUSDT&timestamp=123");
     }
 
     @Test

@@ -104,10 +104,10 @@ public class BinanceApiController {
                 return withdrawHistory(request);
             }
             if (path.endsWith("/capital/withdraw/apply")) {
-                return withdraw(request);
+                return withdraw(request, body);
             }
             if (path.endsWith("/account")) {
-                long userId = authenticate(request, "READ");
+                long userId = authenticate(request, "READ", body);
                 return account(request, body, userId);
             }
             if (path.endsWith("/account/status")) {
@@ -152,7 +152,7 @@ public class BinanceApiController {
 
     private ResponseEntity<byte[]> transfer(HttpServletRequest request, byte[] body) {
         Map<String, Object> params = parameters(request, body);
-        long userId = authenticate(request, "TRADE");
+        long userId = authenticate(request, "TRADE", body);
         String type = required(params, "type").toUpperCase(Locale.ROOT);
         String asset = required(params, "asset");
         GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(asset);
@@ -237,11 +237,11 @@ public class BinanceApiController {
         return json(HttpStatus.OK, result);
     }
 
-    private ResponseEntity<byte[]> withdraw(HttpServletRequest request) {
-        Map<String, Object> params = parameters(request, null);
+    private ResponseEntity<byte[]> withdraw(HttpServletRequest request, byte[] body) {
+        Map<String, Object> params = parameters(request, body);
         boolean apiKeyRequest = request.getHeader("X-MBX-APIKEY") != null
                 && !request.getHeader("X-MBX-APIKEY").isBlank();
-        long userId = authenticate(request, "WITHDRAW");
+        long userId = authenticate(request, "WITHDRAW", body);
         requireWithdrawalSecurity(request, userId, apiKeyRequest ? "API_WITHDRAWAL" : "WITHDRAWAL");
         requireKyc(userId);
         complianceService.requireWithdrawalEligibility(userId);
@@ -314,7 +314,7 @@ public class BinanceApiController {
     private ResponseEntity<byte[]> order(HttpServletRequest request, byte[] body) {
         String method = request.getMethod().toUpperCase(Locale.ROOT);
         Map<String, Object> params = parameters(request, body);
-        long userId = authenticate(request, "GET".equals(method) || "DELETE".equals(method) ? "READ" : "TRADE");
+        long userId = authenticate(request, "GET".equals(method) || "DELETE".equals(method) ? "READ" : "TRADE", body);
         String symbol = required(params, "symbol");
         String backendSymbol = properties.getBinanceApi().backendSymbol(symbol);
         if ("POST".equals(method)) {
@@ -567,8 +567,12 @@ public class BinanceApiController {
     }
 
     private long authenticate(HttpServletRequest request, String permission) {
+        return authenticate(request, permission, null);
+    }
+
+    private long authenticate(HttpServletRequest request, String permission, byte[] body) {
         String apiKey = request.getHeader("X-MBX-APIKEY");
-        if (apiKey != null && !apiKey.isBlank()) return apiKeyService.authenticate(request, permission);
+        if (apiKey != null && !apiKey.isBlank()) return apiKeyService.authenticate(request, permission, body);
         try {
             JwtPrincipal principal = authService.authenticateBearer(request.getHeader(HttpHeaders.AUTHORIZATION));
             return principal.userId();
