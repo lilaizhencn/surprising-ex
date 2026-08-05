@@ -66,7 +66,7 @@ public class AccountCommandGateway {
     }
 
     public ProductTransferResponse transfer(ProductTransferRequest request) {
-        throw new IllegalStateException("资金账户转账尚未接入用户分区多账户快照，禁止回退数据库");
+        throw new IllegalStateException("跨产品线划转必须经 surprising-gateway 编排；单产品账户进程禁止回退数据库");
     }
 
     public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {

@@ -74,13 +74,13 @@ public class HttpProductAccountClient implements ProductAccountClient {
                 return ProductAccountAdjustment.applied(response.getBody());
             }
             int status = response == null ? 0 : response.getStatusCode().value();
-            if (status >= 400 && status < 500) {
+            if (isPermanentRejection(status)) {
                 return ProductAccountAdjustment.rejected("account provider rejected adjustment HTTP " + status);
             }
             return ProductAccountAdjustment.unknown("account provider adjustment outcome is unknown HTTP " + status);
         } catch (HttpStatusCodeException ex) {
             int status = ex.getStatusCode().value();
-            if (status >= 400 && status < 500) {
+            if (isPermanentRejection(status)) {
                 return ProductAccountAdjustment.rejected("account provider rejected adjustment HTTP " + status);
             }
             return ProductAccountAdjustment.unknown("account provider adjustment outcome is unknown HTTP " + status);
@@ -110,6 +110,10 @@ public class HttpProductAccountClient implements ProductAccountClient {
     private String field(String value) {
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
         return bytes.length + ":" + value;
+    }
+
+    private boolean isPermanentRejection(int status) {
+        return status == 400 || status == 409 || status == 422;
     }
 
     private String trimTrailingSlash(String value) {

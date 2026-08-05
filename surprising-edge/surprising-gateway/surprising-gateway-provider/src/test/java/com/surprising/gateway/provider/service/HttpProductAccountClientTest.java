@@ -78,4 +78,21 @@ class HttpProductAccountClientTest {
 
         assertThat(result.status()).isEqualTo(ProductAccountAdjustment.Status.REJECTED);
     }
+
+    @Test
+    void keepsAuthenticationAndRateLimitErrorsRecoverable() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.setRoutes(Map.of("account", new GatewayProperties.BackendRoute(
+                "http://account:9086", "/api/v1/accounts", true)));
+        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenThrow(HttpClientErrorException.create(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                        "rate limited", org.springframework.http.HttpHeaders.EMPTY, new byte[0], null));
+
+        ProductAccountAdjustment result = new HttpProductAccountClient(properties, restTemplate)
+                .adjust("USDT_PERPETUAL", -1L, "transfer-009", "test", 42L, "USDT");
+
+        assertThat(result.status()).isEqualTo(ProductAccountAdjustment.Status.UNKNOWN);
+    }
 }
