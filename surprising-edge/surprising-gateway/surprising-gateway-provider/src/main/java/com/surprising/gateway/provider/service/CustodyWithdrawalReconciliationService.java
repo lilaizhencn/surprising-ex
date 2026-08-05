@@ -38,9 +38,6 @@ public class CustodyWithdrawalReconciliationService {
                         record.externalReference(), record.chain(), record.assetSymbol(), 20).stream()
                 .filter(row -> record.externalReference().equals(
                         stringValue(row.get("externalReference"), stringValue(row.get("external_reference"), null))))
-                .filter(row -> record.walletWithdrawalId() == null
-                        || record.walletWithdrawalId().equals(
-                                stringValue(row.get("withdrawalId"), stringValue(row.get("id"), null))))
                 .toList();
         if (matches.size() != 1) {
             return;
@@ -48,6 +45,10 @@ public class CustodyWithdrawalReconciliationService {
         Map<String, Object> walletRecord = matches.getFirst();
         String walletWithdrawalId = stringValue(walletRecord.get("withdrawalId"),
                 stringValue(walletRecord.get("id"), record.walletWithdrawalId()));
+        if (record.walletWithdrawalId() != null
+                && !record.walletWithdrawalId().equals(walletWithdrawalId)) {
+            return;
+        }
         String status = stringValue(walletRecord.get("status"), "").toUpperCase(Locale.ROOT);
         String response = json(walletRecord);
         if ("CONFIRMED".equals(status)) {

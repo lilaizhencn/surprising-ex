@@ -231,11 +231,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
 
     @Test
     void ambiguousCustodyResultDoesNotCompleteOrRefundWithdrawal() {
-        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
-                withdrawalId);
         when(walletClient.withdrawalsByExternalReference(
                 "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
-                .thenReturn(List.of(walletRow("CONFIRMED"), walletRow("FAILED")));
+                .thenReturn(List.of(walletRow("CONFIRMED"), walletRow("FAILED", "wallet-other")));
 
         reconciliationService.reconcile(repository.find(withdrawalId));
 
@@ -243,7 +241,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 42L, "USDT", 25_000_000L,
                 "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
         assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
-        assertThat(repository.find(withdrawalId).walletWithdrawalId()).isNull();
+        assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-integration");
     }
 
     @Test
@@ -368,7 +366,11 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     private Map<String, Object> walletRow(String status) {
-        return Map.of("id", "wallet-integration", "externalReference", "custody-wallet-withdrawal:integration",
+        return walletRow(status, "wallet-integration");
+    }
+
+    private Map<String, Object> walletRow(String status, String walletWithdrawalId) {
+        return Map.of("id", walletWithdrawalId, "externalReference", "custody-wallet-withdrawal:integration",
                 "status", status, "asset", "USDT", "chain", "ETH", "amount", "25");
     }
 
