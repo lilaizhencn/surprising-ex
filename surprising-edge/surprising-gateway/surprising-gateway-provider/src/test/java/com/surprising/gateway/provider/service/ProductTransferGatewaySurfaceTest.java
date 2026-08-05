@@ -35,7 +35,9 @@ class ProductTransferGatewaySurfaceTest {
             return state;
         });
         when(store.lock(321L)).thenAnswer(invocation -> pending.get());
-        when(store.update(any(ProductTransferState.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(store.update(any(ProductTransferState.class), any(ProductTransferState.class)))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(store.recoverable(org.mockito.ArgumentMatchers.anyInt())).thenReturn(java.util.List.of());
         when(accountClient.adjust(anyString(), anyLong(), anyString(), anyString(), anyLong(), anyString()))
                 .thenReturn(ProductAccountAdjustment.applied("ok"));
         GatewayProxyService proxy = new GatewayProxyService(properties(), new RestTemplate(), userAuthService(),

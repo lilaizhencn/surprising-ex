@@ -6,9 +6,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
@@ -22,13 +20,11 @@ public class ProductTransferCoordinator {
         this.accountClient = accountClient;
     }
 
-    @Autowired
     public ProductTransferCoordinator(ProductTransferRepository repository,
                                       HttpProductAccountClient accountClient) {
         this((ProductTransferStore) repository, (ProductAccountClient) accountClient);
     }
 
-    @Transactional
     public ProductTransferResult transfer(ProductTransferCommand command) {
         validate(command);
         String source = normalizeAccountType(command.sourceAccountType());
@@ -49,6 +45,24 @@ public class ProductTransferCoordinator {
             throw new IllegalStateException("product transfer state disappeared: " + created.transferId());
         }
         return ProductTransferResult.from(drive(state));
+    }
+
+    public int reconcile(int limit) {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("reconciliation limit must be positive");
+        }
+        int processed = 0;
+        for (ProductTransferState state : store.recoverable(limit)) {
+            try {
+                drive(state);
+            } catch (RuntimeException ex) {
+                ProductTransferState retry = state.status(retryStatus(state.status()),
+                        "RECOVERY_ATTEMPT_FAILED", safeMessage(ex));
+                store.update(state, retry);
+            }
+            processed++;
+        }
+        return processed;
     }
 
     public ProductTransferResult transferJson(long userId,
@@ -86,40 +100,81 @@ public class ProductTransferCoordinator {
     }
 
     private ProductTransferState debitSource(ProductTransferState state) {
-        ProductAccountAdjustment adjustment = accountClient.adjust(providerAccountType(state.sourceAccountType()),
-                Math.negateExact(state.amountUnits()), state.referenceId() + ":debit", state.reason(), state.userId(),
-                state.asset());
+        ProductAccountAdjustment adjustment;
+        try {
+            adjustment = accountClient.adjust(providerAccountType(state.sourceAccountType()),
+                    Math.negateExact(state.amountUnits()), providerReference(state, "debit"), state.reason(),
+                    state.userId(), state.asset());
+        } catch (RuntimeException ex) {
+            adjustment = ProductAccountAdjustment.unknown(safeMessage(ex));
+        }
         return switch (adjustment.status()) {
-            case APPLIED -> drive(store.update(state.status(ProductTransferStatus.SOURCE_DEBITED, null, null)));
-            case REJECTED -> store.update(state.status(ProductTransferStatus.FAILED, "SOURCE_DEBIT_REJECTED",
+            case APPLIED -> drive(transition(state, state.status(ProductTransferStatus.SOURCE_DEBITED, null, null)));
+            case REJECTED -> transition(state, state.status(ProductTransferStatus.FAILED, "SOURCE_DEBIT_REJECTED",
                     adjustment.errorMessage()));
-            case UNKNOWN -> store.update(state.status(ProductTransferStatus.SOURCE_DEBIT_UNKNOWN,
+            case UNKNOWN -> transition(state, state.status(ProductTransferStatus.SOURCE_DEBIT_UNKNOWN,
                     "SOURCE_DEBIT_UNKNOWN", adjustment.errorMessage()));
         };
     }
 
     private ProductTransferState creditTarget(ProductTransferState state) {
-        ProductAccountAdjustment adjustment = accountClient.adjust(providerAccountType(state.targetAccountType()),
-                state.amountUnits(), state.referenceId() + ":credit", state.reason(), state.userId(), state.asset());
+        ProductAccountAdjustment adjustment;
+        try {
+            adjustment = accountClient.adjust(providerAccountType(state.targetAccountType()), state.amountUnits(),
+                    providerReference(state, "credit"), state.reason(), state.userId(), state.asset());
+        } catch (RuntimeException ex) {
+            adjustment = ProductAccountAdjustment.unknown(safeMessage(ex));
+        }
         return switch (adjustment.status()) {
-            case APPLIED -> store.update(state.status(ProductTransferStatus.COMPLETED, null, null));
-            case UNKNOWN -> store.update(state.status(ProductTransferStatus.TARGET_CREDIT_UNKNOWN,
+            case APPLIED -> transition(state, state.status(ProductTransferStatus.COMPLETED, null, null));
+            case UNKNOWN -> transition(state, state.status(ProductTransferStatus.TARGET_CREDIT_UNKNOWN,
                     "TARGET_CREDIT_UNKNOWN", adjustment.errorMessage()));
-            case REJECTED -> compensateSource(store.update(state.status(ProductTransferStatus.COMPENSATION_REQUIRED,
+            case REJECTED -> compensateSource(transition(state, state.status(ProductTransferStatus.COMPENSATION_REQUIRED,
                     "TARGET_CREDIT_REJECTED", adjustment.errorMessage())));
         };
     }
 
     private ProductTransferState compensateSource(ProductTransferState state) {
-        ProductAccountAdjustment adjustment = accountClient.adjust(providerAccountType(state.sourceAccountType()),
-                state.amountUnits(), state.referenceId() + ":compensate", state.reason(), state.userId(),
-                state.asset());
+        ProductAccountAdjustment adjustment;
+        try {
+            adjustment = accountClient.adjust(providerAccountType(state.sourceAccountType()), state.amountUnits(),
+                    providerReference(state, "compensate"), state.reason(), state.userId(), state.asset());
+        } catch (RuntimeException ex) {
+            adjustment = ProductAccountAdjustment.unknown(safeMessage(ex));
+        }
         return switch (adjustment.status()) {
-            case APPLIED -> store.update(state.status(ProductTransferStatus.FAILED, "TARGET_CREDIT_REJECTED",
+            case APPLIED -> transition(state, state.status(ProductTransferStatus.FAILED, "TARGET_CREDIT_REJECTED",
                     state.errorMessage()));
-            case REJECTED, UNKNOWN -> store.update(state.status(ProductTransferStatus.COMPENSATION_REQUIRED,
+            case REJECTED, UNKNOWN -> transition(state, state.status(ProductTransferStatus.COMPENSATION_REQUIRED,
                     "COMPENSATION_REQUIRED", adjustment.errorMessage()));
         };
+    }
+
+    private ProductTransferState transition(ProductTransferState previous, ProductTransferState next) {
+        ProductTransferState current = store.update(previous, next);
+        if (current == null) {
+            throw new IllegalStateException("product transfer transition returned no state");
+        }
+        return current.status() == next.status() ? current : drive(current);
+    }
+
+    private String providerReference(ProductTransferState state, String stage) {
+        return "gateway-transfer:" + state.transferId() + ":" + stage;
+    }
+
+    private ProductTransferStatus retryStatus(ProductTransferStatus status) {
+        return switch (status) {
+            case PENDING, SOURCE_DEBIT_UNKNOWN -> ProductTransferStatus.SOURCE_DEBIT_UNKNOWN;
+            case SOURCE_DEBITED, TARGET_CREDIT_UNKNOWN -> ProductTransferStatus.TARGET_CREDIT_UNKNOWN;
+            case COMPENSATION_REQUIRED -> ProductTransferStatus.COMPENSATION_REQUIRED;
+            case COMPLETED, FAILED -> status;
+        };
+    }
+
+    private String safeMessage(RuntimeException ex) {
+        String message = ex.getMessage();
+        return message == null || message.isBlank() ? ex.getClass().getSimpleName() : message.substring(0,
+                Math.min(message.length(), 512));
     }
 
     private String fingerprint(ProductTransferCommand command, String source, String target) {
@@ -167,8 +222,8 @@ public class ProductTransferCoordinator {
         if (command == null || command.userId() <= 0L) {
             throw new IllegalArgumentException("userId is required");
         }
-        if (command.idempotencyKey() == null || !command.idempotencyKey().trim().matches("[A-Za-z0-9._:-]{8,128}")) {
-            throw new IllegalArgumentException("idempotency key must be 8-128 safe characters");
+        if (command.idempotencyKey() == null || !command.idempotencyKey().trim().matches("[A-Za-z0-9._:-]{1,128}")) {
+            throw new IllegalArgumentException("idempotency key must be 1-128 safe characters");
         }
         if (command.asset() == null || !command.asset().trim().matches("[A-Za-z0-9]{1,20}")) {
             throw new IllegalArgumentException("asset is invalid");

@@ -72,6 +72,37 @@ class BinanceApiControllerTest {
     }
 
     @Test
+    void supportsBinanceCoinMFuturesTransferAliases() {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
+        scale.setQuantityScale(6);
+        properties.getBinanceApi().setSymbolScales(Map.of("USDT", scale));
+        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        when(proxy.proxyCompat(anyString(), eq("/transfers"), isNull(), eq(HttpMethod.POST), any(), any(), eq(1001L)))
+                .thenReturn(ResponseEntity.ok("{\"transferId\":7124,\"status\":\"COMPLETED\"}"
+                        .getBytes(StandardCharsets.UTF_8)));
+        BinanceApiController controller = new BinanceApiController(properties, proxy,
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), bearerAuth(),
+                mock(ComplianceService.class), mock(CustodyWalletClient.class),
+                mock(CustodyWithdrawalService.class), new ObjectMapper());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/sapi/v1/asset/transfer");
+        request.addHeader("Authorization", "Bearer token");
+        request.setParameter("type", "MAIN_CMFUTURE");
+        request.setParameter("asset", "USDT");
+        request.setParameter("amount", "1");
+        request.setParameter("clientTranId", "coinm-transfer-1");
+
+        controller.handle(request, null);
+
+        ArgumentCaptor<byte[]> body = ArgumentCaptor.forClass(byte[].class);
+        verify(proxy).proxyCompat(anyString(), eq("/transfers"), isNull(), eq(HttpMethod.POST), any(), body.capture(),
+                eq(1001L));
+        assertThat(new String(body.getValue(), StandardCharsets.UTF_8))
+                .contains("\"sourceAccountType\":\"FUNDING\"")
+                .contains("\"targetAccountType\":\"COIN_PERPETUAL\"");
+    }
+
+    @Test
     void rejectsWithdrawBeforeCallingCustodyWhenSensitiveVerificationFails() {
         GatewayProperties properties = withdrawalProperties();
         AuthService authService = bearerAuth();

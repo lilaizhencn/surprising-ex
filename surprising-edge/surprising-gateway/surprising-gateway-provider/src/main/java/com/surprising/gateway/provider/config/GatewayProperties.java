@@ -27,6 +27,7 @@ public class GatewayProperties implements EnvironmentAware {
     private Security security = new Security();
     private CustodyWallet custodyWallet = new CustodyWallet();
     private Withdrawal withdrawal = new Withdrawal();
+    private ProductTransfer productTransfer = new ProductTransfer();
     private KycDocuments kycDocuments = new KycDocuments();
     private BinanceApi binanceApi = new BinanceApi();
     private HttpClient httpClient = new HttpClient();
@@ -249,6 +250,14 @@ public class GatewayProperties implements EnvironmentAware {
 
     public void setWithdrawal(Withdrawal withdrawal) {
         this.withdrawal = withdrawal == null ? new Withdrawal() : withdrawal;
+    }
+
+    public ProductTransfer getProductTransfer() {
+        return productTransfer;
+    }
+
+    public void setProductTransfer(ProductTransfer productTransfer) {
+        this.productTransfer = productTransfer == null ? new ProductTransfer() : productTransfer;
     }
 
     public KycDocuments getKycDocuments() {
@@ -751,6 +760,28 @@ public class GatewayProperties implements EnvironmentAware {
         public void setFailureReconciliationDelay(Duration value) {
             this.failureReconciliationDelay = value == null || value.isZero() || value.isNegative()
                     ? Duration.ofSeconds(30) : value;
+        }
+    }
+
+    public static class ProductTransfer {
+        private Duration reconciliationDelay = Duration.ofSeconds(5);
+        private int reconciliationBatchSize = 100;
+
+        public Duration getReconciliationDelay() {
+            return reconciliationDelay;
+        }
+
+        public void setReconciliationDelay(Duration value) {
+            reconciliationDelay = value == null || value.isZero() || value.isNegative()
+                    ? Duration.ofSeconds(5) : value;
+        }
+
+        public int getReconciliationBatchSize() {
+            return reconciliationBatchSize;
+        }
+
+        public void setReconciliationBatchSize(int value) {
+            reconciliationBatchSize = value <= 0 ? 100 : Math.min(value, 1000);
         }
     }
 

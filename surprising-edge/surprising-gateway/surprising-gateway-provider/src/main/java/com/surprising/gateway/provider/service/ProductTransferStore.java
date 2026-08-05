@@ -6,5 +6,7 @@ public interface ProductTransferStore {
 
     ProductTransferState lock(long transferId);
 
-    ProductTransferState update(ProductTransferState state);
+    ProductTransferState update(ProductTransferState previous, ProductTransferState next);
+
+    java.util.List<ProductTransferState> recoverable(int limit);
 }

@@ -72,6 +72,16 @@ public class GatewayProxyService {
                 new ObjectMapper(), null);
     }
 
+    public GatewayProxyService(GatewayProperties properties,
+                               RestTemplate restTemplate,
+                               AuthService authService,
+                               AdminAuditRepository adminAuditRepository,
+                               AdminApprovalRepository adminApprovalRepository,
+                               ObjectMapper objectMapper) {
+        this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository,
+                objectMapper, null);
+    }
+
     @Autowired
     public GatewayProxyService(GatewayProperties properties,
                                RestTemplate restTemplate,

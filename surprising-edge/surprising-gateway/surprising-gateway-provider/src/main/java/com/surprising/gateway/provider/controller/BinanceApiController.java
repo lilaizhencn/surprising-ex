@@ -155,7 +155,7 @@ public class BinanceApiController {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new IllegalArgumentException("clientTranId or Idempotency-Key is required");
         }
-        payload.put("referenceId", "binance-transfer:" + idempotencyKey.trim());
+        payload.put("referenceId", idempotencyKey.trim());
         payload.put("reason", "binance asset transfer");
         ResponseEntity<byte[]> response = proxy("account", "/transfers", request, jsonBytes(payload), userId, null, true);
         if (response.getStatusCode().isError()) return response;
@@ -240,6 +240,8 @@ public class BinanceApiController {
             case "UMFUTURE_MAIN" -> source ? "USDT_PERPETUAL" : "FUNDING";
             case "MAIN_CM" -> source ? "FUNDING" : "COIN_PERPETUAL";
             case "CM_MAIN" -> source ? "COIN_PERPETUAL" : "FUNDING";
+            case "MAIN_CMFUTURE" -> source ? "FUNDING" : "COIN_PERPETUAL";
+            case "CMFUTURE_MAIN" -> source ? "COIN_PERPETUAL" : "FUNDING";
             case "MAIN_SPOT" -> source ? "FUNDING" : "SPOT";
             case "SPOT_MAIN" -> source ? "SPOT" : "FUNDING";
             default -> throw new IllegalArgumentException("unsupported transfer type");

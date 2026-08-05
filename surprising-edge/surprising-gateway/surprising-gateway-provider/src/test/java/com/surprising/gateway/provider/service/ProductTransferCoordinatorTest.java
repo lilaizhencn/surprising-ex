@@ -24,8 +24,8 @@ class ProductTransferCoordinatorTest {
         assertThat(first.status()).isEqualTo(ProductTransferStatus.COMPLETED);
         assertThat(duplicate.status()).isEqualTo(ProductTransferStatus.COMPLETED);
         assertThat(accountClient.calls()).containsExactly(
-                new AdjustmentCall("SPOT", -1_250_000L, "transfer-001:debit"),
-                new AdjustmentCall("USDT_PERPETUAL", 1_250_000L, "transfer-001:credit"));
+                new AdjustmentCall("SPOT", -1_250_000L, "gateway-transfer:100:debit"),
+                new AdjustmentCall("USDT_PERPETUAL", 1_250_000L, "gateway-transfer:100:credit"));
     }
 
     @Test
@@ -40,16 +40,16 @@ class ProductTransferCoordinatorTest {
 
         assertThat(result.status()).isEqualTo(ProductTransferStatus.FAILED);
         assertThat(accountClient.calls()).containsExactly(
-                new AdjustmentCall("SPOT", -10L, "transfer-002:debit"),
-                new AdjustmentCall("USDT_PERPETUAL", 10L, "transfer-002:credit"),
-                new AdjustmentCall("SPOT", 10L, "transfer-002:compensate"));
+                new AdjustmentCall("SPOT", -10L, "gateway-transfer:100:debit"),
+                new AdjustmentCall("USDT_PERPETUAL", 10L, "gateway-transfer:100:credit"),
+                new AdjustmentCall("SPOT", 10L, "gateway-transfer:100:compensate"));
     }
 
     @Test
     void unknownCompensationIsRecoverableAndNeverReportedAsCompleted() {
         InMemoryProductTransferStore store = new InMemoryProductTransferStore();
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        accountClient.unknown("SPOT", "transfer-003:compensate");
+        accountClient.unknown("SPOT", "gateway-transfer:100:compensate");
         accountClient.reject("USDT_PERPETUAL");
         ProductTransferCoordinator coordinator = new ProductTransferCoordinator(store, accountClient);
 
@@ -99,6 +99,22 @@ class ProductTransferCoordinatorTest {
         assertThat(accountClient.calls()).isEmpty();
     }
 
+    @Test
+    void samePublicReferenceDoesNotReuseProviderCommandAcrossTransfers() {
+        InMemoryProductTransferStore store = new InMemoryProductTransferStore();
+        RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
+        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(store, accountClient);
+
+        coordinator.transfer(new ProductTransferCommand(42L, "transfer-007", "FUNDING", "USDT_PERPETUAL",
+                "USDT", 10L, "same-reference", "test"));
+        coordinator.transfer(new ProductTransferCommand(42L, "transfer-008", "FUNDING", "USDT_PERPETUAL",
+                "USDT", 10L, "same-reference", "test"));
+
+        assertThat(accountClient.calls()).extracting(AdjustmentCall::referenceId)
+                .containsExactly("gateway-transfer:100:debit", "gateway-transfer:100:credit",
+                        "gateway-transfer:101:debit", "gateway-transfer:101:credit");
+    }
+
     private ProductTransferCommand command(String key, String source, String target, long amount) {
         return new ProductTransferCommand(42L, key, source, target, "USDT", amount, key, "test transfer");
     }
@@ -127,9 +143,18 @@ class ProductTransferCoordinatorTest {
         }
 
         @Override
-        public ProductTransferState update(ProductTransferState state) {
-            rows.put(state.transferId(), state);
-            return state;
+        public ProductTransferState update(ProductTransferState previous, ProductTransferState next) {
+            ProductTransferState current = rows.get(previous.transferId());
+            if (current.status() != previous.status()) {
+                return current;
+            }
+            rows.put(next.transferId(), next);
+            return next;
+        }
+
+        @Override
+        public java.util.List<ProductTransferState> recoverable(int limit) {
+            return rows.values().stream().filter(row -> !row.status().terminal()).limit(limit).toList();
         }
     }
 

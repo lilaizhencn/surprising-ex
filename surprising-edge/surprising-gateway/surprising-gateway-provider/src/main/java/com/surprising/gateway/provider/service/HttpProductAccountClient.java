@@ -19,11 +19,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpStatusCodeException;
 
 @Service
 public class HttpProductAccountClient implements ProductAccountClient {
 
     private static final String INTERNAL_SERVICE = "surprising-gateway";
+    private static final String INTERNAL_AUDIENCE = "/api/v1/accounts/admin/product-balance-adjustments";
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
 
@@ -60,6 +62,7 @@ public class HttpProductAccountClient implements ProductAccountClient {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Internal-Service", INTERNAL_SERVICE);
         headers.set("X-Internal-Timestamp", Long.toString(timestamp));
+        headers.set("X-Internal-Audience", INTERNAL_AUDIENCE);
         headers.set("X-Internal-Signature", signature(properties.getCustodyWallet().getSpotAccountInternalSecret(),
                 timestamp, userId, accountType, normalizedAsset, amountUnits, referenceId, normalizedReason));
         URI target = URI.create(trimTrailingSlash(route.getBaseUrl()) + ensureLeadingSlash(route.getTargetPrefix())
@@ -75,6 +78,12 @@ public class HttpProductAccountClient implements ProductAccountClient {
                 return ProductAccountAdjustment.rejected("account provider rejected adjustment HTTP " + status);
             }
             return ProductAccountAdjustment.unknown("account provider adjustment outcome is unknown HTTP " + status);
+        } catch (HttpStatusCodeException ex) {
+            int status = ex.getStatusCode().value();
+            if (status >= 400 && status < 500) {
+                return ProductAccountAdjustment.rejected("account provider rejected adjustment HTTP " + status);
+            }
+            return ProductAccountAdjustment.unknown("account provider adjustment outcome is unknown HTTP " + status);
         } catch (RestClientException ex) {
             return ProductAccountAdjustment.unknown("account provider adjustment outcome is unknown");
         }
@@ -85,8 +94,9 @@ public class HttpProductAccountClient implements ProductAccountClient {
         if (secret == null || secret.isBlank()) {
             throw new IllegalStateException("account provider internal secret is not configured");
         }
-        String canonical = INTERNAL_SERVICE + "\n" + timestamp + "\n" + userId + "\n" + accountType + "\n"
-                + asset + "\n" + amountUnits + "\n" + referenceId + "\n" + reason;
+        String canonical = field(INTERNAL_SERVICE) + field(INTERNAL_AUDIENCE) + field(Long.toString(timestamp))
+                + field(Long.toString(userId)) + field(accountType) + field(asset) + field(Long.toString(amountUnits))
+                + field(referenceId) + field(reason);
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
@@ -95,6 +105,11 @@ public class HttpProductAccountClient implements ProductAccountClient {
         } catch (Exception ex) {
             throw new IllegalStateException("account provider internal signing failed", ex);
         }
+    }
+
+    private String field(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        return bytes.length + ":" + value;
     }
 
     private String trimTrailingSlash(String value) {

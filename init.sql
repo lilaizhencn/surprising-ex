@@ -3895,6 +3895,21 @@ CREATE INDEX IF NOT EXISTS gateway_product_transfers_status_idx
 CREATE INDEX IF NOT EXISTS gateway_product_transfers_user_time_idx
     ON gateway_product_transfers (user_id, created_at DESC, transfer_id DESC);
 
+CREATE SEQUENCE IF NOT EXISTS gateway_product_transfer_event_seq;
+
+CREATE TABLE IF NOT EXISTS gateway_product_transfer_events (
+    event_id       BIGINT PRIMARY KEY DEFAULT nextval('gateway_product_transfer_event_seq'),
+    transfer_id    BIGINT NOT NULL REFERENCES gateway_product_transfers(transfer_id),
+    from_status    VARCHAR(32),
+    to_status      VARCHAR(32) NOT NULL,
+    error_code     VARCHAR(64),
+    error_message  VARCHAR(512),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS gateway_product_transfer_events_transfer_time_idx
+    ON gateway_product_transfer_events (transfer_id, created_at, event_id);
+
 CREATE TABLE IF NOT EXISTS gateway_admin_approval_requests (
     approval_id          BIGSERIAL PRIMARY KEY,
     requester_user_id    BIGINT NOT NULL REFERENCES gateway_users(user_id),

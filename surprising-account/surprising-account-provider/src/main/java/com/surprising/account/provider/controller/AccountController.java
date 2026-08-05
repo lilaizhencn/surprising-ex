@@ -48,6 +48,8 @@ public class AccountController {
 
     private static final String ADMIN_BASE_PATH = "/api/v1/admin/accounts";
     private static final String INTERNAL_SERVICE = "surprising-gateway";
+    private static final String PRODUCT_BALANCE_AUDIENCE =
+            AccountApiPaths.ACCOUNT_ADMIN_BASE_PATH + "/product-balance-adjustments";
     private static final long MAX_CLOCK_SKEW_SECONDS = 300L;
 
     private final AccountService accountService;
@@ -99,8 +101,9 @@ public class AccountController {
             @RequestHeader(value = "X-Internal-Service", required = false) String service,
             @RequestHeader(value = "X-Internal-Timestamp", required = false) String timestamp,
             @RequestHeader(value = "X-Internal-Signature", required = false) String signature,
+            @RequestHeader(value = "X-Internal-Audience", required = false) String audience,
             @Valid @RequestBody ProductBalanceAdjustmentRequest request) {
-        requireInternalProductService(service, timestamp, signature, request);
+        requireInternalProductService(service, timestamp, signature, audience, request);
         try {
             return commandGateway.adjustProductBalance(request, null, null);
         } catch (AccountCommandTimeoutException ex) {
@@ -440,8 +443,12 @@ public class AccountController {
     }
 
     private void requireInternalProductService(String service, String timestamp, String signature,
+                                                String audience,
                                                 ProductBalanceAdjustmentRequest request) {
         requireInternalHeaders(service, timestamp, signature);
+        if (!PRODUCT_BALANCE_AUDIENCE.equals(audience == null ? "" : audience.trim())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service audience is invalid");
+        }
         long timestampSeconds = parseInternalTimestamp(timestamp);
         if (Math.abs(Instant.now().getEpochSecond() - timestampSeconds) > MAX_CLOCK_SKEW_SECONDS) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service timestamp is expired");
@@ -451,10 +458,12 @@ public class AccountController {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "internal service authentication is not configured");
         }
-        String canonical = INTERNAL_SERVICE + "\n" + timestampSeconds + "\n" + request.userId() + "\n"
-                + request.accountType().name() + "\n" + request.asset().trim().toUpperCase(java.util.Locale.ROOT)
-                + "\n" + request.amountUnits() + "\n" + request.referenceId() + "\n"
-                + (request.reason() == null ? "" : request.reason());
+        String canonical = field(INTERNAL_SERVICE) + field(PRODUCT_BALANCE_AUDIENCE)
+                + field(Long.toString(timestampSeconds)) + field(Long.toString(request.userId()))
+                + field(request.accountType().name())
+                + field(request.asset().trim().toUpperCase(java.util.Locale.ROOT))
+                + field(Long.toString(request.amountUnits())) + field(request.referenceId())
+                + field(request.reason() == null ? "" : request.reason());
         if (!MessageDigest.isEqual(signCanonical(secret, canonical).getBytes(StandardCharsets.UTF_8),
                 signature.trim().getBytes(StandardCharsets.UTF_8))) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "internal service signature is invalid");
@@ -487,5 +496,10 @@ public class AccountController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "internal service signing is unavailable", ex);
         }
+    }
+
+    private String field(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        return bytes.length + ":" + value;
     }
 }

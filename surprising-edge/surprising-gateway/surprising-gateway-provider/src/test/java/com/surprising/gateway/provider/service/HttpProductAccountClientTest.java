@@ -19,6 +19,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpClientErrorException;
 
 class HttpProductAccountClientTest {
 
@@ -53,9 +54,28 @@ class HttpProductAccountClientTest {
         String timestamp = request.getValue().getHeaders().getFirst("X-Internal-Timestamp");
         assertThat(request.getValue().getHeaders().getFirst("X-Internal-Service"))
                 .isEqualTo("surprising-gateway");
+        assertThat(request.getValue().getHeaders().getFirst("X-Internal-Audience"))
+                .isEqualTo("/api/v1/accounts/admin/product-balance-adjustments");
         assertThat(request.getValue().getHeaders().getFirst("X-Internal-Signature"))
                 .isEqualTo(client.signature("account-internal-secret-for-tests-32", Long.parseLong(timestamp), 42L,
                         "USDT_PERPETUAL", "USDT", -1_250L, "transfer-007:debit", "test"));
         assertThat(Math.abs(Instant.now().getEpochSecond() - Long.parseLong(timestamp))).isLessThanOrEqualTo(1L);
+    }
+
+    @Test
+    void mapsProviderClientErrorsToPermanentRejection() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.setRoutes(Map.of("account", new GatewayProperties.BackendRoute(
+                "http://account:9086", "/api/v1/accounts", true)));
+        properties.getCustodyWallet().setSpotAccountInternalSecret("account-internal-secret-for-tests-32");
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenThrow(HttpClientErrorException.create(org.springframework.http.HttpStatus.CONFLICT,
+                        "conflict", org.springframework.http.HttpHeaders.EMPTY, new byte[0], null));
+
+        ProductAccountAdjustment result = new HttpProductAccountClient(properties, restTemplate)
+                .adjust("USDT_PERPETUAL", -1L, "transfer-008", "test", 42L, "USDT");
+
+        assertThat(result.status()).isEqualTo(ProductAccountAdjustment.Status.REJECTED);
     }
 }
