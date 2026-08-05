@@ -96,6 +96,25 @@ BEGIN
                  ADD CONSTRAINT gateway_wallet_withdrawal_external_reference_uq
                  UNIQUE (external_reference)';
     END IF;
+    IF EXISTS (
+        SELECT 1
+          FROM gateway_wallet_withdrawals
+         WHERE wallet_withdrawal_id IS NOT NULL
+         GROUP BY wallet_withdrawal_id
+        HAVING COUNT(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'gateway_wallet_withdrawals contains duplicate wallet withdrawal ids';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conname = 'gateway_wallet_withdrawal_wallet_id_uq'
+           AND conrelid = 'public.gateway_wallet_withdrawals'::regclass
+    ) THEN
+        EXECUTE 'ALTER TABLE gateway_wallet_withdrawals
+                 ADD CONSTRAINT gateway_wallet_withdrawal_wallet_id_uq
+                 UNIQUE (wallet_withdrawal_id)';
+    END IF;
 END
 $$;
 

@@ -209,14 +209,27 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void webhookBindsWalletIdByExternalReferenceAndRejectsConflictingBinding() {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
                 withdrawalId);
+        UUID otherId = insertWithdrawal("custody-wallet-withdrawal:other", "wallet-owned");
 
-        CustodyWithdrawalRepository.WithdrawalRecord bound = repository.findByWalletReference(
-                "wallet-bound", "custody-wallet-withdrawal:integration");
-        assertThat(bound.walletWithdrawalId()).isEqualTo("wallet-bound");
-        assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-bound");
-        assertThatThrownBy(() -> repository.findByWalletReference(
-                "wallet-other", "custody-wallet-withdrawal:integration"))
-                .isInstanceOf(IllegalStateException.class);
+        try {
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                    "UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = 'wallet-owned' WHERE withdrawal_id = ?",
+                    withdrawalId))
+                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> repository.findByWalletReference(
+                    "wallet-owned", "custody-wallet-withdrawal:integration"))
+                    .isInstanceOf(IllegalStateException.class);
+
+            CustodyWithdrawalRepository.WithdrawalRecord bound = repository.findByWalletReference(
+                    "wallet-bound", "custody-wallet-withdrawal:integration");
+            assertThat(bound.walletWithdrawalId()).isEqualTo("wallet-bound");
+            assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-bound");
+            assertThatThrownBy(() -> repository.findByWalletReference(
+                    "wallet-other", "custody-wallet-withdrawal:integration"))
+                    .isInstanceOf(IllegalStateException.class);
+        } finally {
+            jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE withdrawal_id = ?", otherId);
+        }
     }
 
     @Test
@@ -270,7 +283,8 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 + "wallet_response JSONB, wallet_withdrawal_id TEXT, error_code TEXT, error_message TEXT, "
                 + "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
                 + "submitted_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, admin_user_id BIGINT, "
-                + "admin_username TEXT, admin_reason TEXT)");
+                + "admin_username TEXT, admin_reason TEXT, "
+                + "CONSTRAINT gateway_wallet_withdrawals_wallet_id_uq UNIQUE (wallet_withdrawal_id))");
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_actions ("
                 + "action_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
                 + "admin_user_id BIGINT NOT NULL REFERENCES gateway_users, admin_username TEXT NOT NULL, "
@@ -278,16 +292,20 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     private UUID insertFailurePendingWithdrawal() {
+        return insertWithdrawal("custody-wallet-withdrawal:integration", "wallet-integration");
+    }
+
+    private UUID insertWithdrawal(String externalReference, String walletWithdrawalId) {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update("""
                 INSERT INTO gateway_wallet_withdrawals (
                     withdrawal_id, user_id, idempotency_key, request_sha256, chain, asset_symbol,
                     custody_address_id, to_address, amount, amount_units, usdt_value, external_reference,
                     spot_debit_reference, request_payload, status, wallet_withdrawal_id
-                ) VALUES (?, 42, 'integration-key', 'hash', 'ETH', 'USDT', ?, '0xrecipient', '25',
-                          25000000, 25, 'custody-wallet-withdrawal:integration',
-                          'custody-wallet-withdrawal:integration', '{}'::jsonb, 'FAILED_PENDING', 'wallet-integration')
-                """, id, UUID.randomUUID());
+                ) VALUES (?, 42, ?, ?, 'ETH', 'USDT', ?, '0xrecipient', '25',
+                          25000000, 25, ?, ?, '{}'::jsonb, 'FAILED_PENDING', ?)
+                """, id, externalReference + ":key", "hash-" + externalReference, UUID.randomUUID(),
+                externalReference, externalReference, walletWithdrawalId);
         return id;
     }
 

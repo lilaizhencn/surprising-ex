@@ -3471,6 +3471,7 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawals (
     ),
     CONSTRAINT gateway_wallet_withdrawal_amount_check CHECK (amount_units > 0 AND usdt_value > 0),
     CONSTRAINT gateway_wallet_withdrawal_external_reference_uq UNIQUE (external_reference),
+    CONSTRAINT gateway_wallet_withdrawal_wallet_id_uq UNIQUE (wallet_withdrawal_id),
     CONSTRAINT gateway_wallet_withdrawal_idempotency_uq UNIQUE (user_id, idempotency_key)
 );
 

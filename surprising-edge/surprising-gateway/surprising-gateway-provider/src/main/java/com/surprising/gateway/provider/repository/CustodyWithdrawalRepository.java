@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -103,11 +104,20 @@ public class CustodyWithdrawalRepository {
                 throw new IllegalStateException("withdrawal webhook wallet id does not match local intent");
             }
             if (record.walletWithdrawalId() == null) {
-                int updated = jdbcTemplate.update("""
-                        UPDATE gateway_wallet_withdrawals
-                           SET wallet_withdrawal_id = ?, updated_at = now()
-                         WHERE withdrawal_id = ? AND wallet_withdrawal_id IS NULL
-                        """, walletWithdrawalId, record.withdrawalId());
+                WithdrawalRecord owner = findByWalletWithdrawalId(walletWithdrawalId);
+                if (owner != null && !owner.withdrawalId().equals(record.withdrawalId())) {
+                    throw new IllegalStateException("withdrawal webhook wallet id is already bound");
+                }
+                int updated;
+                try {
+                    updated = jdbcTemplate.update("""
+                            UPDATE gateway_wallet_withdrawals
+                               SET wallet_withdrawal_id = ?, updated_at = now()
+                             WHERE withdrawal_id = ? AND wallet_withdrawal_id IS NULL
+                            """, walletWithdrawalId, record.withdrawalId());
+                } catch (DataIntegrityViolationException ex) {
+                    throw new IllegalStateException("withdrawal webhook wallet id is already bound", ex);
+                }
                 if (updated == 0) {
                     WithdrawalRecord current = find(record.withdrawalId());
                     if (current == null) {
@@ -127,6 +137,15 @@ public class CustodyWithdrawalRepository {
         List<WithdrawalRecord> rows = jdbcTemplate.query(selectSql(predicate, 2), this::toRecord, args);
         if (rows.size() > 1) {
             throw new IllegalStateException("withdrawal webhook identifiers are ambiguous");
+        }
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    private WithdrawalRecord findByWalletWithdrawalId(String walletWithdrawalId) {
+        List<WithdrawalRecord> rows = jdbcTemplate.query(
+                selectSql("wallet_withdrawal_id = ?", 2), this::toRecord, walletWithdrawalId);
+        if (rows.size() > 1) {
+            throw new IllegalStateException("withdrawal webhook wallet id is ambiguous");
         }
         return rows.isEmpty() ? null : rows.getFirst();
     }
