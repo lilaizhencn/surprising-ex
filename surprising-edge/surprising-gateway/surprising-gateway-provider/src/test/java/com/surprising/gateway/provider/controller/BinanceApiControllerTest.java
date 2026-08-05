@@ -329,6 +329,54 @@ class BinanceApiControllerTest {
         assertThat(status).containsEntry("data", "Normal");
     }
 
+    @Test
+    void exposesBookTickerAndKlinesWithBinanceShapes() throws Exception {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
+        scale.setPriceScale(2);
+        scale.setQuantityScale(3);
+        properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
+        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        when(proxy.proxyCompat(anyString(), eq("/orderbook"), anyString(), eq(HttpMethod.GET),
+                any(), isNull(), isNull())).thenReturn(ResponseEntity.ok((
+                        "{\"bids\":[{\"priceTicks\":12345,\"quantitySteps\":2000}],"
+                                + "\"asks\":[{\"priceTicks\":12355,\"quantitySteps\":3000}]}"
+                ).getBytes(StandardCharsets.UTF_8)));
+        when(proxy.proxyCompat(anyString(), eq("/candles"), anyString(), eq(HttpMethod.GET),
+                any(), isNull(), isNull())).thenReturn(ResponseEntity.ok((
+                        "{\"candles\":[{\"openTime\":\"2026-08-01T00:00:00Z\","
+                                + "\"closeTime\":\"2026-08-01T00:01:00Z\",\"openPrice\":\"100\","
+                                + "\"highPrice\":\"110\",\"lowPrice\":\"90\",\"closePrice\":\"105\","
+                                + "\"baseVolume\":\"3\",\"quoteVolume\":\"310\",\"tradeCount\":2}]}"
+                ).getBytes(StandardCharsets.UTF_8)));
+        BinanceApiController controller = new BinanceApiController(properties, proxy,
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class),
+                bearerAuth(), mock(ComplianceService.class), mock(CustodyWalletClient.class),
+                mock(CustodyWithdrawalService.class), new ObjectMapper());
+
+        MockHttpServletRequest bookRequest = new MockHttpServletRequest("GET", "/api/v3/ticker/bookTicker");
+        bookRequest.addHeader("Authorization", "Bearer token");
+        bookRequest.setParameter("symbol", "BTCUSDT");
+        Map<String, Object> book = new ObjectMapper().readValue(
+                controller.handle(bookRequest, null).getBody(), Map.class);
+        assertThat(book).containsEntry("bidPrice", "123.45")
+                .containsEntry("bidQty", "2")
+                .containsEntry("askPrice", "123.55")
+                .containsEntry("askQty", "3");
+
+        MockHttpServletRequest klineRequest = new MockHttpServletRequest("GET", "/api/v3/klines");
+        klineRequest.addHeader("Authorization", "Bearer token");
+        klineRequest.setParameter("symbol", "BTCUSDT");
+        klineRequest.setParameter("interval", "1m");
+        klineRequest.setParameter("startTime", "1754006400000");
+        klineRequest.setParameter("endTime", "1754006460000");
+        List<List<Object>> klines = new ObjectMapper().readValue(
+                controller.handle(klineRequest, null).getBody(), List.class);
+        assertThat(klines).hasSize(1);
+        assertThat(klines.getFirst()).containsExactly(1785542400000L, "100", "110", "90", "105", "3",
+                1785542460000L, "310", 2, "0", "0", "0");
+    }
+
     private BinanceApiController controller(GatewayProperties properties, AuthService authService,
                                              SensitiveActionVerificationService verification,
                                              CustodyWithdrawalService withdrawalService) {

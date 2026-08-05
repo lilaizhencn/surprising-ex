@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -127,8 +128,14 @@ public class BinanceApiController {
             if (path.endsWith("/ticker/price")) {
                 return tickerPrice(request);
             }
+            if (path.endsWith("/ticker/bookTicker")) {
+                return bookTicker(request);
+            }
             if (path.endsWith("/ticker/24hr")) {
                 return ticker24hr(request);
+            }
+            if (path.endsWith("/klines")) {
+                return klines(request);
             }
             return error(HttpStatus.NOT_FOUND, -1003, "unsupported Binance-compatible endpoint");
         } catch (ResponseStatusException ex) {
@@ -432,6 +439,68 @@ public class BinanceApiController {
                 "price", decimalString(number(payload.get("priceTicks")), scale.getPriceScale())));
     }
 
+    private ResponseEntity<byte[]> bookTicker(HttpServletRequest request) {
+        String symbol = requiredParameter(request, "symbol");
+        String query = "symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol))
+                + "&depth=5";
+        ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query, false);
+        if (response.getStatusCode().isError()) return response;
+        Map<String, Object> payload = readMap(response.getBody());
+        GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
+        Map<String, Object> bid = firstLevel(payload.get("bids"));
+        Map<String, Object> ask = firstLevel(payload.get("asks"));
+        return json(HttpStatus.OK, Map.of(
+                "symbol", symbol,
+                "bidPrice", decimalString(number(bid.get("priceTicks")), scale.getPriceScale()),
+                "bidQty", decimalString(number(bid.get("quantitySteps")), scale.getQuantityScale()),
+                "askPrice", decimalString(number(ask.get("priceTicks")), scale.getPriceScale()),
+                "askQty", decimalString(number(ask.get("quantitySteps")), scale.getQuantityScale())));
+    }
+
+    private ResponseEntity<byte[]> klines(HttpServletRequest request) {
+        String symbol = requiredParameter(request, "symbol");
+        String period = requiredParameter(request, "interval").trim().toLowerCase(Locale.ROOT);
+        if (!List.of("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w")
+                .contains(period)) {
+            throw new IllegalArgumentException("unsupported interval");
+        }
+        int limit = capped(request.getParameter("limit"));
+        Instant end = epochParameter(request.getParameter("endTime"), Instant.now());
+        Instant start = epochParameter(request.getParameter("startTime"), end.minus(Duration.ofDays(1)));
+        if (!start.isBefore(end)) {
+            throw new IllegalArgumentException("startTime must be before endTime");
+        }
+        String query = "symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol))
+                + "&period=" + encode(period)
+                + "&startTime=" + encode(start.toString())
+                + "&endTime=" + encode(end.toString())
+                + "&limit=" + limit;
+        ResponseEntity<byte[]> response = proxy("candlestick", "/candles", request, null, null, query, false);
+        if (response.getStatusCode().isError()) return response;
+        Map<String, Object> payload = readMap(response.getBody());
+        List<List<Object>> result = new ArrayList<>();
+        Object rows = payload.get("candles");
+        if (rows instanceof List<?> list) {
+            for (Object row : list) {
+                Map<String, Object> candle = mapValue(row);
+                result.add(List.of(
+                        epochMillisOrZero(candle.get("openTime")),
+                        decimalResponse(candle.get("openPrice")),
+                        decimalResponse(candle.get("highPrice")),
+                        decimalResponse(candle.get("lowPrice")),
+                        decimalResponse(candle.get("closePrice")),
+                        decimalResponse(candle.get("baseVolume")),
+                        epochMillisOrZero(candle.get("closeTime")),
+                        decimalResponse(candle.get("quoteVolume")),
+                        number(candle.get("tradeCount")),
+                        "0",
+                        "0",
+                        "0"));
+            }
+        }
+        return json(HttpStatus.OK, result);
+    }
+
     private ResponseEntity<byte[]> ticker24hr(HttpServletRequest request) {
         String symbol = requiredParameter(request, "symbol");
         String query = "symbol=" + encode(properties.getBinanceApi().backendSymbol(symbol));
@@ -617,6 +686,16 @@ public class BinanceApiController {
         return units.movePointLeft(scale).stripTrailingZeros().toPlainString();
     }
 
+    private String decimalResponse(Object value) {
+        return decimalNumber(value).stripTrailingZeros().toPlainString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstLevel(Object value) {
+        if (!(value instanceof List<?> list) || list.isEmpty()) return Map.of();
+        return mapValue(list.getFirst());
+    }
+
     private BigDecimal decimalNumber(Object value) {
         if (value == null) return BigDecimal.ZERO;
         try {
@@ -658,6 +737,15 @@ public class BinanceApiController {
             return Instant.parse(String.valueOf(value)).toEpochMilli();
         } catch (RuntimeException ex) {
             throw new IllegalArgumentException("timestamp response field is invalid", ex);
+        }
+    }
+
+    private Instant epochParameter(String value, Instant fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            return Instant.ofEpochMilli(Long.parseLong(value));
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("timestamp parameter is invalid", ex);
         }
     }
 
