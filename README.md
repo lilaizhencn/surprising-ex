@@ -1,7 +1,7 @@
 # surprising-ex
 
 
-Surprising-EX 是基于 Java 21、PostgreSQL、Kafka 和 Redis/Valkey 的多产品线交易所后端。仓库覆盖
+Surprising-EX 是基于 Java 25、PostgreSQL、Kafka 和 Redis/Valkey 的多产品线交易所后端。仓库覆盖
 现货、U 本位永续、U 本位交割和欧式现金结算期权；生产部署时每个进程只运行一条产品线，并使用
 独立 Topic、消费组、订单簿和账户类型。
 
@@ -75,7 +75,7 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 
 ## 构建与本地启动
 
-要求 JDK 21。先启动 PostgreSQL、Kafka 和 Redis，再初始化数据库与 Topic：
+要求 JDK 25。先启动 PostgreSQL、Kafka 和 Redis，再初始化数据库与 Topic：
 
 ```bash
 mvn -DskipTests package
@@ -86,7 +86,7 @@ PRODUCT_LINE=LINEAR_PERPETUAL BUILD_SERVICES=false ./scripts/start-product-line-
 
 matching 使用 `exchange.core2:exchange-core:0.5.3` 及其 Chronicle/OpenHFT 传递依赖，必须使用
 [部署文档](docs/deployment.md) 中列出的 `--add-opens/--add-exports` JVM 参数。Chronicle 版本由
-父 POM 的 BOM 统一管理，避免旧版在 JDK 21 中触发 `unmap0`/`Bytes` 初始化错误。默认合并进程和端口：
+父 POM 的 BOM 统一管理，避免旧版在 JDK 25 中触发 `unmap0`/`Bytes` 初始化错误。默认合并进程和端口：
 
 | Provider | 端口 |
 |---|---:|
