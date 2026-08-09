@@ -65,6 +65,7 @@ import com.surprising.trading.api.model.MarketTickerSummary;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -175,8 +176,19 @@ class MarketMakerServiceTest {
         assertThat(fixtures.orderRpc.cancelRequests).singleElement()
                 .extracting(CancelOrderRequest::orderId)
                 .isEqualTo(7L);
+        assertThat(fixtures.orderRpc.cancelBatchCalls).isEqualTo(1);
         assertThat(fixtures.orderRpc.productLinesDuringCancel).containsOnly(ProductLine.LINEAR_PERPETUAL);
         assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
+    }
+
+    @Test
+    void limitsCombinedCancelAndPlaceOperationsPerCycle() {
+        Fixtures fixtures = new Fixtures(List.of(), 2);
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(2);
     }
 
     @Test
@@ -195,6 +207,18 @@ class MarketMakerServiceTest {
 
         assertThat(secondIds).doesNotContainAnyElementsOf(firstIds);
         assertThat(secondIds).allSatisfy(id -> assertThat(id).startsWith("mm-"));
+    }
+
+    @Test
+    void reusesLocalOrderSnapshotBetweenFastCycles() {
+        Fixtures fixtures = new Fixtures(List.of());
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.openOrdersCalls).isEqualTo(1);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
     }
 
     @Test
@@ -312,7 +336,18 @@ class MarketMakerServiceTest {
                                        long priceTicks,
                                        long remainingQuantity,
                                        OrderStatus status) {
-        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        return orderAt(orderId, userId, clientOrderId, side, priceTicks, remainingQuantity, status,
+                Instant.parse("2026-01-01T00:00:00Z"));
+    }
+
+    private static OrderResponse orderAt(long orderId,
+                                         long userId,
+                                         String clientOrderId,
+                                         OrderSide side,
+                                         long priceTicks,
+                                         long remainingQuantity,
+                                         OrderStatus status,
+                                         Instant now) {
         return new OrderResponse(orderId, userId, clientOrderId, "BTC-USDT", 1L, side, OrderType.LIMIT,
                 TimeInForce.GTX, priceTicks, remainingQuantity, 0L, remainingQuantity, MarginMode.CROSS,
                 PositionSide.NET, -100L, 500L, false, true, status, null, now, now);
@@ -323,9 +358,15 @@ class MarketMakerServiceTest {
         private final FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
         private final FakeReferenceSampleRepository referenceSampleRepository =
                 new FakeReferenceSampleRepository();
+        private final int maxOrderOperationsPerCycle;
 
         private Fixtures(List<OrderResponse> openOrders) {
+            this(openOrders, 40);
+        }
+
+        private Fixtures(List<OrderResponse> openOrders, int maxOrderOperationsPerCycle) {
             this.orderRpc = new FakeOrderRpc(openOrders);
+            this.maxOrderOperationsPerCycle = maxOrderOperationsPerCycle;
         }
 
         private MarketMakerService service() {
@@ -373,6 +414,7 @@ class MarketMakerServiceTest {
             properties.getQuoting().setMinSpreadTicks(10L);
             properties.getQuoting().setLevelSpacingTicks(10L);
             properties.getQuoting().setRefreshThresholdTicks(2L);
+            properties.getQuoting().setMaxOrderOperationsPerCycle(maxOrderOperationsPerCycle);
             properties.getRisk().setMaxInventorySteps(1000L);
             MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
             strategy.setStrategyId("btc-usdt-mm-a");
@@ -490,6 +532,8 @@ class MarketMakerServiceTest {
         private final List<ProductLine> productLinesDuringPlace = new ArrayList<>();
         private final List<ProductLine> productLinesDuringCancel = new ArrayList<>();
         private final List<ProductLine> productLinesDuringOpenOrders = new ArrayList<>();
+        private int openOrdersCalls;
+        private int cancelBatchCalls;
 
         private FakeOrderRpc(List<OrderResponse> openOrders) {
             this.openOrders = new ArrayList<>(openOrders);
@@ -499,8 +543,8 @@ class MarketMakerServiceTest {
         public OrderResponse place(PlaceOrderRequest request) {
             productLinesDuringPlace.add(MarketMakerProductLineContext.current());
             placeRequests.add(request);
-            return order(1000L + placeRequests.size(), request.userId(), request.clientOrderId(), request.side(),
-                    request.priceTicks(), request.quantitySteps(), OrderStatus.ACCEPTED);
+            return orderAt(1000L + placeRequests.size(), request.userId(), request.clientOrderId(), request.side(),
+                    request.priceTicks(), request.quantitySteps(), OrderStatus.ACCEPTED, Instant.now());
         }
 
         @Override
@@ -538,7 +582,17 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
-            throw new UnsupportedOperationException();
+            cancelBatchCalls++;
+            List<OrderBatchItemResponse> results = new ArrayList<>();
+            for (int i = 0; i < request.orders().size(); i++) {
+                CancelOrderRequest cancelRequest = request.orders().get(i);
+                productLinesDuringCancel.add(MarketMakerProductLineContext.current());
+                cancelRequests.add(cancelRequest);
+                results.add(new OrderBatchItemResponse(i, true, "completed",
+                        order(cancelRequest.orderId(), cancelRequest.userId(), "canceled", OrderSide.BUY,
+                                1L, 0L, OrderStatus.CANCELED)));
+            }
+            return new OrderBatchResponse(results.size(), results.size(), 0, results);
         }
 
         @Override
@@ -589,6 +643,7 @@ class MarketMakerServiceTest {
         @Override
         public OrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
             productLinesDuringOpenOrders.add(MarketMakerProductLineContext.current());
+            openOrdersCalls++;
             return new OrderQueryResponse(openOrders.size(), openOrders);
         }
     }

@@ -220,6 +220,15 @@ public class MarketMakerProperties {
         @Min(1)
         @Max(100000)
         private long maxPriceDeviationPpm = 5000L;
+        private Duration orderReconciliationInterval = Duration.ofMillis(500);
+        @Min(1)
+        @Max(500)
+        private int maxOrderOperationsPerCycle = 40;
+        @Min(0)
+        @Max(5_000_000)
+        private long volatilitySpreadMultiplierPpm = 500_000L;
+        @Positive
+        private long maxVolatilitySpreadTicks = 100L;
 
         public int getOrderBookDepth() {
             return orderBookDepth;
@@ -283,6 +292,38 @@ public class MarketMakerProperties {
 
         public void setMaxPriceDeviationPpm(long maxPriceDeviationPpm) {
             this.maxPriceDeviationPpm = maxPriceDeviationPpm;
+        }
+
+        public Duration getOrderReconciliationInterval() {
+            return orderReconciliationInterval;
+        }
+
+        public void setOrderReconciliationInterval(Duration orderReconciliationInterval) {
+            this.orderReconciliationInterval = orderReconciliationInterval;
+        }
+
+        public int getMaxOrderOperationsPerCycle() {
+            return maxOrderOperationsPerCycle;
+        }
+
+        public void setMaxOrderOperationsPerCycle(int maxOrderOperationsPerCycle) {
+            this.maxOrderOperationsPerCycle = maxOrderOperationsPerCycle;
+        }
+
+        public long getVolatilitySpreadMultiplierPpm() {
+            return volatilitySpreadMultiplierPpm;
+        }
+
+        public void setVolatilitySpreadMultiplierPpm(long volatilitySpreadMultiplierPpm) {
+            this.volatilitySpreadMultiplierPpm = volatilitySpreadMultiplierPpm;
+        }
+
+        public long getMaxVolatilitySpreadTicks() {
+            return maxVolatilitySpreadTicks;
+        }
+
+        public void setMaxVolatilitySpreadTicks(long maxVolatilitySpreadTicks) {
+            this.maxVolatilitySpreadTicks = maxVolatilitySpreadTicks;
         }
     }
 

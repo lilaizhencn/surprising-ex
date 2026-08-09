@@ -24,7 +24,13 @@ class MarketMakerApplicationYamlTest {
                 .contains(20);
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.trade.enabled"))
-                .contains(true);
+                .contains(false);
+        assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.market-maker.quoting.order-reconciliation-interval"))
+                .contains("500ms");
+        assertThat(sources)
+                .extracting(source -> source.getProperty("surprising.market-maker.quoting.max-order-operations-per-cycle"))
+                .contains(40);
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.market-maker.reference-market.enabled"))
                 .contains(false);

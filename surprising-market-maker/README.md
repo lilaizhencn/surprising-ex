@@ -1,7 +1,7 @@
 # surprising-market-maker
 
 
-内网做市商服务，用于控制盘口流动性、模拟深度、长期运行压测和完整交易链路验证。
+内网做市商服务，用于控制盘口流动性、稳定报价中心、长期运行压测和完整交易链路验证。
 
 这个模块不会绕过撮合。它和普通客户端一样调用订单入口 RPC，因此价格保护、保证金检查、post-only、订单 outbox、exchange-core 撮合、账户结算、风控、WebSocket、强平、资金费率和保险基金链路都会正常被验证。
 
@@ -14,6 +14,10 @@
 
 - `surprising.market-maker.engine.enabled` 默认是 `false`，显式开启前不会定时真实下单。已启用策略仍可以通过私有 `run-once` API 手动执行一轮报价。
 - 所有报价单都是 `LIMIT + GTX + postOnly=true`。
+- 默认只做被动报价，不主动发起 IOC 扫单；主动交易模式仅可在测试配置中显式开启。
+- 报价循环按 100ms 级别运行，开放订单以本地快照为主，并按 `order-reconciliation-interval` 周期通过 REST 修复，避免每轮重复查询订单服务。
+- 报价价差会根据 mark/order-book 锚点的 EWMA 绝对变动自动扩大，并受最大波动价差限制；没有复杂的策略版本传播或跨服务状态编排。
+- 每轮的撤单和补单总量受 `max-order-operations-per-cycle` 限制；撤单优先使用批量接口，状态不确定时保留原订单槽位，不重复补单。
 - 策略每轮都会查询账户持仓。账户状态不可用时，本轮 fail closed，不继续报价。
 - 当前净仓位达到 `maxInventorySteps` 后，会停止继续增加该方向风险的报价。
 - 自己的做市订单通过 `clientOrderId` 前缀识别；过期、偏离目标价格或不再需要的订单会撤掉。
@@ -102,9 +106,15 @@ surprising:
       max-open-orders-per-account-symbol: 30
       stale-order-max-age: 30s
       max-price-deviation-ppm: 5000
+      order-reconciliation-interval: 500ms
+      max-order-operations-per-cycle: 40
+      volatility-spread-multiplier-ppm: 500000
+      max-volatility-spread-ticks: 100
     risk:
       max-inventory-steps: 10000
       max-inventory-skew-ppm: 800000
+    trade:
+      enabled: false
     reference-market:
       enabled: false
       websocket-enabled: false
@@ -159,11 +169,13 @@ surprising:
 1. 如果开启多节点协调，先在 PostgreSQL 的 `market_maker_strategy_leases` 获取租约。
 2. 读取合约配置、最新盘口、最新标记价格和做市账号当前持仓。
 3. 优先使用 mark price 作为报价锚点；mark 不可用时回退盘口中价。
-4. 如果 `reference-market.enabled=true`，使用新鲜的 Binance/OKX/Bybit 风格参考盘口，把外部每档相对中间价的距离和该档数量映射成本地 ticks/steps，同时仍受本地价格偏离、post-only、数量和库存上限保护。
-5. 没有新鲜参考盘口时，继续按配置的 spread 和 spacing 围绕锚点生成对称 post-only 报价。
-6. 按库存偏移和库存上限调整报价数量和方向。
-7. 撤掉过期或偏离目标的自有订单，只补齐缺失报价。
-8. 把本轮 traceId 透传给 order-provider，后续订单事件、撮合事件、账户结算、风控事件和私有 WebSocket 推送都可以关联排查。
+4. 根据锚点的绝对价格变动维护进程内 EWMA 波动值，用它扩大报价半价差；波动价差始终受配置上限和本地价格偏离限制。
+5. 如果 `reference-market.enabled=true`，使用新鲜参考盘口，把外部每档相对中间价的距离和该档数量映射成本地 ticks/steps，同时仍受本地价格偏离、post-only、数量和库存上限保护。
+6. 没有新鲜参考盘口时，继续按配置的 spread 和 spacing 围绕锚点生成对称 post-only 报价。
+7. 按库存偏移和库存上限调整报价数量和方向。
+8. 首次读取开放订单后在本地缓存；缓存更新由下单、批量撤单结果和短周期 REST 对账共同驱动。撤单结果不完整或请求超时时，保留未确认订单，不在同一轮重复补单。
+9. 每轮先撤旧单再补缺口，撤单和补单共享操作预算，避免深度配置或异常订单导致订单服务突发压力。
+10. 把本轮 traceId 透传给 order-provider，后续订单事件、撮合事件、账户结算、风控事件和私有 WebSocket 推送都可以关联排查。
 
 参考市场校准在 `websocket-enabled=true` 时优先维护 WebSocket 本地订单簿；没有新鲜流式盘口时，回退 REST 深度快照。内置解析器覆盖 Binance depth stream、OKX books 和 Bybit V5 orderbook 消息，足够让压测时的本地盘口档位、档间距和每档数量跟随主流交易所深度；生产前仍需要补一轮启用流式 source 的长时间真实进程压测证据。
 

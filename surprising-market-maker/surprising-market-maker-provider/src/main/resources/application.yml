@@ -72,11 +72,15 @@ surprising:
       max-open-orders-per-account-symbol: 60
       stale-order-max-age: 2s
       max-price-deviation-ppm: 5000
+      order-reconciliation-interval: 500ms
+      max-order-operations-per-cycle: 40
+      volatility-spread-multiplier-ppm: 500000
+      max-volatility-spread-ticks: 100
     risk:
       max-inventory-steps: 10000
       max-inventory-skew-ppm: 800000
     trade:
-      enabled: true
+      enabled: false
       account-ids: [900001, 900002, 910001]
       min-interval-ms: 80
       min-quantity-steps: 1

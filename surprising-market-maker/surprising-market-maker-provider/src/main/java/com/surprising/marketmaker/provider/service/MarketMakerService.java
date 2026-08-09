@@ -28,11 +28,13 @@ import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.TraceContext;
+import com.surprising.trading.api.model.BatchCancelOrdersRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
+import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -58,6 +60,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.zip.CRC32;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,6 +90,9 @@ public class MarketMakerService {
     private final MarketMakerRunEventRepository runEventRepository;
     private final MarketMakerReferenceSampleRepository referenceSampleRepository;
     private final Map<String, StrategyRuntimeState> states = new ConcurrentHashMap<>();
+    private final Map<String, AtomicBoolean> cycleLocks = new ConcurrentHashMap<>();
+    private final Map<String, CachedOpenOrders> openOrderSnapshots = new ConcurrentHashMap<>();
+    private final Map<String, PriceState> priceStates = new ConcurrentHashMap<>();
     private final Map<String, Instant> lastTradeTimes = new ConcurrentHashMap<>();
     private final Map<String, OrderSide> lastTradeSides = new ConcurrentHashMap<>();
     private volatile Map<String, StrategyConfigOverride> strategyOverrides = Map.of();
@@ -358,7 +364,7 @@ public class MarketMakerService {
                     1, 0, state.lastError()));
         }
         try {
-            List<OrderResponse> openOrders = openOrders(accountId, symbol);
+            List<OrderResponse> openOrders = openOrders(productLine, accountId, symbol, now);
             List<OrderResponse> ownedLive = openOrders.stream()
                     .filter(order -> ownsOrder(accountPrefix, order))
                     .filter(this::isLive)
@@ -373,7 +379,8 @@ public class MarketMakerService {
             QuotePlan plan = !isTradableForProduct(instrument, productLine)
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of())
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
-                    orderBook, markPrice, position.signedQuantitySteps(), referenceOrderBook);
+                    orderBook, markPrice, position.signedQuantitySteps(), currentVolatility(strategy, symbol),
+                    referenceOrderBook);
             int desiredQuotes = plan.quotes().size();
             long matchedDesired = plan.quotes().stream()
                     .filter(quote -> hasLiveQuote(ownedLive, quote, accountPrefix))
@@ -604,6 +611,14 @@ public class MarketMakerService {
                                    long cycleSequence,
                                    String symbol,
                                    String traceId) {
+        String executionKey = strategyKey(strategy) + ":" + symbol;
+        AtomicBoolean cycleLock = cycleLocks.computeIfAbsent(executionKey, ignored -> new AtomicBoolean());
+        if (!cycleLock.compareAndSet(false, true)) {
+            state.addSkipped(1L);
+            recordRunEvent(strategy, symbol, null, cycleSequence, "SKIPPED",
+                    0, 0, 0, "CYCLE_IN_PROGRESS", null, traceId, Instant.now());
+            return;
+        }
         ProductLine previousProductLine = MarketMakerProductLineContext.current();
         MarketMakerProductLineContext.set(strategy.getProductLine());
         try {
@@ -624,10 +639,11 @@ public class MarketMakerService {
                 MarkPriceResponse markPrice = currentMarkPrice(strategy.getProductLine(), symbol, instrument.version());
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol,
                         strategy.getProductLine(), instrument);
+                long volatilityTicks = observeVolatility(strategy, symbol, instrument, orderBook, markPrice);
                 recordReferenceSample(strategy, symbol, cycleSequence, referenceOrderBook, traceId, now);
                 for (long accountId : strategy.getAccountIds()) {
                     quoteAccount(strategy, state, cycleSequence, symbol, instrument, orderBook, markPrice,
-                            referenceOrderBook, accountId, now, traceId);
+                            referenceOrderBook, volatilityTicks, accountId, now, traceId);
                 }
                 maybeTrade(strategy, state, cycleSequence, symbol, instrument, markPrice, now, traceId);
                 state.markSuccess(traceId, now);
@@ -642,6 +658,7 @@ public class MarketMakerService {
             }
         } finally {
             MarketMakerProductLineContext.set(previousProductLine);
+            cycleLock.set(false);
         }
     }
 
@@ -653,13 +670,14 @@ public class MarketMakerService {
                               OrderBookSnapshotResponse orderBook,
                               MarkPriceResponse markPrice,
                               ReferenceOrderBookSnapshot referenceOrderBook,
+                              long volatilityTicks,
                               long accountId,
                               Instant now,
                               String traceId) {
         PositionResponse position = currentPosition(strategy, accountId, symbol, instrument);
         QuotePlan plan = quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
-                orderBook, markPrice, position.signedQuantitySteps(), referenceOrderBook);
-        List<OrderResponse> openOrders = openOrders(accountId, symbol);
+                orderBook, markPrice, position.signedQuantitySteps(), volatilityTicks, referenceOrderBook);
+        List<OrderResponse> openOrders = openOrders(strategy.getProductLine(), accountId, symbol, now);
         ReconcileResult result = reconcile(strategy, accountId, symbol, plan, openOrders, cycleSequence, now);
         state.addCanceled(result.canceled());
         state.addSubmitted(result.submitted());
@@ -681,14 +699,24 @@ public class MarketMakerService {
                 .sorted(Comparator.comparing(OrderResponse::createdAt, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
         List<OrderResponse> kept = new ArrayList<>();
-        long canceled = 0L;
+        List<CancelOrderRequest> cancelRequests = new ArrayList<>();
+        int operationBudget = properties.getQuoting().getMaxOrderOperationsPerCycle();
         for (OrderResponse order : owned) {
             if (shouldKeep(order, plan.quotes(), accountPrefix, now)) {
                 kept.add(order);
+            } else if (cancelRequests.size() < operationBudget) {
+                cancelRequests.add(new CancelOrderRequest(accountId, order.orderId()));
             } else {
-                cancel(accountId, order.orderId());
-                canceled++;
+                kept.add(order);
             }
+        }
+        CancelResult cancelResult = cancelOrders(strategy.getProductLine(), accountId, symbol, cancelRequests);
+        long canceled = cancelResult.completed();
+        for (CancelOrderRequest failedRequest : cancelResult.failed()) {
+            owned.stream()
+                    .filter(order -> order.orderId() == failedRequest.orderId())
+                    .findFirst()
+                    .ifPresent(kept::add);
         }
 
         long submitted = 0L;
@@ -696,8 +724,12 @@ public class MarketMakerService {
         String rejectionReason = null;
         int maxOpenOrders = properties.getQuoting().getMaxOpenOrdersPerAccountSymbol();
         List<DesiredQuote> missingQuotes = new ArrayList<>();
+        int remainingOperationBudget = Math.max(0, operationBudget - cancelRequests.size());
         for (DesiredQuote quote : plan.quotes()) {
             if (kept.size() >= maxOpenOrders) {
+                break;
+            }
+            if (missingQuotes.size() >= remainingOperationBudget) {
                 break;
             }
             if (hasLiveQuote(kept, quote, accountPrefix)) {
@@ -723,6 +755,7 @@ public class MarketMakerService {
                                     ? "订单服务未返回报价结果" : response.rejectReason());
                             continue;
                         }
+                        rememberOrder(strategy.getProductLine(), accountId, symbol, response);
                         submitted++;
                         int placeholder = kept.indexOf(null);
                         if (placeholder >= 0) {
@@ -748,6 +781,7 @@ public class MarketMakerService {
                                         response == null ? null : response.rejectReason()));
                         continue;
                     }
+                    rememberOrder(strategy.getProductLine(), accountId, symbol, response);
                     submitted++;
                     // 占位元素只用于限制本周期的最大报价数，成功后替换为真实订单。
                     int placeholder = kept.indexOf(null);
@@ -768,6 +802,7 @@ public class MarketMakerService {
                                 ? "订单服务未返回报价结果" : response.rejectReason());
                         continue;
                     }
+                    rememberOrder(strategy.getProductLine(), accountId, symbol, response);
                     submitted++;
                     int placeholder = kept.indexOf(null);
                     if (placeholder >= 0) {
@@ -1025,6 +1060,27 @@ public class MarketMakerService {
         return (markPrice.markPriceUnits() + instrument.priceTickUnits() / 2L) / instrument.priceTickUnits();
     }
 
+    private long observeVolatility(MarketMakerProperties.Strategy strategy,
+                                   String symbol,
+                                   InstrumentResponse instrument,
+                                   OrderBookSnapshotResponse orderBook,
+                                   MarkPriceResponse markPrice) {
+        long anchor = markPriceTicks(instrument, markPrice);
+        if (anchor <= 0) {
+            anchor = midPriceTicks(orderBook);
+        }
+        if (anchor <= 0) {
+            return currentVolatility(strategy, symbol);
+        }
+        return priceStates.computeIfAbsent(strategyKey(strategy) + ":" + symbol, ignored -> new PriceState())
+                .observe(anchor);
+    }
+
+    private long currentVolatility(MarketMakerProperties.Strategy strategy, String symbol) {
+        PriceState state = priceStates.get(strategyKey(strategy) + ":" + symbol);
+        return state == null ? 0L : state.volatilityTicks();
+    }
+
     private long midPriceTicks(OrderBookSnapshotResponse orderBook) {
         long bestBid = bestBid(orderBook);
         long bestAsk = bestAsk(orderBook);
@@ -1061,19 +1117,106 @@ public class MarketMakerService {
         return orderBook.asks().get(0);
     }
 
-    private void cancel(long accountId, long orderId) {
-        try {
-            orderRpcApi.cancel(new CancelOrderRequest(accountId, orderId));
-        } catch (FeignException.NotFound ex) {
-            // 订单在读取开放订单和撤单之间已被撮合或其他周期撤掉，按幂等成功处理。
-            log.debug("做市撤单时订单已不存在 accountId={} orderId={}", accountId, orderId);
+    private CancelResult cancelOrders(ProductLine productLine,
+                                      long accountId,
+                                      String symbol,
+                                      List<CancelOrderRequest> requests) {
+        if (requests.isEmpty()) {
+            return new CancelResult(0L, List.of());
         }
+        try {
+            OrderBatchResponse response = orderRpcApi.cancelBatch(new BatchCancelOrdersRequest(requests));
+            if (response != null) {
+                long canceled = response.results().stream()
+                        .filter(item -> item != null && item.success())
+                        .count();
+                List<CancelOrderRequest> failed = new ArrayList<>();
+                for (int i = 0; i < requests.size(); i++) {
+                    int requestIndex = i;
+                    boolean success = response.results().stream()
+                            .anyMatch(item -> item != null && item.index() == requestIndex && item.success());
+                    if (success) {
+                        forgetOrder(productLine, accountId, symbol, requests.get(i).orderId());
+                    } else {
+                        failed.add(requests.get(i));
+                    }
+                }
+                return new CancelResult(canceled, List.copyOf(failed));
+            }
+        } catch (UnsupportedOperationException ex) {
+            return cancelIndividually(productLine, accountId, symbol, requests);
+        } catch (FeignException.NotFound ex) {
+            return cancelIndividually(productLine, accountId, symbol, requests);
+        } catch (RuntimeException ex) {
+            log.warn("做市批量撤单状态不确定 accountId={} symbol={} error={}", accountId, symbol, ex.getMessage());
+            return new CancelResult(0L, List.copyOf(requests));
+        }
+        return cancelIndividually(productLine, accountId, symbol, requests);
     }
 
-    private List<OrderResponse> openOrders(long accountId, String symbol) {
+    private CancelResult cancelIndividually(ProductLine productLine,
+                                            long accountId,
+                                            String symbol,
+                                            List<CancelOrderRequest> requests) {
+        long canceled = 0L;
+        List<CancelOrderRequest> failed = new ArrayList<>();
+        for (CancelOrderRequest request : requests) {
+            try {
+                orderRpcApi.cancel(request);
+                canceled++;
+                forgetOrder(productLine, accountId, symbol, request.orderId());
+            } catch (FeignException.NotFound ex) {
+                canceled++;
+                forgetOrder(productLine, accountId, symbol, request.orderId());
+            } catch (RuntimeException ex) {
+                failed.add(request);
+                log.warn("做市撤单状态不确定 accountId={} orderId={} error={}",
+                        accountId, request.orderId(), ex.getMessage());
+            }
+        }
+        return new CancelResult(canceled, List.copyOf(failed));
+    }
+
+    private List<OrderResponse> openOrders(ProductLine productLine,
+                                            long accountId,
+                                            String symbol,
+                                            Instant now) {
+        String key = orderSnapshotKey(productLine, accountId, symbol);
+        CachedOpenOrders cached = openOrderSnapshots.get(key);
+        Duration interval = properties.getQuoting().getOrderReconciliationInterval();
+        if (cached != null && interval != null && cached.refreshedAt().plus(interval).isAfter(now)) {
+            return cached.orders();
+        }
         OrderQueryResponse response = orderRpcApi.openOrders(accountId, symbol,
                 properties.getQuoting().getMaxOpenOrdersPerAccountSymbol(), null);
-        return response == null || response.orders() == null ? List.of() : response.orders();
+        List<OrderResponse> orders = response == null || response.orders() == null
+                ? List.of() : List.copyOf(response.orders());
+        openOrderSnapshots.put(key, new CachedOpenOrders(orders, now));
+        return orders;
+    }
+
+    private void rememberOrder(ProductLine productLine, long accountId, String symbol, OrderResponse order) {
+        if (order == null) {
+            return;
+        }
+        String key = orderSnapshotKey(productLine, accountId, symbol);
+        openOrderSnapshots.computeIfPresent(key, (ignored, cached) -> {
+            List<OrderResponse> orders = new ArrayList<>(cached.orders());
+            orders.removeIf(existing -> existing != null && existing.orderId() == order.orderId());
+            orders.add(order);
+            return new CachedOpenOrders(List.copyOf(orders), cached.refreshedAt());
+        });
+    }
+
+    private void forgetOrder(ProductLine productLine, long accountId, String symbol, long orderId) {
+        String key = orderSnapshotKey(productLine, accountId, symbol);
+        openOrderSnapshots.computeIfPresent(key, (ignored, cached) -> new CachedOpenOrders(
+                cached.orders().stream().filter(order -> order == null || order.orderId() != orderId).toList(),
+                cached.refreshedAt()));
+    }
+
+    private String orderSnapshotKey(ProductLine productLine, long accountId, String symbol) {
+        return productLine.name() + ":" + accountId + ":" + symbol;
     }
 
     private MarkPriceResponse latestMarkPrice(String symbol, long instrumentVersion) {
@@ -1541,7 +1684,32 @@ public class MarketMakerService {
     private record ReconcileResult(long submitted, long canceled, long rejected, String rejectionReason) {
     }
 
+    private record CachedOpenOrders(List<OrderResponse> orders, Instant refreshedAt) {
+    }
+
+    private record CancelResult(long completed, List<CancelOrderRequest> failed) {
+    }
+
     private record TradeTarget(long priceTicks, long availableQuantitySteps) {
+    }
+
+    private static final class PriceState {
+        private long lastPriceTicks;
+        private long volatilityTicks;
+
+        private synchronized long observe(long priceTicks) {
+            if (lastPriceTicks > 0) {
+                long delta = priceTicks >= lastPriceTicks
+                        ? priceTicks - lastPriceTicks : lastPriceTicks - priceTicks;
+                volatilityTicks += (delta - volatilityTicks) / 4L;
+            }
+            lastPriceTicks = priceTicks;
+            return volatilityTicks;
+        }
+
+        private synchronized long volatilityTicks() {
+            return volatilityTicks;
+        }
     }
 
     private static final class NoopMarketMakerRunEventRepository implements MarketMakerRunEventRepository {

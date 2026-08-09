@@ -116,6 +116,20 @@ class QuotePlannerTest {
     }
 
     @Test
+    void widensHalfSpreadFromObservedVolatilityWithoutChangingAnchor() {
+        MarketMakerProperties.Quoting quoting = quoting();
+        quoting.setVolatilitySpreadMultiplierPpm(500_000L);
+        quoting.setMaxVolatilitySpreadTicks(100L);
+
+        QuotePlan plan = quotePlanner.plan(strategy(), quoting, risk(), instrument(),
+                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, 100L, null);
+
+        assertThat(plan.anchorPriceTicks()).isEqualTo(50_000L);
+        assertThat(plan.quotes().get(0).priceTicks()).isEqualTo(49_950L);
+        assertThat(plan.quotes().get(1).priceTicks()).isEqualTo(50_050L);
+    }
+
+    @Test
     void capsReferenceMarketQuantityAtStrategyBaseQuantity() {
         ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "WEBSOCKET", "BTC-USDT",
                 List.of(new ReferenceOrderBookLevel(49_990L, 40L)),

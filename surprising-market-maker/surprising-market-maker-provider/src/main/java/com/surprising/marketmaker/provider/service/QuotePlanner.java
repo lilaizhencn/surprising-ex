@@ -27,7 +27,7 @@ public class QuotePlanner {
                           OrderBookSnapshotResponse orderBook,
                           MarkPriceResponse markPrice,
                           long signedPositionSteps) {
-        return plan(strategy, quoting, risk, instrument, orderBook, markPrice, signedPositionSteps, null);
+        return plan(strategy, quoting, risk, instrument, orderBook, markPrice, signedPositionSteps, 0L, null);
     }
 
     public QuotePlan plan(MarketMakerProperties.Strategy strategy,
@@ -38,9 +38,23 @@ public class QuotePlanner {
                           MarkPriceResponse markPrice,
                           long signedPositionSteps,
                           ReferenceOrderBookSnapshot referenceOrderBook) {
+        return plan(strategy, quoting, risk, instrument, orderBook, markPrice, signedPositionSteps, 0L,
+                referenceOrderBook);
+    }
+
+    public QuotePlan plan(MarketMakerProperties.Strategy strategy,
+                          MarketMakerProperties.Quoting quoting,
+                          MarketMakerProperties.Risk risk,
+                          InstrumentResponse instrument,
+                          OrderBookSnapshotResponse orderBook,
+                          MarkPriceResponse markPrice,
+                          long signedPositionSteps,
+                          long volatilityTicks,
+                          ReferenceOrderBookSnapshot referenceOrderBook) {
         long anchor = anchorPriceTicks(strategy, instrument, orderBook, markPrice, referenceOrderBook);
         int levels = orderLevels(strategy, quoting);
-        long halfSpread = Math.max(1L, spreadTicks(strategy, quoting) / 2L);
+        long halfSpread = Math.max(Math.max(1L, spreadTicks(strategy, quoting) / 2L),
+                volatilitySpreadTicks(quoting, volatilityTicks));
         long spacing = levelSpacingTicks(strategy, quoting);
         long maxDeviationTicks = Math.max(1L, multiplyDiv(anchor, quoting.getMaxPriceDeviationPpm(), ONE_PPM));
         long minPrice = Math.max(1L, anchor - maxDeviationTicks);
@@ -175,6 +189,14 @@ public class QuotePlanner {
 
     private long levelSpacingTicks(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Quoting quoting) {
         return strategy.getLevelSpacingTicks() > 0 ? strategy.getLevelSpacingTicks() : quoting.getLevelSpacingTicks();
+    }
+
+    private long volatilitySpreadTicks(MarketMakerProperties.Quoting quoting, long volatilityTicks) {
+        if (volatilityTicks <= 0 || quoting.getVolatilitySpreadMultiplierPpm() <= 0) {
+            return 0L;
+        }
+        long spread = multiplyDiv(volatilityTicks, quoting.getVolatilitySpreadMultiplierPpm(), ONE_PPM);
+        return Math.min(Math.max(1L, spread), quoting.getMaxVolatilitySpreadTicks());
     }
 
     private long maxInventory(MarketMakerProperties.Strategy strategy, MarketMakerProperties.Risk risk) {
