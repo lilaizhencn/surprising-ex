@@ -6,6 +6,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -15,6 +16,7 @@ public class ProductTransferCoordinator {
     private final ProductTransferStore store;
     private final ProductAccountClient accountClient;
 
+    @Autowired
     public ProductTransferCoordinator(ProductTransferStore store, ProductAccountClient accountClient) {
         this.store = store;
         this.accountClient = accountClient;
