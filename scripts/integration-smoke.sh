@@ -503,7 +503,7 @@ SQL
 
 if [[ "${RUN_MAVEN:-false}" == "true" ]]; then
   echo "Running Maven tests"
-  JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}"
+  JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}"
   if [[ -n "${JAVA_HOME}" ]]; then
     PATH="${JAVA_HOME}/bin:${PATH}" mvn -q test
   else

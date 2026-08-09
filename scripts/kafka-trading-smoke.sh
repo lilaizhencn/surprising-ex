@@ -272,7 +272,7 @@ package_services() {
   if [[ "${BUILD_SERVICES}" != "true" ]]; then
     return
   fi
-  JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+  JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}" \
     mvn -q -pl :surprising-order-provider,:surprising-matching-provider,:surprising-account-provider \
     -am -DskipTests package
 }

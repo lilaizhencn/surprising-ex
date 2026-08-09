@@ -11,13 +11,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}" \
   mvn -q -pl :surprising-trading-api -am -DskipTests install
 
-JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}" \
   mvn -q -pl :surprising-matching-provider -am -DskipTests test-compile
 
-JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21 2>/dev/null || true)}" \
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}" \
   mvn -q -U -pl :surprising-matching-provider -DincludeScope=test \
   -Dmdep.outputFile="${CP_FILE}" dependency:build-classpath
 

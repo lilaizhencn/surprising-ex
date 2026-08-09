@@ -78,7 +78,7 @@ partition 接管后，进程会退出并由 systemd/ASG 重启，再从 PostgreS
 
 选择 G1 的原因：
 
-- JDK 21 默认和成熟度高，适合当前大多数 Spring Boot 服务；
+- JDK 25 作为当前项目统一运行时，适合当前 Spring Boot 服务；
 - `Xms=Xmx` 加 `AlwaysPreTouch` 避免交易高峰临时扩堆和缺页抖动；
 - 堆只占主机内存的 25%～50%，给 Netty、线程栈、exchange-core、RocksDB 和 Linux 页缓存留空间；
 - `MaxGCPauseMillis` 是调优目标，不是延迟保证，最终以压测的 GC 日志和端到端延迟为准。
