@@ -15,6 +15,12 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 索引、约束和后台权限，也会为存量提现补齐网关生成的外部引用；发现重复引用时会失败停止，不会静默合并提现记录。
 新建数据库仍通过根目录 `init.sql` 初始化。
 
+账户成交侧结算审计表缺失的存量数据库，执行
+`migrations/20260809_account_trade_settlement_sides.sql`。该迁移幂等创建
+`account_trade_settlement_sides`、未完成结算监控索引和 `account_trade_settlement_completions` 视图。
+账户未平仓量快照表缺失时，再执行
+`migrations/20260809_account_open_interest_shards.sql`，创建分片表、修订号序列、索引和聚合视图。
+
 ## 管理网关表
 
 `gateway_admin_operation_logs.duration_ms` 保存管理网关代理请求耗时，作为本地安全审计证据。
