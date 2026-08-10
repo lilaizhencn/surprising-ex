@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PRODUCT_LINES_EXPLICIT="${PRODUCT_LINES+x}"
+TEST_PROFILE="${TEST_PROFILE:-auto}"
+source "${ROOT_DIR}/scripts/test-environment-profile.sh"
+test_profile_detect
 DB_USER="${DB_USER:-surprising}"
 DB_PASSWORD="${DB_PASSWORD:-surprising}"
 DB_NAME="${DB_NAME:-surprising_product_line_smoke}"
@@ -13,8 +17,10 @@ KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
 export KAFKA_HEAP_OPTS="${KAFKA_HEAP_OPTS:--Xms32M -Xmx128M}"
 ACCOUNT_COMMAND_PARTITIONS="${ACCOUNT_COMMAND_PARTITIONS:-32}"
 MARKET_MAKER_CYCLE_DELAY_MS="${MARKET_MAKER_CYCLE_DELAY_MS:-1000}"
-PRODUCT_LINES="${PRODUCT_LINES:-LINEAR_PERPETUAL LINEAR_DELIVERY OPTION SPOT}"
-BUILD_SERVICES="${BUILD_SERVICES:-true}"
+if [[ -z "${PRODUCT_LINES_EXPLICIT}" ]]; then
+  PRODUCT_LINES="${TEST_DEFAULT_PRODUCT_LINE:-LINEAR_PERPETUAL}"
+fi
+BUILD_SERVICES="${BUILD_SERVICES:-auto}"
 KEEP_TMP="${KEEP_TMP:-true}"
 RESET_KAFKA="${RESET_KAFKA:-false}"
 CREATE_KAFKA_TOPICS="${CREATE_KAFKA_TOPICS:-false}"
@@ -28,12 +34,16 @@ RUN_ID="${RUN_ID:-$(date +%s%N)}"
 RUN_SEQ=$((RUN_ID % 1000000000))
 RUN_SEQUENCE_BASE=$((500000000 + (RUN_SEQ % 500000) * 3000))
 TMP_DIR="$(mktemp -d /tmp/surprising-product-line-api.XXXXXX)"
+if [[ -n "${STRESS_TMP_DIR_FILE:-}" ]]; then
+  mkdir -p "$(dirname "${STRESS_TMP_DIR_FILE}")"
+  printf '%s\n' "${TMP_DIR}" >"${STRESS_TMP_DIR_FILE}"
+fi
 MULTI_SYMBOL_STRESS="${MULTI_SYMBOL_STRESS:-false}"
-STRESS_SYMBOL_COUNT="${STRESS_SYMBOL_COUNT:-20}"
-STRESS_USER_COUNT="${STRESS_USER_COUNT:-2000}"
+STRESS_SYMBOL_COUNT="${STRESS_SYMBOL_COUNT:-${TEST_STRESS_SYMBOL_COUNT}}"
+STRESS_USER_COUNT="${STRESS_USER_COUNT:-${TEST_STRESS_USER_COUNT}}"
 STRESS_SCENARIO="${STRESS_SCENARIO:-trade}"
-STRESS_LOAD_CONCURRENCY="${STRESS_LOAD_CONCURRENCY:-128}"
-STRESS_MAKER_LOAD_CONCURRENCY="${STRESS_MAKER_LOAD_CONCURRENCY:-32}"
+STRESS_LOAD_CONCURRENCY="${STRESS_LOAD_CONCURRENCY:-${TEST_STRESS_LOAD_CONCURRENCY}}"
+STRESS_MAKER_LOAD_CONCURRENCY="${STRESS_MAKER_LOAD_CONCURRENCY:-${TEST_STRESS_LOAD_CONCURRENCY}}"
 STRESS_MAKER_DEPTH_LEVELS="${STRESS_MAKER_DEPTH_LEVELS:-6}"
 STRESS_MAKER_REFRESH_CYCLES="${STRESS_MAKER_REFRESH_CYCLES:-3}"
 STRESS_MAKER_REFRESH_LEVELS="${STRESS_MAKER_REFRESH_LEVELS:-2}"
@@ -47,25 +57,25 @@ KAFKA_ASSIGNMENT_TIMEOUT_SECONDS="${KAFKA_ASSIGNMENT_TIMEOUT_SECONDS:-90}"
 KAFKA_TOPIC_RESET_TIMEOUT_SECONDS="${KAFKA_TOPIC_RESET_TIMEOUT_SECONDS:-60}"
 STRESS_REPORT_FILE="${STRESS_REPORT_FILE:-${TMP_DIR}/stress-report.md}"
 STRESS_RUN_LABEL="${STRESS_RUN_LABEL:-}"
-STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-32}"
-STRESS_MATCHING_MAX_POLL_RECORDS="${STRESS_MATCHING_MAX_POLL_RECORDS:-128}"
-STRESS_MATCHING_ENGINE_SHARDS="${STRESS_MATCHING_ENGINE_SHARDS:-4}"
-STRESS_MATCHING_RISK_SHARDS="${STRESS_MATCHING_RISK_SHARDS:-2}"
-STRESS_MATCHING_OUTBOX_BATCH_SIZE="${STRESS_MATCHING_OUTBOX_BATCH_SIZE:-1000}"
+STRESS_MATCHING_KAFKA_CONCURRENCY="${STRESS_MATCHING_KAFKA_CONCURRENCY:-${TEST_MATCHING_KAFKA_CONCURRENCY}}"
+STRESS_MATCHING_MAX_POLL_RECORDS="${STRESS_MATCHING_MAX_POLL_RECORDS:-${TEST_MATCHING_MAX_POLL_RECORDS}}"
+STRESS_MATCHING_ENGINE_SHARDS="${STRESS_MATCHING_ENGINE_SHARDS:-${TEST_MATCHING_ENGINE_SHARDS}}"
+STRESS_MATCHING_RISK_SHARDS="${STRESS_MATCHING_RISK_SHARDS:-${TEST_MATCHING_RISK_SHARDS}}"
+STRESS_MATCHING_OUTBOX_BATCH_SIZE="${STRESS_MATCHING_OUTBOX_BATCH_SIZE:-${TEST_OUTBOX_BATCH_SIZE}}"
 STRESS_MATCHING_OUTBOX_PUBLISH_DELAY_MS="${STRESS_MATCHING_OUTBOX_PUBLISH_DELAY_MS:-20}"
-STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT="${STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT:-64}"
+STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT="${STRESS_MATCHING_OUTBOX_MAX_IN_FLIGHT:-${TEST_OUTBOX_MAX_IN_FLIGHT}}"
 STRESS_MATCHING_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_MATCHING_OUTBOX_MAX_ROWS_PER_KEY:-32}"
-STRESS_ORDER_OUTBOX_BATCH_SIZE="${STRESS_ORDER_OUTBOX_BATCH_SIZE:-1000}"
+STRESS_ORDER_OUTBOX_BATCH_SIZE="${STRESS_ORDER_OUTBOX_BATCH_SIZE:-${TEST_OUTBOX_BATCH_SIZE}}"
 STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS="${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS:-20}"
-STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT="${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT:-64}"
+STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT="${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT:-${TEST_OUTBOX_MAX_IN_FLIGHT}}"
 STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY:-32}"
-STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-32}"
-STRESS_ACCOUNT_OUTBOX_BATCH_SIZE="${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE:-1000}"
+STRESS_ACCOUNT_KAFKA_CONCURRENCY="${STRESS_ACCOUNT_KAFKA_CONCURRENCY:-${TEST_ACCOUNT_KAFKA_CONCURRENCY}}"
+STRESS_ACCOUNT_OUTBOX_BATCH_SIZE="${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE:-${TEST_OUTBOX_BATCH_SIZE}}"
 STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS="${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS:-20}"
-STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT="${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT:-32}"
+STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT="${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT:-${TEST_ACCOUNT_OUTBOX_MAX_IN_FLIGHT}}"
 STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY:-32}"
-STRESS_RISK_KAFKA_CONCURRENCY="${STRESS_RISK_KAFKA_CONCURRENCY:-4}"
-STRESS_RISK_OUTBOX_BATCH_SIZE="${STRESS_RISK_OUTBOX_BATCH_SIZE:-1000}"
+STRESS_RISK_KAFKA_CONCURRENCY="${STRESS_RISK_KAFKA_CONCURRENCY:-${TEST_RISK_KAFKA_CONCURRENCY}}"
+STRESS_RISK_OUTBOX_BATCH_SIZE="${STRESS_RISK_OUTBOX_BATCH_SIZE:-${TEST_OUTBOX_BATCH_SIZE}}"
 STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS:-20}"
 STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY="${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY:-32}"
 STRESS_LIQUIDATION_KAFKA_CONCURRENCY="${STRESS_LIQUIDATION_KAFKA_CONCURRENCY:-32}"
@@ -73,7 +83,7 @@ STRESS_LIQUIDATION_WAIT_SECONDS="${STRESS_LIQUIDATION_WAIT_SECONDS:-900}"
 STRESS_LIQUIDATION_MARK_FACTOR_PPM="${STRESS_LIQUIDATION_MARK_FACTOR_PPM:-800000}"
 STRESS_LIQUIDATION_WALLET_RATE_PPM="${STRESS_LIQUIDATION_WALLET_RATE_PPM:-120000}"
 STRESS_MARK_PRICE_FACTOR_PPM="${STRESS_MARK_PRICE_FACTOR_PPM:-1000000}"
-STRESS_TARGET_TPS="${STRESS_TARGET_TPS:-0}"
+STRESS_TARGET_TPS="${STRESS_TARGET_TPS:-${TEST_TARGET_TPS}}"
 STRESS_HOT_SYMBOL_COUNT="${STRESS_HOT_SYMBOL_COUNT:-0}"
 STRESS_HOT_TRAFFIC_PERCENT="${STRESS_HOT_TRAFFIC_PERCENT:-80}"
 STRESS_INTERNAL_MARKET_MAKER_WHITELIST="${STRESS_INTERNAL_MARKET_MAKER_WHITELIST:-true}"
@@ -81,6 +91,9 @@ STRESS_RESET_PG_STAT_STATEMENTS="${STRESS_RESET_PG_STAT_STATEMENTS:-true}"
 STRESS_KAFKA_LAG_SAMPLE_SECONDS="${STRESS_KAFKA_LAG_SAMPLE_SECONDS:-2}"
 ACCOUNT_RESTART_RECOVERY="${ACCOUNT_RESTART_RECOVERY:-false}"
 ACCOUNT_RESTART_MODE="${ACCOUNT_RESTART_MODE:-kill}"
+RECOVERY_PROVIDER="${RECOVERY_PROVIDER:-}"
+RECOVERY_MODE="${RECOVERY_MODE:-kill}"
+RECOVERY_TIMELINE_FILE="${RECOVERY_TIMELINE_FILE:-}"
 RUN_WEBSOCKET_SMOKE="${RUN_WEBSOCKET_SMOKE:-false}"
 WS_TIMEOUT_MS="${WS_TIMEOUT_MS:-300000}"
 STRESS_PG_STAT_STATEMENTS_AVAILABLE=false
@@ -179,6 +192,40 @@ restart_account_for_recovery() {
     stop_provider_by_name account
   fi
   start_provider account "${product_line}"
+}
+
+restart_provider_for_recovery() {
+  local product_line="$1"
+  local provider="$2"
+  local recovery_started recovery_ended
+  case "${provider}" in
+    account|matching|margin-ops|price|trading-entry|edge) ;;
+    *) echo "Unsupported RECOVERY_PROVIDER=${provider}" >&2; exit 1 ;;
+  esac
+  echo "Restarting ${product_line} ${provider} provider for recovery verification (mode=${RECOVERY_MODE})"
+  recovery_started="$(date +%s%3N)"
+  if [[ "${RECOVERY_MODE}" == "kill" ]]; then
+    local i pid
+    for ((i = 0; i < ${#PROVIDER_PIDS[@]}; i++)); do
+      if [[ "${PROVIDER_NAMES[$i]}" != "${provider}" ]]; then
+        continue
+      fi
+      pid="${PROVIDER_PIDS[$i]}"
+      if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
+        kill -KILL "${pid}" >/dev/null 2>&1 || true
+        wait "${pid}" >/dev/null 2>&1 || true
+      fi
+      PROVIDER_PIDS[$i]=""
+    done
+  else
+    stop_provider_by_name "${provider}"
+  fi
+  start_provider "${provider}" "${product_line}"
+  recovery_ended="$(date +%s%3N)"
+  if [[ -n "${RECOVERY_TIMELINE_FILE}" ]]; then
+    mkdir -p "$(dirname "${RECOVERY_TIMELINE_FILE}")"
+    printf 'provider=%s\trto_ms=%s\n' "${provider}" "$((recovery_ended - recovery_started))" >>"${RECOVERY_TIMELINE_FILE}"
+  fi
 }
 
 stop_all_providers() {
@@ -1444,8 +1491,28 @@ package_services() {
 }
 
 register_provider_pid() {
+  local active=0 pid
+  for pid in "${PROVIDER_PIDS[@]}"; do
+    [[ -n "${pid}" ]] && active=$((active + 1))
+  done
+  if (( active >= TEST_MAX_PROVIDER_PROCESSES )); then
+    echo "provider process limit exceeded: limit=${TEST_MAX_PROVIDER_PROCESSES}" >&2
+    exit 1
+  fi
   PROVIDER_NAMES+=("$1")
   PROVIDER_PIDS+=("$2")
+}
+
+profile_service_selected() {
+  local services="$1"
+  local needle="$2"
+  local service
+  for service in ${services}; do
+    if [[ "${service}" == "${needle}" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 matching_java_args() {
@@ -1788,6 +1855,15 @@ start_provider() {
   jar="$(boot_jar "${module}" "${artifact}")"
   log_file="${TMP_DIR}/${product_line}-${name}.log"
   local java_args=()
+  local profile_java_args=()
+  local arg
+  if [[ -n "${TEST_JAVA_OPTS:-}" ]]; then
+    read -r -a profile_java_args <<<"${TEST_JAVA_OPTS}"
+  else
+    while IFS= read -r arg; do
+      profile_java_args+=("${arg}")
+    done < <(test_profile_java_args_for_service "${name}")
+  fi
   local mark_price_max_age=30s
   if [[ "${name}" == "trading-entry" ]]; then
     mark_price_max_age=15s
@@ -1800,7 +1876,18 @@ start_provider() {
     "--surprising.price.consumer.group-id=product-smoke-${RUN_ID}-$(product_slug "${product_line}")-${name}-mark-price"
     "--surprising.price.consumer.max-age=${mark_price_max_age}"
   )
-  local arg
+  if [[ -n "${SERVER_TOMCAT_THREADS_MAX:-}" ]]; then
+    app_args+=("--server.tomcat.threads.max=${SERVER_TOMCAT_THREADS_MAX}")
+  fi
+  if [[ -n "${SERVER_TOMCAT_THREADS_MIN_SPARE:-}" ]]; then
+    app_args+=("--server.tomcat.threads.min-spare=${SERVER_TOMCAT_THREADS_MIN_SPARE}")
+  fi
+  if [[ -n "${SERVER_TOMCAT_ACCEPT_COUNT:-}" ]]; then
+    app_args+=("--server.tomcat.accept-count=${SERVER_TOMCAT_ACCEPT_COUNT}")
+  fi
+  if [[ -n "${SERVER_TOMCAT_MAX_CONNECTIONS:-}" ]]; then
+    app_args+=("--server.tomcat.max-connections=${SERVER_TOMCAT_MAX_CONNECTIONS}")
+  fi
   if [[ "${name}" == "matching" ]]; then
     while IFS= read -r arg; do
       java_args+=("${arg}")
@@ -1819,7 +1906,7 @@ start_provider() {
       "ACCOUNT_WAL_DIR=${TMP_DIR}/account-wal" \
       "PRODUCT_LINE=${product_line}" \
       "PRODUCT_TOPICS_ENABLED=true" \
-      java ${java_args[@]+"${java_args[@]}"} -jar "${jar}" "${app_args[@]}"
+      java "${profile_java_args[@]}" "${java_args[@]}" -jar "${jar}" "${app_args[@]}"
   ) >"${log_file}" 2>&1 &
   register_provider_pid "${name}" "$!"
   wait_http "${product_line}-${name}" "${port}"
@@ -1827,10 +1914,21 @@ start_provider() {
 
 start_providers_for_line() {
   local product_line="$1"
-  start_provider instrument "${product_line}"
-  if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
-    start_provider price "${product_line}"
+  local selected_services
+  selected_services="$(test_profile_services "${product_line}" "${STRESS_SCENARIO}")"
+  local required_service
+  for required_service in instrument price matching account trading-entry edge; do
+    if ! profile_service_selected "${selected_services}" "${required_service}"; then
+      echo "TEST_SERVICES must include ${required_service} for API smoke: ${selected_services}" >&2
+      exit 1
+    fi
+  done
+  if is_margin_product "${product_line}" && ! profile_service_selected "${selected_services}" margin-ops; then
+    echo "TEST_SERVICES must include margin-ops for ${product_line}: ${selected_services}" >&2
+    exit 1
   fi
+  start_provider instrument "${product_line}"
+  start_provider price "${product_line}"
   start_provider matching "${product_line}"
   start_provider account "${product_line}"
   if is_margin_product "${product_line}"; then
@@ -1838,9 +1936,6 @@ start_providers_for_line() {
   fi
   start_provider trading-entry "${product_line}"
   start_provider edge "${product_line}"
-  if [[ "${MULTI_SYMBOL_STRESS}" != "true" ]]; then
-    start_provider price "${product_line}"
-  fi
 }
 
 start_price_refresher() {
@@ -4512,7 +4607,9 @@ run_manual_open_close_flow() {
   maker_order="$(place_order "${product_line}" "${MANUAL_MAKER_USER}" "manual-open-maker-${product_line}-${RUN_ID}" "SELL" "LIMIT" "GTC" "${price}" "${qty}" false true)"
   wait_order_status "${product_line}" "${maker_order}" "ACCEPTED"
   taker_order="$(place_order "${product_line}" "${TAKER_USER}" "manual-open-taker-${product_line}-${RUN_ID}" "BUY" "LIMIT" "IOC" "${price}" "${qty}" false false)"
-  if [[ "${ACCOUNT_RESTART_RECOVERY}" == "true" ]]; then
+  if [[ -n "${RECOVERY_PROVIDER}" ]]; then
+    restart_provider_for_recovery "${product_line}" "${RECOVERY_PROVIDER}"
+  elif [[ "${ACCOUNT_RESTART_RECOVERY}" == "true" ]]; then
     restart_account_for_recovery "${product_line}"
   fi
   wait_order_filled "${product_line}" "${taker_order}" "${qty}"
@@ -4786,7 +4883,9 @@ run_spot_asset_flow() {
   taker="$(place_order "${product_line}" "${TAKER_USER}" "spot-buy-taker-${RUN_ID}" "BUY" "LIMIT" "IOC" "${price}" "${qty}" false false)"
   wait_order_filled "${product_line}" "${taker}" "${qty}"
   wait_account_processed_order "${product_line}" "${taker}"
-  if [[ "${ACCOUNT_RESTART_RECOVERY}" == "true" ]]; then
+  if [[ -n "${RECOVERY_PROVIDER}" ]]; then
+    restart_provider_for_recovery "${product_line}" "${RECOVERY_PROVIDER}"
+  elif [[ "${ACCOUNT_RESTART_RECOVERY}" == "true" ]]; then
     # 现货没有衍生品持仓，但账户余额、资产冻结和现货预占同样必须经受进程重启恢复。
     restart_account_for_recovery "${product_line}"
     wait_account_processed_order "${product_line}" "${taker}"
@@ -4889,6 +4988,16 @@ validate_multi_symbol_stress_config() {
       exit 1
       ;;
   esac
+  case "${RECOVERY_MODE}" in
+    kill|term) ;;
+    *) echo "RECOVERY_MODE must be kill or term" >&2; exit 1 ;;
+  esac
+  if [[ -n "${RECOVERY_PROVIDER}" ]]; then
+    case "${RECOVERY_PROVIDER}" in
+      account|matching|margin-ops|price|trading-entry|edge) ;;
+      *) echo "Unsupported RECOVERY_PROVIDER=${RECOVERY_PROVIDER}" >&2; exit 1 ;;
+    esac
+  fi
   if [[ "${STRESS_SCENARIO}" == "liquidation" && "${PRODUCT_LINES}" != "LINEAR_PERPETUAL" ]]; then
     echo "STRESS_SCENARIO=liquidation currently supports only LINEAR_PERPETUAL" >&2
     exit 1

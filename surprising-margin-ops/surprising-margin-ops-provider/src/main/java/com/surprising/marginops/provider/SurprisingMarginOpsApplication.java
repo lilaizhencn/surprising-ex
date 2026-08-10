@@ -21,6 +21,7 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import tools.jackson.databind.ObjectMapper;
@@ -57,6 +58,7 @@ import tools.jackson.databind.ObjectMapper;
         InsuranceProperties.class,
         AdlProperties.class
 })
+@ImportRuntimeHints(MarginOpsRuntimeHints.class)
 public class SurprisingMarginOpsApplication {
 
     /**

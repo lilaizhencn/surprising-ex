@@ -36,6 +36,19 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.trading.entry.SurprisingTradingEntryApplication</mainClass>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.graalvm.buildtools</groupId>
+                <artifactId>native-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.trading.entry.SurprisingTradingEntryApplication</mainClass>
+                    <buildArgs>
+                        <buildArg>-H:IncludeResources=librocksdbjni-.*</buildArg>
+                    </buildArgs>
+                </configuration>
             </plugin>
         </plugins>
     </build>

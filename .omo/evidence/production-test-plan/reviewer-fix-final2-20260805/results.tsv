@@ -1,0 +1,16 @@
+bash-syntax	exit=0
+node-syntax	exit=0
+diff-check	exit=0
+performance-dry-run	exit=0
+gc-dry-run	exit=0
+threadpool-dry-run	exit=0
+recovery-dry-run	exit=0
+security-dry-run	exit=0
+concurrency-dry-run	exit=0
+security-unauthorized	exit=1
+security-missing-allowlist	exit=1
+docs-contract	exit=0
+unsafe-heap	exit=1
+unsafe-process-budget	exit=1
+jfr-args	exit=0
+resource-override-rejection	exit=0

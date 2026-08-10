@@ -1,0 +1,9 @@
+scenario\tmode\tcommand or fixture\tPASS condition
+passive\tpassive\tcurl -D passive.headers -o passive.body TARGET\tno sensitive endpoint exposure or secret disclosure
+authz\tnegative\tmissing token, user mismatch, admin path and product-line mismatch\t401/403/400 and no business fact
+websocket\tnegative\tproduct-line-websocket-smoke.mjs\tno anonymous private access or cross-user event
+kafka\tpassive\tkafka ACL/list/group/topic key checks\tunauthorized read/write rejected and key isolation holds
+http-fuzz\tactive\tlimited ffuf/Nuclei baseline\t4xx/413/429, bounded resources, no fact created
+resource\tactive\tapproved low-rate input/connection limits\tno OOM/FullGC/unbounded queue and recovery to baseline
+concurrency\tactive\tsecurity-concurrency-race.sh\tno duplicate fact/freeze/settlement and funds reconcile zero
+dependencies\tpassive\tdependency/secret/config scanner\tno unaccepted high/critical issue or secret

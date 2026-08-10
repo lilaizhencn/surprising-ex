@@ -448,7 +448,7 @@ public class AccountUserStateCommandWorker {
     }
 
     private String requiredText(JsonNode node, String field) {
-        String value = node.path(field).asText(null);
+        String value = node.path(field).asString(null);
         if (value == null || value.isBlank()) {
             throw new AccountCommandPoisonPillException("成交账本明细缺少有效" + field);
         }

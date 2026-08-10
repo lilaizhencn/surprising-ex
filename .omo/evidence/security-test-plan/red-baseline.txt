@@ -1,0 +1,14 @@
+RED_CHECK command=scripts/run-security-test-suite.sh
+sh: scripts/run-security-test-suite.sh: No such file or directory
+RED_STATUS command=scripts/run-security-test-suite.sh exit=127
+RED_CHECK command=scripts/run-jvm-gc-matrix.sh
+sh: scripts/run-jvm-gc-matrix.sh: No such file or directory
+RED_STATUS command=scripts/run-jvm-gc-matrix.sh exit=127
+RED_CHECK command=scripts/run-container-threadpool-matrix.sh
+sh: scripts/run-container-threadpool-matrix.sh: No such file or directory
+RED_STATUS command=scripts/run-container-threadpool-matrix.sh exit=127
+RED_CHECK command=scripts/run-product-line-recovery-matrix.sh
+sh: scripts/run-product-line-recovery-matrix.sh: No such file or directory
+RED_STATUS command=scripts/run-product-line-recovery-matrix.sh exit=127
+RED_CHECK doc=docs/production-security-test-plan.md
+RED_STATUS doc exit=1

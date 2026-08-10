@@ -174,6 +174,10 @@ DB_NAME=surprising_product_line_smoke \
 
 ## 7. 性能、稳定性和容量门槛
 
+性能矩阵和机器资源自适应规则统一维护在
+[production-performance-test-plan.md](production-performance-test-plan.md)；认证授权、外部渗透、WebSocket/Kafka 攻击面和并发竞态安全测试独立维护在
+[production-security-test-plan.md](production-security-test-plan.md)，安全套件不能被性能结果替代。
+
 性能测试分三层执行：
 
 1. 单 symbol 基线：验证 API、订单、撮合、账户和 WebSocket 的 p50/p95/p99 以及端到端延迟。

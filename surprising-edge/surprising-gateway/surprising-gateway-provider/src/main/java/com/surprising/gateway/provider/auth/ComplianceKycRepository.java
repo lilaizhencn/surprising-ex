@@ -148,8 +148,8 @@ public class ComplianceKycRepository {
                 }
                 JsonNode type = document.get("type");
                 JsonNode reference = document.get("reference");
-                String normalizedType = type == null ? "" : type.asText("").trim().toUpperCase(Locale.ROOT);
-                String normalizedReference = reference == null ? "" : reference.asText("").trim();
+                String normalizedType = type == null ? "" : type.asString("").trim().toUpperCase(Locale.ROOT);
+                String normalizedReference = reference == null ? "" : reference.asString("").trim();
                 if (!allowedTypes.contains(normalizedType) || normalizedReference.isBlank()
                         || normalizedReference.length() > 240) {
                     throw new IllegalArgumentException("submitted document type or reference is invalid");

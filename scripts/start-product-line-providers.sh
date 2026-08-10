@@ -4,19 +4,32 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ACTION="${ACTION:-start}"
 PRODUCT_LINE="${PRODUCT_LINE:?必须显式设置 PRODUCT_LINE，例如 SPOT、LINEAR_PERPETUAL、LINEAR_DELIVERY 或 OPTION}"
+SERVICES_EXPLICIT="${SERVICES+x}"
+JAVA_OPTS_EXPLICIT="${JAVA_OPTS+x}"
+TEST_PROFILE="${TEST_PROFILE:-auto}"
+source "${ROOT_DIR}/scripts/test-environment-profile.sh"
+test_profile_detect
 PRODUCT_TOPICS_ENABLED="${PRODUCT_TOPICS_ENABLED:-true}"
 PORT_OFFSET="${PORT_OFFSET:-0}"
-SERVICES="${SERVICES:-instrument candlestick index-price mark-price trading-entry matching account margin-ops edge}"
+if [[ -z "${SERVICES_EXPLICIT}" ]]; then
+  SERVICES="$(test_profile_services "${PRODUCT_LINE}" "${TEST_SCENARIO:-trade}")"
+fi
 BUILD_SERVICES="${BUILD_SERVICES:-false}"
+NATIVE_IMAGE="${NATIVE_IMAGE:-false}"
+NATIVE_BINARY_DIR="${NATIVE_BINARY_DIR:-}"
+NATIVE_RUNTIME_ARGS="${NATIVE_RUNTIME_ARGS:-}"
 WAIT_HEALTH="${WAIT_HEALTH:-true}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
+LOCAL_HOST="${LOCAL_HOST:-127.0.0.1}"
 LOG_DIR="${LOG_DIR:-}"
 JAVA_BIN="${JAVA_BIN:-java}"
-JAVA_OPTS="${JAVA_OPTS:-}"
-SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:5432/surprising_exchange}"
+if [[ -z "${JAVA_OPTS_EXPLICIT}" ]]; then
+  JAVA_OPTS="$(test_profile_java_opts)"
+fi
+SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://${LOCAL_HOST}:5432/surprising_exchange}"
 SPRING_DATASOURCE_USERNAME="${SPRING_DATASOURCE_USERNAME:-surprising}"
 SPRING_DATASOURCE_PASSWORD="${SPRING_DATASOURCE_PASSWORD:-surprising}"
-KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-${LOCAL_HOST}:9092}"
 
 product_slug() {
   echo "$1" | tr '[:upper:]_' '[:lower:]-'
@@ -138,11 +151,32 @@ find_jar() {
   exit 1
 }
 
+find_native_binary() {
+  local module="$1"
+  local artifact
+  artifact="$(basename "${module}")"
+  local binary_dir="${NATIVE_BINARY_DIR:-${ROOT_DIR}/${module}/target}"
+  local candidates=("${binary_dir}/${artifact}" "${binary_dir}/${artifact}-"*)
+  local binary
+  for binary in "${candidates[@]}"; do
+    [[ -f "${binary}" && -x "${binary}" ]] || continue
+    echo "${binary}"
+    return
+  done
+  echo "Missing Native Image binary for ${module}; run mvn -q -pl :${artifact} -am -Pnative -DskipTests package" >&2
+  exit 1
+}
+
 build_service() {
   local service="$1"
   local artifact
   artifact="$(artifact_for "${service}")"
-  mvn -q -pl ":${artifact}" -am -DskipTests package
+  if [[ "${NATIVE_IMAGE}" == "true" ]]; then
+    mvn -q -pl ":${artifact}" -am -Pnative -DskipTests install
+    mvn -q -pl ":${artifact}" -Pnative -DskipTests native:compile
+  else
+    mvn -q -pl ":${artifact}" -am -DskipTests package
+  fi
 }
 
 common_env() {
@@ -162,6 +196,18 @@ common_env() {
     "INSTANCE_PRODUCT_LINE=${PRODUCT_LINE}" \
     "INSTANCE_PRODUCT_SLUG=${slug}" \
     "INSTANCE_SERVICE=${service}"
+  if [[ -n "${SERVER_TOMCAT_THREADS_MAX:-}" ]]; then
+    printf '%s\n' "SERVER_TOMCAT_THREADS_MAX=${SERVER_TOMCAT_THREADS_MAX}"
+  fi
+  if [[ -n "${SERVER_TOMCAT_THREADS_MIN_SPARE:-}" ]]; then
+    printf '%s\n' "SERVER_TOMCAT_THREADS_MIN_SPARE=${SERVER_TOMCAT_THREADS_MIN_SPARE}"
+  fi
+  if [[ -n "${SERVER_TOMCAT_ACCEPT_COUNT:-}" ]]; then
+    printf '%s\n' "SERVER_TOMCAT_ACCEPT_COUNT=${SERVER_TOMCAT_ACCEPT_COUNT}"
+  fi
+  if [[ -n "${SERVER_TOMCAT_MAX_CONNECTIONS:-}" ]]; then
+    printf '%s\n' "SERVER_TOMCAT_MAX_CONNECTIONS=${SERVER_TOMCAT_MAX_CONNECTIONS}"
+  fi
 }
 
 service_env() {
@@ -211,8 +257,8 @@ service_env() {
       local entry_port
       entry_port=$(( $(base_port_for trading-entry) + PORT_OFFSET ))
       printf '%s\n' \
-        "SURPRISING_CLIENTS_ORDER_BASE_URL=http://localhost:${entry_port}" \
-        "SURPRISING_CLIENTS_TRIGGER_BASE_URL=http://localhost:${entry_port}" \
+        "SURPRISING_CLIENTS_ORDER_BASE_URL=http://${LOCAL_HOST}:${entry_port}" \
+        "SURPRISING_CLIENTS_TRIGGER_BASE_URL=http://${LOCAL_HOST}:${entry_port}" \
         "SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
         "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
@@ -267,7 +313,7 @@ service_env() {
       local margin_ops_port
       margin_ops_port=$(( $(base_port_for margin-ops) + PORT_OFFSET ))
       printf '%s\n' \
-        "SURPRISING_CLIENTS_RISK_BASE_URL=http://localhost:${margin_ops_port}" \
+        "SURPRISING_CLIENTS_RISK_BASE_URL=http://${LOCAL_HOST}:${margin_ops_port}" \
         "SURPRISING_RISK_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
         "SURPRISING_RISK_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_RISK_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
@@ -338,7 +384,7 @@ service_env() {
       mark_price_port=$((mark_price_port + PORT_OFFSET))
       printf '%s\n' \
         "SURPRISING_MARKET_MAKER_ENGINE_NODE_ID=${HOSTNAME:-local}-${slug}-market-maker" \
-        "SURPRISING_CLIENTS_MARK_PRICE_BASE_URL=http://localhost:${mark_price_port}"
+        "SURPRISING_CLIENTS_MARK_PRICE_BASE_URL=http://${LOCAL_HOST}:${mark_price_port}"
       ;;
   esac
 }
@@ -368,7 +414,7 @@ wait_health() {
   local service="$1"
   local port="$2"
   local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
-  until curl -fsS "http://localhost:${port}/actuator/health" | grep -q '"status":"UP"'; do
+  until curl -fsS "http://${LOCAL_HOST}:${port}/actuator/health/readiness" | grep -q '"status":"UP"'; do
     if ((SECONDS >= deadline)); then
       echo "${service}: health check timed out on port ${port}; see ${LOG_DIR}/${service}.log" >&2
       tail -n 80 "${LOG_DIR}/${service}.log" >&2 || true
@@ -388,29 +434,79 @@ start_service() {
     echo "${service}: skipped for ${PRODUCT_LINE}"
     return
   fi
-  local slug module jar port
+  local slug module launch_artifact port
   slug="$(product_slug "${PRODUCT_LINE}")"
   module="$(module_for "${service}")"
   port=$(( $(base_port_for "${service}") + PORT_OFFSET ))
   if [[ "${BUILD_SERVICES}" == "true" ]]; then
     build_service "${service}"
   fi
-  jar="$(find_jar "${module}")"
+  if [[ "${NATIVE_IMAGE}" == "true" ]]; then
+    launch_artifact="$(find_native_binary "${module}")"
+  else
+    launch_artifact="$(find_jar "${module}")"
+  fi
   local env_values=()
+  local service_java_args=()
   local env_value
+  if [[ "${NATIVE_IMAGE}" == "true" ]]; then
+    read -r -a service_java_args <<<"${NATIVE_RUNTIME_ARGS}"
+  elif [[ -z "${JAVA_OPTS_EXPLICIT}" ]]; then
+    while IFS= read -r env_value; do
+      service_java_args+=("${env_value}")
+    done < <(test_profile_java_args_for_service "${service}")
+  else
+    read -r -a service_java_args <<<"${JAVA_OPTS}"
+  fi
   while IFS= read -r env_value; do
     env_values+=("${env_value}")
   done < <(common_env "${service}" "${port}" "${slug}"; service_env "${service}" "${slug}")
   (
     cd "${ROOT_DIR}"
-    # shellcheck disable=SC2086
-    env "${env_values[@]}" "${JAVA_BIN}" ${JAVA_OPTS} -jar "${jar}"
+    if [[ "${NATIVE_IMAGE}" == "true" ]]; then
+      if ((${#service_java_args[@]} > 0)); then
+        env "${env_values[@]}" "${launch_artifact}" "${service_java_args[@]}"
+      else
+        env "${env_values[@]}" "${launch_artifact}"
+      fi
+    else
+      env "${env_values[@]}" "${JAVA_BIN}" "${service_java_args[@]}" -jar "${launch_artifact}"
+    fi
   ) >"${LOG_DIR}/${service}.log" 2>&1 &
   local pid=$!
   echo "${pid}" >"$(pid_file "${service}")"
   echo "${service}: started pid ${pid} port ${port} productLine ${PRODUCT_LINE}"
   if [[ "${WAIT_HEALTH}" == "true" ]]; then
     wait_health "${service}" "${port}"
+  fi
+}
+
+validate_provider_budget() {
+  local count=0 total_heap=0 service heap_mb max_heap_mb=0
+  for service in ${SERVICES}; do
+    count=$((count + 1))
+    if [[ -n "${JAVA_OPTS_EXPLICIT}" && "${JAVA_OPTS}" =~ -Xmx([1-9][0-9]*)([mMgG]) ]]; then
+      heap_mb="${BASH_REMATCH[1]}"
+      [[ "${BASH_REMATCH[2]}" =~ [gG] ]] && heap_mb=$((heap_mb * 1024))
+    else
+      heap_mb="$(test_profile_service_heap_mb "${service}")"
+    fi
+    total_heap=$((total_heap + heap_mb))
+    if ((heap_mb > max_heap_mb)); then
+      max_heap_mb="${heap_mb}"
+    fi
+  done
+  ((count > 0)) || { echo "SERVICES must contain at least one provider" >&2; exit 1; }
+  ((count <= TEST_MAX_PROVIDER_PROCESSES)) || { echo "provider count ${count} exceeds TEST_MAX_PROVIDER_PROCESSES=${TEST_MAX_PROVIDER_PROCESSES}" >&2; exit 1; }
+  local heap_budget_percent=60
+  case "${TEST_PROFILE}" in local-low) heap_budget_percent=45 ;; local-standard) heap_budget_percent=55 ;; esac
+  if ((TEST_MEMORY_MB > 0 && total_heap > TEST_MEMORY_MB * heap_budget_percent / 100)) && [[ "${ALLOW_RESOURCE_OVERRIDE}" != "true" ]]; then
+    echo "provider heap total ${total_heap}MB exceeds ${TEST_PROFILE} budget ${heap_budget_percent}% of ${TEST_MEMORY_MB}MB" >&2
+    exit 1
+  fi
+  if [[ -n "${JAVA_OPTS_EXPLICIT}" && "${max_heap_mb}" -gt "${TEST_JVM_HEAP_MB}" && "${ALLOW_RESOURCE_OVERRIDE}" != "true" ]]; then
+    echo "explicit JAVA_OPTS -Xmx${max_heap_mb}m exceeds TEST_JVM_HEAP_MB=${TEST_JVM_HEAP_MB}; set ALLOW_RESOURCE_OVERRIDE=true only with approval" >&2
+    exit 1
   fi
 }
 
@@ -421,6 +517,7 @@ validate_port_offset
 if [[ "${ACTION}" == "start" ]] && ! service_requested instrument; then
   SERVICES="instrument ${SERVICES}"
 fi
+validate_provider_budget
 
 PRODUCT_SLUG="$(product_slug "${PRODUCT_LINE}")"
 if [[ -z "${LOG_DIR}" ]]; then

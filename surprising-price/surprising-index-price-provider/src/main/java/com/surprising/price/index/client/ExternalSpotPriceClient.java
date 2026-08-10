@@ -184,7 +184,7 @@ public class ExternalSpotPriceClient {
         BigDecimal bid = decimal(ticker, "bidPx");
         BigDecimal ask = decimal(ticker, "askPx");
         BigDecimal last = decimal(ticker, "last");
-        Instant sourceTime = epochMillis(ticker.path("ts").asText(null));
+        Instant sourceTime = epochMillis(ticker.path("ts").asString(null));
         return new ParsedTicker(midOrLast(bid, ask, last), bid, ask, sourceTime, firstText(ticker, "instId"));
     }
 
@@ -206,7 +206,7 @@ public class ExternalSpotPriceClient {
         BigDecimal bid = firstDecimal(root, "bid", "best_bid");
         BigDecimal ask = firstDecimal(root, "ask", "best_ask");
         BigDecimal price = decimal(root, "price");
-        Instant sourceTime = root.hasNonNull("time") ? Instant.parse(root.get("time").asText()) : Instant.now();
+        Instant sourceTime = root.hasNonNull("time") ? Instant.parse(root.get("time").asString()) : Instant.now();
         return new ParsedTicker(midOrLast(bid, ask, price), bid, ask, sourceTime, firstText(root, "product_id"));
     }
 
@@ -341,17 +341,17 @@ public class ExternalSpotPriceClient {
         if (value.isArray()) {
             value = value.path(0);
         }
-        if (value.isMissingNode() || value.isNull() || value.asText().isBlank()) {
+        if (value.isMissingNode() || value.isNull() || value.asString().isBlank()) {
             return null;
         }
-        return new BigDecimal(value.asText());
+        return new BigDecimal(value.asString());
     }
 
     private String firstText(JsonNode node, String... fields) {
         for (String field : fields) {
             JsonNode value = node.path(field);
-            if (!value.isMissingNode() && !value.isNull() && !value.asText().isBlank()) {
-                return value.asText();
+            if (!value.isMissingNode() && !value.isNull() && !value.asString().isBlank()) {
+                return value.asString();
             }
         }
         return null;

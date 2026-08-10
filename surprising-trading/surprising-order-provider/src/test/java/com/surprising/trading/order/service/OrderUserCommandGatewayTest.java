@@ -44,9 +44,9 @@ class OrderUserCommandGatewayTest {
                 eq("LINEAR_PERPETUAL:1001"), payloads.capture());
         JsonNode first = objectMapper.readTree(payloads.getAllValues().get(0));
         JsonNode second = objectMapper.readTree(payloads.getAllValues().get(1));
-        assertThat(first.get("commandId").asText()).endsWith(":91");
-        assertThat(second.get("commandId").asText()).endsWith(":92");
-        assertThat(first.get("commandId").asText()).isNotEqualTo(second.get("commandId").asText());
+        assertThat(first.get("commandId").asString()).endsWith(":91");
+        assertThat(second.get("commandId").asString()).endsWith(":92");
+        assertThat(first.get("commandId").asString()).isNotEqualTo(second.get("commandId").asString());
     }
 
     private PositionUpdatedEvent event(long eventId, long revision) {

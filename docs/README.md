@@ -36,6 +36,8 @@ candidate 的 Redis ZSET 只做候选过滤、排序、lease 和重试调度，�
 
 - [产品线测试与资金守恒](product-line-testing-and-funds-reconciliation.md)
 - [生产级全链路验收方案](production-grade-trading-acceptance-plan.md)
+- [生产级性能测试方案与环境自适应规则](production-performance-test-plan.md)
+- [生产级独立安全测试方案](production-security-test-plan.md)
 - [本地 Homebrew 中间件](local-homebrew-infra.md)
 
 真实运行报告应保存在 CI 制品、对象存储或临时目录。若结论需要长期保留，应把稳定参数、阈值或

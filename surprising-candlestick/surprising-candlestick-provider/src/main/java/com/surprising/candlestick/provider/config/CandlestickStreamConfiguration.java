@@ -25,12 +25,14 @@ import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.streams.state.Stores;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.kafka.annotation.EnableKafkaStreams;
 import org.springframework.kafka.config.KafkaStreamsConfiguration;
 import org.springframework.kafka.support.serializer.JsonSerde;
 
 @Configuration
 @EnableKafkaStreams
+@ImportRuntimeHints(KafkaStreamsRuntimeHints.class)
 /**
  * Builds the Kafka Streams topology for perpetual K-line aggregation.
  *

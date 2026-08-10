@@ -187,13 +187,13 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                     parseLevels(root.path("b"), true), parseLevels(root.path("a"), true), false);
             case "OKX_BOOKS_WS", "OKX_BOOKS_FULL_WS" -> {
                 JsonNode book = root.path("data").path(0);
-                boolean delta = "update".equalsIgnoreCase(root.path("action").asText("snapshot"));
+                boolean delta = "update".equalsIgnoreCase(root.path("action").asString("snapshot"));
                 yield new ParsedBookUpdate(parseLevels(book.path("bids"), true),
                         parseLevels(book.path("asks"), true), delta);
             }
             case "BYBIT_ORDERBOOK_WS", "BYBIT_V5_ORDERBOOK_WS" -> {
                 JsonNode book = root.path("data");
-                boolean delta = "delta".equalsIgnoreCase(root.path("type").asText("snapshot"));
+                boolean delta = "delta".equalsIgnoreCase(root.path("type").asString("snapshot"));
                 yield new ParsedBookUpdate(parseLevels(book.path("b"), true),
                         parseLevels(book.path("a"), true), delta);
             }
@@ -275,7 +275,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         if (node == null || !node.isArray() || node.size() <= index) {
             return BigDecimal.ZERO;
         }
-        String value = node.path(index).asText(null);
+        String value = node.path(index).asString(null);
         if (value == null || value.isBlank()) {
             return BigDecimal.ZERO;
         }

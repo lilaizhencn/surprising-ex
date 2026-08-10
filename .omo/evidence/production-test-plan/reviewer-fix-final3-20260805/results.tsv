@@ -1,0 +1,4 @@
+bash-syntax	exit=0
+threadpool-dry-run	exit=0
+threadpool-default-binding-gate	exit=0
+diff-check	exit=0

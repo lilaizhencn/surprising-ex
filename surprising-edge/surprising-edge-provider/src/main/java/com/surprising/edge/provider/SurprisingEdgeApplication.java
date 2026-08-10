@@ -14,6 +14,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -38,6 +39,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         GatewayProperties.class,
         WebSocketProperties.class
 })
+@ImportRuntimeHints(EdgeRuntimeHints.class)
 public class SurprisingEdgeApplication {
 
     public static void main(String[] args) {

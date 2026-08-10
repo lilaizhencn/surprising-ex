@@ -157,10 +157,10 @@ public class ExchangeRateService {
     }
 
     private void saveOpenExchangeRateApiRates(String baseCurrency, IndexPriceProperties.Fiat fiat, JsonNode root) {
-        if (!"success".equalsIgnoreCase(root.path("result").asText())) {
-            throw new IllegalStateException("fiat provider result=" + root.path("result").asText());
+        if (!"success".equalsIgnoreCase(root.path("result").asString())) {
+            throw new IllegalStateException("fiat provider result=" + root.path("result").asString());
         }
-        String provider = root.path("provider").asText(fiat.getProvider());
+        String provider = root.path("provider").asString(fiat.getProvider());
         Instant rateTime = root.hasNonNull("time_last_update_unix")
                 ? Instant.ofEpochSecond(root.path("time_last_update_unix").asLong())
                 : Instant.now();
@@ -169,8 +169,8 @@ public class ExchangeRateService {
         for (String quote : fiat.getQuoteCurrencies()) {
             String quoteCurrency = normalizeCurrency(quote);
             JsonNode value = root.path("rates").path(quoteCurrency);
-            if (!value.isMissingNode() && !value.isNull() && !value.asText().isBlank()) {
-                BigDecimal rate = new BigDecimal(value.asText());
+            if (!value.isMissingNode() && !value.isNull() && !value.asString().isBlank()) {
+                BigDecimal rate = new BigDecimal(value.asString());
                 if (rate.signum() > 0) {
                     saveRateAndInverse(baseCurrency, quoteCurrency, rate, provider, rateTime, updatedAt);
                 }

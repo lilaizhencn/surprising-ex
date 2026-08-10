@@ -1,0 +1,3 @@
+case\tconcurrency\trequest\texpected invariant
+idempotent-order\t8\tPOST /api/v1/gateway/trading with same clientOrderId\t<=1 order fact and <=1 freeze
+cancel-race\t8\tPOST /api/v1/gateway/trading/cancel for same order\tone terminal transition and one unlock
