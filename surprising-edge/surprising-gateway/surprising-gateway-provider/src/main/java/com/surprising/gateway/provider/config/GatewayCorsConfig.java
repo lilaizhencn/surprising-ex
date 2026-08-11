@@ -16,7 +16,8 @@ public class GatewayCorsConfig implements WebMvcConfigurer {
                         "http://localhost:5174",
                         "http://127.0.0.1:5174",
                         "http://localhost:4173",
-                        "http://127.0.0.1:4173")
+                        "http://127.0.0.1:4173",
+                        "https://ex.tokdou.com")
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .exposedHeaders("Content-Disposition", "X-Trace-Id")
