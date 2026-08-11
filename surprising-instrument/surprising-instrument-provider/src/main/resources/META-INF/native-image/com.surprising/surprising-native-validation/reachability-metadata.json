@@ -1,0 +1,15 @@
+{
+  "reflection": [
+    {
+      "type": "org.hibernate.validator.internal.util.logging.Log_$logger",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jboss.logging.Logger"
+          ]
+        }
+      ]
+    }
+  ]
+}
