@@ -7,6 +7,8 @@ import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
+import com.surprising.websocket.api.model.WsClientCommand;
+import com.surprising.websocket.api.model.WsServerMessage;
 import com.surprising.websocket.provider.service.KafkaFanoutConsumer;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
@@ -22,6 +24,8 @@ public final class EdgeRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, PerpBookTickerEvent.class);
         registerRecord(hints, PerpFundingRateEvent.class);
         registerRecord(hints, PerpTradeEvent.class);
+        registerRecord(hints, WsClientCommand.class);
+        registerRecord(hints, WsServerMessage.class);
         hints.reflection().registerType(KafkaFanoutConsumer.class, MemberCategory.INVOKE_PUBLIC_METHODS);
     }
 
