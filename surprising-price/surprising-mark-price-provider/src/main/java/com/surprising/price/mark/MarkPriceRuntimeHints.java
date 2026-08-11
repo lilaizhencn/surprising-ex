@@ -1,5 +1,6 @@
 package com.surprising.price.mark;
 
+import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.price.api.model.IndexComponentSnapshot;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -25,6 +26,7 @@ public final class MarkPriceRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, PerpBookTickerEvent.class);
         registerRecord(hints, PerpFundingRateEvent.class);
         registerRecord(hints, PerpTradeEvent.class);
+        registerRecord(hints, InstrumentEvent.class);
         register(hints, InstrumentSnapshotConsumer.class);
         register(hints, MarkPriceAuditConsumer.class);
         register(hints, MarkPriceService.class);

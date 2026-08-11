@@ -71,4 +71,25 @@ class MarkPriceCalculatorTest {
         assertThat(event.status()).isEqualTo(PriceStatus.HEALTHY);
         assertThat(event.fundingRate()).isEqualByComparingTo(BigDecimal.ZERO);
     }
+
+    @Test
+    void fallbackFundingTimeUsesTheNextSettlementBoundaryInsteadOfSlidingWithEachMark() {
+        MarkPriceProperties properties = new MarkPriceProperties();
+        MarkPriceCalculator calculator = new MarkPriceCalculator(properties);
+        Instant now = Instant.parse("2026-06-30T10:00:00Z");
+
+        MarkPriceEvent event = calculator.calculate(
+                "BTC-USDT", 1,
+                new IndexPriceEvent("BTC-USDT", new BigDecimal("100.00"), 1, PriceStatus.HEALTHY,
+                        5, 5, BigDecimal.valueOf(5), now, List.of()),
+                new PerpBookTickerEvent("BTC-USDT", new BigDecimal("100.00"), new BigDecimal("100.00"), 1, now),
+                new PerpTradeEvent("BTC-USDT", "t1", 1, now, new BigDecimal("100.00"), BigDecimal.ONE, "BUY"),
+                null,
+                BigDecimal.ZERO,
+                new MarkPriceEncoding(1L, 100_000_000L, 1_000_000L),
+                now);
+
+        assertThat(event.nextFundingTime()).isEqualTo(Instant.parse("2026-06-30T16:00:00Z"));
+        assertThat(event.timeUntilFundingSeconds()).isEqualTo(21_600L);
+    }
 }

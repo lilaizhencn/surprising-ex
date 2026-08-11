@@ -1917,7 +1917,7 @@ start_providers_for_line() {
   local selected_services
   selected_services="$(test_profile_services "${product_line}" "${STRESS_SCENARIO}")"
   local required_service
-  for required_service in instrument price matching account trading-entry edge; do
+  for required_service in instrument price candlestick matching account trading-entry edge; do
     if ! profile_service_selected "${selected_services}" "${required_service}"; then
       echo "TEST_SERVICES must include ${required_service} for API smoke: ${selected_services}" >&2
       exit 1

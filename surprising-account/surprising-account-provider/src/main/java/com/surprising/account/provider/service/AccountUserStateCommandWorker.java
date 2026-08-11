@@ -558,6 +558,20 @@ public class AccountUserStateCommandWorker {
     }
 
     /**
+     * 将已恢复的 canonical 快照重新广播给下游缓存。
+     *
+     * <p>仅由受限的内部恢复入口调用，不会修改账户余额、修订号或 WAL；下游以账户修订号
+     * 幂等处理同一份快照。</p>
+     */
+    public void publishStateSnapshotForRecovery(
+            com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) {
+        if (snapshot == null) {
+            throw new IllegalArgumentException("账户状态恢复快照不能为空");
+        }
+        publishStateSnapshot(snapshot);
+    }
+
+    /**
      * 从同一份账户 canonical 快照派生持仓事件。
      *
      * <p>持仓事件与账户状态快照共用用户分区 key 和账户修订号，不能再从数据库拼装。状态

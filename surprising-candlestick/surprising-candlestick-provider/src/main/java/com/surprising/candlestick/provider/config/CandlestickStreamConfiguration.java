@@ -28,7 +28,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.kafka.annotation.EnableKafkaStreams;
 import org.springframework.kafka.config.KafkaStreamsConfiguration;
-import org.springframework.kafka.support.serializer.JsonSerde;
+import org.springframework.kafka.support.serializer.JacksonJsonSerde;
 
 @Configuration
 @EnableKafkaStreams
@@ -127,8 +127,8 @@ public class CandlestickStreamConfiguration {
         return updates;
     }
 
-    private <T> JsonSerde<T> jsonSerde(Class<T> type) {
-        JsonSerde<T> serde = new JsonSerde<>(type);
+    private <T> JacksonJsonSerde<T> jsonSerde(Class<T> type) {
+        JacksonJsonSerde<T> serde = new JacksonJsonSerde<>(type);
         serde.ignoreTypeHeaders();
         serde.noTypeInfo();
         return serde;

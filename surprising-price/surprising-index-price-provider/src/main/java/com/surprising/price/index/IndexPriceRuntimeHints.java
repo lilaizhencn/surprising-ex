@@ -1,5 +1,6 @@
 package com.surprising.price.index;
 
+import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.price.api.model.IndexComponentSnapshot;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.index.service.IndexPriceAuditConsumer;
@@ -14,6 +15,7 @@ public final class IndexPriceRuntimeHints implements RuntimeHintsRegistrar {
     public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
         registerRecord(hints, IndexComponentSnapshot.class);
         registerRecord(hints, IndexPriceEvent.class);
+        registerRecord(hints, InstrumentEvent.class);
         hints.reflection().registerType(
                 IndexPriceAuditConsumer.class,
                 MemberCategory.INVOKE_PUBLIC_METHODS);

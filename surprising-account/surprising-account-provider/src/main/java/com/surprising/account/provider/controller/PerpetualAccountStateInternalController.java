@@ -4,10 +4,12 @@ import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.service.PerpetualAccountStateSnapshotService;
 import com.surprising.account.provider.service.AccountUserStateReducer;
+import com.surprising.account.provider.service.AccountUserStateCommandWorker;
 import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,11 +22,14 @@ public class PerpetualAccountStateInternalController {
 
     private final PerpetualAccountStateSnapshotService snapshotService;
     private final AccountUserStateReducer stateReducer;
+    private final AccountUserStateCommandWorker stateWorker;
 
     public PerpetualAccountStateInternalController(PerpetualAccountStateSnapshotService snapshotService,
-                                                   AccountUserStateReducer stateReducer) {
+                                                   AccountUserStateReducer stateReducer,
+                                                   AccountUserStateCommandWorker stateWorker) {
         this.snapshotService = snapshotService;
         this.stateReducer = stateReducer;
+        this.stateWorker = stateWorker;
     }
 
     @GetMapping("/perpetual-state/snapshot")
@@ -45,5 +50,18 @@ public class PerpetualAccountStateInternalController {
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         }
+    }
+
+    /**
+     * 将现有账户快照重新发布到事实流，供订单等下游服务恢复 JVM 缓存。
+     *
+     * <p>该操作不创建余额、不改变账户修订号，也不会绕过资金校验。</p>
+     */
+    @PostMapping("/perpetual-state/recover")
+    public PerpetualAccountStateUpdatedEvent recover(@RequestParam("productLine") ProductLine productLine,
+                                                      @RequestParam("userId") long userId) {
+        PerpetualAccountStateUpdatedEvent snapshot = snapshot(productLine, userId);
+        stateWorker.publishStateSnapshotForRecovery(snapshot);
+        return snapshot;
     }
 }

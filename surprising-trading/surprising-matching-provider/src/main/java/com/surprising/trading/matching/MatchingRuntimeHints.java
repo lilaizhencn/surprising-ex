@@ -1,5 +1,9 @@
 package com.surprising.trading.matching;
 
+import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.account.api.model.OrderReleaseAccountCommand;
+import com.surprising.account.api.model.TradeSideSettlementCommand;
+import com.surprising.instrument.api.model.InstrumentEvent;
 import com.lmax.disruptor.AbstractSequencer;
 import com.lmax.disruptor.BlockingWaitStrategy;
 import com.lmax.disruptor.RingBuffer;
@@ -23,6 +27,13 @@ import exchange.core2.core.common.api.reports.TotalCurrencyBalanceReportQuery;
 import com.surprising.trading.matching.service.InstrumentSnapshotConsumer;
 import com.surprising.trading.matching.service.MatchingAuditProjectionConsumer;
 import com.surprising.trading.matching.service.MatchingCommandConsumer;
+import com.surprising.trading.matching.store.MatchingLocalStateStore;
+import com.surprising.trading.api.model.MatchResultEvent;
+import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.OrderBookDepthEvent;
+import com.surprising.trading.api.model.OrderBookLevel;
+import com.surprising.trading.api.model.OrderCommandEvent;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
@@ -37,6 +48,18 @@ public final class MatchingRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, PerpBookTickerEvent.class);
         registerRecord(hints, PerpFundingRateEvent.class);
         registerRecord(hints, PerpTradeEvent.class);
+        registerRecord(hints, AccountUserCommand.class);
+        registerRecord(hints, OrderReleaseAccountCommand.class);
+        registerRecord(hints, TradeSideSettlementCommand.class);
+        registerRecord(hints, InstrumentEvent.class);
+        registerRecord(hints, MatchResultEvent.class);
+        registerRecord(hints, MatchTradeEvent.class);
+        registerRecord(hints, OrderBookDepthEvent.class);
+        registerRecord(hints, OrderBookLevel.class);
+        registerRecord(hints, OrderCommandEvent.class);
+        registerRecord(hints, PublicTradeEvent.class);
+        registerRecord(hints, MatchingLocalStateStore.StoredOrder.class);
+        registerRecord(hints, MatchingLocalStateStore.LocalOutboxRecord.class);
         register(hints, InstrumentSnapshotConsumer.class);
         register(hints, MatchingAuditProjectionConsumer.class);
         register(hints, MatchingCommandConsumer.class);
@@ -104,7 +127,7 @@ public final class MatchingRuntimeHints implements RuntimeHintsRegistrar {
         try {
             hints.reflection().registerType(
                     Class.forName("jdk.internal.util.ArraysSupport", false, classLoader),
-                    MemberCategory.INVOKE_DECLARED_METHODS);
+                    MemberCategory.INVOKE_PUBLIC_METHODS);
         } catch (ClassNotFoundException ignored) {
         }
     }

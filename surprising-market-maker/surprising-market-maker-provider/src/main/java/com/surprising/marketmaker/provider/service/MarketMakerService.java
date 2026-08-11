@@ -72,6 +72,7 @@ import org.springframework.stereotype.Service;
 public class MarketMakerService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketMakerService.class);
+    private static final int MAX_BATCH_PLACE_ORDERS = 20;
     // 预占结果通过账户 Kafka 异步返回。预占中的报价仍然占用一个报价槽位，
     // 若在下一轮被当成非活动订单撤掉，会形成“永远预占不成功”的并发活锁。
     private static final Set<OrderStatus> LIVE_STATUSES = EnumSet.of(
@@ -742,13 +743,15 @@ public class MarketMakerService {
             List<PlaceOrderRequest> requests = missingQuotes.stream()
                     .map(quote -> quoteRequest(strategy, accountId, symbol, quote, cycleSequence))
                     .toList();
-            try {
-                var batch = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(requests));
+            for (int start = 0; start < requests.size(); start += MAX_BATCH_PLACE_ORDERS) {
+                List<PlaceOrderRequest> batchRequests = requests.subList(start,
+                        Math.min(start + MAX_BATCH_PLACE_ORDERS, requests.size()));
+                try {
+                    var batch = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(batchRequests));
                 if (batch == null) {
                     // 兼容旧的嵌入式调用方；生产 Feign 实现始终返回批量结果。
-                    for (DesiredQuote quote : missingQuotes) {
-                        OrderResponse response = orderRpcApi.place(
-                                quoteRequest(strategy, accountId, symbol, quote, cycleSequence));
+                        for (PlaceOrderRequest request : batchRequests) {
+                            OrderResponse response = orderRpcApi.place(request);
                         if (response == null || response.status() == OrderStatus.REJECTED) {
                             rejected++;
                             rejectionReason = firstReason(rejectionReason, response == null
@@ -764,9 +767,9 @@ public class MarketMakerService {
                             kept.add(response);
                         }
                     }
-                    return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
+                        continue;
                 }
-                for (int i = 0; i < requests.size(); i++) {
+                    for (int i = 0; i < batchRequests.size(); i++) {
                     int resultIndex = i;
                     var item = batch.results().stream()
                             .filter(result -> result.index() == resultIndex)
@@ -791,11 +794,10 @@ public class MarketMakerService {
                         kept.add(response);
                     }
                 }
-            } catch (UnsupportedOperationException ex) {
+                } catch (UnsupportedOperationException ex) {
                 // 兼容尚未实现批量 RPC 的嵌入式调用方；线上订单服务提供批量接口。
-                for (DesiredQuote quote : missingQuotes) {
-                    OrderResponse response = orderRpcApi.place(
-                            quoteRequest(strategy, accountId, symbol, quote, cycleSequence));
+                    for (PlaceOrderRequest request : batchRequests) {
+                        OrderResponse response = orderRpcApi.place(request);
                     if (response == null || response.status() == OrderStatus.REJECTED) {
                         rejected++;
                         rejectionReason = firstReason(rejectionReason, response == null
@@ -811,11 +813,12 @@ public class MarketMakerService {
                         kept.add(response);
                     }
                 }
-            } catch (RuntimeException ex) {
+                } catch (RuntimeException ex) {
                 // 批量请求失败时只跳过当前账户的报价，不能让一个账户阻断其他产品线。
                 // 下一周期会重新读取 JVM 快照并重试；资金校验仍由下单与账户单写者严格执行。
-                rejected += requests.size();
+                    rejected += batchRequests.size();
                 rejectionReason = firstReason(rejectionReason, ex.getMessage());
+                }
             }
         }
         return new ReconcileResult(submitted, canceled, rejected, rejectionReason);

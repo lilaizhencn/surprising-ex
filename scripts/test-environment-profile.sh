@@ -295,12 +295,12 @@ test_profile_services() {
   case "${scenario}" in
     matching) echo "instrument matching" ;;
     account) echo "instrument account" ;;
-    websocket) echo "instrument price matching account trading-entry edge" ;;
+    websocket) echo "instrument price candlestick matching account trading-entry edge" ;;
     trade|recovery|soak|liquidation)
       if [[ "${product_line}" == "SPOT" ]]; then
-        echo "instrument price matching account trading-entry edge market-maker"
+        echo "instrument price candlestick matching account trading-entry edge market-maker"
       else
-        echo "instrument price matching account margin-ops trading-entry edge market-maker"
+        echo "instrument price candlestick matching account margin-ops trading-entry edge market-maker"
       fi
       ;;
     *) echo "unsupported test scenario ${scenario}" >&2; return 1 ;;

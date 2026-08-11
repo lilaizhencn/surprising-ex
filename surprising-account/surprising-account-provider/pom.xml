@@ -97,11 +97,15 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.account.provider.SurprisingAccountApplication</mainClass>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.graalvm.buildtools</groupId>
                 <artifactId>native-maven-plugin</artifactId>
                 <configuration>
+                    <mainClass>com.surprising.account.provider.SurprisingAccountApplication</mainClass>
                     <buildArgs>
                         <buildArg>-H:IncludeResources=librocksdbjni-.*</buildArg>
                     </buildArgs>

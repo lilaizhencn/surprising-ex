@@ -163,17 +163,19 @@ find_native_binary() {
     echo "${binary}"
     return
   done
-  echo "Missing Native Image binary for ${module}; run mvn -q -pl :${artifact} -am -Pnative -DskipTests package" >&2
+  echo "Missing Native Image binary for ${module}; run BUILD_SERVICES=true NATIVE_IMAGE=true PRODUCT_LINE=${PRODUCT_LINE} $0" >&2
   exit 1
 }
 
 build_service() {
   local service="$1"
-  local artifact
+  local artifact module
   artifact="$(artifact_for "${service}")"
+  module="$(module_for "${service}")"
   if [[ "${NATIVE_IMAGE}" == "true" ]]; then
-    mvn -q -pl ":${artifact}" -am -Pnative -DskipTests install
-    mvn -q -pl ":${artifact}" -Pnative -DskipTests native:compile
+    mvn -q -pl ":${artifact}" -am -Pnative -Dmaven.test.skip=true install
+    "${ROOT_DIR}/scripts/check-native-aot-metadata.sh" "${module}" "${artifact}"
+    mvn -q -pl ":${artifact}" -Pnative -Dmaven.test.skip=true native:compile
   else
     mvn -q -pl ":${artifact}" -am -DskipTests package
   fi

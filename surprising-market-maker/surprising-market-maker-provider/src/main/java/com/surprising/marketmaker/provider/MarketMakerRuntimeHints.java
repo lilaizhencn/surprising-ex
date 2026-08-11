@@ -1,5 +1,6 @@
 package com.surprising.marketmaker.provider;
 
+import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.price.api.model.IndexComponentSnapshot;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -24,6 +25,7 @@ public final class MarketMakerRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, PerpBookTickerEvent.class);
         registerRecord(hints, PerpFundingRateEvent.class);
         registerRecord(hints, PerpTradeEvent.class);
+        registerRecord(hints, InstrumentEvent.class);
         register(hints, MarkPriceConsumerProperties.class);
         register(hints, MarkPriceKafkaConsumer.class);
         register(hints, InstrumentSnapshotConsumer.class);

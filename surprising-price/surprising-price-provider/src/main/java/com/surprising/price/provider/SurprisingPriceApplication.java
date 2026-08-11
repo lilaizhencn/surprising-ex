@@ -1,7 +1,9 @@
 package com.surprising.price.provider;
 
 import com.surprising.price.index.SurprisingIndexPriceApplication;
+import com.surprising.price.index.IndexPriceRuntimeHints;
 import com.surprising.price.index.config.IndexPriceProperties;
+import com.surprising.price.mark.MarkPriceRuntimeHints;
 import com.surprising.price.mark.SurprisingMarkPriceApplication;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import java.util.Map;
@@ -12,6 +14,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -38,6 +41,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         IndexPriceProperties.class,
         MarkPriceProperties.class
 })
+@ImportRuntimeHints({IndexPriceRuntimeHints.class, MarkPriceRuntimeHints.class})
 public class SurprisingPriceApplication {
 
     public static void main(String[] args) {

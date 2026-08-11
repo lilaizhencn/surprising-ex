@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
@@ -36,11 +37,10 @@ public class MarkPriceCalculator {
         int scale = properties.getCalculation().getScale();
         BigDecimal indexPrice = index.indexPrice();
         BigDecimal fundingRate = funding == null ? BigDecimal.ZERO : funding.fundingRate();
-        Instant nextFundingTime = funding == null ? now.plus(Duration.ofHours(properties.getCalculation().getDefaultFundingIntervalHours()))
-                : funding.nextFundingTime();
         int intervalHours = funding == null || funding.fundingIntervalHours() <= 0
                 ? properties.getCalculation().getDefaultFundingIntervalHours()
                 : funding.fundingIntervalHours();
+        Instant nextFundingTime = funding == null ? nextFundingBoundary(now, intervalHours) : funding.nextFundingTime();
         long timeUntilFundingSeconds = Math.max(0, Duration.between(now, nextFundingTime).toSeconds());
         BigDecimal fundingFraction = BigDecimal.valueOf(timeUntilFundingSeconds)
                 .divide(BigDecimal.valueOf(intervalHours * 3600L), scale, RoundingMode.HALF_UP);
@@ -86,5 +86,11 @@ public class MarkPriceCalculator {
                 .skip(1)
                 .findFirst()
                 .orElseThrow();
+    }
+
+    private Instant nextFundingBoundary(Instant now, int intervalHours) {
+        long intervalSeconds = Math.multiplyExact(intervalHours, 3600L);
+        long epochSeconds = now.truncatedTo(ChronoUnit.SECONDS).getEpochSecond();
+        return Instant.ofEpochSecond(((epochSeconds / intervalSeconds) + 1L) * intervalSeconds);
     }
 }

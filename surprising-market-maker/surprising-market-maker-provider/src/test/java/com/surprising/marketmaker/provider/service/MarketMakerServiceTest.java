@@ -127,6 +127,22 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void runOnceSplitsQuoteBatchesAtTheOrderServiceLimit() {
+        Fixtures fixtures = new Fixtures(List.of(), 40);
+        fixtures.orderRpc.batchSupported = true;
+        fixtures.orderLevels = 20;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.batchPlaceRequests)
+                .extracting(BatchPlaceOrderRequest::orders)
+                .allSatisfy(orders -> assertThat(orders).hasSize(20));
+        assertThat(fixtures.orderRpc.batchPlaceRequests).hasSize(2);
+        assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+    }
+
+    @Test
     void runOnceDoesNotRunStrategiesFromAnotherProductLine() {
         Fixtures fixtures = new Fixtures(List.of());
         MarketMakerService service = fixtures.service();
@@ -359,6 +375,7 @@ class MarketMakerServiceTest {
         private final FakeReferenceSampleRepository referenceSampleRepository =
                 new FakeReferenceSampleRepository();
         private final int maxOrderOperationsPerCycle;
+        private int orderLevels = 3;
 
         private Fixtures(List<OrderResponse> openOrders) {
             this(openOrders, 40);
@@ -410,7 +427,7 @@ class MarketMakerServiceTest {
             MarketMakerProperties properties = new MarketMakerProperties();
             properties.getEngine().setNodeId("mm-test");
             properties.getCoordination().setEnabled(false);
-            properties.getQuoting().setOrderLevels(3);
+            properties.getQuoting().setOrderLevels(orderLevels);
             properties.getQuoting().setMinSpreadTicks(10L);
             properties.getQuoting().setLevelSpacingTicks(10L);
             properties.getQuoting().setRefreshThresholdTicks(2L);
@@ -532,6 +549,8 @@ class MarketMakerServiceTest {
         private final List<ProductLine> productLinesDuringPlace = new ArrayList<>();
         private final List<ProductLine> productLinesDuringCancel = new ArrayList<>();
         private final List<ProductLine> productLinesDuringOpenOrders = new ArrayList<>();
+        private final List<BatchPlaceOrderRequest> batchPlaceRequests = new ArrayList<>();
+        private boolean batchSupported;
         private int openOrdersCalls;
         private int cancelBatchCalls;
 
@@ -549,7 +568,19 @@ class MarketMakerServiceTest {
 
         @Override
         public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
-            throw new UnsupportedOperationException();
+            if (!batchSupported) {
+                throw new UnsupportedOperationException();
+            }
+            batchPlaceRequests.add(request);
+            List<OrderBatchItemResponse> results = new ArrayList<>();
+            for (int i = 0; i < request.orders().size(); i++) {
+                PlaceOrderRequest placeRequest = request.orders().get(i);
+                results.add(new OrderBatchItemResponse(i, true, "completed",
+                        orderAt(2_000L + batchPlaceRequests.size() * 100L + i, placeRequest.userId(),
+                                placeRequest.clientOrderId(), placeRequest.side(), placeRequest.priceTicks(),
+                                placeRequest.quantitySteps(), OrderStatus.ACCEPTED, Instant.now())));
+            }
+            return new OrderBatchResponse(results.size(), results.size(), 0, results);
         }
 
         @Override
