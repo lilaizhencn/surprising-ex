@@ -79,10 +79,16 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.price.mark.SurprisingMarkPriceApplication</mainClass>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.graalvm.buildtools</groupId>
                 <artifactId>native-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.price.mark.SurprisingMarkPriceApplication</mainClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>

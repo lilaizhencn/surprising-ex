@@ -13,5 +13,8 @@ public final class KafkaStreamsRuntimeHints implements RuntimeHintsRegistrar {
                 NoOpProcessorWrapper.class,
                 MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
                 MemberCategory.INVOKE_PUBLIC_METHODS);
+        hints.reflection().registerType(
+                CandlestickRocksDbConfig.class,
+                MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS);
     }
 }
