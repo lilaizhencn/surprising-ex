@@ -1,0 +1,48 @@
+- generic [ref=e1] clickable [onclick]
+  - main
+    - sectionheader
+      - button [ref=e2]
+      - button "安全中心" [ref=e3]
+      - button "切换明暗主题" [ref=e4]
+      - button "切换语言" [ref=e5]
+        - StaticText "EN"
+      - button "产品线" [expanded=false, ref=e6]
+      - button "登录" [ref=e7]
+      - button "注册" [ref=e8]
+    - generic
+      - sectionheader
+        - StaticText "MARKET CENTER"
+        - heading "行情中心" [level=1, ref=e9]
+        - paragraph
+          - StaticText "用真实 instrument 与行情数据比较市场，选择交易对后进入对应产品线工作台。"
+        - button "刷新行情" [ref=e10]
+          - StaticText "刷新行情"
+      - LabelText
+        - textbox "搜索币对或产品" [ref=e11]
+      - group "产品线筛选"
+        - button "全部" [ref=e12]
+        - button "U本位永续" [ref=e13]
+        - button "币本位永续" [ref=e14]
+        - button "U本位交割" [ref=e15]
+        - button "币本位交割" [ref=e16]
+        - button "期权" [ref=e17]
+        - button "现货" [ref=e18]
+      - alert
+        - strong
+          - StaticText "行情服务暂不可用"
+        - paragraph
+          - StaticText "未收到真实市场数据，页面不会用演示数据填充。"
+        - button "重新加载" [ref=e20]
+          - StaticText "重新加载"
+- generic
+  - Canvas
+  - generic
+    - generic
+      - button "Copy element" [ref=e21]
+        - image
+      - button "Comment on element" [ref=e22]
+        - image
+      - button "Style element" [ref=e23]
+        - image
+    - button "Collapse toolbar" [expanded=true, ref=e19]
+      - image

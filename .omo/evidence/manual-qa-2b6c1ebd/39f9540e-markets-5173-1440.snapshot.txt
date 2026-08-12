@@ -1,0 +1,49 @@
+- generic [ref=e1] clickable [onclick]
+  - main
+    - sectionheader
+      - button "Surprising EX" [ref=e2]
+      - navigation
+        - button "首页" [ref=e11]
+        - button "U本位" [ref=e12]
+        - button "币本位" [ref=e13]
+        - button "U交割" [ref=e14]
+        - button "币交割" [ref=e15]
+        - button "期权" [ref=e16]
+        - button "现货" [ref=e17]
+        - button "行情" [ref=e18]
+        - button "交易规则" [ref=e19]
+      - StaticText "RECONNECTING"
+      - StaticText "--:--:--"
+      - button "Refresh market data" [ref=e3]
+      - LabelText
+        - textbox [ref=e31]
+      - button "充值" [ref=e4]
+      - button "资产管理" [ref=e5]
+      - button "安全中心" [ref=e6]
+      - button "切换明暗主题" [ref=e7]
+      - button "切换语言" [ref=e8]
+      - button "登录" [ref=e9]
+      - button "注册" [ref=e10]
+    - generic
+      - sectionheader
+        - heading "行情中心" [level=1, ref=e20]
+        - button "刷新行情" [ref=e21]
+      - LabelText
+        - textbox "搜索币对或产品" [ref=e22]
+      - group "产品线筛选"
+        - button "全部" [ref=e23]
+        - button "U本位永续" [ref=e24]
+        - button "币本位永续" [ref=e25]
+        - button "U本位交割" [ref=e26]
+        - button "币本位交割" [ref=e27]
+        - button "期权" [ref=e28]
+        - button "现货" [ref=e29]
+      - alert
+        - button "重新加载" [ref=e32]
+- generic
+  - generic
+    - generic
+      - button "Copy element" [ref=e33]
+      - button "Comment on element" [ref=e34]
+      - button "Style element" [ref=e35]
+    - button "Expand toolbar" [expanded=false, ref=e30]

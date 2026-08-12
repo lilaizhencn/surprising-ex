@@ -1,0 +1,16 @@
+=== SERVED UI COMMIT ===
+Repository: /Users/atomex/Desktop/surprising/surprising-ex-web
+HEAD: 39f9540e82042afb7bdcf3995b8569238cf3640e
+Subject: fix: scope realtime market updates by product
+Verified: 2026-08-12 Asia/Shanghai
+
+=== LIVE SERVER PROVENANCE ===
+127.0.0.1:5173 and 127.0.0.1:5174 both served from the repository above.
+The backend repository at /Users/atomex/Desktop/surprising/surprising-ex was not checked out or modified; its separate HEAD was not used as UI provenance.
+
+=== HTTP INVOCATIONS ===
+curl -i --max-time 10 http://127.0.0.1:5173/markets
+curl -i --max-time 10 http://127.0.0.1:5174/markets
+curl -i --max-time 10 http://127.0.0.1:5173/trade/spot
+
+All three responses were HTTP/1.1 200 OK, Content-Type: text/html, from the live Vite server.

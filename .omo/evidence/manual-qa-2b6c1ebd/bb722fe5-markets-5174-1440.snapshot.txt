@@ -1,0 +1,220 @@
+- generic [ref=e1] clickable [onclick]
+  - main
+    - sectionheader
+      - button "Surprising EX" [ref=e2]
+        - strong
+          - StaticText "Surprising EX"
+      - navigation
+        - button "首页" [ref=e11]
+        - button "U本位" [ref=e12]
+        - button "币本位" [ref=e13]
+        - button "U交割" [ref=e14]
+        - button "币交割" [ref=e15]
+        - button "期权" [ref=e16]
+        - button "现货" [ref=e17]
+        - button "行情" [ref=e18]
+        - button "交易规则" [ref=e19]
+      - StaticText "RECONNECTING"
+      - StaticText "--:--:--"
+      - button "Refresh market data" [ref=e3]
+      - LabelText
+        - textbox [ref=e34]
+      - button "充值" [ref=e4]
+      - button "资产管理" [ref=e5]
+      - button "安全中心" [ref=e6]
+      - button "切换明暗主题" [ref=e7]
+      - button "切换语言" [ref=e8]
+        - StaticText "EN"
+      - button "登录" [ref=e9]
+      - button "注册" [ref=e10]
+    - generic
+      - sectionheader
+        - StaticText "MARKET CENTER"
+        - heading "行情中心" [level=1, ref=e20]
+        - paragraph
+          - StaticText "用真实 instrument 与行情数据比较市场，选择交易对后进入对应产品线工作台。"
+        - button "刷新行情" [ref=e21]
+          - StaticText "刷新行情"
+      - LabelText
+        - textbox "搜索币对或产品" [ref=e22]
+      - group "产品线筛选"
+        - button "全部" [ref=e23]
+        - button "U本位永续" [ref=e24]
+        - button "币本位永续" [ref=e25]
+        - button "U本位交割" [ref=e26]
+        - button "币本位交割" [ref=e27]
+        - button "期权" [ref=e28]
+        - button "现货" [ref=e29]
+      - generic
+        - StaticText "可交易市场"
+        - strong
+          - StaticText "6"
+        - StaticText "全部产品线"
+      - generic
+        - StaticText "上涨市场"
+        - strong
+          - StaticText "3"
+        - StaticText "50% 占已同步行情"
+      - generic
+        - StaticText "24H成交额"
+        - strong
+          - StaticText "1.39B"
+        - StaticText "按后端返回计价"
+      - generic
+        - heading "涨跌榜" [level=2, ref=e30]
+        - article
+          - button "BTC-USDT U本位永续 · USDT" [ref=e35]
+            - strong
+              - StaticText "BTC-USDT"
+            - generic
+              - StaticText "U本位永续 · USDT"
+          - strong
+            - StaticText "+1.86%"
+          - button "BTC-USDT 加入自选" [ref=e36]
+        - article
+          - button "BTC-USDT-SPOT 现货 · USDT" [ref=e37]
+            - strong
+              - StaticText "BTC-USDT-SPOT"
+            - generic
+              - StaticText "现货 · USDT"
+          - strong
+            - StaticText "+1.58%"
+          - button "BTC-USDT-SPOT 加入自选" [ref=e38]
+        - article
+          - button "BTC-USD 币本位永续 · USD" [ref=e39]
+            - strong
+              - StaticText "BTC-USD"
+            - generic
+              - StaticText "币本位永续 · USD"
+          - strong
+            - StaticText "+1.23%"
+          - button "BTC-USD 加入自选" [ref=e40]
+      - generic
+        - heading "成交额榜" [level=2, ref=e31]
+        - article
+          - button "BTC-USDT U本位永续 · USDT" [ref=e41]
+            - strong
+              - StaticText "BTC-USDT"
+            - generic
+              - StaticText "U本位永续 · USDT"
+          - strong
+            - StaticText "486.21M"
+          - button "BTC-USDT 加入自选" [ref=e42]
+        - article
+          - button "BTC-USDT-SPOT 现货 · USDT" [ref=e43]
+            - strong
+              - StaticText "BTC-USDT-SPOT"
+            - generic
+              - StaticText "现货 · USDT"
+          - strong
+            - StaticText "318.9M"
+          - button "BTC-USDT-SPOT 加入自选" [ref=e44]
+        - article
+          - button "ETH-USDT U本位永续 · USDT" [ref=e45]
+            - strong
+              - StaticText "ETH-USDT"
+            - generic
+              - StaticText "U本位永续 · USDT"
+          - strong
+            - StaticText "220.89M"
+          - button "ETH-USDT 加入自选" [ref=e46]
+      - generic
+        - StaticText "MARKET SNAPSHOT"
+        - heading "全部市场" [level=2, ref=e32]
+        - StaticText "数据降级"
+        - table "市场列表"
+          - row
+            - StaticText "市场"
+            - StaticText "最新价"
+            - StaticText "24H变化"
+            - StaticText "24H成交额"
+            - StaticText "状态"
+          - article
+            - button "BTC-USDT U本位永续 · USDT" [ref=e47]
+              - strong
+                - StaticText "BTC-USDT"
+              - generic
+                - StaticText "U本位永续 · USDT"
+            - strong
+              - StaticText "65,000.00"
+            - strong
+              - StaticText "+1.86%"
+            - StaticText "486.21M"
+            - StaticText "交易中"
+            - button "BTC-USDT 加入自选" [ref=e48]
+          - article
+            - button "ETH-USDT U本位永续 · USDT" [ref=e49]
+              - strong
+                - StaticText "ETH-USDT"
+              - generic
+                - StaticText "U本位永续 · USDT"
+            - strong
+              - StaticText "3,600.00"
+            - strong
+              - StaticText "-0.82%"
+            - StaticText "220.89M"
+            - StaticText "交易中"
+            - button "ETH-USDT 加入自选" [ref=e50]
+          - article
+            - button "BTC-USD 币本位永续 · USD" [ref=e51]
+              - strong
+                - StaticText "BTC-USD"
+              - generic
+                - StaticText "币本位永续 · USD"
+            - strong
+              - StaticText "65,000.00"
+            - strong
+              - StaticText "+1.23%"
+            - StaticText "126.4M"
+            - StaticText "交易中"
+            - button "BTC-USD 加入自选" [ref=e52]
+          - article
+            - button "ETH-USD 币本位永续 · USD" [ref=e53]
+              - strong
+                - StaticText "ETH-USD"
+              - generic
+                - StaticText "币本位永续 · USD"
+            - strong
+              - StaticText "3,600.00"
+            - strong
+              - StaticText "-0.62%"
+            - StaticText "92.7M"
+            - StaticText "交易中"
+            - button "ETH-USD 加入自选" [ref=e54]
+          - article
+            - button "BTC-USDT-SPOT 现货 · USDT" [ref=e55]
+              - strong
+                - StaticText "BTC-USDT-SPOT"
+              - generic
+                - StaticText "现货 · USDT"
+            - strong
+              - StaticText "65,010.00"
+            - strong
+              - StaticText "+1.58%"
+            - StaticText "318.9M"
+            - StaticText "交易中"
+            - button "BTC-USDT-SPOT 加入自选" [ref=e56]
+          - article
+            - button "ETH-USDT-SPOT 现货 · USDT" [ref=e57]
+              - strong
+                - StaticText "ETH-USDT-SPOT"
+              - generic
+                - StaticText "现货 · USDT"
+            - strong
+              - StaticText "3,602.00"
+            - strong
+              - StaticText "-0.51%"
+            - StaticText "147.5M"
+            - StaticText "交易中"
+            - button "ETH-USDT-SPOT 加入自选" [ref=e58]
+- generic
+  - generic
+    - generic
+      - button "Copy element" [ref=e59]
+        - image
+      - button "Comment on element" [ref=e60]
+        - image
+      - button "Style element" [ref=e61]
+        - image
+    - button "Collapse toolbar" [expanded=true, ref=e33]
+      - image
