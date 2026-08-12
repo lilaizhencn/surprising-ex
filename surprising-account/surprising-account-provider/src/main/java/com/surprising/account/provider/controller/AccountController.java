@@ -402,6 +402,21 @@ public class AccountController {
         }
     }
 
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/transfers")
+    public ProductTransferRecordQueryResponse userProductTransfers(
+            @RequestHeader("X-User-Id") long userId,
+            @RequestParam("accountType") AccountType accountType,
+            @RequestParam(value = "asset", required = false) String asset,
+            @RequestParam(value = "limit", defaultValue = "50") int limit,
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestParam(value = "sort", required = false) String sort) {
+        try {
+            return accountService.productTransfers(userId, accountType, asset, limit, cursor, sort);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
     @GetMapping(ADMIN_BASE_PATH + "/adjustments")
     public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String headerAdminUserId,

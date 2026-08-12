@@ -134,6 +134,15 @@ public class AuthService {
     }
 
     @Transactional
+    public void logout(RefreshRequest request) {
+        if (request == null || request.refreshToken() == null || request.refreshToken().isBlank()) {
+            return;
+        }
+        repository.refreshSession(hashRefreshToken(request.refreshToken()))
+                .ifPresent(session -> repository.revokeRefreshSession(session.sessionId(), Instant.now()));
+    }
+
+    @Transactional
     public boolean verifyEmail(String authorizationHeader, EmailVerificationRequest request) {
         JwtPrincipal principal = authenticateBearer(authorizationHeader);
         AuthenticatedUser user = repository.user(principal.userId())

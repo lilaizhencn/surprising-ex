@@ -237,6 +237,17 @@ class AuthServiceTest {
     }
 
     @Test
+    void logoutRevokesOnlyTheRefreshSessionFromTheRequest() {
+        Instant now = Instant.parse("2026-07-02T00:00:00Z");
+        when(repository.refreshSession(any())).thenReturn(Optional.of(
+                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600), null)));
+
+        service.logout(new RefreshRequest("refresh-token"));
+
+        verify(repository).revokeRefreshSession(eq(88L), any());
+    }
+
+    @Test
     void emailIsAcceptedAsLoginIdentifier() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         when(repository.credentialByEmail("user@example.com")).thenReturn(Optional.of(

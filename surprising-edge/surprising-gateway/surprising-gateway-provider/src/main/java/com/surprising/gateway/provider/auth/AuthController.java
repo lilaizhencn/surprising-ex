@@ -116,6 +116,11 @@ public class AuthController {
         }
     }
 
+    @PostMapping("/logout")
+    public void logout(@Valid @RequestBody RefreshRequest request) {
+        authService.logout(request);
+    }
+
     @GetMapping("/me")
     public AuthModels.JwtPrincipal me(@RequestHeader("Authorization") String authorization) {
         try {
