@@ -47,6 +47,7 @@
                     <mainClass>com.surprising.trading.entry.SurprisingTradingEntryApplication</mainClass>
                     <buildArgs>
                         <buildArg>-H:IncludeResources=librocksdbjni-.*</buildArg>
+                        <buildArg>-H:DeadlockWatchdogInterval=60</buildArg>
                     </buildArgs>
                 </configuration>
             </plugin>

@@ -119,7 +119,7 @@ public class AccountController {
     public ProductBalanceResponse adminAdjustProductBalance(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestHeader(value = "X-Admin-Username", required = false) String adminUsername,
-            @RequestBody ProductBalanceAdjustmentRequest request) {
+            @Valid @RequestBody ProductBalanceAdjustmentRequest request) {
         requireAdmin(adminUserId);
         try {
             return commandGateway.adjustProductBalance(request, adminUserId, adminUsername);

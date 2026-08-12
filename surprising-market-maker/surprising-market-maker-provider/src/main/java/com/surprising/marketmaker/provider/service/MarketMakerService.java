@@ -697,6 +697,10 @@ public class MarketMakerService {
         String accountPrefix = accountPrefix(strategy, symbol, accountId);
         List<OrderResponse> owned = openOrders.stream()
                 .filter(order -> ownsOrder(accountPrefix, order))
+                // CANCEL_REQUESTED 已不再是可交易订单，不能继续占用本周期撤单/挂单额度。
+                // 旧订单状态可能因服务重启短暂滞留在开放订单查询中；让它们继续消耗额度
+                // 会导致所有报价都被跳过，做市策略进入“运行但无盘口”的假健康状态。
+                .filter(this::isLive)
                 .sorted(Comparator.comparing(OrderResponse::createdAt, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
         List<OrderResponse> kept = new ArrayList<>();

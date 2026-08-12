@@ -107,7 +107,7 @@ public class AccountUserStateCommandWorker {
     private Void applyPartition(UserPartitionKey partition) {
         long applied = stateStore.lastAppliedSequence(partition);
         List<UserPartitionEvent> events = wal.replay(partition);
-        initializeEmptyReservationPartition(partition, events);
+        initializeFirstCommandPartition(partition, events);
         ensureInitialized(partition);
         for (UserPartitionEvent event : events) {
             AccountUserCommand command = decode(event, partition);
@@ -213,22 +213,30 @@ public class AccountUserStateCommandWorker {
     }
 
     /**
-     * 首条命令是订单预占且本地没有快照时，先建立零余额状态，让 reducer 返回明确的余额不足终态。
-     * 其他命令仍必须等待正式的内部 RPC/Kafka 快照初始化，不能用零状态掩盖充值或持仓数据缺失。
+     * 新用户首条命令可以是订单预占或正式资金入账。两者都从零余额状态开始：预占会得到明确的
+     * 余额不足终态，资金调整则由 reducer 按正式命令生成余额、修订号和流水。其他命令仍必须
+     * 等待内部 RPC/Kafka 快照初始化，不能用零状态掩盖已有充值、持仓或转账数据。
      */
-    private void initializeEmptyReservationPartition(UserPartitionKey partition,
-                                                     List<UserPartitionEvent> events) {
+    private void initializeFirstCommandPartition(UserPartitionKey partition,
+                                                 List<UserPartitionEvent> events) {
         if (stateStore.read(partition).isPresent() || events == null || events.isEmpty()) {
             return;
         }
         AccountUserCommand first = decode(events.get(0), partition);
-        if (first.commandType() == AccountUserCommandType.ORDER_RESERVE) {
+        if (first.commandType() == AccountUserCommandType.ORDER_RESERVE
+                || first.commandType() == AccountUserCommandType.BALANCE_ADJUST
+                || first.commandType() == AccountUserCommandType.PRODUCT_BALANCE_ADJUST) {
             reducer.initializeEmpty(partition);
         }
     }
 
     private AccountUserStateReducer.Reduction reduce(AccountUserCommand command, long sequence) {
-        AccountUserStateReducer.Reduction reduction = reducer.reduce(command, sequence);
+        AccountUserStateReducer.Reduction reduction;
+        try {
+            reduction = reducer.reduce(command, sequence);
+        } catch (AccountCommandPoisonPillException ex) {
+            return reducer.rejectWithoutCommit(command, sequence, "INVALID_COMMAND_PAYLOAD", ex.getMessage());
+        }
         if (reduction.status() == AccountUserStateReducer.ApplyStatus.UNSUPPORTED) {
             // 资金命令尚未有本地 reducer 时必须停住用户分区，不能把未执行伪装成拒绝并越过序号。
             throw new IllegalStateException("账户本地 reducer 尚未支持命令 commandId="

@@ -17,6 +17,8 @@ import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.OrderReservationKind;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
+import com.surprising.account.api.model.ProductBalanceAdjustmentAccountCommand;
+import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
 import com.surprising.eventstore.UserPartitionCommandLane;
@@ -24,6 +26,7 @@ import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.UserPartitionResultStore;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -231,6 +234,99 @@ class AccountUserStateCommandWorkerTest {
                             java.nio.charset.StandardCharsets.UTF_8), AccountCommandTerminalResult.class);
             assertThat(terminal.status()).isEqualTo(com.surprising.account.api.model.AccountCommandStatus.REJECTED);
             assertThat(terminal.errorCode()).isEqualTo("INSUFFICIENT_AVAILABLE_BALANCE");
+            assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
+        }
+    }
+
+    @Test
+    void appliesFirstProductBalanceAdjustmentWithoutExistingSnapshot() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-worker-first-adjustment-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture((SendResult<String, String>) null));
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1003L);
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION, "worker-first-product-adjustment",
+                ProductLine.LINEAR_PERPETUAL, 1003L, AccountUserCommandType.PRODUCT_BALANCE_ADJUST,
+                "ADMIN", "first-product-adjustment", null,
+                objectMapper.writeValueAsString(new ProductBalanceAdjustmentAccountCommand(
+                        new ProductBalanceAdjustmentRequest(1003L, AccountType.USDT_PERPETUAL,
+                                "USDT", 500L, "first-product-adjustment", "测试首次入账"),
+                        "admin-1", "管理员")),
+                Instant.parse("2026-08-02T00:00:00Z"), "worker-first-product-adjustment");
+
+        try (UserPartitionWal wal = new UserPartitionWal(directory.resolve("wal"));
+             UserPartitionStateStore stateStore = new UserPartitionStateStore(directory.resolve("state"));
+             UserPartitionResultStore resultStore = new UserPartitionResultStore(directory.resolve("result"))) {
+            wal.append(partition, command.commandId(), command.commandType().name(),
+                    objectMapper.writeValueAsString(command).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "worker-first-product-adjustment-fingerprint", command.occurredAt());
+            InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
+            instruments.replace(ProductLine.LINEAR_PERPETUAL, List.of(), java.util.Map.of("USDT", 1L));
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane(),
+                    instruments, new PositionCalculator());
+            AccountUserStateCommandWorker worker = new AccountUserStateCommandWorker(
+                    objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
+                    reducer, kafkaTemplate);
+
+            worker.applyPending();
+
+            AccountCommandTerminalResult terminal = objectMapper.readValue(
+                    new String(resultStore.read(partition, command.commandId()).orElseThrow(),
+                            java.nio.charset.StandardCharsets.UTF_8), AccountCommandTerminalResult.class);
+            assertThat(terminal.status()).isEqualTo(com.surprising.account.api.model.AccountCommandStatus.APPLIED);
+            assertThat(reducer.state(partition).orElseThrow().snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 500L, 0L));
+            assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
+        }
+    }
+
+    @Test
+    void rejectsMalformedProductBalanceAdjustmentWithoutBlockingThePartition() throws Exception {
+        Path directory = Files.createTempDirectory("account-state-worker-invalid-adjustment-");
+        ObjectMapper objectMapper = new ObjectMapper();
+        AccountProperties properties = new AccountProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture((SendResult<String, String>) null));
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
+        AccountUserCommand command = new AccountUserCommand(
+                AccountUserCommand.CURRENT_SCHEMA_VERSION, "worker-invalid-product-adjustment",
+                ProductLine.LINEAR_PERPETUAL, 1001L, AccountUserCommandType.PRODUCT_BALANCE_ADJUST,
+                "ADMIN", "invalid-product-adjustment", null,
+                objectMapper.writeValueAsString(new ProductBalanceAdjustmentAccountCommand(
+                        new ProductBalanceAdjustmentRequest(1001L, AccountType.USDT_PERPETUAL,
+                                "", 500L, "invalid-product-adjustment", "测试非法入账"),
+                        "admin-1", "管理员")),
+                Instant.parse("2026-08-02T00:00:00Z"), "worker-invalid-product-adjustment");
+
+        try (UserPartitionWal wal = new UserPartitionWal(directory.resolve("wal"));
+             UserPartitionStateStore stateStore = new UserPartitionStateStore(directory.resolve("state"));
+             UserPartitionResultStore resultStore = new UserPartitionResultStore(directory.resolve("result"))) {
+            wal.append(partition, command.commandId(), command.commandType().name(),
+                    objectMapper.writeValueAsString(command).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "worker-invalid-product-adjustment-fingerprint", command.occurredAt());
+            AccountUserStateReducer reducer = new AccountUserStateReducer(
+                    objectMapper, stateStore, new UserPartitionCommandLane());
+            reducer.initialize(snapshot());
+            AccountUserStateCommandWorker worker = new AccountUserStateCommandWorker(
+                    objectMapper, properties, wal, stateStore, resultStore, new UserPartitionCommandLane(),
+                    reducer, kafkaTemplate);
+
+            worker.applyPending();
+
+            AccountCommandTerminalResult terminal = objectMapper.readValue(
+                    new String(resultStore.read(partition, command.commandId()).orElseThrow(),
+                            java.nio.charset.StandardCharsets.UTF_8), AccountCommandTerminalResult.class);
+            assertThat(terminal.status()).isEqualTo(com.surprising.account.api.model.AccountCommandStatus.REJECTED);
+            assertThat(terminal.errorCode()).isEqualTo("INVALID_COMMAND_PAYLOAD");
+            assertThat(reducer.state(partition).orElseThrow().snapshot().balances()).containsExactly(
+                    new PerpetualAccountStateUpdatedEvent.Balance("USDT", 1000L, 0L));
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
         }
     }

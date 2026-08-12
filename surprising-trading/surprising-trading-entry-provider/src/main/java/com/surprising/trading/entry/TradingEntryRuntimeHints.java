@@ -5,6 +5,7 @@ import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.OpenInterestShardUpdatedEvent;
 import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
+import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent;
@@ -46,13 +47,19 @@ import com.surprising.trading.api.model.FeeScheduleEvent;
 import com.surprising.trading.api.model.LeverageSettingEvent;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
+import com.surprising.trading.api.model.AlgoOrderResponse;
+import com.surprising.trading.api.model.OrderBatchItemResponse;
+import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderCommandEvent;
 import com.surprising.trading.api.model.OrderEvent;
+import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderUserCommand;
 import com.surprising.trading.api.model.OrderUserCommandResult;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
+import org.springframework.aot.hint.TypeReference;
 
 public final class TradingEntryRuntimeHints implements RuntimeHintsRegistrar {
     @Override
@@ -70,6 +77,7 @@ public final class TradingEntryRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, OpenInterestShardUpdatedEvent.class);
         registerRecord(hints, OrderReleaseAccountCommand.class);
         registerRecord(hints, OrderReserveAccountCommand.class);
+        registerRecord(hints, PerpetualAccountStateUpdatedEvent.class);
         registerRecord(hints, PositionUpdatedEvent.class);
         registerRecord(hints, InstrumentEvent.class);
         registerRecord(hints, InstrumentLifecycleDrainEvent.class);
@@ -77,7 +85,12 @@ public final class TradingEntryRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, LeverageSettingEvent.class);
         registerRecord(hints, MatchResultEvent.class);
         registerRecord(hints, MatchTradeEvent.class);
+        registerRecord(hints, AlgoOrderResponse.class);
+        registerRecord(hints, OrderBatchItemResponse.class);
+        registerRecord(hints, OrderBatchResponse.class);
+        registerRecord(hints, OrderCommandEvent.class);
         registerRecord(hints, OrderEvent.class);
+        registerRecord(hints, OrderResponse.class);
         registerRecord(hints, OrderUserCommand.class);
         registerRecord(hints, OrderUserCommandResult.class);
         registerRecord(hints, TriggerOrderUpdatedEvent.class);
@@ -106,6 +119,11 @@ public final class TradingEntryRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, OrderUserEvent.class);
         registerRecord(hints, OrderUserState.class);
         registerRecord(hints, OrderUserStateSnapshot.class);
+        hints.reflection().registerType(
+                TypeReference.of("com.surprising.trading.order.service.OrderUserStateService$CommandFingerprint"),
+                MemberCategory.ACCESS_DECLARED_FIELDS,
+                MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                MemberCategory.INVOKE_PUBLIC_METHODS);
         register(hints, InstrumentTriggerDrainConsumer.class);
         register(hints, com.surprising.trading.trigger.service.InstrumentSnapshotConsumer.class);
         register(hints, PositionClosedTriggerConsumer.class);
@@ -120,5 +138,10 @@ public final class TradingEntryRuntimeHints implements RuntimeHintsRegistrar {
                 MemberCategory.ACCESS_DECLARED_FIELDS,
                 MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
                 MemberCategory.INVOKE_PUBLIC_METHODS);
+        for (Class<?> nestedType : type.getDeclaredClasses()) {
+            if (nestedType.isRecord()) {
+                registerRecord(hints, nestedType);
+            }
+        }
     }
 }

@@ -30,6 +30,8 @@ import com.surprising.price.consumer.MarkPriceKafkaConsumer;
 import com.surprising.account.api.model.ProductBalanceAdjustmentAccountCommand;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandResultWaiter;
+import com.surprising.account.provider.model.CachedPosition;
+import com.surprising.account.provider.model.CachedPositionMargin;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
 import com.surprising.account.provider.service.AccountInstrumentDrainConsumer;
 import com.surprising.account.provider.service.AccountUserReducerState;
@@ -56,6 +58,8 @@ public final class AccountRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, PerpTradeEvent.class);
         registerRecord(hints, AccountCommandResultEvent.class);
         registerRecord(hints, AccountCommandTerminalResult.class);
+        registerRecord(hints, CachedPosition.class);
+        registerRecord(hints, CachedPositionMargin.class);
         registerRecord(hints, AccountUserCommand.class);
         registerRecord(hints, AdlTargetSettlementAccountCommand.class);
         registerRecord(hints, BalanceAdjustmentAccountCommand.class);
@@ -101,5 +105,10 @@ public final class AccountRuntimeHints implements RuntimeHintsRegistrar {
                 MemberCategory.ACCESS_DECLARED_FIELDS,
                 MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
                 MemberCategory.INVOKE_PUBLIC_METHODS);
+        for (Class<?> nestedType : type.getDeclaredClasses()) {
+            if (nestedType.isRecord()) {
+                registerRecord(hints, nestedType);
+            }
+        }
     }
 }

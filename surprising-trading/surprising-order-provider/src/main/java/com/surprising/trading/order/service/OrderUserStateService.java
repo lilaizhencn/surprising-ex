@@ -193,6 +193,11 @@ public class OrderUserStateService {
             OrderUserCommandResult existing = readCommandResult(partition, command.commandId()).orElse(null);
             if (existing != null) {
                 if (!commandFingerprint(command).equals(existing.commandFingerprint())) {
+                    if (command.commandType() == OrderUserCommandType.CANCEL_OPEN) {
+                        log.warn("订单全量撤单命令载荷已变化，沿用已持久化结果 commandId={} userId={}",
+                                command.commandId(), command.userId());
+                        return existing;
+                    }
                     throw new IllegalStateException("订单用户命令编号与载荷指纹冲突: " + command.commandId());
                 }
                 return existing;

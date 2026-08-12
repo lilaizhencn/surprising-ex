@@ -28,6 +28,16 @@ management:
 
 surprising:
   price:
+    consumer:
+      bootstrap-servers: localhost:9092
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
+      topic: surprising.perp.mark.price.v1
+      group-id: surprising-price-query-${HOSTNAME:${random.uuid}}
+      max-age: 3s
+      allowed-future-skew: 1s
+      concurrency: 1
+      max-poll-records: 500
     index:
       kafka:
         bootstrap-servers: localhost:9092

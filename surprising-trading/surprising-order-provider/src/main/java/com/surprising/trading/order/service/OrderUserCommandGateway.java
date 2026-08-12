@@ -21,6 +21,7 @@ import com.surprising.trading.order.model.OrderUserCancelOpenCommand;
 import com.surprising.trading.order.model.OrderUserPruneReduceOnlyCommand;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -69,7 +70,12 @@ public class OrderUserCommandGateway {
 
     public OrderBatchResponse cancelOpen(ProductLine productLine, long userId, String symbol, int limit,
                                          String reason) {
-        return submit(productLine, userId, "ORDER_CANCEL_OPEN:" + userId + ":" + (symbol == null ? "ALL" : symbol),
+        String normalizedSymbol = symbol == null || symbol.isBlank()
+                ? "ALL" : symbol.trim().toUpperCase(Locale.ROOT);
+        String normalizedReason = reason == null || reason.isBlank() ? "USER_CANCEL_ALL" : reason.trim();
+        String commandId = "ORDER_CANCEL_OPEN:" + userId + ":" + normalizedSymbol + ":" + limit + ":"
+                + Integer.toUnsignedString(normalizedReason.hashCode());
+        return submit(productLine, userId, commandId,
                 OrderUserCommandType.CANCEL_OPEN, new OrderUserCancelOpenCommand(symbol, limit, reason),
                 OrderBatchResponse.class);
     }
