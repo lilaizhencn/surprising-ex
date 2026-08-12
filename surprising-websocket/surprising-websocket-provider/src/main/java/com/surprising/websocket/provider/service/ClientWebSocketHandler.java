@@ -86,34 +86,6 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     }
 
     private Long authenticatedUserId(WebSocketSession session) {
-        URI uri = session.getUri();
-        List<String> headers = session.getHandshakeHeaders().get(properties.getSecurity().getUserIdHeader());
-        if (headers != null && !headers.isEmpty() && !headers.get(0).isBlank()) {
-            return Long.parseLong(headers.get(0).trim());
-        }
-        HttpHeaders handshakeHeaders = session.getHandshakeHeaders();
-        List<String> forwarded = handshakeHeaders.get("X-Forwarded-User-Id");
-        if (forwarded != null && !forwarded.isEmpty() && !forwarded.get(0).isBlank()) {
-            return Long.parseLong(forwarded.get(0).trim());
-        }
-        String queryUserId = queryValue(uri, "userId");
-        if (properties.getSecurity().isAllowQueryUserIdFallback()
-                && queryUserId != null && !queryUserId.isBlank()) {
-            return Long.parseLong(queryUserId.trim());
-        }
-        return null;
-    }
-
-    private String queryValue(URI uri, String name) {
-        if (uri == null || uri.getQuery() == null) {
-            return null;
-        }
-        for (String part : uri.getQuery().split("&")) {
-            String[] kv = part.split("=", 2);
-            if (kv.length == 2 && name.equals(kv[0])) {
-                return kv[1];
-            }
-        }
         return null;
     }
 }
