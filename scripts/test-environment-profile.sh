@@ -63,7 +63,7 @@ test_profile_detect() {
   fi
   case "${TEST_PROFILE}" in
     local-low)
-      TEST_MAX_PROVIDER_PROCESSES="${TEST_MAX_PROVIDER_PROCESSES:-8}"
+      TEST_MAX_PROVIDER_PROCESSES="${TEST_MAX_PROVIDER_PROCESSES:-16}"
       TEST_JVM_HEAP_MB="${TEST_JVM_HEAP_MB:-512}"
       TEST_STRESS_SYMBOL_COUNT="${TEST_STRESS_SYMBOL_COUNT:-1}"
       TEST_STRESS_USER_COUNT="${TEST_STRESS_USER_COUNT:-100}"
@@ -83,7 +83,7 @@ test_profile_detect() {
       TEST_JVM_GC_AUTO="${TEST_JVM_GC_AUTO:-g1}"
       ;;
     local-standard)
-      TEST_MAX_PROVIDER_PROCESSES="${TEST_MAX_PROVIDER_PROCESSES:-10}"
+      TEST_MAX_PROVIDER_PROCESSES="${TEST_MAX_PROVIDER_PROCESSES:-20}"
       TEST_JVM_HEAP_MB="${TEST_JVM_HEAP_MB:-1024}"
       TEST_STRESS_SYMBOL_COUNT="${TEST_STRESS_SYMBOL_COUNT:-20}"
       TEST_STRESS_USER_COUNT="${TEST_STRESS_USER_COUNT:-1000}"
@@ -103,7 +103,7 @@ test_profile_detect() {
       TEST_JVM_GC_AUTO="${TEST_JVM_GC_AUTO:-g1}"
       ;;
     cloud-capacity)
-      TEST_MAX_PROVIDER_PROCESSES="${TEST_MAX_PROVIDER_PROCESSES:-16}"
+      TEST_MAX_PROVIDER_PROCESSES="${TEST_MAX_PROVIDER_PROCESSES:-24}"
       TEST_JVM_HEAP_MB="${TEST_JVM_HEAP_MB:-2048}"
       TEST_STRESS_SYMBOL_COUNT="${TEST_STRESS_SYMBOL_COUNT:-20}"
       TEST_STRESS_USER_COUNT="${TEST_STRESS_USER_COUNT:-5000}"
@@ -153,9 +153,9 @@ test_profile_detect() {
     [[ "${!profile_value}" =~ ^[1-9][0-9]*$ ]] || { echo "${profile_value} must be a positive integer" >&2; return 1; }
   done
   case "${TEST_PROFILE}" in
-    local-low) max_processes_default=8 ;;
-    local-standard) max_processes_default=10 ;;
-    cloud-capacity) max_processes_default=16 ;;
+    local-low) max_processes_default=16 ;;
+    local-standard) max_processes_default=20 ;;
+    cloud-capacity) max_processes_default=24 ;;
     cloud-production) max_processes_default=64 ;;
   esac
   if ((TEST_MAX_PROVIDER_PROCESSES > max_processes_default)) && [[ "${ALLOW_RESOURCE_OVERRIDE}" != "true" ]]; then
@@ -201,29 +201,29 @@ test_profile_service_heap_mb() {
   case "${TEST_PROFILE}" in
     local-low)
       case "${service}" in
-        matching|account|margin-ops) heap=384 ;;
-        price|trading-entry|edge|market-maker) heap=256 ;;
+        matching|account|risk|liquidation) heap=384 ;;
+        index-price|mark-price|order|trigger|funding|insurance|adl|gateway|websocket|market-maker) heap=256 ;;
         *) heap=256 ;;
       esac
       ;;
     local-standard)
       case "${service}" in
-        matching|account|margin-ops) heap=768 ;;
-        price|trading-entry|edge|market-maker) heap=512 ;;
+        matching|account|risk|liquidation) heap=768 ;;
+        index-price|mark-price|order|trigger|funding|insurance|adl|gateway|websocket|market-maker) heap=512 ;;
         *) heap=384 ;;
       esac
       ;;
     cloud-capacity)
       case "${service}" in
-        matching|account|margin-ops) heap=1536 ;;
-        price|trading-entry|edge|market-maker) heap=768 ;;
+        matching|account|risk|liquidation) heap=1536 ;;
+        index-price|mark-price|order|trigger|funding|insurance|adl|gateway|websocket|market-maker) heap=768 ;;
         *) heap=512 ;;
       esac
       ;;
     cloud-production)
       case "${service}" in
-        matching|account|margin-ops) heap=3072 ;;
-        price|trading-entry|edge|market-maker) heap=1536 ;;
+        matching|account|risk|liquidation) heap=3072 ;;
+        index-price|mark-price|order|trigger|funding|insurance|adl|gateway|websocket|market-maker) heap=1536 ;;
         *) heap=1024 ;;
       esac
       ;;
@@ -295,12 +295,12 @@ test_profile_services() {
   case "${scenario}" in
     matching) echo "instrument matching" ;;
     account) echo "instrument account" ;;
-    websocket) echo "instrument price candlestick matching account trading-entry edge" ;;
+    websocket) echo "instrument index-price mark-price candlestick matching account order trigger gateway websocket" ;;
     trade|recovery|soak|liquidation)
       if [[ "${product_line}" == "SPOT" ]]; then
-        echo "instrument price candlestick matching account trading-entry edge market-maker"
+        echo "instrument index-price mark-price candlestick matching account order trigger gateway websocket market-maker"
       else
-        echo "instrument price candlestick matching account margin-ops trading-entry edge market-maker"
+        echo "instrument index-price mark-price candlestick matching account risk liquidation funding insurance adl order trigger gateway websocket market-maker"
       fi
       ;;
     *) echo "unsupported test scenario ${scenario}" >&2; return 1 ;;
@@ -318,7 +318,11 @@ test_profile_write_manifest() {
     echo "jvm_heap_mb=${TEST_JVM_HEAP_MB}"
     echo "matching_jvm_heap_mb=$(test_profile_service_heap_mb matching)"
     echo "account_jvm_heap_mb=$(test_profile_service_heap_mb account)"
-    echo "margin_ops_jvm_heap_mb=$(test_profile_service_heap_mb margin-ops)"
+    echo "risk_jvm_heap_mb=$(test_profile_service_heap_mb risk)"
+    echo "liquidation_jvm_heap_mb=$(test_profile_service_heap_mb liquidation)"
+    echo "funding_jvm_heap_mb=$(test_profile_service_heap_mb funding)"
+    echo "insurance_jvm_heap_mb=$(test_profile_service_heap_mb insurance)"
+    echo "adl_jvm_heap_mb=$(test_profile_service_heap_mb adl)"
     echo "jvm_gc=${TEST_JVM_GC}"
     echo "services=${TEST_SERVICES}"
     echo "stress_symbols=${TEST_STRESS_SYMBOL_COUNT}"

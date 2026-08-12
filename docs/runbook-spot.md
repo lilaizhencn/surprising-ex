@@ -27,13 +27,13 @@ PRODUCT_LINES=SPOT INCLUDE_SHARED_TOPICS=true INCLUDE_LEGACY_PERP_TOPICS=false \
 
 ```bash
 mvn -q -DskipTests package
-SERVICES="candlestick trading-entry matching account edge market-maker" \
+SERVICES="candlestick order trigger matching account gateway websocket market-maker" \
 PRODUCT_LINE=SPOT PRODUCT_TOPICS_ENABLED=true BUILD_SERVICES=false \
 KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS}" \
 SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL}" \
 ./scripts/start-product-line-providers.sh
 
-PRODUCT_LINE=SPOT SERVICES="candlestick trading-entry matching account edge market-maker" \
+PRODUCT_LINE=SPOT SERVICES="candlestick order trigger matching account gateway websocket market-maker" \
 ACTION=stop ./scripts/start-product-line-providers.sh
 ```
 

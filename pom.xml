@@ -21,8 +21,13 @@
         <module>surprising-price</module>
         <module>surprising-trading</module>
         <module>surprising-account</module>
-        <module>surprising-margin-ops</module>
-        <module>surprising-edge</module>
+        <module>surprising-adl</module>
+        <module>surprising-funding</module>
+        <module>surprising-insurance</module>
+        <module>surprising-liquidation</module>
+        <module>surprising-risk</module>
+        <module>surprising-gateway</module>
+        <module>surprising-websocket</module>
         <module>surprising-market-maker</module>
         <module>surprising-finance-ops</module>
     </modules>

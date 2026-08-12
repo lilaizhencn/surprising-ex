@@ -92,6 +92,16 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.trading.trigger.SurprisingTriggerApplication</mainClass>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.graalvm.buildtools</groupId>
+                <artifactId>native-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.trading.trigger.SurprisingTriggerApplication</mainClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>

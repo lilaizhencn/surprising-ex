@@ -26,14 +26,14 @@ PRODUCT_LINES=LINEAR_PERPETUAL INCLUDE_SHARED_TOPICS=true INCLUDE_LEGACY_PERP_TO
 
 ```bash
 mvn -q -DskipTests package
-SERVICES="candlestick index-price mark-price trading-entry matching account margin-ops edge market-maker" \
+SERVICES="candlestick index-price mark-price order trigger matching account risk liquidation funding insurance adl gateway websocket market-maker" \
 PRODUCT_LINE=LINEAR_PERPETUAL PRODUCT_TOPICS_ENABLED=true BUILD_SERVICES=false \
 KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS}" \
 SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL}" \
 ./scripts/start-product-line-providers.sh
 
 PRODUCT_LINE=LINEAR_PERPETUAL \
-SERVICES="candlestick index-price mark-price trading-entry matching account margin-ops edge market-maker" \
+SERVICES="candlestick index-price mark-price order trigger matching account risk liquidation funding insurance adl gateway websocket market-maker" \
 ACTION=stop ./scripts/start-product-line-providers.sh
 ```
 

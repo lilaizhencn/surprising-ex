@@ -227,7 +227,7 @@ PRODUCT_LINE=OPTION PORT_OFFSET=300 ACTION=stop ./scripts/start-product-line-pro
 `PRODUCT_LINE` 必须显式设置，省略时脚本直接失败；脚本向服务传入 `PRODUCT_TOPICS_ENABLED=true`，
 若显式传入 `false`，服务启动校验会直接失败。脚本设置产品线 Topic、独立消费者组、唯一客户端 ID 和协调节点 ID，并自动跳过不适用
 的服务。`PORT_OFFSET` 加到各服务默认端口。Jar 未构建时使用 `BUILD_SERVICES=true`；用
-`SERVICES="trading-entry matching account"` 选择子集；CI 未暴露 Actuator 时使用
+`SERVICES="order trigger matching account"` 选择子集；CI 未暴露 Actuator 时使用
 `WAIT_HEALTH=false`。
 脚本会自动把 instrument-provider 放在服务列表第一项并等待其健康检查通过，即使显式 `SERVICES` 未包含
 `instrument` 也不会跳过合约 JVM 快照初始化。

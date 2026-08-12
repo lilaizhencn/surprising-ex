@@ -1,0 +1,52 @@
+server:
+  port: 9093
+
+spring:
+  application:
+    name: surprising-websocket-provider
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  websocket:
+    kafka:
+      bootstrap-servers: localhost:9092
+      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:false}
+      # 横向广播要求每个 WebSocket 节点都在本地接收公共行情数据。
+      # 每个 Pod/实例必须使用稳定且唯一的组名；所有节点共用同一组会导致每条 Kafka 消息只投递给一个节点，
+      # 每次重启都生成随机组名则会残留大量消费者组，并使积压监控失真。
+      group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
+      concurrency: 2
+      max-poll-records: 1000
+      candle-topic: surprising.perp.candle.events.v1
+      trade-topic: surprising.perp.trade.events.v1
+      order-book-depth-topic: surprising.perp.orderbook.depth.v1
+      index-price-topic: surprising.perp.index.price.v1
+      mark-price-topic: surprising.perp.mark.price.v1
+      funding-rate-topic: surprising.perp.funding.rate.v1
+      order-events-topic: surprising.perp.order.events.v1
+      trigger-order-events-topic: surprising.perp.trigger-order.events.v1
+      match-results-topic: surprising.perp.match.results.v1
+      match-trades-topic: surprising.perp.match.trades.v1
+      position-events-topic: surprising.account.position.events.v1
+      account-risk-events-topic: surprising.risk.account.events.v1
+      position-risk-events-topic: surprising.risk.position.events.v1
+    session:
+      max-subscriptions: 200
+      outbound-queue-capacity: 1000
+      send-timeout: 5s
+    security:
+      user-id-header: X-User-Id
+      allow-query-user-id-fallback: ${SURPRISING_WS_QUERY_USER_ID:false}
+      issuer: surprising-ex-gateway
+      jwt-secret: ${SURPRISING_WEBSOCKET_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
+      allowed-origins:
+        - ${SURPRISING_WS_ALLOWED_ORIGIN:*}
+    fanout:
+      candle-partial-coalesce-window: 250ms
+      mark-price-max-age: 3s
+      mark-price-allowed-future-skew: 1s

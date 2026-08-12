@@ -40,15 +40,15 @@
 
 ```text
 SPOT:
-  trading-entry/order-provider -> matching-provider -> account spot settlement
+  order-provider -> matching-provider -> account spot settlement
 
 LINEAR_PERPETUAL:
-  trading-entry/order-provider -> matching-provider -> account derivative settlement
-  -> margin-ops/risk -> liquidation -> insurance -> adl
+  order-provider -> matching-provider -> account derivative settlement
+  -> risk -> liquidation -> insurance -> adl
   -> funding
 
 LINEAR_DELIVERY:
-  trading-entry/order-provider -> matching-provider -> account derivative settlement（基础链路）
+  order-provider -> matching-provider -> account derivative settlement（基础链路）
   -> 交割价确认 -> delivery settlement user command -> 交割流水/保证金释放
 
 OPTION:
@@ -62,10 +62,10 @@ OPTION:
 
 - `surprising-product-api`：`ProductLine`、账户类型映射、合约类型映射、产品线 topic 和 consumer group 生成。
 - `surprising-instrument`：统一管理 `SPOT`、`PERPETUAL`、`DELIVERY`、`OPTION` instrument，包含到期、交割、行权价、期权类型等字段。
-- `surprising-trading`：订单入口、条件单、算法单、exchange-core 撮合封装和产品线 topic 路由。
+- `surprising-trading`：独立订单入口、条件单、算法单、exchange-core 撮合封装和产品线 topic 路由。
 - `surprising-account`：基础账户、产品账户、余额流水、产品流水、持仓、保证金、资金费、交割/行权账务。
-- `surprising-margin-ops`：保证金产品共用的风控、强平、资金费、保险基金和 ADL 链路，按产品线和账户类型隔离。
-- `surprising-edge`：客户端使用 `productLine` 路由 REST 和订阅实时推送；`surprising-gateway` 和 `surprising-websocket` 仍保留在 edge 模块下，可按生产容量独立部署。
+- `surprising-risk`、`surprising-liquidation`、`surprising-funding`、`surprising-insurance`、`surprising-adl`：分别承载风控、强平、资金费、保险基金和 ADL 链路，按产品线和账户类型隔离。
+- `surprising-gateway`、`surprising-websocket`：客户端使用 `productLine` 路由 REST 和订阅实时推送，两个模块可按生产容量独立部署。
 
 ## 交割合约执行模型（设计边界）
 

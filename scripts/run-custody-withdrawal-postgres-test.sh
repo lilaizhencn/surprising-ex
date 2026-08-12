@@ -19,6 +19,6 @@ cd "${PROJECT_ROOT}"
 SURPRISING_WITHDRAWAL_IT_DATABASE_URL="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable" \
 SURPRISING_WITHDRAWAL_IT_DATABASE_USER="${DB_USER}" \
 SURPRISING_WITHDRAWAL_IT_DATABASE_PASSWORD="${SURPRISING_WITHDRAWAL_IT_DATABASE_PASSWORD:-}" \
-    mvn -q -pl surprising-edge/surprising-gateway/surprising-gateway-provider -am \
+    mvn -q -pl surprising-gateway -am \
     -Dtest=CustodyWithdrawalReconciliationPostgresTest \
     -Dsurefire.failIfNoSpecifiedTests=false test

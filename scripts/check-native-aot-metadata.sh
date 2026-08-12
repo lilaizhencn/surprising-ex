@@ -49,13 +49,6 @@ required_types() {
         com.surprising.price.api.model.MarkPricePublishedEvent \
         com.surprising.price.api.model.PerpFundingRateEvent
       ;;
-    surprising-price-provider)
-      printf '%s\n' \
-        com.surprising.instrument.api.model.InstrumentEvent \
-        com.surprising.price.api.model.IndexPriceEvent \
-        com.surprising.price.api.model.MarkPricePublishedEvent \
-        com.surprising.price.api.model.PerpFundingRateEvent
-      ;;
     surprising-account-provider)
       printf '%s\n' \
         com.surprising.account.api.model.AccountCommandResultEvent \
@@ -75,7 +68,7 @@ required_types() {
         com.surprising.instrument.api.model.InstrumentEvent \
         com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent
       ;;
-    surprising-trading-entry-provider)
+    surprising-order-provider)
       printf '%s\n' \
         com.surprising.account.api.model.AccountCommandResultEvent \
         com.surprising.account.api.model.AccountUserCommand \
@@ -86,9 +79,13 @@ required_types() {
         com.surprising.trading.api.model.OrderEvent \
         com.surprising.trading.api.model.OrderUserCommand \
         com.surprising.trading.api.model.OrderUserCommandResult \
-        com.surprising.trading.api.model.TriggerOrderUpdatedEvent \
         com.surprising.trading.order.model.CancelAllAfterTimer \
         com.surprising.trading.order.model.OrderUserCancelCommand
+      ;;
+    surprising-trigger-provider)
+      printf '%s\n' \
+        com.surprising.instrument.api.model.InstrumentEvent \
+        com.surprising.trading.api.model.TriggerOrderUpdatedEvent
       ;;
     surprising-matching-provider)
       printf '%s\n' \
@@ -100,7 +97,7 @@ required_types() {
         'com.surprising.trading.matching.store.MatchingLocalStateStore$StoredOrder' \
         'com.surprising.trading.matching.store.MatchingLocalStateStore$LocalOutboxRecord'
       ;;
-    surprising-margin-ops-provider)
+    surprising-risk-provider)
       printf '%s\n' \
         com.surprising.account.api.model.AccountCommandResultEvent \
         com.surprising.account.api.model.AccountUserCommand \
@@ -115,11 +112,20 @@ required_types() {
         'com.surprising.risk.provider.service.RiskLocalProjectionStore$RiskProjectionBatch' \
         'com.surprising.risk.provider.service.RiskLocalProjectionStore$ProjectionIds'
       ;;
-    surprising-edge-provider)
+    surprising-liquidation-provider|surprising-funding-provider|surprising-insurance-provider|surprising-adl-provider)
+      printf '%s\n' \
+        com.surprising.account.api.model.AccountCommandResultEvent \
+        com.surprising.account.api.model.AccountUserCommand \
+        com.surprising.instrument.api.model.InstrumentEvent
+      ;;
+    surprising-gateway)
+      printf '%s\n' \
+        com.surprising.gateway.provider.service.ProductTransferWireRequest
+      ;;
+    surprising-websocket-provider)
       printf '%s\n' \
         com.surprising.candlestick.api.model.CandleUpdatedEvent \
         com.surprising.candlestick.api.model.TradeEvent \
-        com.surprising.gateway.provider.service.ProductTransferWireRequest \
         com.surprising.trading.api.model.OrderBookDepthEvent \
         com.surprising.trading.api.model.OrderEvent \
         com.surprising.trading.api.model.MatchResultEvent \

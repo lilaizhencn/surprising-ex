@@ -54,12 +54,17 @@ Surprising-EX 是基于 Java 25、PostgreSQL、Kafka 和 Redis/Valkey 的多产�
 |---|---|
 | `surprising-product-api` | 产品线、账户类型和 Topic 命名 |
 | `surprising-instrument` | symbol、合约规格、风险档位和生命周期 |
-| `surprising-price` | 指数价、标记价和汇率 |
-| `surprising-trading` | 普通订单、条件单、算法单和 exchange-core 撮合 |
+| `surprising-price` | 独立指数价、标记价和汇率服务 |
+| `surprising-trading` | 独立普通订单、条件单、算法单和 exchange-core 撮合服务 |
 | `surprising-account` | 余额、账本、账户指令、结算、持仓和保证金 |
-| `surprising-margin-ops` | 风险、强平、资金费、保险基金和 ADL |
+| `surprising-risk` | 风险 API 和独立风控服务 |
+| `surprising-liquidation` | 强平 API 和独立强平服务 |
+| `surprising-funding` | 资金费 API 和独立资金费服务 |
+| `surprising-insurance` | 保险基金 API 和独立保险基金服务 |
+| `surprising-adl` | ADL API 和独立自动减仓服务 |
 | `surprising-candlestick` | Kafka Streams + RocksDB K 线 |
-| `surprising-edge` | REST gateway 和 WebSocket fanout |
+| `surprising-gateway` | 独立 REST gateway |
+| `surprising-websocket` | 独立 WebSocket fanout |
 | `surprising-market-maker` | 内部做市和交易链路压测 |
 
 Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
@@ -92,12 +97,19 @@ matching 使用 `exchange.core2:exchange-core:0.5.3` 及其 Chronicle/OpenHFT �
 |---|---:|
 | instrument | 9080 |
 | candlestick | 9081 |
-| price（index + mark） | 9082 |
-| trading-entry（order + trigger） | 9084 |
+| index-price | 9082 |
+| mark-price | 9083 |
+| order | 9084 |
+| trigger | 9095 |
 | matching | 9085 |
 | account | 9086 |
-| margin-ops | 9088 |
-| edge（gateway + WebSocket） | 9094 |
+| risk | 9087 |
+| liquidation | 9088 |
+| funding | 9089 |
+| insurance | 9090 |
+| adl | 9091 |
+| websocket | 9093 |
+| gateway | 9094 |
 | market-maker | 9096 |
 
 ## 测试

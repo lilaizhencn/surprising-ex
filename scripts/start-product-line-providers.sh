@@ -58,23 +58,19 @@ module_for() {
   case "$1" in
     instrument) echo "surprising-instrument/surprising-instrument-provider" ;;
     candlestick) echo "surprising-candlestick/surprising-candlestick-provider" ;;
-    price) echo "surprising-price/surprising-price-provider" ;;
     index-price) echo "surprising-price/surprising-index-price-provider" ;;
     mark-price) echo "surprising-price/surprising-mark-price-provider" ;;
-    trading-entry) echo "surprising-trading/surprising-trading-entry-provider" ;;
     order) echo "surprising-trading/surprising-order-provider" ;;
     matching) echo "surprising-trading/surprising-matching-provider" ;;
     trigger) echo "surprising-trading/surprising-trigger-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
-    risk) echo "surprising-margin-ops/surprising-risk-provider" ;;
-    margin-ops) echo "surprising-margin-ops/surprising-margin-ops-provider" ;;
-    liquidation) echo "surprising-margin-ops/surprising-liquidation-provider" ;;
-    funding) echo "surprising-margin-ops/surprising-funding-provider" ;;
-    insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
-    adl) echo "surprising-margin-ops/surprising-adl-provider" ;;
-    edge) echo "surprising-edge/surprising-edge-provider" ;;
-    websocket) echo "surprising-edge/surprising-websocket/surprising-websocket-provider" ;;
-    gateway) echo "surprising-edge/surprising-gateway/surprising-gateway-provider" ;;
+    risk) echo "surprising-risk/surprising-risk-provider" ;;
+    liquidation) echo "surprising-liquidation/surprising-liquidation-provider" ;;
+    funding) echo "surprising-funding/surprising-funding-provider" ;;
+    insurance) echo "surprising-insurance/surprising-insurance-provider" ;;
+    adl) echo "surprising-adl/surprising-adl-provider" ;;
+    websocket) echo "surprising-websocket/surprising-websocket-provider" ;;
+    gateway) echo "surprising-gateway" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *)
       echo "Unknown service: $1" >&2
@@ -91,20 +87,16 @@ base_port_for() {
   case "$1" in
     instrument) echo 9080 ;;
     candlestick) echo 9081 ;;
-    price) echo 9082 ;;
     index-price) echo 9082 ;;
     mark-price) echo 9083 ;;
-    trading-entry) echo 9084 ;;
     order) echo 9084 ;;
     matching) echo 9085 ;;
     account) echo 9086 ;;
     risk) echo 9087 ;;
-    margin-ops) echo 9088 ;;
     liquidation) echo 9088 ;;
     funding) echo 9089 ;;
     insurance) echo 9090 ;;
     adl) echo 9091 ;;
-    edge) echo 9094 ;;
     websocket) echo 9093 ;;
     gateway) echo 9094 ;;
     trigger) echo 9095 ;;
@@ -235,18 +227,6 @@ service_env() {
         "SURPRISING_PRICE_INDEX_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_PRICE_INDEX_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-index"
       ;;
-    price)
-      printf '%s\n' \
-        "SURPRISING_PRICE_INDEX_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_PRICE_INDEX_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_PRICE_INDEX_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_PRICE_INDEX_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-index" \
-        "SURPRISING_PRICE_MARK_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_PRICE_MARK_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_PRICE_MARK_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_PRICE_MARK_KAFKA_GROUP_ID=surprising-mark-price-${slug}-v1" \
-        "SURPRISING_PRICE_MARK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-mark"
-      ;;
     mark-price)
       printf '%s\n' \
         "SURPRISING_PRICE_MARK_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
@@ -254,20 +234,6 @@ service_env() {
         "SURPRISING_PRICE_MARK_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_PRICE_MARK_KAFKA_GROUP_ID=surprising-mark-price-${slug}-v1" \
         "SURPRISING_PRICE_MARK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-mark"
-      ;;
-    trading-entry)
-      local entry_port
-      entry_port=$(( $(base_port_for trading-entry) + PORT_OFFSET ))
-      printf '%s\n' \
-        "SURPRISING_CLIENTS_ORDER_BASE_URL=http://${LOCAL_HOST}:${entry_port}" \
-        "SURPRISING_CLIENTS_TRIGGER_BASE_URL=http://${LOCAL_HOST}:${entry_port}" \
-        "SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_TRADING_TRIGGER_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_TRADING_TRIGGER_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_TRADING_TRIGGER_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_TRADING_TRIGGER_KAFKA_GROUP_ID=surprising-trigger-${slug}-v1"
       ;;
     order)
       printf '%s\n' \
@@ -307,37 +273,6 @@ service_env() {
         "SURPRISING_RISK_KAFKA_GROUP_ID=surprising-risk-${slug}-v1" \
         "SURPRISING_RISK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-risk"
       ;;
-    margin-ops)
-      local funding_enabled=false
-      if supports_funding; then
-        funding_enabled=true
-      fi
-      local margin_ops_port
-      margin_ops_port=$(( $(base_port_for margin-ops) + PORT_OFFSET ))
-      printf '%s\n' \
-        "SURPRISING_CLIENTS_RISK_BASE_URL=http://${LOCAL_HOST}:${margin_ops_port}" \
-        "SURPRISING_RISK_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_RISK_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_RISK_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_RISK_KAFKA_GROUP_ID=surprising-risk-${slug}-v1" \
-        "SURPRISING_RISK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-risk" \
-        "SURPRISING_LIQUIDATION_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_LIQUIDATION_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_LIQUIDATION_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_LIQUIDATION_KAFKA_GROUP_ID=surprising-liquidation-${slug}-v1" \
-        "SURPRISING_FUNDING_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_FUNDING_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_FUNDING_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_FUNDING_CALCULATION_ENABLED=${funding_enabled}" \
-        "SURPRISING_FUNDING_SETTLEMENT_ENABLED=${funding_enabled}" \
-        "SURPRISING_FUNDING_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-funding" \
-        "SURPRISING_INSURANCE_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_INSURANCE_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_INSURANCE_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_INSURANCE_KAFKA_GROUP_ID=surprising-insurance-${slug}-v1" \
-        "SURPRISING_ADL_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_ADL_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}"
-      ;;
     liquidation)
       printf '%s\n' \
         "SURPRISING_LIQUIDATION_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
@@ -371,16 +306,12 @@ service_env() {
         "SURPRISING_WEBSOCKET_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_WEBSOCKET_KAFKA_GROUP_ID=surprising-websocket-${slug}-${HOSTNAME:-local}-$$"
       ;;
-    edge)
-      printf '%s\n' \
-        "SURPRISING_WEBSOCKET_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "SURPRISING_WEBSOCKET_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_WEBSOCKET_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_WEBSOCKET_KAFKA_GROUP_ID=surprising-edge-websocket-${slug}-${HOSTNAME:-local}-$$"
+    gateway)
+      :
       ;;
     market-maker)
       local mark_price_port=9083
-      if service_requested price && ! service_requested mark-price; then
+      if service_requested index-price && ! service_requested mark-price; then
         mark_price_port=9082
       fi
       mark_price_port=$((mark_price_port + PORT_OFFSET))
@@ -428,7 +359,7 @@ wait_health() {
 
 start_service() {
   local service="$1"
-  if [[ "${service}" =~ ^(price|index-price|mark-price|risk|margin-ops|liquidation|insurance|adl)$ ]] && ! supports_margin_services; then
+  if [[ "${service}" =~ ^(index-price|mark-price|risk|liquidation|insurance|adl)$ ]] && ! supports_margin_services; then
     echo "${service}: skipped for ${PRODUCT_LINE}"
     return
   fi

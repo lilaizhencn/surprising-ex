@@ -20,8 +20,8 @@ if [[ "${RECOVERY_CASES}" == "auto" ]]; then
   case "${TEST_PROFILE}" in
     local-low) RECOVERY_CASES="account:kill" ;;
     local-standard) RECOVERY_CASES="account:kill matching:kill" ;;
-    cloud-capacity) RECOVERY_CASES="account:kill matching:kill margin-ops:kill edge:term" ;;
-    cloud-production) RECOVERY_CASES="account:kill matching:kill margin-ops:kill edge:term price:term" ;;
+    cloud-capacity) RECOVERY_CASES="account:kill matching:kill risk:kill liquidation:term gateway:term" ;;
+    cloud-production) RECOVERY_CASES="account:kill matching:kill risk:kill liquidation:term order:term gateway:term index-price:term" ;;
   esac
 fi
 
@@ -51,9 +51,9 @@ test_profile_write_manifest "${MATRIX_OUTPUT_DIR}/environment-manifest.env"
 
 for recovery_case in ${RECOVERY_CASES}; do
   IFS=: read -r provider mode <<<"${recovery_case}"
-  case "${provider}" in account|matching|margin-ops|price|trading-entry|edge) ;; *) fail "unsupported recovery provider ${provider}" ;; esac
+  case "${provider}" in account|matching|risk|liquidation|funding|insurance|adl|index-price|mark-price|order|trigger|gateway|websocket) ;; *) fail "unsupported recovery provider ${provider}" ;; esac
   case "${mode}" in kill|term) ;; *) fail "unsupported recovery mode ${mode}" ;; esac
-  if [[ "${provider}" == "margin-ops" && "${PRODUCT_LINE}" == "SPOT" ]]; then
+  if [[ "${provider}" =~ ^(risk|liquidation|funding|insurance|adl)$ && "${PRODUCT_LINE}" == "SPOT" ]]; then
     echo "| ${provider} | ${mode} | SKIPPED_PRODUCT_LINE | - |" >>"${MATRIX_OUTPUT_DIR}/index.md"
     continue
   fi

@@ -97,6 +97,20 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.trading.order.SurprisingOrderApplication</mainClass>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.graalvm.buildtools</groupId>
+                <artifactId>native-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.surprising.trading.order.SurprisingOrderApplication</mainClass>
+                    <buildArgs>
+                        <buildArg>-H:IncludeResources=librocksdbjni-.*</buildArg>
+                        <buildArg>-H:DeadlockWatchdogInterval=60</buildArg>
+                    </buildArgs>
+                </configuration>
             </plugin>
         </plugins>
     </build>

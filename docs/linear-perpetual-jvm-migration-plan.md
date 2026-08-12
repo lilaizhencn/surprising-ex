@@ -54,19 +54,19 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 
 ### 2.3 风控
 
-[`RiskService`](../surprising-margin-ops/surprising-risk-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java) 使用 `localGroups` 和 Redis 风险组快照；`scanPositionUpdates` 在快照缺失时失败关闭，不再通过 `RiskRepository.cachedRiskGroup` 回查数据库。标记价触发只读取 Redis 反向索引命中的 JVM 风险组。风险计算结果先进入 `RiskLocalProjectionStore` 的 RocksDB 队列，再由异步投影器在数据库事务中落库。
+[`RiskService`](../surprising-risk/surprising-risk-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java) 使用 `localGroups` 和 Redis 风险组快照；`scanPositionUpdates` 在快照缺失时失败关闭，不再通过 `RiskRepository.cachedRiskGroup` 回查数据库。标记价触发只读取 Redis 反向索引命中的 JVM 风险组。风险计算结果先进入 `RiskLocalProjectionStore` 的 RocksDB 队列，再由异步投影器在数据库事务中落库。
 
 ### 2.4 强平
 
-[`LiquidationService`](../surprising-margin-ops/surprising-liquidation-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationService.java) 当前执行候选时会：
+[`LiquidationService`](../surprising-liquidation/surprising-liquidation-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationService.java) 当前执行候选时会：
 
 1. 从标记价缓存检查价格新鲜度；
 2. 通过 `LiquidationCandidateRepository` 在数据库中 claim 候选；
-3. 通过 [`LiquidationPositionRepository`](../surprising-margin-ops/surprising-liquidation-provider/src/main/java/com/surprising/liquidation/provider/repository/LiquidationPositionRepository.java) 对 `account_positions` 执行 `FOR UPDATE`；
-4. 通过 [`LiquidationRepository`](../surprising-margin-ops/surprising-liquidation-provider/src/main/java/com/surprising/liquidation/provider/repository/LiquidationRepository.java) JOIN 风险快照并复核最新状态；
+3. 通过 [`LiquidationPositionRepository`](../surprising-liquidation/surprising-liquidation-provider/src/main/java/com/surprising/liquidation/provider/repository/LiquidationPositionRepository.java) 对 `account_positions` 执行 `FOR UPDATE`；
+4. 通过 [`LiquidationRepository`](../surprising-liquidation/surprising-liquidation-provider/src/main/java/com/surprising/liquidation/provider/repository/LiquidationRepository.java) JOIN 风险快照并复核最新状态；
 5. 创建减仓市价单并写审计。
 
-[`RedisLiquidationCandidateQueue`](../surprising-margin-ops/surprising-liquidation-provider/src/main/java/com/surprising/liquidation/provider/service/RedisLiquidationCandidateQueue.java) 已提供优先级、租约、重试和跨节点协调，但当前只负责候选队列，不负责持仓事实。
+[`RedisLiquidationCandidateQueue`](../surprising-liquidation/surprising-liquidation-provider/src/main/java/com/surprising/liquidation/provider/service/RedisLiquidationCandidateQueue.java) 已提供优先级、租约、重试和跨节点协调，但当前只负责候选队列，不负责持仓事实。
 
 ### 2.5 其他必须纳入迁移的链路
 
@@ -221,7 +221,7 @@ Redis 是查询投影，不应承担资金条件判断。迁移后保留 Redis �
 
 ```bash
 mvn -pl surprising-account/surprising-account-api,surprising-account/surprising-account-provider -am test
-mvn -pl surprising-margin-ops/surprising-risk-provider,surprising-margin-ops/surprising-liquidation-provider -am test
+mvn -pl surprising-risk/surprising-risk-provider,surprising-liquidation/surprising-liquidation-provider -am test
 PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-api-flow-smoke.sh
 PRODUCT_LINES=LINEAR_PERPETUAL ./scripts/product-line-funds-reconcile.sh
 ./scripts/check-account-single-writer.sh

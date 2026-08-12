@@ -21,6 +21,8 @@ import org.springframework.util.backoff.FixedBackOff;
 @Configuration
 public class TradingOrderKafkaConfiguration {
 
+    private static final int ORDER_STATE_SNAPSHOT_MAX_BYTES = 4 * 1024 * 1024;
+
     @Bean
     public ProducerFactory<String, String> orderProducerFactory(TradingOrderProperties properties) {
         Map<String, Object> config = new HashMap<>();
@@ -33,6 +35,7 @@ public class TradingOrderKafkaConfiguration {
         config.put(ProducerConfig.LINGER_MS_CONFIG, 2);
         config.put(ProducerConfig.BATCH_SIZE_CONFIG, 65_536);
         config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+        config.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, ORDER_STATE_SNAPSHOT_MAX_BYTES);
         return new DefaultKafkaProducerFactory<>(config);
     }
 
@@ -52,6 +55,8 @@ public class TradingOrderKafkaConfiguration {
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
+        config.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, ORDER_STATE_SNAPSHOT_MAX_BYTES);
+        config.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, ORDER_STATE_SNAPSHOT_MAX_BYTES);
         return new DefaultKafkaConsumerFactory<>(config);
     }
 

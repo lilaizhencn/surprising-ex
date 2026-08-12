@@ -199,7 +199,7 @@ restart_provider_for_recovery() {
   local provider="$2"
   local recovery_started recovery_ended
   case "${provider}" in
-    account|matching|margin-ops|price|trading-entry|edge) ;;
+    account|matching|risk|liquidation|funding|insurance|adl|index-price|mark-price|order|trigger|gateway|websocket) ;;
     *) echo "Unsupported RECOVERY_PROVIDER=${provider}" >&2; exit 1 ;;
   esac
   echo "Restarting ${product_line} ${provider} provider for recovery verification (mode=${RECOVERY_MODE})"
@@ -397,7 +397,8 @@ wait_stress_mark_price_readiness() {
     if ((SECONDS >= deadline)); then
       echo "Timed out waiting for ${product_line} mark-price readiness" >&2
       tail -n 160 "${TMP_DIR}/${product_line}-matching.log" >&2 || true
-      tail -n 160 "${TMP_DIR}/${product_line}-trading-entry.log" >&2 || true
+      tail -n 160 "${TMP_DIR}/${product_line}-order.log" >&2 || true
+      tail -n 160 "${TMP_DIR}/${product_line}-trigger.log" >&2 || true
       exit 1
     fi
     sleep 1
@@ -1398,19 +1399,19 @@ boot_jar() {
 provider_module() {
   case "$1" in
     instrument) echo "surprising-instrument/surprising-instrument-provider" ;;
-    price) echo "surprising-price/surprising-price-provider" ;;
     mark-price) echo "surprising-price/surprising-mark-price-provider" ;;
-    trading-entry) echo "surprising-trading/surprising-trading-entry-provider" ;;
+    index-price) echo "surprising-price/surprising-index-price-provider" ;;
     order) echo "surprising-trading/surprising-order-provider" ;;
     matching) echo "surprising-trading/surprising-matching-provider" ;;
     account) echo "surprising-account/surprising-account-provider" ;;
-    margin-ops) echo "surprising-margin-ops/surprising-margin-ops-provider" ;;
-    risk) echo "surprising-margin-ops/surprising-risk-provider" ;;
-    liquidation) echo "surprising-margin-ops/surprising-liquidation-provider" ;;
-    insurance) echo "surprising-margin-ops/surprising-insurance-provider" ;;
-    funding) echo "surprising-margin-ops/surprising-funding-provider" ;;
-    edge) echo "surprising-edge/surprising-edge-provider" ;;
-    gateway) echo "surprising-edge/surprising-gateway/surprising-gateway-provider" ;;
+    risk) echo "surprising-risk/surprising-risk-provider" ;;
+    liquidation) echo "surprising-liquidation/surprising-liquidation-provider" ;;
+    insurance) echo "surprising-insurance/surprising-insurance-provider" ;;
+    funding) echo "surprising-funding/surprising-funding-provider" ;;
+    adl) echo "surprising-adl/surprising-adl-provider" ;;
+    trigger) echo "surprising-trading/surprising-trigger-provider" ;;
+    websocket) echo "surprising-websocket/surprising-websocket-provider" ;;
+    gateway) echo "surprising-gateway" ;;
     market-maker) echo "surprising-market-maker/surprising-market-maker-provider" ;;
     *) echo "unknown provider: $1" >&2; exit 1 ;;
   esac
@@ -1419,19 +1420,19 @@ provider_module() {
 provider_artifact() {
   case "$1" in
     instrument) echo "surprising-instrument-provider" ;;
-    price) echo "surprising-price-provider" ;;
     mark-price) echo "surprising-mark-price-provider" ;;
-    trading-entry) echo "surprising-trading-entry-provider" ;;
+    index-price) echo "surprising-index-price-provider" ;;
     order) echo "surprising-order-provider" ;;
     matching) echo "surprising-matching-provider" ;;
     account) echo "surprising-account-provider" ;;
-    margin-ops) echo "surprising-margin-ops-provider" ;;
     risk) echo "surprising-risk-provider" ;;
     liquidation) echo "surprising-liquidation-provider" ;;
     insurance) echo "surprising-insurance-provider" ;;
     funding) echo "surprising-funding-provider" ;;
-    edge) echo "surprising-edge-provider" ;;
-    gateway) echo "surprising-gateway-provider" ;;
+    adl) echo "surprising-adl-provider" ;;
+    trigger) echo "surprising-trigger-provider" ;;
+    websocket) echo "surprising-websocket-provider" ;;
+    gateway) echo "surprising-gateway" ;;
     market-maker) echo "surprising-market-maker-provider" ;;
     *) echo "unknown provider: $1" >&2; exit 1 ;;
   esac
@@ -1440,18 +1441,17 @@ provider_artifact() {
 provider_port() {
   case "$1" in
     instrument) echo 9080 ;;
-    price) echo 9082 ;;
     mark-price) echo 9083 ;;
-    trading-entry) echo 9084 ;;
+    index-price) echo 9082 ;;
     order) echo 9084 ;;
+    trigger) echo 9095 ;;
     matching) echo 9085 ;;
     account) echo 9086 ;;
-    margin-ops) echo 9088 ;;
     risk) echo 9087 ;;
     liquidation) echo 9088 ;;
     insurance) echo 9090 ;;
     funding) echo 9089 ;;
-    edge) echo 9094 ;;
+    websocket) echo 9093 ;;
     gateway) echo 9094 ;;
     market-maker) echo 9096 ;;
     *) echo "unknown provider: $1" >&2; exit 1 ;;
@@ -1466,7 +1466,7 @@ package_services() {
   local missing=()
   local stale=false
   local name
-  for name in instrument price trading-entry matching account margin-ops edge market-maker; do
+  for name in instrument index-price mark-price matching account risk liquidation funding insurance adl order trigger gateway websocket market-maker; do
     local jar
     jar="$(boot_jar "$(provider_module "${name}")" "$(provider_artifact "${name}")" 2>/dev/null || true)"
     if [[ -z "${jar}" ]]; then
@@ -1482,7 +1482,7 @@ package_services() {
   fi
   local selectors
   if [[ "${BUILD_SERVICES}" == "true" || "${stale}" == "true" ]]; then
-    selectors=":surprising-instrument-provider,:surprising-price-provider,:surprising-trading-entry-provider,:surprising-matching-provider,:surprising-account-provider,:surprising-margin-ops-provider,:surprising-edge-provider,:surprising-market-maker-provider"
+    selectors=":surprising-instrument-provider,:surprising-index-price-provider,:surprising-mark-price-provider,:surprising-matching-provider,:surprising-account-provider,:surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-insurance-provider,:surprising-adl-provider,:surprising-order-provider,:surprising-trigger-provider,:surprising-gateway,:surprising-websocket-provider,:surprising-market-maker-provider"
   else
     local IFS=,
     selectors="${missing[*]}"
@@ -1536,7 +1536,7 @@ product_provider_args() {
   local slug
   slug="$(product_slug "${product_line}")"
   case "${name}" in
-    price)
+    index-price)
       printf '%s\n' \
         "--surprising.price.index.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.price.index.kafka.product-line=${product_line}" \
@@ -1544,17 +1544,11 @@ product_provider_args() {
         "--surprising.price.index.coordination.node-id=product-smoke-${RUN_ID}-${slug}-index" \
         "--surprising.price.index.web-socket.enabled=false" \
         "--surprising.price.index.calculation.poll-delay-ms=600000" \
-        "--surprising.price.mark.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "--surprising.price.mark.kafka.product-line=${product_line}" \
-        "--surprising.price.mark.kafka.product-topics-enabled=true" \
-        "--surprising.price.mark.kafka.group-id=product-smoke-${RUN_ID}-${slug}-mark-price" \
-        "--surprising.price.mark.coordination.node-id=product-smoke-${RUN_ID}-${slug}-mark" \
         "--spring.kafka.listener.auto-startup=false"
       ;;
-    trading-entry)
+    order)
       printf '%s\n' \
-        "--surprising.clients.order.base-url=http://localhost:9084" \
-        "--surprising.clients.trigger.base-url=http://localhost:9084" \
+        "--surprising.clients.trigger.base-url=http://localhost:9095" \
         "--surprising.trading.order.wal.directory=${TMP_DIR}/order-wal" \
         "--surprising.trading.order.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.trading.order.kafka.product-line=${product_line}" \
@@ -1566,11 +1560,7 @@ product_provider_args() {
         "--surprising.trading.order.kafka.user-command-concurrency=${ACCOUNT_COMMAND_PARTITIONS}" \
         "--surprising.trading.order.risk.market-max-mark-age-ms=30000" \
         "--surprising.trading.order.risk.limit-price-max-mark-age-ms=30000" \
-        "--surprising.price.consumer.concurrency=4" \
-        "--surprising.trading.trigger.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "--surprising.trading.trigger.kafka.product-line=${product_line}" \
-        "--surprising.trading.trigger.kafka.product-topics-enabled=true" \
-        "--surprising.trading.trigger.kafka.group-id=product-smoke-${RUN_ID}-${slug}-trigger"
+        "--surprising.price.consumer.concurrency=4"
       if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
         local readiness_index readiness_symbol
         for ((readiness_index = 0; readiness_index < STRESS_SYMBOL_COUNT; readiness_index++)); do
@@ -1579,17 +1569,12 @@ product_provider_args() {
         done
       fi
       ;;
-    order)
+    trigger)
       printf '%s\n' \
-        "--surprising.trading.order.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "--surprising.trading.order.kafka.product-line=${product_line}" \
-        "--surprising.trading.order.kafka.product-topics-enabled=true" \
-        "--surprising.trading.order.outbox.batch-size=${STRESS_ORDER_OUTBOX_BATCH_SIZE}" \
-        "--surprising.trading.order.outbox.publish-delay-ms=${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS}" \
-        "--surprising.trading.order.outbox.max-in-flight=${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT}" \
-        "--surprising.trading.order.outbox.max-rows-per-key=${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY}" \
-        "--surprising.trading.order.kafka.user-command-concurrency=${ACCOUNT_COMMAND_PARTITIONS}" \
-        "--surprising.trading.order.risk.market-max-mark-age-ms=30000"
+        "--surprising.trading.trigger.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
+        "--surprising.trading.trigger.kafka.product-line=${product_line}" \
+        "--surprising.trading.trigger.kafka.product-topics-enabled=true" \
+        "--surprising.trading.trigger.kafka.group-id=product-smoke-${RUN_ID}-${slug}-trigger"
       ;;
     matching)
       local matching_concurrency=1
@@ -1701,13 +1686,17 @@ product_provider_args() {
         "--surprising.insurance.coverage.scan-delay-ms=500"
       ;;
     funding)
+      local funding_enabled=false
+      if is_funding_product "${product_line}"; then
+        funding_enabled=true
+      fi
       printf '%s\n' \
         "--surprising.funding.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.funding.kafka.product-line=${product_line}" \
         "--surprising.funding.kafka.product-topics-enabled=true" \
         "--surprising.funding.coordination.node-id=product-smoke-${RUN_ID}-${slug}-funding" \
-        "--surprising.funding.calculation.enabled=false" \
-        "--surprising.funding.settlement.enabled=true" \
+        "--surprising.funding.calculation.enabled=${funding_enabled}" \
+        "--surprising.funding.settlement.enabled=${funding_enabled}" \
         "--surprising.funding.settlement.scan-delay-ms=500"
       ;;
     mark-price)
@@ -1718,74 +1707,30 @@ product_provider_args() {
         "--surprising.price.mark.kafka.group-id=product-smoke-${RUN_ID}-${slug}-mark-price" \
         "--spring.kafka.listener.auto-startup=false"
       ;;
-    margin-ops)
-      local risk_concurrency=1 risk_outbox_batch_size=200 risk_outbox_publish_delay_ms=200
-      local risk_outbox_max_rows_per_key=32 funding_enabled=false
-      if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
-        risk_concurrency="${STRESS_RISK_KAFKA_CONCURRENCY}"
-        risk_outbox_batch_size="${STRESS_RISK_OUTBOX_BATCH_SIZE}"
-        risk_outbox_publish_delay_ms="${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}"
-        risk_outbox_max_rows_per_key="${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY}"
-      fi
-      if is_funding_product "${product_line}"; then
-        funding_enabled=true
-      fi
+    gateway)
       printf '%s\n' \
-        "--surprising.clients.risk.base-url=http://localhost:9088" \
-        "--surprising.risk.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "--surprising.risk.kafka.product-line=${product_line}" \
-        "--surprising.risk.kafka.product-topics-enabled=true" \
-        "--surprising.risk.kafka.group-id=product-smoke-${RUN_ID}-${slug}-risk" \
-        "--surprising.risk.kafka.concurrency=${risk_concurrency}" \
-        "--surprising.risk.local-state.wal-directory=${TMP_DIR}/risk-projection-wal" \
-        "--surprising.risk.calculation.scan-delay-ms=500" \
-        "--surprising.risk.outbox.batch-size=${risk_outbox_batch_size}" \
-        "--surprising.risk.outbox.publish-delay-ms=${risk_outbox_publish_delay_ms}" \
-        "--surprising.risk.outbox.max-rows-per-key=${risk_outbox_max_rows_per_key}" \
-        "--surprising.liquidation.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "--surprising.liquidation.kafka.product-line=${product_line}" \
-        "--surprising.liquidation.kafka.product-topics-enabled=true" \
-        "--surprising.liquidation.kafka.group-id=product-smoke-${RUN_ID}-${slug}-liquidation" \
-        "--surprising.liquidation.kafka.candidate-concurrency=${STRESS_LIQUIDATION_KAFKA_CONCURRENCY}" \
-        "--surprising.funding.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "--surprising.funding.kafka.product-line=${product_line}" \
-        "--surprising.funding.kafka.product-topics-enabled=true" \
-        "--surprising.funding.calculation.enabled=false" \
-        "--surprising.funding.settlement.enabled=${funding_enabled}" \
-        "--surprising.funding.settlement.scan-delay-ms=500" \
-        "--surprising.funding.coordination.node-id=product-smoke-${RUN_ID}-${slug}-funding" \
-        "--surprising.funding.wal.directory=${TMP_DIR}/funding-wal" \
-        "--surprising.insurance.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
-        "--surprising.insurance.kafka.product-line=${product_line}" \
-        "--surprising.insurance.kafka.product-topics-enabled=true" \
-        "--surprising.insurance.kafka.liquidation-fee-events-topic=$(topic_name "${product_line}" "account.liquidation-fee.events")" \
-        "--surprising.insurance.kafka.group-id=product-smoke-${RUN_ID}-${slug}-insurance" \
-        "--surprising.insurance.kafka.concurrency=1" \
-        "--surprising.insurance.coverage.scan-delay-ms=500" \
-        "--surprising.adl.kafka.product-line=${product_line}" \
-        "--surprising.adl.kafka.product-topics-enabled=true"
+        "--surprising.gateway.routes.price-mark.base-url=http://localhost:9082" \
+        "--surprising.gateway.admin-routes.price-mark.base-url=http://localhost:9082" \
+        "--surprising.gateway.routes.risk.base-url=http://localhost:9087" \
+        "--surprising.gateway.admin-routes.risk.base-url=http://localhost:9087" \
+        "--surprising.gateway.admin-routes.risk-admin.base-url=http://localhost:9087" \
+        "--surprising.gateway.routes.liquidation.base-url=http://localhost:9088" \
+        "--surprising.gateway.admin-routes.liquidation.base-url=http://localhost:9088" \
+        "--surprising.gateway.admin-routes.liquidation-admin.base-url=http://localhost:9088" \
+        "--surprising.gateway.routes.funding.base-url=http://localhost:9089" \
+        "--surprising.gateway.admin-routes.funding.base-url=http://localhost:9089" \
+        "--surprising.gateway.routes.insurance.base-url=http://localhost:9090" \
+        "--surprising.gateway.admin-routes.insurance.base-url=http://localhost:9090" \
+        "--surprising.gateway.admin-routes.insurance-admin.base-url=http://localhost:9090" \
+        "--surprising.gateway.routes.adl.base-url=http://localhost:9091" \
+        "--surprising.gateway.admin-routes.adl.base-url=http://localhost:9091"
       ;;
-    edge)
+    websocket)
       printf '%s\n' \
         "--surprising.websocket.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.websocket.kafka.product-line=${product_line}" \
         "--surprising.websocket.kafka.product-topics-enabled=true" \
-        "--surprising.websocket.kafka.group-id=product-smoke-${RUN_ID}-${slug}-edge-websocket" \
-        "--surprising.gateway.routes.price-mark.base-url=http://localhost:9082" \
-        "--surprising.gateway.admin-routes.price-mark.base-url=http://localhost:9082" \
-        "--surprising.gateway.routes.risk.base-url=http://localhost:9088" \
-        "--surprising.gateway.admin-routes.risk.base-url=http://localhost:9088" \
-        "--surprising.gateway.admin-routes.risk-admin.base-url=http://localhost:9088" \
-        "--surprising.gateway.routes.liquidation.base-url=http://localhost:9088" \
-        "--surprising.gateway.admin-routes.liquidation.base-url=http://localhost:9088" \
-        "--surprising.gateway.admin-routes.liquidation-admin.base-url=http://localhost:9088" \
-        "--surprising.gateway.routes.funding.base-url=http://localhost:9088" \
-        "--surprising.gateway.admin-routes.funding.base-url=http://localhost:9088" \
-        "--surprising.gateway.routes.insurance.base-url=http://localhost:9088" \
-        "--surprising.gateway.admin-routes.insurance.base-url=http://localhost:9088" \
-        "--surprising.gateway.admin-routes.insurance-admin.base-url=http://localhost:9088" \
-        "--surprising.gateway.routes.adl.base-url=http://localhost:9088" \
-        "--surprising.gateway.admin-routes.adl.base-url=http://localhost:9088"
+        "--surprising.websocket.kafka.group-id=product-smoke-${RUN_ID}-${slug}-websocket"
       ;;
     market-maker)
       local symbol
@@ -1865,7 +1810,7 @@ start_provider() {
     done < <(test_profile_java_args_for_service "${name}")
   fi
   local mark_price_max_age=30s
-  if [[ "${name}" == "trading-entry" ]]; then
+  if [[ "${name}" == "order" || "${name}" == "trigger" ]]; then
     mark_price_max_age=15s
   fi
   local app_args=(
@@ -1917,25 +1862,37 @@ start_providers_for_line() {
   local selected_services
   selected_services="$(test_profile_services "${product_line}" "${STRESS_SCENARIO}")"
   local required_service
-  for required_service in instrument price candlestick matching account trading-entry edge; do
+  for required_service in instrument index-price mark-price candlestick matching account order trigger gateway websocket; do
     if ! profile_service_selected "${selected_services}" "${required_service}"; then
       echo "TEST_SERVICES must include ${required_service} for API smoke: ${selected_services}" >&2
       exit 1
     fi
   done
-  if is_margin_product "${product_line}" && ! profile_service_selected "${selected_services}" margin-ops; then
-    echo "TEST_SERVICES must include margin-ops for ${product_line}: ${selected_services}" >&2
-    exit 1
+  if is_margin_product "${product_line}"; then
+    local margin_service
+    for margin_service in risk liquidation funding insurance adl; do
+      if ! profile_service_selected "${selected_services}" "${margin_service}"; then
+        echo "TEST_SERVICES must include ${margin_service} for ${product_line}: ${selected_services}" >&2
+        exit 1
+      fi
+    done
   fi
   start_provider instrument "${product_line}"
-  start_provider price "${product_line}"
+  start_provider index-price "${product_line}"
+  start_provider mark-price "${product_line}"
   start_provider matching "${product_line}"
   start_provider account "${product_line}"
   if is_margin_product "${product_line}"; then
-    start_provider margin-ops "${product_line}"
+    start_provider risk "${product_line}"
+    start_provider liquidation "${product_line}"
+    start_provider funding "${product_line}"
+    start_provider insurance "${product_line}"
+    start_provider adl "${product_line}"
   fi
-  start_provider trading-entry "${product_line}"
-  start_provider edge "${product_line}"
+  start_provider order "${product_line}"
+  start_provider trigger "${product_line}"
+  start_provider gateway "${product_line}"
+  start_provider websocket "${product_line}"
 }
 
 start_price_refresher() {
@@ -4994,7 +4951,7 @@ validate_multi_symbol_stress_config() {
   esac
   if [[ -n "${RECOVERY_PROVIDER}" ]]; then
     case "${RECOVERY_PROVIDER}" in
-      account|matching|margin-ops|price|trading-entry|edge) ;;
+      account|matching|risk|liquidation|funding|insurance|adl|index-price|mark-price|order|trigger|gateway|websocket) ;;
       *) echo "Unsupported RECOVERY_PROVIDER=${RECOVERY_PROVIDER}" >&2; exit 1 ;;
     esac
   fi

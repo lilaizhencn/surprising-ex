@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ class TradingOrderKafkaConfigurationTest {
         assertThat(config).containsEntry(ProducerConfig.LINGER_MS_CONFIG, 2);
         assertThat(config).containsEntry(ProducerConfig.BATCH_SIZE_CONFIG, 65_536);
         assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+        assertThat(config).containsEntry(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, 4 * 1024 * 1024);
     }
 
     @Test
@@ -41,6 +43,9 @@ class TradingOrderKafkaConfigurationTest {
         TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
                 configuration.orderStateConsumerFactory(properties);
+        Map<String, Object> consumerConfig = consumerFactory.getConfigurationProperties();
+        assertThat(consumerConfig).containsEntry(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, 4 * 1024 * 1024);
+        assertThat(consumerConfig).containsEntry(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 4 * 1024 * 1024);
         var listenerFactory = configuration.orderStateKafkaListenerContainerFactory(consumerFactory);
 
         assertThat(listenerFactory.isBatchListener()).isTrue();

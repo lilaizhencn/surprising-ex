@@ -30,11 +30,17 @@ AWS EC2，PostgreSQL、Kafka、Redis 兼容服务直接购买 AWS 托管产品�
 |---|---:|---|---|---|---|---:|---|
 | `instrument-provider` | 2 | `m8i.large` | 2 / 8 GiB | 2 GiB | 100 GiB，3000 IOPS，125 MiB/s | 10 | 低频配置和生命周期任务，双节点用于可用性 |
 | `candlestick-provider` | 2 | `m8i.xlarge` | 4 / 16 GiB | 4 GiB | 500 GiB，6000 IOPS，250 MiB/s | 20 | Kafka Streams 与 RocksDB 需要本地 I/O 和页缓存 |
-| `price-provider` | 2 | `m8i.xlarge` | 4 / 16 GiB | 4 GiB | 100 GiB，3000 IOPS，125 MiB/s | 10 | 合并 index/mark price；DB lease 保证同 symbol 单发布者 |
-| `trading-entry-provider` | 2 | `m8i.2xlarge` | 8 / 32 GiB | 8 GiB | 200 GiB，3000 IOPS，125 MiB/s | 32 | 下单、撤单、触发单和 outbox 是入口热点 |
+| `index-price-provider` | 2 | `m8i.large` | 2 / 8 GiB | 2 GiB | 100 GiB，3000 IOPS，125 MiB/s | 10 | 外部源采集、指数计算和 DB lease |
+| `mark-price-provider` | 2 | `m8i.large` | 2 / 8 GiB | 2 GiB | 100 GiB，3000 IOPS，125 MiB/s | 10 | 消费指数、盘口和资金费并发布标记价 |
+| `order-provider` | 2 | `m8i.xlarge` | 4 / 16 GiB | 4 GiB | 200 GiB，3000 IOPS，125 MiB/s | 24 | 下单、撤单和 order outbox 是入口热点 |
+| `trigger-provider` | 2 | `m8i.large` | 2 / 8 GiB | 2 GiB | 100 GiB，3000 IOPS，125 MiB/s | 12 | 条件单扫描、触发和 order API 调用 |
 | `matching-provider` | **1** | `m8i.4xlarge` | 16 / 64 GiB | 16 GiB | 200 GiB，3000 IOPS，125 MiB/s | 20 | exchange-core、订单簿和恢复需要独占 CPU 与充足内存 |
 | `account-provider` | 2 | `m8i.2xlarge` | 8 / 32 GiB | 8 GiB | 200 GiB，3000 IOPS，125 MiB/s | 24 | 资金写入按用户串行，数据库和 Kafka 都是热点 |
-| `margin-ops-provider` | 2 | `m8i.2xlarge` | 8 / 32 GiB | 8 GiB | 200 GiB，3000 IOPS，125 MiB/s | 20 | 合并 risk、liquidation、funding、insurance、ADL |
+| `risk-provider` | 2 | `m8i.xlarge` | 4 / 16 GiB | 4 GiB | 200 GiB，3000 IOPS，125 MiB/s | 20 | 风险组快照、风险扫描和强平候选 |
+| `liquidation-provider` | 2 | `m8i.large` | 2 / 8 GiB | 2 GiB | 100 GiB，3000 IOPS，125 MiB/s | 16 | 强平候选 claim、复核和 reduce-only 订单 |
+| `funding-provider` | 2 | `m8i.large` | 2 / 8 GiB | 2 GiB | 100 GiB，3000 IOPS，125 MiB/s | 12 | 费率发布和资金费结算 |
+| `insurance-provider` | 2 | `m8i.large` | 2 / 8 GiB | 2 GiB | 100 GiB，3000 IOPS，125 MiB/s | 12 | 强平费入账和穿仓覆盖 |
+| `adl-provider` | 2 | `m8i.large` | 2 / 8 GiB | 2 GiB | 100 GiB，3000 IOPS，125 MiB/s | 12 | ADL 队列与自动减仓执行 |
 | `gateway-provider` | 2 | `m8i.xlarge` | 4 / 16 GiB | 4 GiB | 100 GiB，3000 IOPS，125 MiB/s | 10 | 无状态 REST 入口，双节点跨可用区 |
 | `websocket-provider` | 2 | `m8i.2xlarge` | 8 / 32 GiB | 8 GiB | 200 GiB，3000 IOPS，125 MiB/s | 0 | 长连接、订阅和发送队列主要消耗内存与网络 |
 | `market-maker-provider` | 2 | `m8i.xlarge` | 4 / 16 GiB | 4 GiB | 100 GiB，3000 IOPS，125 MiB/s | 10 | 两节点运行，DB lease 保证一个策略/symbol 只有一个 owner |

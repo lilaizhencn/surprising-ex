@@ -36,7 +36,7 @@
 
 脚本必须保留操作系统余量，不允许把全部内存分配给 JVM：
 
-- `local-low`：JVM 总堆预算不超过物理内存的 45%，外围 provider 默认 256MiB，matching/account/margin-ops 默认 384MiB。
+- `local-low`：JVM 总堆预算不超过物理内存的 45%，外围 provider 默认 256MiB，matching/account/risk/liquidation 默认 384MiB。
 - `local-standard`：JVM 总堆预算不超过物理内存的 55%，核心 provider 默认 768-2048MiB。
 - `cloud-capacity`：JVM 堆按服务规格独立设置，默认 `Xms=Xmx`，不超过节点内存的 60%。
 - `cloud-production`：使用部署文档中明确的节点级 JVM 堆，不使用本机自动值覆盖云上配置。
@@ -47,7 +47,7 @@
 TEST_PROFILE=local-low|local-standard|cloud-capacity|cloud-production
 TEST_MAX_JVM_HEAP_MB=<integer>
 TEST_JVM_GC=auto|g1|zgc|parallel
-TEST_SERVICES="instrument price matching account trading-entry edge"
+TEST_SERVICES="instrument index-price mark-price matching account order trigger gateway websocket"
 TEST_MAX_PROVIDER_PROCESSES=<integer>
 ```
 
@@ -59,12 +59,12 @@ TEST_MAX_PROVIDER_PROCESSES=<integer>
 
 | 场景 | 必需实例 |
 |---|---|
-| 现货功能 smoke | instrument、price、matching、account、trading-entry、edge、market-maker |
-| 永续/交割/期权功能 smoke | instrument、price、matching、account、margin-ops、trading-entry、edge、market-maker |
+| 现货功能 smoke | instrument、index-price、mark-price、matching、account、order、trigger、gateway、websocket、market-maker |
+| 永续/交割/期权功能 smoke | instrument、index-price、mark-price、matching、account、risk、liquidation、funding、insurance、adl、order、trigger、gateway、websocket、market-maker |
 | 撮合核心基准 | matching 及其依赖的 instrument 快照，不启动 Gateway、WebSocket、wallet |
 | 账户 Owner/WAL 测试 | account，不启动 wallet 和无关产品线 |
-| WebSocket 测试 | edge、Gateway 路由所需服务、一个做市实例 |
-| 风控/强平测试 | price、matching、account、margin-ops、edge、market-maker |
+| WebSocket 测试 | websocket、gateway 路由所需服务、一个做市实例 |
+| 风控/强平测试 | index-price、mark-price、matching、account、risk、liquidation、funding、insurance、adl、gateway、market-maker |
 
 低配置环境禁止同时启动四条产品线，也不启动 candlestick、index-price 等非当前场景必需实例。云上测试可以通过 `TEST_SERVICES` 恢复完整服务集合。
 

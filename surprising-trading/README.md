@@ -1,14 +1,13 @@
 # surprising-trading
 
 
-Surprising Exchange 现货、永续、交割和期权交易模块。当前已实现 `surprising-order-provider`、`surprising-trigger-provider`、`surprising-trading-entry-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、幂等落库、产品线 Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
+Surprising Exchange 现货、永续、交割和期权交易模块。当前已实现独立的 `surprising-order-provider`、`surprising-trigger-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、幂等落库、产品线 Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
 
 ## 模块
 
 - `surprising-trading-api`：订单 RPC 合约、DTO、Kafka command/event 模型。
 - `surprising-order-provider`：订单入口 provider。
 - `surprising-trigger-provider`：止盈止损条件单 provider。
-- `surprising-trading-entry-provider`：订单入口和条件单的合并部署 provider。
 - `surprising-matching-provider`：基于 `exchange-core` 的撮合 provider。
 
 ## long 定点数模型
@@ -39,7 +38,7 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前已实
 ```text
 client / internal gateway
   -> POST /api/v1/trading/orders
-  -> surprising-trading-entry-provider / surprising-order-provider
+  -> surprising-order-provider
   -> surprising.<product-segment>.order.user.commands.v1（key = PRODUCT_LINE:userId）
   -> 用户分区单写入消费者
   -> 用户分区 WAL/RocksDB 顺序追加订单事实
@@ -59,7 +58,7 @@ client / internal gateway
 ```text
 client / internal gateway
   -> POST /api/v1/trading/trigger-orders
-  -> surprising-trading-entry-provider / surprising-trigger-provider
+  -> surprising-trigger-provider
   -> PostgreSQL trading_trigger_orders
   -> consume surprising.<product-segment>.mark.price.v1
   -> 通过订单入口 API 提交 reduceOnly 平仓单
@@ -554,22 +553,22 @@ brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 ./scripts/create-topics.sh
 mvn -pl :surprising-instrument-provider -am spring-boot:run
-mvn -pl :surprising-trading-entry-provider -am spring-boot:run
+mvn -pl :surprising-order-provider -am spring-boot:run
+mvn -pl :surprising-trigger-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-matching-provider -am spring-boot:run
 ```
 
 端口：
 
-- `9084`：trading-entry 合并服务，包含普通订单入口和条件单。
+- `9084`：order-provider，普通订单入口。
 - `9085`：撮合服务。
-- `9095`：拆分部署时的止盈止损条件单服务。
+- `9095`：trigger-provider，止盈止损条件单服务。
 
 ## 生产注意事项
 
-- `surprising-trading-entry-provider` 是默认交易入口部署进程，承载普通订单和条件单流量。
-- `surprising-order-provider` 和 `surprising-trigger-provider` 仍然保留，可用于拆分部署。二者都可以多节点水平部署，但必须共享同一个 PostgreSQL 和 Kafka 集群。trigger 按 Kafka partition 和数据库 claim batch 扩展，不要做每个 symbol 一个 worker。
-- `surprising-matching-provider` 必须继续独立于 trading-entry；它持有 exchange-core 订单簿，应该单独扩缩容和重启恢复。
+- `surprising-order-provider` 和 `surprising-trigger-provider` 独立部署。二者都可以多节点水平部署，但必须共享同一个 PostgreSQL 和 Kafka 集群。trigger 按 Kafka partition 和数据库 claim batch 扩展，不要做每个 symbol 一个 worker。
+- `surprising-matching-provider` 独立于 order/trigger；它持有 exchange-core 订单簿，应该单独扩缩容和重启恢复。
 - matching provider 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.3` 传递依赖 Chronicle/OpenHFT，父 POM 通过 BOM 统一到 JDK 25 可用的 2026.x 版本，生产进程仍需使用本地运行示例里的 `JAVA_TOOL_OPTIONS`。升级前旧版 Chronicle 查找 `FileChannelImpl.unmap0` 会导致 `Bytes` 初始化失败；升级后必须通过撮合模块全量测试再发布。
 - 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。
 - MARKET 订单在订单入口和撮合阶段都要求 mark price 新鲜。订单入口会用配置的 mark 派生可成交区间校验 min/max notional，再发布撮合命令；线性合约 max-notional 和初始保证金按上边界计算，避免市价 SELL 开空在高买价成交时抵押不足。`surprising.trading.*.market-max-slippage-ppm` 需要按产品流动性配置。
@@ -589,7 +588,7 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 
 ```bash
 mvn -pl :surprising-order-provider -am test
-mvn -pl :surprising-trading-entry-provider -am test
+mvn -pl :surprising-order-provider -am test
 mvn -pl :surprising-matching-provider -am test
 mvn -pl :surprising-trigger-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'
