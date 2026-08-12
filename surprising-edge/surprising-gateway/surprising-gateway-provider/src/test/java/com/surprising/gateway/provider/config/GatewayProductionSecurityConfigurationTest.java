@@ -159,6 +159,7 @@ class GatewayProductionSecurityConfigurationTest {
                 "spot-account-internal-secret-with-at-least-thirty-two-characters");
         testEnvironment.put("GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT", "10000");
         testEnvironment.put("GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT", "50000");
+        testEnvironment.put("GATEWAY_PRODUCT_TRANSFER_VERIFICATION_THRESHOLD_USDT", "10000");
         testEnvironment.put("GATEWAY_WITHDRAWAL_VALUATION_BASE_URL", "https://price.example.com");
         testEnvironment.put("GATEWAY_KYC_DOCUMENTS_ENDPOINT", "https://s3.example.com");
         testEnvironment.put("GATEWAY_KYC_DOCUMENTS_BUCKET", "kyc-documents");
