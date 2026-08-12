@@ -264,10 +264,19 @@ public class GatewayProxyService {
             mutable.remove("instrumentVersion");
             if (instrumentResponse) {
                 mutable.remove("version");
+                stringifyUnitField(mutable, "priceTickUnits");
+                stringifyUnitField(mutable, "quantityStepUnits");
             }
             mutable.values().forEach(child -> removeInternalContractFields(child, instrumentResponse));
         } else if (value instanceof List<?> list) {
             list.forEach(child -> removeInternalContractFields(child, instrumentResponse));
+        }
+    }
+
+    private void stringifyUnitField(Map<Object, Object> value, String fieldName) {
+        Object field = value.get(fieldName);
+        if (field instanceof Number || field instanceof String) {
+            value.put(fieldName, String.valueOf(field));
         }
     }
 
