@@ -198,7 +198,6 @@ public class AccountService {
                                                                String cursor,
                                                                String sort) {
         requireUserId(userId);
-        requireProductAccount(accountType);
         var page = projectionQueryService.productTransferPage(userId, accountType,
                 optionalAsset(asset), normalizeLimit(limit), cursor, sort);
         return new ProductTransferRecordQueryResponse(page.items().size(), page.items(), page.nextCursor(),

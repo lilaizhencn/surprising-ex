@@ -9,6 +9,7 @@ import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.product.api.ProductLine;
 import java.util.Locale;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,6 +42,11 @@ public class InstrumentController {
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
+    }
+
+    @GetMapping(InstrumentApiPaths.BASE_PATH + "/asset-scales")
+    public Map<String, Long> assetScales() {
+        return instrumentService.assetScales();
     }
 
     @GetMapping(InstrumentApiPaths.BASE_PATH + "/version")

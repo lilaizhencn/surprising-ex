@@ -20,6 +20,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,6 +77,11 @@ public class InstrumentService {
     public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status) {
         var rows = storageService.list(type, status);
         return new InstrumentQueryResponse(rows.size(), rows);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Long> assetScales() {
+        return storageService.assetScales();
     }
 
     public InstrumentQueryResponse list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
