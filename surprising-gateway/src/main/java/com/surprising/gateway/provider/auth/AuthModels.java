@@ -1,0 +1,322 @@
+package com.surprising.gateway.provider.auth;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+public final class AuthModels {
+
+    private AuthModels() {
+    }
+
+    public record RegisterRequest(
+            @Size(min = 3, max = 32) String username,
+            @NotBlank @Size(min = 8, max = 128) String password,
+            @Size(max = 254) String email,
+            @Size(max = 32) String phone) {
+        public RegisterRequest(String username, String password, String email) {
+            this(username, password, email, null);
+        }
+    }
+
+    public record LoginRequest(
+            @NotBlank @JsonAlias({"username", "email", "phone"}) String identifier,
+            @NotBlank String password,
+            String totpCode) {
+    }
+
+    public record RefreshRequest(@NotBlank String refreshToken) {
+    }
+
+    public record RevokeOtherSessionsRequest(@NotBlank String refreshToken) {
+    }
+
+    public record EmailVerificationRequest(
+            @NotBlank @Size(max = 254) String email,
+            @NotBlank @Size(min = 6, max = 6) String code) {
+    }
+
+    public record PasswordResetRequest(
+            @NotBlank String identifier,
+            @NotBlank @Size(min = 6, max = 6) String code,
+            @NotBlank @Size(min = 8, max = 128) String newPassword) {
+    }
+
+    public record PasswordResetStartRequest(@NotBlank String identifier) {
+    }
+
+    public record PasswordResetResponse(boolean accepted) {
+    }
+
+    public record UserMfaVerificationRequest(
+            @NotBlank @Size(min = 6, max = 6) String totpCode) {
+    }
+
+    public record UserSecuritySceneUpdateRequest(
+            @NotNull Boolean enabled,
+            @Size(min = 6, max = 6) String emailCode,
+            @Size(min = 6, max = 6) String totpCode) {
+    }
+
+    public record ChangePasswordRequest(
+            @NotBlank String currentPassword,
+            @NotBlank @Size(min = 8, max = 128) String newPassword,
+            @Size(min = 6, max = 6) String emailCode,
+            @Size(min = 6, max = 6) String totpCode) {
+    }
+
+    public record SensitiveChallengeRequest(@NotBlank String sceneCode) {
+    }
+
+    public record SensitiveChallengeVerificationRequest(
+            @NotBlank String sceneCode,
+            @NotBlank @Size(min = 6, max = 6) String emailCode,
+            @Size(min = 6, max = 6) String totpCode) {
+    }
+
+    public record AuthenticatedUser(
+            long userId,
+            String username,
+            String email,
+            String status,
+            List<String> roles,
+            Instant createdAt) {
+    }
+
+    public record TokenPair(
+            String accessToken,
+            String refreshToken,
+            Instant accessTokenExpiresAt,
+            Instant refreshTokenExpiresAt) {
+    }
+
+    public record AuthResponse(
+            AuthenticatedUser user,
+            String accessToken,
+            String refreshToken,
+            Instant accessTokenExpiresAt,
+            Instant refreshTokenExpiresAt,
+            boolean requiresEmailVerification) {
+        public AuthResponse(AuthenticatedUser user,
+                            String accessToken,
+                            String refreshToken,
+                            Instant accessTokenExpiresAt,
+                            Instant refreshTokenExpiresAt) {
+            this(user, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, false);
+        }
+    }
+
+    public record JwtPrincipal(
+            long userId,
+            String username,
+            String status,
+            List<String> roles,
+            Instant expiresAt) {
+    }
+
+    public record AdminUserQueryResponse(
+            int count,
+            List<AuthenticatedUser> users,
+            String nextCursor,
+            boolean hasMore,
+            String sort,
+            int limit) {
+
+        public AdminUserQueryResponse(int count, List<AuthenticatedUser> users) {
+            this(count, users, null, false, null, count);
+        }
+    }
+
+    public record AdminUserStatusRequest(
+            @NotBlank String status) {
+    }
+
+    public record AdminUserRolesRequest(
+            List<@NotBlank String> roles) {
+    }
+
+    public record AdminRoleResponse(
+            String roleCode,
+            String roleName,
+            int permissionCount,
+            Instant createdAt) {
+    }
+
+    public record AdminRoleQueryResponse(
+            int count,
+            List<AdminRoleResponse> roles) {
+    }
+
+    public record AdminPermissionResponse(
+            String permissionCode,
+            String permissionName,
+            String description,
+            Instant createdAt) {
+    }
+
+    public record AdminPermissionQueryResponse(
+            int count,
+            List<AdminPermissionResponse> permissions) {
+    }
+
+    public record AdminRolePermissionsResponse(
+            String roleCode,
+            List<String> permissions) {
+    }
+
+    public record AdminRolePermissionsRequest(
+            List<@NotBlank String> permissions) {
+    }
+
+    public record AdminRefreshSessionResponse(
+            long sessionId,
+            long userId,
+            boolean active,
+            Instant expiresAt,
+            Instant revokedAt,
+            String userAgent,
+            String ipAddress,
+            Instant createdAt,
+            Instant updatedAt) {
+    }
+
+    public record AdminRefreshSessionQueryResponse(
+            int count,
+            List<AdminRefreshSessionResponse> sessions,
+            String nextCursor,
+            boolean hasMore,
+            String sort,
+            int limit) {
+
+        public AdminRefreshSessionQueryResponse(int count, List<AdminRefreshSessionResponse> sessions) {
+            this(count, sessions, null, false, null, count);
+        }
+    }
+
+    public record AdminSessionRevokeResponse(
+            int revoked,
+            Instant revokedAt) {
+    }
+
+    public record AdminMfaStatusResponse(
+            boolean enabled,
+            Instant verifiedAt) {
+    }
+
+    public record AdminMfaEnrollmentResponse(
+            boolean enabled,
+            String secret,
+            String otpauthUri,
+            Instant generatedAt) {
+    }
+
+    public record AdminMfaVerificationRequest(
+            @NotBlank String totpCode) {
+    }
+
+    public record LoginLogResponse(
+            long loginId,
+            Long userId,
+            String result,
+            String reason,
+            String userAgent,
+            String ipAddress,
+            Instant createdAt) {
+    }
+
+    public record LoginLogQueryResponse(
+            int count,
+            List<LoginLogResponse> logs,
+            String nextCursor,
+            boolean hasMore,
+            String sort,
+            int limit) {
+        public LoginLogQueryResponse(int count, List<LoginLogResponse> logs) {
+            this(count, logs, null, false, "createdAt.desc", count);
+        }
+    }
+
+    public record AdminOperationLogResponse(
+            long operationId,
+            Long adminUserId,
+            String adminUsername,
+            List<String> adminRoles,
+            String service,
+            String httpMethod,
+            String requestPath,
+            String queryString,
+            String targetUri,
+            String requestBodySha256,
+            Integer responseStatus,
+            Long durationMs,
+            boolean success,
+            String errorMessage,
+            String traceId,
+            String userAgent,
+            String ipAddress,
+            Instant createdAt) {
+    }
+
+    public record AdminOperationLogQueryResponse(
+            int count,
+            List<AdminOperationLogResponse> logs,
+            String nextCursor,
+            boolean hasMore,
+            String sort,
+            int limit) {
+        public AdminOperationLogQueryResponse(int count, List<AdminOperationLogResponse> logs) {
+            this(count, logs, null, false, "createdAt.desc", count);
+        }
+    }
+
+    public record AdminApprovalCreateRequest(
+            @NotBlank String service,
+            @NotBlank String httpMethod,
+            @NotBlank String requestPath,
+            String queryString,
+            String requestBodySha256,
+            @NotBlank @Size(max = 1000) String reason) {
+    }
+
+    public record AdminApprovalDecisionRequest(
+            @Size(max = 1000) String reason) {
+    }
+
+    public record AdminApprovalResponse(
+            long approvalId,
+            long requesterUserId,
+            String requesterUsername,
+            Long approverUserId,
+            String approverUsername,
+            String service,
+            String httpMethod,
+            String requestPath,
+            String queryString,
+            String requestBodySha256,
+            String reason,
+            String decisionReason,
+            String status,
+            Instant requestedAt,
+            Instant expiresAt,
+            Instant decidedAt,
+            Instant consumedAt,
+            String consumedTraceId) {
+    }
+
+    public record AdminApprovalQueryResponse(
+            int count,
+            List<AdminApprovalResponse> approvals,
+            String nextCursor,
+            boolean hasMore,
+            String sort,
+            int limit) {
+        public AdminApprovalQueryResponse(int count, List<AdminApprovalResponse> approvals) {
+            this(count, approvals, null, false, "requestedAt.desc", count);
+        }
+    }
+
+}

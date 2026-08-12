@@ -5,6 +5,7 @@ import com.surprising.gateway.provider.auth.AuthModels.ChangePasswordRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AdminRefreshSessionQueryResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AdminSessionRevokeResponse;
 import com.surprising.gateway.provider.auth.AuthModels.LoginLogQueryResponse;
+import com.surprising.gateway.provider.auth.AuthModels.RevokeOtherSessionsRequest;
 import com.surprising.gateway.provider.auth.AuthModels.SensitiveChallengeRequest;
 import com.surprising.gateway.provider.auth.AuthModels.SensitiveChallengeVerificationRequest;
 import com.surprising.gateway.provider.auth.AuthModels.UserSecuritySceneUpdateRequest;
@@ -139,14 +140,12 @@ public class UserSecurityController {
             @org.springframework.web.bind.annotation.PathVariable long sessionId) {
         try {
             long userId = principal(authorization).userId();
-            boolean owned = persistence.refreshSessions(userId, null, 500).stream()
-                    .anyMatch(session -> session.sessionId() == sessionId);
-            if (!owned) {
+            java.time.Instant revokedAt = java.time.Instant.now();
+            int revoked = persistence.revokeRefreshSessionForUser(userId, sessionId, revokedAt);
+            if (revoked == 0) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found");
             }
-            java.time.Instant revokedAt = java.time.Instant.now();
-            persistence.revokeRefreshSession(sessionId, revokedAt);
-            return new AdminSessionRevokeResponse(1, revokedAt);
+            return new AdminSessionRevokeResponse(revoked, revokedAt);
         } catch (ResponseStatusException ex) {
             throw ex;
         } catch (IllegalArgumentException ex) {
@@ -156,12 +155,10 @@ public class UserSecurityController {
 
     @PostMapping("/sessions/revoke-all")
     public AdminSessionRevokeResponse revokeAllSessions(
-            @RequestHeader("Authorization") String authorization) {
+            @RequestHeader("Authorization") String authorization,
+            @Valid @RequestBody RevokeOtherSessionsRequest request) {
         try {
-            long userId = principal(authorization).userId();
-            java.time.Instant revokedAt = java.time.Instant.now();
-            int revoked = persistence.revokeUserRefreshSessions(userId, revokedAt);
-            return new AdminSessionRevokeResponse(revoked, revokedAt);
+            return authService.revokeOtherRefreshSessions(authorization, request.refreshToken());
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         }

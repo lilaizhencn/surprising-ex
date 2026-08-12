@@ -46,9 +46,9 @@ class UserSecurityControllerTest {
         Instant now = Instant.parse("2026-08-01T00:00:00Z");
         when(authService.authenticateBearer("Bearer token"))
                 .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60)));
-        when(persistence.refreshSessions(42L, null, 500)).thenReturn(List.of(
-                new AdminRefreshSessionResponse(8L, 42L, true, now.plusSeconds(3600), null,
-                        "browser", "127.0.0.1", now, now)));
+        when(persistence.revokeRefreshSessionForUser(org.mockito.ArgumentMatchers.eq(42L),
+                org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.any(Instant.class)))
+                .thenReturn(0);
 
         assertThatThrownBy(() -> controller.revokeSession("Bearer token", 9L))
                 .isInstanceOf(ResponseStatusException.class)
@@ -56,17 +56,15 @@ class UserSecurityControllerTest {
     }
 
     @Test
-    void revokeAllSessionsUsesAuthenticatedUserId() {
+    void revokeAllSessionsKeepsCurrentSessionByPassingRefreshToken() {
         Instant now = Instant.parse("2026-08-01T00:00:00Z");
-        when(authService.authenticateBearer("Bearer token"))
-                .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60)));
-        when(persistence.revokeUserRefreshSessions(org.mockito.ArgumentMatchers.eq(42L),
-                org.mockito.ArgumentMatchers.any(Instant.class))).thenReturn(2);
+        when(authService.revokeOtherRefreshSessions("Bearer token", "refresh-token"))
+                .thenReturn(new AuthModels.AdminSessionRevokeResponse(2, now));
 
-        var response = controller.revokeAllSessions("Bearer token");
+        var response = controller.revokeAllSessions("Bearer token",
+                new AuthModels.RevokeOtherSessionsRequest("refresh-token"));
 
         assertThat(response.revoked()).isEqualTo(2);
-        verify(persistence).revokeUserRefreshSessions(org.mockito.ArgumentMatchers.eq(42L),
-                org.mockito.ArgumentMatchers.any(Instant.class));
+        verify(authService).revokeOtherRefreshSessions("Bearer token", "refresh-token");
     }
 }
