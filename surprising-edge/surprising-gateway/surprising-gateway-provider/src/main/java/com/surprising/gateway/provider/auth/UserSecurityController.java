@@ -2,6 +2,9 @@ package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.AuthModels.UserMfaVerificationRequest;
 import com.surprising.gateway.provider.auth.AuthModels.ChangePasswordRequest;
+import com.surprising.gateway.provider.auth.AuthModels.AdminRefreshSessionQueryResponse;
+import com.surprising.gateway.provider.auth.AuthModels.AdminSessionRevokeResponse;
+import com.surprising.gateway.provider.auth.AuthModels.LoginLogQueryResponse;
 import com.surprising.gateway.provider.auth.AuthModels.SensitiveChallengeRequest;
 import com.surprising.gateway.provider.auth.AuthModels.SensitiveChallengeVerificationRequest;
 import com.surprising.gateway.provider.auth.AuthModels.UserSecuritySceneUpdateRequest;
@@ -13,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -24,13 +28,16 @@ public class UserSecurityController {
     private final AuthService authService;
     private final UserSecurityService securityService;
     private final SensitiveActionVerificationService verificationService;
+    private final AuthPersistenceService persistence;
 
     public UserSecurityController(AuthService authService,
                                   UserSecurityService securityService,
-                                  SensitiveActionVerificationService verificationService) {
+                                  SensitiveActionVerificationService verificationService,
+                                  AuthPersistenceService persistence) {
         this.authService = authService;
         this.securityService = securityService;
         this.verificationService = verificationService;
+        this.persistence = persistence;
     }
 
     @GetMapping("/mfa")
@@ -109,6 +116,82 @@ public class UserSecurityController {
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         }
+    }
+
+    @GetMapping("/sessions")
+    public AdminRefreshSessionQueryResponse sessions(
+            @RequestHeader("Authorization") String authorization,
+            @RequestParam(value = "active", defaultValue = "true") Boolean active,
+            @RequestParam(value = "limit", defaultValue = "100") int limit,
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestParam(value = "sort", required = false) String sort) {
+        try {
+            long userId = principal(authorization).userId();
+            return pageSessions(userId, active, limit, cursor, sort);
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        }
+    }
+
+    @PostMapping("/sessions/{sessionId}/revoke")
+    public AdminSessionRevokeResponse revokeSession(
+            @RequestHeader("Authorization") String authorization,
+            @org.springframework.web.bind.annotation.PathVariable long sessionId) {
+        try {
+            long userId = principal(authorization).userId();
+            boolean owned = persistence.refreshSessions(userId, null, 500).stream()
+                    .anyMatch(session -> session.sessionId() == sessionId);
+            if (!owned) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found");
+            }
+            java.time.Instant revokedAt = java.time.Instant.now();
+            persistence.revokeRefreshSession(sessionId, revokedAt);
+            return new AdminSessionRevokeResponse(1, revokedAt);
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        }
+    }
+
+    @PostMapping("/sessions/revoke-all")
+    public AdminSessionRevokeResponse revokeAllSessions(
+            @RequestHeader("Authorization") String authorization) {
+        try {
+            long userId = principal(authorization).userId();
+            java.time.Instant revokedAt = java.time.Instant.now();
+            int revoked = persistence.revokeUserRefreshSessions(userId, revokedAt);
+            return new AdminSessionRevokeResponse(revoked, revokedAt);
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        }
+    }
+
+    @GetMapping("/login-history")
+    public LoginLogQueryResponse loginHistory(
+            @RequestHeader("Authorization") String authorization,
+            @RequestParam(value = "result", required = false) String result,
+            @RequestParam(value = "limit", defaultValue = "100") int limit,
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestParam(value = "sort", required = false) String sort) {
+        try {
+            long userId = principal(authorization).userId();
+            var page = persistence.loginLogPage(userId, result, limit, cursor, sort);
+            return new LoginLogQueryResponse(page.items().size(), page.items(), page.nextCursor(),
+                    page.hasMore(), page.sort(), page.limit());
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        }
+    }
+
+    private AdminRefreshSessionQueryResponse pageSessions(long userId,
+                                                          Boolean active,
+                                                          int limit,
+                                                          String cursor,
+                                                          String sort) {
+        var page = persistence.refreshSessionsPage(userId, active, limit, cursor, sort);
+        return new AdminRefreshSessionQueryResponse(page.items().size(), page.items(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
     }
 
     @PostMapping("/verification/challenge")
