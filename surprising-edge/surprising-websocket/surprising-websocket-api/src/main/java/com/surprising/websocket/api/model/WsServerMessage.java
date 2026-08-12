@@ -34,6 +34,10 @@ public record WsServerMessage(
         return new WsServerMessage("pong", id, null, null, null, null, null, null, null, Instant.now());
     }
 
+    public static WsServerMessage authenticated(String id, long userId) {
+        return new WsServerMessage("authenticated", id, null, null, null, userId, null, null, null, Instant.now());
+    }
+
     public static WsServerMessage error(String id, String error) {
         return new WsServerMessage("error", id, null, null, null, null, null, null, error, Instant.now());
     }

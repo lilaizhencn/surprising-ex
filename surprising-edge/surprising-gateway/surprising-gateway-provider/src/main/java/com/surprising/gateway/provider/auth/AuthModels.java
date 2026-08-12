@@ -32,6 +32,9 @@ public final class AuthModels {
     public record RefreshRequest(@NotBlank String refreshToken) {
     }
 
+    public record RevokeOtherSessionsRequest(@NotBlank String refreshToken) {
+    }
+
     public record EmailVerificationRequest(
             @NotBlank @Size(max = 254) String email,
             @NotBlank @Size(min = 6, max = 6) String code) {

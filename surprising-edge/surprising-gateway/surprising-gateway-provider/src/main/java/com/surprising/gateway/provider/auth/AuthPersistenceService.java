@@ -231,6 +231,14 @@ public class AuthPersistenceService {
         return refreshSessionRepository.revokeActiveForUser(userId, now);
     }
 
+    public int revokeActiveForUserExcept(long userId, long excludedSessionId, Instant now) {
+        return refreshSessionRepository.revokeActiveForUserExcept(userId, excludedSessionId, now);
+    }
+
+    public int revokeRefreshSessionForUser(long userId, long sessionId, Instant now) {
+        return refreshSessionRepository.revokeActiveForUserSession(userId, sessionId, now);
+    }
+
     public int updatePasswordHash(long userId, String passwordHash, Instant now) {
         return userRepository.updatePasswordHash(userId, passwordHash, now);
     }

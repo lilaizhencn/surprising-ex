@@ -26,7 +26,7 @@ public class ClientConnection implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(ClientConnection.class);
 
     private final WebSocketSession session;
-    private final Long authenticatedUserId;
+    private volatile Long authenticatedUserId;
     /** 有界环形队列；满载时主动断开慢连接，背压不会传回 Kafka 消费线程。 */
     private final BlockingQueue<String> outbound;
     private final Duration sendTimeout;
@@ -51,6 +51,16 @@ public class ClientConnection implements AutoCloseable {
 
     public Long authenticatedUserId() {
         return authenticatedUserId;
+    }
+
+    public synchronized void authenticate(long userId) {
+        if (userId <= 0L) {
+            throw new IllegalArgumentException("websocket userId must be positive");
+        }
+        if (authenticatedUserId != null && authenticatedUserId != userId) {
+            throw new IllegalArgumentException("websocket session is already authenticated");
+        }
+        authenticatedUserId = userId;
     }
 
     public boolean send(String payload) {

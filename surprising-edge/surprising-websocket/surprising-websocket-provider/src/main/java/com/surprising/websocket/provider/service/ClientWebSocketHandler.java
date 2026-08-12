@@ -47,6 +47,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
             WsClientCommand command = objectMapper.readValue(message.getPayload(), WsClientCommand.class);
             String op = command.op() == null ? "" : command.op().trim().toLowerCase();
             switch (op) {
+                case "authenticate" -> authenticate(connection, command);
                 case "subscribe" -> subscribe(connection, command);
                 case "unsubscribe" -> unsubscribe(connection, command);
                 case "ping" -> connection.send(objectMapper.writeValueAsString(WsServerMessage.pong(command.id())));
@@ -68,6 +69,12 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         connection.send(objectMapper.writeValueAsString(WsServerMessage.ack(command.id(), topic)));
     }
 
+    private void authenticate(ClientConnection connection, WsClientCommand command) {
+        long userId = jwtAuthenticator.authenticate(command.token());
+        connection.authenticate(userId);
+        connection.send(objectMapper.writeValueAsString(WsServerMessage.authenticated(command.id(), userId)));
+    }
+
     private void unsubscribe(ClientConnection connection, WsClientCommand command) {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
         registry.unsubscribe(connection, topic);
@@ -79,38 +86,6 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     }
 
     private Long authenticatedUserId(WebSocketSession session) {
-        URI uri = session.getUri();
-        String queryToken = queryValue(uri, "token");
-        if (queryToken != null && !queryToken.isBlank()) {
-            return jwtAuthenticator.authenticate(queryToken.trim());
-        }
-        List<String> headers = session.getHandshakeHeaders().get(properties.getSecurity().getUserIdHeader());
-        if (headers != null && !headers.isEmpty() && !headers.get(0).isBlank()) {
-            return Long.parseLong(headers.get(0).trim());
-        }
-        HttpHeaders handshakeHeaders = session.getHandshakeHeaders();
-        List<String> forwarded = handshakeHeaders.get("X-Forwarded-User-Id");
-        if (forwarded != null && !forwarded.isEmpty() && !forwarded.get(0).isBlank()) {
-            return Long.parseLong(forwarded.get(0).trim());
-        }
-        String queryUserId = queryValue(uri, "userId");
-        if (properties.getSecurity().isAllowQueryUserIdFallback()
-                && queryUserId != null && !queryUserId.isBlank()) {
-            return Long.parseLong(queryUserId.trim());
-        }
-        return null;
-    }
-
-    private String queryValue(URI uri, String name) {
-        if (uri == null || uri.getQuery() == null) {
-            return null;
-        }
-        for (String part : uri.getQuery().split("&")) {
-            String[] kv = part.split("=", 2);
-            if (kv.length == 2 && name.equals(kv[0])) {
-                return kv[1];
-            }
-        }
         return null;
     }
 }

@@ -45,8 +45,11 @@ public class InstrumentController {
     }
 
     @GetMapping(InstrumentApiPaths.BASE_PATH + "/asset-scales")
-    public Map<String, Long> assetScales() {
-        return instrumentService.assetScales();
+    public Map<String, String> assetScales() {
+        return instrumentService.assetScales().entrySet().stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        Map.Entry::getKey,
+                        entry -> Long.toString(entry.getValue())));
     }
 
     @GetMapping(InstrumentApiPaths.BASE_PATH + "/version")

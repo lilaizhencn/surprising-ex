@@ -44,6 +44,9 @@ public class GatewayProxyService {
             HttpHeaders.CONTENT_TYPE,
             "X-Request-Id",
             "X-User-Id",
+            "X-Product-Line",
+            "X-Account-Type",
+            "X-Contract-Type",
             "X-Forwarded-For",
             GatewayTraceFilter.TRACE_ID_HEADER);
 

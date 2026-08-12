@@ -142,6 +142,37 @@ public class GatewayRefreshSessionRepository {
                 """, Timestamp.from(now), Timestamp.from(now), userId, Timestamp.from(now));
     }
 
+    public int revokeActiveForUserExcept(long userId, long excludedSessionId, Instant now) {
+        if (userId <= 0 || excludedSessionId <= 0) {
+            throw new IllegalArgumentException("userId and excludedSessionId must be positive");
+        }
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = COALESCE(revoked_at, ?),
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND session_id <> ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, excludedSessionId,
+                Timestamp.from(now));
+    }
+
+    public int revokeActiveForUserSession(long userId, long sessionId, Instant now) {
+        if (userId <= 0 || sessionId <= 0) {
+            throw new IllegalArgumentException("userId and sessionId must be positive");
+        }
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = COALESCE(revoked_at, ?),
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND session_id = ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, sessionId, Timestamp.from(now));
+    }
+
     private AdminRefreshSessionResponse toResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
         Instant revokedAt = nullableInstant(rs, "revoked_at");
         Instant expiresAt = rs.getTimestamp("expires_at").toInstant();

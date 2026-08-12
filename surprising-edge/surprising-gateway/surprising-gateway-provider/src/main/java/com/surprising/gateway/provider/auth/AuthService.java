@@ -264,6 +264,26 @@ public class AuthService {
     }
 
     @Transactional
+    public AdminSessionRevokeResponse revokeOtherRefreshSessions(String authorizationHeader,
+                                                                 String refreshToken) {
+        JwtPrincipal principal = authenticateBearer(authorizationHeader);
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new IllegalArgumentException("refreshToken is required");
+        }
+        var currentSession = repository.refreshSession(hashRefreshToken(refreshToken))
+                .orElseThrow(() -> new IllegalArgumentException("refresh session not found"));
+        if (currentSession.revokedAt() != null || !currentSession.expiresAt().isAfter(Instant.now())) {
+            throw new IllegalArgumentException("refresh session is not active");
+        }
+        if (currentSession.userId() != principal.userId()) {
+            throw new IllegalArgumentException("refresh session does not belong to authenticated user");
+        }
+        Instant now = Instant.now();
+        int revoked = repository.revokeActiveForUserExcept(principal.userId(), currentSession.sessionId(), now);
+        return new AdminSessionRevokeResponse(revoked, now);
+    }
+
+    @Transactional
     public AuthenticatedUser updateUserStatus(String authorizationHeader, long userId, String status) {
         authenticateAdminBearer(authorizationHeader);
         return repository.updateStatus(userId, status, Instant.now())
