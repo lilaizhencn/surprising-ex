@@ -19,7 +19,10 @@ public record PlaceOrderCommand(
         CoreOrderType orderType,
         CoreTimeInForce timeInForce,
         long matchingPriceTicks,
-        boolean postOnly) {
+        boolean postOnly,
+        String clientOrderId,
+        long makerFeeRatePpm,
+        long takerFeeRatePpm) {
 
     public PlaceOrderCommand {
         if (orderId <= 0 || symbol == null || symbol.isBlank() || instrumentVersion <= 0
@@ -31,6 +34,7 @@ public record PlaceOrderCommand(
                 || reservationAsset.isBlank() || reservedUnits <= 0 || orderType == null || timeInForce == null
                 || matchingPriceTicks <= 0 || orderType == CoreOrderType.LIMIT && priceTicks <= 0
                 || orderType == CoreOrderType.MARKET && priceTicks != 0
+                || clientOrderId == null || clientOrderId.length() > 64
                 || postOnly && (orderType != CoreOrderType.LIMIT || timeInForce != CoreTimeInForce.GTX)) {
             throw new IllegalArgumentException("invalid place order command");
         }
@@ -43,7 +47,7 @@ public record PlaceOrderCommand(
                              String reservationAsset, long reservedUnits) {
         this(orderId, symbol, instrumentVersion, baseAsset, quoteAsset, settleAsset, side, priceTicks,
                 quantitySteps, reduceOnly, marginMode, positionSide, reservationKind, reservationAsset,
-                reservedUnits, CoreOrderType.LIMIT, CoreTimeInForce.GTC, priceTicks, false);
+                reservedUnits, CoreOrderType.LIMIT, CoreTimeInForce.GTC, priceTicks, false, "", 0, 0);
     }
 
     public PlaceOrderCommand(long orderId, String symbol, long instrumentVersion, String baseAsset,
@@ -53,6 +57,6 @@ public record PlaceOrderCommand(
         this(orderId, symbol, instrumentVersion, baseAsset, quoteAsset, settleAsset, side, priceTicks,
                 quantitySteps, reduceOnly, CoreMarginMode.CROSS, CorePositionSide.NET,
                 reservationKind, reservationAsset, reservedUnits, CoreOrderType.LIMIT,
-                CoreTimeInForce.GTC, priceTicks, false);
+                CoreTimeInForce.GTC, priceTicks, false, "", 0, 0);
     }
 }

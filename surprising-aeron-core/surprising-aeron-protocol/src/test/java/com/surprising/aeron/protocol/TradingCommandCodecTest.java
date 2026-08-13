@@ -13,7 +13,8 @@ class TradingCommandCodecTest {
         PlaceOrderCommand placeOrder = new PlaceOrderCommand(7, "BTC-USDT", 3, "BTC", "USDT", "USDT",
                 CoreOrderSide.BUY, 0, 3, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 2_000,
-                CoreOrderType.MARKET, CoreTimeInForce.FOK, 60_000, false);
+                CoreOrderType.MARKET, CoreTimeInForce.FOK, 60_000, false,
+                "client-7", -10, 20);
         CancelOrderCommand cancelOrder = new CancelOrderCommand(7);
         ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(7, "BTC", "USDT", 61_000, 2_100);
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 3, 1,

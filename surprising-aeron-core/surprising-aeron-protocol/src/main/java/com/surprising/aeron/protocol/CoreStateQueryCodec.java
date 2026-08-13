@@ -8,11 +8,25 @@ import java.util.List;
 
 public final class CoreStateQueryCodec {
 
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
+    private static final int VERSION_2 = 2;
     private static final int VERSION_1 = 1;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreStateQueryCodec() {
+    }
+
+    public static byte[] encodeClientOrderStateQuery(String clientOrderId) {
+        Writer writer = new Writer();
+        writer.text(clientOrderId);
+        return writer.toByteArray();
+    }
+
+    public static String decodeClientOrderStateQuery(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        String clientOrderId = reader.text();
+        reader.requireConsumed();
+        return clientOrderId;
     }
 
     public static byte[] encodeUserState(CoreUserStateView state) {
@@ -108,6 +122,19 @@ public final class CoreStateQueryCodec {
         writer.longValue(state.executedQuantitySteps());
         writer.longValue(state.remainingQuantitySteps());
         writer.byteValue(state.reduceOnly() ? 1 : 0);
+        writer.intValue(state.marginMode().wireCode());
+        writer.intValue(state.positionSide().wireCode());
+        writer.intValue(state.orderType().wireCode());
+        writer.intValue(state.timeInForce().wireCode());
+        writer.byteValue(state.postOnly() ? 1 : 0);
+        writer.optionalText(state.clientOrderId());
+        writer.longValue(state.commandId().getMostSignificantBits());
+        writer.longValue(state.commandId().getLeastSignificantBits());
+        writer.longValue(state.makerFeeRatePpm());
+        writer.longValue(state.takerFeeRatePpm());
+        writer.longValue(state.createdAtEpochMillis());
+        writer.longValue(state.updatedAtEpochMillis());
+        writer.longValue(state.clusterPosition());
         writer.text(state.status());
         writer.longValue(state.revision());
         return writer.toByteArray();
@@ -115,14 +142,35 @@ public final class CoreStateQueryCodec {
 
     public static CoreOrderStateView decodeOrderState(byte[] encoded) {
         Reader reader = new Reader(encoded);
-        reader.requireVersion();
-        CoreOrderStateView state = new CoreOrderStateView(reader.positiveLong("orderId"),
-                ProductLineWireCode.decode(reader.intValue()), reader.positiveLong("userId"), reader.text(),
-                reader.positiveLong("instrumentVersion"),
-                CoreOrderSide.fromWireCode(reader.intValue()), reader.nonNegativeLong("priceTicks"),
-                reader.positiveLong("quantitySteps"), reader.nonNegativeLong("executedQuantitySteps"),
-                reader.nonNegativeLong("remainingQuantitySteps"), reader.booleanValue(), reader.text(),
-                reader.positiveLong("revision"));
+        int version = reader.version(VERSION, VERSION_2, VERSION_1);
+        long orderId = reader.positiveLong("orderId");
+        ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
+        long userId = reader.positiveLong("userId");
+        String symbol = reader.text();
+        long instrumentVersion = reader.positiveLong("instrumentVersion");
+        CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
+        long priceTicks = reader.nonNegativeLong("priceTicks");
+        long quantitySteps = reader.positiveLong("quantitySteps");
+        long executed = reader.nonNegativeLong("executedQuantitySteps");
+        long remaining = reader.nonNegativeLong("remainingQuantitySteps");
+        boolean reduceOnly = reader.booleanValue();
+        CoreMarginMode marginMode = version == VERSION ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
+        CorePositionSide positionSide = version == VERSION ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
+        CoreOrderType orderType = version == VERSION ? CoreOrderType.fromWireCode(reader.intValue()) : CoreOrderType.LIMIT;
+        CoreTimeInForce timeInForce = version == VERSION ? CoreTimeInForce.fromWireCode(reader.intValue()) : CoreTimeInForce.GTC;
+        boolean postOnly = version == VERSION && reader.booleanValue();
+        String clientOrderId = version == VERSION ? reader.optionalText() : "";
+        java.util.UUID commandId = version == VERSION
+                ? new java.util.UUID(reader.longValue(), reader.longValue()) : new java.util.UUID(0, orderId);
+        long makerFee = version == VERSION ? reader.longValue() : 0;
+        long takerFee = version == VERSION ? reader.longValue() : 0;
+        long createdAt = version == VERSION ? reader.nonNegativeLong("createdAt") : 0;
+        long updatedAt = version == VERSION ? reader.nonNegativeLong("updatedAt") : 0;
+        long clusterPosition = version == VERSION ? reader.nonNegativeLong("clusterPosition") : 0;
+        CoreOrderStateView state = new CoreOrderStateView(orderId, productLine, userId, symbol,
+                instrumentVersion, side, priceTicks, quantitySteps, executed, remaining, reduceOnly,
+                marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
+                makerFee, takerFee, createdAt, updatedAt, clusterPosition, reader.text(), reader.positiveLong("revision"));
         reader.requireConsumed();
         return state;
     }
@@ -153,6 +201,15 @@ public final class CoreStateQueryCodec {
             byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
             if (bytes.length == 0 || bytes.length > MAX_TEXT_BYTES) {
                 throw new IllegalArgumentException("invalid query text length");
+            }
+            intValue(bytes.length);
+            output.writeBytes(bytes);
+        }
+
+        void optionalText(String value) {
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            if (bytes.length > MAX_TEXT_BYTES) {
+                throw new IllegalArgumentException("invalid optional query text length");
             }
             intValue(bytes.length);
             output.writeBytes(bytes);
@@ -242,6 +299,17 @@ public final class CoreStateQueryCodec {
             int length = count("text");
             if (length == 0 || length > MAX_TEXT_BYTES) {
                 throw new ProtocolException("invalid query text length: " + length);
+            }
+            require(length);
+            String value = new String(input, offset, length, StandardCharsets.UTF_8);
+            offset += length;
+            return value;
+        }
+
+        String optionalText() {
+            int length = count("optional text");
+            if (length > MAX_TEXT_BYTES) {
+                throw new ProtocolException("invalid optional query text length: " + length);
             }
             require(length);
             String value = new String(input, offset, length, StandardCharsets.UTF_8);

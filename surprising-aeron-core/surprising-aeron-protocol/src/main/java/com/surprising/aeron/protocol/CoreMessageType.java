@@ -27,6 +27,7 @@ public enum CoreMessageType {
     ORDER_STATE_QUERY(105, WireMessageKind.QUERY),
     EXPORT_BATCH_QUERY(106, WireMessageKind.QUERY),
     EXPORT_STATUS_QUERY(107, WireMessageKind.QUERY),
+    CLIENT_ORDER_STATE_QUERY(108, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),

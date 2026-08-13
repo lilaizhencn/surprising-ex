@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
+import java.util.UUID;
 
 public record CoreOrderState(
         long orderId,
@@ -24,6 +25,13 @@ public record CoreOrderState(
         CoreOrderType orderType,
         CoreTimeInForce timeInForce,
         boolean postOnly,
+        String clientOrderId,
+        UUID commandId,
+        long makerFeeRatePpm,
+        long takerFeeRatePpm,
+        long createdAtEpochMillis,
+        long updatedAtEpochMillis,
+        long clusterPosition,
         CoreOrderStatus status,
         long revision) {
 
@@ -33,6 +41,8 @@ public record CoreOrderState(
                 || quantitySteps <= 0 || executedQuantitySteps < 0 || remainingQuantitySteps < 0
                 || Math.addExact(executedQuantitySteps, remainingQuantitySteps) != quantitySteps
                 || marginMode == null || positionSide == null || orderType == null || timeInForce == null
+                || clientOrderId == null || clientOrderId.length() > 64 || commandId == null
+                || createdAtEpochMillis < 0 || updatedAtEpochMillis < createdAtEpochMillis || clusterPosition < 0
                 || postOnly && (orderType != CoreOrderType.LIMIT || timeInForce != CoreTimeInForce.GTX)
                 || status == null || revision <= 0) {
             throw new IllegalArgumentException("invalid order state");
@@ -49,7 +59,20 @@ public record CoreOrderState(
                           CoreOrderStatus status, long revision) {
         this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, CoreMarginMode.CROSS,
-                CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, status, revision);
+                CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
+                "", new UUID(0, orderId), 0, 0, 0, 0, 0, status, revision);
+    }
+
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+                          long instrumentVersion, CoreOrderSide side, long priceTicks, long quantitySteps,
+                          long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
+                          CoreMarginMode marginMode, CorePositionSide positionSide, CoreOrderType orderType,
+                          CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId, UUID commandId,
+                          long makerFeeRatePpm, long takerFeeRatePpm, CoreOrderStatus status, long revision) {
+        this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, quantitySteps,
+                executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
+                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                0, 0, 0, status, revision);
     }
 
     public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
@@ -59,7 +82,8 @@ public record CoreOrderState(
                           CoreOrderStatus status, long revision) {
         this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, status, revision);
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
+                "", new UUID(0, orderId), 0, 0, 0, 0, 0, status, revision);
     }
 
     public CoreOrderState cancel() {
@@ -69,7 +93,8 @@ public record CoreOrderState(
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
                 side, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
-                orderType, timeInForce, postOnly,
+                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 CoreOrderStatus.CANCELED,
                 Math.incrementExact(revision));
     }
@@ -83,6 +108,8 @@ public record CoreOrderState(
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
                 side, priceTicks, quantitySteps(), nextExecuted, nextRemaining, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly,
+                clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 nextRemaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN,
                 Math.incrementExact(revision));
     }
@@ -94,6 +121,15 @@ public record CoreOrderState(
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
                 side, newPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly,
+                clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 status, Math.incrementExact(revision));
+    }
+
+    public CoreOrderState withCommitMetadata(long timestamp, long position) {
+        return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks,
+                quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
+                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                createdAtEpochMillis == 0 ? timestamp : createdAtEpochMillis, timestamp, position, status, revision);
     }
 }

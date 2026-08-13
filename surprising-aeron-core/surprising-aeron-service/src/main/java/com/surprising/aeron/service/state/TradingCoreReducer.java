@@ -21,6 +21,7 @@ import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 
 public final class TradingCoreReducer {
 
@@ -115,9 +116,20 @@ public final class TradingCoreReducer {
     }
 
     public TradingCoreState placeOrder(TradingCoreState state, long userId, PlaceOrderCommand command) {
+        return placeOrder(state, userId, command, new UUID(0, command.orderId()));
+    }
+
+    public TradingCoreState placeOrder(
+            TradingCoreState state,
+            long userId,
+            PlaceOrderCommand command,
+            UUID commandId) {
         requireUserId(userId);
         if (state.orders().containsKey(command.orderId())) {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "orderId already exists");
+        }
+        if (!command.clientOrderId().isEmpty() && state.order(userId, command.clientOrderId()) != null) {
+            throw new CoreStateRejectedException("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
         CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
         if (state.treasuryState().lifecycleSettlements().containsKey(instrument.symbol())) {
@@ -153,6 +165,7 @@ public final class TradingCoreReducer {
                 command.quantitySteps(), 0,
                 command.quantitySteps(), command.reduceOnly(), command.marginMode(), command.positionSide(),
                 command.orderType(), command.timeInForce(), command.postOnly(),
+                command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
                 CoreOrderStatus.OPEN, 1);
 
         Map<String, AssetBalance> balances = new TreeMap<>(currentUser.balances());

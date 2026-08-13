@@ -73,10 +73,12 @@ public final class TradingCommandCodec {
         byte[] quoteAsset = text(command.quoteAsset());
         byte[] settleAsset = text(command.settleAsset());
         byte[] asset = text(command.reservationAsset());
+        byte[] clientOrderId = optionalText(command.clientOrderId());
         return ByteBuffer.allocate(Integer.BYTES + Long.BYTES * 2 + Short.BYTES + symbol.length
                         + Short.BYTES + baseAsset.length + Short.BYTES + quoteAsset.length
                         + Short.BYTES + settleAsset.length + Integer.BYTES
-                        + Long.BYTES * 4 + Byte.BYTES * 2 + Integer.BYTES * 5 + Short.BYTES + asset.length)
+                        + Long.BYTES * 6 + Byte.BYTES * 2 + Integer.BYTES * 5
+                        + Short.BYTES * 2 + asset.length + clientOrderId.length)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(PLACE_ORDER_V2_MARKER)
                 .putLong(command.orderId())
@@ -103,6 +105,10 @@ public final class TradingCommandCodec {
                 .putInt(command.timeInForce().wireCode())
                 .putLong(command.matchingPriceTicks())
                 .put((byte) (command.postOnly() ? 1 : 0))
+                .putShort((short) clientOrderId.length)
+                .put(clientOrderId)
+                .putLong(command.makerFeeRatePpm())
+                .putLong(command.takerFeeRatePpm())
                 .array();
     }
 
@@ -154,10 +160,20 @@ public final class TradingCommandCodec {
             }
             postOnly = postOnlyCode == 1;
         }
+        String clientOrderId = "";
+        long makerFeeRatePpm = 0;
+        long takerFeeRatePpm = 0;
+        if (version2 && buffer.hasRemaining()) {
+            clientOrderId = readOptionalText(buffer);
+            requireRemaining(buffer, Long.BYTES * 2);
+            makerFeeRatePpm = buffer.getLong();
+            takerFeeRatePpm = buffer.getLong();
+        }
         requireConsumed(buffer);
         return new PlaceOrderCommand(orderId, symbol, instrumentVersion, baseAsset, quoteAsset, settleAsset,
                 side, priceTicks, quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
-                reservationKind, asset, reservedUnits, orderType, timeInForce, matchingPriceTicks, postOnly);
+                reservationKind, asset, reservedUnits, orderType, timeInForce, matchingPriceTicks, postOnly,
+                clientOrderId, makerFeeRatePpm, takerFeeRatePpm);
     }
 
     public static byte[] encodeCancelOrder(CancelOrderCommand command) {
@@ -361,11 +377,34 @@ public final class TradingCommandCodec {
         return encoded;
     }
 
+    private static byte[] optionalText(String value) {
+        if (value == null || value.isEmpty()) {
+            return new byte[0];
+        }
+        byte[] encoded = value.getBytes(StandardCharsets.UTF_8);
+        if (encoded.length > MAX_TEXT_BYTES) {
+            throw new IllegalArgumentException("optional text length must be 0.." + MAX_TEXT_BYTES + " bytes");
+        }
+        return encoded;
+    }
+
     private static String readText(ByteBuffer buffer) {
         requireRemaining(buffer, Short.BYTES);
         int length = Short.toUnsignedInt(buffer.getShort());
         if (length == 0 || length > MAX_TEXT_BYTES) {
             throw new ProtocolException("invalid text length: " + length);
+        }
+        requireRemaining(buffer, length);
+        byte[] encoded = new byte[length];
+        buffer.get(encoded);
+        return new String(encoded, StandardCharsets.UTF_8);
+    }
+
+    private static String readOptionalText(ByteBuffer buffer) {
+        requireRemaining(buffer, Short.BYTES);
+        int length = Short.toUnsignedInt(buffer.getShort());
+        if (length > MAX_TEXT_BYTES) {
+            throw new ProtocolException("invalid optional text length: " + length);
         }
         requireRemaining(buffer, length);
         byte[] encoded = new byte[length];

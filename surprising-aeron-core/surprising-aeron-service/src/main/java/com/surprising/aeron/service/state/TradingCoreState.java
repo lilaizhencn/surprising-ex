@@ -13,11 +13,12 @@ public record TradingCoreState(
         CoreBookState bookState,
         Map<String, CoreInstrumentState> instruments,
         CoreRiskState riskState,
-        CoreTreasuryState treasuryState) {
+        CoreTreasuryState treasuryState,
+        Map<ClientOrderKey, Long> clientOrderIndex) {
 
     public TradingCoreState {
         if (productLine == null || revision < 0 || users == null || orders == null || bookState == null
-                || instruments == null || riskState == null || treasuryState == null) {
+                || instruments == null || riskState == null || treasuryState == null || clientOrderIndex == null) {
             throw new IllegalArgumentException("invalid trading core state");
         }
         Map<Long, CoreUserState> sortedUsers = Collections.unmodifiableMap(new TreeMap<>(users));
@@ -33,6 +34,16 @@ public record TradingCoreState(
                 throw new IllegalArgumentException("order state belongs to another partition");
             }
         });
+        Map<ClientOrderKey, Long> derivedIndex = new TreeMap<>();
+        sortedOrders.values().stream().filter(order -> !order.clientOrderId().isEmpty()).forEach(order -> {
+            ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
+            if (derivedIndex.put(key, order.orderId()) != null) {
+                throw new IllegalArgumentException("duplicate clientOrderId for user");
+            }
+        });
+        if (!derivedIndex.equals(clientOrderIndex)) {
+            throw new IllegalArgumentException("client order index does not match authoritative orders");
+        }
         bookState.openOrders().forEach((orderId, bookOrder) -> {
             CoreOrderState order = sortedOrders.get(orderId);
             if (order == null || order.status() != CoreOrderStatus.OPEN
@@ -45,6 +56,15 @@ public record TradingCoreState(
         users = sortedUsers;
         orders = sortedOrders;
         instruments = Collections.unmodifiableMap(new TreeMap<>(instruments));
+        clientOrderIndex = Collections.unmodifiableMap(derivedIndex);
+    }
+
+    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
+                            Map<Long, CoreOrderState> orders, CoreBookState bookState,
+                            Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
+                            CoreTreasuryState treasuryState) {
+        this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
+                deriveClientOrderIndex(orders));
     }
 
     public static TradingCoreState empty(ProductLine productLine) {
@@ -58,6 +78,31 @@ public record TradingCoreState(
 
     public CoreOrderState order(long orderId) {
         return orders.get(orderId);
+    }
+
+    public CoreOrderState order(long userId, String clientOrderId) {
+        if (clientOrderId == null || clientOrderId.isBlank()) {
+            return null;
+        }
+        Long orderId = clientOrderIndex.get(new ClientOrderKey(userId, clientOrderId));
+        return orderId == null ? null : orders.get(orderId);
+    }
+
+    public TradingCoreState stampOrderChanges(
+            TradingCoreState before,
+            long timestamp,
+            long clusterPosition) {
+        Map<Long, CoreOrderState> stamped = new TreeMap<>(orders);
+        boolean changed = false;
+        for (CoreOrderState order : orders.values()) {
+            CoreOrderState previous = before.orders().get(order.orderId());
+            if (!order.equals(previous)) {
+                stamped.put(order.orderId(), order.withCommitMetadata(timestamp, clusterPosition));
+                changed = true;
+            }
+        }
+        return changed ? new TradingCoreState(productLine, revision, users, stamped, bookState,
+                instruments, riskState, treasuryState) : this;
     }
 
     public long businessStateHash() {
@@ -211,7 +256,42 @@ public record TradingCoreState(
         hash = CoreStateHash.mix(hash, order.orderType().wireCode());
         hash = CoreStateHash.mix(hash, order.timeInForce().wireCode());
         hash = CoreStateHash.mix(hash, order.postOnly());
+        hash = CoreStateHash.mix(hash, order.clientOrderId());
+        hash = CoreStateHash.mix(hash, order.commandId().getMostSignificantBits());
+        hash = CoreStateHash.mix(hash, order.commandId().getLeastSignificantBits());
+        hash = CoreStateHash.mix(hash, order.makerFeeRatePpm());
+        hash = CoreStateHash.mix(hash, order.takerFeeRatePpm());
+        hash = CoreStateHash.mix(hash, order.createdAtEpochMillis());
+        hash = CoreStateHash.mix(hash, order.updatedAtEpochMillis());
+        hash = CoreStateHash.mix(hash, order.clusterPosition());
         hash = CoreStateHash.mix(hash, order.status().ordinal());
         return CoreStateHash.mix(hash, order.revision());
+    }
+
+    private static Map<ClientOrderKey, Long> deriveClientOrderIndex(Map<Long, CoreOrderState> orders) {
+        Map<ClientOrderKey, Long> index = new TreeMap<>();
+        if (orders != null) {
+            orders.values().stream().filter(order -> !order.clientOrderId().isEmpty()).forEach(order -> {
+                ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
+                if (index.put(key, order.orderId()) != null) {
+                    throw new IllegalArgumentException("duplicate clientOrderId for user");
+                }
+            });
+        }
+        return index;
+    }
+
+    public record ClientOrderKey(long userId, String clientOrderId) implements Comparable<ClientOrderKey> {
+        public ClientOrderKey {
+            if (userId <= 0 || clientOrderId == null || clientOrderId.isBlank()) {
+                throw new IllegalArgumentException("invalid client order key");
+            }
+        }
+
+        @Override
+        public int compareTo(ClientOrderKey other) {
+            int userComparison = Long.compare(userId, other.userId);
+            return userComparison != 0 ? userComparison : clientOrderId.compareTo(other.clientOrderId);
+        }
     }
 }

@@ -16,10 +16,12 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 5;
+    private static final int VERSION = 6;
+    private static final int VERSION_5 = 5;
     private static final int VERSION_4 = 4;
     private static final int VERSION_3 = 3;
     private static final int VERSION_2 = 2;
@@ -88,6 +90,14 @@ public final class TradingStateSnapshotCodec {
             writer.intValue(order.orderType().wireCode());
             writer.intValue(order.timeInForce().wireCode());
             writer.byteValue(order.postOnly() ? 1 : 0);
+            writer.optionalText(order.clientOrderId());
+            writer.longValue(order.commandId().getMostSignificantBits());
+            writer.longValue(order.commandId().getLeastSignificantBits());
+            writer.longValue(order.makerFeeRatePpm());
+            writer.longValue(order.takerFeeRatePpm());
+            writer.longValue(order.createdAtEpochMillis());
+            writer.longValue(order.updatedAtEpochMillis());
+            writer.longValue(order.clusterPosition());
             writer.intValue(order.status().ordinal());
             writer.longValue(order.revision());
         });
@@ -168,7 +178,7 @@ public final class TradingStateSnapshotCodec {
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_4 && version != VERSION_3
+        if (version != VERSION && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
                 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
@@ -237,11 +247,19 @@ public final class TradingStateSnapshotCodec {
                     ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
             CorePositionSide orderPositionSide = version >= VERSION_4
                     ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
-            CoreOrderType orderType = version == VERSION
+            CoreOrderType orderType = version >= VERSION_5
                     ? CoreOrderType.fromWireCode(reader.intValue()) : CoreOrderType.LIMIT;
-            CoreTimeInForce timeInForce = version == VERSION
+            CoreTimeInForce timeInForce = version >= VERSION_5
                     ? CoreTimeInForce.fromWireCode(reader.intValue()) : CoreTimeInForce.GTC;
-            boolean postOnly = version == VERSION && reader.booleanValue();
+            boolean postOnly = version >= VERSION_5 && reader.booleanValue();
+            String clientOrderId = version == VERSION ? reader.optionalText() : "";
+            UUID commandId = version == VERSION
+                    ? new UUID(reader.longValue(), reader.longValue()) : new UUID(0, orderId);
+            long makerFeeRatePpm = version == VERSION ? reader.longValue() : 0;
+            long takerFeeRatePpm = version == VERSION ? reader.longValue() : 0;
+            long createdAt = version == VERSION ? reader.nonNegativeLong("order created time") : 0;
+            long updatedAt = version == VERSION ? reader.nonNegativeLong("order updated time") : 0;
+            long clusterPosition = version == VERSION ? reader.nonNegativeLong("order cluster position") : 0;
             int statusCode = reader.intValue();
             if (statusCode < 0 || statusCode >= CoreOrderStatus.values().length) {
                 throw new ProtocolException("invalid order status: " + statusCode);
@@ -250,6 +268,8 @@ public final class TradingStateSnapshotCodec {
                     instrumentVersion, side,
                     priceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
                     orderMarginMode, orderPositionSide, orderType, timeInForce, postOnly,
+                    clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                    createdAt, updatedAt, clusterPosition,
                     CoreOrderStatus.values()[statusCode], reader.positiveLong("order revision"));
             putUnique(orders, orderId, order);
         }
@@ -284,7 +304,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         CoreRiskState riskState = CoreRiskState.empty();
         CoreTreasuryState treasuryState = CoreTreasuryState.empty();
-        if (version == VERSION || version == VERSION_4 || version == VERSION_3) {
+        if (version == VERSION || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
             int instrumentCount = reader.count("instruments");
             for (int index = 0; index < instrumentCount; index++) {
                 String symbol = reader.text();
@@ -434,6 +454,15 @@ public final class TradingStateSnapshotCodec {
             output.writeBytes(bytes);
         }
 
+        void optionalText(String value) {
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            if (bytes.length > MAX_TEXT_BYTES) {
+                throw new IllegalArgumentException("invalid optional snapshot text length");
+            }
+            intValue(bytes.length);
+            output.writeBytes(bytes);
+        }
+
         byte[] toByteArray() {
             return output.toByteArray();
         }
@@ -501,6 +530,17 @@ public final class TradingStateSnapshotCodec {
             int length = count("text");
             if (length == 0 || length > MAX_TEXT_BYTES) {
                 throw new ProtocolException("invalid snapshot text length: " + length);
+            }
+            require(length);
+            String value = new String(input, offset, length, StandardCharsets.UTF_8);
+            offset += length;
+            return value;
+        }
+
+        String optionalText() {
+            int length = count("optional text");
+            if (length > MAX_TEXT_BYTES) {
+                throw new ProtocolException("invalid optional snapshot text length: " + length);
             }
             require(length);
             String value = new String(input, offset, length, StandardCharsets.UTF_8);

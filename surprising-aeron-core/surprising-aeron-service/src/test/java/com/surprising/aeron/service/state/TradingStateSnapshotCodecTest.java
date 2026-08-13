@@ -30,7 +30,8 @@ class TradingStateSnapshotCodecTest {
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_500,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTX, 500, true));
+                CoreOrderType.LIMIT, CoreTimeInForce.GTX, 500, true,
+                "option-client-71", -10, 20));
 
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(state), ProductLine.OPTION);

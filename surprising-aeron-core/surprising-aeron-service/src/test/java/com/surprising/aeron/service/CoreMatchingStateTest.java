@@ -276,7 +276,7 @@ class CoreMatchingStateTest {
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 reservationKind, reservationAsset, reservedUnits, orderType, timeInForce,
-                matchingPriceTicks, postOnly));
+                matchingPriceTicks, postOnly, "client-" + orderId, 0, 0));
     }
 
     private static byte[] place(

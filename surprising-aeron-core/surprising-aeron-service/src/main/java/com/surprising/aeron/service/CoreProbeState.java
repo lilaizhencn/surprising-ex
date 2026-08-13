@@ -85,6 +85,10 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     public CoreResponse apply(CoreMessage message) {
+        return apply(message, message.header().submittedAtEpochMillis(), Math.addExact(appliedCommandCount, 1));
+    }
+
+    public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         if (message.header().productLine() != productLine) {
             return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
         }
@@ -118,6 +122,15 @@ public final class CoreProbeState implements AutoCloseable {
                 && message.header().messageType() == CoreMessageType.ORDER_STATE_QUERY) {
             try {
                 return orderStateResponse(TradingCommandCodec.decodeOrderStateQuery(message.payload()));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.CLIENT_ORDER_STATE_QUERY) {
+            try {
+                return orderStateResponse(tradingState.order(message.header().userId(),
+                        CoreStateQueryCodec.decodeClientOrderStateQuery(message.payload())));
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -162,6 +175,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (exportCommand && message.payload().length > CoreExportCodec.MAX_COMMAND_PAYLOAD) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
+        TradingCoreState beforeTradingState = tradingState;
         try {
             status = applyCommand(message);
         } catch (CoreStateRejectedException exception) {
@@ -176,6 +190,9 @@ public final class CoreProbeState implements AutoCloseable {
         }
         if (status == null) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
+        }
+        if (status == ResponseStatus.APPLIED) {
+            tradingState = tradingState.stampOrderChanges(beforeTradingState, clusterTimestamp, clusterPosition);
         }
         appliedCommandCount = Math.incrementExact(appliedCommandCount);
         lastSourceSequences.put(sourceKey, message.header().sourceSequence());
@@ -305,7 +322,8 @@ public final class CoreProbeState implements AutoCloseable {
     private void placeOrder(CoreMessage message) {
         var command = TradingCommandCodec.decodePlaceOrder(message.payload());
         TradingCoreState before = tradingState;
-        TradingCoreState reserved = tradingReducer.placeOrder(before, message.header().userId(), command);
+        TradingCoreState reserved = tradingReducer.placeOrder(before, message.header().userId(), command,
+                message.header().commandId());
         try {
             var matchingResult = matchingAdapter.place(message.header().userId(), command);
             if (!matchingResult.accepted()) {
@@ -440,16 +458,22 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private CoreResponse orderStateResponse(long orderId) {
-        var order = tradingState.order(orderId);
+        return orderStateResponse(tradingState.order(orderId));
+    }
+
+    private CoreResponse orderStateResponse(com.surprising.aeron.service.state.CoreOrderState order) {
         if (order == null) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                     CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount, tradingState.businessStateHash());
         }
         var view = new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(), order.symbol(),
                 order.instrumentVersion(), order.side(), order.priceTicks(), order.quantitySteps(),
-                order.executedQuantitySteps(),
-                order.remainingQuantitySteps(), order.reduceOnly(), order.status().name(), order.revision());
-        return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.orderStateHash(orderId),
+                order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
+                order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(), order.postOnly(),
+                order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
+                order.createdAtEpochMillis(), order.updatedAtEpochMillis(), order.clusterPosition(),
+                order.status().name(), order.revision());
+        return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.orderStateHash(order.orderId()),
                 CoreStateQueryCodec.encodeOrderState(view));
     }
 

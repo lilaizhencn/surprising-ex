@@ -56,7 +56,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         } catch (IllegalArgumentException exception) {
             return;
         }
-        var result = state.apply(request);
+        var result = state.apply(request, timestamp, header.position());
         if (session != null) {
             CoreMessage response = new CoreMessage(request.header().response(responseType(request)),
                     CoreProtocol.responsePayload(result));
@@ -135,7 +135,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private static CoreMessageType responseType(CoreMessage request) {
         return switch (request.header().messageType()) {
             case USER_STATE_QUERY -> CoreMessageType.USER_STATE_RESULT;
-            case ORDER_STATE_QUERY -> CoreMessageType.ORDER_STATE_RESULT;
+            case ORDER_STATE_QUERY, CLIENT_ORDER_STATE_QUERY -> CoreMessageType.ORDER_STATE_RESULT;
             default -> request.header().kind() == WireMessageKind.QUERY
                     ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
         };
