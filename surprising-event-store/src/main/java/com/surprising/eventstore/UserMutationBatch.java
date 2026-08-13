@@ -21,11 +21,13 @@ public record UserMutationBatch(List<UserMutation> mutations) {
             UserMutation mutation = mutations.get(index);
             Objects.requireNonNull(mutation, "user mutation must not be null");
             UserMutation existing = commandById.putIfAbsent(mutation.commandId(), mutation);
-            if (existing != null) {
+            if (existing != null && !existing.equals(mutation)) {
                 throw new IllegalArgumentException("duplicate user mutation commandId: " + mutation.commandId());
             }
-            indexByCommandId.put(mutation.commandId(), index);
-            copy.add(mutation);
+            if (existing == null) {
+                indexByCommandId.put(mutation.commandId(), index);
+                copy.add(mutation);
+            }
         }
         for (UserMutation mutation : copy) {
             if (mutation.dependsOnCommandId() == null) {

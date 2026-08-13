@@ -27,7 +27,10 @@ class UserMutationBatchTest {
     void rejectsDuplicateCommandIdsWithinOnePoll() {
         UserMutation first = mutation("same", ProductLine.SPOT, 7L);
 
-        assertThatThrownBy(() -> new UserMutationBatch(List.of(first, first)))
+        assertThat(new UserMutationBatch(List.of(first, first)).mutations())
+                .containsExactly(first);
+        UserMutation conflicting = mutation("same", ProductLine.SPOT, 8L);
+        assertThatThrownBy(() -> new UserMutationBatch(List.of(first, conflicting)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("duplicate");
     }
