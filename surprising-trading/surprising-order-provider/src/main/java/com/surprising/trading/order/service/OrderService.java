@@ -43,6 +43,7 @@ import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
+import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -67,6 +68,7 @@ public class OrderService {
     private final OrderUserStateService orderUserStateService;
     private final OrderUserCommandGateway orderUserCommandGateway;
     private final AeronOrderCommandService aeronOrders;
+    private final AeronOrderProjectionRepository aeronOrderProjection;
 
     @Autowired
     public OrderService(TradingOrderProperties properties,
@@ -78,7 +80,8 @@ public class OrderService {
                         OrderFeeSnapshotLookup feeSnapshotLookup,
                         OrderUserStateService orderUserStateService,
                         OrderUserCommandGateway orderUserCommandGateway,
-                        AeronOrderCommandService aeronOrders) {
+                        AeronOrderCommandService aeronOrders,
+                        AeronOrderProjectionRepository aeronOrderProjection) {
         this.properties = properties;
         this.orderValidator = orderValidator;
         this.reduceOnlyValidator = reduceOnlyValidator;
@@ -89,6 +92,7 @@ public class OrderService {
         this.orderUserStateService = orderUserStateService;
         this.orderUserCommandGateway = orderUserCommandGateway;
         this.aeronOrders = aeronOrders;
+        this.aeronOrderProjection = aeronOrderProjection;
     }
 
     public OrderService(TradingOrderProperties properties,
@@ -101,7 +105,7 @@ public class OrderService {
                         OrderUserStateService orderUserStateService,
                         OrderUserCommandGateway orderUserCommandGateway) {
         this(properties, orderValidator, reduceOnlyValidator, placementStateService, orderMarginCalculator,
-                spotReservationCalculator, feeSnapshotLookup, orderUserStateService, orderUserCommandGateway, null);
+                spotReservationCalculator, feeSnapshotLookup, orderUserStateService, orderUserCommandGateway, null, null);
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
@@ -622,7 +626,19 @@ public class OrderService {
         }
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null : normalizeSymbol(request.symbol());
-        return orderUserCommandGateway.cancelOpen(currentProductLine(), request.userId(), symbol, limit);
+        if (aeronOrders == null) return orderUserCommandGateway.cancelOpen(currentProductLine(), request.userId(), symbol, limit);
+        List<OrderResponse> open = projectionOpenOrders(currentProductLine(), request.userId(), symbol, limit,
+                Long.MAX_VALUE);
+        List<OrderBatchItemResponse> results = new ArrayList<>();
+        for (int index = 0; index < open.size(); index++) {
+            try {
+                results.add(new OrderBatchItemResponse(index, true, "completed",
+                        aeronOrders.cancel(request.userId(), open.get(index).orderId())));
+            } catch (IllegalStateException exception) {
+                results.add(new OrderBatchItemResponse(index, false, exception.getMessage(), null));
+            }
+        }
+        return orderBatchResponse(results);
     }
 
     public OrderResponse get(long orderId) {
@@ -654,7 +670,20 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         long beforeOrderId = decodeOpenOrderCursor(cursor);
-        return orderUserStateService.openOrders(userId, symbol, limit, beforeOrderId);
+        if (aeronOrders == null) return orderUserStateService.openOrders(userId, symbol, limit, beforeOrderId);
+        List<OrderResponse> values = projectionOpenOrders(currentProductLine(), userId,
+                symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol), limit + 1, beforeOrderId);
+        boolean hasMore = values.size() > limit;
+        List<OrderResponse> page = hasMore ? values.subList(0, limit) : values;
+        String next = hasMore && !page.isEmpty() ? encodeOpenOrderCursor(page.getLast().orderId()) : null;
+        return new OrderQueryResponse(page.size(), List.copyOf(page), next, hasMore, "createdAt.desc", limit);
+    }
+
+    private List<OrderResponse> projectionOpenOrders(ProductLine productLine, long userId, String symbol,
+                                                     int limit, long beforeOrderId) {
+        List<OrderResponse> accepted = aeronOrderProjection.query(productLine, userId, symbol,
+                OrderStatus.ACCEPTED, null, beforeOrderId, null, null, null, limit, false);
+        return accepted;
     }
 
     public OrderQueryResponse historyOrders(long userId,
@@ -678,8 +707,11 @@ public class OrderService {
             throw new IllegalArgumentException("startTime must not be after endTime");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        return orderUserStateService.historyOrders(userId, normalizedSymbol, limit, minimumOrderId,
-                startTime, endTime);
+        if (aeronOrders == null) return orderUserStateService.historyOrders(userId, normalizedSymbol, limit,
+                minimumOrderId, startTime, endTime);
+        List<OrderResponse> orders = aeronOrderProjection.query(currentProductLine(), userId, normalizedSymbol,
+                null, null, null, minimumOrderId, startTime, endTime, limit, false);
+        return new OrderQueryResponse(orders.size(), orders, null, false, "createdAt.desc", limit);
     }
 
     public OrderQueryResponse adminOrders(Long userId, String symbol, String status, Long orderId, int limit) {
@@ -718,8 +750,13 @@ public class OrderService {
                 ? null
                 : OrderStatus.valueOf(status.trim().toUpperCase());
         ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
-        return orderUserStateService.adminOrders(resolvedProductLine, userId, normalizedSymbol, normalizedStatus,
-                orderId, limit, cursor, sort);
+        if (aeronOrders == null) return orderUserStateService.adminOrders(resolvedProductLine, userId,
+                normalizedSymbol, normalizedStatus, orderId, limit, cursor, sort);
+        boolean ascending = "createdAt.asc".equalsIgnoreCase(sort);
+        List<OrderResponse> orders = aeronOrderProjection.query(resolvedProductLine, userId, normalizedSymbol,
+                normalizedStatus, orderId, null, null, null, null, limit, ascending);
+        return new OrderQueryResponse(orders.size(), orders, null, false,
+                ascending ? "createdAt.asc" : "createdAt.desc", limit);
     }
 
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason) {
