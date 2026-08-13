@@ -936,7 +936,7 @@ PostgreSQL 保留以下职责：
 
 完成标准：任意事务边界崩溃后 RPO=0，无重复资金影响，恢复后状态等价。
 
-当前状态：账户用户命令、订单用户命令和撮合命令的 Kafka producer 已启用稳定 transactional-id 前缀，相关 listener 已绑定 Kafka transaction manager；订单/账户 owner 在事务上下文内不再逐条等待发送，撮合批次会在处理前后校验并持久化 assignment epoch，用户状态库暴露 checkpoint 水位读取与连续序列校验。Kafka changelog 重建、本地 checkpoint 自动替换、跨输出的完整 shard epoch fencing 和 warm standby lag 调度仍未完成，因此尚未达到 RPO=0 最终验收。
+当前状态：账户用户命令、订单用户命令和撮合命令的 Kafka producer 已启用稳定 transactional-id 前缀，相关 listener 已绑定 Kafka transaction manager；订单/账户 owner 在事务上下文内不再逐条等待发送，撮合批次会在处理前后校验并持久化 assignment epoch，用户状态库以同步 WriteBatch 持久化状态与 checkpoint 水位并提供连续序列校验。Kafka changelog 重建、本地 checkpoint 自动替换、跨输出的完整 shard epoch fencing 和 warm standby lag 调度仍未完成，因此尚未达到 RPO=0 最终验收。
 
 ### 阶段 8：评估 Aeron Cluster
 

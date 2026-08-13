@@ -61,7 +61,7 @@ public final class UserPartitionStateStore implements AutoCloseable {
             Files.createDirectories(directory);
             options = new Options().setCreateIfMissing(true);
             database = RocksDB.open(options, directory.toString());
-            writeOptions = new WriteOptions().setSync(false);
+            writeOptions = new WriteOptions().setSync(true);
         } catch (Exception ex) {
             throw new IllegalStateException("failed to open user partition state store: " + directory, ex);
         }
