@@ -29,6 +29,31 @@ public final class CoreStateQueryCodec {
         return clientOrderId;
     }
 
+    public static byte[] encodeTreasuryState(List<CoreTreasuryAssetView> assets) {
+        Writer writer = new Writer();
+        writer.intValue(1);
+        writer.intValue(assets.size());
+        assets.forEach(asset -> {
+            writer.text(asset.asset());
+            writer.longValue(asset.feeBalanceUnits());
+            writer.longValue(asset.insuranceBalanceUnits());
+            writer.longValue(asset.insuranceDeficitUnits());
+        });
+        return writer.toByteArray();
+    }
+
+    public static List<CoreTreasuryAssetView> decodeTreasuryState(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        reader.version(1);
+        List<CoreTreasuryAssetView> assets = new ArrayList<>();
+        for (int index = 0, count = reader.count("treasury assets"); index < count; index++) {
+            assets.add(new CoreTreasuryAssetView(reader.text(), reader.longValue(),
+                    reader.nonNegativeLong("insurance balance"), reader.nonNegativeLong("insurance deficit")));
+        }
+        reader.requireConsumed();
+        return List.copyOf(assets);
+    }
+
     public static byte[] encodeUserState(CoreUserStateView state) {
         Writer writer = new Writer();
         writer.intValue(VERSION);

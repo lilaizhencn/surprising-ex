@@ -20,7 +20,8 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 6;
+    private static final int VERSION = 7;
+    private static final int VERSION_6 = 6;
     private static final int VERSION_5 = 5;
     private static final int VERSION_4 = 4;
     private static final int VERSION_3 = 3;
@@ -158,6 +159,7 @@ public final class TradingStateSnapshotCodec {
             writer.intValue(liquidation.positionSide().wireCode());
             writer.longValue(liquidation.instrumentVersion());
             writer.longValue(liquidation.triggerPriceSequence());
+            writer.longValue(liquidation.signedQuantitySteps());
             writer.longValue(liquidation.closeQuantitySteps());
             writer.longValue(liquidation.deficitUnits());
             writer.intValue(liquidation.status().ordinal());
@@ -178,7 +180,7 @@ public final class TradingStateSnapshotCodec {
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
+        if (version != VERSION && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
                 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
@@ -252,14 +254,14 @@ public final class TradingStateSnapshotCodec {
             CoreTimeInForce timeInForce = version >= VERSION_5
                     ? CoreTimeInForce.fromWireCode(reader.intValue()) : CoreTimeInForce.GTC;
             boolean postOnly = version >= VERSION_5 && reader.booleanValue();
-            String clientOrderId = version == VERSION ? reader.optionalText() : "";
-            UUID commandId = version == VERSION
+            String clientOrderId = version >= VERSION_6 ? reader.optionalText() : "";
+            UUID commandId = version >= VERSION_6
                     ? new UUID(reader.longValue(), reader.longValue()) : new UUID(0, orderId);
-            long makerFeeRatePpm = version == VERSION ? reader.longValue() : 0;
-            long takerFeeRatePpm = version == VERSION ? reader.longValue() : 0;
-            long createdAt = version == VERSION ? reader.nonNegativeLong("order created time") : 0;
-            long updatedAt = version == VERSION ? reader.nonNegativeLong("order updated time") : 0;
-            long clusterPosition = version == VERSION ? reader.nonNegativeLong("order cluster position") : 0;
+            long makerFeeRatePpm = version >= VERSION_6 ? reader.longValue() : 0;
+            long takerFeeRatePpm = version >= VERSION_6 ? reader.longValue() : 0;
+            long createdAt = version >= VERSION_6 ? reader.nonNegativeLong("order created time") : 0;
+            long updatedAt = version >= VERSION_6 ? reader.nonNegativeLong("order updated time") : 0;
+            long clusterPosition = version >= VERSION_6 ? reader.nonNegativeLong("order cluster position") : 0;
             int statusCode = reader.intValue();
             if (statusCode < 0 || statusCode >= CoreOrderStatus.values().length) {
                 throw new ProtocolException("invalid order status: " + statusCode);
@@ -304,7 +306,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         CoreRiskState riskState = CoreRiskState.empty();
         CoreTreasuryState treasuryState = CoreTreasuryState.empty();
-        if (version == VERSION || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
+        if (version == VERSION || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
             int instrumentCount = reader.count("instruments");
             for (int index = 0; index < instrumentCount; index++) {
                 String symbol = reader.text();
@@ -350,7 +352,7 @@ public final class TradingStateSnapshotCodec {
             for (int index = 0; index < riskCount; index++) {
                 long userId = reader.positiveLong("risk userId");
                 String symbol = reader.text();
-                CorePositionSide positionSide = version == VERSION
+                CorePositionSide positionSide = version >= VERSION_6
                         ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
                 long priceSequence = reader.positiveLong("risk price sequence");
                 long equity = reader.longValue();
@@ -372,11 +374,16 @@ public final class TradingStateSnapshotCodec {
                 long liquidationId = reader.positiveLong("liquidationId");
                 long userId = reader.positiveLong("liquidation userId");
                 String symbol = reader.text();
-                CorePositionSide positionSide = version == VERSION
+                CorePositionSide positionSide = version >= VERSION_6
                         ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
                 long instrumentVersion = reader.positiveLong("liquidation instrument version");
                 long priceSequence = reader.positiveLong("liquidation price sequence");
+                long signedQuantity = version == VERSION ? reader.longValue() : 0;
                 long closeQuantity = reader.positiveLong("liquidation close quantity");
+                if (version != VERSION) {
+                    signedQuantity = positionSide == CorePositionSide.SHORT
+                            ? Math.negateExact(closeQuantity) : closeQuantity;
+                }
                 long deficitUnits = reader.nonNegativeLong("liquidation deficit");
                 int status = reader.intValue();
                 if (status < 0 || status >= CoreLiquidationState.Status.values().length) {
@@ -384,7 +391,7 @@ public final class TradingStateSnapshotCodec {
                 }
                 CoreLiquidationState liquidation = new CoreLiquidationState(liquidationId, userId, symbol,
                         positionSide,
-                        instrumentVersion, priceSequence, closeQuantity,
+                        instrumentVersion, priceSequence, signedQuantity, closeQuantity,
                         deficitUnits, CoreLiquidationState.Status.values()[status]);
                 putUnique(liquidations, liquidationId, liquidation);
             }

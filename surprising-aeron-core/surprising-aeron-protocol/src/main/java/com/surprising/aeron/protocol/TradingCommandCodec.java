@@ -32,6 +32,22 @@ public final class TradingCommandCodec {
         return new BalanceAdjustmentCommand(asset, delta);
     }
 
+    public static byte[] encodeAdjustInsuranceFund(AdjustInsuranceFundCommand command) {
+        byte[] asset = text(command.asset());
+        return ByteBuffer.allocate(Short.BYTES + asset.length + Long.BYTES)
+                .order(ByteOrder.LITTLE_ENDIAN).putShort((short) asset.length).put(asset)
+                .putLong(command.deltaUnits()).array();
+    }
+
+    public static AdjustInsuranceFundCommand decodeAdjustInsuranceFund(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        String asset = readText(buffer);
+        requireRemaining(buffer, Long.BYTES);
+        AdjustInsuranceFundCommand command = new AdjustInsuranceFundCommand(asset, buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
     public static byte[] encodeUpdatePositionMode(UpdatePositionModeCommand command) {
         return ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(command.positionMode().wireCode()).array();
@@ -312,6 +328,32 @@ public final class TradingCommandCodec {
         ByteBuffer buffer = readable(payload);
         requireRemaining(buffer, Long.BYTES * 2);
         ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(buffer.getLong(), buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
+    public static byte[] encodeExecuteAdl(ExecuteAdlCommand command) {
+        byte[] symbol = text(command.symbol());
+        return ByteBuffer.allocate(Long.BYTES * 7 + Integer.BYTES * 2 + Short.BYTES + symbol.length)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(command.liquidationId()).putLong(command.targetUserId())
+                .putShort((short) symbol.length).put(symbol)
+                .putInt(command.marginMode().wireCode()).putInt(command.positionSide().wireCode())
+                .putLong(command.expectedSignedQuantitySteps()).putLong(command.expectedEntryPriceTicks())
+                .putLong(command.markPriceSequence()).putLong(command.closeQuantitySteps())
+                .putLong(command.coveredUnits()).array();
+    }
+
+    public static ExecuteAdlCommand decodeExecuteAdl(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Long.BYTES * 2);
+        long liquidationId = buffer.getLong();
+        long targetUserId = buffer.getLong();
+        String symbol = readText(buffer);
+        requireRemaining(buffer, Integer.BYTES * 2 + Long.BYTES * 5);
+        ExecuteAdlCommand command = new ExecuteAdlCommand(liquidationId, targetUserId, symbol,
+                CoreMarginMode.fromWireCode(buffer.getInt()), CorePositionSide.fromWireCode(buffer.getInt()),
+                buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong());
         requireConsumed(buffer);
         return command;
     }

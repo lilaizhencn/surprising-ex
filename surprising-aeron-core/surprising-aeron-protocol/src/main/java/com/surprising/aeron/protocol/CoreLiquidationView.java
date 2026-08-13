@@ -8,6 +8,7 @@ public record CoreLiquidationView(
         CorePositionSide positionSide,
         long instrumentVersion,
         long triggerPriceSequence,
+        long signedQuantitySteps,
         long closeQuantitySteps,
         long deficitUnits,
         String status) {
@@ -15,7 +16,8 @@ public record CoreLiquidationView(
     public CoreLiquidationView {
         if (liquidationId <= 0 || userId <= 0 || symbol == null || symbol.isBlank()
                 || asset == null || asset.isBlank() || positionSide == null || instrumentVersion <= 0
-                || triggerPriceSequence <= 0 || closeQuantitySteps <= 0 || deficitUnits < 0
+                || triggerPriceSequence <= 0 || signedQuantitySteps == 0 || closeQuantitySteps <= 0
+                || closeQuantitySteps > Math.absExact(signedQuantitySteps) || deficitUnits < 0
                 || status == null || status.isBlank()) {
             throw new IllegalArgumentException("invalid core liquidation view");
         }

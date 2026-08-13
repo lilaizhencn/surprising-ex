@@ -393,7 +393,8 @@ public final class TradingCoreReducer {
                 if (status == CoreRiskStatus.LIQUIDATION && !activeLiquidation) {
                     CoreLiquidationState liquidation = new CoreLiquidationState(nextLiquidationId, user.userId(),
                             scan.symbol(), position.positionSide(), instrument.version(), scan.priceSequence(),
-                            Math.absExact(position.signedQuantitySteps()), 0, CoreLiquidationState.Status.PLANNED);
+                            position.signedQuantitySteps(), Math.absExact(position.signedQuantitySteps()), 0,
+                            CoreLiquidationState.Status.PLANNED);
                     liquidations.put(nextLiquidationId, liquidation);
                     nextLiquidationId = Math.incrementExact(nextLiquidationId);
                 }
@@ -592,29 +593,23 @@ public final class TradingCoreReducer {
                     throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT",
                             "insurance resolution requires insurance state");
                 }
-                if (command.coveredUnits() != liquidation.deficitUnits()) {
-                    throw new CoreStateRejectedException("INSURANCE_COVER_MISMATCH",
-                            "insurance coverage must equal liquidation deficit");
+                if (command.coveredUnits() <= 0 || command.coveredUnits() > liquidation.deficitUnits()) {
+                    throw new CoreStateRejectedException("INSURANCE_COVER_EXCEEDS_DEFICIT",
+                            "insurance coverage must be within liquidation deficit");
                 }
-                if (command.coveredUnits() > 0) {
-                    treasury = treasury.adjustInsurance(instrument.settleAsset(), command.coveredUnits());
+                long available = treasury.insuranceBalances().getOrDefault(instrument.settleAsset(), 0L);
+                if (command.coveredUnits() > available) {
+                    throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
+                            "insurance fund balance is insufficient");
                 }
-                nextStatus = CoreLiquidationState.Status.COMPLETED;
+                treasury = treasury.adjustInsurance(instrument.settleAsset(),
+                        Math.negateExact(command.coveredUnits()));
+                nextStatus = command.coveredUnits() == liquidation.deficitUnits()
+                        ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
             }
             case ADL -> {
-                if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED
-                        && liquidation.status() != CoreLiquidationState.Status.ADL_REQUIRED) {
-                    throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT",
-                            "adl resolution requires deficit state");
-                }
-                if (command.coveredUnits() != liquidation.deficitUnits()) {
-                    throw new CoreStateRejectedException("INSURANCE_COVER_MISMATCH",
-                            "adl coverage must equal liquidation deficit");
-                }
-                if (command.coveredUnits() > 0) {
-                    treasury = treasury.adjustInsurance(instrument.settleAsset(), command.coveredUnits());
-                }
-                nextStatus = CoreLiquidationState.Status.COMPLETED;
+                throw new CoreStateRejectedException("INVALID_COMMAND",
+                        "ADL resolution requires atomic target deleveraging");
             }
             case COMPLETED -> {
                 if (command.coveredUnits() != 0) {
@@ -625,11 +620,94 @@ public final class TradingCoreReducer {
             default -> throw new IllegalStateException("unknown liquidation resolution");
         }
         Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(state.riskState().liquidations());
-        liquidations.put(liquidation.liquidationId(), liquidation.withStatus(nextStatus));
+        CoreLiquidationState nextLiquidation = command.resolution() == ResolveLiquidationCommand.Resolution.COMPLETED
+                ? liquidation.withStatus(nextStatus) : liquidation.covered(command.coveredUnits(), nextStatus);
+        liquidations.put(liquidation.liquidationId(), nextLiquidation);
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scan(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
                 state.orders(), state.bookState(), state.instruments(), risk, treasury);
+    }
+
+    public TradingCoreState adjustInsuranceFund(TradingCoreState state,
+                                                com.surprising.aeron.protocol.AdjustInsuranceFundCommand command) {
+        long current = state.treasuryState().insuranceBalances().getOrDefault(command.asset(), 0L);
+        if (command.deltaUnits() < 0 && Math.negateExact(command.deltaUnits()) > current) {
+            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
+                    "insurance fund balance is insufficient");
+        }
+        CoreTreasuryState treasury = state.treasuryState().adjustInsurance(command.asset(), command.deltaUnits());
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
+                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury);
+    }
+
+    public TradingCoreState executeAdl(TradingCoreState state,
+                                       com.surprising.aeron.protocol.ExecuteAdlCommand command) {
+        CoreLiquidationState liquidation = state.riskState().liquidations().get(command.liquidationId());
+        if (liquidation == null) {
+            throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
+        }
+        if (liquidation.status() != CoreLiquidationState.Status.ADL_REQUIRED) {
+            throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "ADL requires ADL state");
+        }
+        if (!liquidation.symbol().equals(command.symbol()) || command.targetUserId() == liquidation.userId()
+                || command.coveredUnits() > liquidation.deficitUnits()) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
+        }
+        CoreInstrumentState instrument = requireInstrument(state, liquidation.symbol(),
+                liquidation.instrumentVersion());
+        CoreMarkPriceState mark = state.riskState().markPrices().get(liquidation.symbol());
+        if (mark == null || mark.priceSequence() != command.markPriceSequence()) {
+            throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
+        }
+        CoreUserState target = state.user(command.targetUserId());
+        String positionKey = positionKey(command.symbol(), command.positionSide());
+        CorePositionState position = target == null ? null : target.positions().get(positionKey);
+        if (position == null || position.marginMode() != command.marginMode()
+                || position.signedQuantitySteps() != command.expectedSignedQuantitySteps()
+                || position.entryPriceTicks() != command.expectedEntryPriceTicks()
+                || Long.signum(position.signedQuantitySteps()) == Long.signum(liquidation.signedQuantitySteps())) {
+            throw new CoreStateRejectedException("ADL_POSITION_CONFLICT", "ADL target position changed");
+        }
+        long totalProfit = CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
+                position.entryPriceTicks(), mark.markPriceTicks());
+        long coverCapacity = totalProfit <= 0 ? 0 : proportional(totalProfit, command.closeQuantitySteps(),
+                Math.absExact(position.signedQuantitySteps()));
+        if (coverCapacity < command.coveredUnits()) {
+            throw new CoreStateRejectedException("ADL_PROFIT_INSUFFICIENT", "ADL target profit is insufficient");
+        }
+        long currentAbs = Math.absExact(position.signedQuantitySteps());
+        long remainingAbs = Math.subtractExact(currentAbs, command.closeQuantitySteps());
+        long nextQuantity = remainingAbs == 0 ? 0
+                : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
+        long releasedMargin = proportional(position.positionMarginUnits(), command.closeQuantitySteps(), currentAbs);
+        AssetBalance balance = requireBalance(target, instrument.settleAsset());
+        if (releasedMargin > 0) balance = balance.release(releasedMargin);
+        long targetCashDelta = Math.subtractExact(coverCapacity, command.coveredUnits());
+        if (targetCashDelta > 0) balance = balance.credit(targetCashDelta);
+        Map<String, AssetBalance> balances = new TreeMap<>(target.balances());
+        balances.put(instrument.settleAsset(), balance);
+        long nextEntryValue = remainingAbs == 0 ? 0
+                : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
+        Map<String, CorePositionState> positions = new TreeMap<>(target.positions());
+        positions.put(positionKey, new CorePositionState(position.symbol(), position.marginAsset(),
+                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
+                nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
+                Math.addExact(position.realizedPnlUnits(), coverCapacity),
+                Math.subtractExact(position.positionMarginUnits(), releasedMargin)));
+        CoreUserState nextTarget = new CoreUserState(target.productLine(), target.userId(),
+                Math.incrementExact(target.revision()), balances, target.reservations(), positions,
+                target.positionMode());
+        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        users.put(nextTarget.userId(), nextTarget);
+        CoreLiquidationState.Status nextStatus = command.coveredUnits() == liquidation.deficitUnits()
+                ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
+        Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(state.riskState().liquidations());
+        liquidations.put(liquidation.liquidationId(), liquidation.covered(command.coveredUnits(), nextStatus));
+        CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
+                liquidations, state.riskState().scan(), state.riskState().nextLiquidationId());
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
+                state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState());
     }
 
     private TradingCoreState cancelUserSymbolOrders(TradingCoreState state, long userId, String symbol) {

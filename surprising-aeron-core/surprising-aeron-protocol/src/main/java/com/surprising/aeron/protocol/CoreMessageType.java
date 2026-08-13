@@ -19,6 +19,8 @@ public enum CoreMessageType {
     ACK_EXPORT(27, WireMessageKind.COMMAND),
     UPDATE_POSITION_MODE(28, WireMessageKind.COMMAND),
     ADJUST_POSITION_MARGIN(29, WireMessageKind.COMMAND),
+    ADJUST_INSURANCE_FUND(30, WireMessageKind.COMMAND),
+    EXECUTE_ADL(31, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),
@@ -28,10 +30,12 @@ public enum CoreMessageType {
     EXPORT_BATCH_QUERY(106, WireMessageKind.QUERY),
     EXPORT_STATUS_QUERY(107, WireMessageKind.QUERY),
     CLIENT_ORDER_STATE_QUERY(108, WireMessageKind.QUERY),
+    TREASURY_STATE_QUERY(109, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
     ORDER_STATE_RESULT(203, WireMessageKind.RESPONSE),
+    TREASURY_STATE_RESULT(204, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

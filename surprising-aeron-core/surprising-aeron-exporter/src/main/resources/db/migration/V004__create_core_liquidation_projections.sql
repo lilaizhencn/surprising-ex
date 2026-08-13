@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS core_liquidation_projection (
     position_side VARCHAR(16) NOT NULL,
     instrument_version BIGINT NOT NULL,
     trigger_price_sequence BIGINT NOT NULL,
+    signed_quantity_steps BIGINT NOT NULL,
     close_quantity_steps BIGINT NOT NULL,
     deficit_units BIGINT NOT NULL,
     status VARCHAR(32) NOT NULL,

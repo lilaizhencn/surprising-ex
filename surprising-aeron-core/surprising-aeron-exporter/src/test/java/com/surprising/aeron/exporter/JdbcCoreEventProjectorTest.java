@@ -134,7 +134,7 @@ class JdbcCoreEventProjectorTest {
         migrate(dataSource);
         UUID commandId = UUID.randomUUID();
         var liquidation = new com.surprising.aeron.protocol.CoreLiquidationView(9, 17, "BTC-USDT", "USDT",
-                CorePositionSide.NET, 3, 8, 2, 12, "INSURANCE_REQUIRED");
+                CorePositionSide.NET, 3, 8, 2, 2, 12, "INSURANCE_REQUIRED");
         var treasury = new com.surprising.aeron.protocol.CoreTreasuryAssetView("USDT", 4, 9, 12);
         var event = new CoreExportEvent(4, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17,

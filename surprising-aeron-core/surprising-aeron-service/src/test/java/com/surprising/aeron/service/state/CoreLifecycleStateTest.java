@@ -152,11 +152,60 @@ class CoreLifecycleStateTest {
         long deficit = liquidated.riskState().liquidations().get(1L).deficitUnits();
         assertThat(deficit).isPositive();
 
-        TradingCoreState resolved = reducer.resolveLiquidation(liquidated,
+        TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", deficit));
+        TradingCoreState resolved = reducer.resolveLiquidation(funded,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, deficit));
-        assertThat(resolved.treasuryState().insuranceBalances()).containsEntry("USDT", deficit + 100);
+        assertThat(resolved.treasuryState().insuranceBalances()).containsEntry("USDT", 100L);
         assertThat(resolved.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
+    }
+
+    @Test
+    void partialInsuranceCoverageLeavesOnlyResidualForAdl() {
+        TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1));
+        TradingCoreState liquidated = reducer.executeLiquidation(state,
+                new ExecuteLiquidationCommand(1, 1));
+        long deficit = liquidated.riskState().liquidations().get(1L).deficitUnits();
+        TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
+
+        TradingCoreState resolved = reducer.resolveLiquidation(funded,
+                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
+
+        assertThat(resolved.treasuryState().insuranceBalances()).containsEntry("USDT", 100L);
+        assertThat(resolved.riskState().liquidations().get(1L).deficitUnits()).isEqualTo(deficit - 25);
+        assertThat(resolved.riskState().liquidations().get(1L).status())
+                .isEqualTo(CoreLiquidationState.Status.ADL_REQUIRED);
+    }
+
+    @Test
+    void adlAtomicallyDeleveragesProfitableCounterpartyAndCoversResidual() {
+        TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 100);
+        state = withPositionAndBalance(state, 2, -10, 200, 1_000, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1));
+        state = reducer.executeLiquidation(state, new ExecuteLiquidationCommand(1, 1));
+        long deficit = state.riskState().liquidations().get(1L).deficitUnits();
+        state = reducer.adjustInsuranceFund(state,
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
+        state = reducer.resolveLiquidation(state,
+                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
+        long before = totalEconomicEquity(state, "USDT");
+
+        TradingCoreState resolved = reducer.executeAdl(state,
+                new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
+                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                        com.surprising.aeron.protocol.CorePositionSide.NET,
+                        -10, 200, 1, 5, deficit - 25));
+
+        assertThat(resolved.user(2).positions().get("BTC-USDT").signedQuantitySteps()).isEqualTo(-5);
+        assertThat(resolved.riskState().liquidations().get(1L).deficitUnits()).isZero();
+        assertThat(resolved.riskState().liquidations().get(1L).status())
+                .isEqualTo(CoreLiquidationState.Status.COMPLETED);
+        assertThat(totalEconomicEquity(resolved, "USDT")).isEqualTo(before);
     }
 
     private TradingCoreState stateWithOppositePositions(
@@ -214,5 +263,23 @@ class CoreLifecycleStateTest {
         long insurance = state.treasuryState().insuranceBalances().getOrDefault(asset, 0L);
         long deficit = state.treasuryState().insuranceDeficits().getOrDefault(asset, 0L);
         return Math.subtractExact(Math.addExact(Math.addExact(users, fee), insurance), deficit);
+    }
+
+    private static long totalEconomicEquity(TradingCoreState state, String asset) {
+        long unrealized = 0;
+        for (CoreUserState user : state.users().values()) {
+            for (CorePositionState position : user.positions().values()) {
+                CoreInstrumentState instrument = state.instruments().get(position.symbol());
+                CoreMarkPriceState mark = state.riskState().markPrices().get(position.symbol());
+                if (position.signedQuantitySteps() != 0 && mark != null && instrument.settleAsset().equals(asset)) {
+                    unrealized = Math.addExact(unrealized, CoreContractMath.pnlUnits(instrument,
+                            position.signedQuantitySteps(), position.entryPriceTicks(), mark.markPriceTicks()));
+                }
+            }
+        }
+        long unresolved = state.riskState().liquidations().values().stream()
+                .filter(liquidation -> state.instruments().get(liquidation.symbol()).settleAsset().equals(asset))
+                .mapToLong(CoreLiquidationState::deficitUnits).sum();
+        return Math.subtractExact(Math.addExact(total(state, asset), unrealized), unresolved);
     }
 }

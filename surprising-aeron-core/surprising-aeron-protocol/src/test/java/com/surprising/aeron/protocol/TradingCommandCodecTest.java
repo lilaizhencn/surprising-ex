@@ -24,12 +24,15 @@ class TradingCommandCodecTest {
         ApplyFundingCommand funding = new ApplyFundingCommand(11, "BTC-USDT", 3, 100);
         SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "BTC-USDT", 3, 61_000, 0);
         ExecuteLiquidationCommand liquidation = new ExecuteLiquidationCommand(13, 59_000);
+        ExecuteAdlCommand adl = new ExecuteAdlCommand(13, 18, "BTC-USDT", CoreMarginMode.CROSS,
+                CorePositionSide.NET, -3, 58_000, 9, 2, 7);
         ResolveLiquidationCommand resolution = new ResolveLiquidationCommand(13,
                 ResolveLiquidationCommand.Resolution.INSURANCE, 7);
         ContinueRiskScanCommand continuation = new ContinueRiskScanCommand(256);
         UpdatePositionModeCommand mode = new UpdatePositionModeCommand(CorePositionMode.HEDGE);
         AdjustPositionMarginCommand margin = new AdjustPositionMarginCommand("BTC-USDT",
                 CoreMarginMode.ISOLATED, CorePositionSide.LONG, 500);
+        AdjustInsuranceFundCommand insuranceFund = new AdjustInsuranceFundCommand("USDT", 500);
 
         assertThat(TradingCommandCodec.decodeBalanceAdjustment(
                 TradingCommandCodec.encodeBalanceAdjustment(adjustment))).isEqualTo(adjustment);
@@ -49,6 +52,8 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeSettleInstrument(settlement))).isEqualTo(settlement);
         assertThat(TradingCommandCodec.decodeExecuteLiquidation(
                 TradingCommandCodec.encodeExecuteLiquidation(liquidation))).isEqualTo(liquidation);
+        assertThat(TradingCommandCodec.decodeExecuteAdl(
+                TradingCommandCodec.encodeExecuteAdl(adl))).isEqualTo(adl);
         assertThat(TradingCommandCodec.decodeResolveLiquidation(
                 TradingCommandCodec.encodeResolveLiquidation(resolution))).isEqualTo(resolution);
         assertThat(TradingCommandCodec.decodeContinueRiskScan(
@@ -57,6 +62,8 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeUpdatePositionMode(mode))).isEqualTo(mode);
         assertThat(TradingCommandCodec.decodeAdjustPositionMargin(
                 TradingCommandCodec.encodeAdjustPositionMargin(margin))).isEqualTo(margin);
+        assertThat(TradingCommandCodec.decodeAdjustInsuranceFund(
+                TradingCommandCodec.encodeAdjustInsuranceFund(insuranceFund))).isEqualTo(insuranceFund);
     }
 
     @Test

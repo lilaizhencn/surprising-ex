@@ -157,6 +157,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, liquidation.positionSide().wireCode());
             hash = CoreStateHash.mix(hash, liquidation.instrumentVersion());
             hash = CoreStateHash.mix(hash, liquidation.triggerPriceSequence());
+            hash = CoreStateHash.mix(hash, liquidation.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, liquidation.closeQuantitySteps());
             hash = CoreStateHash.mix(hash, liquidation.deficitUnits());
             hash = CoreStateHash.mix(hash, liquidation.status().ordinal());

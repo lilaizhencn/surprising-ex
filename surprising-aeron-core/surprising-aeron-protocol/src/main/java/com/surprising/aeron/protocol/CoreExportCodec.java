@@ -161,7 +161,7 @@ public final class CoreExportCodec {
     }
 
     private static int liquidationLength(CoreLiquidationView liquidation) {
-        return Long.BYTES * 6 + Integer.BYTES * 4
+        return Long.BYTES * 7 + Integer.BYTES * 4
                 + utf8(liquidation.symbol()).length + utf8(liquidation.asset()).length
                 + utf8(liquidation.status()).length;
     }
@@ -172,12 +172,12 @@ public final class CoreExportCodec {
         putString(output, liquidation.asset());
         output.putInt(liquidation.positionSide().ordinal()).putLong(liquidation.instrumentVersion())
                 .putLong(liquidation.triggerPriceSequence()).putLong(liquidation.closeQuantitySteps())
-                .putLong(liquidation.deficitUnits());
+                .putLong(liquidation.signedQuantitySteps()).putLong(liquidation.deficitUnits());
         putString(output, liquidation.status());
     }
 
     private static CoreLiquidationView readLiquidation(ByteBuffer input) {
-        if (input.remaining() < Long.BYTES * 6 + Integer.BYTES * 4) {
+        if (input.remaining() < Long.BYTES * 7 + Integer.BYTES * 4) {
             throw new ProtocolException("liquidation fact is truncated");
         }
         long liquidationId = input.getLong();
@@ -191,6 +191,7 @@ public final class CoreExportCodec {
         long instrumentVersion = input.getLong();
         long triggerPriceSequence = input.getLong();
         long closeQuantitySteps = input.getLong();
+        long signedQuantitySteps = input.getLong();
         long deficitUnits = input.getLong();
         String status = readString(input);
         if (positionSide < 0 || positionSide >= CorePositionSide.values().length) {
@@ -198,7 +199,7 @@ public final class CoreExportCodec {
         }
         return new CoreLiquidationView(liquidationId, userId, symbol, asset,
                 CorePositionSide.values()[positionSide], instrumentVersion, triggerPriceSequence,
-                closeQuantitySteps, deficitUnits, status);
+                signedQuantitySteps, closeQuantitySteps, deficitUnits, status);
     }
 
     private static int treasuryLength(CoreTreasuryAssetView treasury) {

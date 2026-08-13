@@ -63,14 +63,15 @@ public final class JdbcCoreEventProjector {
     private static final String INSERT_LIQUIDATION = """
             INSERT INTO core_liquidation_projection
                 (product_line, liquidation_id, user_id, symbol, asset, position_side,
-                 instrument_version, trigger_price_sequence, close_quantity_steps,
-                 deficit_units, status, export_sequence, updated_at_epoch_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 instrument_version, trigger_price_sequence, signed_quantity_steps,
+                 close_quantity_steps, deficit_units, status, export_sequence, updated_at_epoch_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
     private static final String UPDATE_LIQUIDATION = """
             UPDATE core_liquidation_projection SET
                 user_id = ?, symbol = ?, asset = ?, position_side = ?, instrument_version = ?,
-                trigger_price_sequence = ?, close_quantity_steps = ?, deficit_units = ?, status = ?,
+                trigger_price_sequence = ?, signed_quantity_steps = ?, close_quantity_steps = ?,
+                deficit_units = ?, status = ?,
                 export_sequence = ?, updated_at_epoch_ms = ?
             WHERE product_line = ? AND liquidation_id = ? AND export_sequence < ?
             """;
@@ -212,14 +213,15 @@ public final class JdbcCoreEventProjector {
                 update.setString(4, liquidation.positionSide().name());
                 update.setLong(5, liquidation.instrumentVersion());
                 update.setLong(6, liquidation.triggerPriceSequence());
-                update.setLong(7, liquidation.closeQuantitySteps());
-                update.setLong(8, liquidation.deficitUnits());
-                update.setString(9, liquidation.status());
-                update.setLong(10, event.exportSequence());
-                update.setLong(11, message.header().submittedAtEpochMillis());
-                update.setString(12, productLine.name());
-                update.setLong(13, liquidation.liquidationId());
-                update.setLong(14, event.exportSequence());
+                update.setLong(7, liquidation.signedQuantitySteps());
+                update.setLong(8, liquidation.closeQuantitySteps());
+                update.setLong(9, liquidation.deficitUnits());
+                update.setString(10, liquidation.status());
+                update.setLong(11, event.exportSequence());
+                update.setLong(12, message.header().submittedAtEpochMillis());
+                update.setString(13, productLine.name());
+                update.setLong(14, liquidation.liquidationId());
+                update.setLong(15, event.exportSequence());
                 if (update.executeUpdate() == 0) {
                     insert.setString(1, productLine.name());
                     insert.setLong(2, liquidation.liquidationId());
@@ -229,11 +231,12 @@ public final class JdbcCoreEventProjector {
                     insert.setString(6, liquidation.positionSide().name());
                     insert.setLong(7, liquidation.instrumentVersion());
                     insert.setLong(8, liquidation.triggerPriceSequence());
-                    insert.setLong(9, liquidation.closeQuantitySteps());
-                    insert.setLong(10, liquidation.deficitUnits());
-                    insert.setString(11, liquidation.status());
-                    insert.setLong(12, event.exportSequence());
-                    insert.setLong(13, message.header().submittedAtEpochMillis());
+                    insert.setLong(9, liquidation.signedQuantitySteps());
+                    insert.setLong(10, liquidation.closeQuantitySteps());
+                    insert.setLong(11, liquidation.deficitUnits());
+                    insert.setString(12, liquidation.status());
+                    insert.setLong(13, event.exportSequence());
+                    insert.setLong(14, message.header().submittedAtEpochMillis());
                     insert.executeUpdate();
                 }
             }

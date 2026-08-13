@@ -153,6 +153,19 @@ public final class CoreProbeState implements AutoCloseable {
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount, stateHash(),
                     CoreExportCodec.encodeStatus(exportState.status()));
         }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.TREASURY_STATE_QUERY) {
+            java.util.TreeSet<String> assets = new java.util.TreeSet<>();
+            assets.addAll(tradingState.treasuryState().feeBalances().keySet());
+            assets.addAll(tradingState.treasuryState().insuranceBalances().keySet());
+            assets.addAll(tradingState.treasuryState().insuranceDeficits().keySet());
+            var views = assets.stream().map(asset -> new com.surprising.aeron.protocol.CoreTreasuryAssetView(asset,
+                    tradingState.treasuryState().feeBalances().getOrDefault(asset, 0L),
+                    tradingState.treasuryState().insuranceBalances().getOrDefault(asset, 0L),
+                    tradingState.treasuryState().insuranceDeficits().getOrDefault(asset, 0L))).toList();
+            return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                    CoreStateQueryCodec.encodeTreasuryState(views));
+        }
         StoredResult duplicate = commandResults.get(message.header().commandId());
         if (duplicate != null) {
             return new CoreResponse(ResponseStatus.DUPLICATE,
@@ -319,6 +332,8 @@ public final class CoreProbeState implements AutoCloseable {
             }
             case SETTLE_INSTRUMENT -> settleInstrument(message);
             case EXECUTE_LIQUIDATION -> executeLiquidation(message);
+            case EXECUTE_ADL -> tradingState = tradingReducer.executeAdl(tradingState,
+                    TradingCommandCodec.decodeExecuteAdl(message.payload()));
             case RESOLVE_LIQUIDATION -> tradingState = tradingReducer.resolveLiquidation(tradingState,
                     TradingCommandCodec.decodeResolveLiquidation(message.payload()));
             case CONTINUE_RISK_SCAN -> tradingState = tradingReducer.continueRiskScan(tradingState,
@@ -330,6 +345,8 @@ public final class CoreProbeState implements AutoCloseable {
             case ADJUST_POSITION_MARGIN -> tradingState = tradingReducer.adjustPositionMargin(
                     tradingState, message.header().userId(),
                     TradingCommandCodec.decodeAdjustPositionMargin(message.payload()));
+            case ADJUST_INSURANCE_FUND -> tradingState = tradingReducer.adjustInsuranceFund(
+                    tradingState, TradingCommandCodec.decodeAdjustInsuranceFund(message.payload()));
             default -> {
                 return null;
             }
@@ -513,8 +530,8 @@ public final class CoreProbeState implements AutoCloseable {
                     if (instrument == null) throw new IllegalStateException("liquidation instrument is missing");
                     return new com.surprising.aeron.protocol.CoreLiquidationView(value.liquidationId(),
                             value.userId(), value.symbol(), instrument.settleAsset(), value.positionSide(),
-                            value.instrumentVersion(), value.triggerPriceSequence(), value.closeQuantitySteps(),
-                            value.deficitUnits(), value.status().name());
+                            value.instrumentVersion(), value.triggerPriceSequence(), value.signedQuantitySteps(),
+                            value.closeQuantitySteps(), value.deficitUnits(), value.status().name());
                 }).toList();
     }
 
