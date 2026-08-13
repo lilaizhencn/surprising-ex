@@ -152,6 +152,7 @@ public final class TradingCoreReducer {
                 command.symbol(), command.instrumentVersion(), command.side(), command.priceTicks(),
                 command.quantitySteps(), 0,
                 command.quantitySteps(), command.reduceOnly(), command.marginMode(), command.positionSide(),
+                command.orderType(), command.timeInForce(), command.postOnly(),
                 CoreOrderStatus.OPEN, 1);
 
         Map<String, AssetBalance> balances = new TreeMap<>(currentUser.balances());
@@ -269,11 +270,16 @@ public final class TradingCoreReducer {
                 users.put(maker.userId(), releaseTerminalReservation(users.get(maker.userId()), maker.orderId()));
             }
         }
-        if (taker.status() == CoreOrderStatus.OPEN) {
+        if (taker.status() == CoreOrderStatus.OPEN && !taker.timeInForce().immediate()
+                && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             bookOrders.put(taker.orderId(), new CoreBookOrder(taker.orderId(), taker.userId(), taker.symbol(),
                     taker.side(), taker.priceTicks(), taker.remainingQuantitySteps(), nextPrioritySequence));
             nextPrioritySequence = Math.incrementExact(nextPrioritySequence);
         } else {
+            if (taker.status() == CoreOrderStatus.OPEN) {
+                taker = taker.cancel();
+                orders.put(taker.orderId(), taker);
+            }
             users.put(taker.userId(), releaseTerminalReservation(users.get(taker.userId()), taker.orderId()));
         }
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
@@ -861,8 +867,8 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("INSTRUMENT_ORDER_MISMATCH",
                     "order assets do not match instrument state");
         }
-        if (command.priceTicks() <= 0) {
-            throw new CoreStateRejectedException("INVALID_ORDER_PRICE", "order price must be positive");
+        if (command.matchingPriceTicks() <= 0) {
+            throw new CoreStateRejectedException("INVALID_ORDER_PRICE", "matching price must be positive");
         }
     }
 
@@ -872,7 +878,7 @@ public final class TradingCoreReducer {
             PlaceOrderCommand command) {
         if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
             return command.side() == CoreOrderSide.BUY
-                    ? Math.multiplyExact(command.priceTicks(), command.quantitySteps())
+                    ? Math.multiplyExact(command.matchingPriceTicks(), command.quantitySteps())
                     : command.quantitySteps();
         }
         CorePositionState position = user.positions().get(positionKey(instrument.symbol(), command.positionSide()));
@@ -882,11 +888,11 @@ public final class TradingCoreReducer {
         long closeSteps = currentQuantity != 0 && Long.signum(currentQuantity) != Long.signum(signedOrder)
                 ? Math.min(Math.absExact(currentQuantity), command.quantitySteps()) : 0;
         long openSteps = command.reduceOnly() ? 0 : Math.subtractExact(command.quantitySteps(), closeSteps);
-        long margin = CoreContractMath.openingMarginUnits(instrument, command.side(), command.priceTicks(),
+        long margin = CoreContractMath.openingMarginUnits(instrument, command.side(), command.matchingPriceTicks(),
                 openSteps);
         long premium = instrument.contractType().isOption() && command.side() == CoreOrderSide.BUY
-                ? CoreContractMath.optionPremiumUnits(instrument, command.priceTicks(), command.quantitySteps()) : 0;
-        long fee = CoreContractMath.feeDeltaUnits(instrument, command.priceTicks(), command.quantitySteps(), true);
+                ? CoreContractMath.optionPremiumUnits(instrument, command.matchingPriceTicks(), command.quantitySteps()) : 0;
+        long fee = CoreContractMath.feeDeltaUnits(instrument, command.matchingPriceTicks(), command.quantitySteps(), true);
         return Math.max(1, Math.addExact(Math.addExact(margin, premium), Math.max(0, Math.negateExact(fee))));
     }
 

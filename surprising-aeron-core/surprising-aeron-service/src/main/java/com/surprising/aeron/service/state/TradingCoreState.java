@@ -206,6 +206,11 @@ public record TradingCoreState(
         hash = CoreStateHash.mix(hash, order.executedQuantitySteps());
         hash = CoreStateHash.mix(hash, order.remainingQuantitySteps());
         hash = CoreStateHash.mix(hash, order.reduceOnly());
+        hash = CoreStateHash.mix(hash, order.marginMode().wireCode());
+        hash = CoreStateHash.mix(hash, order.positionSide().wireCode());
+        hash = CoreStateHash.mix(hash, order.orderType().wireCode());
+        hash = CoreStateHash.mix(hash, order.timeInForce().wireCode());
+        hash = CoreStateHash.mix(hash, order.postOnly());
         hash = CoreStateHash.mix(hash, order.status().ordinal());
         return CoreStateHash.mix(hash, order.revision());
     }

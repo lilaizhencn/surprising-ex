@@ -7,7 +7,9 @@ import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ReplaceOrderCommand;
@@ -24,6 +26,73 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class CoreMatchingStateTest {
+
+    @Test
+    void iocPartialFillCancelsRemainderAndReleasesUnusedFunds() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.SPOT_ASSET, "BTC", 2));
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 5, ReservationKind.SPOT_ASSET, "USDT", 500,
+                            CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false));
+
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(202).executedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().user(22).balances().get("USDT").availableUnits()).isEqualTo(300);
+            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().user(22).totalUnits("BTC")).isEqualTo(2);
+            assertThat(state.tradingState().bookState().openOrders()).isEmpty();
+        }
+    }
+
+    @Test
+    void postOnlyRejectionLeavesNoOrderOrReservedFunds() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.SPOT_ASSET, "BTC", 2));
+
+            CoreMessage crossingPostOnly = message(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 1, ReservationKind.SPOT_ASSET, "USDT", 100,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTX, 100, true));
+            assertThat(state.apply(crossingPostOnly).status()).isEqualTo(ResponseStatus.REJECTED);
+
+            assertThat(state.tradingState().order(202)).isNull();
+            assertThat(state.tradingState().user(22).balances().get("USDT").availableUnits()).isEqualTo(500);
+            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().bookState().openOrders()).containsOnlyKeys(101L);
+        }
+    }
+
+    @Test
+    void marketOrderUsesProtectionPriceAndNeverRestsOnBook() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 1)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 1, ReservationKind.SPOT_ASSET, "BTC", 1));
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 0, 1, ReservationKind.SPOT_ASSET, "USDT", 100,
+                            CoreOrderType.MARKET, CoreTimeInForce.IOC, 100, false));
+
+            assertThat(state.tradingState().order(202).priceTicks()).isZero();
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().bookState().openOrders()).isEmpty();
+        }
+    }
 
     @Test
     void spotMatchUpdatesBothUsersFundsOrdersAndRecoverableBookAtomically() {
@@ -187,6 +256,27 @@ class CoreMatchingStateTest {
         return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
                 "BTC", "USDT", settleAsset, side, priceTicks, quantitySteps, false,
                 reservationKind, reservationAsset, reservedUnits));
+    }
+
+    private static byte[] place(
+            long orderId,
+            CoreOrderSide side,
+            long priceTicks,
+            long quantitySteps,
+            ReservationKind reservationKind,
+            String reservationAsset,
+            long reservedUnits,
+            CoreOrderType orderType,
+            CoreTimeInForce timeInForce,
+            long matchingPriceTicks,
+            boolean postOnly) {
+        String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
+                "BTC", "USDT", settleAsset, side, priceTicks, quantitySteps, false,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                reservationKind, reservationAsset, reservedUnits, orderType, timeInForce,
+                matchingPriceTicks, postOnly));
     }
 
     private static byte[] place(

@@ -46,14 +46,17 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public CoreMatchingResult place(long userId, PlaceOrderCommand command) {
         int symbolId = ensureSymbol(command.symbol());
         ensureUser(userId);
+        if (command.postOnly() && wouldTakeLiquidity(symbolId, command)) {
+            return new CoreMatchingResult(false, "POST_ONLY_WOULD_TAKE", List.of());
+        }
         var response = api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
                 .orderId(command.orderId())
                 .uid(userId)
                 .symbol(symbolId)
                 .action(command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
-                .orderType(OrderType.GTC)
-                .price(command.priceTicks())
-                .reservePrice(command.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : command.priceTicks())
+                .orderType(orderType(command))
+                .price(command.matchingPriceTicks())
+                .reservePrice(command.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : command.matchingPriceTicks())
                 .size(command.quantitySteps())
                 .build()).join();
         List<CoreMatch> matches = new ArrayList<>();
@@ -65,6 +68,26 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         });
         return new CoreMatchingResult(response.resultCode == CommandResultCode.SUCCESS,
                 response.resultCode.name(), matches);
+    }
+
+    private boolean wouldTakeLiquidity(int symbolId, PlaceOrderCommand command) {
+        var book = api.requestOrderBookAsync(symbolId, 1).join();
+        if (command.side() == CoreOrderSide.BUY) {
+            return book.askSize > 0 && book.askPrices[0] <= command.matchingPriceTicks();
+        }
+        return book.bidSize > 0 && book.bidPrices[0] >= command.matchingPriceTicks();
+    }
+
+    private static OrderType orderType(PlaceOrderCommand command) {
+        if (command.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET) {
+            return command.timeInForce() == com.surprising.aeron.protocol.CoreTimeInForce.FOK
+                    ? OrderType.FOK : OrderType.IOC;
+        }
+        return switch (command.timeInForce()) {
+            case IOC -> OrderType.IOC;
+            case FOK -> OrderType.FOK;
+            case GTC, GTX -> OrderType.GTC;
+        };
     }
 
     public CoreMatchingResult cancel(long userId, long orderId, String symbol) {

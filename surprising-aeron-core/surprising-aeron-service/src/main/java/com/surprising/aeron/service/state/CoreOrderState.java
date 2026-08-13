@@ -3,7 +3,9 @@ package com.surprising.aeron.service.state;
 import com.surprising.product.api.ProductLine;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 
 public record CoreOrderState(
         long orderId,
@@ -19,6 +21,9 @@ public record CoreOrderState(
         boolean reduceOnly,
         CoreMarginMode marginMode,
         CorePositionSide positionSide,
+        CoreOrderType orderType,
+        CoreTimeInForce timeInForce,
+        boolean postOnly,
         CoreOrderStatus status,
         long revision) {
 
@@ -27,7 +32,9 @@ public record CoreOrderState(
                 || side == null || priceTicks < 0
                 || quantitySteps <= 0 || executedQuantitySteps < 0 || remainingQuantitySteps < 0
                 || Math.addExact(executedQuantitySteps, remainingQuantitySteps) != quantitySteps
-                || marginMode == null || positionSide == null || status == null || revision <= 0) {
+                || marginMode == null || positionSide == null || orderType == null || timeInForce == null
+                || postOnly && (orderType != CoreOrderType.LIMIT || timeInForce != CoreTimeInForce.GTX)
+                || status == null || revision <= 0) {
             throw new IllegalArgumentException("invalid order state");
         }
         symbol = OrderReservation.normalizeSymbol(symbol);
@@ -42,7 +49,17 @@ public record CoreOrderState(
                           CoreOrderStatus status, long revision) {
         this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, CoreMarginMode.CROSS,
-                CorePositionSide.NET, status, revision);
+                CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, status, revision);
+    }
+
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+                          long instrumentVersion, CoreOrderSide side, long priceTicks, long quantitySteps,
+                          long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
+                          CoreMarginMode marginMode, CorePositionSide positionSide,
+                          CoreOrderStatus status, long revision) {
+        this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, quantitySteps,
+                executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, status, revision);
     }
 
     public CoreOrderState cancel() {
@@ -52,6 +69,7 @@ public record CoreOrderState(
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
                 side, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
+                orderType, timeInForce, postOnly,
                 CoreOrderStatus.CANCELED,
                 Math.incrementExact(revision));
     }
@@ -64,6 +82,7 @@ public record CoreOrderState(
         long nextRemaining = Math.subtractExact(remainingQuantitySteps, quantitySteps);
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
                 side, priceTicks, quantitySteps(), nextExecuted, nextRemaining, reduceOnly, marginMode, positionSide,
+                orderType, timeInForce, postOnly,
                 nextRemaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN,
                 Math.incrementExact(revision));
     }
@@ -74,6 +93,7 @@ public record CoreOrderState(
         }
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
                 side, newPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
-                reduceOnly, marginMode, positionSide, status, Math.incrementExact(revision));
+                reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly,
+                status, Math.incrementExact(revision));
     }
 }

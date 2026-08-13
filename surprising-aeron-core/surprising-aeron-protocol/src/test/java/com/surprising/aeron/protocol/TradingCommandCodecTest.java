@@ -11,8 +11,9 @@ class TradingCommandCodecTest {
     void roundTripsAllP2Commands() {
         BalanceAdjustmentCommand adjustment = new BalanceAdjustmentCommand("USDT", 10_000);
         PlaceOrderCommand placeOrder = new PlaceOrderCommand(7, "BTC-USDT", 3, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 60_000, 3, false,
-                ReservationKind.SPOT_ASSET, "USDT", 2_000);
+                CoreOrderSide.BUY, 0, 3, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 2_000,
+                CoreOrderType.MARKET, CoreTimeInForce.FOK, 60_000, false);
         CancelOrderCommand cancelOrder = new CancelOrderCommand(7);
         ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(7, "BTC", "USDT", 61_000, 2_100);
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 3, 1,

@@ -5,8 +5,10 @@ import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.product.api.ProductLine;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
@@ -17,7 +19,8 @@ import java.util.TreeMap;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 4;
+    private static final int VERSION = 5;
+    private static final int VERSION_4 = 4;
     private static final int VERSION_3 = 3;
     private static final int VERSION_2 = 2;
     private static final int VERSION_1 = 1;
@@ -82,6 +85,9 @@ public final class TradingStateSnapshotCodec {
             writer.byteValue(order.reduceOnly() ? 1 : 0);
             writer.intValue(order.marginMode().wireCode());
             writer.intValue(order.positionSide().wireCode());
+            writer.intValue(order.orderType().wireCode());
+            writer.intValue(order.timeInForce().wireCode());
+            writer.byteValue(order.postOnly() ? 1 : 0);
             writer.intValue(order.status().ordinal());
             writer.longValue(order.revision());
         });
@@ -162,7 +168,8 @@ public final class TradingStateSnapshotCodec {
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_3 && version != VERSION_2 && version != VERSION_1) {
+        if (version != VERSION && version != VERSION_4 && version != VERSION_3
+                && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
@@ -175,7 +182,7 @@ public final class TradingStateSnapshotCodec {
         for (int index = 0; index < userCount; index++) {
             long userId = reader.positiveLong("userId");
             long userRevision = reader.nonNegativeLong("user revision");
-            CorePositionMode positionMode = version == VERSION
+            CorePositionMode positionMode = version >= VERSION_4
                     ? CorePositionMode.fromWireCode(reader.intValue()) : CorePositionMode.ONE_WAY;
             Map<String, AssetBalance> balances = new TreeMap<>();
             int balanceCount = reader.count("balances");
@@ -200,9 +207,9 @@ public final class TradingStateSnapshotCodec {
             for (int positionIndex = 0; positionIndex < positionCount; positionIndex++) {
                 String symbol = reader.text();
                 String marginAsset = reader.text();
-                CoreMarginMode marginMode = version == VERSION
+                CoreMarginMode marginMode = version >= VERSION_4
                         ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
-                CorePositionSide positionSide = version == VERSION
+                CorePositionSide positionSide = version >= VERSION_4
                         ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
                 CorePositionState position = new CorePositionState(symbol, marginAsset, marginMode, positionSide,
                         reader.nonNegativeLong("instrument version"), reader.longValue(),
@@ -226,10 +233,15 @@ public final class TradingStateSnapshotCodec {
             long executedSteps = reader.nonNegativeLong("executed steps");
             long remainingSteps = reader.nonNegativeLong("remaining steps");
             boolean reduceOnly = reader.booleanValue();
-            CoreMarginMode orderMarginMode = version == VERSION
+            CoreMarginMode orderMarginMode = version >= VERSION_4
                     ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
-            CorePositionSide orderPositionSide = version == VERSION
+            CorePositionSide orderPositionSide = version >= VERSION_4
                     ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
+            CoreOrderType orderType = version == VERSION
+                    ? CoreOrderType.fromWireCode(reader.intValue()) : CoreOrderType.LIMIT;
+            CoreTimeInForce timeInForce = version == VERSION
+                    ? CoreTimeInForce.fromWireCode(reader.intValue()) : CoreTimeInForce.GTC;
+            boolean postOnly = version == VERSION && reader.booleanValue();
             int statusCode = reader.intValue();
             if (statusCode < 0 || statusCode >= CoreOrderStatus.values().length) {
                 throw new ProtocolException("invalid order status: " + statusCode);
@@ -237,7 +249,7 @@ public final class TradingStateSnapshotCodec {
             CoreOrderState order = new CoreOrderState(orderId, productLine, userId, symbol,
                     instrumentVersion, side,
                     priceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
-                    orderMarginMode, orderPositionSide,
+                    orderMarginMode, orderPositionSide, orderType, timeInForce, postOnly,
                     CoreOrderStatus.values()[statusCode], reader.positiveLong("order revision"));
             putUnique(orders, orderId, order);
         }
@@ -272,7 +284,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         CoreRiskState riskState = CoreRiskState.empty();
         CoreTreasuryState treasuryState = CoreTreasuryState.empty();
-        if (version == VERSION || version == VERSION_3) {
+        if (version == VERSION || version == VERSION_4 || version == VERSION_3) {
             int instrumentCount = reader.count("instruments");
             for (int index = 0; index < instrumentCount; index++) {
                 String symbol = reader.text();

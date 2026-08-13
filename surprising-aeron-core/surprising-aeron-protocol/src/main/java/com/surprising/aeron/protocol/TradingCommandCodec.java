@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets;
 
 public final class TradingCommandCodec {
 
+    private static final int PLACE_ORDER_V2_MARKER = 0x504f5632;
+
     private static final int MAX_TEXT_BYTES = 64;
 
     private TradingCommandCodec() {
@@ -71,11 +73,12 @@ public final class TradingCommandCodec {
         byte[] quoteAsset = text(command.quoteAsset());
         byte[] settleAsset = text(command.settleAsset());
         byte[] asset = text(command.reservationAsset());
-        return ByteBuffer.allocate(Long.BYTES * 2 + Short.BYTES + symbol.length
+        return ByteBuffer.allocate(Integer.BYTES + Long.BYTES * 2 + Short.BYTES + symbol.length
                         + Short.BYTES + baseAsset.length + Short.BYTES + quoteAsset.length
                         + Short.BYTES + settleAsset.length + Integer.BYTES
-                        + Long.BYTES * 3 + Byte.BYTES + Integer.BYTES * 3 + Short.BYTES + asset.length)
+                        + Long.BYTES * 4 + Byte.BYTES * 2 + Integer.BYTES * 5 + Short.BYTES + asset.length)
                 .order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(PLACE_ORDER_V2_MARKER)
                 .putLong(command.orderId())
                 .putLong(command.instrumentVersion())
                 .putShort((short) symbol.length)
@@ -96,12 +99,18 @@ public final class TradingCommandCodec {
                 .putShort((short) asset.length)
                 .put(asset)
                 .putLong(command.reservedUnits())
+                .putInt(command.orderType().wireCode())
+                .putInt(command.timeInForce().wireCode())
+                .putLong(command.matchingPriceTicks())
+                .put((byte) (command.postOnly() ? 1 : 0))
                 .array();
     }
 
     public static PlaceOrderCommand decodePlaceOrder(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         requireRemaining(buffer, Long.BYTES * 2);
+        boolean version2 = buffer.remaining() >= Integer.BYTES && buffer.getInt(buffer.position()) == PLACE_ORDER_V2_MARKER;
+        if (version2) buffer.getInt();
         long orderId = buffer.getLong();
         long instrumentVersion = buffer.getLong();
         String symbol = readText(buffer);
@@ -130,10 +139,25 @@ public final class TradingCommandCodec {
         String asset = readText(buffer);
         requireRemaining(buffer, Long.BYTES);
         long reservedUnits = buffer.getLong();
+        CoreOrderType orderType = CoreOrderType.LIMIT;
+        CoreTimeInForce timeInForce = CoreTimeInForce.GTC;
+        long matchingPriceTicks = priceTicks;
+        boolean postOnly = false;
+        if (version2) {
+            requireRemaining(buffer, Integer.BYTES * 2 + Long.BYTES + Byte.BYTES);
+            orderType = CoreOrderType.fromWireCode(buffer.getInt());
+            timeInForce = CoreTimeInForce.fromWireCode(buffer.getInt());
+            matchingPriceTicks = buffer.getLong();
+            byte postOnlyCode = buffer.get();
+            if (postOnlyCode != 0 && postOnlyCode != 1) {
+                throw new ProtocolException("invalid postOnly flag: " + postOnlyCode);
+            }
+            postOnly = postOnlyCode == 1;
+        }
         requireConsumed(buffer);
         return new PlaceOrderCommand(orderId, symbol, instrumentVersion, baseAsset, quoteAsset, settleAsset,
                 side, priceTicks, quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
-                reservationKind, asset, reservedUnits);
+                reservationKind, asset, reservedUnits, orderType, timeInForce, matchingPriceTicks, postOnly);
     }
 
     public static byte[] encodeCancelOrder(CancelOrderCommand command) {

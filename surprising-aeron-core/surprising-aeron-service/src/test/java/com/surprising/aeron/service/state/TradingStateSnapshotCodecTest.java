@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
@@ -24,7 +26,11 @@ class TradingStateSnapshotCodecTest {
                                 "BTC-OPTION", "BTC", "USDT", "USDT", 4)), 7,
                 new BalanceAdjustmentCommand("USDT", 50_000));
         state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "BTC-OPTION", 4, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 500, 2, false, ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_500));
+                CoreOrderSide.BUY, 500, 2, false,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_500,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTX, 500, true));
 
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(state), ProductLine.OPTION);
