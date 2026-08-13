@@ -276,6 +276,9 @@ service_env() {
         "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "ORDER_WAL_NODE_ID=${order_node_id}"
+      if [[ -n "${ORDER_WAL_DIR:-}" ]]; then
+        printf '%s\n' "ORDER_WAL_DIR=${ORDER_WAL_DIR}"
+      fi
       ;;
     matching)
       printf '%s\n' \
@@ -284,7 +287,11 @@ service_env() {
         "SURPRISING_TRADING_MATCHING_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_TRADING_MATCHING_KAFKA_GROUP_ID=surprising-matching-${slug}-v1" \
         "SURPRISING_TRADING_MATCHING_KAFKA_CLIENT_ID=surprising-matching-${slug}-${HOSTNAME:-local}-$$" \
-        "SURPRISING_TRADING_MATCHING_ENGINE_EXCHANGE_ID=surprising-${slug}"
+        "SURPRISING_TRADING_MATCHING_ENGINE_EXCHANGE_ID=surprising-${slug}" \
+        "SURPRISING_TRADING_MATCHING_RECOVERY_OPEN_ORDER_BOOK_RESTORE_ENABLED=${SURPRISING_TRADING_MATCHING_RECOVERY_OPEN_ORDER_BOOK_RESTORE_ENABLED:-true}"
+      if [[ -n "${MATCHING_WAL_DIR:-}" ]]; then
+        printf '%s\n' "MATCHING_WAL_DIR=${MATCHING_WAL_DIR}"
+      fi
       ;;
     trigger)
       printf '%s\n' \

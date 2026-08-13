@@ -87,7 +87,7 @@ surprising:
       admin-approval-ttl: 30m
       require-admin-mfa: false
       phone-registration-enabled: ${GATEWAY_PHONE_REGISTRATION_ENABLED:false}
-      require-email-verification: ${GATEWAY_REQUIRE_EMAIL_VERIFICATION:true}
+      require-email-verification: ${GATEWAY_REQUIRE_EMAIL_VERIFICATION:false}
       resend-api-key: ${RESEND_API_KEY:}
       resend-from: ${RESEND_FROM:}
       resend-base-url: ${RESEND_BASE_URL:https://api.resend.com}

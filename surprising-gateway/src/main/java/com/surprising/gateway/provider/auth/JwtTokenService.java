@@ -66,8 +66,10 @@ public class JwtTokenService {
         List<String> roles = claims.get("roles") instanceof List<?> values
                 ? values.stream().map(Object::toString).toList()
                 : List.of("USER");
+        Object usernameClaim = claims.get("username");
         return new JwtPrincipal(Long.parseLong(asString(claims.get("sub"))),
-                asString(claims.get("username")), "UNKNOWN", roles, expiresAt, optionalLong(claims.get("sid")));
+                usernameClaim == null ? null : asString(usernameClaim),
+                "UNKNOWN", roles, expiresAt, optionalLong(claims.get("sid")));
     }
 
     private Map<String, Object> verify(String token) {

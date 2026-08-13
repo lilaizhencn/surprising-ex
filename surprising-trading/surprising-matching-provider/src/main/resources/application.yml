@@ -67,7 +67,7 @@ surprising:
         order-book-depth-for-post-only: 1
         order-book-depth-levels: 50
       recovery:
-        open-order-book-restore-enabled: true
+        open-order-book-restore-enabled: ${SURPRISING_TRADING_MATCHING_RECOVERY_OPEN_ORDER_BOOK_RESTORE_ENABLED:true}
         open-order-batch-size: 10000
       wal:
         directory: ${MATCHING_WAL_DIR:data/matching-wal}

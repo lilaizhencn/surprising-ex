@@ -27,7 +27,7 @@ public class GatewayAuthChallengeRepository {
                 INSERT INTO gateway_auth_challenges (
                     user_id, purpose, channel, destination, code_hash,
                     expires_at, attempts, request_ip, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, 0, CAST(? AS inet), ?)
                 RETURNING challenge_id, user_id, purpose, channel, destination,
                           code_hash, expires_at, attempts, consumed_at
                 """, (rs, rowNum) -> new Challenge(
