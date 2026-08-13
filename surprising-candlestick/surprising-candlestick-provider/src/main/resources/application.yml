@@ -34,6 +34,7 @@ surprising:
       trade-topic: surprising.perp.match.trades.v1
       candle-topic: surprising.perp.candle.events.v1
       application-id: surprising-candlestick-v1
+      application-id-override: ${SURPRISING_CANDLESTICK_KAFKA_APPLICATION_ID_OVERRIDE:}
     stream:
       threads: 2
       state-dir: data/kafka-streams

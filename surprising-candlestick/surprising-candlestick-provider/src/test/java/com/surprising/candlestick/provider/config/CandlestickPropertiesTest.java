@@ -29,4 +29,15 @@ class CandlestickPropertiesTest {
         assertThat(properties.getKafka().getApplicationId())
                 .isEqualTo("surprising-inverse-delivery-candlestick-v1");
     }
+
+    @Test
+    void explicitApplicationIdOverrideAllowsPartitionedTopologyMigration() {
+        CandlestickProperties properties = new CandlestickProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        properties.getKafka().setProductTopicsEnabled(true);
+        properties.getKafka().setApplicationIdOverride("surprising-linear-perp-candlestick-v2");
+
+        assertThat(properties.getKafka().getApplicationId())
+                .isEqualTo("surprising-linear-perp-candlestick-v2");
+    }
 }

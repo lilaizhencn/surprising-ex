@@ -81,6 +81,7 @@ public class CandlestickProperties {
         private String tradeTopic = "surprising.perp.match.trades.v1";
         private String candleTopic = "surprising.perp.candle.events.v1";
         private String applicationId = "surprising-candlestick-v1";
+        private String applicationIdOverride;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -127,11 +128,22 @@ public class CandlestickProperties {
         }
 
         public String getApplicationId() {
+            if (applicationIdOverride != null && !applicationIdOverride.isBlank()) {
+                return applicationIdOverride.trim();
+            }
             return productTopicsEnabled ? productTopics().consumerGroup("candlestick") : applicationId;
         }
 
         public void setApplicationId(String applicationId) {
             this.applicationId = applicationId;
+        }
+
+        public String getApplicationIdOverride() {
+            return applicationIdOverride;
+        }
+
+        public void setApplicationIdOverride(String applicationIdOverride) {
+            this.applicationIdOverride = applicationIdOverride;
         }
 
         private ProductTopicNames productTopics() {
