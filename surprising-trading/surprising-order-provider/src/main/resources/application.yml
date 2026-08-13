@@ -75,6 +75,11 @@ surprising:
         directory: ${ORDER_WAL_DIR:data/order-wal}
         node-id: ${ORDER_WAL_NODE_ID}
         worker-delay-ms: ${ORDER_WAL_WORKER_DELAY_MS:25}
+      aeron:
+        hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+        egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+        response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+        client-connections: ${AERON_CLIENT_CONNECTIONS:4}
     event-publish:
       send-timeout: 3s
       risk:

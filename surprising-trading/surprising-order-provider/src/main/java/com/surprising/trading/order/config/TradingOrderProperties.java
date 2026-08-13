@@ -16,6 +16,7 @@ public class TradingOrderProperties {
     private Algo algo = new Algo();
     private RedisIndex redisIndex = new RedisIndex();
     private Wal wal = new Wal();
+    private Aeron aeron = new Aeron();
 
     /** 启动时拒绝未隔离的订单 Topic 配置。 */
     @PostConstruct
@@ -65,6 +66,47 @@ public class TradingOrderProperties {
 
     public void setWal(Wal wal) {
         this.wal = wal == null ? new Wal() : wal;
+    }
+
+    public Aeron getAeron() { return aeron; }
+
+    public void setAeron(Aeron aeron) { this.aeron = aeron == null ? new Aeron() : aeron; }
+
+    public static class Aeron {
+        private java.util.List<String> hostnames = java.util.List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private Duration responseTimeout = Duration.ofSeconds(5);
+        private int clientConnections = 4;
+
+        public java.util.List<String> getHostnames() { return hostnames; }
+        public void setHostnames(java.util.List<String> hostnames) {
+            if (hostnames == null || hostnames.size() != 3
+                    || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
+                throw new IllegalArgumentException("aeron hostnames must contain three non-blank members");
+            }
+            this.hostnames = java.util.List.copyOf(hostnames);
+        }
+        public String getEgressHostname() { return egressHostname; }
+        public void setEgressHostname(String egressHostname) {
+            if (egressHostname == null || egressHostname.isBlank()) {
+                throw new IllegalArgumentException("aeron egress hostname is required");
+            }
+            this.egressHostname = egressHostname.trim();
+        }
+        public Duration getResponseTimeout() { return responseTimeout; }
+        public void setResponseTimeout(Duration responseTimeout) {
+            if (responseTimeout == null || responseTimeout.isZero() || responseTimeout.isNegative()) {
+                throw new IllegalArgumentException("aeron response timeout must be positive");
+            }
+            this.responseTimeout = responseTimeout;
+        }
+        public int getClientConnections() { return clientConnections; }
+        public void setClientConnections(int clientConnections) {
+            if (clientConnections < 1 || clientConnections > 64) {
+                throw new IllegalArgumentException("aeron client connections must be in [1,64]");
+            }
+            this.clientConnections = clientConnections;
+        }
     }
 
     public static class Kafka {

@@ -209,9 +209,12 @@ public class OrderController {
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/{orderId}")
-    public OrderResponse get(@PathVariable("orderId") long orderId) {
+    public OrderResponse get(@RequestParam("userId") long userId,
+                             @PathVariable("orderId") long orderId) {
         try {
-            return orderService.get(orderId);
+            return orderService.get(userId, orderId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }

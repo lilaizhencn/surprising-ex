@@ -1191,6 +1191,9 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] Order State 补齐 `clientOrderId`、原始 `commandId`、费率快照、创建/更新时间和最后 Cluster position；按 `(userId, clientOrderId)` 构建确定性不可变索引并支持强查询。
 - [x] Trading Snapshot 升级 v6，v1–v5 使用确定性默认元数据迁移；SPOT 三节点保卷 v5→v6 恢复后 `appliedCommandCount=29`、Export `ack=27,next=28,pending=0`。
 - [x] 重复 `clientOrderId` 在资金预占前拒绝且余额不变；订单强查询 v3 返回完整 API 元数据，协议 12、核心服务 45 个测试通过。
+- [x] Order REST 单笔下单、撤单、按 orderId/clientOrderId 强查询切换到共享 Aeron session 池；下单在同一核心命令内完成资金预占、撮合和结算，不再执行旧 `ORDER_RESERVE` 双锁流程。
+- [x] 单笔 orderId 查询显式携带 `userId` 并由 Core 校验归属，不增加跨用户扫描或数据库回退；重复 clientOrderId 先读权威 Order State 并校验原始意图。
+- [x] Aeron 下单命令映射测试直接解码 payload，覆盖 MARKET 保护价、订单类型/TIF、费率快照和衍生品预留；Order provider 全依赖 `clean test` 128/128 通过。
 - [ ] Account/Order/Funding/Risk/Liquidation 现有服务入口切换到 Aeron 后删除旧实现。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
@@ -1249,6 +1252,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P6 | 实现 | Aeron session 池下沉到共享 client 模块且不解释业务结果码 | Order、Funding、ADL 等后续迁移复用同一并发和重连机制，避免每个 provider 复制连接管理 | `AeronClientPoolTest`、Account provider 回归 | 共享层保持无 Spring、无业务模块依赖；各 provider 继续失败关闭 |
 | 2026-08-13 | P6 | 实现 | Order Core 显式保存订单类型和 TIF，撮合保护价与 API 申报价分离 | 旧 Adapter 硬编码 GTC 会使 IOC/FOK/MARKET 余量错误留簿并持续锁资；REST 迁移前必须先闭合资金生命周期 | `CoreMatchingStateTest` 11/11、SPOT v4→v5 保卷恢复 | 不新增订单权威服务；完整订单 API 元数据和投影继续归入同一 Aeron Order State/Exporter |
 | 2026-08-13 | P6 | 实现 | `clientOrderId` 索引由不可变 Order State 确定性派生，命令元数据使用真实 Cluster timestamp/position 盖章 | 满足订单 API 幂等和审计要求，同时避免第二套索引写流程或扩大幂等结果窗口 | `CoreProbeStateTest`、`CoreStateQueryCodecTest`、SPOT v5→v6 保卷恢复 | 单笔强查询直接走 Aeron；历史批量查询由 Exporter/PG 投影承接 |
+| 2026-08-13 | P6 | 实现 | Order 单笔生产入口直接提交 Aeron 原子下单/撤单命令，强查询必须携带用户归属 | 旧 reserve→matching 链会与 Core 原子预占重复锁资；无用户归属的查询无法安全路由 | `AeronOrderCommandServiceTest` 2/2、Order provider 全依赖 128/128 | 改单、批量撤单和历史列表仍在 P6 后续迁移；未保留运行时回退开关 |
 | 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
 | 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
 | 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |

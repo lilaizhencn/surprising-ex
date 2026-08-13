@@ -66,6 +66,7 @@ public class OrderService {
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final OrderUserStateService orderUserStateService;
     private final OrderUserCommandGateway orderUserCommandGateway;
+    private final AeronOrderCommandService aeronOrders;
 
     @Autowired
     public OrderService(TradingOrderProperties properties,
@@ -76,7 +77,8 @@ public class OrderService {
                         SpotReservationCalculator spotReservationCalculator,
                         OrderFeeSnapshotLookup feeSnapshotLookup,
                         OrderUserStateService orderUserStateService,
-                        OrderUserCommandGateway orderUserCommandGateway) {
+                        OrderUserCommandGateway orderUserCommandGateway,
+                        AeronOrderCommandService aeronOrders) {
         this.properties = properties;
         this.orderValidator = orderValidator;
         this.reduceOnlyValidator = reduceOnlyValidator;
@@ -86,10 +88,74 @@ public class OrderService {
         this.feeSnapshotLookup = feeSnapshotLookup;
         this.orderUserStateService = orderUserStateService;
         this.orderUserCommandGateway = orderUserCommandGateway;
+        this.aeronOrders = aeronOrders;
+    }
+
+    public OrderService(TradingOrderProperties properties,
+                        OrderValidator orderValidator,
+                        ReduceOnlyValidator reduceOnlyValidator,
+                        OrderPlacementStateService placementStateService,
+                        OrderMarginCalculator orderMarginCalculator,
+                        SpotReservationCalculator spotReservationCalculator,
+                        OrderFeeSnapshotLookup feeSnapshotLookup,
+                        OrderUserStateService orderUserStateService,
+                        OrderUserCommandGateway orderUserCommandGateway) {
+        this(properties, orderValidator, reduceOnlyValidator, placementStateService, orderMarginCalculator,
+                spotReservationCalculator, feeSnapshotLookup, orderUserStateService, orderUserCommandGateway, null);
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
-        return placeWal(request, null);
+        return aeronOrders == null ? placeWal(request, null) : placeAeron(request);
+    }
+
+    private OrderResponse placeAeron(PlaceOrderRequest request) {
+        PlaceOrderRequest normalized = normalize(request);
+        ProductLine productLine = currentProductLine();
+        requireLocalAccountProductLine(productLine);
+        if (hasClientOrderId(normalized)) {
+            OrderResponse existing = aeronOrders.find(normalized.userId(), normalized.clientOrderId());
+            if (existing != null) {
+                requireSameClientOrderIntent(normalized, existing);
+                return existing;
+            }
+        }
+        PositionMode positionMode = productLine == ProductLine.SPOT
+                ? PositionMode.ONE_WAY : placementStateService.localPositionMode(productLine, normalized.userId());
+        normalized = normalizePositionMode(normalized, positionMode);
+        ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
+        if (validation.accepted()) validation = orderValidator.validate(normalized);
+        if (validation.accepted() && normalized.reduceOnly()) {
+            ValidationResult reduceValidation = reduceOnlyValidator.validate(normalized);
+            validation = reduceValidation.accepted()
+                    ? ValidationResult.ok(reduceValidation.instrumentVersion(), validation.instrumentType(), validation.contractType())
+                    : ValidationResult.reject(reduceValidation.rejectReason(), validation.instrumentVersion(),
+                    validation.instrumentType(), validation.contractType());
+        }
+        if (!validation.accepted()) throw new IllegalArgumentException(validation.rejectReason());
+        OrderFeeSnapshot fee = feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
+                        validation.instrumentVersion(), Instant.now())
+                .orElseThrow(() -> new IllegalStateException("fee schedule unavailable"));
+        ReservationInput reservation = reservationInput(normalized, validation, fee);
+        return aeronOrders.place(normalized, validation, fee, reservation.asset(), reservation.units());
+    }
+
+    private ReservationInput reservationInput(PlaceOrderRequest request, ValidationResult validation,
+                                              OrderFeeSnapshot fee) {
+        if (validation.instrumentType() == InstrumentType.SPOT) {
+            SpotReservationRequirement value = spotReservationCalculator.requirement(request.symbol(),
+                            validation.instrumentVersion(), request.side(), request.orderType(), request.priceTicks(),
+                            request.quantitySteps(), fee)
+                    .orElseThrow(() -> new IllegalStateException("spot reservation requirement unavailable"));
+            if (!value.accepted()) throw new IllegalStateException(value.rejectReason());
+            return new ReservationInput(value.asset(), value.reservedUnits());
+        }
+        MarginRequirement value = orderMarginCalculator.requirement(request.symbol(), validation.instrumentVersion(),
+                        request.userId(), request.marginMode(), request.positionSide(), request.side(), request.orderType(),
+                        request.priceTicks(), request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
+                        properties.getRisk().getMarketMaxMarkAgeMs())
+                .orElseThrow(() -> new IllegalStateException("margin requirement unavailable"));
+        if (!value.accepted()) throw new IllegalStateException(value.rejectReason());
+        return new ReservationInput(value.asset(), Math.max(1, value.initialMarginUnits()));
     }
 
     /**
@@ -489,7 +555,9 @@ public class OrderService {
         if (request.userId() <= 0 || request.orderId() <= 0) {
             throw new IllegalArgumentException("userId and orderId must be positive");
         }
-        return orderUserCommandGateway.cancel(currentProductLine(), request.userId(), request.orderId(), null);
+        return aeronOrders == null
+                ? orderUserCommandGateway.cancel(currentProductLine(), request.userId(), request.orderId(), null)
+                : aeronOrders.cancel(request.userId(), request.orderId());
     }
 
     public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
@@ -527,11 +595,17 @@ public class OrderService {
         return orderUserStateService.get(orderId);
     }
 
+    public OrderResponse get(long userId, long orderId) {
+        return aeronOrders == null ? orderUserStateService.get(userId, orderId) : aeronOrders.get(userId, orderId);
+    }
+
     public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        return orderUserStateService.getByClientOrderId(userId, normalizeClientOrderId(clientOrderId));
+        String normalized = normalizeClientOrderId(clientOrderId);
+        return aeronOrders == null ? orderUserStateService.getByClientOrderId(userId, normalized)
+                : aeronOrders.get(userId, normalized);
     }
 
     public OrderQueryResponse openOrders(long userId, String symbol, int limit) {
@@ -785,6 +859,9 @@ public class OrderService {
         private boolean accepted() {
             return rejectReason == null || rejectReason.isBlank();
         }
+    }
+
+    private record ReservationInput(String asset, long units) {
     }
 
     private record ReservationSequenceSlot(long expectedAccountRevision, String dependsOnCommandId) {
