@@ -1,60 +1,55 @@
 package com.surprising.account.provider.service;
 
-import com.surprising.account.api.model.AccountUserCommand;
-import com.surprising.account.api.model.AccountUserCommandType;
+import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.SettleInstrumentCommand;
+import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.List;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ExpiringContractSettlementFanoutService {
 
-    private final AccountService accountService;
-    private final AccountCommandSubmissionService commandSubmissionService;
-    private final ObjectMapper objectMapper;
+    private final AccountAeronGateway aeron;
+    private final AccountProperties properties;
 
-    public ExpiringContractSettlementFanoutService(AccountService accountService,
-                                                   AccountCommandSubmissionService commandSubmissionService,
-                                                   ObjectMapper objectMapper) {
-        this.accountService = accountService;
-        this.commandSubmissionService = commandSubmissionService;
-        this.objectMapper = objectMapper;
+    public ExpiringContractSettlementFanoutService(AccountAeronGateway aeron, AccountProperties properties) {
+        this.aeron = aeron;
+        this.properties = properties;
     }
 
     public int fanout(DeliverySettlementEvent event) {
-        return enqueue(accountService.planDeliverySettlement(event), AccountUserCommandType.DELIVERY_SETTLE);
+        submit(event.symbol(), event.version(), event.settlementPriceTicks(), 0,
+                settlementTime(event.deliveryTime(), event.eventTime()));
+        return 1;
     }
 
     public int fanout(OptionExerciseEvent event) {
-        return enqueue(accountService.planOptionExercise(event), AccountUserCommandType.OPTION_EXERCISE);
+        submit(event.symbol(), event.version(), 0, event.cashSettlementUnitsPerContract(),
+                settlementTime(event.deliveryTime(), event.eventTime()));
+        return 1;
     }
 
-    private int enqueue(List<AccountService.UserExpiringSettlementPlan> plans, AccountUserCommandType type) {
-        Instant now = Instant.now();
-        for (AccountService.UserExpiringSettlementPlan plan : plans) {
-            var payload = plan.command();
-            String commandId = type.name() + ":" + plan.productLine().name() + ":" + payload.symbol()
-                    + ":" + payload.instrumentVersion() + ":" + plan.userId() + ":"
-                    + payload.marginMode().name() + ":" + payload.positionSide().name() + ":"
-                    + payload.settlementPriceTicks() + ":" + payload.cashSettlementUnitsPerContract();
-            AccountUserCommand command = new AccountUserCommand(
-                    AccountUserCommand.CURRENT_SCHEMA_VERSION,
-                    commandId,
-                    plan.productLine(),
-                    plan.userId(),
-                    type,
-                    "INSTRUMENT_LIFECYCLE",
-                    payload.symbol() + ":" + payload.instrumentVersion(),
-                    null,
-                    objectMapper.writeValueAsString(payload),
-                    now,
-                    null);
-            // Kafka 只负责把命令交给账户用户分区 WAL；数据库 outbox 不再参与生命周期结算入口。
-            commandSubmissionService.submit(command);
+    private void submit(String symbol, long version, long settlementPriceTicks,
+                        long optionCashUnitsPerContract, Instant settlementTime) {
+        long settlementId = settlementTime.toEpochMilli();
+        String identity = properties.getKafka().getProductLine() + ":lifecycle:" + symbol.toUpperCase()
+                + ':' + settlementId;
+        aeron.command(CoreMessageType.SETTLE_INSTRUMENT,
+                UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8)), 0,
+                TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
+                        settlementId, symbol, version, settlementPriceTicks, optionCashUnitsPerContract)));
+    }
+
+    private static Instant settlementTime(Instant deliveryTime, Instant eventTime) {
+        Instant value = deliveryTime == null ? eventTime : deliveryTime;
+        if (value == null || value.toEpochMilli() <= 0) {
+            throw new IllegalArgumentException("settlement time must be positive");
         }
-        return plans.size();
+        return value;
     }
 }

@@ -331,64 +331,6 @@ public class AccountService {
         return commandGateway.adjustPositionMargin(request);
     }
 
-    public List<UserExpiringSettlementPlan> planDeliverySettlement(DeliverySettlementEvent event) {
-        if (event == null || event.status() != com.surprising.instrument.api.model.InstrumentStatus.CLOSED) {
-            throw new IllegalArgumentException("交割结算事件必须是 CLOSED");
-        }
-        if (event.settlementPriceTicks() <= 0L || event.settlementMethod() != ContractSettlementMethod.CASH) {
-            throw new IllegalArgumentException("交割结算必须携带有效现金结算价");
-        }
-        InstrumentResponse instrument = requireLifecycleInstrument(event.instrument(), event.symbol(), event.version());
-        if (instrument.contractType() != event.contractType() || !instrument.contractType().isDelivery()) {
-            throw new IllegalArgumentException("交割事件合约类型不匹配");
-        }
-        ProductLine productLine = instrument.contractType().productLine();
-        Instant settlementTime = event.deliveryTime() != null ? event.deliveryTime() : event.eventTime();
-        return stateReducer.partitionsForSymbol(productLine, instrument.symbol()).stream()
-                .flatMap(partition -> stateReducer.snapshot(partition).orElseThrow().positions().stream()
-                        .filter(position -> position.symbol().equalsIgnoreCase(instrument.symbol())
-                                && position.signedQuantitySteps() != 0L)
-                        .map(position -> new UserExpiringSettlementPlan(productLine, partition.userId(),
-                                new ExpiringPositionSettlementAccountCommand(instrument.symbol(), position.instrumentVersion(),
-                                        position.marginMode(), position.positionSide(), event.settlementPriceTicks(), 0L,
-                                        "DELIVERY_SETTLEMENT", "DELIVERY_SETTLEMENT", settlementTime))))
-                .toList();
-    }
-
-    public List<UserExpiringSettlementPlan> planOptionExercise(OptionExerciseEvent event) {
-        if (event == null || event.status() != com.surprising.instrument.api.model.InstrumentStatus.CLOSED) {
-            throw new IllegalArgumentException("期权行权事件必须是 CLOSED");
-        }
-        if (event.settlementMethod() != ContractSettlementMethod.CASH
-                || event.underlyingSettlementPriceUnits() <= 0L) {
-            throw new IllegalArgumentException("期权行权必须携带有效标的结算价");
-        }
-        InstrumentResponse instrument = requireLifecycleInstrument(event.instrument(), event.symbol(), event.version());
-        if (instrument.contractType() != ContractType.VANILLA_OPTION
-                || instrument.optionType() != event.optionType()
-                || instrument.optionExerciseStyle() != OptionExerciseStyle.EUROPEAN
-                || !normalizeSymbol(event.underlyingSymbol()).equals(normalizeSymbol(instrument.underlyingSymbol()))) {
-            throw new IllegalArgumentException("期权行权事件合约快照不匹配");
-        }
-        Instant settlementTime = event.deliveryTime() != null ? event.deliveryTime() : event.eventTime();
-        ProductLine productLine = ProductLine.OPTION;
-        return stateReducer.partitionsForSymbol(productLine, instrument.symbol()).stream()
-                .flatMap(partition -> stateReducer.snapshot(partition).orElseThrow().positions().stream()
-                        .filter(position -> position.symbol().equalsIgnoreCase(instrument.symbol())
-                                && position.signedQuantitySteps() != 0L)
-                        .map(position -> new UserExpiringSettlementPlan(productLine, partition.userId(),
-                                new ExpiringPositionSettlementAccountCommand(instrument.symbol(), position.instrumentVersion(),
-                                        position.marginMode(), position.positionSide(), 0L,
-                                        event.cashSettlementUnitsPerContract(),
-                                        "OPTION_EXERCISE", "OPTION_EXERCISE", settlementTime))))
-                .toList();
-    }
-
-    public record UserExpiringSettlementPlan(ProductLine productLine,
-                                             long userId,
-                                             ExpiringPositionSettlementAccountCommand command) {
-    }
-
     private PerpetualAccountStateUpdatedEvent localSnapshot(ProductLine productLine, long userId) {
         requireUserId(userId);
         requireCurrentProduct(productLine);

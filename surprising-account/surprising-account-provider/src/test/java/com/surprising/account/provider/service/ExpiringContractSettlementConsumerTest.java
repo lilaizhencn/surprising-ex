@@ -156,7 +156,7 @@ class ExpiringContractSettlementConsumerTest {
         private OptionExerciseEvent optionEvent;
 
         private RecordingFanoutService() {
-            super(null, null, null);
+            super(null, null);
         }
 
         @Override

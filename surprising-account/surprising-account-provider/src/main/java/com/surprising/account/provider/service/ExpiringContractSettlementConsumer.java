@@ -48,7 +48,7 @@ public class ExpiringContractSettlementConsumer {
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "delivery settlement");
             requireCurrentProductTopic(record.topic(), deliverySettlementsTopic(), "delivery settlement");
             int commands = requireFanoutService().fanout(event);
-            log.info("Enqueued delivery settlement symbol={} version={} userCommands={}",
+            log.info("Applied Aeron delivery settlement symbol={} version={} coreCommands={}",
                     event.symbol(), event.version(), commands);
         } catch (Exception ex) {
             log.error("Failed to process delivery settlement: {}", ex.getMessage(), ex);
@@ -73,7 +73,7 @@ public class ExpiringContractSettlementConsumer {
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "option exercise");
             requireCurrentProductTopic(record.topic(), optionExercisesTopic(), "option exercise");
             int commands = requireFanoutService().fanout(event);
-            log.info("Enqueued option exercise symbol={} version={} userCommands={}",
+            log.info("Applied Aeron option exercise symbol={} version={} coreCommands={}",
                     event.symbol(), event.version(), commands);
         } catch (Exception ex) {
             log.error("Failed to process option exercise: {}", ex.getMessage(), ex);
