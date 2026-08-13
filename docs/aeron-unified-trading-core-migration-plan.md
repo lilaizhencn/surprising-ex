@@ -1184,6 +1184,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] Account 使用进程内固定 Aeron session 池（默认 4），连接延迟建立、故障后重连；Cluster 不可用时失败关闭且无旧链路回退。
 - [x] Account provider 全依赖 `clean test` 122/122 通过；新增门面测试后相关 5/5 通过。
 - [x] 保留原三节点 SPOT 卷以当前镜像重启，v3→v4 恢复后 `appliedCommandCount=29`、Export `ack=27,next=28,pending=0`。
+- [x] 将固定并发 session、消息头、source sequence、延迟连接和故障重连抽到共享 `AeronClientPool`；业务模块只负责命令 payload、结果码和查询视图映射。
 - [ ] Account/Order/Funding/Risk/Liquidation 现有服务入口切换到 Aeron 后删除旧实现。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
@@ -1239,6 +1240,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P0 | 决策 | 每次只压一条产品线 | 隔离容量和资金结论 | 本文第 16 节 | 形成六份独立报告 |
 | 2026-08-13 | P6 | 实现 | 在删除 Account WAL 前补齐仓位模式、逐仓保证金和双向持仓 | 旧 Account API 已提供这些资金功能，不能以删 API 代替迁移 | `TradingCoreReducerTest`、`TradingStateSnapshotCodecTest` | REST 切换可保持原功能契约且由 Aeron 唯一裁决 |
 | 2026-08-13 | P6 | 实现 | Account 对外资金命令与强查询直接使用 Aeron session 池 | 去除 HTTP→Kafka/WAL→轮询结果的额外跳数，Cluster 不可用时明确失败关闭 | `AccountCommandGatewayTest`、`AccountServiceLocalSnapshotTest`、SPOT 保卷重启 | 内部 Order/Matching/Funding 等调用仍需在 P6 后续切换 |
+| 2026-08-13 | P6 | 实现 | Aeron session 池下沉到共享 client 模块且不解释业务结果码 | Order、Funding、ADL 等后续迁移复用同一并发和重连机制，避免每个 provider 复制连接管理 | `AeronClientPoolTest`、Account provider 回归 | 共享层保持无 Spring、无业务模块依赖；各 provider 继续失败关闭 |
 | 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
 | 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
 | 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |
