@@ -9,7 +9,7 @@ PRODUCT_LINE_SLUG="$(printf '%s' "${PRODUCT_LINE}" | tr '[:upper:]_' '[:lower:]-
 export PRODUCT_LINE PRODUCT_LINE_SLUG
 
 usage() {
-  echo "usage: PRODUCT_LINE=SPOT $0 build|up|down|wait-ready|probe|hash|funds-smoke|funds-verify|logs|ps"
+  echo "usage: PRODUCT_LINE=SPOT $0 build|up|down|wait-ready|probe|hash|funds-smoke|funds-verify|spot-match-smoke|spot-match-verify|logs|ps"
 }
 
 wait_ready() {
@@ -53,6 +53,14 @@ case "${1:-}" in
   funds-verify)
     wait_ready
     FUNDS_SMOKE_MODE=verify docker compose -f "${COMPOSE_FILE}" run --rm funds-smoke
+    ;;
+  spot-match-smoke)
+    wait_ready
+    SPOT_MATCH_SMOKE_MODE=execute docker compose -f "${COMPOSE_FILE}" run --rm spot-match-smoke
+    ;;
+  spot-match-verify)
+    wait_ready
+    SPOT_MATCH_SMOKE_MODE=verify docker compose -f "${COMPOSE_FILE}" run --rm spot-match-smoke
     ;;
   logs)
     docker compose -f "${COMPOSE_FILE}" logs --tail=200 node0 node1 node2

@@ -45,6 +45,24 @@ public record OrderReservation(
                 Math.addExact(releasedUnits, remainingUnits()), consumedUnits, orderQuantitySteps);
     }
 
+    public OrderReservation consume(long units) {
+        if (units <= 0 || units > remainingUnits()) {
+            throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
+                    "order reservation is insufficient for fill");
+        }
+        return new OrderReservation(orderId, symbol, instrumentVersion, kind, asset, reservedUnits,
+                releasedUnits, Math.addExact(consumedUnits, units), orderQuantitySteps);
+    }
+
+    public OrderReservation replaceReservedUnits(long newReservedUnits) {
+        if (newReservedUnits <= 0 || newReservedUnits < Math.addExact(releasedUnits, consumedUnits)) {
+            throw new CoreStateRejectedException("INVALID_REPLACEMENT_RESERVATION",
+                    "replacement reservation is below already settled units");
+        }
+        return new OrderReservation(orderId, symbol, instrumentVersion, kind, asset, newReservedUnits,
+                releasedUnits, consumedUnits, orderQuantitySteps);
+    }
+
     static String normalizeSymbol(String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("symbol is required");

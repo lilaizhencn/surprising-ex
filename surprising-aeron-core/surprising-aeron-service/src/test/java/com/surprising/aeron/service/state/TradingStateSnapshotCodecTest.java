@@ -10,6 +10,8 @@ import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 class TradingStateSnapshotCodecTest {
 
@@ -39,5 +41,23 @@ class TradingStateSnapshotCodecTest {
         assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(
                 java.util.Arrays.copyOf(encoded, encoded.length - 1), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class);
+    }
+
+    @Test
+    void migratesVersionOneOpenOrdersIntoDeterministicBookPriority() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState state = reducer.adjustBalance(TradingCoreState.empty(ProductLine.SPOT), 7,
+                new BalanceAdjustmentCommand("USDT", 50_000));
+        state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "BTC-USDT", 4, "BTC", "USDT", "USDT",
+                CoreOrderSide.BUY, 500, 2, false, ReservationKind.SPOT_ASSET, "USDT", 1_500));
+        byte[] versionTwo = TradingStateSnapshotCodec.encode(state);
+        int bookOffset = versionTwo.length - (Long.BYTES + Integer.BYTES);
+        byte[] versionOne = java.util.Arrays.copyOf(versionTwo, bookOffset);
+        ByteBuffer.wrap(versionOne).order(ByteOrder.LITTLE_ENDIAN).putInt(1);
+
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(versionOne, ProductLine.SPOT);
+
+        assertThat(restored.bookState().openOrders()).containsKey(71L);
+        assertThat(restored.bookState().openOrders().get(71L).prioritySequence()).isOne();
     }
 }

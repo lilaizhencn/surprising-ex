@@ -14,6 +14,7 @@ class TradingCommandCodecTest {
                 CoreOrderSide.BUY, 60_000, 3, false,
                 ReservationKind.SPOT_ASSET, "USDT", 2_000);
         CancelOrderCommand cancelOrder = new CancelOrderCommand(7);
+        ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(7, "BTC", "USDT", 61_000, 2_100);
 
         assertThat(TradingCommandCodec.decodeBalanceAdjustment(
                 TradingCommandCodec.encodeBalanceAdjustment(adjustment))).isEqualTo(adjustment);
@@ -21,6 +22,8 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodePlaceOrder(placeOrder))).isEqualTo(placeOrder);
         assertThat(TradingCommandCodec.decodeCancelOrder(
                 TradingCommandCodec.encodeCancelOrder(cancelOrder))).isEqualTo(cancelOrder);
+        assertThat(TradingCommandCodec.decodeReplaceOrder(
+                TradingCommandCodec.encodeReplaceOrder(replaceOrder))).isEqualTo(replaceOrder);
     }
 
     @Test

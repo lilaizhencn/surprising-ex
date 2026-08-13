@@ -52,7 +52,9 @@ Aeron Cluster 适合低延迟复制状态机，不替代所有数据分发场景
 ## Snapshot 决策
 
 第一版 Aeron Snapshot 保存可精确恢复 Exchange Core 价格时间优先级的开放订单状态，恢复后重建
-Exchange Core 并校验状态哈希。不启用 Exchange Core 的本地磁盘 journal，避免第二权威日志。
+Exchange Core 并校验规范化 Book State hash。不启用 Exchange Core 的本地磁盘 journal，避免第二权威日志。
+运行中的 Member 另用 `StateHashReportQuery` 的 `MATCHING_ORDER_BOOKS` 子模块检查执行器一致性；该内部
+hash 包含已成交历史字段，不能作为只保存开放订单的 Snapshot 恢复 hash。
 
 如果生产数据证明重建时间不能满足 RTO，再通过新 ADR 评估将 Exchange Core 原生序列化数据嵌入
 Aeron Snapshot。性能问题不能成为偷偷恢复本地权威 WAL 的理由。

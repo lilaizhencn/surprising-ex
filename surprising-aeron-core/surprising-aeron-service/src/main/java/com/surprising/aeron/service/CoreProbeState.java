@@ -18,13 +18,14 @@ import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import com.surprising.product.api.ProductLine;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
-public final class CoreProbeState {
+public final class CoreProbeState implements AutoCloseable {
 
     static final int MAX_IDEMPOTENCY_RESULTS = 128;
     private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
@@ -34,6 +35,7 @@ public final class CoreProbeState {
     private final LinkedHashMap<UUID, StoredResult> commandResults;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final TradingCoreReducer tradingReducer;
+    private final DeterministicExchangeCoreAdapter matchingAdapter;
     private long appliedCommandCount;
     private long probeValue;
     private TradingCoreState tradingState;
@@ -57,6 +59,8 @@ public final class CoreProbeState {
         this.lastSourceSequences = lastSourceSequences;
         this.tradingState = tradingState;
         this.tradingReducer = new TradingCoreReducer();
+        this.matchingAdapter = new DeterministicExchangeCoreAdapter();
+        this.matchingAdapter.rebuild(tradingState.bookState());
     }
 
     static CoreProbeState restore(
@@ -225,17 +229,82 @@ public final class CoreProbeState {
             case ADJUST_BALANCE -> tradingState = tradingReducer.adjustBalance(
                     tradingState, message.header().userId(),
                     TradingCommandCodec.decodeBalanceAdjustment(message.payload()));
-            case PLACE_ORDER -> tradingState = tradingReducer.placeOrder(
-                    tradingState, message.header().userId(),
-                    TradingCommandCodec.decodePlaceOrder(message.payload()));
-            case CANCEL_ORDER -> tradingState = tradingReducer.cancelOrder(
-                    tradingState, message.header().userId(),
-                    TradingCommandCodec.decodeCancelOrder(message.payload()));
+            case PLACE_ORDER -> placeOrder(message);
+            case CANCEL_ORDER -> cancelOrder(message);
+            case REPLACE_ORDER -> replaceOrder(message);
             default -> {
                 return null;
             }
         }
         return ResponseStatus.APPLIED;
+    }
+
+    private void placeOrder(CoreMessage message) {
+        var command = TradingCommandCodec.decodePlaceOrder(message.payload());
+        TradingCoreState before = tradingState;
+        TradingCoreState reserved = tradingReducer.placeOrder(before, message.header().userId(), command);
+        try {
+            var matchingResult = matchingAdapter.place(message.header().userId(), command);
+            if (!matchingResult.accepted()) {
+                throw new CoreStateRejectedException("MATCHING_REJECTED", matchingResult.resultCode());
+            }
+            tradingState = tradingReducer.applyMatches(reserved, command.orderId(),
+                    command.baseAsset(), command.quoteAsset(), matchingResult.matches());
+        } catch (RuntimeException exception) {
+            matchingAdapter.rebuild(before.bookState());
+            throw exception;
+        }
+    }
+
+    private void cancelOrder(CoreMessage message) {
+        var command = TradingCommandCodec.decodeCancelOrder(message.payload());
+        TradingCoreState before = tradingState;
+        TradingCoreState canceled = tradingReducer.cancelOrder(before, message.header().userId(), command);
+        if (canceled == before) {
+            return;
+        }
+        var order = before.order(command.orderId());
+        try {
+            var matchingResult = matchingAdapter.cancel(message.header().userId(), command.orderId(), order.symbol());
+            if (!matchingResult.accepted()) {
+                throw new CoreStateRejectedException("MATCHING_REJECTED", matchingResult.resultCode());
+            }
+            tradingState = canceled;
+        } catch (RuntimeException exception) {
+            matchingAdapter.rebuild(before.bookState());
+            throw exception;
+        }
+    }
+
+    private void replaceOrder(CoreMessage message) {
+        var command = TradingCommandCodec.decodeReplaceOrder(message.payload());
+        TradingCoreState before = tradingState;
+        var order = before.order(command.orderId());
+        if (order == null) {
+            throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+        }
+        TradingCoreState prepared = tradingReducer.prepareReplace(before, message.header().userId(), command);
+        try {
+            var matchingResult = matchingAdapter.replace(message.header().userId(), command.orderId(),
+                    order.symbol(), command.newPriceTicks());
+            if (!matchingResult.accepted()) {
+                throw new CoreStateRejectedException("MATCHING_REJECTED", matchingResult.resultCode());
+            }
+            tradingState = tradingReducer.applyMatches(prepared, command.orderId(),
+                    command.baseAsset(), command.quoteAsset(), matchingResult.matches());
+        } catch (RuntimeException exception) {
+            matchingAdapter.rebuild(before.bookState());
+            throw exception;
+        }
+    }
+
+    int matchingStateHash() {
+        return matchingAdapter.orderBooksStateHash();
+    }
+
+    @Override
+    public void close() {
+        matchingAdapter.close();
     }
 
     private CoreResponse userStateResponse(long userId) {

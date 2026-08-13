@@ -42,7 +42,8 @@ ADR 中说明，而不是为同一概念继续增加别名。
 | eventId | Exporter 重试时保持不变的稳定事件 ID，供所有消费者幂等。 | Kafka producer 自动生成的消息 ID。 |
 | stateVersion | 聚合在状态变化后的单调业务版本。 | 数据库更新时间。 |
 | State Hash | 对规范化权威状态计算的稳定哈希，用于副本和回放一致性验证。 | Java 对象默认 `hashCode()`。 |
-| Book Hash | 对 Exchange Core/Book State 规范化结果计算的稳定哈希。 | 行情 depth 前几档的哈希。 |
+| Book State Hash | 对开放订单、剩余数量和价格时间优先序计算的规范化稳定哈希，用于 Snapshot 恢复。 | 行情 depth 前几档或 Exchange Core 内部对象 hash。 |
+| Exchange Core Runtime Hash | `StateHashReportQuery` 的 `MATCHING_ORDER_BOOKS` 子模块结果，用于运行中 Member 执行器一致性。 | 从开放订单重建后必须与包含成交历史的旧内部 hash 相同。 |
 | Deterministic Replay | 对相同命令、顺序和逻辑时间重复执行，得到完全相同状态。 | 从 PostgreSQL 猜测性重建开放订单。 |
 | RPO | 故障后允许丢失的已提交核心命令数量；目标为零。 | Kafka/PG 短时可见延迟。 |
 | RTO | 从故障发生到恢复规定服务能力的时间，按 Leader 切换、Follower rejoin 和冷启动分别测量。 | 单个 JVM 启动耗时。 |

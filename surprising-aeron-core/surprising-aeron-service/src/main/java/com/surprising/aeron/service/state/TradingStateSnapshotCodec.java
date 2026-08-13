@@ -12,7 +12,8 @@ import java.util.TreeMap;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
+    private static final int VERSION_1 = 1;
     private static final int MAX_TEXT_BYTES = 64;
 
     private TradingStateSnapshotCodec() {
@@ -72,13 +73,24 @@ public final class TradingStateSnapshotCodec {
             writer.intValue(order.status().ordinal());
             writer.longValue(order.revision());
         });
+        writer.longValue(state.bookState().nextPrioritySequence());
+        writer.intValue(state.bookState().openOrders().size());
+        state.bookState().recoveryOrder().forEach(order -> {
+            writer.longValue(order.orderId());
+            writer.longValue(order.userId());
+            writer.text(order.symbol());
+            writer.intValue(order.side().wireCode());
+            writer.longValue(order.priceTicks());
+            writer.longValue(order.remainingQuantitySteps());
+            writer.longValue(order.prioritySequence());
+        });
         return writer.toByteArray();
     }
 
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION) {
+        if (version != VERSION && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
@@ -145,8 +157,36 @@ public final class TradingStateSnapshotCodec {
                     CoreOrderStatus.values()[statusCode], reader.positiveLong("order revision"));
             putUnique(orders, orderId, order);
         }
+        CoreBookState bookState;
+        if (version == VERSION_1) {
+            Map<Long, CoreBookOrder> migratedOrders = new TreeMap<>();
+            long prioritySequence = 1;
+            for (CoreOrderState order : orders.values()) {
+                if (order.status() == CoreOrderStatus.OPEN) {
+                    migratedOrders.put(order.orderId(), new CoreBookOrder(order.orderId(), order.userId(),
+                            order.symbol(), order.side(), order.priceTicks(), order.remainingQuantitySteps(),
+                            prioritySequence));
+                    prioritySequence = Math.incrementExact(prioritySequence);
+                }
+            }
+            bookState = new CoreBookState(prioritySequence, migratedOrders);
+        } else {
+            long nextPrioritySequence = reader.positiveLong("next book priority sequence");
+            int bookOrderCount = reader.count("book orders");
+            Map<Long, CoreBookOrder> bookOrders = new TreeMap<>();
+            for (int index = 0; index < bookOrderCount; index++) {
+                long orderId = reader.positiveLong("book orderId");
+                CoreBookOrder bookOrder = new CoreBookOrder(orderId,
+                        reader.positiveLong("book userId"), reader.text(),
+                        CoreOrderSide.fromWireCode(reader.intValue()),
+                        reader.positiveLong("book price"), reader.positiveLong("book remaining quantity"),
+                        reader.positiveLong("book priority sequence"));
+                putUnique(bookOrders, orderId, bookOrder);
+            }
+            bookState = new CoreBookState(nextPrioritySequence, bookOrders);
+        }
         reader.requireConsumed();
-        return new TradingCoreState(productLine, revision, users, orders);
+        return new TradingCoreState(productLine, revision, users, orders, bookState);
     }
 
     private static <K, V> void putUnique(Map<K, V> values, K key, V value) {

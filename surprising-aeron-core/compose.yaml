@@ -100,6 +100,26 @@ services:
       - /opt/surprising/tools.jar
       - com.surprising.aeron.tools.ClusterFundsSmokeMain
 
+  spot-match-smoke:
+    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    profiles: [tools]
+    init: true
+    hostname: spot-match-smoke
+    shm_size: 256mb
+    networks:
+      - cluster
+    entrypoint:
+      - java
+      - --add-opens
+      - java.base/jdk.internal.misc=ALL-UNNAMED
+      - -Dsurprising.aeron.hostnames=node0,node1,node2
+      - -Dsurprising.aeron.egress-hostname=spot-match-smoke
+      - -Dsurprising.aeron.smoke-seed=${SPOT_MATCH_SMOKE_SEED:-3001}
+      - -Dsurprising.aeron.smoke-mode=${SPOT_MATCH_SMOKE_MODE:-execute}
+      - -cp
+      - /opt/surprising/tools.jar
+      - com.surprising.aeron.tools.ClusterSpotMatchSmokeMain
+
 networks:
   cluster:
 

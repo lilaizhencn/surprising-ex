@@ -86,6 +86,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster cluster) {
+        state.close();
     }
 
     @Override
@@ -118,7 +119,9 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (snapshot.size() == 0) {
             throw new IllegalStateException("incomplete Aeron core snapshot");
         }
-        state = CoreProbeState.fromSnapshot(productLine, snapshot.toByteArray());
+        CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot.toByteArray());
+        state.close();
+        state = restored;
     }
 
     private void offer(ClientSession session, byte[] encoded) {

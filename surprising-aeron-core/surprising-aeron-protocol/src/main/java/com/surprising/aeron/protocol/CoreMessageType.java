@@ -8,6 +8,7 @@ public enum CoreMessageType {
     ADJUST_BALANCE(10, WireMessageKind.COMMAND),
     PLACE_ORDER(11, WireMessageKind.COMMAND),
     CANCEL_ORDER(12, WireMessageKind.COMMAND),
+    REPLACE_ORDER(13, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),

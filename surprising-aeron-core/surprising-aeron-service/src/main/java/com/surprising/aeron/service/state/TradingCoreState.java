@@ -9,10 +9,11 @@ public record TradingCoreState(
         ProductLine productLine,
         long revision,
         Map<Long, CoreUserState> users,
-        Map<Long, CoreOrderState> orders) {
+        Map<Long, CoreOrderState> orders,
+        CoreBookState bookState) {
 
     public TradingCoreState {
-        if (productLine == null || revision < 0 || users == null || orders == null) {
+        if (productLine == null || revision < 0 || users == null || orders == null || bookState == null) {
             throw new IllegalArgumentException("invalid trading core state");
         }
         Map<Long, CoreUserState> sortedUsers = Collections.unmodifiableMap(new TreeMap<>(users));
@@ -28,12 +29,21 @@ public record TradingCoreState(
                 throw new IllegalArgumentException("order state belongs to another partition");
             }
         });
+        bookState.openOrders().forEach((orderId, bookOrder) -> {
+            CoreOrderState order = sortedOrders.get(orderId);
+            if (order == null || order.status() != CoreOrderStatus.OPEN
+                    || order.userId() != bookOrder.userId() || !order.symbol().equals(bookOrder.symbol())
+                    || order.side() != bookOrder.side() || order.priceTicks() != bookOrder.priceTicks()
+                    || order.remainingQuantitySteps() != bookOrder.remainingQuantitySteps()) {
+                throw new IllegalArgumentException("book order does not match authoritative order state");
+            }
+        });
         users = sortedUsers;
         orders = sortedOrders;
     }
 
     public static TradingCoreState empty(ProductLine productLine) {
-        return new TradingCoreState(productLine, 0, Map.of(), Map.of());
+        return new TradingCoreState(productLine, 0, Map.of(), Map.of(), CoreBookState.empty());
     }
 
     public CoreUserState user(long userId) {
@@ -53,7 +63,12 @@ public record TradingCoreState(
         for (CoreOrderState order : orders.values()) {
             hash = hashOrder(hash, order);
         }
+        hash = CoreStateHash.mix(hash, bookState.stateHash(null));
         return hash;
+    }
+
+    public long bookStateHash(String symbol) {
+        return bookState.stateHash(symbol);
     }
 
     public long userStateHash(long userId) {

@@ -41,4 +41,25 @@ public record CoreOrderState(
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, CoreOrderStatus.CANCELED,
                 Math.incrementExact(revision));
     }
+
+    public CoreOrderState fill(long quantitySteps) {
+        if (status != CoreOrderStatus.OPEN || quantitySteps <= 0 || quantitySteps > remainingQuantitySteps) {
+            throw new IllegalStateException("invalid order fill");
+        }
+        long nextExecuted = Math.addExact(executedQuantitySteps, quantitySteps);
+        long nextRemaining = Math.subtractExact(remainingQuantitySteps, quantitySteps);
+        return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
+                side, priceTicks, quantitySteps(), nextExecuted, nextRemaining, reduceOnly,
+                nextRemaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN,
+                Math.incrementExact(revision));
+    }
+
+    public CoreOrderState replacePrice(long newPriceTicks) {
+        if (status != CoreOrderStatus.OPEN || newPriceTicks <= 0) {
+            throw new IllegalStateException("invalid order replace");
+        }
+        return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
+                side, newPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
+                reduceOnly, status, Math.incrementExact(revision));
+    }
 }

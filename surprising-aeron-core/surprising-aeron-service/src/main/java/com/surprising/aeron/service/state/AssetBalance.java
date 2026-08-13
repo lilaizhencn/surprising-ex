@@ -39,6 +39,19 @@ public record AssetBalance(String asset, long availableUnits, long lockedUnits) 
         return new AssetBalance(asset, Math.addExact(availableUnits, units), Math.subtractExact(lockedUnits, units));
     }
 
+    public AssetBalance consumeLocked(long units) {
+        requirePositive(units);
+        if (lockedUnits < units) {
+            throw new CoreStateRejectedException("INSUFFICIENT_LOCKED_BALANCE", "locked balance is insufficient");
+        }
+        return new AssetBalance(asset, availableUnits, Math.subtractExact(lockedUnits, units));
+    }
+
+    public AssetBalance credit(long units) {
+        requirePositive(units);
+        return new AssetBalance(asset, Math.addExact(availableUnits, units), lockedUnits);
+    }
+
     static String normalizeAsset(String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("asset is required");

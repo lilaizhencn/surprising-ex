@@ -8,7 +8,7 @@
 | 基线分支 | `master` |
 | 基线提交 | `dc46edabcd606fea85517974391739942d5f51e2` |
 | 目标实施分支 | `codex/aeron-unified-core` |
-| 当前阶段 | `P3 Exchange Core Adapter 设计与实现` |
+| 当前阶段 | `P4 Risk、强平和生命周期设计与实现` |
 | 最后更新日期 | `2026-08-13` |
 | 上线状态 | 项目尚未上线，无生产历史数据和兼容包袱 |
 | 架构决策 | [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md) |
@@ -229,8 +229,10 @@ Adapter 中禁止：
 - 写 Kafka 或本地 outbox。
 - 在副本间使用不同线程调度决定业务顺序。
 
-第一版 Snapshot 保存足以精确重建价格时间优先级的开放订单序列。恢复后调用 Exchange Core
-`StateHashReportQuery`，与 Snapshot 中的预期 book hash 对比。只有实测恢复不达标时，才实现内存版
+第一版 Snapshot 保存足以精确重建价格时间优先级的开放订单序列。运行中的三个 Member 使用 Exchange Core
+`StateHashReportQuery` 的 `MATCHING_ORDER_BOOKS` 子模块检查执行器一致性；Snapshot 恢复使用规范化
+`BookState hash` 检查逻辑订单簿一致性。Exchange Core 0.5.3 的内部订单簿 hash 包含已成交历史字段，不能把
+“剩余开放订单重建后的内部 hash 不同”误判为逻辑订单簿不一致。只有实测恢复不达标时，才实现内存版
 `ISerializationProcessor` 把 Exchange Core 原生序列化片段嵌入 Aeron Snapshot；不启用其本地磁盘 journal。
 
 ### 7.5 Risk State
@@ -882,7 +884,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | P0 | `DONE` | 方案冻结、基线和垃圾文件清理 | 本文档、ADR、术语表；基线模块测试通过 | `e4917e3` |
 | P1 | `DONE` | Aeron 协议、三节点骨架和工具 | schema v1 golden；Snapshot/幂等测试；三节点 Leader kill 后 hash 连续 | `6bd1cb3` |
 | P2 | `DONE` | User/Order State 和资金预占 | 订单/账户单测、六线规则、幂等、资金不变量和 Snapshot v2 | `20d5bbd` |
-| P3 | `NOT_STARTED` | Exchange Core Adapter 和 Book State | 撮合矩阵、book hash、Snapshot 重建测试 | 待填写 |
+| P3 | `DONE` | Exchange Core Adapter 和 Book State | 六线撮合组件测试；SPOT 三节点成交、Leader kill、冷恢复资金守恒 | 本阶段提交 |
 | P4 | `NOT_STARTED` | Risk、强平和生命周期进入核心 | 风险/强平/资金费/交割/期权组件测试 | 待填写 |
 | P5 | `NOT_STARTED` | Snapshot、Replay、Exporter 和投影 | Leader kill、冷恢复、Exporter 故障测试 | 待填写 |
 | P6 | `NOT_STARTED` | 删除旧 WAL、Redis Risk 和旧强平链 | 全仓引用清零、全量 Maven 测试 | 待填写 |
@@ -1009,12 +1011,50 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 
 任务：
 
-- [ ] 将 Exchange Core 生命周期放进 Clustered Service。
-- [ ] 去除 Adapter 的数据库、HTTP、Valkey和 wall-clock 依赖。
-- [ ] 实现 place/cancel/replace 和完整 fill 映射。
-- [ ] 原子更新 maker/taker Order/User State。
-- [ ] 实现可快照 Book State 和恢复重建。
-- [ ] 使用 `StateHashReportQuery` 校验重建。
+- [x] 将 Exchange Core 生命周期放进 Clustered Service。
+- [x] 去除 Adapter 的数据库、HTTP、Valkey和 wall-clock 依赖。
+- [x] 实现 place/cancel/replace 和 Exchange Core trade fill 映射。
+- [x] 原子更新 maker/taker Order/User State。
+- [x] 实现可快照 Book State 和恢复重建。
+- [x] 使用 `StateHashReportQuery` 校验运行中执行器，并用 Book State hash 校验恢复重建。
+
+实际修改：
+
+- 新增 `DeterministicExchangeCoreAdapter`，在每个 Clustered Service Member 内启动单线程、无风险裁决、
+  无 journal 的 Exchange Core 0.5.3；symbol/user ID 由稳定函数生成，不访问数据库、HTTP、Kafka、Valkey
+  或 wall clock。
+- 新增 `CoreBookState` 和 `CoreBookOrder`，保存开放订单剩余数量及严格单调的价格时间优先序；Snapshot
+  升级为业务状态 v2，仍兼容读取 P2 v1 状态。
+- `PLACE_ORDER`、`CANCEL_ORDER` 和新增 `REPLACE_ORDER` 同步驱动 Exchange Core；trade callback 先被
+  规范化为 `CoreMatch`，再由 `TradingCoreReducer` 原子更新 maker/taker 订单、Reservation、Balance、
+  Position 与 Book State。
+- 现货成交原子执行 base/quote 双资产交换并逐资产保持总额守恒；衍生品开仓按已成交比例把订单预占转为
+  Position Margin。撮合已改变但状态 reducer 拒绝时，Adapter 立即从提交前 Book State 重建，防止执行器
+  与权威状态分叉。
+- 状态内拒绝同用户自成交和同 symbol 不同 instrument version 混簿；BUY 的 Exchange Core
+  `reservePrice` 使用最大 long，使资金和改单上限只由 Aeron Reservation 裁决，不产生第二资金裁决者。
+- 新增 `ClusterSpotMatchSmokeMain` 和脚本入口，用固定 seed 对 seller/buyer 做真实成交、资金守恒和恢复查询。
+
+验收证据（2026-08-13，JDK `25.0.4`，Aeron `1.52.2`，Exchange Core `0.5.3`）：
+
+- Maven：product-api 18、protocol 9、service 27、tools 2 个测试全部通过；client 编译通过。
+- 六线组件测试：SPOT 验证 maker/taker 双资产交换、部分成交、完全成交、总 BTC/USDT 守恒和 Snapshot
+  重建；四条非期权衍生品线逐线验证双边成交、订单终态和 Position Margin 转移；OPTION 在权利金模型
+  缺失时拒绝成交并回滚 Exchange Core，业务 hash、maker 订单和资金保持不变。
+- replace 测试验证补充 Reservation、失去原价格时间优先级、成交和终态释放；Snapshot 恢复后继续吃掉
+  剩余 maker，规范化 Book State hash 和最终开放订单集一致。
+- Docker SPOT 三节点：固定 seed 真实成交后输出
+  `spotMatchSmoke=PASS btcTotal=5 usdtTotal=500`；实际 Leader `node1` 停止后选出 `node2`，同 seed 查询输出
+  `spotMatchRecovery=PASS`；三节点全停、保留卷、重启后再次输出相同恢复结果。项目容器已停止，卷保留。
+
+阶段边界：
+
+- P3 完成撮合生命周期、Book 恢复和现货资金结算；衍生品当前只验收同方向开仓和 Position Margin 转移。
+  反向合约/平仓 PnL、手续费、期权权利金、reduce-only 容量和生命周期数学属于 P4，目前相关路径
+  fail-closed，不用近似公式生成错误资金。
+- P3 的 `StateHashReportQuery` 用于运行中 Member 的 Exchange Core 执行器一致性；Snapshot 恢复门禁使用
+  规范化 Book State hash。Exchange Core 内部 hash 包含成交历史字段，不能替代规范化恢复 hash。
+- P5 仍负责 Snapshot checksum/manifest、Archive replay 完整矩阵、Exporter 和 PostgreSQL 投影。
 
 阶段出口：三节点撮合结果、订单簿 hash、资金和订单状态完全一致。
 
@@ -1110,6 +1150,9 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P2 | 决策 | 预占命令显式携带 base/quote/settle asset | symbol 命名不能成为资金币种事实源；核心必须校验现货方向资产与衍生品结算资产 | `TradingCoreReducerTest` | P3 instrument state 必须按 version 再校验这些字段 |
 | 2026-08-13 | P2 | 决策 | 重复响应增加原始 `commandStatus` | 只有 `DUPLICATE` 无法判断超时前原命令成功还是拒绝 | `CoreProbeStateTest` | Gateway 必须按 `commandStatus` 返回原始业务裁决 |
 | 2026-08-13 | P2 | 边界 | `reduceOnly` 在 P2 fail-closed | 未接持仓和成交状态时无法证明订单真的降低风险 | `TradingCoreReducerTest` | P3 接入 Position/Book 后解除 |
+| 2026-08-13 | P3 | 决策 | Exchange Core 只做确定性订单簿执行器，资金与改单 reserve 上限只由 Aeron State 裁决 | 避免 Exchange Core 的用户余额和 reservePrice 成为第二资金权威 | `DeterministicExchangeCoreAdapter`、`CoreMatchingStateTest` | P4 Risk 继续只读 Aeron User/Position State |
+| 2026-08-13 | P3 | 决策 | 运行时校验 Exchange Core `MATCHING_ORDER_BOOKS` hash，恢复校验规范化 Book State hash | Exchange Core 0.5.3 内部 hash 包含已成交历史字段，开放订单重建后逻辑相同但内部 hash 可不同 | `CoreMatchingStateTest` | P5 恢复报告必须同时标明两种 hash 口径 |
+| 2026-08-13 | P3 | 边界 | 衍生品平仓、反向 PnL、手续费、期权权利金继续 fail-closed | P3 没有完整 instrument multiplier、费用和产品 PnL State，近似结算会损坏资金 | `DERIVATIVE_CLOSE_REQUIRES_PNL_MODEL` | P4 必须先补齐产品数学再解除 |
 
 ## 20. 阶段更新模板
 
