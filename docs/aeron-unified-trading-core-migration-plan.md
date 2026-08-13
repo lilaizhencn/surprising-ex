@@ -8,7 +8,7 @@
 | 基线分支 | `master` |
 | 基线提交 | `dc46edabcd606fea85517974391739942d5f51e2` |
 | 目标实施分支 | `codex/aeron-unified-core` |
-| 当前阶段 | `P4 Risk、强平和生命周期设计与实现` |
+| 当前阶段 | `P5 Snapshot、Replay、Exporter 和投影` |
 | 最后更新日期 | `2026-08-13` |
 | 上线状态 | 项目尚未上线，无生产历史数据和兼容包袱 |
 | 架构决策 | [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md) |
@@ -885,8 +885,8 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | P1 | `DONE` | Aeron 协议、三节点骨架和工具 | schema v1 golden；Snapshot/幂等测试；三节点 Leader kill 后 hash 连续 | `6bd1cb3` |
 | P2 | `DONE` | User/Order State 和资金预占 | 订单/账户单测、六线规则、幂等、资金不变量和 Snapshot v2 | `20d5bbd` |
 | P3 | `DONE` | Exchange Core Adapter 和 Book State | 六线撮合组件测试；SPOT 三节点成交、Leader kill、冷恢复资金守恒 | `e206eee` |
-| P4 | `NOT_STARTED` | Risk、强平和生命周期进入核心 | 风险/强平/资金费/交割/期权组件测试 | 待填写 |
-| P5 | `NOT_STARTED` | Snapshot、Replay、Exporter 和投影 | Leader kill、冷恢复、Exporter 故障测试 | 待填写 |
+| P4 | `DONE` | Risk、强平和生命周期进入核心 | 35 个 service 测试；SPOT、线性永续三节点恢复；资金守恒 | `本 P4 阶段提交` |
+| P5 | `IN_PROGRESS` | Snapshot、Replay、Exporter 和投影 | Leader kill、冷恢复、Exporter 故障测试 | 待填写 |
 | P6 | `NOT_STARTED` | 删除旧 WAL、Redis Risk 和旧强平链 | 全仓引用清零、全量 Maven 测试 | 待填写 |
 | P7 | `NOT_STARTED` | 补齐六条产品线 | 六线 smoke、恢复、资金核对 | 待填写 |
 | P8 | `NOT_STARTED` | 单产品线功能和资金正式验收 | 第 15 节门禁报告 | 待填写 |
@@ -1062,14 +1062,48 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 
 任务：
 
-- [ ] 将 mark price 变为确定性命令。
-- [ ] 实现有界 Risk scan 和续跑游标。
-- [ ] 复用纯 Risk/强平数学。
-- [ ] 实现强平状态机和核心强平单。
-- [ ] 实现资金费批处理。
-- [ ] 实现线性/反向交割批处理。
-- [ ] 实现期权行权/失效批处理。
-- [ ] 接通 Insurance/ADL 外围事件和 Aeron 回执命令。
+- [x] 将 mark price 变为确定性命令。
+- [x] 实现有界 Risk scan 和续跑游标。
+- [x] 复用纯 Risk/强平数学。
+- [x] 实现强平状态机和核心强平单。
+- [x] 实现资金费批处理。
+- [x] 实现线性/反向交割批处理。
+- [x] 实现期权行权/失效批处理。
+- [x] 接通 Insurance/ADL 外围事件和 Aeron 回执命令。
+
+完成日期：`2026-08-13`
+
+实际修改模块：
+
+- `surprising-aeron-protocol`：新增 Instrument、Mark Price、Risk scan、Funding、Settlement、Liquidation
+  命令及固定二进制编解码。
+- `surprising-aeron-service`：新增 Instrument/Risk/Liquidation/Treasury State、纯整数合约数学，完成
+  六线成交资金、主动平仓/反手、资金费、交割、期权和强平状态变更。
+- `surprising-aeron-tools`：新增线性永续三节点 smoke，升级 SPOT smoke 以先写入权威 Instrument State。
+
+验证命令与结果：
+
+- JDK 25 执行 `mvn -pl surprising-aeron-core/surprising-aeron-tools -am test`：`BUILD SUCCESS`；
+  product-api 18、protocol 9、instrument-api 11、service 35、tools 2 个测试全部通过。
+- 单元资金证据：资金费双边净额为零；delivery/option 结算后持仓归零且资金守恒；重复 settlementId
+  在业务层拒绝；强平亏空必须由精确 Insurance/ADL 回执覆盖；300 用户 Risk scan 分两批完成。
+- SPOT 三节点固定 seed `4001`：成交后 `spotMatchSmoke=PASS btcTotal=5 usdtTotal=500`；实际 Leader
+  `node2` 停止后选出 `node1`，恢复查询通过；全 Cluster 停止并保留 Archive 卷后冷启动，恢复查询再次通过。
+- LINEAR_PERPETUAL 三节点固定 seed `5001`：双边开仓、Mark Price、Funding 后输出
+  `derivativeSmoke=PASS usdtTotal=2000 fundingNet=0`；实际 Leader `node1` 停止后选出新 Leader，恢复输出
+  `derivativeRecovery=PASS usdtTotal=2000 fundingNet=0`。
+
+阶段边界：
+
+- P4 已证明 Risk、强平、资金费和生命周期裁决不读取 Redis 或 PostgreSQL；外围 Insurance/ADL 仅能通过
+  `ResolveLiquidationCommand` 将精确覆盖结果写回 Aeron。
+- 强平未覆盖额只保存在 `CoreLiquidationState.deficitUnits`，不同时写 Treasury deficit，避免双重记账；
+  Treasury 的负余额只用于用户现金效果的守恒对手项。
+- Snapshot v3 是尚未发布分支上的最终 P4 schema，兼容已提交的 v1/v2；P5 将升级为带 checksum 和
+  manifest 的正式 schema，并完成 Archive/Snapshot 恢复矩阵。
+- P4 相关 8 模块测试全部通过。额外执行全仓 52 模块测试时，前 49 个模块通过，既有
+  `MarketMakerServiceTest.runOnceSplitsQuoteBatchesAtTheOrderServiceLimit` 稳定失败：40 个报价请求实际按
+  `20 + 10` 生成，但测试对每个批次都断言 20；该模块与本阶段无代码重叠，P6 全仓门禁时修正并重新全量验证。
 
 阶段出口：六线策略测试通过，永续强平和生命周期结算不依赖 Redis/PG 裁决。
 
@@ -1153,6 +1187,10 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P3 | 决策 | Exchange Core 只做确定性订单簿执行器，资金与改单 reserve 上限只由 Aeron State 裁决 | 避免 Exchange Core 的用户余额和 reservePrice 成为第二资金权威 | `DeterministicExchangeCoreAdapter`、`CoreMatchingStateTest` | P4 Risk 继续只读 Aeron User/Position State |
 | 2026-08-13 | P3 | 决策 | 运行时校验 Exchange Core `MATCHING_ORDER_BOOKS` hash，恢复校验规范化 Book State hash | Exchange Core 0.5.3 内部 hash 包含已成交历史字段，开放订单重建后逻辑相同但内部 hash 可不同 | `CoreMatchingStateTest` | P5 恢复报告必须同时标明两种 hash 口径 |
 | 2026-08-13 | P3 | 边界 | 衍生品平仓、反向 PnL、手续费、期权权利金继续 fail-closed | P3 没有完整 instrument multiplier、费用和产品 PnL State，近似结算会损坏资金 | `DERIVATIVE_CLOSE_REQUIRES_PNL_MODEL` | P4 必须先补齐产品数学再解除 |
+| 2026-08-13 | P4 | 决策 | Instrument 参数进入 Aeron State，成交、Risk 和生命周期只使用绑定 version 的参数 | 外围缓存或 symbol 命名不能成为保证金、PnL 和费用事实源 | `CoreInstrumentState`、`TradingCoreReducer` | P5 Input Bridge 只能提交版本化命令 |
+| 2026-08-13 | P4 | 决策 | Risk scan 每个命令最多处理 256 用户并通过续跑命令推进 | 限制单个 Cluster duty cycle，避免强平风暴阻塞共识 | `CoreRiskStateTest` | P9 强平风暴压测后再调整可配置生产值 |
+| 2026-08-13 | P4 | 决策 | 未覆盖坏账只记录在 Liquidation State，不同时写 Treasury deficit | 对手方盈利和坏账若同时进 Treasury 会重复计算系统资金 | `CoreLiquidationState.deficitUnits`、`CoreLifecycleStateTest` | Exporter 必须输出 liquidation deficit 和后续覆盖回执 |
+| 2026-08-13 | P4 | 证据 | SPOT 和 LINEAR_PERPETUAL 均完成真实三节点 Leader kill 恢复，线性资金费净额为零 | 组件测试不能替代共识日志上的状态连续性 | `ClusterSpotMatchSmokeMain`、`ClusterDerivativeSmokeMain` | P7 继续逐线执行相同门禁，不并行启动六线 |
 
 ## 20. 阶段更新模板
 

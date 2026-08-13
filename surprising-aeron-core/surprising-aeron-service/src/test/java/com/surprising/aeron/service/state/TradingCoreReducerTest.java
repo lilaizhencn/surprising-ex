@@ -39,9 +39,9 @@ class TradingCoreReducerTest {
     void spotSellReservesBaseAssetAndRejectsWrongAsset() {
         TradingCoreState funded = funded(ProductLine.SPOT, "BTC", 20);
         TradingCoreState placed = reducer.placeOrder(funded, 101,
-                order(2, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET, "BTC", 5));
+                order(2, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET, "BTC", 10));
 
-        assertBalance(placed, "BTC", 15, 5);
+        assertBalance(placed, "BTC", 10, 10);
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
                 order(3, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET, "USDT", 5)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -68,7 +68,11 @@ class TradingCoreReducerTest {
 
     @Test
     void derivativeReservationMustUseSettleAsset() {
-        TradingCoreState funded = funded(ProductLine.INVERSE_PERPETUAL, "USDT", 1_000);
+        TradingCoreState base = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.INVERSE_PERPETUAL),
+                CoreStateTestFixtures.instrument(ProductLine.INVERSE_PERPETUAL,
+                        "BTC-USD", "BTC", "USD", "BTC", 1));
+        TradingCoreState funded = reducer.adjustBalance(base, 101,
+                new BalanceAdjustmentCommand("USDT", 1_000));
 
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
                 new PlaceOrderCommand(1, "BTC-USD", 1, "BTC", "USD", "BTC",
@@ -135,7 +139,7 @@ class TradingCoreReducerTest {
     }
 
     private TradingCoreState funded(ProductLine productLine, String asset, long units) {
-        return reducer.adjustBalance(TradingCoreState.empty(productLine), 101,
+        return reducer.adjustBalance(CoreStateTestFixtures.withInstrument(reducer, productLine), 101,
                 new BalanceAdjustmentCommand(asset, units));
     }
 
@@ -145,9 +149,9 @@ class TradingCoreReducerTest {
             ReservationKind kind,
             String asset,
             long reservedUnits) {
-        String settleAsset = asset.equals("BTC") ? "BTC" : "USDT";
+        String settleAsset = kind == ReservationKind.DERIVATIVE_MARGIN ? asset : "USDT";
         return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", settleAsset, side,
-                60_000, 10, false, kind, asset, reservedUnits);
+                10, 10, false, kind, asset, reservedUnits);
     }
 
     private static Stream<ProductLine> derivativeProductLines() {

@@ -10,10 +10,14 @@ public record TradingCoreState(
         long revision,
         Map<Long, CoreUserState> users,
         Map<Long, CoreOrderState> orders,
-        CoreBookState bookState) {
+        CoreBookState bookState,
+        Map<String, CoreInstrumentState> instruments,
+        CoreRiskState riskState,
+        CoreTreasuryState treasuryState) {
 
     public TradingCoreState {
-        if (productLine == null || revision < 0 || users == null || orders == null || bookState == null) {
+        if (productLine == null || revision < 0 || users == null || orders == null || bookState == null
+                || instruments == null || riskState == null || treasuryState == null) {
             throw new IllegalArgumentException("invalid trading core state");
         }
         Map<Long, CoreUserState> sortedUsers = Collections.unmodifiableMap(new TreeMap<>(users));
@@ -40,10 +44,12 @@ public record TradingCoreState(
         });
         users = sortedUsers;
         orders = sortedOrders;
+        instruments = Collections.unmodifiableMap(new TreeMap<>(instruments));
     }
 
     public static TradingCoreState empty(ProductLine productLine) {
-        return new TradingCoreState(productLine, 0, Map.of(), Map.of(), CoreBookState.empty());
+        return new TradingCoreState(productLine, 0, Map.of(), Map.of(), CoreBookState.empty(),
+                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
     }
 
     public CoreUserState user(long userId) {
@@ -64,6 +70,75 @@ public record TradingCoreState(
             hash = hashOrder(hash, order);
         }
         hash = CoreStateHash.mix(hash, bookState.stateHash(null));
+        for (CoreInstrumentState instrument : instruments.values()) {
+            hash = CoreStateHash.mix(hash, instrument.symbol());
+            hash = CoreStateHash.mix(hash, instrument.version());
+            hash = CoreStateHash.mix(hash, instrument.contractType().ordinal());
+            hash = CoreStateHash.mix(hash, instrument.baseAsset());
+            hash = CoreStateHash.mix(hash, instrument.quoteAsset());
+            hash = CoreStateHash.mix(hash, instrument.settleAsset());
+            hash = CoreStateHash.mix(hash, instrument.notionalMultiplierUnits());
+            hash = CoreStateHash.mix(hash, instrument.priceTickUnits());
+            hash = CoreStateHash.mix(hash, instrument.settleScaleUnits());
+            hash = CoreStateHash.mix(hash, instrument.initialMarginRatePpm());
+            hash = CoreStateHash.mix(hash, instrument.maintenanceMarginRatePpm());
+            hash = CoreStateHash.mix(hash, instrument.makerFeeRatePpm());
+            hash = CoreStateHash.mix(hash, instrument.takerFeeRatePpm());
+            hash = CoreStateHash.mix(hash, instrument.expiryEpochMillis());
+            hash = CoreStateHash.mix(hash, instrument.optionType() == null ? -1 : instrument.optionType().ordinal());
+            hash = CoreStateHash.mix(hash, instrument.strikePriceTicks());
+        }
+        for (CoreMarkPriceState mark : riskState.markPrices().values()) {
+            hash = CoreStateHash.mix(hash, mark.symbol());
+            hash = CoreStateHash.mix(hash, mark.instrumentVersion());
+            hash = CoreStateHash.mix(hash, mark.markPriceTicks());
+            hash = CoreStateHash.mix(hash, mark.priceSequence());
+        }
+        for (CoreRiskSnapshot risk : riskState.snapshots().values()) {
+            hash = CoreStateHash.mix(hash, risk.userId());
+            hash = CoreStateHash.mix(hash, risk.symbol());
+            hash = CoreStateHash.mix(hash, risk.priceSequence());
+            hash = CoreStateHash.mix(hash, risk.equityUnits());
+            hash = CoreStateHash.mix(hash, risk.unrealizedPnlUnits());
+            hash = CoreStateHash.mix(hash, risk.maintenanceMarginUnits());
+            hash = CoreStateHash.mix(hash, risk.marginRatioPpm());
+            hash = CoreStateHash.mix(hash, risk.status().ordinal());
+        }
+        for (CoreLiquidationState liquidation : riskState.liquidations().values()) {
+            hash = CoreStateHash.mix(hash, liquidation.liquidationId());
+            hash = CoreStateHash.mix(hash, liquidation.userId());
+            hash = CoreStateHash.mix(hash, liquidation.symbol());
+            hash = CoreStateHash.mix(hash, liquidation.instrumentVersion());
+            hash = CoreStateHash.mix(hash, liquidation.triggerPriceSequence());
+            hash = CoreStateHash.mix(hash, liquidation.closeQuantitySteps());
+            hash = CoreStateHash.mix(hash, liquidation.deficitUnits());
+            hash = CoreStateHash.mix(hash, liquidation.status().ordinal());
+        }
+        hash = CoreStateHash.mix(hash, riskState.scan().symbol());
+        hash = CoreStateHash.mix(hash, riskState.scan().priceSequence());
+        hash = CoreStateHash.mix(hash, riskState.scan().lastUserId());
+        hash = CoreStateHash.mix(hash, riskState.scan().complete());
+        hash = CoreStateHash.mix(hash, riskState.nextLiquidationId());
+        for (Map.Entry<String, Long> entry : treasuryState.feeBalances().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        for (Map.Entry<String, Long> entry : treasuryState.insuranceBalances().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        for (Map.Entry<String, Long> entry : treasuryState.insuranceDeficits().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        for (Map.Entry<String, Long> entry : treasuryState.fundingSettlements().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        for (Map.Entry<String, Long> entry : treasuryState.lifecycleSettlements().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
         return hash;
     }
 

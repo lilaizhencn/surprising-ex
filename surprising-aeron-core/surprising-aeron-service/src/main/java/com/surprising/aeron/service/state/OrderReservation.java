@@ -41,8 +41,16 @@ public record OrderReservation(
     }
 
     public OrderReservation releaseAll() {
+        return release(remainingUnits());
+    }
+
+    public OrderReservation release(long units) {
+        if (units <= 0 || units > remainingUnits()) {
+            throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
+                    "order reservation is insufficient for release");
+        }
         return new OrderReservation(orderId, symbol, instrumentVersion, kind, asset, reservedUnits,
-                Math.addExact(releasedUnits, remainingUnits()), consumedUnits, orderQuantitySteps);
+                Math.addExact(releasedUnits, units), consumedUnits, orderQuantitySteps);
     }
 
     public OrderReservation consume(long units) {

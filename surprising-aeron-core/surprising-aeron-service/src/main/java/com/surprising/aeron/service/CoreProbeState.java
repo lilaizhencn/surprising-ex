@@ -232,6 +232,18 @@ public final class CoreProbeState implements AutoCloseable {
             case PLACE_ORDER -> placeOrder(message);
             case CANCEL_ORDER -> cancelOrder(message);
             case REPLACE_ORDER -> replaceOrder(message);
+            case UPSERT_INSTRUMENT -> tradingState = tradingReducer.upsertInstrument(tradingState,
+                    TradingCommandCodec.decodeUpsertInstrument(message.payload()));
+            case APPLY_MARK_PRICE -> tradingState = tradingReducer.applyMarkPrice(tradingState,
+                    TradingCommandCodec.decodeApplyMarkPrice(message.payload()));
+            case APPLY_FUNDING -> tradingState = tradingReducer.applyFunding(tradingState,
+                    TradingCommandCodec.decodeApplyFunding(message.payload()));
+            case SETTLE_INSTRUMENT -> settleInstrument(message);
+            case EXECUTE_LIQUIDATION -> executeLiquidation(message);
+            case RESOLVE_LIQUIDATION -> tradingState = tradingReducer.resolveLiquidation(tradingState,
+                    TradingCommandCodec.decodeResolveLiquidation(message.payload()));
+            case CONTINUE_RISK_SCAN -> tradingState = tradingReducer.continueRiskScan(tradingState,
+                    TradingCommandCodec.decodeContinueRiskScan(message.payload()).maxUsers());
             default -> {
                 return null;
             }
@@ -292,6 +304,53 @@ public final class CoreProbeState implements AutoCloseable {
             }
             tradingState = tradingReducer.applyMatches(prepared, command.orderId(),
                     command.baseAsset(), command.quoteAsset(), matchingResult.matches());
+        } catch (RuntimeException exception) {
+            matchingAdapter.rebuild(before.bookState());
+            throw exception;
+        }
+    }
+
+    private void executeLiquidation(CoreMessage message) {
+        var command = TradingCommandCodec.decodeExecuteLiquidation(message.payload());
+        TradingCoreState before = tradingState;
+        var liquidation = before.riskState().liquidations().get(command.liquidationId());
+        if (liquidation == null) {
+            throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
+        }
+        var openOrders = before.orders().values().stream()
+                .filter(order -> order.userId() == liquidation.userId()
+                        && order.symbol().equals(liquidation.symbol())
+                        && order.status() == com.surprising.aeron.service.state.CoreOrderStatus.OPEN)
+                .toList();
+        try {
+            for (var order : openOrders) {
+                var result = matchingAdapter.cancel(order.userId(), order.orderId(), order.symbol());
+                if (!result.accepted()) {
+                    throw new CoreStateRejectedException("MATCHING_REJECTED", result.resultCode());
+                }
+            }
+            tradingState = tradingReducer.executeLiquidation(before, command);
+        } catch (RuntimeException exception) {
+            matchingAdapter.rebuild(before.bookState());
+            throw exception;
+        }
+    }
+
+    private void settleInstrument(CoreMessage message) {
+        var command = TradingCommandCodec.decodeSettleInstrument(message.payload());
+        TradingCoreState before = tradingState;
+        var openOrders = before.orders().values().stream()
+                .filter(order -> order.symbol().equalsIgnoreCase(command.symbol())
+                        && order.status() == com.surprising.aeron.service.state.CoreOrderStatus.OPEN)
+                .toList();
+        try {
+            for (var order : openOrders) {
+                var result = matchingAdapter.cancel(order.userId(), order.orderId(), order.symbol());
+                if (!result.accepted()) {
+                    throw new CoreStateRejectedException("MATCHING_REJECTED", result.resultCode());
+                }
+            }
+            tradingState = tradingReducer.settleInstrument(before, command);
         } catch (RuntimeException exception) {
             matchingAdapter.rebuild(before.bookState());
             throw exception;

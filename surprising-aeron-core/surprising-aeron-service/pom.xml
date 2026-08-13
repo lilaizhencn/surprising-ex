@@ -22,6 +22,11 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-instrument-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>io.aeron</groupId>
             <artifactId>aeron-all</artifactId>
         </dependency>

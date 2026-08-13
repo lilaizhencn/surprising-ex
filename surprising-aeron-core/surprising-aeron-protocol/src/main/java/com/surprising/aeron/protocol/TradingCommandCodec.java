@@ -125,6 +125,144 @@ public final class TradingCommandCodec {
         return new ReplaceOrderCommand(orderId, baseAsset, quoteAsset, newPriceTicks, newReservedUnits);
     }
 
+    public static byte[] encodeUpsertInstrument(UpsertInstrumentCommand command) {
+        byte[] symbol = text(command.symbol());
+        byte[] base = text(command.baseAsset());
+        byte[] quote = text(command.quoteAsset());
+        byte[] settle = text(command.settleAsset());
+        return ByteBuffer.allocate(Short.BYTES * 4 + symbol.length + base.length + quote.length + settle.length
+                        + Integer.BYTES * 2 + Long.BYTES * 10)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putShort((short) symbol.length).put(symbol)
+                .putLong(command.instrumentVersion()).putInt(command.contractTypeCode())
+                .putShort((short) base.length).put(base)
+                .putShort((short) quote.length).put(quote)
+                .putShort((short) settle.length).put(settle)
+                .putLong(command.notionalMultiplierUnits()).putLong(command.priceTickUnits())
+                .putLong(command.settleScaleUnits()).putLong(command.initialMarginRatePpm())
+                .putLong(command.maintenanceMarginRatePpm()).putLong(command.makerFeeRatePpm())
+                .putLong(command.takerFeeRatePpm()).putLong(command.expiryEpochMillis())
+                .putInt(command.optionTypeCode()).putLong(command.strikePriceTicks()).array();
+    }
+
+    public static UpsertInstrumentCommand decodeUpsertInstrument(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        String symbol = readText(buffer);
+        requireRemaining(buffer, Long.BYTES + Integer.BYTES);
+        long version = buffer.getLong();
+        int contractTypeCode = buffer.getInt();
+        String base = readText(buffer);
+        String quote = readText(buffer);
+        String settle = readText(buffer);
+        requireRemaining(buffer, Long.BYTES * 9 + Integer.BYTES);
+        UpsertInstrumentCommand command = new UpsertInstrumentCommand(symbol, version, contractTypeCode,
+                base, quote, settle, buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong(),
+                buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getInt(),
+                buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
+    public static byte[] encodeApplyMarkPrice(ApplyMarkPriceCommand command) {
+        byte[] symbol = text(command.symbol());
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 3)
+                .order(ByteOrder.LITTLE_ENDIAN).putShort((short) symbol.length).put(symbol)
+                .putLong(command.instrumentVersion()).putLong(command.markPriceTicks())
+                .putLong(command.priceSequence()).array();
+    }
+
+    public static ApplyMarkPriceCommand decodeApplyMarkPrice(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        String symbol = readText(buffer);
+        requireRemaining(buffer, Long.BYTES * 3);
+        ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(symbol, buffer.getLong(), buffer.getLong(),
+                buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
+    public static byte[] encodeApplyFunding(ApplyFundingCommand command) {
+        byte[] symbol = text(command.symbol());
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 3)
+                .order(ByteOrder.LITTLE_ENDIAN).putShort((short) symbol.length).put(symbol)
+                .putLong(command.settlementId()).putLong(command.instrumentVersion())
+                .putLong(command.fundingRatePpm()).array();
+    }
+
+    public static ApplyFundingCommand decodeApplyFunding(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        String symbol = readText(buffer);
+        requireRemaining(buffer, Long.BYTES * 3);
+        ApplyFundingCommand command = new ApplyFundingCommand(buffer.getLong(), symbol, buffer.getLong(),
+                buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
+    public static byte[] encodeSettleInstrument(SettleInstrumentCommand command) {
+        byte[] symbol = text(command.symbol());
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 4)
+                .order(ByteOrder.LITTLE_ENDIAN).putShort((short) symbol.length).put(symbol)
+                .putLong(command.settlementId()).putLong(command.instrumentVersion())
+                .putLong(command.settlementPriceTicks()).putLong(command.optionCashUnitsPerContract()).array();
+    }
+
+    public static SettleInstrumentCommand decodeSettleInstrument(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        String symbol = readText(buffer);
+        requireRemaining(buffer, Long.BYTES * 4);
+        SettleInstrumentCommand command = new SettleInstrumentCommand(buffer.getLong(), symbol, buffer.getLong(),
+                buffer.getLong(), buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
+    public static byte[] encodeExecuteLiquidation(ExecuteLiquidationCommand command) {
+        return ByteBuffer.allocate(Long.BYTES * 2).order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(command.liquidationId()).putLong(command.executionPriceTicks()).array();
+    }
+
+    public static ExecuteLiquidationCommand decodeExecuteLiquidation(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Long.BYTES * 2);
+        ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(buffer.getLong(), buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
+    public static byte[] encodeResolveLiquidation(ResolveLiquidationCommand command) {
+        return ByteBuffer.allocate(Long.BYTES * 2 + Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(command.liquidationId()).putInt(command.resolution().ordinal())
+                .putLong(command.coveredUnits()).array();
+    }
+
+    public static ResolveLiquidationCommand decodeResolveLiquidation(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Long.BYTES + Integer.BYTES + Long.BYTES);
+        long liquidationId = buffer.getLong();
+        int resolutionCode = buffer.getInt();
+        if (resolutionCode < 0 || resolutionCode >= ResolveLiquidationCommand.Resolution.values().length) {
+            throw new ProtocolException("invalid liquidation resolution: " + resolutionCode);
+        }
+        ResolveLiquidationCommand command = new ResolveLiquidationCommand(liquidationId,
+                ResolveLiquidationCommand.Resolution.values()[resolutionCode], buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
+    public static byte[] encodeContinueRiskScan(ContinueRiskScanCommand command) {
+        return ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(command.maxUsers()).array();
+    }
+
+    public static ContinueRiskScanCommand decodeContinueRiskScan(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Integer.BYTES);
+        ContinueRiskScanCommand command = new ContinueRiskScanCommand(buffer.getInt());
+        requireConsumed(buffer);
+        return command;
+    }
+
     public static byte[] encodeOrderStateQuery(long orderId) {
         return encodeCancelOrder(new CancelOrderCommand(orderId));
     }

@@ -12,6 +12,8 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.Arrays;
@@ -37,6 +39,7 @@ public final class ClusterSpotMatchSmokeMain {
         try (SurprisingAeronClient client = SurprisingAeronClient.connect(
                 ProductLine.SPOT, hosts, egress, Duration.ofSeconds(10))) {
             if (!verify) {
+                applied(client, instrumentCommand(sourceId + 1_000_000, seed));
                 applied(client, command(sourceId, seed, seller, CoreMessageType.ADJUST_BALANCE,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 5))));
                 applied(client, command(sourceId, seed + 1, buyer, CoreMessageType.ADJUST_BALANCE,
@@ -55,6 +58,14 @@ public final class ClusterSpotMatchSmokeMain {
             String label = verify ? "spotMatchRecovery" : "spotMatchSmoke";
             System.out.printf("%s=PASS seller=%d buyer=%d btcTotal=5 usdtTotal=500%n", label, seller, buyer);
         }
+    }
+
+    private static CoreMessage instrumentCommand(long sourceId, long sequence) {
+        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+                ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                100_000, 50_000, 0, 0, 0, -1, 0);
+        return command(sourceId, sequence, 1, CoreMessageType.UPSERT_INSTRUMENT,
+                TradingCommandCodec.encodeUpsertInstrument(instrument));
     }
 
     private static byte[] order(long orderId, CoreOrderSide side, long quantity, String asset, long reserved) {

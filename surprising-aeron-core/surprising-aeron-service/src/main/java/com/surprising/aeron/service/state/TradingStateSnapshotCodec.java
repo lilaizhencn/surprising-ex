@@ -5,6 +5,8 @@ import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.product.api.ProductLine;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.OptionType;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -12,7 +14,8 @@ import java.util.TreeMap;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
+    private static final int VERSION_2 = 2;
     private static final int VERSION_1 = 1;
     private static final int MAX_TEXT_BYTES = 64;
 
@@ -84,13 +87,71 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(order.remainingQuantitySteps());
             writer.longValue(order.prioritySequence());
         });
+        writer.intValue(state.instruments().size());
+        state.instruments().values().forEach(instrument -> {
+            writer.text(instrument.symbol());
+            writer.longValue(instrument.version());
+            writer.intValue(instrument.contractType().ordinal());
+            writer.text(instrument.baseAsset());
+            writer.text(instrument.quoteAsset());
+            writer.text(instrument.settleAsset());
+            writer.longValue(instrument.notionalMultiplierUnits());
+            writer.longValue(instrument.priceTickUnits());
+            writer.longValue(instrument.settleScaleUnits());
+            writer.longValue(instrument.initialMarginRatePpm());
+            writer.longValue(instrument.maintenanceMarginRatePpm());
+            writer.longValue(instrument.makerFeeRatePpm());
+            writer.longValue(instrument.takerFeeRatePpm());
+            writer.longValue(instrument.expiryEpochMillis());
+            writer.intValue(instrument.optionType() == null ? -1 : instrument.optionType().ordinal());
+            writer.longValue(instrument.strikePriceTicks());
+        });
+        writer.intValue(state.riskState().markPrices().size());
+        state.riskState().markPrices().values().forEach(mark -> {
+            writer.text(mark.symbol());
+            writer.longValue(mark.instrumentVersion());
+            writer.longValue(mark.markPriceTicks());
+            writer.longValue(mark.priceSequence());
+        });
+        writer.intValue(state.riskState().snapshots().size());
+        state.riskState().snapshots().values().forEach(risk -> {
+            writer.longValue(risk.userId());
+            writer.text(risk.symbol());
+            writer.longValue(risk.priceSequence());
+            writer.longValue(risk.equityUnits());
+            writer.longValue(risk.unrealizedPnlUnits());
+            writer.longValue(risk.maintenanceMarginUnits());
+            writer.longValue(risk.marginRatioPpm());
+            writer.intValue(risk.status().ordinal());
+        });
+        writer.intValue(state.riskState().liquidations().size());
+        state.riskState().liquidations().values().forEach(liquidation -> {
+            writer.longValue(liquidation.liquidationId());
+            writer.longValue(liquidation.userId());
+            writer.text(liquidation.symbol());
+            writer.longValue(liquidation.instrumentVersion());
+            writer.longValue(liquidation.triggerPriceSequence());
+            writer.longValue(liquidation.closeQuantitySteps());
+            writer.longValue(liquidation.deficitUnits());
+            writer.intValue(liquidation.status().ordinal());
+        });
+        writer.text(state.riskState().scan().symbol());
+        writer.longValue(state.riskState().scan().priceSequence());
+        writer.longValue(state.riskState().scan().lastUserId());
+        writer.byteValue(state.riskState().scan().complete() ? 1 : 0);
+        writer.longValue(state.riskState().nextLiquidationId());
+        writeUnits(writer, state.treasuryState().feeBalances());
+        writeUnits(writer, state.treasuryState().insuranceBalances());
+        writeUnits(writer, state.treasuryState().insuranceDeficits());
+        writeUnits(writer, state.treasuryState().fundingSettlements());
+        writeUnits(writer, state.treasuryState().lifecycleSettlements());
         return writer.toByteArray();
     }
 
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_1) {
+        if (version != VERSION && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
@@ -185,8 +246,117 @@ public final class TradingStateSnapshotCodec {
             }
             bookState = new CoreBookState(nextPrioritySequence, bookOrders);
         }
+        Map<String, CoreInstrumentState> instruments = new TreeMap<>();
+        CoreRiskState riskState = CoreRiskState.empty();
+        CoreTreasuryState treasuryState = CoreTreasuryState.empty();
+        if (version == VERSION) {
+            int instrumentCount = reader.count("instruments");
+            for (int index = 0; index < instrumentCount; index++) {
+                String symbol = reader.text();
+                long instrumentVersion = reader.positiveLong("instrument version");
+                int contractType = reader.intValue();
+                if (contractType < 0 || contractType >= ContractType.values().length) {
+                    throw new ProtocolException("invalid contract type: " + contractType);
+                }
+                ContractType decodedType = ContractType.values()[contractType];
+                String baseAsset = reader.text();
+                String quoteAsset = reader.text();
+                String settleAsset = reader.text();
+                long multiplier = reader.positiveLong("notional multiplier");
+                long priceTick = reader.positiveLong("price tick units");
+                long settleScale = reader.positiveLong("settle scale");
+                long initialMargin = reader.positiveLong("initial margin rate");
+                long maintenanceMargin = reader.positiveLong("maintenance margin rate");
+                long makerFee = reader.longValue();
+                long takerFee = reader.longValue();
+                long expiry = reader.nonNegativeLong("expiry time");
+                int optionTypeCode = reader.intValue();
+                if (optionTypeCode < -1 || optionTypeCode >= OptionType.values().length) {
+                    throw new ProtocolException("invalid option type: " + optionTypeCode);
+                }
+                CoreInstrumentState instrument = new CoreInstrumentState(symbol, instrumentVersion,
+                        decodedType, baseAsset, quoteAsset, settleAsset, multiplier, priceTick, settleScale,
+                        initialMargin, maintenanceMargin, makerFee, takerFee, expiry,
+                        optionTypeCode < 0 ? null : OptionType.values()[optionTypeCode],
+                        reader.nonNegativeLong("strike price"));
+                putUnique(instruments, symbol, instrument);
+            }
+            Map<String, CoreMarkPriceState> marks = new TreeMap<>();
+            int markCount = reader.count("mark prices");
+            for (int index = 0; index < markCount; index++) {
+                String symbol = reader.text();
+                CoreMarkPriceState mark = new CoreMarkPriceState(symbol,
+                        reader.positiveLong("mark instrument version"), reader.positiveLong("mark price"),
+                        reader.positiveLong("price sequence"));
+                putUnique(marks, symbol, mark);
+            }
+            Map<String, CoreRiskSnapshot> risks = new TreeMap<>();
+            int riskCount = reader.count("risk snapshots");
+            for (int index = 0; index < riskCount; index++) {
+                long userId = reader.positiveLong("risk userId");
+                String symbol = reader.text();
+                long priceSequence = reader.positiveLong("risk price sequence");
+                long equity = reader.longValue();
+                long unrealized = reader.longValue();
+                long maintenance = reader.nonNegativeLong("maintenance margin");
+                long ratio = reader.nonNegativeLong("margin ratio");
+                int status = reader.intValue();
+                if (status < 0 || status >= CoreRiskStatus.values().length) {
+                    throw new ProtocolException("invalid risk status: " + status);
+                }
+                CoreRiskSnapshot risk = new CoreRiskSnapshot(userId, symbol, priceSequence, equity, unrealized,
+                        maintenance, ratio, CoreRiskStatus.values()[status]);
+                putUnique(risks, risk.key(), risk);
+            }
+            Map<Long, CoreLiquidationState> liquidations = new TreeMap<>();
+            int liquidationCount = reader.count("liquidations");
+            for (int index = 0; index < liquidationCount; index++) {
+                long liquidationId = reader.positiveLong("liquidationId");
+                long userId = reader.positiveLong("liquidation userId");
+                String symbol = reader.text();
+                long instrumentVersion = reader.positiveLong("liquidation instrument version");
+                long priceSequence = reader.positiveLong("liquidation price sequence");
+                long closeQuantity = reader.positiveLong("liquidation close quantity");
+                long deficitUnits = reader.nonNegativeLong("liquidation deficit");
+                int status = reader.intValue();
+                if (status < 0 || status >= CoreLiquidationState.Status.values().length) {
+                    throw new ProtocolException("invalid liquidation status: " + status);
+                }
+                CoreLiquidationState liquidation = new CoreLiquidationState(liquidationId, userId, symbol,
+                        instrumentVersion, priceSequence, closeQuantity,
+                        deficitUnits, CoreLiquidationState.Status.values()[status]);
+                putUnique(liquidations, liquidationId, liquidation);
+            }
+            String scanSymbol = reader.text();
+            CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(scanSymbol,
+                    reader.nonNegativeLong("scan price sequence"), reader.nonNegativeLong("scan userId"),
+                    reader.booleanValue());
+            riskState = new CoreRiskState(marks, risks, liquidations, scan,
+                    reader.positiveLong("next liquidation id"));
+            treasuryState = new CoreTreasuryState(readUnits(reader, "fee balances"),
+                    readUnits(reader, "insurance balances"), readUnits(reader, "insurance deficits"),
+                    readUnits(reader, "funding settlements"), readUnits(reader, "lifecycle settlements"));
+        }
         reader.requireConsumed();
-        return new TradingCoreState(productLine, revision, users, orders, bookState);
+        return new TradingCoreState(productLine, revision, users, orders, bookState, instruments, riskState,
+                treasuryState);
+    }
+
+    private static void writeUnits(Writer writer, Map<String, Long> values) {
+        writer.intValue(values.size());
+        values.forEach((asset, units) -> {
+            writer.text(asset);
+            writer.longValue(units);
+        });
+    }
+
+    private static Map<String, Long> readUnits(Reader reader, String name) {
+        Map<String, Long> values = new TreeMap<>();
+        int count = reader.count(name);
+        for (int index = 0; index < count; index++) {
+            putUnique(values, reader.text(), reader.longValue());
+        }
+        return values;
     }
 
     private static <K, V> void putUnique(Map<K, V> values, K key, V value) {

@@ -16,6 +16,8 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -83,13 +85,14 @@ class CoreProbeStateTest {
     @Test
     void appliesTradingCommandsOnceAndSnapshotsAuthoritativeState() {
         CoreProbeState original = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(original);
         UUID adjustmentId = UUID.randomUUID();
         UUID placeId = UUID.randomUUID();
         CoreMessage adjustment = tradingCommand(CoreMessageType.ADJUST_BALANCE, adjustmentId, 1,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
         CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, placeId, 2,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(91, "BTC-USDT", 1, "BTC", "USDT", "USDT",
-                        CoreOrderSide.BUY, 60_000, 2, false,
+                        CoreOrderSide.BUY, 1_000, 2, false,
                         ReservationKind.SPOT_ASSET, "USDT", 2_500)));
 
         assertThat(original.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
@@ -121,10 +124,11 @@ class CoreProbeStateTest {
     @Test
     void recordsRejectedTradingCommandWithoutChangingBusinessState() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
         long businessHash = state.tradingState().businessStateHash();
         CoreMessage command = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 1,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(1, "BTC-USDT", 1, "BTC", "USDT", "USDT",
-                        CoreOrderSide.BUY, 60_000, 1, false,
+                        CoreOrderSide.BUY, 600, 1, false,
                         ReservationKind.SPOT_ASSET, "USDT", 1_000)));
 
         var rejected = state.apply(command);
@@ -135,7 +139,7 @@ class CoreProbeStateTest {
         assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
         assertThat(duplicate.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
         assertThat(duplicate.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-        assertThat(state.appliedCommandCount()).isOne();
+        assertThat(state.appliedCommandCount()).isEqualTo(2);
         assertThat(state.tradingState().businessStateHash()).isEqualTo(businessHash);
 
         CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot());
@@ -167,6 +171,16 @@ class CoreProbeStateTest {
         return new CoreMessage(CoreMessageHeader.command(messageType, commandId,
                 ProductLine.SPOT, CommandSource.GATEWAY, 7, sourceSequence, 1001,
                 1_000, sourceSequence), payload);
+    }
+
+    private static void applySpotInstrument(CoreProbeState state) {
+        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+                ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                100_000, 50_000, 0, 0, 0, -1, 0);
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.UPSERT_INSTRUMENT,
+                UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 1, 1,
+                1_000, 1), TradingCommandCodec.encodeUpsertInstrument(instrument));
+        assertThat(state.apply(command).status()).isEqualTo(ResponseStatus.APPLIED);
     }
 
     private static CoreMessage query(CoreMessageType messageType, long userId, byte[] payload) {

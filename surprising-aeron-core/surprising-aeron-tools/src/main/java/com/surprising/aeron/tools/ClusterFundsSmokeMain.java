@@ -13,6 +13,8 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.Arrays;
@@ -54,12 +56,17 @@ public final class ClusterFundsSmokeMain {
                         productLine, userId, fundedUnits);
                 return;
             }
+            submitApplied(client, command(productLine, sourceId + 1_000_000, seed, 1,
+                    CoreMessageType.UPSERT_INSTRUMENT,
+                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
+                            "BTC-USDT", 1, ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
+                            1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0))));
             submitApplied(client, command(productLine, sourceId, seed, userId, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(
                             new BalanceAdjustmentCommand("USDT", fundedUnits))));
             submitApplied(client, command(productLine, sourceId, seed + 1, userId, CoreMessageType.PLACE_ORDER,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                            "BTC", "USDT", "USDT", CoreOrderSide.BUY, 60_000, 2, false,
+                            "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 2, false,
                             ReservationKind.SPOT_ASSET, "USDT", reservedUnits))));
             var reserved = queryUser(client, productLine, sourceId, userId, seed + 2);
             var reservedBalance = reserved.balances().stream()
