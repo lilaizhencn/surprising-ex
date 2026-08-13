@@ -4,6 +4,7 @@ import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.OrderReleaseAccountCommand;
 import com.surprising.account.api.model.OrderReserveAccountCommand;
+import com.surprising.eventstore.UserStateChangelog;
 import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.OrderEvent;
@@ -29,6 +30,7 @@ public final class OrderRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, OrderEvent.class);
         registerRecord(hints, OrderUserCommand.class);
         registerRecord(hints, OrderUserCommandResult.class);
+        registerRecord(hints, UserStateChangelog.class);
         registerRecord(hints, CancelAllAfterTimer.class);
         registerRecord(hints, OrderUserCancelCommand.class);
     }

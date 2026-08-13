@@ -16,6 +16,7 @@ import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.UserPartitionResultStore;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
+import com.surprising.eventstore.UserStateChangelog;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
@@ -951,6 +952,39 @@ public class OrderUserStateService {
         });
     }
 
+    public void restoreChangelog(UserStateChangelog changelog) {
+        if (changelog == null || changelog.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("订单状态 changelog 产品线不匹配");
+        }
+        UserPartitionKey partition = new UserPartitionKey(changelog.productLine(), changelog.userId());
+        lane.execute(partition, () -> {
+            long localSequence = stateStore.lastAppliedSequence(partition);
+            long localWalTail = wal.lastSequence(partition);
+            if (localWalTail > 0L) {
+                if (localWalTail > changelog.sequence() || localSequence < localWalTail) {
+                    throw new IllegalStateException("本地订单 WAL 未追平，拒绝覆盖订单 changelog: " + partition.value());
+                }
+                return null;
+            }
+            if (localSequence > changelog.sequence()) {
+                return null;
+            }
+            OrderUserState restored;
+            try {
+                restored = objectMapper.readValue(changelog.state(), OrderUserState.class);
+            } catch (Exception ex) {
+                throw new IllegalStateException("订单状态 changelog 无法反序列化: " + partition.value(), ex);
+            }
+            if (restored.orders().stream().anyMatch(order -> order.productLine() != partition.productLine()
+                    || order.userId() != partition.userId())) {
+                throw new IllegalStateException("订单 changelog 状态分区不匹配: " + partition.value());
+            }
+            stateStore.restoreCheckpoint(partition, changelog.sequence(), changelog.state());
+            publishedSnapshotRevisions.put(partition, restored.revision());
+            return null;
+        });
+    }
+
     private Void applyPartition(UserPartitionKey partition) {
         OrderUserState current = state(partition);
         long applied = stateStore.lastAppliedSequence(partition);
@@ -1004,11 +1038,23 @@ public class OrderUserStateService {
         try {
             awaitKafkaIfOutsideTransaction(kafkaTemplate.send(properties.getKafka().getOrderStateEventsTopic(),
                     snapshot.partitionKey(), objectMapper.writeValueAsString(snapshot)));
+            publishStateChangelog(partition, state);
             publishedSnapshotRevisions.put(partition, state.revision());
         } catch (Exception ex) {
             throw new KafkaException("订单完整快照发布失败 partition=" + partition.value()
                     + " revision=" + state.revision(), ex);
         }
+    }
+
+    private void publishStateChangelog(UserPartitionKey partition, OrderUserState state) throws Exception {
+        long sequence = stateStore.lastAppliedSequence(partition);
+        if (sequence <= 0L) {
+            throw new IllegalStateException("订单状态 changelog 缺少 WAL 序号: " + partition.value());
+        }
+        UserStateChangelog changelog = UserStateChangelog.create(partition.productLine(), partition.userId(),
+                sequence, objectMapper.writeValueAsBytes(state), Instant.now(), null);
+        awaitKafkaIfOutsideTransaction(kafkaTemplate.send(properties.getKafka().getUserStateChangelogTopic(),
+                changelog.partitionKey(), objectMapper.writeValueAsString(changelog)));
     }
 
     private OrderUserState applyEvent(OrderUserState current, OrderUserEvent event) {

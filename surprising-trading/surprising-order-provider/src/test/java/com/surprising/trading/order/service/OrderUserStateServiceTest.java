@@ -12,6 +12,7 @@ import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionResultStore;
 import com.surprising.eventstore.UserPartitionWal;
+import com.surprising.eventstore.UserStateChangelog;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchResultEvent;
 import com.surprising.trading.api.model.MatchTradeEvent;
@@ -176,6 +177,37 @@ class OrderUserStateServiceTest {
             assertThat(target.get(order.userId(), order.orderId()).status()).isEqualTo(OrderStatus.ACCEPTED);
             assertThat(state.lastAppliedSequence(new com.surprising.eventstore.UserPartitionKey(
                     ProductLine.LINEAR_PERPETUAL, order.userId()))).isZero();
+        }
+    }
+
+    @Test
+    void changelogRestoresOrderCheckpointWithWalSequence() throws Exception {
+        Path sourceRoot = Files.createTempDirectory("order-user-changelog-source-");
+        Path targetRoot = Files.createTempDirectory("order-user-changelog-target-");
+        TradingOrderProperties properties = properties();
+        OrderRecord order = order("changelog-1", 9061L, 10L);
+        UserStateChangelog changelog;
+        ObjectMapper objectMapper = new ObjectMapper();
+        try (UserPartitionWal wal = new UserPartitionWal(sourceRoot.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(sourceRoot.resolve("state"))) {
+            OrderUserStateService source = new OrderUserStateService(objectMapper, properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            source.place(order);
+            var partition = new com.surprising.eventstore.UserPartitionKey(ProductLine.LINEAR_PERPETUAL,
+                    order.userId());
+            changelog = UserStateChangelog.create(ProductLine.LINEAR_PERPETUAL, order.userId(),
+                    state.lastAppliedSequence(partition), state.read(partition).orElseThrow().state(),
+                    Instant.now(), "order-changelog-test");
+        }
+        try (UserPartitionWal wal = new UserPartitionWal(targetRoot.resolve("wal"));
+             UserPartitionStateStore state = new UserPartitionStateStore(targetRoot.resolve("state"))) {
+            OrderUserStateService target = new OrderUserStateService(objectMapper, properties, wal, state,
+                    new UserPartitionCommandLane(), kafka());
+            target.restoreChangelog(changelog);
+
+            assertThat(target.get(order.userId(), order.orderId()).status()).isEqualTo(OrderStatus.ACCEPTED);
+            assertThat(state.lastAppliedSequence(new com.surprising.eventstore.UserPartitionKey(
+                    ProductLine.LINEAR_PERPETUAL, order.userId()))).isEqualTo(1L);
         }
     }
 

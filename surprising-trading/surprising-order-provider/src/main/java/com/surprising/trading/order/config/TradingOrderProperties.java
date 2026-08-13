@@ -154,6 +154,9 @@ public class TradingOrderProperties {
         public String getOrderStateEventsTopic() {
             return productTopics().orderStateEventsTopic();
         }
+        public String getUserStateChangelogTopic() {
+            return productTopics().userStateChangelogTopic();
+        }
         public String getOrderUserCommandGroupId() {
             return productTopics().consumerGroup("order-user-state");
         }
