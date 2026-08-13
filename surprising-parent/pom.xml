@@ -33,6 +33,7 @@
         <spring-cloud.version>2025.1.2</spring-cloud.version>
         <bouncycastle.version>1.82</bouncycastle.version>
         <exchange-core.version>0.5.3</exchange-core.version>
+        <aeron.version>1.52.2</aeron.version>
         <chronicle.bom.version>2026.18</chronicle.bom.version>
         <dependency-check.version>12.1.0</dependency-check.version>
     </properties>
@@ -60,6 +61,11 @@
                 <groupId>exchange.core2</groupId>
                 <artifactId>exchange-core</artifactId>
                 <version>${exchange-core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.aeron</groupId>
+                <artifactId>aeron-all</artifactId>
+                <version>${aeron.version}</version>
             </dependency>
             <dependency>
                 <groupId>net.openhft</groupId>

@@ -27,6 +27,8 @@ Redis Risk State、Redis 强平候选队列和 PostgreSQL 强平事务维持不�
 9. 新核心通过功能、资金和恢复门禁后立即删除旧 WAL、Redis Risk 和旧强平链路，删除早于性能压测。
 10. 不做长期双写、运行时回退开关或影子集群；通过离线确定性重放、状态哈希和三节点故障测试验证。
 11. 性能测试一次只运行一条产品线，且压测前必须证明该线功能正常、资金差异为零。
+12. Cluster Log 协议 v1 使用固定小端二进制 envelope；幂等边界由 `commandId` 和
+    `(source, sourceId, sourceSequence)` 高水位共同保证，不使用 Java serialization。
 
 ## 选择统一 Cluster 而不是多 Cluster
 
@@ -106,4 +108,3 @@ Aeron Snapshot。性能问题不能成为偷偷恢复本地权威 WAL 的理由�
 - [Aeron 统一交易核心迁移实施方案](../aeron-unified-trading-core-migration-plan.md)
 - [Aeron 统一交易核心术语表](../aeron-unified-trading-core-glossary.md)
 - [产品线测试与资金守恒](../product-line-testing-and-funds-reconciliation.md)
-

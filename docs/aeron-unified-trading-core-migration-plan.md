@@ -8,7 +8,7 @@
 | 基线分支 | `master` |
 | 基线提交 | `dc46edabcd606fea85517974391739942d5f51e2` |
 | 目标实施分支 | `codex/aeron-unified-core` |
-| 当前阶段 | `P0 方案冻结与基线固化` |
+| 当前阶段 | `P2 User/Order State 设计与实现` |
 | 最后更新日期 | `2026-08-13` |
 | 上线状态 | 项目尚未上线，无生产历史数据和兼容包袱 |
 | 架构决策 | [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md) |
@@ -296,6 +296,7 @@ surprising-aeron-core/
 - `commandId`
 - `productLine`
 - `source`
+- `sourceId`，标识 Gateway client agent、Kafka partition 或其他稳定来源实例
 - `sourceSequence`
 - `userId` 或明确的系统作用域
 - `submittedAtEpochMillis`，只作为确定性输入，不由 Member 本地生成
@@ -878,8 +879,8 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 
 | 阶段 | 状态 | 目标 | 完成证据 | 完成提交 |
 | --- | --- | --- | --- | --- |
-| P0 | `IN_PROGRESS` | 方案冻结、基线和垃圾文件清理 | 本文档、ADR、术语表；基线模块测试通过 | 待填写 |
-| P1 | `NOT_STARTED` | Aeron 协议、三节点骨架和工具 | 协议兼容测试、三节点 echo/state hash 测试 | 待填写 |
+| P0 | `DONE` | 方案冻结、基线和垃圾文件清理 | 本文档、ADR、术语表；基线模块测试通过 | `e4917e3` |
+| P1 | `DONE` | Aeron 协议、三节点骨架和工具 | schema v1 golden；Snapshot/幂等测试；三节点 Leader kill 后 hash 连续 | 本阶段提交 |
 | P2 | `NOT_STARTED` | User/Order State 和资金预占 | 订单/账户单测、幂等、资金不变量测试 | 待填写 |
 | P3 | `NOT_STARTED` | Exchange Core Adapter 和 Book State | 撮合矩阵、book hash、Snapshot 重建测试 | 待填写 |
 | P4 | `NOT_STARTED` | Risk、强平和生命周期进入核心 | 风险/强平/资金费/交割/期权组件测试 | 待填写 |
@@ -901,8 +902,8 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] 冻结 Kafka、PostgreSQL、Valkey与 Aeron 权威边界。
 - [x] 冻结“不长期双写、不建影子集群”的迁移策略。
 - [x] 编写主方案、ADR 和术语表。
-- [ ] 提交并推送垃圾文件清理与本方案。
-- [ ] 创建 `codex/aeron-unified-core` 分支。
+- [x] 提交并推送垃圾文件清理与本方案。
+- [x] 创建 `codex/aeron-unified-core` 分支。
 
 阶段出口：文档已审阅，基线清洁，分支创建，所有后续实现引用本方案。
 
@@ -910,14 +911,44 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 
 任务：
 
-- [ ] 父 POM 引入 Aeron 版本和新模块。
-- [ ] 冻结 SBE schema version 1。
-- [ ] 实现 command header、response、query、export event envelope。
-- [ ] 实现单产品线 `ClusteredService` 空状态骨架。
-- [ ] 实现 JDK 25 三节点本地镜像和 Compose。
-- [ ] 实现 Gateway/测试 client 的 Leader 自动发现和重连。
-- [ ] 实现状态 hash 查询和离线 replay 工具骨架。
-- [ ] 添加协议 golden file 与兼容测试。
+- [x] 父 POM 引入 Aeron `1.52.2` 和五个新模块。
+- [x] 冻结固定小端二进制 schema version 1，并完成 header 扩展兼容验证。
+- [x] 实现 command header、response、query 和 export event envelope 边界。
+- [x] 实现单产品线 `ClusteredService` 确定性探针状态、幂等窗口和 Snapshot 骨架。
+- [x] 实现 JDK 25 三节点镜像和按单产品线启动的 Compose。
+- [x] 实现 Gateway/测试 client 的 Leader 自动发现、切换回调和结果未知语义。
+- [x] 实现状态 hash 查询和离线 replay 工具骨架。
+- [x] 添加协议 golden、未知 header 扩展、六线隔离、幂等高水位和 Snapshot 测试。
+
+实际修改：
+
+- 新增 `surprising-aeron-core` 聚合模块及 protocol、service、client、exporter、tools 五个子模块。
+- `CoreMessageCodec` 固定 76 字节 v1 header；`sourceId` 与 `sourceSequence` 共同界定来源顺序。
+- `CoreProbeState` 只用于 P1 复制状态验证，保存有界完整结果和不淘汰的来源序列高水位。
+- `SurprisingClusterNode` 在同一 JVM 启动 Media Driver、Archive、Consensus Module 和 Service。
+- `ProductLineClusterLayout` 给六条线分配互不重叠的 `clusterId` 与端口空间。
+- `SurprisingAeronClient` 使用 Aeron ingress endpoint 列表自动发现 Leader；超时抛出
+  `ResultUnknownException`，不伪装成业务失败。
+- `compose.yaml` 和 `scripts/aeron-core-local.sh` 一次只启动一条产品线，`down` 不删除数据卷。
+
+验收证据（2026-08-13，JDK `25.0.4`，Aeron `1.52.2`）：
+
+- Maven：protocol 4 个测试、service 4 个测试、tools 2 个测试，以及依赖的 product-api 18 个测试全部通过。
+- 本机三节点：首命令 `appliedCommandCount=1`；杀死实际 Leader `node1` 后第二命令为
+  `appliedCommandCount=2`，查询得到相同 `stateHash=928a62b8bace0684`。
+- Docker JDK 25 三节点：三个容器均为 `Up`，首命令成功；杀 Leader 后选举窗口内首次客户端提交
+  超时且查询证明命令未执行，稳定后重试成功为 `appliedCommandCount=2`，查询 hash 同为
+  `99aa20509fd8695f`。
+- Docker Desktop daemon 未继承终端 Clash 代理，官方 JRE 25 镜像首次拉取超时；验证时由宿主机通过
+  Clash 下载官方 Temurin `25.0.4+7`，覆盖本地已有 Temurin Linux 基础层。仓库 Dockerfile 仍引用
+  官方 `eclipse-temurin:25-jre`，生产构建不依赖本地临时镜像。
+
+已知边界：
+
+- Docker Compose 使用临时容器 DNS 时，故障节点容器被删除后其主机名会短暂不可解析；生产三机必须使用
+  固定 DNS/IP。客户端把这段选举窗口报告为结果未知，调用方必须复用 `commandId`。
+- P1 Snapshot 只保存探针状态，不代表 P2–P5 的 User/Order/Book/Risk/Liquidation Snapshot 已完成。
+- Exporter 模块当前只有协议和 sink 边界，可靠发布、ack 与积压恢复在 P5 实现。
 
 阶段出口：三节点可提交测试命令、Leader 切换后状态一致，协议可版本化。
 
@@ -1032,6 +1063,9 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P0 | 决策 | 未上线项目不做长期影子集群和双权威 | 无生产历史数据；降低复杂度 | ADR-0001 | 使用离线重放替代影子验证 |
 | 2026-08-13 | P0 | 决策 | P6 删除旧链路早于性能压测 | 性能必须测唯一最终架构 | 本文第 13、16 节 | 不保留运行时回退开关 |
 | 2026-08-13 | P0 | 决策 | 每次只压一条产品线 | 隔离容量和资金结论 | 本文第 16 节 | 形成六份独立报告 |
+| 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
+| 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
+| 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |
 
 ## 20. 阶段更新模板
 
@@ -1079,4 +1113,3 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - 六条产品线分别完成单线容量测试。
 - 生产部署、Backup、监控、告警和 Runbook 演练通过。
 - 本文档、ADR、术语表、部署文档和产品线 Runbook 与最终代码一致。
-

@@ -1,0 +1,87 @@
+name: surprising-aeron-${PRODUCT_LINE_SLUG:-spot}
+
+x-node-common: &node-common
+  image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+  build:
+    context: .
+  restart: unless-stopped
+  init: true
+  shm_size: 512mb
+  stop_grace_period: 30s
+  networks:
+    - cluster
+  environment:
+    JAVA_TOOL_OPTIONS: >-
+      -XX:+UseZGC
+      -XX:+AlwaysPreTouch
+      -Xms${AERON_CORE_HEAP:-512m}
+      -Xmx${AERON_CORE_HEAP:-512m}
+
+services:
+  node0:
+    <<: *node-common
+    hostname: node0
+    command:
+      - -Dsurprising.aeron.product-line=${PRODUCT_LINE:-SPOT}
+      - -Dsurprising.aeron.node-id=0
+      - -Dsurprising.aeron.hostnames=node0,node1,node2
+      - -Dsurprising.aeron.data-dir=/var/lib/surprising/aeron
+      - -jar
+      - /opt/surprising/service.jar
+    volumes:
+      - node0-data:/var/lib/surprising/aeron
+
+  node1:
+    <<: *node-common
+    hostname: node1
+    command:
+      - -Dsurprising.aeron.product-line=${PRODUCT_LINE:-SPOT}
+      - -Dsurprising.aeron.node-id=1
+      - -Dsurprising.aeron.hostnames=node0,node1,node2
+      - -Dsurprising.aeron.data-dir=/var/lib/surprising/aeron
+      - -jar
+      - /opt/surprising/service.jar
+    volumes:
+      - node1-data:/var/lib/surprising/aeron
+
+  node2:
+    <<: *node-common
+    hostname: node2
+    command:
+      - -Dsurprising.aeron.product-line=${PRODUCT_LINE:-SPOT}
+      - -Dsurprising.aeron.node-id=2
+      - -Dsurprising.aeron.hostnames=node0,node1,node2
+      - -Dsurprising.aeron.data-dir=/var/lib/surprising/aeron
+      - -jar
+      - /opt/surprising/service.jar
+    volumes:
+      - node2-data:/var/lib/surprising/aeron
+
+  probe:
+    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    profiles: [tools]
+    init: true
+    hostname: probe
+    shm_size: 256mb
+    networks:
+      - cluster
+    entrypoint:
+      - java
+      - --add-opens
+      - java.base/jdk.internal.misc=ALL-UNNAMED
+      - -Dsurprising.aeron.product-line=${PRODUCT_LINE:-SPOT}
+      - -Dsurprising.aeron.hostnames=node0,node1,node2
+      - -Dsurprising.aeron.egress-hostname=probe
+      - -Dsurprising.aeron.probe-mode=${PROBE_MODE:-increment}
+      - -Dsurprising.aeron.probe-delta=${PROBE_DELTA:-1}
+      - -Dsurprising.aeron.source-id=${PROBE_SOURCE_ID:-0}
+      - -jar
+      - /opt/surprising/tools.jar
+
+networks:
+  cluster:
+
+volumes:
+  node0-data:
+  node1-data:
+  node2-data:

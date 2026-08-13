@@ -30,7 +30,9 @@ ADR 中说明，而不是为同一概念继续增加别名。
 | Projection | 从 Kafka 事件构建的 PostgreSQL、Valkey、WebSocket 或报表读模型。 | 可回写或覆盖核心状态的权威源。 |
 | commandId | 标识一次业务意图的稳定幂等 ID；重试必须复用。 | 每次网络请求随机生成的新 ID。 |
 | correlationId | 用于串联调用、日志和响应的追踪 ID。 | 状态变化幂等键。 |
-| sourceSequence | 外部来源单调序号，例如 Kafka topic/partition/offset 映射。 | Cluster position。 |
+| sourceId | 同类命令来源内的稳定实例或分区标识，例如 Gateway client agent ID 或 Kafka partition。 | 用户 ID 或随机请求 ID。 |
+| sourceSequence | 在 `(source, sourceId)` 范围内严格单调的外部序号，例如 Kafka offset。 | Cluster position 或跨所有来源共用的全局序号。 |
+| Source High Watermark | Cluster 对每个 `(source, sourceId)` 已执行最大序号的记录；完整幂等结果淘汰后仍阻止旧命令重放。 | 可返回原业务响应的完整幂等窗口。 |
 | eventId | Exporter 重试时保持不变的稳定事件 ID，供所有消费者幂等。 | Kafka producer 自动生成的消息 ID。 |
 | stateVersion | 聚合在状态变化后的单调业务版本。 | 数据库更新时间。 |
 | State Hash | 对规范化权威状态计算的稳定哈希，用于副本和回放一致性验证。 | Java 对象默认 `hashCode()`。 |
@@ -66,4 +68,3 @@ ADR 中说明，而不是为同一概念继续增加别名。
 - 新增核心状态、命令、恢复概念或监控指标时同步补充本文。
 - 术语含义变化必须通过 ADR，不允许只修改代码变量名。
 - 产品文档可使用中文展示名，但配置、协议和指标使用表中固定英文名称。
-
