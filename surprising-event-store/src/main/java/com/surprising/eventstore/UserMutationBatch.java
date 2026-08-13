@@ -57,4 +57,9 @@ public record UserMutationBatch(List<UserMutation> mutations) {
         grouped.forEach((partition, values) -> result.put(partition, List.copyOf(values)));
         return Collections.unmodifiableMap(result);
     }
+
+    public List<UserMutation> partition(UserPartitionKey partition) {
+        Objects.requireNonNull(partition, "partition");
+        return byPartition().getOrDefault(partition, List.of());
+    }
 }
