@@ -56,6 +56,19 @@ public record UserMutation(
         return mutation != null && Objects.equals(dependsOnCommandId, mutation.commandId());
     }
 
+    public boolean sameBusinessIntent(UserMutation other) {
+        return other != null
+                && schemaVersion == other.schemaVersion
+                && Objects.equals(commandId, other.commandId)
+                && productLine == other.productLine
+                && userId == other.userId
+                && Objects.equals(mutationType, other.mutationType)
+                && Objects.equals(source, other.source)
+                && Objects.equals(sourceReference, other.sourceReference)
+                && Objects.equals(dependsOnCommandId, other.dependsOnCommandId)
+                && Objects.equals(payload, other.payload);
+    }
+
     public static String partitionKey(ProductLine productLine, long userId) {
         if (productLine == null || userId <= 0L) {
             throw new IllegalArgumentException("user mutation partition key is invalid");

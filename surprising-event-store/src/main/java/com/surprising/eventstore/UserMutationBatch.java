@@ -21,7 +21,7 @@ public record UserMutationBatch(List<UserMutation> mutations) {
             UserMutation mutation = mutations.get(index);
             Objects.requireNonNull(mutation, "user mutation must not be null");
             UserMutation existing = commandById.putIfAbsent(mutation.commandId(), mutation);
-            if (existing != null && !existing.equals(mutation)) {
+            if (existing != null && !existing.sameBusinessIntent(mutation)) {
                 throw new IllegalArgumentException("duplicate user mutation commandId: " + mutation.commandId());
             }
             if (existing == null) {

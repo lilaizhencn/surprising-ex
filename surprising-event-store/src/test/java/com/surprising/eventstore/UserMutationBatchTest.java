@@ -35,6 +35,16 @@ class UserMutationBatchTest {
                 .hasMessageContaining("duplicate");
     }
 
+    @Test
+    void foldsRetryWithDifferentTraceAndTime() {
+        UserMutation first = mutation("retry", ProductLine.SPOT, 7L);
+        UserMutation retry = new UserMutation(UserMutation.CURRENT_SCHEMA_VERSION, "retry", ProductLine.SPOT,
+                7L, "ORDER_PLACE", "ORDER", "retry", null, "{}",
+                Instant.parse("2026-01-01T00:00:01Z"), "new-trace");
+
+        assertThat(new UserMutationBatch(List.of(first, retry)).mutations()).containsExactly(first);
+    }
+
     private UserMutation mutation(String commandId, ProductLine productLine, long userId) {
         return new UserMutation(UserMutation.CURRENT_SCHEMA_VERSION, commandId, productLine, userId,
                 "ORDER_PLACE", "ORDER", commandId, null, "{}", Instant.parse("2026-01-01T00:00:00Z"), null);
