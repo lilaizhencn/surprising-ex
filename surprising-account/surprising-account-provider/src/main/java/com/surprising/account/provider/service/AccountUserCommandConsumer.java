@@ -11,12 +11,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.listener.BatchListenerFailedException;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
@@ -30,20 +33,31 @@ public class AccountUserCommandConsumer {
     private final AccountUserStateCommandWorker stateWorker;
     private final AccountProperties properties;
     private final AccountCommandMetrics metrics;
+    private final KafkaTemplate<String, String> kafkaTemplate;
     private final Set<FailedRecord> failedRecords = ConcurrentHashMap.newKeySet();
 
     /** 生产入口只写同步 WAL；数据库审计投影由独立 worker 负责。 */
-    @Autowired
     public AccountUserCommandConsumer(ObjectMapper objectMapper,
                                       AccountUserCommandWalIngress walIngress,
                                       AccountUserStateCommandWorker stateWorker,
                                       AccountProperties properties,
                                       AccountCommandMetrics metrics) {
+        this(objectMapper, walIngress, stateWorker, properties, metrics, null);
+    }
+
+    @Autowired
+    public AccountUserCommandConsumer(ObjectMapper objectMapper,
+                                      AccountUserCommandWalIngress walIngress,
+                                      AccountUserStateCommandWorker stateWorker,
+                                      AccountProperties properties,
+                                      AccountCommandMetrics metrics,
+                                      @Qualifier("accountKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.walIngress = walIngress;
         this.stateWorker = stateWorker;
         this.properties = properties;
         this.metrics = metrics;
+        this.kafkaTemplate = kafkaTemplate;
     }
 
     @KafkaListener(
@@ -69,6 +83,9 @@ public class AccountUserCommandConsumer {
             UserMutationBatch mutationBatch = new UserMutationBatch(parsed.stream()
                     .map(value -> toUserMutation(value.command()))
                     .toList());
+            for (UserMutation mutation : mutationBatch.mutations()) {
+                publishMutation(mutation);
+            }
             List<AccountUserCommandWalIngress.CommandEnvelope> envelopes = parsed.stream()
                     .map(value -> new AccountUserCommandWalIngress.CommandEnvelope(
                             value.command(), value.record().value()))
@@ -134,6 +151,22 @@ public class AccountUserCommandConsumer {
         return new UserMutation(UserMutation.CURRENT_SCHEMA_VERSION, command.commandId(), command.productLine(),
                 command.userId(), command.commandType().name(), command.source(), command.sourceReference(),
                 command.dependsOnCommandId(), command.payload(), command.occurredAt(), command.traceId());
+    }
+
+    private void publishMutation(UserMutation mutation) {
+        if (kafkaTemplate == null) {
+            return;
+        }
+        try {
+            java.util.concurrent.CompletableFuture<?> send = kafkaTemplate.send(
+                    properties.getKafka().getUserMutationsTopic(), mutation.partitionKey(),
+                    objectMapper.writeValueAsString(mutation));
+            if (!(kafkaTemplate.isTransactional() && kafkaTemplate.inTransaction())) {
+                send.get(5, TimeUnit.SECONDS);
+            }
+        } catch (Exception ex) {
+            throw new IllegalStateException("用户 mutation canonical 入口发送失败: " + mutation.commandId(), ex);
+        }
     }
 
     private AccountUserCommand parseAndValidate(ConsumerRecord<String, String> record) {

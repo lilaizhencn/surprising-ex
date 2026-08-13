@@ -81,6 +81,9 @@ public class OrderUserCommandConsumer {
             }
         }
         UserMutationBatch mutationBatch = new UserMutationBatch(commands.stream().map(this::toUserMutation).toList());
+        for (UserMutation mutation : mutationBatch.mutations()) {
+            publishMutation(mutation);
+        }
         Map<String, ConsumerRecord<String, String>> recordsByCommandId = new java.util.LinkedHashMap<>();
         Map<String, OrderUserCommand> commandsById = new java.util.LinkedHashMap<>();
         for (int index = 0; index < records.size(); index++) {
@@ -169,6 +172,19 @@ public class OrderUserCommandConsumer {
             }
         } catch (Exception ex) {
             throw new KafkaException("订单用户命令结果发送失败: " + result.commandId(), ex);
+        }
+    }
+
+    private void publishMutation(UserMutation mutation) {
+        try {
+            java.util.concurrent.CompletableFuture<?> send = kafkaTemplate.send(
+                    properties.getKafka().getUserMutationsTopic(), mutation.partitionKey(),
+                    objectMapper.writeValueAsString(mutation));
+            if (!(kafkaTemplate.isTransactional() && kafkaTemplate.inTransaction())) {
+                send.get(properties.getEventPublish().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            }
+        } catch (Exception ex) {
+            throw new KafkaException("用户 mutation canonical 入口发送失败: " + mutation.commandId(), ex);
         }
     }
 
