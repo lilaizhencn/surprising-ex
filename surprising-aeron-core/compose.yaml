@@ -141,6 +141,27 @@ services:
       - /opt/surprising/tools.jar
       - com.surprising.aeron.tools.ClusterDerivativeSmokeMain
 
+  export-smoke:
+    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    profiles: [tools]
+    init: true
+    hostname: export-smoke
+    shm_size: 256mb
+    networks:
+      - cluster
+    entrypoint:
+      - java
+      - --add-opens
+      - java.base/jdk.internal.misc=ALL-UNNAMED
+      - -Dsurprising.aeron.product-line=${PRODUCT_LINE:-SPOT}
+      - -Dsurprising.aeron.hostnames=node0,node1,node2
+      - -Dsurprising.aeron.egress-hostname=export-smoke
+      - -Dsurprising.aeron.export-mode=${EXPORT_SMOKE_MODE:-status}
+      - -Dsurprising.aeron.export-batch-size=${EXPORT_BATCH_SIZE:-1024}
+      - -cp
+      - /opt/surprising/tools.jar
+      - com.surprising.aeron.tools.ClusterExportSmokeMain
+
 networks:
   cluster:
 

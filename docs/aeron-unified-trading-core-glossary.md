@@ -28,9 +28,12 @@ ADR 中说明，而不是为同一概念继续增加别名。
 | Exchange Core Adapter | 把统一核心命令映射到 Exchange Core 并将 fill 原子应用回权威状态的适配层。 | 独立权威撮合服务或本地 journal。 |
 | Risk State | 标记价、风险参数、账户风险快照、索引和扫描游标。 | Redis 风险缓存。 |
 | Liquidation State | 强平从发现、撤单、重算、下强平单、结算到保险/ADL 的可恢复进度。 | Redis candidate queue 中的一条临时记录。 |
-| Export State | Cluster 内保存的待导出事件和连续确认游标。 | Kafka 本身的 consumer offset。 |
+| Export State | Cluster 内保存的待导出事件、连续确认游标和稳定内容摘要；使用条数与总字节双硬上限。 | Kafka 本身的 consumer offset。 |
 | Reliable Exporter | 从 Export State 向 Kafka at-least-once 发布并将 ack 提交回 Cluster 的进程。 | Aeron 与 Kafka 的分布式事务。 |
-| Kafka Input Bridge | 将外部 Kafka 事件转换为稳定 commandId 的 Aeron 命令，成功提交后再确认 offset。 | 核心业务状态存储。 |
+| Export Sequence | 单条产品线内由 Aeron State 连续分配的对外事件序号；Kafka key 和 PG 幂等主键都包含它。 | Kafka offset 或 Cluster position。 |
+| Export ACK | Kafka 全批成功后提交回 Aeron、只推进连续区间的命令；自身不生成 Export Event。 | Kafka producer ack 本身。 |
+| Export Backpressure | pending 达到条数或字节硬上限时，在业务 reducer 前返回 `EXPORT_BACKLOG_FULL`；这不是业务裁决。 | 可提交 Kafka input offset 的拒单。 |
+| Kafka Input Bridge | 将版本化外部 Kafka envelope 转换为稳定 commandId 的 Aeron 命令，明确业务裁决后再确认 offset。 | 核心业务状态存储。 |
 | Projection | 从 Kafka 事件构建的 PostgreSQL、Valkey、WebSocket 或报表读模型。 | 可回写或覆盖核心状态的权威源。 |
 | commandId | 标识一次业务意图的稳定幂等 ID；重试必须复用。 | 每次网络请求随机生成的新 ID。 |
 | correlationId | 用于串联调用、日志和响应的追踪 ID。 | 状态变化幂等键。 |

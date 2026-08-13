@@ -17,9 +17,13 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.AckExportCommand;
+import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import org.junit.jupiter.api.Test;
 
 class CoreProbeStateTest {
@@ -149,8 +153,132 @@ class CoreProbeStateTest {
         assertThat(restoredDuplicate.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
     }
 
+    @Test
+    void exportBacklogIsOrderedAckedAndRestoredWithSnapshot() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        CoreMessage first = command(UUID.randomUUID(), 1, 7);
+        CoreMessage second = command(UUID.randomUUID(), 2, 3);
+        state.apply(first);
+        state.apply(second);
+
+        var batchResult = state.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
+                CoreExportCodec.encodeBatchQuery(10)));
+        var batch = CoreExportCodec.decodeBatch(batchResult.data());
+
+        assertThat(batch).hasSize(2);
+        assertThat(batch).extracting(message -> CoreExportCodec.decodeEvent(message.payload()).exportSequence())
+                .containsExactly(1L, 2L);
+        assertThat(CoreExportCodec.decodeEvent(batch.getFirst().payload()).commandId())
+                .isEqualTo(first.header().commandId());
+
+        CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
+                UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 81, 1, 0, 2_000, 81),
+                CoreExportCodec.encodeAck(new AckExportCommand(1)));
+        assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
+
+        CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot());
+        var status = CoreExportCodec.decodeStatus(restored.apply(query(
+                CoreMessageType.EXPORT_STATUS_QUERY, 0, new byte[0])).data());
+        var remaining = CoreExportCodec.decodeBatch(restored.apply(query(
+                CoreMessageType.EXPORT_BATCH_QUERY, 0, CoreExportCodec.encodeBatchQuery(10))).data());
+
+        assertThat(status.acknowledgedSequence()).isEqualTo(1);
+        assertThat(status.nextSequence()).isEqualTo(3);
+        assertThat(status.pendingCount()).isEqualTo(1);
+        assertThat(status.pendingBytes()).isPositive();
+        assertThat(status.acceptingCommands()).isTrue();
+        assertThat(remaining).hasSize(1);
+        assertThat(CoreExportCodec.decodeEvent(remaining.getFirst().payload()).exportSequence()).isEqualTo(2);
+    }
+
+    @Test
+    void snapshotChecksumRejectsCorruption() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        state.apply(command(UUID.randomUUID(), 1, 7));
+        byte[] snapshot = state.snapshot();
+        snapshot[snapshot.length - Long.BYTES - 1] ^= 1;
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot))
+                .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)
+                .hasMessageContaining("checksum");
+    }
+
+    @Test
+    void readsLegacyVersionOneAndTwoSnapshots() {
+        CoreProbeState empty = new CoreProbeState(ProductLine.SPOT);
+        byte[] versionOne = java.util.Arrays.copyOf(empty.snapshot(), 32);
+        ByteBuffer.wrap(versionOne).order(ByteOrder.LITTLE_ENDIAN).putShort(4, (short) 1);
+        CoreProbeState restoredV1 = CoreProbeState.fromSnapshot(ProductLine.SPOT, versionOne);
+
+        CoreProbeState populated = new CoreProbeState(ProductLine.SPOT);
+        populated.apply(command(UUID.randomUUID(), 1, 7));
+        byte[] versionTwo = downgradeToVersionTwo(populated.snapshot());
+        CoreProbeState restoredV2 = CoreProbeState.fromSnapshot(ProductLine.SPOT, versionTwo);
+
+        assertThat(restoredV1.appliedCommandCount()).isZero();
+        assertThat(restoredV1.tradingState().businessStateHash())
+                .isEqualTo(empty.tradingState().businessStateHash());
+        assertThat(restoredV2.appliedCommandCount()).isEqualTo(1);
+        assertThat(restoredV2.probeValue()).isEqualTo(7);
+        assertThat(restoredV2.exportState().pending()).isEmpty();
+    }
+
+    @Test
+    void snapshotManifestReportsAuthoritativeMetadata() {
+        CoreProbeState state = new CoreProbeState(ProductLine.OPTION);
+        state.apply(command(ProductLine.OPTION, UUID.randomUUID(), 1, 3));
+
+        CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
+
+        assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
+        assertThat(manifest.schemaVersion()).isEqualTo(3);
+        assertThat(manifest.appliedCommandCount()).isEqualTo(1);
+        assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+        assertThat(manifest.exportStatus().pendingCount()).isEqualTo(1);
+        assertThat(manifest.checksum()).isPositive();
+    }
+
+    @Test
+    void rejectsAckAheadWithExplicitResultAndAllowsRetry() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        state.apply(command(UUID.randomUUID(), 1, 7));
+        UUID commandId = UUID.randomUUID();
+        CoreMessage ackAhead = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
+                commandId, ProductLine.SPOT, CommandSource.OPERATIONS, 81, 1, 0, 2_000, 81),
+                CoreExportCodec.encodeAck(new AckExportCommand(2)));
+
+        var rejected = state.apply(ackAhead);
+        var duplicate = state.apply(ackAhead);
+
+        assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
+        assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.EXPORT_ACK_AHEAD);
+        assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+        assertThat(duplicate.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+        assertThat(duplicate.resultCode()).isEqualTo(CoreResultCode.EXPORT_ACK_AHEAD);
+    }
+
     private static CoreMessage command(UUID commandId, long sourceSequence, long delta) {
         return command(ProductLine.SPOT, commandId, sourceSequence, delta);
+    }
+
+    private static byte[] downgradeToVersionTwo(byte[] versionThree) {
+        ByteBuffer input = ByteBuffer.wrap(versionThree).order(ByteOrder.LITTLE_ENDIAN);
+        int resultCount = input.getInt(24);
+        int sourceCount = input.getInt(28);
+        int tradingLength = input.getInt(32);
+        int exportOffset = 36 + sourceCount * 24 + resultCount * 40;
+        input.position(exportOffset + Long.BYTES * 2);
+        int eventCount = input.getInt();
+        for (int index = 0; index < eventCount; index++) {
+            input.position(input.position() + Integer.BYTES + input.getInt(input.position()));
+        }
+        int tradingOffset = input.position();
+        byte[] versionTwo = new byte[exportOffset + tradingLength];
+        System.arraycopy(versionThree, 0, versionTwo, 0, exportOffset);
+        System.arraycopy(versionThree, tradingOffset, versionTwo, exportOffset, tradingLength);
+        ByteBuffer.wrap(versionTwo).order(ByteOrder.LITTLE_ENDIAN).putShort(4, (short) 2);
+        return versionTwo;
     }
 
     private static CoreMessage command(

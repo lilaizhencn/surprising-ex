@@ -15,6 +15,7 @@ import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.WireMessageKind;
+import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
@@ -36,13 +37,14 @@ public final class CoreProbeState implements AutoCloseable {
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final TradingCoreReducer tradingReducer;
     private final DeterministicExchangeCoreAdapter matchingAdapter;
+    private final CoreExportState exportState;
     private long appliedCommandCount;
     private long probeValue;
     private TradingCoreState tradingState;
 
     public CoreProbeState(ProductLine productLine) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
-                TradingCoreState.empty(productLine));
+                TradingCoreState.empty(productLine), new CoreExportState());
     }
 
     private CoreProbeState(
@@ -51,13 +53,15 @@ public final class CoreProbeState implements AutoCloseable {
             long probeValue,
             LinkedHashMap<UUID, StoredResult> commandResults,
             LinkedHashMap<SourceKey, Long> lastSourceSequences,
-            TradingCoreState tradingState) {
+            TradingCoreState tradingState,
+            CoreExportState exportState) {
         this.productLine = productLine;
         this.appliedCommandCount = appliedCommandCount;
         this.probeValue = probeValue;
         this.commandResults = commandResults;
         this.lastSourceSequences = lastSourceSequences;
         this.tradingState = tradingState;
+        this.exportState = exportState;
         this.tradingReducer = new TradingCoreReducer();
         this.matchingAdapter = new DeterministicExchangeCoreAdapter();
         this.matchingAdapter.rebuild(tradingState.bookState());
@@ -69,13 +73,15 @@ public final class CoreProbeState implements AutoCloseable {
             long probeValue,
             Map<UUID, StoredResult> commandResults,
             Map<SourceKey, Long> lastSourceSequences,
-            TradingCoreState tradingState) {
+            TradingCoreState tradingState,
+            CoreExportState exportState) {
         if (appliedCommandCount < 0 || commandResults.size() > MAX_IDEMPOTENCY_RESULTS
-                || tradingState == null || tradingState.productLine() != productLine) {
+                || tradingState == null || tradingState.productLine() != productLine || exportState == null) {
             throw new IllegalArgumentException("invalid restored probe state");
         }
         return new CoreProbeState(productLine, appliedCommandCount, probeValue,
-                new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences), tradingState);
+                new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences), tradingState,
+                exportState);
     }
 
     public CoreResponse apply(CoreMessage message) {
@@ -116,6 +122,21 @@ public final class CoreProbeState implements AutoCloseable {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
         }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.EXPORT_BATCH_QUERY) {
+            try {
+                int maxEvents = CoreExportCodec.decodeBatchQuery(message.payload());
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, stateHash(),
+                        CoreExportCodec.encodeBatch(exportState.batch(maxEvents)));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.EXPORT_STATUS_QUERY) {
+            return new CoreResponse(ResponseStatus.OK, appliedCommandCount, stateHash(),
+                    CoreExportCodec.encodeStatus(exportState.status()));
+        }
         StoredResult duplicate = commandResults.get(message.header().commandId());
         if (duplicate != null) {
             return new CoreResponse(ResponseStatus.DUPLICATE,
@@ -134,6 +155,13 @@ public final class CoreProbeState implements AutoCloseable {
         }
         ResponseStatus status;
         CoreResultCode resultCode = CoreResultCode.NONE;
+        boolean exportCommand = message.header().messageType() != CoreMessageType.ACK_EXPORT;
+        if (exportCommand && !exportState.hasCapacityFor(message)) {
+            return rejected(CoreResultCode.EXPORT_BACKLOG_FULL);
+        }
+        if (exportCommand && message.payload().length > CoreExportCodec.MAX_COMMAND_PAYLOAD) {
+            return rejected(CoreResultCode.INVALID_MESSAGE);
+        }
         try {
             status = applyCommand(message);
         } catch (CoreStateRejectedException exception) {
@@ -151,6 +179,10 @@ public final class CoreProbeState implements AutoCloseable {
         }
         appliedCommandCount = Math.incrementExact(appliedCommandCount);
         lastSourceSequences.put(sourceKey, message.header().sourceSequence());
+        if (exportCommand) {
+            exportState.append(message, status, resultCode, appliedCommandCount,
+                    tradingState.businessStateHash());
+        }
         commandResults.put(message.header().commandId(),
                 new StoredResult(status, resultCode, appliedCommandCount, 0));
         trimIdempotencyWindow();
@@ -166,6 +198,10 @@ public final class CoreProbeState implements AutoCloseable {
         hash = mix(hash, appliedCommandCount);
         hash = mix(hash, probeValue);
         hash = mix(hash, tradingState.businessStateHash());
+        hash = mix(hash, exportState.acknowledgedSequence());
+        hash = mix(hash, exportState.nextSequence());
+        hash = mix(hash, exportState.pendingCount());
+        hash = mix(hash, exportState.pendingDigest());
         for (Map.Entry<SourceKey, Long> entry : lastSourceSequences.entrySet()) {
             hash = mix(hash, entry.getKey().source().wireCode());
             hash = mix(hash, entry.getKey().sourceId());
@@ -189,6 +225,10 @@ public final class CoreProbeState implements AutoCloseable {
         return CoreStateSnapshotCodec.decode(snapshot, productLine);
     }
 
+    public static CoreSnapshotManifest inspectSnapshot(ProductLine productLine, byte[] snapshot) {
+        return CoreStateSnapshotCodec.manifest(snapshot, productLine);
+    }
+
     public ProductLine productLine() {
         return productLine;
     }
@@ -203,6 +243,10 @@ public final class CoreProbeState implements AutoCloseable {
 
     public TradingCoreState tradingState() {
         return tradingState;
+    }
+
+    CoreExportState exportState() {
+        return exportState;
     }
 
     Map<UUID, StoredResult> commandResults() {
@@ -244,6 +288,7 @@ public final class CoreProbeState implements AutoCloseable {
                     TradingCommandCodec.decodeResolveLiquidation(message.payload()));
             case CONTINUE_RISK_SCAN -> tradingState = tradingReducer.continueRiskScan(tradingState,
                     TradingCommandCodec.decodeContinueRiskScan(message.payload()).maxUsers());
+            case ACK_EXPORT -> exportState.acknowledge(CoreExportCodec.decodeAck(message.payload()));
             default -> {
                 return null;
             }

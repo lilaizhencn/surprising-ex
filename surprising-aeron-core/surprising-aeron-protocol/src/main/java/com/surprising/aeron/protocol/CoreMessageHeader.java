@@ -71,4 +71,10 @@ public record CoreMessageHeader(
         return new CoreMessageHeader(schemaVersion, WireMessageKind.RESPONSE, responseType, commandId,
                 productLine, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
     }
+
+    public CoreMessageHeader exportEvent(long exportSequence) {
+        return new CoreMessageHeader(schemaVersion, WireMessageKind.EXPORT_EVENT, CoreMessageType.CORE_EVENT,
+                commandId, productLine, source, sourceId, exportSequence, userId,
+                submittedAtEpochMillis, correlationId);
+    }
 }

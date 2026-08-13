@@ -8,7 +8,7 @@
 | 基线分支 | `master` |
 | 基线提交 | `dc46edabcd606fea85517974391739942d5f51e2` |
 | 目标实施分支 | `codex/aeron-unified-core` |
-| 当前阶段 | `P5 Snapshot、Replay、Exporter 和投影` |
+| 当前阶段 | `P6 删除旧 WAL、Redis Risk 和旧强平链路` |
 | 最后更新日期 | `2026-08-13` |
 | 上线状态 | 项目尚未上线，无生产历史数据和兼容包袱 |
 | 架构决策 | [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md) |
@@ -377,13 +377,10 @@ Exporter 流程：
 Kafka 写成功但 Aeron ack 丢失时允许重复导出。所有消费者必须以 `eventId` 或业务唯一键幂等。
 PostgreSQL 表必须有相应唯一约束。不能声称跨 Aeron 和 Kafka 做到了分布式 exactly-once。
 
-当 Export backlog 达到：
-
-- 警告水位：告警并降低非关键事件批次频率。
-- 拒单水位：拒绝普通新开仓，继续允许撤单、reduce-only 和强平。
-- 极限水位：进入安全 Drain，禁止产生更多非安全状态变化。
-
-三个水位根据可用堆内存、Snapshot 大小和 Kafka 故障演练确定，不能使用无界队列。
+P5 实现使用 `1,000,000` 条和 `64 MiB` 双重硬上限，任一达到即在业务 reducer 前返回
+`EXPORT_BACKLOG_FULL`，调用方必须重试，Kafka Input Bridge 不得提交 offset。第一版不在积压极限下区分
+普通新开仓与撤单/强平，避免给同一条确定性出口再增加旁路；Exporter 恢复或运维 Drain 后统一恢复。
+预警水位与生产告警阈值仍由 P9 单产品线实测确定，但不能高于这两个硬上限。
 
 ### 9.4 PostgreSQL
 
@@ -885,9 +882,9 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | P1 | `DONE` | Aeron 协议、三节点骨架和工具 | schema v1 golden；Snapshot/幂等测试；三节点 Leader kill 后 hash 连续 | `6bd1cb3` |
 | P2 | `DONE` | User/Order State 和资金预占 | 订单/账户单测、六线规则、幂等、资金不变量和 Snapshot v2 | `20d5bbd` |
 | P3 | `DONE` | Exchange Core Adapter 和 Book State | 六线撮合组件测试；SPOT 三节点成交、Leader kill、冷恢复资金守恒 | `e206eee` |
-| P4 | `DONE` | Risk、强平和生命周期进入核心 | 35 个 service 测试；SPOT、线性永续三节点恢复；资金守恒 | `本 P4 阶段提交` |
-| P5 | `IN_PROGRESS` | Snapshot、Replay、Exporter 和投影 | Leader kill、冷恢复、Exporter 故障测试 | 待填写 |
-| P6 | `NOT_STARTED` | 删除旧 WAL、Redis Risk 和旧强平链 | 全仓引用清零、全量 Maven 测试 | 待填写 |
+| P4 | `DONE` | Risk、强平和生命周期进入核心 | 35 个 service 测试；SPOT、线性永续三节点恢复；资金守恒 | `cb525dc` |
+| P5 | `DONE` | Snapshot、Replay、Exporter 和投影 | SPOT Leader/Follower kill、冷恢复、Exporter 故障、Kafka/PG 幂等投影 | `本 P5 阶段提交` |
+| P6 | `IN_PROGRESS` | 删除旧 WAL、Redis Risk 和旧强平链 | 全仓引用清零、全量 Maven 测试 | 待填写 |
 | P7 | `NOT_STARTED` | 补齐六条产品线 | 六线 smoke、恢复、资金核对 | 待填写 |
 | P8 | `NOT_STARTED` | 单产品线功能和资金正式验收 | 第 15 节门禁报告 | 待填写 |
 | P9 | `NOT_STARTED` | 单产品线性能和故障容量测试 | 六份独立容量报告 | 待填写 |
@@ -1111,14 +1108,62 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 
 任务：
 
-- [ ] 完整 Snapshot schema 和 checksum。
-- [ ] Snapshot + Archive replay。
-- [ ] Leader/Follower/全 Cluster 恢复矩阵。
-- [ ] Export State 和 backlog 水位。
-- [ ] Kafka Exporter 和 ack 命令。
-- [ ] PostgreSQL 幂等投影。
-- [ ] Kafka Input Bridge。
-- [ ] 运维监控、health 和安全 Drain。
+- [x] 完整 Snapshot schema 和 checksum。
+- [x] Snapshot + Archive replay。
+- [x] Leader/Follower/全 Cluster 恢复矩阵。
+- [x] Export State 和 backlog 水位。
+- [x] Kafka Exporter 和 ack 命令。
+- [x] PostgreSQL 幂等投影。
+- [x] Kafka Input Bridge。
+- [x] 运维监控、health 和安全 Drain。
+
+完成日期：2026-08-13
+
+完成提交：本 P5 阶段提交
+
+实际修改模块：
+
+- `surprising-aeron-protocol`：新增 Export batch/status/ack、稳定 export sequence、版本化 Kafka input
+  envelope、明确 `EXPORT_BACKLOG_FULL` 和 `EXPORT_ACK_AHEAD` 结果码；响应批次严格限制在 16 MiB 协议内。
+- `surprising-aeron-service`：新增有序 `CoreExportState`；所有首次裁决（包括业务拒绝）进入审计事件，ACK
+  不自反馈；队列使用 O(1) 头部删除、稳定增量 digest、`1,000,000` 条和 `64 MiB` 双硬上限。
+- `CoreStateSnapshotCodec`：outer snapshot v3 保存 User/Order/Book/Risk/Liquidation/Treasury/Export 完整状态，
+  CRC32C 先校验后解析，继续兼容 v1/v2；`SnapshotInspectMain` 输出产品线、schema、applied count、
+  business hash、export cursor 和 checksum。
+- `surprising-aeron-exporter`：新增可执行 `ExporterMain`、`ProjectionMain`、`InputBridgeMain`；Kafka producer
+  强制 idempotence 和 `acks=all`；只有全批 publish 成功才提交 Aeron ACK；PG 以
+  `(product_line, export_sequence)` 主键幂等投影；Kafka input 只有明确业务裁决才提交 offset。
+- `ClusterExportSmokeMain` 与 `scripts/aeron-core-local.sh`：新增 status、故障注入和 bounded drain 工具。
+
+验证命令：
+
+- `mvn -pl :surprising-aeron-protocol,:surprising-aeron-service,:surprising-aeron-client,:surprising-aeron-exporter,:surprising-aeron-tools -am test`
+- `PRODUCT_LINE=SPOT ./scripts/aeron-core-local.sh build|up|export-status|export-fail|export-drain`
+- `docker stop surprising-aeron-spot-node0-1` 后重新执行 export status/drain。
+- 停止 node2、继续提交命令、启动 node2 并追平；随后三节点全停保留卷冷启动。
+- `ClusterTool <cluster-dir> snapshot`。
+- `ExporterInfrastructureSmokeMain` 连接本机 Kafka `localhost:9092` 和 PostgreSQL `localhost:5432`。
+
+验证结果：
+
+- 单元/组件测试：product-api 18、protocol 12、instrument-api 11、service 40、exporter 6、tools 2，
+  `BUILD SUCCESS`。
+- Exporter 故障：真实三节点 backlog `ack=0,next=26,pending=25`；注入 sink 失败尝试发布 25 条后仍为
+  `ack=0,pending=25`。
+- Leader kill：停止 Leader node0 后新 Leader 返回同一 `ack=0,next=26,pending=25`；恢复 sink 后重发 25
+  条，结果 `ack=25,pending=0`。
+- Follower kill/rejoin：停止 node2 期间继续提交 1 条命令成功；node2 重入后 drain 2 条并达到
+  `ack=27,pending=0`。
+- Snapshot/冷恢复：Aeron `SNAPSHOT applied successfully`；三节点全停、保留卷重启后
+  `ack=27,next=28,pending=0`，`appliedCommandCount=29`。
+- Kafka/PG：真实发布到 `surprising.spot.core.events.v1`；同一事件投影两次，PG 最终 `pgRows=1`。
+
+残留风险：
+
+- 本阶段证据是 Apple M1 Pro 本地功能与恢复证据，不是生产容量结论。
+- Kafka/PG 真实基础设施验证覆盖 SPOT；六产品线 topic、projection 和完整资金对账在 P7 逐线执行。
+- Snapshot 命令与 Leader/Follower/冷启动矩阵已覆盖；单 Member 空目录重建和 Cluster Backup 属 P10
+  服务器部署演练范围。
 
 阶段出口：RPO 0，Exporter 可重复无重复资金效果，投影能追平。
 
@@ -1191,6 +1236,11 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P4 | 决策 | Risk scan 每个命令最多处理 256 用户并通过续跑命令推进 | 限制单个 Cluster duty cycle，避免强平风暴阻塞共识 | `CoreRiskStateTest` | P9 强平风暴压测后再调整可配置生产值 |
 | 2026-08-13 | P4 | 决策 | 未覆盖坏账只记录在 Liquidation State，不同时写 Treasury deficit | 对手方盈利和坏账若同时进 Treasury 会重复计算系统资金 | `CoreLiquidationState.deficitUnits`、`CoreLifecycleStateTest` | Exporter 必须输出 liquidation deficit 和后续覆盖回执 |
 | 2026-08-13 | P4 | 证据 | SPOT 和 LINEAR_PERPETUAL 均完成真实三节点 Leader kill 恢复，线性资金费净额为零 | 组件测试不能替代共识日志上的状态连续性 | `ClusterSpotMatchSmokeMain`、`ClusterDerivativeSmokeMain` | P7 继续逐线执行相同门禁，不并行启动六线 |
+| 2026-08-13 | P5 | 决策 | Export State 位于 Aeron Snapshot，Kafka 成功后才 ACK；不增加数据库 outbox 或第二套 WAL | 保持单一权威恢复链，跨 Aeron/Kafka 使用 at-least-once 和稳定 sequence | `CoreExportState`、`ReliableCoreExporter` | Kafka/PG 消费者必须按 `(product_line, export_sequence)` 幂等 |
+| 2026-08-13 | P5 | 决策 | Export backlog 使用条数与 64 MiB 双硬上限，满载在 reducer 前明确背压 | 防止大 payload 在 100 万条之前耗尽堆或令 Snapshot 超过 JVM 数组限制 | `CoreExportState.hasCapacityFor` | `EXPORT_BACKLOG_FULL` 不属于业务裁决，Kafka offset 不提交 |
+| 2026-08-13 | P5 | 决策 | 第一版极限积压统一 fail-closed，不为撤单/强平增加旁路队列 | 旁路会破坏一个连续 Export State 的简单恢复语义 | `CoreProbeState.apply` | 运维先恢复 exporter 或 drain；P9 再以证据决定预警水位 |
+| 2026-08-13 | P5 | 证据 | SPOT 真实三节点完成 sink 故障、Leader kill、Follower rejoin、Snapshot 和全停冷恢复 | 模拟 sink 单测不足以证明 cursor 在共识故障中的连续性 | `ClusterExportSmokeMain`、Aeron `ClusterTool` | P7 对其余五线复用相同恢复脚本 |
+| 2026-08-13 | P5 | 证据 | 本机 Kafka 和 PostgreSQL 完成真实发布、重复投影，最终唯一行数为 1 | H2 只验证 JDBC 语义，不能替代目标基础设施 | `ExporterInfrastructureSmokeMain` | P7 将事件内容与六线资金投影逐项对账 |
 
 ## 20. 阶段更新模板
 

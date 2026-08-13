@@ -33,6 +33,12 @@ Redis Risk State、Redis 强平候选队列和 PostgreSQL 强平事务维持不�
     预占币种，不允许从 symbol 名称或外部缓存猜测资金资产。
 14. `commandId` 重试返回传输状态 `DUPLICATE` 时必须同时返回原始 `commandStatus`，调用方不能把重复
     误判为成功或失败。
+15. Export State 与业务状态保存在同一个 Aeron Snapshot；Exporter 只有在 Kafka 全批确认后提交连续
+    ACK，不增加数据库 outbox 或应用 WAL。
+16. Kafka Input Bridge 使用 topic/partition/offset 稳定映射命令来源和 `commandId`，只有 Aeron 明确业务
+    裁决后提交 offset；`EXPORT_BACKLOG_FULL` 与结果未知都必须原 offset 重试。
+17. PostgreSQL 投影主键为 `(product_line, export_sequence)`，只接受 at-least-once 重放，不能反向覆盖
+    Aeron 权威状态。
 
 ## 选择统一 Cluster 而不是多 Cluster
 
@@ -51,8 +57,11 @@ Aeron Cluster 适合低延迟复制状态机，不替代所有数据分发场景
 
 ## Snapshot 决策
 
-第一版 Aeron Snapshot 保存可精确恢复 Exchange Core 价格时间优先级的开放订单状态，恢复后重建
+第一版 Aeron Snapshot 保存可精确恢复 Exchange Core 价格时间优先级的开放订单状态以及 Export pending
+事件、ACK/next cursor，恢复后重建
 Exchange Core 并校验规范化 Book State hash。不启用 Exchange Core 的本地磁盘 journal，避免第二权威日志。
+outer snapshot v3 使用 CRC32C 校验并兼容 v1/v2；Snapshot manifest 可离线检查产品线、schema、已应用命令、
+业务 hash、export cursor 和 checksum。
 运行中的 Member 另用 `StateHashReportQuery` 的 `MATCHING_ORDER_BOOKS` 子模块检查执行器一致性；该内部
 hash 包含已成交历史字段，不能作为只保存开放订单的 Snapshot 恢复 hash。
 

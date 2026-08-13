@@ -6,13 +6,16 @@ import java.util.UUID;
 
 public final class CoreMessageCodec {
 
-    private static final int MAX_PAYLOAD_LENGTH = 16 * 1024 * 1024;
+    public static final int MAX_PAYLOAD_LENGTH = 16 * 1024 * 1024;
 
     private CoreMessageCodec() {
     }
 
     public static byte[] encode(CoreMessage message) {
         byte[] payload = message.payload();
+        if (payload.length > MAX_PAYLOAD_LENGTH) {
+            throw new IllegalArgumentException("message payload is too large");
+        }
         CoreMessageHeader header = message.header();
         ByteBuffer buffer = ByteBuffer.allocate(CoreProtocol.HEADER_LENGTH + payload.length)
                 .order(ByteOrder.LITTLE_ENDIAN);
