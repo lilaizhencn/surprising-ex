@@ -1,6 +1,6 @@
 package com.surprising.account.provider.service;
 
-public final class AccountCommandRejectedException extends RuntimeException {
+public final class AccountCommandRejectedException extends IllegalStateException {
 
     private final String errorCode;
     private final String resultPayload;

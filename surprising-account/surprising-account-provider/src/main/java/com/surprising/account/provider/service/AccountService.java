@@ -26,6 +26,7 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.eventstore.UserPartitionKey;
+import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.ContractSettlementMethod;
@@ -53,16 +54,19 @@ public class AccountService {
     private final AccountProperties properties;
     private final AccountUserStateReducer stateReducer;
     private final AccountCommandGateway commandGateway;
+    private final AccountAeronGateway aeronGateway;
     private final AccountQueryService projectionQueryService;
 
     @Autowired
     public AccountService(AccountProperties properties,
                           AccountUserStateReducer stateReducer,
                           AccountCommandGateway commandGateway,
+                          AccountAeronGateway aeronGateway,
                           AccountQueryService projectionQueryService) {
         this.properties = properties;
         this.stateReducer = stateReducer;
         this.commandGateway = commandGateway;
+        this.aeronGateway = aeronGateway;
         this.projectionQueryService = projectionQueryService;
     }
 
@@ -80,21 +84,21 @@ public class AccountService {
     }
 
     public BalanceResponse balance(long userId, String asset) {
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(currentProductLine(), userId);
+        CoreUserStateView snapshot = coreSnapshot(currentProductLine(), userId);
         String normalizedAsset = normalizeAsset(asset);
         return snapshot.balances().stream()
                 .filter(value -> value.asset().equalsIgnoreCase(normalizedAsset))
                 .findFirst()
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
-                        Math.addExact(value.availableUnits(), value.lockedUnits()), snapshot.eventTime()))
-                .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, snapshot.eventTime()));
+                        Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
+                .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.now()));
     }
 
     public BalanceQueryResponse balances(long userId) {
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(currentProductLine(), userId);
+        CoreUserStateView snapshot = coreSnapshot(currentProductLine(), userId);
         List<BalanceResponse> rows = snapshot.balances().stream()
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
-                        Math.addExact(value.availableUnits(), value.lockedUnits()), snapshot.eventTime()))
+                        Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
                 .toList();
         return new BalanceQueryResponse(rows.size(), rows);
     }
@@ -115,25 +119,25 @@ public class AccountService {
 
     public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
         requireProductAccount(accountType);
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(accountType.productLine().orElseThrow(), userId);
+        CoreUserStateView snapshot = coreSnapshot(accountType.productLine().orElseThrow(), userId);
         String normalizedAsset = normalizeAsset(asset);
         BalanceResponse balance = snapshot.balances().stream()
                 .filter(value -> value.asset().equalsIgnoreCase(normalizedAsset))
                 .findFirst()
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
-                        Math.addExact(value.availableUnits(), value.lockedUnits()), snapshot.eventTime()))
-                .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, snapshot.eventTime()));
+                        Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
+                .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.now()));
         return new ProductBalanceResponse(userId, accountType, balance.asset(),
                 balance.availableUnits(), balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
     }
 
     public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
         requireProductAccount(accountType);
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(accountType.productLine().orElseThrow(), userId);
+        CoreUserStateView snapshot = coreSnapshot(accountType.productLine().orElseThrow(), userId);
         List<ProductBalanceResponse> rows = snapshot.balances().stream()
                 .map(value -> new ProductBalanceResponse(userId, accountType, value.asset(),
                         value.availableUnits(), value.lockedUnits(),
-                        Math.addExact(value.availableUnits(), value.lockedUnits()), snapshot.eventTime()))
+                        Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
                 .toList();
         return new ProductBalanceQueryResponse(rows.size(), rows);
     }
@@ -252,9 +256,9 @@ public class AccountService {
         requireUserId(userId);
         requireCurrentProduct(productLine);
         requireDerivativeProduct(productLine);
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(productLine, userId);
-        return new PositionModeResponse(productLine, userId, snapshot.positionMode(),
-                snapshot.eventTime());
+        CoreUserStateView snapshot = coreSnapshot(productLine, userId);
+        return new PositionModeResponse(productLine, userId,
+                com.surprising.trading.api.model.PositionMode.valueOf(snapshot.positionMode().name()), Instant.now());
     }
 
     public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
@@ -277,7 +281,7 @@ public class AccountService {
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
         com.surprising.trading.api.model.PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
-        return localPosition(localSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
+        return corePosition(coreSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
                 normalizedPositionSide).orElseGet(() -> new PositionResponse(userId, normalizedSymbol, 0L,
                         normalizedMarginMode, normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
     }
@@ -287,7 +291,7 @@ public class AccountService {
         requireDerivativeProduct(currentProductLine());
         String normalizedSymbol = normalizeSymbol(symbol);
         MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
-        return localPositionMargin(localSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
+        return corePositionMargin(coreSnapshot(currentProductLine(), userId), userId, normalizedSymbol, normalizedMarginMode,
                 com.surprising.trading.api.model.PositionSide.NET).orElseGet(() -> new PositionMarginResponse(
                         userId, normalizedSymbol, "", normalizedMarginMode,
                         com.surprising.trading.api.model.PositionSide.NET, 0L, Instant.EPOCH));
@@ -302,10 +306,10 @@ public class AccountService {
         requireDerivativeProduct(currentProductLine());
         com.surprising.trading.api.model.PositionSide normalized = positionSide == null || positionSide.isBlank()
                 ? null : normalizePositionSide(positionSide);
-        PerpetualAccountStateUpdatedEvent snapshot = localSnapshot(currentProductLine(), userId);
+        CoreUserStateView snapshot = coreSnapshot(currentProductLine(), userId);
         List<PositionResponse> rows = snapshot.positions().stream()
-                .filter(value -> normalized == null || value.positionSide() == normalized)
-                .map(value -> toPositionResponse(userId, value))
+                .filter(value -> normalized == null || value.positionSide().name().equals(normalized.name()))
+                .map(value -> toCorePositionResponse(userId, value))
                 .toList();
         return new PositionQueryResponse(rows.size(), rows);
     }
@@ -391,6 +395,42 @@ public class AccountService {
         return stateReducer.snapshot(new UserPartitionKey(productLine, userId))
                 .orElseThrow(() -> new AccountStateUnavailableException("账户 JVM 快照尚未初始化: "
                         + productLine + ":" + userId));
+    }
+
+    private CoreUserStateView coreSnapshot(ProductLine productLine, long userId) {
+        requireUserId(userId);
+        requireCurrentProduct(productLine);
+        CoreUserStateView state = aeronGateway.userState(userId);
+        if (state == null) throw new AccountStateUnavailableException("Aeron 账户状态尚未初始化: "
+                + productLine + ':' + userId);
+        return state;
+    }
+
+    private Optional<PositionResponse> corePosition(CoreUserStateView snapshot, long userId, String symbol,
+                                                     MarginMode marginMode,
+                                                     com.surprising.trading.api.model.PositionSide positionSide) {
+        return snapshot.positions().stream().filter(value -> value.symbol().equalsIgnoreCase(symbol))
+                .filter(value -> value.marginMode().name().equals(marginMode.name()))
+                .filter(value -> value.positionSide().name().equals(positionSide.name()))
+                .map(value -> toCorePositionResponse(userId, value)).findFirst();
+    }
+
+    private Optional<PositionMarginResponse> corePositionMargin(CoreUserStateView snapshot, long userId,
+                                                                 String symbol, MarginMode marginMode,
+                                                                 com.surprising.trading.api.model.PositionSide side) {
+        return snapshot.positions().stream().filter(value -> value.symbol().equalsIgnoreCase(symbol))
+                .filter(value -> value.marginMode().name().equals(marginMode.name()))
+                .filter(value -> value.positionSide().name().equals(side.name()))
+                .map(value -> new PositionMarginResponse(userId, value.symbol(), value.marginAsset(), marginMode,
+                        side, value.positionMarginUnits(), Instant.now())).findFirst();
+    }
+
+    private PositionResponse toCorePositionResponse(long userId,
+                                                     com.surprising.aeron.protocol.CorePositionView position) {
+        return new PositionResponse(userId, position.symbol(), position.instrumentVersion(),
+                MarginMode.valueOf(position.marginMode().name()),
+                com.surprising.trading.api.model.PositionSide.valueOf(position.positionSide().name()),
+                position.signedQuantitySteps(), position.entryPriceTicks(), position.realizedPnlUnits(), Instant.now());
     }
 
     private Optional<PositionResponse> localPosition(PerpetualAccountStateUpdatedEvent snapshot,

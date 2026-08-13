@@ -4,79 +4,67 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.eventstore.UserPartitionCommandLane;
-import com.surprising.eventstore.UserPartitionStateStore;
+import com.surprising.aeron.protocol.CoreBalanceView;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CorePositionMode;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CorePositionView;
+import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionMode;
-import com.surprising.trading.api.model.PositionSide;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
 
 class AccountServiceLocalSnapshotTest {
 
     @Test
-    void balanceAndPositionsReadOnlyTheLocalUserSnapshot() throws Exception {
-        Path directory = Files.createTempDirectory("account-service-local-");
-        ObjectMapper objectMapper = new ObjectMapper();
+    void balanceAndPositionsReadOnlyAeronStrongState() {
         AccountQueryService projection = mock(AccountQueryService.class);
-        try (UserPartitionStateStore stateStore = new UserPartitionStateStore(directory)) {
-            AccountUserStateReducer reducer = new AccountUserStateReducer(
-                    objectMapper, stateStore, new UserPartitionCommandLane());
-            reducer.initialize(snapshot());
-            AccountService service = new AccountService(properties(), reducer, mock(AccountCommandGateway.class), projection);
+        AccountAeronGateway aeron = mock(AccountAeronGateway.class);
+        when(aeron.userState(1001L)).thenReturn(snapshot());
+        AccountService service = service(aeron, projection);
 
-            assertThat(service.balance(1001L, "usdt").availableUnits()).isEqualTo(800L);
-            assertThat(service.position(1001L, "btc-usdt").signedQuantitySteps()).isEqualTo(10L);
-            assertThat(service.positions(1001L).count()).isEqualTo(1);
-            assertThat(service.positionMode(1001L).positionMode()).isEqualTo(PositionMode.ONE_WAY);
-            verifyNoInteractions(projection);
-        }
+        assertThat(service.balance(1001L, "usdt").availableUnits()).isEqualTo(800L);
+        assertThat(service.position(1001L, "btc-usdt").signedQuantitySteps()).isEqualTo(10L);
+        assertThat(service.positions(1001L).count()).isEqualTo(1);
+        assertThat(service.positionMode(1001L).positionMode()).isEqualTo(PositionMode.ONE_WAY);
+        verifyNoInteractions(projection);
     }
 
     @Test
-    void missingSnapshotFailsClosedInsteadOfQueryingProjectionDatabase() throws Exception {
-        Path directory = Files.createTempDirectory("account-service-missing-");
-        ObjectMapper objectMapper = new ObjectMapper();
+    void missingAeronStateFailsClosedInsteadOfQueryingProjectionDatabase() {
         AccountQueryService projection = mock(AccountQueryService.class);
-        try (UserPartitionStateStore stateStore = new UserPartitionStateStore(directory)) {
-            AccountUserStateReducer reducer = new AccountUserStateReducer(
-                    objectMapper, stateStore, new UserPartitionCommandLane());
-            AccountService service = new AccountService(properties(), reducer, mock(AccountCommandGateway.class), projection);
+        AccountAeronGateway aeron = mock(AccountAeronGateway.class);
+        AccountService service = service(aeron, projection);
 
-            assertThatThrownBy(() -> service.balance(1001L, "USDT"))
-                    .isInstanceOf(AccountStateUnavailableException.class);
-            verifyNoInteractions(projection);
-        }
+        assertThatThrownBy(() -> service.balance(1001L, "USDT"))
+                .isInstanceOf(AccountStateUnavailableException.class);
+        verifyNoInteractions(projection);
     }
 
     @Test
-    void unsupportedProductLineAndTransferDoNotFallBackToDatabase() throws Exception {
-        Path directory = Files.createTempDirectory("account-service-scope-");
-        ObjectMapper objectMapper = new ObjectMapper();
+    void unsupportedProductLineAndTransferDoNotFallBackToDatabase() {
         AccountQueryService projection = mock(AccountQueryService.class);
         AccountCommandGateway gateway = mock(AccountCommandGateway.class);
-        try (UserPartitionStateStore stateStore = new UserPartitionStateStore(directory)) {
-            AccountUserStateReducer reducer = new AccountUserStateReducer(
-                    objectMapper, stateStore, new UserPartitionCommandLane());
-            reducer.initialize(snapshot());
-            AccountService service = new AccountService(properties(), reducer, gateway, projection);
+        AccountAeronGateway aeron = mock(AccountAeronGateway.class);
+        AccountService service = new AccountService(properties(), mock(AccountUserStateReducer.class), gateway,
+                aeron, projection);
 
-            assertThatThrownBy(() -> service.positionMode(ProductLine.LINEAR_DELIVERY, 1001L))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> service.transfer(new com.surprising.account.api.model.ProductTransferRequest(
-                    1001L, AccountType.USDT_PERPETUAL, AccountType.FUNDING, "USDT", 1L, "ref", "test")))
-                    .isInstanceOf(IllegalArgumentException.class);
-            verifyNoInteractions(projection);
-        }
+        assertThatThrownBy(() -> service.positionMode(ProductLine.LINEAR_DELIVERY, 1001L))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.transfer(new com.surprising.account.api.model.ProductTransferRequest(
+                1001L, AccountType.USDT_PERPETUAL, AccountType.FUNDING, "USDT", 1L, "ref", "test")))
+                .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(projection);
+    }
+
+    private static AccountService service(AccountAeronGateway aeron, AccountQueryService projection) {
+        return new AccountService(properties(), mock(AccountUserStateReducer.class),
+                mock(AccountCommandGateway.class), aeron, projection);
     }
 
     private static AccountProperties properties() {
@@ -86,16 +74,10 @@ class AccountServiceLocalSnapshotTest {
         return properties;
     }
 
-    private static PerpetualAccountStateUpdatedEvent snapshot() {
-        return new PerpetualAccountStateUpdatedEvent(
-                PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, 1L, 1L,
-                ProductLine.LINEAR_PERPETUAL, 1001L, AccountType.USDT_PERPETUAL.name(),
-                List.of(new PerpetualAccountStateUpdatedEvent.Balance("USDT", 800L, 200L)),
-                List.of(),
-                List.of(new PerpetualAccountStateUpdatedEvent.Position(
-                        "BTC-USDT", 1L, MarginMode.CROSS, PositionSide.NET,
-                        10L, 100L, 1000L, 0L, Instant.parse("2026-08-02T00:00:00Z"))),
-                List.of(), List.of(), PositionMode.ONE_WAY,
-                Instant.parse("2026-08-02T00:00:00Z"), "test");
+    private static CoreUserStateView snapshot() {
+        return new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 1001L, 1L, CorePositionMode.ONE_WAY,
+                List.of(new CoreBalanceView("USDT", 800L, 200L)), List.of(),
+                List.of(new CorePositionView("BTC-USDT", "USDT", CoreMarginMode.CROSS,
+                        CorePositionSide.NET, 1L, 10L, 100L, 1000L, 0L, 200L)));
     }
 }
