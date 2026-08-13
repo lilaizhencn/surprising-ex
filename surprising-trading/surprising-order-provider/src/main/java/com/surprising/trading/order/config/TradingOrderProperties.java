@@ -88,6 +88,8 @@ public class TradingOrderProperties {
         private int accountCommandResultsConcurrency = 32;
         private int userCommandConcurrency = 32;
         private Duration userCommandTimeout = Duration.ofSeconds(5);
+        private Duration resultCacheTtl = Duration.ofMinutes(5);
+        private int resultCacheMaxEntries = 10_000;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -175,6 +177,28 @@ public class TradingOrderProperties {
                 throw new IllegalArgumentException("订单用户命令等待时间必须为正数");
             }
             this.userCommandTimeout = userCommandTimeout;
+        }
+
+        public Duration getResultCacheTtl() {
+            return resultCacheTtl;
+        }
+
+        public void setResultCacheTtl(Duration resultCacheTtl) {
+            if (resultCacheTtl == null || resultCacheTtl.isZero() || resultCacheTtl.isNegative()) {
+                throw new IllegalArgumentException("订单结果缓存 TTL 必须为正数");
+            }
+            this.resultCacheTtl = resultCacheTtl;
+        }
+
+        public int getResultCacheMaxEntries() {
+            return resultCacheMaxEntries;
+        }
+
+        public void setResultCacheMaxEntries(int resultCacheMaxEntries) {
+            if (resultCacheMaxEntries <= 0) {
+                throw new IllegalArgumentException("订单结果缓存容量必须为正数");
+            }
+            this.resultCacheMaxEntries = resultCacheMaxEntries;
         }
         public String getPositionEventsTopic() {
             return productTopics().accountPositionEventsTopic();
@@ -271,7 +295,7 @@ public class TradingOrderProperties {
     /** 订单用户分区事实流的本地存储配置。 */
     public static class Wal {
         private String directory = "data/order-wal";
-        private int nodeId = 1;
+        private int nodeId = -1;
         private long workerDelayMs = 25L;
 
         public String getDirectory() {

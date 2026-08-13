@@ -4,6 +4,7 @@ import com.surprising.account.provider.model.AccountCommandTerminalResult;
 import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.eventstore.UserPartitionKey;
+import com.surprising.eventstore.BoundedExpiringCache;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -26,12 +27,14 @@ import tools.jackson.databind.ObjectMapper;
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
     private final Map<CommandKey, WaitSlot> waiting = new ConcurrentHashMap<>();
-    private final Map<CommandKey, AccountCommandTerminalResult> completed = new ConcurrentHashMap<>();
+    private final BoundedExpiringCache<CommandKey, AccountCommandTerminalResult> completed;
 
     public AccountCommandResultWaiter(ObjectMapper objectMapper,
                                       AccountProperties properties) {
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.completed = new BoundedExpiringCache<>(properties.getCommandWait().getCompletedCacheTtl(),
+                properties.getCommandWait().getCompletedCacheMaxEntries());
     }
 
     public AccountCommandTerminalResult await(UserPartitionKey partition, String commandId, Duration timeout) {
@@ -109,6 +112,7 @@ import tools.jackson.databind.ObjectMapper;
 
     /** 维护任务入口；结果由 Kafka listener 实时完成，不再轮询数据库。 */
     public void completeTerminalCommands() {
+        completed.cleanup();
         waiting.forEach((key, slot) -> {
             AccountCommandTerminalResult result = completed.get(key);
             if (result != null) {

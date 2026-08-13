@@ -57,6 +57,8 @@ surprising:
         user-command-concurrency: ${ORDER_USER_COMMAND_CONCURRENCY:32}
         # 用户命令包含 Kafka 发送和单写者落盘，等待时间必须覆盖启动重平衡窗口。
         user-command-timeout: ${ORDER_USER_COMMAND_TIMEOUT:15s}
+        result-cache-ttl: ${ORDER_COMMAND_RESULT_CACHE_TTL:5m}
+        result-cache-max-entries: ${ORDER_COMMAND_RESULT_CACHE_MAX_ENTRIES:10000}
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
         instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
@@ -71,7 +73,7 @@ surprising:
         lock-ttl: 30s
       wal:
         directory: ${ORDER_WAL_DIR:data/order-wal}
-        node-id: ${ORDER_WAL_NODE_ID:1}
+        node-id: ${ORDER_WAL_NODE_ID}
         worker-delay-ms: ${ORDER_WAL_WORKER_DELAY_MS:25}
     event-publish:
       send-timeout: 3s

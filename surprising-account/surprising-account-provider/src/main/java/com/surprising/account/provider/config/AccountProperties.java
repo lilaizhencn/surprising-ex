@@ -487,6 +487,8 @@ public class AccountProperties {
     public static class CommandWait {
         private Duration timeout = Duration.ofSeconds(10);
         private long pollDelayMs = 20L;
+        private Duration completedCacheTtl = Duration.ofMinutes(5);
+        private int completedCacheMaxEntries = 10_000;
 
         public Duration getTimeout() {
             return timeout;
@@ -508,6 +510,28 @@ public class AccountProperties {
                 throw new IllegalArgumentException("command wait pollDelayMs must be positive");
             }
             this.pollDelayMs = pollDelayMs;
+        }
+
+        public Duration getCompletedCacheTtl() {
+            return completedCacheTtl;
+        }
+
+        public void setCompletedCacheTtl(Duration completedCacheTtl) {
+            if (completedCacheTtl == null || completedCacheTtl.isZero() || completedCacheTtl.isNegative()) {
+                throw new IllegalArgumentException("command wait completedCacheTtl must be positive");
+            }
+            this.completedCacheTtl = completedCacheTtl;
+        }
+
+        public int getCompletedCacheMaxEntries() {
+            return completedCacheMaxEntries;
+        }
+
+        public void setCompletedCacheMaxEntries(int completedCacheMaxEntries) {
+            if (completedCacheMaxEntries <= 0) {
+                throw new IllegalArgumentException("command wait completedCacheMaxEntries must be positive");
+            }
+            this.completedCacheMaxEntries = completedCacheMaxEntries;
         }
     }
 

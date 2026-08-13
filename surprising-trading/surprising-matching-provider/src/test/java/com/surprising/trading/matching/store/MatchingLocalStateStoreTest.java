@@ -84,7 +84,30 @@ class MatchingLocalStateStoreTest {
     }
 
     @Test
-    void serializesGlobalOutboxSequenceAcrossSymbols() throws Exception {
+    void commitsMultipleOutboxWritesOnOneEventStream() {
+        ObjectMapper mapper = new ObjectMapper();
+        OrderCommandEvent command = command(31L, 301L, 1001L, Instant.parse("2026-07-01T00:00:00Z"));
+        MatchResultEvent result = new MatchResultEvent(command.commandId(), command.orderId(), command.userId(),
+                command.symbol(), command.instrumentVersion(), command.commandType(), "SUCCESS", 0L,
+                OrderStatus.ACCEPTED, Instant.parse("2026-07-01T00:00:01Z"), List.of());
+        Instant occurredAt = Instant.parse("2026-07-01T00:00:01Z");
+        MatchingOutboxWrite taker = new MatchingOutboxWrite(
+                "ACCOUNT_COMMAND", 700L, "surprising.spot.account.user.commands.v1",
+                "SPOT:USER:1001", "TRADE_SIDE_SETTLE", "{\"role\":\"TAKER\"}", occurredAt);
+        MatchingOutboxWrite release = new MatchingOutboxWrite(
+                "ACCOUNT_COMMAND", 700L, "surprising.spot.account.user.commands.v1",
+                "SPOT:USER:1001", "ORDER_RELEASE", "{\"role\":\"RELEASE\"}", occurredAt);
+
+        try (MatchingLocalStateStore store = new MatchingLocalStateStore(directory, mapper)) {
+            store.prepare(command);
+            assertThat(store.commit(result, List.of(), List.of(taker, release))).isTrue();
+            assertThat(store.pendingOutbox(10)).extracting(MatchingLocalStateStore.LocalOutboxRecord::eventType)
+                    .containsExactly("TRADE_SIDE_SETTLE", "ORDER_RELEASE");
+        }
+    }
+
+    @Test
+    void isolatesOutboxSequenceAcrossSymbols() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         int commandCount = 64;
         List<OrderCommandEvent> commands = new ArrayList<>(commandCount);
@@ -136,14 +159,15 @@ class MatchingLocalStateStoreTest {
             }
 
             List<MatchingLocalStateStore.LocalOutboxRecord> records = store.pendingOutbox(commandCount);
-            Set<Long> sequences = new HashSet<>();
+            Set<String> streams = new HashSet<>();
             Set<Long> aggregateIds = new HashSet<>();
             for (MatchingLocalStateStore.LocalOutboxRecord record : records) {
-                sequences.add(record.sequence());
+                streams.add(record.eventKey());
+                assertThat(record.sequence()).isEqualTo(1L);
                 aggregateIds.add(record.aggregateId());
             }
             assertThat(records).hasSize(commandCount);
-            assertThat(sequences).hasSize(commandCount);
+            assertThat(streams).hasSize(commandCount);
             assertThat(aggregateIds).hasSize(commandCount);
         }
     }

@@ -2,7 +2,9 @@ package com.surprising.trading.matching.service;
 
 import com.surprising.trading.matching.config.MatchingProperties;
 import com.surprising.trading.matching.store.MatchingLocalStateStore;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -28,15 +30,16 @@ public class MatchingLocalOutboxPublisher {
     public void publishPending() {
         List<MatchingLocalStateStore.LocalOutboxRecord> records = stateStore.pendingOutbox(
                 Math.max(1, properties.getOutbox().getBatchSize()));
-        for (MatchingLocalStateStore.LocalOutboxRecord record : records) {
-            try {
-                kafkaTemplate.send(record.topic(), record.eventKey(), record.payload())
-                        .get(properties.getOutbox().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
-                stateStore.markOutboxPublished(record.sequence());
-            } catch (Exception ex) {
-                throw new KafkaException("撮合本地通知发布失败 sequence=" + record.sequence()
-                        + " topic=" + record.topic(), ex);
+        List<CompletableFuture<?>> sends = new ArrayList<>(records.size());
+        try {
+            for (MatchingLocalStateStore.LocalOutboxRecord record : records) {
+                sends.add(kafkaTemplate.send(record.topic(), record.eventKey(), record.payload()));
             }
+            CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
+                    .get(properties.getOutbox().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            stateStore.markOutboxPublished(records);
+        } catch (Exception ex) {
+            throw new KafkaException("撮合本地通知批量发布失败", ex);
         }
     }
 }

@@ -61,5 +61,5 @@ PRODUCT_LINES=LINEAR_PERPETUAL BUILD_SERVICES=auto CREATE_KAFKA_TOPICS=true KAFK
 PostgreSQL 使用 16GB 机器的本地压测参数：`max_connections=300`、`shared_buffers=2GB`、`work_mem=16MB`、`maintenance_work_mem=512MB`、`max_wal_size=8GB`、`checkpoint_timeout=15min`、`effective_cache_size=10GB`、`jit=off`。资金正确性测试保留 `fsync=on`、`full_page_writes=on`、`synchronous_commit=on`。
 
 Kafka 保持标准 `9092` 端口，单机 Broker/Controller 监听本机回环地址，网络线程和 I/O 线程分别
-提高到 `8` 和 `16`，默认 Topic 分区为 `8`，项目 Topic 仍由 `scripts/create-topics.sh`
+提高到 `8` 和 `16`；单节点测试默认 Topic 分区为 `4`，项目 Topic 仍由 `scripts/create-topics.sh`
 按脚本参数创建。

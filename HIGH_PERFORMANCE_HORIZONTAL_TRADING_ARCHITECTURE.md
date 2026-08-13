@@ -1,6 +1,6 @@
 # 高性能、低竞争、可横向扩展的交易链路架构
 
-> 状态：目标架构提案，尚未全部实现<br>
+> 状态：Kafka 分片状态机迁移阶段 1-3 已落地并完成四产品线验证；阶段 4-8 仍按后续容量与恢复门槛推进<br>
 > 适用项目：Surprising-EX 现货、永续、交割、期权后端<br>
 > 最后更新：2026-08-12<br>
 > 核心原则：资金正确性优先于吞吐和延迟
@@ -889,6 +889,8 @@ PostgreSQL 保留以下职责：
 
 完成标准：不同 symbol 和不同用户的提交不争抢同一 Owner 或 sequence key。
 
+当前验证结果：已删除 Matching 本地全局 Outbox sequence/Owner，改为按 event stream 的序列和批量标记；订单号生成不再为每个 ID 创建 Owner 或同步写盘。`MatchingLocalStateStoreTest` 的多 symbol 并发用例验证每个 stream 从 1 开始且不互相争抢。
+
 ### 阶段 4：直接分区单写事件循环
 
 - Kafka partition 线程直接驱动 reducer，或使用 SPSC bridge。
@@ -897,6 +899,8 @@ PostgreSQL 保留以下职责：
 - 所有同步网络 I/O 移出 Owner 执行段。
 
 完成标准：一个 shard 只有一个写线程，热路径无跨线程 Future 等待。
+
+当前状态：尚未完成。现有 `PartitionOwnerLane` 仍是安全的过渡单写实现，生产热路径仍有跨线程提交等待；在此阶段完成前不宣称达到最终低竞争执行器。
 
 ### 阶段 5：统一用户热写状态机
 
@@ -907,6 +911,8 @@ PostgreSQL 保留以下职责：
 
 完成标准：普通下单不再经过 Order -> Account -> Order 的同步结果往返。
 
+当前状态：尚未完成。订单和账户仍保留独立用户命令与兼容结果等待边界。
+
 ### 阶段 6：独立 Matching Book Shard
 
 - 每个 Book Shard 独立 engine、状态、序号和快照。
@@ -916,6 +922,8 @@ PostgreSQL 保留以下职责：
 
 完成标准：增加 Matching pod 能提高多 symbol 总吞吐，且热点 symbol 不影响其他 shard。
 
+当前状态：尚未完成。当前 JVM 仍由 `ExchangeCoreEngine` 承载多个 symbol，状态库已按 symbol 归属处理但尚未拆为独立 Book Shard 生命周期。
+
 ### 阶段 7：Kafka EOS 和 Warm Standby
 
 - 输入 offsets、changelog 和输出事件使用 Kafka transaction。
@@ -924,6 +932,8 @@ PostgreSQL 保留以下职责：
 - 增加 warm standby 和恢复 lag 调度。
 
 完成标准：任意事务边界崩溃后 RPO=0，无重复资金影响，恢复后状态等价。
+
+当前状态：尚未完成。当前实现仍以本地 WAL/RocksDB 同步事实和 Kafka 重试为过渡边界，尚未启用 Kafka transaction、epoch fencing 或 warm standby。
 
 ### 阶段 8：评估 Aeron Cluster
 

@@ -86,7 +86,7 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 mvn -DskipTests package
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 PRODUCT_LINES=LINEAR_PERPETUAL PARTITIONS=32 ACCOUNT_COMMAND_PARTITIONS=32 ./scripts/create-topics.sh
-PRODUCT_LINE=LINEAR_PERPETUAL BUILD_SERVICES=false ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=LINEAR_PERPETUAL PORT_OFFSET=100 ORDER_WAL_NODE_ID=101 BUILD_SERVICES=false ./scripts/start-product-line-providers.sh
 ```
 
 matching 使用 `exchange.core2:exchange-core:0.5.3` 及其 Chronicle/OpenHFT 传递依赖，必须使用

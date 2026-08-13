@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -48,7 +50,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     private static final byte[] TRADE_PREFIX = "trade/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] OUTBOX_PREFIX = "local-outbox/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] OUTBOX_IDEMPOTENCY_PREFIX = "local-outbox-id/".getBytes(StandardCharsets.UTF_8);
-    private static final byte[] OUTBOX_NEXT_KEY = "local-outbox-next".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] OUTBOX_SEQUENCE_PREFIX = "local-outbox-sequence/".getBytes(StandardCharsets.UTF_8);
 
     static {
         RocksDB.loadLibrary();
@@ -59,8 +61,8 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     private final RocksDB database;
     private final WriteOptions writeOptions;
     private final PartitionOwnerLane<String> symbolOwners;
-    private final PartitionOwnerLane<String> outboxOwner;
     private final boolean ownsSymbolOwners;
+    private final Map<String, Object> outboxStreamLocks = new ConcurrentHashMap<>();
 
     public MatchingLocalStateStore(Path directory, ObjectMapper objectMapper) {
         this(directory, objectMapper, new PartitionOwnerLane<>(
@@ -81,7 +83,6 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         try {
             this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
             this.symbolOwners = Objects.requireNonNull(symbolOwners, "symbolOwners");
-            this.outboxOwner = new PartitionOwnerLane<>(1, "matching-outbox-owner");
             this.ownsSymbolOwners = ownsSymbolOwners;
             Files.createDirectories(Objects.requireNonNull(directory, "directory"));
             options = new Options().setCreateIfMissing(true);
@@ -269,27 +270,38 @@ public final class MatchingLocalStateStore implements AutoCloseable {
             return;
         }
         List<MatchingOutboxWrite> copy = List.copyOf(writes);
-        outboxOwner.execute("enqueue", () -> {
-            enqueueOutboxLocked(copy);
-            return null;
-        });
+        Map<String, List<MatchingOutboxWrite>> byStream = new LinkedHashMap<>();
+        for (MatchingOutboxWrite write : copy) {
+            if (write == null || write.eventKey() == null || write.eventKey().isBlank()) {
+                throw new IllegalArgumentException("撮合本地通知 eventKey 不能为空");
+            }
+            byStream.computeIfAbsent(write.eventKey(), ignored -> new ArrayList<>()).add(write);
+        }
+        for (Map.Entry<String, List<MatchingOutboxWrite>> entry : byStream.entrySet()) {
+            withSymbolOwner(entry.getKey(), () -> {
+                enqueueOutboxLocked(entry.getValue());
+                return null;
+            });
+        }
     }
 
     private void enqueueOutboxLocked(List<MatchingOutboxWrite> writes) {
-        try (WriteBatch batch = new WriteBatch()) {
-            appendOutbox(batch, writes);
-            database.write(writeOptions, batch);
-        } catch (RocksDBException ex) {
-            throw new IllegalStateException("写入撮合本地通知队列失败", ex);
-        }
+        withOutboxStreamLocks(writes, () -> {
+            try (WriteBatch batch = new WriteBatch()) {
+                appendOutbox(batch, writes);
+                database.write(writeOptions, batch);
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("写入撮合本地通知队列失败", ex);
+            }
+            return null;
+        });
     }
 
     public List<LocalOutboxRecord> pendingOutbox(int limit) {
         List<LocalOutboxRecord> result = new ArrayList<>();
         try (var iterator = database.newIterator()) {
             iterator.seek(OUTBOX_PREFIX);
-            while (iterator.isValid() && startsWith(iterator.key(), OUTBOX_PREFIX)
-                    && result.size() < Math.max(1, limit)) {
+            while (iterator.isValid() && startsWith(iterator.key(), OUTBOX_PREFIX)) {
                 LocalOutboxRecord record = decode(iterator.value(), LocalOutboxRecord.class);
                 if (!record.published()) {
                     result.add(record);
@@ -297,28 +309,65 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                 iterator.next();
             }
         }
+        result.sort(Comparator.comparingLong(LocalOutboxRecord::sequence));
+        if (result.size() > Math.max(1, limit)) {
+            result = new ArrayList<>(result.subList(0, Math.max(1, limit)));
+        }
         return List.copyOf(result);
     }
 
     public void markOutboxPublished(long sequence) {
-        outboxOwner.execute("mark-published", () -> {
-            try {
-                byte[] value = database.get(outboxKey(sequence));
-                if (value == null) {
-                    throw new IllegalStateException("本地通知不存在 sequence=" + sequence);
-                }
-                LocalOutboxRecord current = decode(value, LocalOutboxRecord.class);
-                if (current.published()) {
-                    return null;
-                }
-                database.put(writeOptions, outboxKey(sequence), encode(new LocalOutboxRecord(
-                        current.sequence(), current.aggregateType(), current.aggregateId(), current.topic(),
-                        current.eventKey(), current.eventType(), current.payload(), current.createdAt(), true)));
-                return null;
-            } catch (RocksDBException ex) {
-                throw new IllegalStateException("标记撮合本地通知失败 sequence=" + sequence, ex);
-            }
+        LocalOutboxRecord record = findOutbox(sequence)
+                .orElseThrow(() -> new IllegalStateException("本地通知不存在 sequence=" + sequence));
+        markOutboxPublished(record);
+    }
+
+    public void markOutboxPublished(LocalOutboxRecord record) {
+        Objects.requireNonNull(record, "record");
+        withSymbolOwner(record.eventKey(), () -> {
+            markOutboxPublishedLocked(record);
+            return null;
         });
+    }
+
+    public void markOutboxPublished(List<LocalOutboxRecord> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        Map<String, List<LocalOutboxRecord>> byStream = new LinkedHashMap<>();
+        for (LocalOutboxRecord record : records) {
+            if (record != null && !record.published()) {
+                byStream.computeIfAbsent(record.eventKey(), ignored -> new ArrayList<>()).add(record);
+            }
+        }
+        for (Map.Entry<String, List<LocalOutboxRecord>> entry : byStream.entrySet()) {
+            withSymbolOwner(entry.getKey(), () -> {
+                try (WriteBatch batch = new WriteBatch()) {
+                    for (LocalOutboxRecord record : entry.getValue()) {
+                        byte[] key = findOutboxKey(record.eventKey(), record.sequence());
+                        if (key == null) {
+                            throw new IllegalStateException("本地通知不存在 sequence=" + record.sequence());
+                        }
+                        byte[] value = database.get(key);
+                        if (value == null) {
+                            throw new IllegalStateException("本地通知不存在 sequence=" + record.sequence());
+                        }
+                        LocalOutboxRecord current = decode(value, LocalOutboxRecord.class);
+                        if (!current.published()) {
+                            batch.put(key, encode(new LocalOutboxRecord(current.sequence(), current.aggregateType(),
+                                    current.aggregateId(), current.topic(), current.eventKey(), current.eventType(),
+                                    current.payload(), current.createdAt(), true)));
+                        }
+                    }
+                    if (batch.count() > 0) {
+                        database.write(writeOptions, batch);
+                    }
+                    return null;
+                } catch (RocksDBException ex) {
+                    throw new IllegalStateException("批量标记撮合本地通知失败", ex);
+                }
+            });
+        }
     }
 
     public List<RecoveredOrderBookOrder> recoverableOpenOrdersAfter(Instant createdAt,
@@ -385,7 +434,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                         fill.completed() ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED,
                         fill.eventTime()));
             }
-            outboxOwner.execute("commit-" + result.commandId(), () -> {
+            withOutboxStreamLocks(outboxWrites, () -> {
                 try {
                     try (WriteBatch batch = new WriteBatch()) {
                         batch.put(resultKey, resultBytes);
@@ -405,8 +454,8 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                         }
                         appendOutbox(batch, outboxWrites);
                         database.write(writeOptions, batch);
-                        return null;
                     }
+                    return null;
                 } catch (RocksDBException ex) {
                     throw new IllegalStateException("提交撮合本地事实失败 commandId=" + result.commandId(), ex);
                 }
@@ -421,24 +470,89 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         if (writes == null || writes.isEmpty()) {
             return;
         }
-        long next = readLong(database.get(OUTBOX_NEXT_KEY), 1L);
+        Map<String, List<MatchingOutboxWrite>> byStream = new LinkedHashMap<>();
         for (MatchingOutboxWrite write : writes) {
-            if (write == null || write.now() == null || write.payload() == null) {
+            if (write == null || write.eventKey() == null || write.eventKey().isBlank()
+                    || write.now() == null || write.payload() == null) {
                 throw new IllegalArgumentException("撮合本地通知不能为空");
             }
+            byStream.computeIfAbsent(write.eventKey(), ignored -> new ArrayList<>()).add(write);
+        }
+        for (Map.Entry<String, List<MatchingOutboxWrite>> entry : byStream.entrySet()) {
+            appendOutboxStream(batch, entry.getKey(), entry.getValue());
+        }
+    }
+
+    private void appendOutboxStream(WriteBatch batch,
+                                    String eventKey,
+                                    List<MatchingOutboxWrite> writes) throws RocksDBException {
+        byte[] sequenceKey = key(OUTBOX_SEQUENCE_PREFIX, streamKey(eventKey));
+        byte[] stored = database.get(sequenceKey);
+        long next = stored == null ? findNextStreamSequence(eventKey) : readLong(stored, 1L);
+        boolean advanced = false;
+        String stream = streamKey(eventKey);
+        for (MatchingOutboxWrite write : writes) {
             String identity = outboxIdentity(write);
             byte[] identityKey = key(OUTBOX_IDEMPOTENCY_PREFIX, identity);
-            byte[] existing = database.get(identityKey);
-            if (existing != null) {
+            if (database.get(identityKey) != null) {
                 continue;
             }
-            LocalOutboxRecord record = new LocalOutboxRecord(next, write.aggregateType(), write.aggregateId(),
+            if (next == Long.MAX_VALUE) {
+                throw new IllegalStateException("撮合本地通知序列耗尽");
+            }
+            LocalOutboxRecord record = new LocalOutboxRecord(next++,
+                    write.aggregateType(), write.aggregateId(),
                     write.topic(), write.eventKey(), write.eventType(), write.payload(), write.now(), false);
-            batch.put(outboxKey(next), encode(record));
-            batch.put(identityKey, encodeLong(next));
-            next = Math.addExact(next, 1L);
+            batch.put(outboxKey(stream, identity), encode(record));
+            batch.put(identityKey, encodeLong(record.sequence()));
+            advanced = true;
         }
-        batch.put(OUTBOX_NEXT_KEY, encodeLong(next));
+        if (advanced) {
+            batch.put(sequenceKey, encodeLong(next));
+        }
+    }
+
+    private long findNextStreamSequence(String eventKey) {
+        long maximum = 0L;
+        byte[] prefix = key(OUTBOX_PREFIX, streamKey(eventKey) + "/");
+        try (var iterator = database.newIterator()) {
+            iterator.seek(prefix);
+            while (iterator.isValid() && startsWith(iterator.key(), prefix)) {
+                LocalOutboxRecord record = decode(iterator.value(), LocalOutboxRecord.class);
+                if (eventKey.equals(record.eventKey())) {
+                    maximum = Math.max(maximum, record.sequence());
+                }
+                iterator.next();
+            }
+        }
+        if (maximum == Long.MAX_VALUE) {
+            throw new IllegalStateException("撮合本地通知序列耗尽");
+        }
+        return maximum + 1L;
+    }
+
+    private <T> T withOutboxStreamLocks(List<MatchingOutboxWrite> writes,
+                                         java.util.function.Supplier<T> action) {
+        List<String> streams = writes.stream()
+                .filter(Objects::nonNull)
+                .map(MatchingOutboxWrite::eventKey)
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .toList();
+        return withOutboxStreamLocks(streams, 0, action);
+    }
+
+    private <T> T withOutboxStreamLocks(List<String> streams,
+                                        int index,
+                                        java.util.function.Supplier<T> action) {
+        if (index >= streams.size()) {
+            return action.get();
+        }
+        Object lock = outboxStreamLocks.computeIfAbsent(streams.get(index), ignored -> new Object());
+        synchronized (lock) {
+            return withOutboxStreamLocks(streams, index + 1, action);
+        }
     }
 
     private void applyMakerFillsLocked(List<MatchTradeEvent> trades) {
@@ -499,7 +613,11 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     }
 
     private <T> T withSymbolOwner(String symbol, java.util.function.Supplier<T> action) {
-        return symbolOwners.execute(Objects.requireNonNull(symbol, "symbol"), action);
+        String requiredSymbol = Objects.requireNonNull(symbol, "symbol");
+        if (symbolOwners.isOwnerThread(requiredSymbol)) {
+            return action.get();
+        }
+        return symbolOwners.execute(requiredSymbol, action);
     }
 
     private byte[] resultKey(long commandId) {
@@ -514,8 +632,77 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         return key(TRADE_PREFIX, Long.toString(tradeId));
     }
 
-    private byte[] outboxKey(long sequence) {
-        return key(OUTBOX_PREFIX, String.format(java.util.Locale.ROOT, "%020d", sequence));
+    private byte[] outboxKey(String stream, String identity) {
+        return key(OUTBOX_PREFIX, stream + "/" + identity);
+    }
+
+    private String streamKey(String eventKey) {
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(eventKey.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private long publicSequence(String identity) {
+        byte[] digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256")
+                    .digest(identity.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 不可用", ex);
+        }
+        long value = 0L;
+        for (int index = 0; index < Long.BYTES; index++) {
+            value = (value << Byte.SIZE) | (digest[index] & 0xffL);
+        }
+        return value == Long.MIN_VALUE ? Long.MAX_VALUE : Math.abs(value);
+    }
+
+    private Optional<LocalOutboxRecord> findOutbox(long sequence) {
+        try (var iterator = database.newIterator()) {
+            iterator.seek(OUTBOX_PREFIX);
+            while (iterator.isValid() && startsWith(iterator.key(), OUTBOX_PREFIX)) {
+                LocalOutboxRecord record = decode(iterator.value(), LocalOutboxRecord.class);
+                if (record.sequence() == sequence) {
+                    return Optional.of(record);
+                }
+                iterator.next();
+            }
+            return Optional.empty();
+        }
+    }
+
+    private byte[] findOutboxKey(String eventKey, long sequence) {
+        try (var iterator = database.newIterator()) {
+            iterator.seek(OUTBOX_PREFIX);
+            while (iterator.isValid() && startsWith(iterator.key(), OUTBOX_PREFIX)) {
+                LocalOutboxRecord record = decode(iterator.value(), LocalOutboxRecord.class);
+                if (record.sequence() == sequence && eventKey.equals(record.eventKey())) {
+                    return Arrays.copyOf(iterator.key(), iterator.key().length);
+                }
+                iterator.next();
+            }
+            return null;
+        }
+    }
+
+    private void markOutboxPublishedLocked(LocalOutboxRecord record) {
+        try {
+            byte[] key = findOutboxKey(record.eventKey(), record.sequence());
+            if (key == null) {
+                throw new IllegalStateException("本地通知不存在 sequence=" + record.sequence());
+            }
+            byte[] value = database.get(key);
+            if (value == null) {
+                throw new IllegalStateException("本地通知不存在 sequence=" + record.sequence());
+            }
+            LocalOutboxRecord current = decode(value, LocalOutboxRecord.class);
+            if (!current.published()) {
+                database.put(writeOptions, key, encode(new LocalOutboxRecord(current.sequence(), current.aggregateType(),
+                        current.aggregateId(), current.topic(), current.eventKey(), current.eventType(),
+                        current.payload(), current.createdAt(), true)));
+            }
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("标记撮合本地通知失败 sequence=" + record.sequence(), ex);
+        }
     }
 
     private String outboxIdentity(MatchingOutboxWrite write) {
@@ -527,6 +714,11 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 不可用", ex);
         }
+    }
+
+    private String outboxIdentity(LocalOutboxRecord record) {
+        return outboxIdentity(new MatchingOutboxWrite(record.aggregateType(), record.aggregateId(), record.topic(),
+                record.eventKey(), record.eventType(), record.payload(), record.createdAt()));
     }
 
     private byte[] encodeLong(long value) {
@@ -589,7 +781,6 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         if (ownsSymbolOwners) {
             symbolOwners.close();
         }
-        outboxOwner.close();
         writeOptions.close();
         database.close();
         options.close();

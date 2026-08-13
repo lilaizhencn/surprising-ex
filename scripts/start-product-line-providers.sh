@@ -236,10 +236,16 @@ service_env() {
         "SURPRISING_PRICE_MARK_COORDINATION_NODE_ID=${HOSTNAME:-local}-${slug}-mark"
       ;;
     order)
+      local order_node_id="${ORDER_WAL_NODE_ID:-$((PORT_OFFSET / 100 + 1))}"
+      if [[ "${order_node_id}" -lt 0 || "${order_node_id}" -gt 1023 ]]; then
+        echo "ORDER_WAL_NODE_ID must be in 0..1023: ${order_node_id}" >&2
+        exit 1
+      fi
       printf '%s\n' \
         "SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
         "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
-        "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}"
+        "SURPRISING_TRADING_ORDER_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
+        "ORDER_WAL_NODE_ID=${order_node_id}"
       ;;
     matching)
       printf '%s\n' \

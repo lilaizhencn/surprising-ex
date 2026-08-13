@@ -12,10 +12,11 @@ DB_NAME="${DB_NAME:-surprising_product_line_smoke}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:${POSTGRES_PORT}/${DB_NAME}?reWriteBatchedInserts=true}"
 KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+export ACCOUNT_INTERNAL_SERVICE_SECRET="${ACCOUNT_INTERNAL_SERVICE_SECRET:-product-line-smoke-internal-secret}"
 # 测试机同时运行多个 provider 时，命令行 Kafka 工具不需要 512M 堆，降低其
 # 启动内存可以避免标记价补发被 JVM 资源竞争拖到业务等待窗口之外。
 export KAFKA_HEAP_OPTS="${KAFKA_HEAP_OPTS:--Xms32M -Xmx128M}"
-ACCOUNT_COMMAND_PARTITIONS="${ACCOUNT_COMMAND_PARTITIONS:-32}"
+ACCOUNT_COMMAND_PARTITIONS="${ACCOUNT_COMMAND_PARTITIONS:-4}"
 MARKET_MAKER_CYCLE_DELAY_MS="${MARKET_MAKER_CYCLE_DELAY_MS:-1000}"
 if [[ -z "${PRODUCT_LINES_EXPLICIT}" ]]; then
   PRODUCT_LINES="${TEST_DEFAULT_PRODUCT_LINE:-LINEAR_PERPETUAL}"
@@ -137,15 +138,16 @@ cleanup() {
     kill "${WEBSOCKET_SMOKE_PID}" >/dev/null 2>&1 || true
     wait "${WEBSOCKET_SMOKE_PID}" >/dev/null 2>&1 || true
   fi
-  local i
-  for ((i = 0; i < ${#PROVIDER_PIDS[@]}; i++)); do
-    local pid="${PROVIDER_PIDS[$i]}"
+  local i pid
+  local provider_pids=("${PROVIDER_PIDS[@]-}")
+  for ((i = 0; i < ${#provider_pids[@]}; i++)); do
+    pid="${provider_pids[$i]}"
     if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
       kill "${pid}" >/dev/null 2>&1 || true
     fi
   done
-  for ((i = 0; i < ${#PROVIDER_PIDS[@]}; i++)); do
-    local pid="${PROVIDER_PIDS[$i]}"
+  for ((i = 0; i < ${#provider_pids[@]}; i++)); do
+    pid="${provider_pids[$i]}"
     [[ -n "${pid}" ]] && wait "${pid}" >/dev/null 2>&1 || true
   done
   if [[ "${KEEP_TMP}" == "true" ]]; then
@@ -367,8 +369,32 @@ wait_http() {
   local name="$1"
   local port="$2"
   local log_file="${TMP_DIR}/${name}.log"
+  local product_line="${name%-*}"
+  local service="${name##*-}"
   local deadline=$((SECONDS + 180))
-  # readiness 组只判断服务是否已完成启动；聚合 health 还可能包含可选的审计/投影指标。
+  if [[ "${service}" == "order" ]] && is_margin_product "${product_line}"; then
+    until curl -fsS "http://localhost:${port}/actuator/health/liveness" | grep -q 'UP'; do
+      if ((SECONDS >= deadline)); then
+        echo "Timed out waiting for ${name} liveness on port ${port}" >&2
+        tail -n 160 "${log_file}" >&2 || true
+        exit 1
+      fi
+      sleep 1
+    done
+    return
+  fi
+  if [[ "${name}" == *-websocket ]]; then
+    until curl -sS -o /dev/null -w '%{http_code}' "http://localhost:${port}/actuator/health/readiness" \
+        | grep -Eq '^(200|401)$'; do
+      if ((SECONDS >= deadline)); then
+        echo "Timed out waiting for ${name} health on port ${port}" >&2
+        tail -n 160 "${log_file}" >&2 || true
+        exit 1
+      fi
+      sleep 1
+    done
+    return
+  fi
   until curl -fsS "http://localhost:${port}/actuator/health/readiness" | grep -q 'UP'; do
     if ((SECONDS >= deadline)); then
       echo "Timed out waiting for ${name} health on port ${port}" >&2
@@ -1307,16 +1333,16 @@ wait_product_topics_ready() {
     "${prefix}.match.trades.v1"
     "${prefix}.orderbook.depth.v1"
     "${prefix}.mark.price.v1"
+    "${prefix}.index.price.v1"
+    "${prefix}.book.ticker.v1"
+    "${prefix}.account.position.events.v1"
+    "${prefix}.account.open-interest.events.v1"
+    "${prefix}.account.liquidation-fee.events.v1"
+    "${prefix}.account.state.events.v1"
     "${prefix}.order.state.events.v1"
   )
   if is_margin_product "${product_line}"; then
     topics+=(
-      "${prefix}.index.price.v1"
-      "${prefix}.book.ticker.v1"
-      "${prefix}.account.position.events.v1"
-      "${prefix}.account.open-interest.events.v1"
-      "${prefix}.account.liquidation-fee.events.v1"
-      "${prefix}.account.state.events.v1"
       "${prefix}.risk.account.events.v1"
       "${prefix}.risk.position.events.v1"
       "${prefix}.liquidation.candidates.v1"
@@ -1451,6 +1477,7 @@ provider_port() {
     liquidation) echo 9088 ;;
     insurance) echo 9090 ;;
     funding) echo 9089 ;;
+    adl) echo 9091 ;;
     websocket) echo 9093 ;;
     gateway) echo 9094 ;;
     market-maker) echo 9096 ;;
@@ -1492,7 +1519,10 @@ package_services() {
 
 register_provider_pid() {
   local active=0 pid
-  for pid in "${PROVIDER_PIDS[@]}"; do
+  local index
+  for index in "${!PROVIDER_PIDS[@]}"; do
+    [[ "${PROVIDER_NAMES[$index]}" == price-refresher* ]] && continue
+    pid="${PROVIDER_PIDS[$index]}"
     [[ -n "${pid}" ]] && active=$((active + 1))
   done
   if (( active >= TEST_MAX_PROVIDER_PROCESSES )); then
@@ -1550,6 +1580,7 @@ product_provider_args() {
       printf '%s\n' \
         "--surprising.clients.trigger.base-url=http://localhost:9095" \
         "--surprising.trading.order.wal.directory=${TMP_DIR}/order-wal" \
+        "--surprising.trading.order.wal.node-id=$((RUN_ID % 1024))" \
         "--surprising.trading.order.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.trading.order.kafka.product-line=${product_line}" \
         "--surprising.trading.order.kafka.product-topics-enabled=true" \
@@ -1694,6 +1725,7 @@ product_provider_args() {
         "--surprising.funding.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.funding.kafka.product-line=${product_line}" \
         "--surprising.funding.kafka.product-topics-enabled=true" \
+        "--surprising.funding.wal.directory=${TMP_DIR}/funding-wal" \
         "--surprising.funding.coordination.node-id=product-smoke-${RUN_ID}-${slug}-funding" \
         "--surprising.funding.calculation.enabled=${funding_enabled}" \
         "--surprising.funding.settlement.enabled=${funding_enabled}" \
@@ -1709,6 +1741,7 @@ product_provider_args() {
       ;;
     gateway)
       printf '%s\n' \
+        "--surprising.gateway.security.allow-user-id-header-fallback=true" \
         "--surprising.gateway.routes.price-mark.base-url=http://localhost:9082" \
         "--surprising.gateway.admin-routes.price-mark.base-url=http://localhost:9082" \
         "--surprising.gateway.routes.risk.base-url=http://localhost:9087" \
@@ -1844,14 +1877,25 @@ start_provider() {
   echo "Starting ${product_line} ${name} on port ${port}"
   (
     cd "${ROOT_DIR}"
-    exec env \
-      "SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}" \
-      "SPRING_DATASOURCE_USERNAME=${DB_USER}" \
-      "SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}" \
-      "ACCOUNT_WAL_DIR=${TMP_DIR}/account-wal" \
-      "PRODUCT_LINE=${product_line}" \
-      "PRODUCT_TOPICS_ENABLED=true" \
-      java "${profile_java_args[@]}" "${java_args[@]}" -jar "${jar}" "${app_args[@]}"
+    if ((${#java_args[@]} > 0)); then
+      exec env \
+        "SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}" \
+        "SPRING_DATASOURCE_USERNAME=${DB_USER}" \
+        "SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}" \
+        "ACCOUNT_WAL_DIR=${TMP_DIR}/account-wal" \
+        "PRODUCT_LINE=${product_line}" \
+        "PRODUCT_TOPICS_ENABLED=true" \
+        java "${profile_java_args[@]}" "${java_args[@]}" -jar "${jar}" "${app_args[@]}"
+      else
+      exec env \
+        "SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}" \
+        "SPRING_DATASOURCE_USERNAME=${DB_USER}" \
+        "SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}" \
+        "ACCOUNT_WAL_DIR=${TMP_DIR}/account-wal" \
+        "PRODUCT_LINE=${product_line}" \
+        "PRODUCT_TOPICS_ENABLED=true" \
+        java "${profile_java_args[@]}" -jar "${jar}" "${app_args[@]}"
+      fi
   ) >"${log_file}" 2>&1 &
   register_provider_pid "${name}" "$!"
   wait_http "${product_line}-${name}" "${port}"
@@ -2008,6 +2052,26 @@ json_field() {
   python3 -c "import json,sys; print(json.load(sys.stdin)['${field}'])"
 }
 
+length_prefixed_field() {
+  local value="$1"
+  printf '%s:%s' "${#value}" "${value}"
+}
+
+internal_product_balance_signature() {
+  local timestamp="$1"
+  local user_id="$2"
+  local account_type="$3"
+  local asset="$4"
+  local amount_units="$5"
+  local reference_id="$6"
+  local reason="$7"
+  local canonical
+  canonical="$(length_prefixed_field "surprising-gateway")$(length_prefixed_field "/api/v1/accounts/admin/product-balance-adjustments")$(length_prefixed_field "${timestamp}")$(length_prefixed_field "${user_id}")$(length_prefixed_field "${account_type}")$(length_prefixed_field "${asset}")$(length_prefixed_field "${amount_units}")$(length_prefixed_field "${reference_id}")$(length_prefixed_field "${reason}")"
+  printf 'v1=%s' "$(printf '%s' "${canonical}" \
+    | openssl dgst -sha256 -hmac "${ACCOUNT_INTERNAL_SERVICE_SECRET}" -binary \
+    | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
+}
+
 api_post() {
   local product_line="$1"
   local path="$2"
@@ -2051,15 +2115,23 @@ adjust_product_balance() {
   local asset="$3"
   local amount_units="$4"
   local reference_id="$5"
+  local reason="PRODUCT_LINE_API_SMOKE"
+  local timestamp signature
+  timestamp="$(date +%s)"
+  signature="$(internal_product_balance_signature "${timestamp}" "${user_id}" "${account_type}" "${asset}" "${amount_units}" "${reference_id}" "${reason}")"
   curl -fsS -X POST "http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Service: surprising-gateway" \
+    -H "X-Internal-Timestamp: ${timestamp}" \
+    -H "X-Internal-Signature: ${signature}" \
+    -H "X-Internal-Audience: /api/v1/accounts/admin/product-balance-adjustments" \
     -d "{
       \"userId\": ${user_id},
       \"accountType\": \"${account_type}\",
       \"asset\": \"${asset}\",
       \"amountUnits\": ${amount_units},
       \"referenceId\": \"${reference_id}\",
-      \"reason\": \"PRODUCT_LINE_API_SMOKE\"
+      \"reason\": \"${reason}\"
     }" >/dev/null
 }
 
@@ -4608,7 +4680,7 @@ run_funding_settlement_flow() {
 update_risk_runtime_config() {
   local warning="$1"
   local liquidation="$2"
-  curl -fsS -X POST "http://localhost:9088/api/v1/risk/admin/runtime-config" \
+  curl -fsS -X POST "http://localhost:9087/api/v1/risk/admin/runtime-config" \
     -H "Content-Type: application/json" \
     -H "X-Admin-User-Id: product-line-smoke" \
     -d "{\"warningMarginRatioPpm\": ${warning}, \"liquidationMarginRatioPpm\": ${liquidation}}" >/dev/null
@@ -5090,6 +5162,9 @@ run_line() {
   fund_user_for_line "${product_line}" "${MM_USER_A}"
   fund_user_for_line "${product_line}" "${MM_USER_B}"
   fund_user_for_line "${product_line}" "${TAKER_USER}"
+  if is_margin_product "${product_line}"; then
+    wait_stress_mark_price_readiness "${product_line}"
+  fi
   start_provider market-maker "${product_line}"
   if [[ "${RUN_WEBSOCKET_SMOKE}" == "true" ]]; then
     start_live_websocket_smoke "${product_line}" "$(symbol_for "${product_line}")"

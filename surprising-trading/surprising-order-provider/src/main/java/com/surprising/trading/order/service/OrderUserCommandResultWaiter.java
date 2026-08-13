@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.eventstore.UserPartitionKey;
+import com.surprising.eventstore.BoundedExpiringCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderUserCommandResult;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -30,12 +31,14 @@ public class OrderUserCommandResultWaiter {
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final Map<CommandKey, WaitSlot> waiting = new ConcurrentHashMap<>();
-    private final Map<CommandKey, OrderUserCommandResult> completed = new ConcurrentHashMap<>();
+    private final BoundedExpiringCache<CommandKey, OrderUserCommandResult> completed;
 
     public OrderUserCommandResultWaiter(ObjectMapper objectMapper,
                                          TradingOrderProperties properties) {
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.completed = new BoundedExpiringCache<>(properties.getKafka().getResultCacheTtl(),
+                properties.getKafka().getResultCacheMaxEntries());
     }
 
     public OrderUserCommandResult await(UserPartitionKey partition, String commandId, Duration timeout) {

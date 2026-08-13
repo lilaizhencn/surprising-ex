@@ -96,7 +96,11 @@ public class AccountUserStateCommandWorker {
             throw new IllegalArgumentException("账户事实流分区不能为空");
         }
         try {
-            lane.execute(partition, () -> applyPartition(partition));
+            if (lane.isOwnerThread(partition)) {
+                applyPartition(partition);
+            } else {
+                lane.execute(partition, () -> applyPartition(partition));
+            }
         } catch (RuntimeException ex) {
             // 单个用户故障必须停在原序号，不能让其他用户或后续资金事件越过它。
             log.warn("账户事实流分区执行失败 partition={}", partition.value(), ex);

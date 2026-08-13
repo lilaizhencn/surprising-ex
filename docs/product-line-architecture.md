@@ -5,6 +5,8 @@
 
 `surprising-ex` 已从单一永续链路推进到按产品线隔离运行的交易系统。当前共享同一套 Java 模块和数据库 schema，但通过 `ProductLine`、账户类型、Kafka topic、consumer group、provider 启动参数和 gateway 路由把业务逻辑隔离到不同产品线。
 
+当前高性能迁移已完成结果等待器有界化、账户 WAL 批量 group commit、订单号窗口预留、撮合 Outbox 按 stream 分序和批量发布；Kafka EOS、统一 User State、独立 Book Shard 与 Aeron Cluster 仍不是当前实现范围。
+
 当前主要运行和测试覆盖的四条线：
 
 | 产品线 | `ProductLine` | 账户类型 | 合约类型 | Topic 命名空间 | 当前状态 |
@@ -129,7 +131,7 @@ surprising.<product-segment>.option.exercises.v1
 共享的 `surprising.instrument.lifecycle-drain.v1` 使用 symbol 作为 key，承载
 `ORDER`、`TRIGGER`、`ACCOUNT` 三类到期排空确认。它不是运营查询 topic，也不能替代后续独立财务运营库。
 
-不同产品线只创建适用的 Topic。永续生产的精确清单和 32 分区约束见
+每条产品线都创建自己的行情、账户状态和用户命令 Topic；仅创建该产品线适用的风险、资金费、交割或期权事件 Topic。永续生产的精确清单和 32 分区约束见
 [部署文档](deployment.md)。
 
 本地创建 topic：

@@ -91,6 +91,8 @@ surprising:
     command-wait:
       timeout: 10s
       poll-delay-ms: 20
+      completed-cache-ttl: ${ACCOUNT_COMMAND_RESULT_CACHE_TTL:5m}
+      completed-cache-max-entries: ${ACCOUNT_COMMAND_RESULT_CACHE_MAX_ENTRIES:10000}
     wal:
       directory: ${ACCOUNT_WAL_DIR:data/account-wal}
       projection-delay-ms: ${ACCOUNT_WAL_PROJECTION_DELAY_MS:25}

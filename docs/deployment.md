@@ -70,6 +70,8 @@ order-provider 使用专用批量监听器消费 `account.command.results.v1`。
 `<PRODUCT_LINE>:<userId>` Key 保证用户结果有序；只有批量订单状态变更、审计事件和
 `ACCEPTED` / `PLACE` Outbox 在同一事务提交后才确认 Kafka 位点。
 
+本地单节点验证可将 `PARTITIONS` 和 `ACCOUNT_COMMAND_PARTITIONS` 设为 4；生产环境仍按容量规划使用 32 分区和 RF=3。
+
 跨服务延迟应以生产者事件或 Outbox 的 `created_at` 为起点、消费者本地处理时间为终点。
 `published_at` 只有 Kafka 确认后才落库，可能晚于消费者时间，只能衡量 Outbox 发布延迟。
 
@@ -216,12 +218,12 @@ WebSocket 和资金费流量必须使用产品线 Topic 隔离。
 ```bash
 mvn -q -DskipTests package
 
-PRODUCT_LINE=SPOT PORT_OFFSET=0 ./scripts/start-product-line-providers.sh
-PRODUCT_LINE=LINEAR_PERPETUAL PORT_OFFSET=100 ./scripts/start-product-line-providers.sh
-PRODUCT_LINE=LINEAR_DELIVERY PORT_OFFSET=200 ./scripts/start-product-line-providers.sh
-PRODUCT_LINE=OPTION PORT_OFFSET=300 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=SPOT PORT_OFFSET=0 ORDER_WAL_NODE_ID=1 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=LINEAR_PERPETUAL PORT_OFFSET=100 ORDER_WAL_NODE_ID=101 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=LINEAR_DELIVERY PORT_OFFSET=200 ORDER_WAL_NODE_ID=201 ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=OPTION PORT_OFFSET=300 ORDER_WAL_NODE_ID=301 ./scripts/start-product-line-providers.sh
 
-PRODUCT_LINE=OPTION PORT_OFFSET=300 ACTION=stop ./scripts/start-product-line-providers.sh
+PRODUCT_LINE=OPTION PORT_OFFSET=300 ORDER_WAL_NODE_ID=301 ACTION=stop ./scripts/start-product-line-providers.sh
 ```
 
 `PRODUCT_LINE` 必须显式设置，省略时脚本直接失败；脚本向服务传入 `PRODUCT_TOPICS_ENABLED=true`，

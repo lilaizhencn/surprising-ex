@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -78,36 +79,70 @@ public final class UserPartitionWal implements AutoCloseable {
                                      byte[] payload,
                                      String fingerprint,
                                      Instant occurredAt) {
-        requireEventInput(partition, eventId, eventType, payload, fingerprint, occurredAt);
+        return appendBatch(partition, List.of(new AppendRequest(eventId, eventType, payload, fingerprint, occurredAt)))
+                .get(0);
+    }
+
+    public List<UserPartitionEvent> appendBatch(UserPartitionKey partition, List<AppendRequest> requests) {
+        Objects.requireNonNull(partition, "partition");
+        if (requests == null || requests.isEmpty()) {
+            return List.of();
+        }
+        requests.forEach(request -> {
+            if (request == null) {
+                throw new IllegalArgumentException("WAL append request must not be null");
+            }
+            requireEventInput(partition, request.eventId(), request.eventType(), request.payload(),
+                    request.fingerprint(), request.occurredAt());
+        });
         return lane.execute(partition, () -> {
           try {
-            byte[] idempotencyKey = idempotencyKey(partition, eventId);
-            byte[] existing = database.get(idempotencyKey);
-            if (existing != null) {
-                ExistingEvent reference = decodeExisting(existing);
-                if (!reference.fingerprint().equals(fingerprint)) {
-                    throw new IllegalStateException("eventId already used with different event fingerprint: " + eventId);
-                }
-                return readEvent(partition, reference.sequence())
-                        .orElseThrow(() -> new IllegalStateException("WAL idempotency index points to missing event"));
-            }
-
-            long sequence = nextSequence(partition);
-            if (sequence <= 0L || sequence == Long.MAX_VALUE) {
-                throw new IllegalStateException("用户分区 WAL 序号耗尽: " + partition.value());
-            }
-            UserPartitionEvent event = new UserPartitionEvent(partition, sequence, eventId, eventType, payload,
-                    fingerprint, occurredAt);
+            long next = nextSequence(partition);
+            List<UserPartitionEvent> result = new ArrayList<>(requests.size());
+            Map<String, UserPartitionEvent> appended = new java.util.HashMap<>();
             try (WriteBatch batch = new WriteBatch()) {
-                batch.put(eventKey(partition, sequence), encode(event));
-                batch.put(idempotencyKey, encodeExisting(sequence, fingerprint));
-                batch.put(nextKey(partition), encodeLong(sequence + 1L));
-                batch.put(partitionKey(partition), new byte[]{1});
-                database.write(writeOptions, batch);
+                for (AppendRequest request : requests) {
+                    byte[] idempotencyKey = idempotencyKey(partition, request.eventId());
+                    UserPartitionEvent pending = appended.get(request.eventId());
+                    if (pending != null) {
+                        if (!pending.fingerprint().equals(request.fingerprint())) {
+                            throw new IllegalStateException("eventId already used with different event fingerprint: "
+                                    + request.eventId());
+                        }
+                        result.add(pending);
+                        continue;
+                    }
+                    byte[] existing = database.get(idempotencyKey);
+                    if (existing != null) {
+                        ExistingEvent reference = decodeExisting(existing);
+                        if (!reference.fingerprint().equals(request.fingerprint())) {
+                            throw new IllegalStateException("eventId already used with different event fingerprint: "
+                                    + request.eventId());
+                        }
+                        result.add(readEvent(partition, reference.sequence()).orElseThrow(() ->
+                                new IllegalStateException("WAL idempotency index points to missing event")));
+                        continue;
+                    }
+                    if (next <= 0L || next == Long.MAX_VALUE) {
+                        throw new IllegalStateException("用户分区 WAL 序号耗尽: " + partition.value());
+                    }
+                    UserPartitionEvent event = new UserPartitionEvent(partition, next, request.eventId(),
+                            request.eventType(), request.payload(), request.fingerprint(), request.occurredAt());
+                    batch.put(eventKey(partition, next), encode(event));
+                    batch.put(idempotencyKey, encodeExisting(next, request.fingerprint()));
+                    result.add(event);
+                    appended.put(request.eventId(), event);
+                    next++;
+                }
+                if (next != nextSequence(partition)) {
+                    batch.put(nextKey(partition), encodeLong(next));
+                    batch.put(partitionKey(partition), new byte[]{1});
+                    database.write(writeOptions, batch);
+                }
+                return List.copyOf(result);
             }
-            return event;
           } catch (RocksDBException ex) {
-              throw new IllegalStateException("failed to append user partition WAL event", ex);
+              throw new IllegalStateException("failed to append user partition WAL batch", ex);
           }
         });
     }
@@ -503,5 +538,12 @@ public final class UserPartitionWal implements AutoCloseable {
     }
 
     private record ExistingEvent(long sequence, String fingerprint) {
+    }
+
+    public record AppendRequest(String eventId,
+                                String eventType,
+                                byte[] payload,
+                                String fingerprint,
+                                Instant occurredAt) {
     }
 }

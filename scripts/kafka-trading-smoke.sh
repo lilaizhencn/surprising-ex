@@ -309,6 +309,10 @@ start_provider() {
     )
   fi
   echo "Starting ${name} provider on port ${port}"
+  local order_env=()
+  if [[ "${name}" == "order" ]]; then
+    order_env+=("ORDER_WAL_NODE_ID=$((RUN_SEQ % 1024 + 1))")
+  fi
   (
     cd "${ROOT_DIR}"
     if (( ${#java_args[@]} > 0 )); then
@@ -316,6 +320,7 @@ start_provider() {
         "SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}" \
         "SPRING_DATASOURCE_USERNAME=${DB_USER}" \
         "SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}" \
+        ${order_env[@]+"${order_env[@]}"} \
         "${kafka_env_name}=${BOOTSTRAP_SERVERS}" \
         java "${java_args[@]}" -jar "${jar}"
     else
@@ -323,6 +328,7 @@ start_provider() {
         "SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}" \
         "SPRING_DATASOURCE_USERNAME=${DB_USER}" \
         "SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}" \
+        ${order_env[@]+"${order_env[@]}"} \
         "${kafka_env_name}=${BOOTSTRAP_SERVERS}" \
         java -jar "${jar}"
     fi

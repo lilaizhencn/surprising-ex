@@ -7,6 +7,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.HexFormat;
 import org.springframework.stereotype.Service;
 
@@ -29,20 +32,53 @@ public class AccountUserCommandWalIngress {
         if (envelopes == null || envelopes.isEmpty()) {
             return List.of();
         }
-        return envelopes.stream().map(this::appendOne).toList();
+        Map<UserPartitionKey, List<IndexedEnvelope>> byPartition = new LinkedHashMap<>();
+        for (int index = 0; index < envelopes.size(); index++) {
+            CommandEnvelope envelope = envelopes.get(index);
+            validateEnvelope(envelope);
+            UserPartitionKey partition = new UserPartitionKey(envelope.command().productLine(), envelope.command().userId());
+            byPartition.computeIfAbsent(partition, ignored -> new ArrayList<>())
+                    .add(new IndexedEnvelope(index, envelope));
+        }
+        List<AppendOutcome> outcomes = new ArrayList<>(envelopes.size());
+        for (int index = 0; index < envelopes.size(); index++) {
+            outcomes.add(null);
+        }
+        for (Map.Entry<UserPartitionKey, List<IndexedEnvelope>> entry : byPartition.entrySet()) {
+            List<IndexedEnvelope> values = entry.getValue();
+            boolean duplicateCommand = values.stream().map(value -> value.envelope().command().commandId())
+                    .distinct().count() != values.size();
+            if (duplicateCommand) {
+                for (IndexedEnvelope value : values) {
+                    UserPartitionWal.AppendRequest request = toRequest(value.envelope());
+                    wal.append(entry.getKey(), request.eventId(), request.eventType(), request.payload(),
+                            request.fingerprint(), request.occurredAt());
+                }
+            } else {
+                List<UserPartitionWal.AppendRequest> requests = values.stream()
+                        .map(value -> toRequest(value.envelope()))
+                        .toList();
+                wal.appendBatch(entry.getKey(), requests);
+            }
+            for (IndexedEnvelope value : values) {
+                outcomes.set(value.index(), AppendOutcome.DURABLE);
+            }
+        }
+        return List.copyOf(outcomes);
     }
 
-    private AppendOutcome appendOne(CommandEnvelope envelope) {
+    private UserPartitionWal.AppendRequest toRequest(CommandEnvelope envelope) {
+        AccountUserCommand command = envelope.command();
+        return new UserPartitionWal.AppendRequest(command.commandId(), command.commandType().name(),
+                envelope.serializedEnvelope().getBytes(StandardCharsets.UTF_8), fingerprint(command),
+                command.occurredAt());
+    }
+
+    private void validateEnvelope(CommandEnvelope envelope) {
         if (envelope == null || envelope.command() == null
                 || envelope.serializedEnvelope() == null || envelope.serializedEnvelope().isBlank()) {
             throw new AccountCommandPoisonPillException("invalid account command batch envelope");
         }
-        AccountUserCommand command = envelope.command();
-        UserPartitionKey partition = new UserPartitionKey(command.productLine(), command.userId());
-        wal.append(partition, command.commandId(), command.commandType().name(),
-                envelope.serializedEnvelope().getBytes(StandardCharsets.UTF_8),
-                fingerprint(command), command.occurredAt());
-        return AppendOutcome.DURABLE;
     }
 
     /**
@@ -76,5 +112,8 @@ public class AccountUserCommandWalIngress {
 
     /** 账户 Kafka 消费批次中的原始命令和固定序列化内容。 */
     public record CommandEnvelope(AccountUserCommand command, String serializedEnvelope) {
+    }
+
+    private record IndexedEnvelope(int index, CommandEnvelope envelope) {
     }
 }
