@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.HexFormat;
+import java.util.function.Supplier;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -64,6 +65,13 @@ public class AccountUserCommandWalIngress {
         return List.copyOf(outcomes);
     }
 
+    public <T> T runAsOwner(UserPartitionKey partition, Supplier<T> action) {
+        if (lane == null) {
+            return wal.runAsOwner(partition, action);
+        }
+        return lane.runAsOwner(partition, action);
+    }
+
     private void appendPartition(UserPartitionKey partition, List<IndexedEnvelope> values) {
         Runnable append = () -> {
             boolean duplicateCommand = values.stream().map(value -> value.envelope().command().commandId())
@@ -81,7 +89,7 @@ public class AccountUserCommandWalIngress {
                 wal.appendBatch(partition, requests);
             }
         };
-        if (lane == null) {
+        if (lane == null || lane.isOwnerThread(partition)) {
             append.run();
         } else {
             lane.runAsOwner(partition, () -> {

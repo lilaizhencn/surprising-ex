@@ -6,7 +6,9 @@ import com.surprising.eventstore.UserMutationBatch;
 import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.account.provider.config.AccountProperties;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -74,15 +76,45 @@ public class AccountUserCommandConsumer {
             if (walIngress == null) {
                 throw new IllegalStateException("账户 WAL 入口未配置，禁止回退数据库命令处理器");
             }
-            List<AccountUserCommandWalIngress.AppendOutcome> outcomes = walIngress.append(envelopes);
-            if (outcomes.size() != parsed.size()) {
-                throw new IllegalStateException("account command batch outcome size mismatch");
-            }
             if (stateWorker == null) {
                 throw new IllegalStateException("账户状态执行器未配置，禁止只写 WAL 后提交 Kafka offset");
             }
+            Map<UserPartitionKey, List<IndexedEnvelope>> envelopesByPartition =
+                    new LinkedHashMap<>();
+            for (int index = 0; index < envelopes.size(); index++) {
+                AccountUserCommandWalIngress.CommandEnvelope envelope = envelopes.get(index);
+                UserPartitionKey partition = new UserPartitionKey(envelope.command().productLine(),
+                        envelope.command().userId());
+                envelopesByPartition.computeIfAbsent(partition, ignored -> new ArrayList<>())
+                        .add(new IndexedEnvelope(index, envelope));
+            }
+            List<AccountUserCommandWalIngress.AppendOutcome> outcomes = new ArrayList<>(parsed.size());
+            for (int index = 0; index < parsed.size(); index++) {
+                outcomes.add(null);
+            }
             for (UserPartitionKey partition : mutationBatch.byPartition().keySet()) {
-                stateWorker.applyPendingPartition(partition);
+                List<IndexedEnvelope> partitionValues = envelopesByPartition.get(partition);
+                if (partitionValues == null || partitionValues.isEmpty()) {
+                    throw new IllegalStateException("account command partition batch is missing");
+                }
+                walIngress.runAsOwner(partition, () -> {
+                    List<AccountUserCommandWalIngress.CommandEnvelope> partitionEnvelopes = partitionValues.stream()
+                            .map(IndexedEnvelope::envelope)
+                            .toList();
+                    List<AccountUserCommandWalIngress.AppendOutcome> partitionOutcomes =
+                            walIngress.append(partitionEnvelopes);
+                    if (partitionOutcomes.size() != partitionEnvelopes.size()) {
+                        throw new IllegalStateException("account command partition outcome size mismatch");
+                    }
+                    for (int localIndex = 0; localIndex < partitionValues.size(); localIndex++) {
+                        outcomes.set(partitionValues.get(localIndex).index(), partitionOutcomes.get(localIndex));
+                    }
+                    stateWorker.applyPendingPartition(partition);
+                    return null;
+                });
+            }
+            if (outcomes.stream().anyMatch(outcome -> outcome == null)) {
+                throw new IllegalStateException("account command batch outcome is incomplete");
             }
             for (int index = 0; index < parsed.size(); index++) {
                 ParsedRecord value = parsed.get(index);
@@ -152,5 +184,8 @@ public class AccountUserCommandConsumer {
     }
 
     private record ParsedRecord(ConsumerRecord<String, String> record, AccountUserCommand command) {
+    }
+
+    private record IndexedEnvelope(int index, AccountUserCommandWalIngress.CommandEnvelope envelope) {
     }
 }

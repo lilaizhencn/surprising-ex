@@ -2,6 +2,7 @@ package com.surprising.account.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -14,6 +15,7 @@ import com.surprising.product.api.ProductLine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Supplier;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -27,6 +29,10 @@ class AccountUserCommandConsumerTest {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         AccountUserCommandWalIngress ingress = mock(AccountUserCommandWalIngress.class);
+        when(ingress.runAsOwner(any(), any())).thenAnswer(invocation -> {
+            Supplier<?> action = invocation.getArgument(1);
+            return action.get();
+        });
         when(ingress.append(anyList())).thenReturn(List.of(
                 AccountUserCommandWalIngress.AppendOutcome.DURABLE,
                 AccountUserCommandWalIngress.AppendOutcome.DURABLE));
@@ -54,6 +60,10 @@ class AccountUserCommandConsumerTest {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         AccountUserCommandWalIngress ingress = mock(AccountUserCommandWalIngress.class);
+        when(ingress.runAsOwner(any(), any())).thenAnswer(invocation -> {
+            Supplier<?> action = invocation.getArgument(1);
+            return action.get();
+        });
         when(ingress.append(anyList())).thenReturn(List.of(
                 AccountUserCommandWalIngress.AppendOutcome.DURABLE));
         AccountUserStateCommandWorker worker = mock(AccountUserStateCommandWorker.class);
