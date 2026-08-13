@@ -360,19 +360,26 @@ public final class CoreProbeState implements AutoCloseable {
     private void replaceOrder(CoreMessage message) {
         var command = TradingCommandCodec.decodeReplaceOrder(message.payload());
         TradingCoreState before = tradingState;
-        var order = before.order(command.orderId());
+        var order = before.order(command.originalOrderId());
         if (order == null) {
             throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
         }
-        TradingCoreState prepared = tradingReducer.prepareReplace(before, message.header().userId(), command);
+        TradingCoreState canceled = tradingReducer.cancelOrder(before, message.header().userId(),
+                new com.surprising.aeron.protocol.CancelOrderCommand(command.originalOrderId()));
+        TradingCoreState prepared = tradingReducer.placeOrder(canceled, message.header().userId(),
+                command.replacement(), message.header().commandId());
         try {
-            var matchingResult = matchingAdapter.replace(message.header().userId(), command.orderId(),
-                    order.symbol(), command.newPriceTicks());
+            var cancelResult = matchingAdapter.cancel(message.header().userId(), command.originalOrderId(),
+                    order.symbol());
+            if (!cancelResult.accepted()) {
+                throw new CoreStateRejectedException("MATCHING_REJECTED", cancelResult.resultCode());
+            }
+            var matchingResult = matchingAdapter.place(message.header().userId(), command.replacement());
             if (!matchingResult.accepted()) {
                 throw new CoreStateRejectedException("MATCHING_REJECTED", matchingResult.resultCode());
             }
-            tradingState = tradingReducer.applyMatches(prepared, command.orderId(),
-                    command.baseAsset(), command.quoteAsset(), matchingResult.matches());
+            tradingState = tradingReducer.applyMatches(prepared, command.replacement().orderId(),
+                    command.replacement().baseAsset(), command.replacement().quoteAsset(), matchingResult.matches());
         } catch (RuntimeException exception) {
             matchingAdapter.rebuild(before.bookState());
             throw exception;

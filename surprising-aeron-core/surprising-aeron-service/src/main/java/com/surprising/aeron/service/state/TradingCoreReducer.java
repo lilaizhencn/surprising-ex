@@ -5,7 +5,6 @@ import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
@@ -298,39 +297,6 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
                 new CoreBookState(nextPrioritySequence, bookOrders), state.instruments(), state.riskState(),
                 treasury);
-    }
-
-    public TradingCoreState prepareReplace(
-            TradingCoreState state,
-            long userId,
-            ReplaceOrderCommand command) {
-        CoreOrderState order = requireOpenOrder(state.orders(), command.orderId());
-        if (order.userId() != userId) {
-            throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
-        }
-        CoreUserState user = state.user(userId);
-        OrderReservation reservation = requireReservation(user, order.orderId());
-        OrderReservation nextReservation = reservation.replaceReservedUnits(command.newReservedUnits());
-        long delta = Math.subtractExact(nextReservation.remainingUnits(), reservation.remainingUnits());
-        AssetBalance balance = requireBalance(user, reservation.asset());
-        AssetBalance nextBalance = delta > 0 ? balance.reserve(delta)
-                : delta < 0 ? balance.release(Math.negateExact(delta)) : balance;
-        Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
-        balances.put(nextBalance.asset(), nextBalance);
-        Map<Long, OrderReservation> reservations = new TreeMap<>(user.reservations());
-        reservations.put(order.orderId(), nextReservation);
-        CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
-                Math.incrementExact(user.revision()), balances, reservations, user.positions(), user.positionMode());
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
-        users.put(userId, nextUser);
-        Map<Long, CoreOrderState> orders = new TreeMap<>(state.orders());
-        CoreOrderState replaced = order.replacePrice(command.newPriceTicks());
-        orders.put(order.orderId(), replaced);
-        Map<Long, CoreBookOrder> bookOrders = new TreeMap<>(state.bookState().openOrders());
-        bookOrders.remove(order.orderId());
-        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
-                new CoreBookState(state.bookState().nextPrioritySequence(), bookOrders),
-                state.instruments(), state.riskState(), state.treasuryState());
     }
 
     public TradingCoreState upsertInstrument(TradingCoreState state, UpsertInstrumentCommand command) {

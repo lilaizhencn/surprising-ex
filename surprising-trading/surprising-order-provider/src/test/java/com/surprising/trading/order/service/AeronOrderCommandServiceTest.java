@@ -15,6 +15,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
@@ -106,6 +107,42 @@ class AeronOrderCommandServiceTest {
         verify(aeron).command(eq(CoreMessageType.CANCEL_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), payload.capture());
         assertThat(TradingCommandCodec.decodeCancelOrder(payload.getValue()).orderId()).isEqualTo(99);
+    }
+
+    @Test
+    void replaceCarriesCompleteReplacementInOneCoreCommand() {
+        PlaceOrderRequest originalRequest = new PlaceOrderRequest(1001, "old", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 60_000, 5, MarginMode.CROSS, PositionSide.NET,
+                false, false);
+        PlaceOrderRequest replacementRequest = new PlaceOrderRequest(1001, "new", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTX, 59_000, 4, MarginMode.CROSS, PositionSide.NET,
+                false, true);
+        com.surprising.trading.api.model.OrderResponse original = new com.surprising.trading.api.model.OrderResponse(
+                77, 1001, "old", "BTC-USDT", 7, OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
+                60_000, 5, 0, 5, MarginMode.CROSS, PositionSide.NET, -10, 25,
+                false, false, OrderStatus.ACCEPTED, null,
+                java.time.Instant.ofEpochMilli(1_000), java.time.Instant.ofEpochMilli(1_000));
+        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
+        when(aeron.order(eq(1001L), anyLong())).thenAnswer(invocation -> {
+            long orderId = invocation.getArgument(1);
+            return orderId == 77 ? orderView(orderId, originalRequest) : orderView(orderId, replacementRequest);
+        });
+
+        assertThat(service.replace(original, replacementRequest,
+                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL),
+                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test"), "USDT", 800)
+                .replacementOrder().clientOrderId()).isEqualTo("new");
+
+        ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
+        verify(aeron).command(eq(CoreMessageType.REPLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+                eq(1001L), payload.capture());
+        ReplaceOrderCommand command = TradingCommandCodec.decodeReplaceOrder(payload.getValue());
+        assertThat(command.originalOrderId()).isEqualTo(77);
+        assertThat(command.replacement().clientOrderId()).isEqualTo("new");
+        assertThat(command.replacement().quantitySteps()).isEqualTo(4);
+        assertThat(command.replacement().timeInForce()).isEqualTo(CoreTimeInForce.GTX);
+        assertThat(command.replacement().postOnly()).isTrue();
+        assertThat(command.replacement().reservedUnits()).isEqualTo(800);
     }
 
     private static InstrumentRule perpetualRule() {

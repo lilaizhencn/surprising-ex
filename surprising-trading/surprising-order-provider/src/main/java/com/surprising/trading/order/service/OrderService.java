@@ -110,8 +110,6 @@ public class OrderService {
 
     private OrderResponse placeAeron(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
-        ProductLine productLine = currentProductLine();
-        requireLocalAccountProductLine(productLine);
         if (hasClientOrderId(normalized)) {
             OrderResponse existing = aeronOrders.find(normalized.userId(), normalized.clientOrderId());
             if (existing != null) {
@@ -119,6 +117,14 @@ public class OrderService {
                 return existing;
             }
         }
+        PreparedAeronOrder prepared = prepareAeronOrder(normalized);
+        return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee(),
+                prepared.reservation().asset(), prepared.reservation().units());
+    }
+
+    private PreparedAeronOrder prepareAeronOrder(PlaceOrderRequest normalized) {
+        ProductLine productLine = currentProductLine();
+        requireLocalAccountProductLine(productLine);
         PositionMode positionMode = productLine == ProductLine.SPOT
                 ? PositionMode.ONE_WAY : placementStateService.localPositionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
@@ -136,7 +142,7 @@ public class OrderService {
                         validation.instrumentVersion(), Instant.now())
                 .orElseThrow(() -> new IllegalStateException("fee schedule unavailable"));
         ReservationInput reservation = reservationInput(normalized, validation, fee);
-        return aeronOrders.place(normalized, validation, fee, reservation.asset(), reservation.units());
+        return new PreparedAeronOrder(normalized, validation, fee, reservation);
     }
 
     private ReservationInput reservationInput(PlaceOrderRequest request, ValidationResult validation,
@@ -322,7 +328,35 @@ public class OrderService {
     }
 
     public AmendOrderResponse amend(AmendOrderRequest request) {
-        return amendWal(request);
+        return aeronOrders == null ? amendWal(request) : amendAeron(request);
+    }
+
+    private AmendOrderResponse amendAeron(AmendOrderRequest request) {
+        AmendOrderRequest normalized = normalizeAmend(request);
+        OrderResponse original = aeronOrders.get(normalized.userId(), normalized.orderId());
+        if (original.orderType() != OrderType.LIMIT) {
+            throw new IllegalArgumentException("only LIMIT orders can be amended");
+        }
+        if (original.status() != OrderStatus.ACCEPTED && original.status() != OrderStatus.PARTIALLY_FILLED) {
+            throw new IllegalStateException("order is not amendable: " + original.status().name());
+        }
+        long price = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
+        long quantity = normalized.quantitySteps() == null ? original.remainingQuantitySteps() : normalized.quantitySteps();
+        TimeInForce timeInForce = normalized.timeInForce() == null ? original.timeInForce() : normalized.timeInForce();
+        boolean postOnly = normalized.postOnly() == null ? original.postOnly() : normalized.postOnly();
+        PlaceOrderRequest replacement = new PlaceOrderRequest(original.userId(), normalized.newClientOrderId(),
+                original.symbol(), original.side(), OrderType.LIMIT, timeInForce, price, quantity,
+                original.marginMode(), original.positionSide(), original.reduceOnly(), postOnly);
+        if (hasClientOrderId(replacement)) {
+            OrderResponse existing = aeronOrders.find(replacement.userId(), replacement.clientOrderId());
+            if (existing != null) {
+                requireSameClientOrderIntent(replacement, existing);
+                return new AmendOrderResponse(original, existing, false, "replacement order already exists");
+            }
+        }
+        PreparedAeronOrder prepared = prepareAeronOrder(normalize(replacement));
+        return aeronOrders.replace(original, prepared.request(), prepared.validation(), prepared.fee(),
+                prepared.reservation().asset(), prepared.reservation().units());
     }
 
     /** 生产改单只追加同一用户分区的撤单事实，再提交替代订单事实。 */
@@ -862,6 +896,10 @@ public class OrderService {
     }
 
     private record ReservationInput(String asset, long units) {
+    }
+
+    private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation,
+                                      OrderFeeSnapshot fee, ReservationInput reservation) {
     }
 
     private record ReservationSequenceSlot(long expectedAccountRevision, String dependsOnCommandId) {

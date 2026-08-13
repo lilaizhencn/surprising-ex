@@ -233,11 +233,15 @@ class CoreMatchingStateTest {
             apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
             apply(state, 5, 22, CoreMessageType.REPLACE_ORDER,
-                    TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(202, "BTC", "USDT", 110, 220)));
+                    TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(202,
+                            new PlaceOrderCommand(203, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+                                    CoreOrderSide.BUY, 110, 2, false, ReservationKind.SPOT_ASSET,
+                                    "USDT", 220))));
 
             assertThat(state.tradingState().bookState().openOrders()).isEmpty();
             assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.FILLED);
             try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().bookState().openOrders()).isEmpty();
             }

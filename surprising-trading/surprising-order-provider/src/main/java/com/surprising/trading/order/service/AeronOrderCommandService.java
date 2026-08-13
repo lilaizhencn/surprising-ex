@@ -10,6 +10,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
@@ -56,13 +57,48 @@ public class AeronOrderCommandService {
             String reservationAsset,
             long reservedUnits) {
         long orderId = orderIds.next();
+        PlaceOrderCommand command = placeCommand(orderId, request, validation, fee, reservationAsset, reservedUnits);
+        UUID commandId = stableId("ORDER_PLACE:" + request.userId() + ':'
+                + (request.clientOrderId() == null ? orderId : request.clientOrderId()));
+        aeron.command(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
+                TradingCommandCodec.encodePlaceOrder(command));
+        return requireOrder(aeron.order(request.userId(), orderId), "placed order missing");
+    }
+
+    public com.surprising.trading.api.model.AmendOrderResponse replace(
+            OrderResponse original,
+            com.surprising.trading.api.model.PlaceOrderRequest replacement,
+            ValidationResult validation,
+            OrderFeeSnapshot fee,
+            String reservationAsset,
+            long reservedUnits) {
+        long replacementOrderId = orderIds.next();
+        PlaceOrderCommand replacementCommand = placeCommand(replacementOrderId, replacement, validation, fee,
+                reservationAsset, reservedUnits);
+        UUID commandId = stableId("ORDER_REPLACE:" + replacement.userId() + ':' + original.orderId() + ':'
+                + (replacement.clientOrderId() == null ? replacementOrderId : replacement.clientOrderId()));
+        aeron.command(CoreMessageType.REPLACE_ORDER, commandId, replacement.userId(),
+                TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(original.orderId(), replacementCommand)));
+        OrderResponse canceled = requireOrder(aeron.order(original.userId(), original.orderId()),
+                "replaced original order missing");
+        OrderResponse placed = requireOrder(aeron.order(replacement.userId(), replacementOrderId),
+                "replacement order missing");
+        return new com.surprising.trading.api.model.AmendOrderResponse(canceled, placed, true,
+                placed.status() == OrderStatus.REJECTED ? "replacement rejected" : "order replaced");
+    }
+
+    private PlaceOrderCommand placeCommand(
+            long orderId,
+            com.surprising.trading.api.model.PlaceOrderRequest request,
+            ValidationResult validation,
+            OrderFeeSnapshot fee,
+            String reservationAsset,
+            long reservedUnits) {
         InstrumentRule instrument = instrumentRules.currentRule(request.symbol())
                 .filter(value -> value.version() == validation.instrumentVersion())
                 .orElseThrow(() -> new IllegalStateException("instrument snapshot changed before Aeron submit"));
         long matchingPriceTicks = matchingPriceTicks(request, validation.instrumentVersion());
-        UUID commandId = stableId("ORDER_PLACE:" + request.userId() + ':'
-                + (request.clientOrderId() == null ? orderId : request.clientOrderId()));
-        PlaceOrderCommand command = new PlaceOrderCommand(orderId, request.symbol(), validation.instrumentVersion(),
+        return new PlaceOrderCommand(orderId, request.symbol(), validation.instrumentVersion(),
                 instrument.baseAsset(), instrument.quoteAsset(), instrument.settleAsset(), side(request.side()),
                 request.priceTicks(), request.quantitySteps(), request.reduceOnly(), marginMode(request.marginMode()),
                 positionSide(request.positionSide()), instrument.spot() ? ReservationKind.SPOT_ASSET
@@ -70,9 +106,6 @@ public class AeronOrderCommandService {
                 orderType(request.orderType()), timeInForce(request.timeInForce()), matchingPriceTicks,
                 request.postOnly(), request.clientOrderId() == null ? "" : request.clientOrderId(),
                 fee.makerFeeRatePpm(), fee.takerFeeRatePpm());
-        aeron.command(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
-                TradingCommandCodec.encodePlaceOrder(command));
-        return requireOrder(aeron.order(request.userId(), orderId), "placed order missing");
     }
 
     public OrderResponse cancel(long userId, long orderId) {

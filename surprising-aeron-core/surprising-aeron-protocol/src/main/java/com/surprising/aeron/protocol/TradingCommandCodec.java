@@ -188,29 +188,27 @@ public final class TradingCommandCodec {
     }
 
     public static byte[] encodeReplaceOrder(ReplaceOrderCommand command) {
-        byte[] baseAsset = text(command.baseAsset());
-        byte[] quoteAsset = text(command.quoteAsset());
-        return ByteBuffer.allocate(Long.BYTES * 3 + Short.BYTES * 2 + baseAsset.length + quoteAsset.length)
+        byte[] replacement = encodePlaceOrder(command.replacement());
+        return ByteBuffer.allocate(Long.BYTES + Integer.BYTES + replacement.length)
                 .order(ByteOrder.LITTLE_ENDIAN)
-                .putLong(command.orderId())
-                .putShort((short) baseAsset.length).put(baseAsset)
-                .putShort((short) quoteAsset.length).put(quoteAsset)
-                .putLong(command.newPriceTicks())
-                .putLong(command.newReservedUnits())
+                .putLong(command.originalOrderId())
+                .putInt(replacement.length)
+                .put(replacement)
                 .array();
     }
 
     public static ReplaceOrderCommand decodeReplaceOrder(byte[] payload) {
         ByteBuffer buffer = readable(payload);
-        requireRemaining(buffer, Long.BYTES);
-        long orderId = buffer.getLong();
-        String baseAsset = readText(buffer);
-        String quoteAsset = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 2);
-        long newPriceTicks = buffer.getLong();
-        long newReservedUnits = buffer.getLong();
+        requireRemaining(buffer, Long.BYTES + Integer.BYTES);
+        long originalOrderId = buffer.getLong();
+        int replacementLength = buffer.getInt();
+        if (replacementLength <= 0 || replacementLength != buffer.remaining()) {
+            throw new ProtocolException("invalid replacement payload length");
+        }
+        byte[] replacement = new byte[replacementLength];
+        buffer.get(replacement);
         requireConsumed(buffer);
-        return new ReplaceOrderCommand(orderId, baseAsset, quoteAsset, newPriceTicks, newReservedUnits);
+        return new ReplaceOrderCommand(originalOrderId, decodePlaceOrder(replacement));
     }
 
     public static byte[] encodeUpsertInstrument(UpsertInstrumentCommand command) {

@@ -16,7 +16,7 @@ class TradingCommandCodecTest {
                 CoreOrderType.MARKET, CoreTimeInForce.FOK, 60_000, false,
                 "client-7", -10, 20);
         CancelOrderCommand cancelOrder = new CancelOrderCommand(7);
-        ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(7, "BTC", "USDT", 61_000, 2_100);
+        ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(6, placeOrder);
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 3, 1,
                 "BTC", "USDT", "USDT", 1, 1, 100_000_000, 100_000, 50_000, -10, 20,
                 0, -1, 0);
