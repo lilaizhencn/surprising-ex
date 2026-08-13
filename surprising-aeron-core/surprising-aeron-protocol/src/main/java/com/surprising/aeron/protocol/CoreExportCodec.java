@@ -10,6 +10,7 @@ public final class CoreExportCodec {
 
     private static final int EVENT_V2_MARKER = 0xC0E2_0002;
     private static final int EVENT_V3_MARKER = 0xC0E3_0003;
+    private static final int EVENT_V4_MARKER = 0xC0E4_0004;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
             CoreMessageCodec.MAX_PAYLOAD_LENGTH - EVENT_FIXED_LENGTH;
@@ -47,18 +48,24 @@ public final class CoreExportCodec {
         byte[] payload = event.commandPayload();
         List<byte[]> users = event.changedUsers().stream().map(CoreStateQueryCodec::encodeUserState).toList();
         List<byte[]> orders = event.changedOrders().stream().map(CoreStateQueryCodec::encodeOrderState).toList();
-        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 4L + payload.length;
+        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 6L + payload.length;
         for (byte[] user : users) length = Math.addExact(length, Integer.BYTES + user.length);
         for (byte[] order : orders) length = Math.addExact(length, Integer.BYTES + order.length);
         length = Math.addExact(length, Math.multiplyExact(event.executions().size(), Long.BYTES * 6L));
         for (CoreFundingPaymentView payment : event.fundingPayments()) {
             length = Math.addExact(length, fundingPaymentLength(payment));
         }
+        for (CoreLiquidationView liquidation : event.changedLiquidations()) {
+            length = Math.addExact(length, liquidationLength(liquidation));
+        }
+        for (CoreTreasuryAssetView treasury : event.changedTreasuryAssets()) {
+            length = Math.addExact(length, treasuryLength(treasury));
+        }
         if (payload.length > MAX_COMMAND_PAYLOAD || length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("export event payload is too large");
         }
         ByteBuffer output = littleEndian(Math.toIntExact(length));
-        output.putInt(EVENT_V3_MARKER);
+        output.putInt(EVENT_V4_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
         output.putLong(event.businessStateHash());
@@ -79,6 +86,10 @@ public final class CoreExportCodec {
                 .putLong(execution.quantitySteps()));
         output.putInt(event.fundingPayments().size());
         event.fundingPayments().forEach(payment -> putFundingPayment(output, payment));
+        output.putInt(event.changedLiquidations().size());
+        event.changedLiquidations().forEach(liquidation -> putLiquidation(output, liquidation));
+        output.putInt(event.changedTreasuryAssets().size());
+        event.changedTreasuryAssets().forEach(treasury -> putTreasury(output, treasury));
         return output.array();
     }
 
@@ -90,7 +101,8 @@ public final class CoreExportCodec {
         int marker = input.remaining() >= Integer.BYTES ? input.getInt(input.position()) : 0;
         boolean version2 = marker == EVENT_V2_MARKER;
         boolean version3 = marker == EVENT_V3_MARKER;
-        if (version2 || version3) input.getInt();
+        boolean version4 = marker == EVENT_V4_MARKER;
+        if (version2 || version3 || version4) input.getInt();
         long sequence = input.getLong();
         long appliedCount = input.getLong();
         long businessHash = input.getLong();
@@ -106,7 +118,7 @@ public final class CoreExportCodec {
         }
         byte[] payload = new byte[payloadLength];
         input.get(payload);
-        if (!version2 && !version3) {
+        if (!version2 && !version3 && !version4) {
             if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
             return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                     commandType, status, resultCode, userId, payload);
@@ -131,9 +143,78 @@ public final class CoreExportCodec {
         int fundingCount = readCount(input);
         List<CoreFundingPaymentView> fundingPayments = new ArrayList<>(fundingCount);
         for (int index = 0; index < fundingCount; index++) fundingPayments.add(readFundingPayment(input));
+        if (version3) {
+            if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
+            return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
+                    commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments);
+        }
+        int liquidationCount = readCount(input);
+        List<CoreLiquidationView> liquidations = new ArrayList<>(liquidationCount);
+        for (int index = 0; index < liquidationCount; index++) liquidations.add(readLiquidation(input));
+        int treasuryCount = readCount(input);
+        List<CoreTreasuryAssetView> treasuryAssets = new ArrayList<>(treasuryCount);
+        for (int index = 0; index < treasuryCount; index++) treasuryAssets.add(readTreasury(input));
         if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
-                commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments);
+                commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
+                liquidations, treasuryAssets);
+    }
+
+    private static int liquidationLength(CoreLiquidationView liquidation) {
+        return Long.BYTES * 6 + Integer.BYTES * 4
+                + utf8(liquidation.symbol()).length + utf8(liquidation.asset()).length
+                + utf8(liquidation.status()).length;
+    }
+
+    private static void putLiquidation(ByteBuffer output, CoreLiquidationView liquidation) {
+        output.putLong(liquidation.liquidationId()).putLong(liquidation.userId());
+        putString(output, liquidation.symbol());
+        putString(output, liquidation.asset());
+        output.putInt(liquidation.positionSide().ordinal()).putLong(liquidation.instrumentVersion())
+                .putLong(liquidation.triggerPriceSequence()).putLong(liquidation.closeQuantitySteps())
+                .putLong(liquidation.deficitUnits());
+        putString(output, liquidation.status());
+    }
+
+    private static CoreLiquidationView readLiquidation(ByteBuffer input) {
+        if (input.remaining() < Long.BYTES * 6 + Integer.BYTES * 4) {
+            throw new ProtocolException("liquidation fact is truncated");
+        }
+        long liquidationId = input.getLong();
+        long userId = input.getLong();
+        String symbol = readString(input);
+        String asset = readString(input);
+        if (input.remaining() < Integer.BYTES + Long.BYTES * 4) {
+            throw new ProtocolException("liquidation fact is truncated");
+        }
+        int positionSide = input.getInt();
+        long instrumentVersion = input.getLong();
+        long triggerPriceSequence = input.getLong();
+        long closeQuantitySteps = input.getLong();
+        long deficitUnits = input.getLong();
+        String status = readString(input);
+        if (positionSide < 0 || positionSide >= CorePositionSide.values().length) {
+            throw new ProtocolException("invalid liquidation position side");
+        }
+        return new CoreLiquidationView(liquidationId, userId, symbol, asset,
+                CorePositionSide.values()[positionSide], instrumentVersion, triggerPriceSequence,
+                closeQuantitySteps, deficitUnits, status);
+    }
+
+    private static int treasuryLength(CoreTreasuryAssetView treasury) {
+        return Integer.BYTES + Long.BYTES * 3 + utf8(treasury.asset()).length;
+    }
+
+    private static void putTreasury(ByteBuffer output, CoreTreasuryAssetView treasury) {
+        putString(output, treasury.asset());
+        output.putLong(treasury.feeBalanceUnits()).putLong(treasury.insuranceBalanceUnits())
+                .putLong(treasury.insuranceDeficitUnits());
+    }
+
+    private static CoreTreasuryAssetView readTreasury(ByteBuffer input) {
+        String asset = readString(input);
+        if (input.remaining() < Long.BYTES * 3) throw new ProtocolException("treasury fact is truncated");
+        return new CoreTreasuryAssetView(asset, input.getLong(), input.getLong(), input.getLong());
     }
 
     private static int fundingPaymentLength(CoreFundingPaymentView payment) {

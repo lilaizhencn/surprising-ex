@@ -60,6 +60,32 @@ public final class JdbcCoreEventProjector {
                  funding_rate_ppm, amount_units, occurred_at_epoch_ms)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
+    private static final String INSERT_LIQUIDATION = """
+            INSERT INTO core_liquidation_projection
+                (product_line, liquidation_id, user_id, symbol, asset, position_side,
+                 instrument_version, trigger_price_sequence, close_quantity_steps,
+                 deficit_units, status, export_sequence, updated_at_epoch_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+    private static final String UPDATE_LIQUIDATION = """
+            UPDATE core_liquidation_projection SET
+                user_id = ?, symbol = ?, asset = ?, position_side = ?, instrument_version = ?,
+                trigger_price_sequence = ?, close_quantity_steps = ?, deficit_units = ?, status = ?,
+                export_sequence = ?, updated_at_epoch_ms = ?
+            WHERE product_line = ? AND liquidation_id = ? AND export_sequence < ?
+            """;
+    private static final String INSERT_TREASURY = """
+            INSERT INTO core_treasury_projection
+                (product_line, asset, fee_balance_units, insurance_balance_units,
+                 insurance_deficit_units, export_sequence, updated_at_epoch_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """;
+    private static final String UPDATE_TREASURY = """
+            UPDATE core_treasury_projection SET
+                fee_balance_units = ?, insurance_balance_units = ?, insurance_deficit_units = ?,
+                export_sequence = ?, updated_at_epoch_ms = ?
+            WHERE product_line = ? AND asset = ? AND export_sequence < ?
+            """;
 
     private final DataSource dataSource;
 
@@ -171,6 +197,74 @@ public final class JdbcCoreEventProjector {
             executions.executeBatch();
         }
         insertFundingFacts(connection, productLine, message, event);
+        upsertLiquidations(connection, productLine, message, event);
+        upsertTreasury(connection, productLine, message, event);
+    }
+
+    private static void upsertLiquidations(Connection connection, ProductLine productLine, CoreMessage message,
+                                           CoreExportEvent event) throws SQLException {
+        try (PreparedStatement update = connection.prepareStatement(UPDATE_LIQUIDATION);
+             PreparedStatement insert = connection.prepareStatement(INSERT_LIQUIDATION)) {
+            for (var liquidation : event.changedLiquidations()) {
+                update.setLong(1, liquidation.userId());
+                update.setString(2, liquidation.symbol());
+                update.setString(3, liquidation.asset());
+                update.setString(4, liquidation.positionSide().name());
+                update.setLong(5, liquidation.instrumentVersion());
+                update.setLong(6, liquidation.triggerPriceSequence());
+                update.setLong(7, liquidation.closeQuantitySteps());
+                update.setLong(8, liquidation.deficitUnits());
+                update.setString(9, liquidation.status());
+                update.setLong(10, event.exportSequence());
+                update.setLong(11, message.header().submittedAtEpochMillis());
+                update.setString(12, productLine.name());
+                update.setLong(13, liquidation.liquidationId());
+                update.setLong(14, event.exportSequence());
+                if (update.executeUpdate() == 0) {
+                    insert.setString(1, productLine.name());
+                    insert.setLong(2, liquidation.liquidationId());
+                    insert.setLong(3, liquidation.userId());
+                    insert.setString(4, liquidation.symbol());
+                    insert.setString(5, liquidation.asset());
+                    insert.setString(6, liquidation.positionSide().name());
+                    insert.setLong(7, liquidation.instrumentVersion());
+                    insert.setLong(8, liquidation.triggerPriceSequence());
+                    insert.setLong(9, liquidation.closeQuantitySteps());
+                    insert.setLong(10, liquidation.deficitUnits());
+                    insert.setString(11, liquidation.status());
+                    insert.setLong(12, event.exportSequence());
+                    insert.setLong(13, message.header().submittedAtEpochMillis());
+                    insert.executeUpdate();
+                }
+            }
+        }
+    }
+
+    private static void upsertTreasury(Connection connection, ProductLine productLine, CoreMessage message,
+                                       CoreExportEvent event) throws SQLException {
+        try (PreparedStatement update = connection.prepareStatement(UPDATE_TREASURY);
+             PreparedStatement insert = connection.prepareStatement(INSERT_TREASURY)) {
+            for (var treasury : event.changedTreasuryAssets()) {
+                update.setLong(1, treasury.feeBalanceUnits());
+                update.setLong(2, treasury.insuranceBalanceUnits());
+                update.setLong(3, treasury.insuranceDeficitUnits());
+                update.setLong(4, event.exportSequence());
+                update.setLong(5, message.header().submittedAtEpochMillis());
+                update.setString(6, productLine.name());
+                update.setString(7, treasury.asset());
+                update.setLong(8, event.exportSequence());
+                if (update.executeUpdate() == 0) {
+                    insert.setString(1, productLine.name());
+                    insert.setString(2, treasury.asset());
+                    insert.setLong(3, treasury.feeBalanceUnits());
+                    insert.setLong(4, treasury.insuranceBalanceUnits());
+                    insert.setLong(5, treasury.insuranceDeficitUnits());
+                    insert.setLong(6, event.exportSequence());
+                    insert.setLong(7, message.header().submittedAtEpochMillis());
+                    insert.executeUpdate();
+                }
+            }
+        }
     }
 
     private static void insertFundingFacts(Connection connection, ProductLine productLine, CoreMessage message,

@@ -203,7 +203,9 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 exportState.append(message, status, resultCode, Math.incrementExact(appliedCommandCount),
                         tradingState.businessStateHash(), changedUsers(beforeTradingState, tradingState),
-                        changedOrders(beforeTradingState, tradingState), commandExecutions, commandFundingPayments);
+                        changedOrders(beforeTradingState, tradingState), commandExecutions, commandFundingPayments,
+                        changedLiquidations(beforeTradingState, tradingState),
+                        changedTreasuryAssets(beforeTradingState, tradingState));
             } catch (CoreStateRejectedException exception) {
                 tradingState = beforeTradingState;
                 matchingAdapter.rebuild(beforeTradingState.bookState());
@@ -500,6 +502,45 @@ public final class CoreProbeState implements AutoCloseable {
         return after.orders().values().stream()
                 .filter(order -> !order.equals(before.orders().get(order.orderId())))
                 .map(CoreProbeState::orderView).toList();
+    }
+
+    private static List<com.surprising.aeron.protocol.CoreLiquidationView> changedLiquidations(
+            TradingCoreState before, TradingCoreState after) {
+        return after.riskState().liquidations().values().stream()
+                .filter(value -> !value.equals(before.riskState().liquidations().get(value.liquidationId())))
+                .map(value -> {
+                    var instrument = after.instruments().get(value.symbol());
+                    if (instrument == null) throw new IllegalStateException("liquidation instrument is missing");
+                    return new com.surprising.aeron.protocol.CoreLiquidationView(value.liquidationId(),
+                            value.userId(), value.symbol(), instrument.settleAsset(), value.positionSide(),
+                            value.instrumentVersion(), value.triggerPriceSequence(), value.closeQuantitySteps(),
+                            value.deficitUnits(), value.status().name());
+                }).toList();
+    }
+
+    private static List<com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasuryAssets(
+            TradingCoreState before, TradingCoreState after) {
+        java.util.TreeSet<String> assets = new java.util.TreeSet<>();
+        assets.addAll(before.treasuryState().feeBalances().keySet());
+        assets.addAll(before.treasuryState().insuranceBalances().keySet());
+        assets.addAll(before.treasuryState().insuranceDeficits().keySet());
+        assets.addAll(after.treasuryState().feeBalances().keySet());
+        assets.addAll(after.treasuryState().insuranceBalances().keySet());
+        assets.addAll(after.treasuryState().insuranceDeficits().keySet());
+        return assets.stream().filter(asset -> treasuryChanged(before, after, asset))
+                .map(asset -> new com.surprising.aeron.protocol.CoreTreasuryAssetView(asset,
+                        after.treasuryState().feeBalances().getOrDefault(asset, 0L),
+                        after.treasuryState().insuranceBalances().getOrDefault(asset, 0L),
+                        after.treasuryState().insuranceDeficits().getOrDefault(asset, 0L))).toList();
+    }
+
+    private static boolean treasuryChanged(TradingCoreState before, TradingCoreState after, String asset) {
+        return !java.util.Objects.equals(before.treasuryState().feeBalances().get(asset),
+                after.treasuryState().feeBalances().get(asset))
+                || !java.util.Objects.equals(before.treasuryState().insuranceBalances().get(asset),
+                after.treasuryState().insuranceBalances().get(asset))
+                || !java.util.Objects.equals(before.treasuryState().insuranceDeficits().get(asset),
+                after.treasuryState().insuranceDeficits().get(asset));
     }
 
     private static CoreUserStateView userView(com.surprising.aeron.service.state.CoreUserState user) {

@@ -38,7 +38,8 @@ class JdbcCoreEventProjectorTest {
         dataSource.setURL("jdbc:h2:mem:projection;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             for (String resource : java.util.List.of("/db/migration/V001__create_core_event_projection.sql",
-                    "/db/migration/V002__create_core_state_projections.sql")) {
+                    "/db/migration/V002__create_core_state_projections.sql",
+                    "/db/migration/V004__create_core_liquidation_projections.sql")) {
                 try (var stream = getClass().getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) {
@@ -126,11 +127,44 @@ class JdbcCoreEventProjectorTest {
         }
     }
 
+    @Test
+    void projectsAuthoritativeLiquidationAndTreasuryFacts() throws Exception {
+        JdbcDataSource dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:mem:liquidation_projection;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+        migrate(dataSource);
+        UUID commandId = UUID.randomUUID();
+        var liquidation = new com.surprising.aeron.protocol.CoreLiquidationView(9, 17, "BTC-USDT", "USDT",
+                CorePositionSide.NET, 3, 8, 2, 12, "INSURANCE_REQUIRED");
+        var treasury = new com.surprising.aeron.protocol.CoreTreasuryAssetView("USDT", 4, 9, 12);
+        var event = new CoreExportEvent(4, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 17,
+                TradingCommandCodec.encodeExecuteLiquidation(
+                        new com.surprising.aeron.protocol.ExecuteLiquidationCommand(9, 60_000)),
+                java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(),
+                java.util.List.of(liquidation), java.util.List.of(treasury));
+        var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.EXECUTE_LIQUIDATION, commandId,
+                ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 1, 17, 1234, 1).exportEvent(4),
+                CoreExportCodec.encodeEvent(event));
+
+        assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.LINEAR_PERPETUAL, message)).isTrue();
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            assertCount(statement, "core_liquidation_projection", 1);
+            assertCount(statement, "core_treasury_projection", 1);
+            try (var result = statement.executeQuery("SELECT status, deficit_units "
+                    + "FROM core_liquidation_projection")) {
+                result.next();
+                assertThat(result.getString(1)).isEqualTo("INSURANCE_REQUIRED");
+                assertThat(result.getLong(2)).isEqualTo(12);
+            }
+        }
+    }
+
     private static void migrate(JdbcDataSource dataSource) throws Exception {
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             for (String resource : java.util.List.of("/db/migration/V001__create_core_event_projection.sql",
                     "/db/migration/V002__create_core_state_projections.sql",
-                    "/db/migration/V003__create_core_funding_projections.sql")) {
+                    "/db/migration/V003__create_core_funding_projections.sql",
+                    "/db/migration/V004__create_core_liquidation_projections.sql")) {
                 try (var stream = JdbcCoreEventProjectorTest.class.getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) if (!sql.isBlank()) statement.execute(sql);
