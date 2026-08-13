@@ -881,7 +881,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | --- | --- | --- | --- | --- |
 | P0 | `DONE` | 方案冻结、基线和垃圾文件清理 | 本文档、ADR、术语表；基线模块测试通过 | `e4917e3` |
 | P1 | `DONE` | Aeron 协议、三节点骨架和工具 | schema v1 golden；Snapshot/幂等测试；三节点 Leader kill 后 hash 连续 | `6bd1cb3` |
-| P2 | `DONE` | User/Order State 和资金预占 | 订单/账户单测、六线规则、幂等、资金不变量和 Snapshot v2 | 本阶段提交 |
+| P2 | `DONE` | User/Order State 和资金预占 | 订单/账户单测、六线规则、幂等、资金不变量和 Snapshot v2 | `20d5bbd` |
 | P3 | `NOT_STARTED` | Exchange Core Adapter 和 Book State | 撮合矩阵、book hash、Snapshot 重建测试 | 待填写 |
 | P4 | `NOT_STARTED` | Risk、强平和生命周期进入核心 | 风险/强平/资金费/交割/期权组件测试 | 待填写 |
 | P5 | `NOT_STARTED` | Snapshot、Replay、Exporter 和投影 | Leader kill、冷恢复、Exporter 故障测试 | 待填写 |
