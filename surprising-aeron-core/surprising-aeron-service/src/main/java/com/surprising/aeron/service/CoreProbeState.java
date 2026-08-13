@@ -289,6 +289,12 @@ public final class CoreProbeState implements AutoCloseable {
             case CONTINUE_RISK_SCAN -> tradingState = tradingReducer.continueRiskScan(tradingState,
                     TradingCommandCodec.decodeContinueRiskScan(message.payload()).maxUsers());
             case ACK_EXPORT -> exportState.acknowledge(CoreExportCodec.decodeAck(message.payload()));
+            case UPDATE_POSITION_MODE -> tradingState = tradingReducer.updatePositionMode(
+                    tradingState, message.header().userId(),
+                    TradingCommandCodec.decodeUpdatePositionMode(message.payload()));
+            case ADJUST_POSITION_MARGIN -> tradingState = tradingReducer.adjustPositionMargin(
+                    tradingState, message.header().userId(),
+                    TradingCommandCodec.decodeAdjustPositionMargin(message.payload()));
             default -> {
                 return null;
             }
@@ -417,7 +423,7 @@ public final class CoreProbeState implements AutoCloseable {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                     CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount, tradingState.businessStateHash());
         }
-        var view = new CoreUserStateView(user.productLine(), user.userId(), user.revision(),
+        var view = new CoreUserStateView(user.productLine(), user.userId(), user.revision(), user.positionMode(),
                 user.balances().values().stream().map(value -> new CoreBalanceView(
                         value.asset(), value.availableUnits(), value.lockedUnits())).toList(),
                 user.reservations().values().stream().map(value -> new CoreReservationView(
@@ -425,7 +431,8 @@ public final class CoreProbeState implements AutoCloseable {
                         value.reservedUnits(),
                         value.releasedUnits(), value.consumedUnits(), value.orderQuantitySteps())).toList(),
                 user.positions().values().stream().map(value -> new CorePositionView(
-                        value.symbol(), value.marginAsset(), value.instrumentVersion(), value.signedQuantitySteps(),
+                        value.symbol(), value.marginAsset(), value.marginMode(), value.positionSide(),
+                        value.instrumentVersion(), value.signedQuantitySteps(),
                         value.entryPriceTicks(), value.entryValueTicks(), value.realizedPnlUnits(),
                         value.positionMarginUnits())).toList());
         return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.userStateHash(userId),

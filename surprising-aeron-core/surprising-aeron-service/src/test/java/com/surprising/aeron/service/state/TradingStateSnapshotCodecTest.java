@@ -56,10 +56,7 @@ class TradingStateSnapshotCodecTest {
                 new BalanceAdjustmentCommand("USDT", 50_000));
         state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "BTC-USDT", 4, "BTC", "USDT", "USDT",
                 CoreOrderSide.BUY, 500, 2, false, ReservationKind.SPOT_ASSET, "USDT", 1_500));
-        byte[] versionTwo = TradingStateSnapshotCodec.encode(state);
-        int bookOffset = versionOneBoundary(versionTwo);
-        byte[] versionOne = java.util.Arrays.copyOf(versionTwo, bookOffset);
-        ByteBuffer.wrap(versionOne).order(ByteOrder.LITTLE_ENDIAN).putInt(1);
+        byte[] versionOne = legacyVersionOne(state);
 
         TradingCoreState restored = TradingStateSnapshotCodec.decode(versionOne, ProductLine.SPOT);
 
@@ -67,52 +64,74 @@ class TradingStateSnapshotCodecTest {
         assertThat(restored.bookState().openOrders().get(71L).prioritySequence()).isOne();
     }
 
-    private static int versionOneBoundary(byte[] snapshot) {
-        ByteBuffer input = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
-        input.getInt();
-        input.getInt();
-        input.getLong();
-        int userCount = input.getInt();
-        for (int userIndex = 0; userIndex < userCount; userIndex++) {
-            input.getLong();
-            input.getLong();
-            int balanceCount = input.getInt();
-            for (int balanceIndex = 0; balanceIndex < balanceCount; balanceIndex++) {
-                skipText(input);
-                input.position(input.position() + Long.BYTES * 2);
-            }
-            int reservationCount = input.getInt();
-            for (int reservationIndex = 0; reservationIndex < reservationCount; reservationIndex++) {
-                input.getLong();
-                skipText(input);
-                input.getLong();
-                input.getInt();
-                skipText(input);
-                input.position(input.position() + Long.BYTES * 4);
-            }
-            int positionCount = input.getInt();
-            for (int positionIndex = 0; positionIndex < positionCount; positionIndex++) {
-                skipText(input);
-                skipText(input);
-                input.position(input.position() + Long.BYTES * 6);
-            }
+    private static byte[] legacyVersionOne(TradingCoreState state) {
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        writeInt(output, 1);
+        writeInt(output, com.surprising.aeron.protocol.ProductLineWireCode.encode(state.productLine()));
+        writeLong(output, state.revision());
+        writeInt(output, state.users().size());
+        for (CoreUserState user : state.users().values()) {
+            writeLong(output, user.userId());
+            writeLong(output, user.revision());
+            writeInt(output, user.balances().size());
+            user.balances().values().forEach(balance -> {
+                writeText(output, balance.asset());
+                writeLong(output, balance.availableUnits());
+                writeLong(output, balance.lockedUnits());
+            });
+            writeInt(output, user.reservations().size());
+            user.reservations().values().forEach(reservation -> {
+                writeLong(output, reservation.orderId());
+                writeText(output, reservation.symbol());
+                writeLong(output, reservation.instrumentVersion());
+                writeInt(output, reservation.kind().wireCode());
+                writeText(output, reservation.asset());
+                writeLong(output, reservation.reservedUnits());
+                writeLong(output, reservation.releasedUnits());
+                writeLong(output, reservation.consumedUnits());
+                writeLong(output, reservation.orderQuantitySteps());
+            });
+            writeInt(output, user.positions().size());
+            user.positions().values().forEach(position -> {
+                writeText(output, position.symbol());
+                writeText(output, position.marginAsset());
+                writeLong(output, position.instrumentVersion());
+                writeLong(output, position.signedQuantitySteps());
+                writeLong(output, position.entryPriceTicks());
+                writeLong(output, position.entryValueTicks());
+                writeLong(output, position.realizedPnlUnits());
+                writeLong(output, position.positionMarginUnits());
+            });
         }
-        int orderCount = input.getInt();
-        for (int orderIndex = 0; orderIndex < orderCount; orderIndex++) {
-            input.position(input.position() + Long.BYTES * 2);
-            skipText(input);
-            input.getLong();
-            input.getInt();
-            input.position(input.position() + Long.BYTES * 4);
-            input.get();
-            input.getInt();
-            input.getLong();
-        }
-        return input.position();
+        writeInt(output, state.orders().size());
+        state.orders().values().forEach(order -> {
+            writeLong(output, order.orderId());
+            writeLong(output, order.userId());
+            writeText(output, order.symbol());
+            writeLong(output, order.instrumentVersion());
+            writeInt(output, order.side().wireCode());
+            writeLong(output, order.priceTicks());
+            writeLong(output, order.quantitySteps());
+            writeLong(output, order.executedQuantitySteps());
+            writeLong(output, order.remainingQuantitySteps());
+            output.write(order.reduceOnly() ? 1 : 0);
+            writeInt(output, order.status().ordinal());
+            writeLong(output, order.revision());
+        });
+        return output.toByteArray();
     }
 
-    private static void skipText(ByteBuffer input) {
-        int length = input.getInt();
-        input.position(input.position() + length);
+    private static void writeText(java.io.ByteArrayOutputStream output, String value) {
+        byte[] bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        writeInt(output, bytes.length);
+        output.writeBytes(bytes);
+    }
+
+    private static void writeInt(java.io.ByteArrayOutputStream output, int value) {
+        for (int shift = 0; shift < Integer.SIZE; shift += Byte.SIZE) output.write(value >>> shift);
+    }
+
+    private static void writeLong(java.io.ByteArrayOutputStream output, long value) {
+        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) output.write((int) (value >>> shift));
     }
 }

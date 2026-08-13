@@ -4,6 +4,9 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CorePositionMode;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.product.api.ProductLine;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
@@ -14,7 +17,8 @@ import java.util.TreeMap;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 3;
+    private static final int VERSION = 4;
+    private static final int VERSION_3 = 3;
     private static final int VERSION_2 = 2;
     private static final int VERSION_1 = 1;
     private static final int MAX_TEXT_BYTES = 64;
@@ -31,6 +35,7 @@ public final class TradingStateSnapshotCodec {
         for (CoreUserState user : state.users().values()) {
             writer.longValue(user.userId());
             writer.longValue(user.revision());
+            writer.intValue(user.positionMode().wireCode());
             writer.intValue(user.balances().size());
             user.balances().values().forEach(balance -> {
                 writer.text(balance.asset());
@@ -53,6 +58,8 @@ public final class TradingStateSnapshotCodec {
             user.positions().values().forEach(position -> {
                 writer.text(position.symbol());
                 writer.text(position.marginAsset());
+                writer.intValue(position.marginMode().wireCode());
+                writer.intValue(position.positionSide().wireCode());
                 writer.longValue(position.instrumentVersion());
                 writer.longValue(position.signedQuantitySteps());
                 writer.longValue(position.entryPriceTicks());
@@ -73,6 +80,8 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(order.executedQuantitySteps());
             writer.longValue(order.remainingQuantitySteps());
             writer.byteValue(order.reduceOnly() ? 1 : 0);
+            writer.intValue(order.marginMode().wireCode());
+            writer.intValue(order.positionSide().wireCode());
             writer.intValue(order.status().ordinal());
             writer.longValue(order.revision());
         });
@@ -117,6 +126,7 @@ public final class TradingStateSnapshotCodec {
         state.riskState().snapshots().values().forEach(risk -> {
             writer.longValue(risk.userId());
             writer.text(risk.symbol());
+            writer.intValue(risk.positionSide().wireCode());
             writer.longValue(risk.priceSequence());
             writer.longValue(risk.equityUnits());
             writer.longValue(risk.unrealizedPnlUnits());
@@ -129,6 +139,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(liquidation.liquidationId());
             writer.longValue(liquidation.userId());
             writer.text(liquidation.symbol());
+            writer.intValue(liquidation.positionSide().wireCode());
             writer.longValue(liquidation.instrumentVersion());
             writer.longValue(liquidation.triggerPriceSequence());
             writer.longValue(liquidation.closeQuantitySteps());
@@ -151,7 +162,7 @@ public final class TradingStateSnapshotCodec {
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_2 && version != VERSION_1) {
+        if (version != VERSION && version != VERSION_3 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
@@ -164,6 +175,8 @@ public final class TradingStateSnapshotCodec {
         for (int index = 0; index < userCount; index++) {
             long userId = reader.positiveLong("userId");
             long userRevision = reader.nonNegativeLong("user revision");
+            CorePositionMode positionMode = version == VERSION
+                    ? CorePositionMode.fromWireCode(reader.intValue()) : CorePositionMode.ONE_WAY;
             Map<String, AssetBalance> balances = new TreeMap<>();
             int balanceCount = reader.count("balances");
             for (int balanceIndex = 0; balanceIndex < balanceCount; balanceIndex++) {
@@ -186,14 +199,19 @@ public final class TradingStateSnapshotCodec {
             int positionCount = reader.count("positions");
             for (int positionIndex = 0; positionIndex < positionCount; positionIndex++) {
                 String symbol = reader.text();
-                CorePositionState position = new CorePositionState(symbol, reader.text(),
+                String marginAsset = reader.text();
+                CoreMarginMode marginMode = version == VERSION
+                        ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
+                CorePositionSide positionSide = version == VERSION
+                        ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
+                CorePositionState position = new CorePositionState(symbol, marginAsset, marginMode, positionSide,
                         reader.nonNegativeLong("instrument version"), reader.longValue(),
                         reader.nonNegativeLong("entry price"), reader.nonNegativeLong("entry value"),
                         reader.longValue(), reader.nonNegativeLong("position margin"));
                 putUnique(positions, symbol, position);
             }
             putUnique(users, userId, new CoreUserState(productLine, userId, userRevision,
-                    balances, reservations, positions));
+                    balances, reservations, positions, positionMode));
         }
         Map<Long, CoreOrderState> orders = new TreeMap<>();
         int orderCount = reader.count("orders");
@@ -208,6 +226,10 @@ public final class TradingStateSnapshotCodec {
             long executedSteps = reader.nonNegativeLong("executed steps");
             long remainingSteps = reader.nonNegativeLong("remaining steps");
             boolean reduceOnly = reader.booleanValue();
+            CoreMarginMode orderMarginMode = version == VERSION
+                    ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
+            CorePositionSide orderPositionSide = version == VERSION
+                    ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
             int statusCode = reader.intValue();
             if (statusCode < 0 || statusCode >= CoreOrderStatus.values().length) {
                 throw new ProtocolException("invalid order status: " + statusCode);
@@ -215,6 +237,7 @@ public final class TradingStateSnapshotCodec {
             CoreOrderState order = new CoreOrderState(orderId, productLine, userId, symbol,
                     instrumentVersion, side,
                     priceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
+                    orderMarginMode, orderPositionSide,
                     CoreOrderStatus.values()[statusCode], reader.positiveLong("order revision"));
             putUnique(orders, orderId, order);
         }
@@ -249,7 +272,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         CoreRiskState riskState = CoreRiskState.empty();
         CoreTreasuryState treasuryState = CoreTreasuryState.empty();
-        if (version == VERSION) {
+        if (version == VERSION || version == VERSION_3) {
             int instrumentCount = reader.count("instruments");
             for (int index = 0; index < instrumentCount; index++) {
                 String symbol = reader.text();
@@ -295,6 +318,8 @@ public final class TradingStateSnapshotCodec {
             for (int index = 0; index < riskCount; index++) {
                 long userId = reader.positiveLong("risk userId");
                 String symbol = reader.text();
+                CorePositionSide positionSide = version == VERSION
+                        ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
                 long priceSequence = reader.positiveLong("risk price sequence");
                 long equity = reader.longValue();
                 long unrealized = reader.longValue();
@@ -304,7 +329,8 @@ public final class TradingStateSnapshotCodec {
                 if (status < 0 || status >= CoreRiskStatus.values().length) {
                     throw new ProtocolException("invalid risk status: " + status);
                 }
-                CoreRiskSnapshot risk = new CoreRiskSnapshot(userId, symbol, priceSequence, equity, unrealized,
+                CoreRiskSnapshot risk = new CoreRiskSnapshot(userId, symbol, positionSide,
+                        priceSequence, equity, unrealized,
                         maintenance, ratio, CoreRiskStatus.values()[status]);
                 putUnique(risks, risk.key(), risk);
             }
@@ -314,6 +340,8 @@ public final class TradingStateSnapshotCodec {
                 long liquidationId = reader.positiveLong("liquidationId");
                 long userId = reader.positiveLong("liquidation userId");
                 String symbol = reader.text();
+                CorePositionSide positionSide = version == VERSION
+                        ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
                 long instrumentVersion = reader.positiveLong("liquidation instrument version");
                 long priceSequence = reader.positiveLong("liquidation price sequence");
                 long closeQuantity = reader.positiveLong("liquidation close quantity");
@@ -323,6 +351,7 @@ public final class TradingStateSnapshotCodec {
                     throw new ProtocolException("invalid liquidation status: " + status);
                 }
                 CoreLiquidationState liquidation = new CoreLiquidationState(liquidationId, userId, symbol,
+                        positionSide,
                         instrumentVersion, priceSequence, closeQuantity,
                         deficitUnits, CoreLiquidationState.Status.values()[status]);
                 putUnique(liquidations, liquidationId, liquidation);

@@ -30,6 +30,41 @@ public final class TradingCommandCodec {
         return new BalanceAdjustmentCommand(asset, delta);
     }
 
+    public static byte[] encodeUpdatePositionMode(UpdatePositionModeCommand command) {
+        return ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(command.positionMode().wireCode()).array();
+    }
+
+    public static UpdatePositionModeCommand decodeUpdatePositionMode(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Integer.BYTES);
+        UpdatePositionModeCommand command = new UpdatePositionModeCommand(
+                CorePositionMode.fromWireCode(buffer.getInt()));
+        requireConsumed(buffer);
+        return command;
+    }
+
+    public static byte[] encodeAdjustPositionMargin(AdjustPositionMarginCommand command) {
+        byte[] symbol = text(command.symbol());
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Integer.BYTES * 2 + Long.BYTES)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putShort((short) symbol.length).put(symbol)
+                .putInt(command.marginMode().wireCode())
+                .putInt(command.positionSide().wireCode())
+                .putLong(command.amountUnits()).array();
+    }
+
+    public static AdjustPositionMarginCommand decodeAdjustPositionMargin(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        String symbol = readText(buffer);
+        requireRemaining(buffer, Integer.BYTES * 2 + Long.BYTES);
+        AdjustPositionMarginCommand command = new AdjustPositionMarginCommand(symbol,
+                CoreMarginMode.fromWireCode(buffer.getInt()), CorePositionSide.fromWireCode(buffer.getInt()),
+                buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
     public static byte[] encodePlaceOrder(PlaceOrderCommand command) {
         byte[] symbol = text(command.symbol());
         byte[] baseAsset = text(command.baseAsset());
@@ -39,7 +74,7 @@ public final class TradingCommandCodec {
         return ByteBuffer.allocate(Long.BYTES * 2 + Short.BYTES + symbol.length
                         + Short.BYTES + baseAsset.length + Short.BYTES + quoteAsset.length
                         + Short.BYTES + settleAsset.length + Integer.BYTES
-                        + Long.BYTES * 3 + Byte.BYTES + Integer.BYTES + Short.BYTES + asset.length)
+                        + Long.BYTES * 3 + Byte.BYTES + Integer.BYTES * 3 + Short.BYTES + asset.length)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putLong(command.orderId())
                 .putLong(command.instrumentVersion())
@@ -55,6 +90,8 @@ public final class TradingCommandCodec {
                 .putLong(command.priceTicks())
                 .putLong(command.quantitySteps())
                 .put((byte) (command.reduceOnly() ? 1 : 0))
+                .putInt(command.marginMode().wireCode())
+                .putInt(command.positionSide().wireCode())
                 .putInt(command.reservationKind().wireCode())
                 .putShort((short) asset.length)
                 .put(asset)
@@ -79,13 +116,24 @@ public final class TradingCommandCodec {
         if (reduceOnlyCode != 0 && reduceOnlyCode != 1) {
             throw new ProtocolException("invalid reduceOnly flag: " + reduceOnlyCode);
         }
-        ReservationKind reservationKind = ReservationKind.fromWireCode(buffer.getInt());
+        CoreMarginMode marginMode = CoreMarginMode.CROSS;
+        CorePositionSide positionSide = CorePositionSide.NET;
+        int firstCode = buffer.getInt();
+        ReservationKind reservationKind;
+        if (firstCode >= 0 && firstCode <= 1 && buffer.remaining() >= Integer.BYTES * 2 + Short.BYTES + Long.BYTES) {
+            marginMode = CoreMarginMode.fromWireCode(firstCode);
+            positionSide = CorePositionSide.fromWireCode(buffer.getInt());
+            reservationKind = ReservationKind.fromWireCode(buffer.getInt());
+        } else {
+            reservationKind = ReservationKind.fromWireCode(firstCode);
+        }
         String asset = readText(buffer);
         requireRemaining(buffer, Long.BYTES);
         long reservedUnits = buffer.getLong();
         requireConsumed(buffer);
         return new PlaceOrderCommand(orderId, symbol, instrumentVersion, baseAsset, quoteAsset, settleAsset,
-                side, priceTicks, quantitySteps, reduceOnlyCode == 1, reservationKind, asset, reservedUnits);
+                side, priceTicks, quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
+                reservationKind, asset, reservedUnits);
     }
 
     public static byte[] encodeCancelOrder(CancelOrderCommand command) {

@@ -19,6 +19,9 @@ ADR 中说明，而不是为同一概念继续增加别名。
 | Product Line Cluster | 单条产品线的三节点 Aeron Cluster。六条产品线拥有六套逻辑 Cluster。 | 六条线共享的一套大 Cluster。 |
 | Unified Core State | 一条产品线内 User、Order、Book、Risk、Liquidation 和 Export 的顶层状态。 | 把六条产品线资金合并。 |
 | User State | 用户产品账户余额、冻结、保证金、持仓和账务版本。 | 用户登录资料、KYC 或 wallet 私钥。 |
+| Position Mode State | User State 中的 `ONE_WAY/HEDGE`；仅在无持仓、挂单和剩余预占时切换。 | 前端偏好或 PostgreSQL 配置。 |
+| Position Identity | `ONE_WAY` 使用 `symbol + NET`，`HEDGE` 使用 `symbol + LONG/SHORT`；是仓位、风险和强平的共同身份。 | 只按 symbol 聚合后再猜测方向。 |
+| Isolated Margin State | 单个 Position Identity 的独立保证金，调整时与同用户 available/locked 原子互转。 | Redis 中独立维护的风险字段。 |
 | Order State | 订单、预占、已成交/剩余数量、状态和幂等索引。 | 仅供后台展示的订单表。 |
 | Reservation State | 订单维度的预占资产、原始数量、已释放、已消费和剩余锁定；剩余锁定必须可重建 Balance locked。 | 只保存一个按资产汇总的冻结数。 |
 | Business State Hash | 只覆盖规范化业务状态的稳定哈希。 | 包含幂等窗口和来源高水位的完整内部恢复哈希。 |

@@ -25,6 +25,9 @@ class TradingCommandCodecTest {
         ResolveLiquidationCommand resolution = new ResolveLiquidationCommand(13,
                 ResolveLiquidationCommand.Resolution.INSURANCE, 7);
         ContinueRiskScanCommand continuation = new ContinueRiskScanCommand(256);
+        UpdatePositionModeCommand mode = new UpdatePositionModeCommand(CorePositionMode.HEDGE);
+        AdjustPositionMarginCommand margin = new AdjustPositionMarginCommand("BTC-USDT",
+                CoreMarginMode.ISOLATED, CorePositionSide.LONG, 500);
 
         assertThat(TradingCommandCodec.decodeBalanceAdjustment(
                 TradingCommandCodec.encodeBalanceAdjustment(adjustment))).isEqualTo(adjustment);
@@ -48,6 +51,10 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeResolveLiquidation(resolution))).isEqualTo(resolution);
         assertThat(TradingCommandCodec.decodeContinueRiskScan(
                 TradingCommandCodec.encodeContinueRiskScan(continuation))).isEqualTo(continuation);
+        assertThat(TradingCommandCodec.decodeUpdatePositionMode(
+                TradingCommandCodec.encodeUpdatePositionMode(mode))).isEqualTo(mode);
+        assertThat(TradingCommandCodec.decodeAdjustPositionMargin(
+                TradingCommandCodec.encodeAdjustPositionMargin(margin))).isEqualTo(margin);
     }
 
     @Test

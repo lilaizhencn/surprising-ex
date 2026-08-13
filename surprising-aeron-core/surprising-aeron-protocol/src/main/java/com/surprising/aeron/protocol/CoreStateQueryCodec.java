@@ -8,7 +8,8 @@ import java.util.List;
 
 public final class CoreStateQueryCodec {
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
+    private static final int VERSION_1 = 1;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreStateQueryCodec() {
@@ -20,6 +21,7 @@ public final class CoreStateQueryCodec {
         writer.intValue(ProductLineWireCode.encode(state.productLine()));
         writer.longValue(state.userId());
         writer.longValue(state.revision());
+        writer.intValue(state.positionMode().wireCode());
         writer.intValue(state.balances().size());
         state.balances().forEach(balance -> {
             writer.text(balance.asset());
@@ -42,6 +44,8 @@ public final class CoreStateQueryCodec {
         state.positions().forEach(position -> {
             writer.text(position.symbol());
             writer.text(position.marginAsset());
+            writer.intValue(position.marginMode().wireCode());
+            writer.intValue(position.positionSide().wireCode());
             writer.longValue(position.instrumentVersion());
             writer.longValue(position.signedQuantitySteps());
             writer.longValue(position.entryPriceTicks());
@@ -54,10 +58,12 @@ public final class CoreStateQueryCodec {
 
     public static CoreUserStateView decodeUserState(byte[] encoded) {
         Reader reader = new Reader(encoded);
-        reader.requireVersion();
+        int version = reader.version(VERSION, VERSION_1);
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
         long userId = reader.positiveLong("userId");
         long revision = reader.nonNegativeLong("revision");
+        CorePositionMode positionMode = version == VERSION
+                ? CorePositionMode.fromWireCode(reader.intValue()) : CorePositionMode.ONE_WAY;
         List<CoreBalanceView> balances = new ArrayList<>();
         for (int index = 0, count = reader.count("balances"); index < count; index++) {
             balances.add(new CoreBalanceView(reader.text(), reader.nonNegativeLong("availableUnits"),
@@ -73,13 +79,19 @@ public final class CoreStateQueryCodec {
         }
         List<CorePositionView> positions = new ArrayList<>();
         for (int index = 0, count = reader.count("positions"); index < count; index++) {
-            positions.add(new CorePositionView(reader.text(), reader.text(),
+            String symbol = reader.text();
+            String marginAsset = reader.text();
+            CoreMarginMode marginMode = version == VERSION
+                    ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
+            CorePositionSide positionSide = version == VERSION
+                    ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
+            positions.add(new CorePositionView(symbol, marginAsset, marginMode, positionSide,
                     reader.nonNegativeLong("instrumentVersion"), reader.longValue(),
                     reader.nonNegativeLong("entryPriceTicks"), reader.nonNegativeLong("entryValueTicks"),
                     reader.longValue(), reader.nonNegativeLong("positionMarginUnits")));
         }
         reader.requireConsumed();
-        return new CoreUserStateView(productLine, userId, revision, balances, reservations, positions);
+        return new CoreUserStateView(productLine, userId, revision, positionMode, balances, reservations, positions);
     }
 
     public static byte[] encodeOrderState(CoreOrderStateView state) {
@@ -167,6 +179,16 @@ public final class CoreStateQueryCodec {
             if (version != VERSION) {
                 throw new ProtocolException("unsupported query state version: " + version);
             }
+        }
+
+        int version(int... supported) {
+            int version = intValue();
+            for (int candidate : supported) {
+                if (version == candidate) {
+                    return version;
+                }
+            }
+            throw new ProtocolException("unsupported query state version: " + version);
         }
 
         int byteValue() {

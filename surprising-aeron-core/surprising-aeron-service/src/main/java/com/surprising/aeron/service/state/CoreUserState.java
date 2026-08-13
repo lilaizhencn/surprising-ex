@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.product.api.ProductLine;
 import java.util.Collections;
 import java.util.Map;
@@ -11,11 +12,12 @@ public record CoreUserState(
         long revision,
         Map<String, AssetBalance> balances,
         Map<Long, OrderReservation> reservations,
-        Map<String, CorePositionState> positions) {
+        Map<String, CorePositionState> positions,
+        CorePositionMode positionMode) {
 
     public CoreUserState {
         if (productLine == null || userId <= 0 || revision < 0
-                || balances == null || reservations == null || positions == null) {
+                || balances == null || reservations == null || positions == null || positionMode == null) {
             throw new IllegalArgumentException("invalid user state");
         }
         balances = immutableSorted(balances);
@@ -31,16 +33,23 @@ public record CoreUserState(
                 throw new IllegalArgumentException("reservation key does not match orderId");
             }
         });
-        positions.forEach((symbol, position) -> {
-            if (!symbol.equals(position.symbol())) {
-                throw new IllegalArgumentException("position key does not match symbol");
+        positions.forEach((key, position) -> {
+            if (!key.equals(position.key())) {
+                throw new IllegalArgumentException("position key does not match position identity");
             }
         });
         validateLocks(balances, reservations, positions);
     }
 
+    public CoreUserState(ProductLine productLine, long userId, long revision,
+                         Map<String, AssetBalance> balances,
+                         Map<Long, OrderReservation> reservations,
+                         Map<String, CorePositionState> positions) {
+        this(productLine, userId, revision, balances, reservations, positions, CorePositionMode.ONE_WAY);
+    }
+
     public static CoreUserState empty(ProductLine productLine, long userId) {
-        return new CoreUserState(productLine, userId, 0, Map.of(), Map.of(), Map.of());
+        return new CoreUserState(productLine, userId, 0, Map.of(), Map.of(), Map.of(), CorePositionMode.ONE_WAY);
     }
 
     public long totalUnits(String asset) {

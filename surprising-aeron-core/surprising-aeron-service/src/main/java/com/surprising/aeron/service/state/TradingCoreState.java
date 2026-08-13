@@ -97,6 +97,7 @@ public record TradingCoreState(
         for (CoreRiskSnapshot risk : riskState.snapshots().values()) {
             hash = CoreStateHash.mix(hash, risk.userId());
             hash = CoreStateHash.mix(hash, risk.symbol());
+            hash = CoreStateHash.mix(hash, risk.positionSide().wireCode());
             hash = CoreStateHash.mix(hash, risk.priceSequence());
             hash = CoreStateHash.mix(hash, risk.equityUnits());
             hash = CoreStateHash.mix(hash, risk.unrealizedPnlUnits());
@@ -108,6 +109,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, liquidation.liquidationId());
             hash = CoreStateHash.mix(hash, liquidation.userId());
             hash = CoreStateHash.mix(hash, liquidation.symbol());
+            hash = CoreStateHash.mix(hash, liquidation.positionSide().wireCode());
             hash = CoreStateHash.mix(hash, liquidation.instrumentVersion());
             hash = CoreStateHash.mix(hash, liquidation.triggerPriceSequence());
             hash = CoreStateHash.mix(hash, liquidation.closeQuantitySteps());
@@ -160,6 +162,7 @@ public record TradingCoreState(
         long hash = CoreStateHash.mix(initial, user.productLine().ordinal());
         hash = CoreStateHash.mix(hash, user.userId());
         hash = CoreStateHash.mix(hash, user.revision());
+        hash = CoreStateHash.mix(hash, user.positionMode().wireCode());
         for (AssetBalance balance : user.balances().values()) {
             hash = CoreStateHash.mix(hash, balance.asset());
             hash = CoreStateHash.mix(hash, balance.availableUnits());
@@ -179,6 +182,8 @@ public record TradingCoreState(
         for (CorePositionState position : user.positions().values()) {
             hash = CoreStateHash.mix(hash, position.symbol());
             hash = CoreStateHash.mix(hash, position.marginAsset());
+            hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
+            hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
             hash = CoreStateHash.mix(hash, position.instrumentVersion());
             hash = CoreStateHash.mix(hash, position.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, position.entryPriceTicks());

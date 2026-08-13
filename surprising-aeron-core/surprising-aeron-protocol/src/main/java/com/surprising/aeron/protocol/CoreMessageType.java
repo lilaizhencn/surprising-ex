@@ -17,6 +17,8 @@ public enum CoreMessageType {
     RESOLVE_LIQUIDATION(25, WireMessageKind.COMMAND),
     CONTINUE_RISK_SCAN(26, WireMessageKind.COMMAND),
     ACK_EXPORT(27, WireMessageKind.COMMAND),
+    UPDATE_POSITION_MODE(28, WireMessageKind.COMMAND),
+    ADJUST_POSITION_MARGIN(29, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),
