@@ -191,6 +191,26 @@ class MatchingLocalStateStoreTest {
         }
     }
 
+    @Test
+    void rejectsPublishingOutboxFromAnOldAssignmentEpoch() {
+        ObjectMapper mapper = new ObjectMapper();
+        OrderCommandEvent command = command(41L, 401L, 1001L, Instant.parse("2026-07-01T00:00:00Z"));
+        MatchResultEvent result = new MatchResultEvent(command.commandId(), command.orderId(), command.userId(),
+                command.symbol(), command.instrumentVersion(), command.commandType(), "SUCCESS", 0L,
+                OrderStatus.ACCEPTED, Instant.parse("2026-07-01T00:00:01Z"), List.of());
+        MatchingOutboxWrite write = new MatchingOutboxWrite("MATCH_RESULT", command.orderId(), "topic",
+                command.symbol(), "PLACE", "{}", result.eventTime());
+        try (MatchingLocalStateStore store = new MatchingLocalStateStore(directory, mapper)) {
+            store.prepare(command);
+            store.commit(result, List.of(), List.of(write));
+            List<MatchingLocalStateStore.LocalOutboxRecord> pending = store.pendingOutbox(10);
+            store.advanceAssignmentEpoch();
+            assertThatThrownBy(() -> store.markOutboxPublished(pending, 0L))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("assignment epoch");
+        }
+    }
+
     private static OrderCommandEvent command(long commandId, long orderId, long userId, Instant time) {
         return command(commandId, orderId, userId, "BTC-USDT", time);
     }

@@ -30,6 +30,7 @@ public class MatchingLocalOutboxPublisher {
     public void publishPending() {
         int shardCount = Math.max(1, properties.getEngine().getBookShards());
         for (int shardId = 0; shardId < shardCount; shardId++) {
+            long publishingEpoch = stateStore.assignmentEpoch();
             List<MatchingLocalStateStore.LocalOutboxRecord> records = stateStore.pendingOutbox(shardId,
                     Math.max(1, properties.getOutbox().getBatchSize()));
             if (records.isEmpty()) {
@@ -42,7 +43,7 @@ public class MatchingLocalOutboxPublisher {
                 }
                 CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
                         .get(properties.getOutbox().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
-                stateStore.markOutboxPublished(records);
+                stateStore.markOutboxPublished(records, publishingEpoch);
             } catch (Exception ex) {
                 throw new KafkaException("撮合本地通知批量发布失败 shardId=" + shardId, ex);
             }

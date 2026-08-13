@@ -421,12 +421,24 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     }
 
     public void markOutboxPublished(List<LocalOutboxRecord> records) {
+        markOutboxPublished(records, assignmentEpoch());
+    }
+
+    public void markOutboxPublished(List<LocalOutboxRecord> records, long expectedEpoch) {
         if (records == null || records.isEmpty()) {
             return;
+        }
+        if (assignmentEpoch() != expectedEpoch) {
+            throw new IllegalStateException("撮合 outbox assignment epoch 已变化: expected=" + expectedEpoch
+                    + " actual=" + assignmentEpoch());
         }
         Map<String, List<LocalOutboxRecord>> byStream = new LinkedHashMap<>();
         for (LocalOutboxRecord record : records) {
             if (record != null && !record.published()) {
+                if (record.assignmentEpoch() > 0L && record.assignmentEpoch() != expectedEpoch) {
+                    throw new IllegalStateException("撮合 outbox 记录属于旧 assignment epoch sequence="
+                            + record.sequence());
+                }
                 byStream.computeIfAbsent(record.eventKey(), ignored -> new ArrayList<>()).add(record);
             }
         }
@@ -446,7 +458,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                         if (!current.published()) {
                             batch.put(key, encode(new LocalOutboxRecord(current.sequence(), current.aggregateType(),
                                     current.aggregateId(), current.topic(), current.eventKey(), current.eventType(),
-                                    current.payload(), current.createdAt(), true, current.shardId())));
+                    current.payload(), current.createdAt(), true, current.shardId(), current.assignmentEpoch())));
                         }
                     }
                     if (batch.count() > 0) {
@@ -621,7 +633,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
             LocalOutboxRecord record = new LocalOutboxRecord(next++,
                     write.aggregateType(), write.aggregateId(),
                     write.topic(), write.eventKey(), write.eventType(), write.payload(), write.now(), false,
-                    originShardId == null ? shardForEventKey(write.eventKey()) : originShardId);
+                    originShardId == null ? shardForEventKey(write.eventKey()) : originShardId, assignmentEpoch());
             batch.put(outboxKey(stream, identity), encode(record));
             batch.put(identityKey, encodeLong(record.sequence()));
             advanced = true;
@@ -840,7 +852,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
             if (!current.published()) {
                 database.put(writeOptions, key, encode(new LocalOutboxRecord(current.sequence(), current.aggregateType(),
                         current.aggregateId(), current.topic(), current.eventKey(), current.eventType(),
-                        current.payload(), current.createdAt(), true, current.shardId())));
+                        current.payload(), current.createdAt(), true, current.shardId(), current.assignmentEpoch())));
             }
         } catch (RocksDBException ex) {
             throw new IllegalStateException("标记撮合本地通知失败 sequence=" + record.sequence(), ex);
@@ -972,7 +984,8 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                                     String payload,
                                     Instant createdAt,
                                     boolean published,
-                                    int shardId) {
+                                    int shardId,
+                                    long assignmentEpoch) {
         public LocalOutboxRecord(long sequence,
                                  String aggregateType,
                                  long aggregateId,
@@ -982,7 +995,21 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                                  String payload,
                                  Instant createdAt,
                                  boolean published) {
-            this(sequence, aggregateType, aggregateId, topic, eventKey, eventType, payload, createdAt, published, 0);
+            this(sequence, aggregateType, aggregateId, topic, eventKey, eventType, payload, createdAt, published, 0, 0L);
+        }
+
+        public LocalOutboxRecord(long sequence,
+                                 String aggregateType,
+                                 long aggregateId,
+                                 String topic,
+                                 String eventKey,
+                                 String eventType,
+                                 String payload,
+                                 Instant createdAt,
+                                 boolean published,
+                                 int shardId) {
+            this(sequence, aggregateType, aggregateId, topic, eventKey, eventType, payload, createdAt, published,
+                    shardId, 0L);
         }
 
         public LocalOutboxRecord {
