@@ -46,6 +46,8 @@ class ProductTopicNamesTest {
                 .isEqualTo("surprising.linear-perp.order.state.events.v1");
         assertThat(linear.userMutationsTopic())
                 .isEqualTo("surprising.linear-perp.user.mutations.v1");
+        assertThat(linear.userStateChangelogTopic())
+                .isEqualTo("surprising.linear-perp.user.state.changelog.v1");
         assertThat(linear.accountRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.account.events.v1");
         assertThat(linear.positionRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.position.events.v1");
         assertThat(linear.liquidationCandidatesTopic())

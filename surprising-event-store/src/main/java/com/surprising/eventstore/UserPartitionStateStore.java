@@ -120,7 +120,14 @@ public final class UserPartitionStateStore implements AutoCloseable {
      * 覆盖本地单写者的预占、成交和幂等索引。</p>
      */
     public void replaceIfUnapplied(UserPartitionKey partition, byte[] state) {
+        replaceIfUnapplied(partition, 0L, state);
+    }
+
+    public void replaceIfUnapplied(UserPartitionKey partition, long sequence, byte[] state) {
         requireState(partition, state);
+        if (sequence < 0L) {
+            throw new IllegalArgumentException("state sequence must not be negative");
+        }
         execute(partition, () -> {
             try {
                 if (currentSequence(partition) != 0L) {
@@ -128,13 +135,48 @@ public final class UserPartitionStateStore implements AutoCloseable {
                 }
                 try (WriteBatch batch = new WriteBatch()) {
                     batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
-                    batch.put(sequenceKey(partition), encodeLong(0L));
+                    batch.put(sequenceKey(partition), encodeLong(sequence));
                     batch.put(partitionKey(partition), new byte[]{1});
                     database.write(writeOptions, batch);
                 }
                 return null;
             } catch (RocksDBException ex) {
                 throw new IllegalStateException("替换用户分区启动快照失败: " + partition.value(), ex);
+            }
+        });
+    }
+
+    public void restoreCheckpoint(UserPartitionKey partition, long sequence, byte[] state) {
+        requireState(partition, state);
+        if (sequence < 0L) {
+            throw new IllegalArgumentException("state sequence must not be negative");
+        }
+        execute(partition, () -> {
+            try {
+                long current = currentSequence(partition);
+                byte[] existing = database.get(stateKey(partition));
+                if (current > sequence) {
+                    return null;
+                }
+                if (current == sequence) {
+                    if (existing != null && !Arrays.equals(existing, state)) {
+                        throw new IllegalStateException("user partition checkpoint conflicts at sequence: "
+                                + partition.value() + " sequence=" + sequence);
+                    }
+                    if (existing != null) {
+                        return null;
+                    }
+                }
+                try (WriteBatch batch = new WriteBatch()) {
+                    batch.put(stateKey(partition), Arrays.copyOf(state, state.length));
+                    batch.put(sequenceKey(partition), encodeLong(sequence));
+                    batch.put(partitionKey(partition), new byte[]{1});
+                    database.write(writeOptions, batch);
+                }
+                return null;
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("failed to restore user partition checkpoint: "
+                        + partition.value(), ex);
             }
         });
     }

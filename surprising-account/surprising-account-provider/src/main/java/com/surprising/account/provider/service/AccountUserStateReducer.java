@@ -22,6 +22,7 @@ import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionWal;
+import com.surprising.eventstore.UserStateChangelog;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.product.api.ProductLine;
@@ -164,6 +165,34 @@ public class AccountUserStateReducer {
     /** 内部 RPC 优先读取本地用户状态，避免每次初始化请求重新查询数据库。 */
     public Optional<PerpetualAccountStateUpdatedEvent> snapshot(UserPartitionKey partition) {
         return state(partition).map(AccountUserReducerState::snapshot);
+    }
+
+    public void restoreChangelog(UserStateChangelog changelog) {
+        if (changelog == null) {
+            throw new IllegalArgumentException("账户状态 changelog 不能为空");
+        }
+        UserPartitionKey partition = changelog.userPartition();
+        lane.runAsOwner(partition, () -> {
+            long localSequence = stateStore.lastAppliedSequence(partition);
+            long localWalTail = wal == null ? 0L : wal.lastSequence(partition);
+            if (localWalTail > 0L) {
+                if (localWalTail > changelog.sequence() || localSequence < localWalTail) {
+                    throw new IllegalStateException("本地 WAL 未追平，拒绝覆盖账户 changelog: " + partition.value());
+                }
+                return null;
+            }
+            if (localSequence > changelog.sequence()) {
+                return null;
+            }
+            AccountUserReducerState restored = deserialize(changelog.state());
+            if (!restored.snapshot().productLine().equals(partition.productLine())
+                    || restored.snapshot().userId() != partition.userId()) {
+                throw new IllegalStateException("账户 changelog 状态分区不匹配: " + partition.value());
+            }
+            stateStore.restoreCheckpoint(partition, changelog.sequence(), changelog.state());
+            states.put(partition, restored);
+            return null;
+        });
     }
 
     /** 返回本地已恢复且仍有指定合约持仓的用户分区，生命周期 fan-out 不访问数据库。 */

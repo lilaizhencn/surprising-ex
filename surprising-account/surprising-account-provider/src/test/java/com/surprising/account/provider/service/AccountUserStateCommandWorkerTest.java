@@ -109,7 +109,7 @@ class AccountUserStateCommandWorkerTest {
         CompletableFuture<SendResult<String, String>> failure = new CompletableFuture<>();
         failure.completeExceptionally(new IllegalStateException("模拟结果发布失败"));
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
-                .thenReturn(success, failure, success, success);
+                .thenReturn(success, success, failure, success, success, success);
         UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
         AccountUserCommand command = command(objectMapper);
 
@@ -142,7 +142,7 @@ class AccountUserStateCommandWorkerTest {
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
             assertThat(restartedReducer.state(partition).orElseThrow().snapshot().balances()).containsExactly(
                     new PerpetualAccountStateUpdatedEvent.Balance("USDT", 700L, 300L));
-            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(4))
+            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(6))
                     .send(anyString(), anyString(), anyString());
         }
     }
@@ -176,10 +176,11 @@ class AccountUserStateCommandWorkerTest {
             assertThat(stateStore.lastAppliedSequence(partition)).isEqualTo(1L);
             assertThat(resultStore.read(partition, command.commandId())).isPresent();
             org.mockito.ArgumentCaptor<String> topic = org.mockito.ArgumentCaptor.forClass(String.class);
-            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(2))
+            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(3))
                     .send(topic.capture(), anyString(), anyString());
             assertThat(topic.getAllValues()).containsExactly(
                     properties.getKafka().getAccountStateEventsTopic(),
+                    properties.getKafka().getUserStateChangelogTopic(),
                     properties.getKafka().getCommandResultsTopic());
 
             AccountUserStateReducer restartedReducer = new AccountUserStateReducer(
@@ -189,10 +190,10 @@ class AccountUserStateCommandWorkerTest {
                     restartedReducer, kafkaTemplate);
             restartedWorker.applyPending();
             org.mockito.ArgumentCaptor<String> payload = org.mockito.ArgumentCaptor.forClass(String.class);
-            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(4))
+            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(6))
                     .send(anyString(), anyString(), payload.capture());
-            assertThat(payload.getAllValues().get(1)).isEqualTo(payload.getAllValues().get(3));
-            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(4))
+            assertThat(payload.getAllValues().get(2)).isEqualTo(payload.getAllValues().get(5));
+            org.mockito.Mockito.verify(kafkaTemplate, org.mockito.Mockito.times(6))
                     .send(anyString(), anyString(), anyString());
         }
     }

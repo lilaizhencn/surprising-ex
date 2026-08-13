@@ -16,6 +16,7 @@ import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.UserPartitionResultStore;
 import com.surprising.eventstore.UserPartitionStateStore;
 import com.surprising.eventstore.UserPartitionWal;
+import com.surprising.eventstore.UserStateChangelog;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -122,7 +123,7 @@ public class AccountUserStateCommandWorker {
                             + command.commandId() + " sequence=" + event.sequence());
                 }
                 if (!isPublished(partition, event.sequence())) {
-                    publishStateSnapshot(reducer.state(partition)
+                    publishStateSnapshot(partition, event.sequence(), reducer.state(partition)
                             .orElseThrow(() -> new AccountStateUnavailableException(
                                     "账户状态快照不存在: " + partition.value()))
                             .snapshot());
@@ -160,7 +161,7 @@ public class AccountUserStateCommandWorker {
                     }
                     reducer.commit(command, event.sequence(), recovery);
                 }
-                publishStateSnapshot(reducer.state(partition)
+                publishStateSnapshot(partition, event.sequence(), reducer.state(partition)
                         .orElseThrow(() -> new AccountStateUnavailableException(
                                 "账户状态快照不存在: " + partition.value()))
                         .snapshot());
@@ -181,7 +182,7 @@ public class AccountUserStateCommandWorker {
             // 先保存终态再提交余额和持仓，崩溃后可以重算并补交状态，不会出现不可恢复的中间窗。
             resultStore.put(partition, command.commandId(), serialize(terminal));
             reducer.commit(command, event.sequence(), reduction);
-            publishStateSnapshot(reducer.state(partition)
+            publishStateSnapshot(partition, event.sequence(), reducer.state(partition)
                     .orElseThrow(() -> new AccountStateUnavailableException(
                             "账户状态快照不存在: " + partition.value()))
                     .snapshot());
@@ -573,10 +574,13 @@ public class AccountUserStateCommandWorker {
      * 状态快照必须先于账户命令结果发布，其他模块才能按同一修订号更新 JVM 缓存。
      * 发布失败时保留本地终态和状态序号，下一轮会按相同 eventId 重试；消费者按修订号幂等。
      */
-    private void publishStateSnapshot(com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) {
+    private void publishStateSnapshot(UserPartitionKey partition,
+                                      long sequence,
+                                      com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) {
         try {
             awaitKafkaIfOutsideTransaction(kafkaTemplate.send(properties.getKafka().getAccountStateEventsTopic(),
                     snapshot.partitionKey(), objectMapper.writeValueAsString(snapshot)));
+            publishStateChangelog(partition, sequence);
             publishPositionSnapshots(snapshot);
         } catch (Exception ex) {
             throw new KafkaException("账户状态快照发布失败 userId=" + snapshot.userId()
@@ -595,7 +599,18 @@ public class AccountUserStateCommandWorker {
         if (snapshot == null) {
             throw new IllegalArgumentException("账户状态恢复快照不能为空");
         }
-        publishStateSnapshot(snapshot);
+        publishStateSnapshot(new UserPartitionKey(snapshot.productLine(), snapshot.userId()),
+                stateStore.lastAppliedSequence(new UserPartitionKey(snapshot.productLine(), snapshot.userId())), snapshot);
+    }
+
+    private void publishStateChangelog(UserPartitionKey partition, long sequence) throws Exception {
+        byte[] state = objectMapper.writeValueAsBytes(reducer.state(partition)
+                .orElseThrow(() -> new AccountStateUnavailableException(
+                        "账户状态快照不存在: " + partition.value())));
+        UserStateChangelog changelog = UserStateChangelog.create(partition.productLine(), partition.userId(),
+                sequence, state, Instant.now(), null);
+        awaitKafkaIfOutsideTransaction(kafkaTemplate.send(properties.getKafka().getUserStateChangelogTopic(),
+                changelog.partitionKey(), objectMapper.writeValueAsString(changelog)));
     }
 
     /**

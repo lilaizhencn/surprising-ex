@@ -60,6 +60,26 @@ class UserPartitionStateStoreTest {
         }
     }
 
+    @Test
+    void restoresOnlyNewerCheckpointAndRejectsSameSequenceConflict() throws Exception {
+        Path directory = Files.createTempDirectory("user-partition-state-restore-");
+        UserPartitionKey partition = new UserPartitionKey(ProductLine.LINEAR_PERPETUAL, 1001L);
+        try (UserPartitionStateStore store = new UserPartitionStateStore(directory)) {
+            store.initialize(partition, bytes("baseline"));
+            store.restoreCheckpoint(partition, 3L, bytes("checkpoint-3"));
+            assertThat(store.checkpoint(partition).sequence()).isEqualTo(3L);
+            assertThat(store.checkpoint(partition).state()).isEqualTo(bytes("checkpoint-3"));
+
+            store.restoreCheckpoint(partition, 2L, bytes("stale"));
+            assertThat(store.checkpoint(partition).sequence()).isEqualTo(3L);
+            assertThat(store.checkpoint(partition).state()).isEqualTo(bytes("checkpoint-3"));
+            store.restoreCheckpoint(partition, 3L, bytes("checkpoint-3"));
+            assertThatThrownBy(() -> store.restoreCheckpoint(partition, 3L, bytes("conflict")))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("conflicts");
+        }
+    }
+
     private byte[] bytes(String value) {
         return value.getBytes(StandardCharsets.UTF_8);
     }

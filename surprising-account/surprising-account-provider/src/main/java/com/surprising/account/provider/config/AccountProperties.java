@@ -216,6 +216,10 @@ public class AccountProperties {
             return productTopics().accountUserCommandsTopic();
         }
 
+        public String getUserStateChangelogTopic() {
+            return productTopics().userStateChangelogTopic();
+        }
+
         public String getUserCommandsDltTopic() {
             return productTopics().accountUserCommandsDltTopic();
         }
