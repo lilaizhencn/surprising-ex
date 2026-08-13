@@ -5,6 +5,7 @@ import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.eventstore.BoundedExpiringCache;
+import com.surprising.eventstore.UserPartitionResultStore;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -26,13 +27,22 @@ import tools.jackson.databind.ObjectMapper;
 
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
+    private final UserPartitionResultStore resultStore;
     private final Map<CommandKey, WaitSlot> waiting = new ConcurrentHashMap<>();
     private final BoundedExpiringCache<CommandKey, AccountCommandTerminalResult> completed;
 
     public AccountCommandResultWaiter(ObjectMapper objectMapper,
                                       AccountProperties properties) {
+        this(objectMapper, properties, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AccountCommandResultWaiter(ObjectMapper objectMapper,
+                                      AccountProperties properties,
+                                      UserPartitionResultStore resultStore) {
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.resultStore = resultStore;
         this.completed = new BoundedExpiringCache<>(properties.getCommandWait().getCompletedCacheTtl(),
                 properties.getCommandWait().getCompletedCacheMaxEntries());
     }
@@ -53,6 +63,11 @@ import tools.jackson.databind.ObjectMapper;
             if (alreadyCompleted != null) {
                 slot.result.complete(alreadyCompleted);
             }
+            AccountCommandTerminalResult persisted = readPersistedResult(key);
+            if (persisted != null) {
+                completed.putIfAbsent(key, persisted);
+                slot.result.complete(persisted);
+            }
             return slot.result.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException ex) {
             throw new AccountCommandTimeoutException(
@@ -69,6 +84,20 @@ import tools.jackson.databind.ObjectMapper;
                 waiting.remove(key, slot);
             }
         }
+    }
+
+    private AccountCommandTerminalResult readPersistedResult(CommandKey key) {
+        if (resultStore == null) {
+            return null;
+        }
+        return resultStore.read(key.partition(), key.commandId()).map(bytes -> {
+            try {
+                return objectMapper.readValue(new String(bytes, java.nio.charset.StandardCharsets.UTF_8),
+                        AccountCommandTerminalResult.class);
+            } catch (Exception ex) {
+                throw new IllegalStateException("账户命令结果损坏 commandId=" + key.commandId(), ex);
+            }
+        }).orElse(null);
     }
 
     /** 结果主题是唯一结果入口，数据库不再参与同步等待。 */

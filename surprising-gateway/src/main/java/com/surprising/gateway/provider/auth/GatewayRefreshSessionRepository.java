@@ -28,17 +28,18 @@ public class GatewayRefreshSessionRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void save(long userId,
+    public long save(long userId,
                      String tokenHash,
                      Instant expiresAt,
                      String userAgent,
                      String ipAddress,
                      Instant now) {
-        jdbcTemplate.update("""
+        return jdbcTemplate.queryForObject("""
                 INSERT INTO gateway_refresh_sessions (
                     user_id, token_hash, expires_at, user_agent, ip_address, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, userId, tokenHash, Timestamp.from(expiresAt), userAgent, ipAddress,
+                RETURNING session_id
+                """, Long.class, userId, tokenHash, Timestamp.from(expiresAt), userAgent, ipAddress,
                 Timestamp.from(now), Timestamp.from(now));
     }
 
@@ -53,6 +54,16 @@ public class GatewayRefreshSessionRepository {
                         rs.getTimestamp("expires_at").toInstant(),
                         nullableInstant(rs, "revoked_at")),
                 tokenHash).stream().findFirst();
+    }
+
+    public boolean active(long userId, long sessionId, Instant now) {
+        Boolean active = jdbcTemplate.queryForObject("""
+                SELECT EXISTS(
+                    SELECT 1 FROM gateway_refresh_sessions
+                     WHERE user_id = ? AND session_id = ? AND revoked_at IS NULL AND expires_at > ?
+                )
+                """, Boolean.class, userId, sessionId, Timestamp.from(now));
+        return Boolean.TRUE.equals(active);
     }
 
     public void revoke(long sessionId, Instant now) {

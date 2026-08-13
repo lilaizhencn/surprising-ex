@@ -112,6 +112,26 @@ class ExchangeCoreEngineRecoveryTest {
         }
     }
 
+    @Test
+    void routesSymbolsToStableIndependentBookShards() {
+        InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");
+        MatchingSymbol matchingSymbol = new MatchingSymbol("BTC-USDT", 105, 11, 12);
+        MatchingProperties properties = new MatchingProperties();
+        properties.getEngine().setExchangeId("book-shard-test");
+        properties.getEngine().setBookShards(2);
+        properties.getRecovery().setOpenOrderBookRestoreEnabled(false);
+        ExchangeCoreEngine engine = new ExchangeCoreEngine(properties,
+                new FakeMatchingSymbolRepository(instrument, matchingSymbol),
+                new FakeRecoveryRepository(List.of()));
+        try {
+            engine.start();
+            assertThat(engine.bookShardCount()).isEqualTo(2);
+            assertThat(engine.bookShardId("BTC-USDT")).isEqualTo(engine.bookShardId("BTC-USDT"));
+        } finally {
+            engine.stop();
+        }
+    }
+
     private ExchangeCoreEngine engineWithRecoveredOrders(MatchingSymbol matchingSymbol,
                                                          List<RecoveredOrderBookOrder> recoveredOrders) {
         InstrumentSymbol instrument = new InstrumentSymbol("BTC-USDT", "BTC", "USDT", "USDT");

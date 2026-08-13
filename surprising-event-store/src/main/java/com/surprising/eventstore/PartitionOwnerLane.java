@@ -11,12 +11,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.concurrent.locks.ReentrantLock;
 
 public final class PartitionOwnerLane<K> implements AutoCloseable {
 
     private static final int DEFAULT_QUEUE_CAPACITY = 65_536;
     private final List<Shard<K>> shards;
     private final AtomicBoolean running = new AtomicBoolean(true);
+    private final ThreadLocal<Deque<K>> boundOwners = ThreadLocal.withInitial(ArrayDeque::new);
+    private final List<ReentrantLock> ownershipLocks;
 
     public PartitionOwnerLane(int shardCount, String threadNamePrefix) {
         this(shardCount, DEFAULT_QUEUE_CAPACITY, threadNamePrefix);
@@ -33,8 +38,10 @@ public final class PartitionOwnerLane<K> implements AutoCloseable {
             throw new IllegalArgumentException("threadNamePrefix must not be blank");
         }
         shards = new ArrayList<>(shardCount);
+        ownershipLocks = new ArrayList<>(shardCount);
         for (int index = 0; index < shardCount; index++) {
             shards.add(new Shard<>(threadNamePrefix + "-" + index, queueCapacity));
+            ownershipLocks.add(new ReentrantLock());
         }
         for (Shard<K> shard : shards) {
             shard.start();
@@ -59,12 +66,19 @@ public final class PartitionOwnerLane<K> implements AutoCloseable {
         if (!running.get()) {
             throw new IllegalStateException("partition owner lane is closed");
         }
+        Deque<K> bound = boundOwners.get();
+        if (!bound.isEmpty()) {
+            K boundKey = bound.peek();
+            if (Objects.equals(boundKey, key)) {
+                return action.get();
+            }
+        }
         Shard<K> shard = shard(key);
         if (shard.isOwnerThread()) {
-            return action.get();
+            return withOwnership(key, action);
         }
         CompletableFuture<T> result = new CompletableFuture<>();
-        shard.offer(new Task<>(action, result, shard.pending));
+        shard.offer(new Task<>(() -> withOwnership(key, action), result, shard.pending));
         try {
             return result.join();
         } catch (CompletionException ex) {
@@ -80,7 +94,21 @@ public final class PartitionOwnerLane<K> implements AutoCloseable {
 
     public boolean isOwnerThread(K key) {
         Objects.requireNonNull(key, "key");
-        return shard(key).isOwnerThread();
+        Deque<K> bound = boundOwners.get();
+        return (!bound.isEmpty() && Objects.equals(bound.peek(), key)) || shard(key).isOwnerThread();
+    }
+
+    public <T> T runAsOwner(K key, Supplier<T> action) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(action, "action");
+        if (!running.get()) {
+            throw new IllegalStateException("partition owner lane is closed");
+        }
+        Deque<K> bound = boundOwners.get();
+        if (!bound.isEmpty() && !Objects.equals(bound.peek(), key)) {
+            throw new IllegalStateException("nested partition owner binding is not allowed");
+        }
+        return withBoundOwner(key, action);
     }
 
     public int shardCount() {
@@ -89,6 +117,31 @@ public final class PartitionOwnerLane<K> implements AutoCloseable {
 
     private Shard<K> shard(K key) {
         return shards.get(Math.floorMod(key.hashCode(), shards.size()));
+    }
+
+    private <T> T withOwnership(K key, Supplier<T> action) {
+        ReentrantLock lock = ownershipLocks.get(Math.floorMod(key.hashCode(), ownershipLocks.size()));
+        lock.lock();
+        try {
+            return action.get();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private <T> T withBoundOwner(K key, Supplier<T> action) {
+        return withOwnership(key, () -> {
+            Deque<K> bound = boundOwners.get();
+            bound.push(key);
+            try {
+                return action.get();
+            } finally {
+                bound.pop();
+                if (bound.isEmpty()) {
+                    boundOwners.remove();
+                }
+            }
+        });
     }
 
     @Override

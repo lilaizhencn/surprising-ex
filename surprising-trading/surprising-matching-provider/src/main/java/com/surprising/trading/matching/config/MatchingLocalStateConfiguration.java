@@ -16,7 +16,7 @@ public class MatchingLocalStateConfiguration {
                                                            PartitionOwnerLane<String> matchingSymbolOwnerLane) {
         return new MatchingLocalStateStore(
                 properties.getWal().productLineDirectory(properties.getKafka().getProductLine()),
-                objectMapper, matchingSymbolOwnerLane);
+                objectMapper, matchingSymbolOwnerLane, properties.getEngine().getBookShards());
     }
 
     @Bean(destroyMethod = "close")

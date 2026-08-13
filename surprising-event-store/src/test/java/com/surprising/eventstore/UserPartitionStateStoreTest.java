@@ -19,11 +19,15 @@ class UserPartitionStateStoreTest {
             store.initialize(partition, bytes("zero"));
             store.initialize(partition, bytes("zero"));
             assertThat(store.lastAppliedSequence(partition)).isZero();
+            assertThat(store.checkpoint(partition).state()).isEqualTo(bytes("zero"));
+            assertThat(store.isCheckpointAt(partition, 0L)).isTrue();
             assertThatThrownBy(() -> store.initialize(partition, bytes("other")))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("初始化快照冲突");
             store.apply(partition, 1L, bytes("one"));
             store.apply(partition, 1L, bytes("one"));
+            assertThat(store.checkpoint(partition).sequence()).isEqualTo(1L);
+            assertThat(store.isCheckpointAt(partition, 1L)).isTrue();
             assertThat(store.read(partition).orElseThrow().state())
                     .isEqualTo(bytes("one"));
             assertThatThrownBy(() -> store.apply(partition, 3L, bytes("three")))

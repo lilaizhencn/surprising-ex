@@ -21,6 +21,7 @@ import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.transaction.KafkaTransactionManager;
 import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
@@ -38,13 +39,22 @@ public class AccountKafkaConfiguration {
         config.put(ProducerConfig.LINGER_MS_CONFIG, 2);
         config.put(ProducerConfig.BATCH_SIZE_CONFIG, 65_536);
         config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
-        return new DefaultKafkaProducerFactory<>(config);
+        DefaultKafkaProducerFactory<String, String> factory = new DefaultKafkaProducerFactory<>(config);
+        factory.setTransactionIdPrefix("account-" + productLineName(properties.getKafka().getProductLine())
+                + "-" + properties.getKafka().getClientId() + "-");
+        return factory;
+    }
+
+    private String productLineName(com.surprising.product.api.ProductLine productLine) {
+        return productLine == null ? "unscoped" : productLine.name().toLowerCase();
     }
 
     @Bean
     public KafkaTemplate<String, String> accountKafkaTemplate(
             ProducerFactory<String, String> accountProducerFactory) {
-        return new KafkaTemplate<>(accountProducerFactory);
+        KafkaTemplate<String, String> template = new KafkaTemplate<>(accountProducerFactory);
+        template.setAllowNonTransactional(true);
+        return template;
     }
 
     @Bean
@@ -84,6 +94,10 @@ public class AccountKafkaConfiguration {
         factory.setConcurrency(properties.getKafka().getUserCommandConcurrency());
         factory.setBatchListener(true);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        if (accountKafkaTemplate.getProducerFactory() != null) {
+            factory.getContainerProperties().setKafkaAwareTransactionManager(
+                    new KafkaTransactionManager<>(accountKafkaTemplate.getProducerFactory()));
+        }
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
                 accountKafkaTemplate,
                 (record, ex) -> new TopicPartition(properties.getKafka().getUserCommandsDltTopic(),

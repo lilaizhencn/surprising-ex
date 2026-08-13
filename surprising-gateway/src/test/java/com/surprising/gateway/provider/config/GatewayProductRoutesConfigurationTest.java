@@ -20,7 +20,9 @@ class GatewayProductRoutesConfigurationTest {
         GatewayProperties properties = bindApplicationProperties(Map.of());
 
         assertProductRouteMatrix(properties.getRoutes().get("trading"));
+        assertProductRouteMatrix(properties.getRoutes().get("trading-leverage"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-market"));
+        assertProductRouteMatrix(properties.getRoutes().get("trading-trades"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-trigger"));
         assertProductRouteMatrix(properties.getRoutes().get("account"));
         assertProductRouteMatrix(properties.getRoutes().get("risk"));
@@ -34,6 +36,8 @@ class GatewayProductRoutesConfigurationTest {
         GatewayProperties.BackendRoute optionRoute = trading.resolve(ProductLine.OPTION);
         assertThat(optionRoute.getBaseUrl()).isEqualTo("http://localhost:9084");
         assertThat(optionRoute.getTargetPrefix()).isEqualTo("/api/v1/trading/orders");
+        GatewayProperties.BackendRoute leverage = properties.getRoutes().get("trading-leverage");
+        assertThat(leverage.getTargetPrefix()).isEqualTo("/api/v1/trading/leverage");
     }
 
     @Test

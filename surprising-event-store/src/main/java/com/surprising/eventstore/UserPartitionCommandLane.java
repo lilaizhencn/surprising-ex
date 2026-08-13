@@ -32,6 +32,10 @@ public final class UserPartitionCommandLane implements AutoCloseable {
         return owners.isOwnerThread(partition);
     }
 
+    public <T> T runAsOwner(UserPartitionKey partition, Supplier<T> action) {
+        return owners.runAsOwner(partition, action);
+    }
+
     @Override
     public void close() {
         owners.close();

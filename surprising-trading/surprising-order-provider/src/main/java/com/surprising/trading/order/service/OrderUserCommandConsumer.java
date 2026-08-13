@@ -3,12 +3,15 @@ package com.surprising.trading.order.service;
 import com.surprising.trading.api.model.OrderUserCommand;
 import com.surprising.trading.api.model.OrderUserCommandResult;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.eventstore.UserPartitionCommandLane;
+import com.surprising.eventstore.UserPartitionKey;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.KafkaException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
@@ -31,15 +34,26 @@ public class OrderUserCommandConsumer {
     private final TradingOrderProperties properties;
     private final OrderUserStateService stateService;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final UserPartitionCommandLane lane;
 
     public OrderUserCommandConsumer(ObjectMapper objectMapper,
                                     TradingOrderProperties properties,
                                     OrderUserStateService stateService,
                                     @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
+        this(objectMapper, properties, stateService, kafkaTemplate, null);
+    }
+
+    @Autowired
+    public OrderUserCommandConsumer(ObjectMapper objectMapper,
+                                    TradingOrderProperties properties,
+                                    OrderUserStateService stateService,
+                                    @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate,
+                                    UserPartitionCommandLane lane) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.stateService = stateService;
         this.kafkaTemplate = kafkaTemplate;
+        this.lane = lane;
     }
 
     @KafkaListener(
@@ -54,7 +68,14 @@ public class OrderUserCommandConsumer {
             OrderUserCommand command = null;
             try {
                 command = decode(record);
-                OrderUserCommandResult result = stateService.executeUserCommand(command);
+                OrderUserCommand decodedCommand = command;
+                OrderUserCommandResult result;
+                if (lane == null) {
+                    result = stateService.executeUserCommand(decodedCommand);
+                } else {
+                    UserPartitionKey partition = new UserPartitionKey(decodedCommand.productLine(), decodedCommand.userId());
+                    result = lane.execute(partition, () -> stateService.executeUserCommand(decodedCommand));
+                }
                 publishResult(result);
             } catch (RuntimeException ex) {
                 // 记录分区和偏移，便于定位某一条坏命令导致分区后续命令持续重试。
@@ -84,9 +105,12 @@ public class OrderUserCommandConsumer {
 
     private void publishResult(OrderUserCommandResult result) {
         try {
-            kafkaTemplate.send(properties.getKafka().getOrderUserCommandResultsTopic(), result.partitionKey(),
-                    objectMapper.writeValueAsString(result)).get(
-                    properties.getEventPublish().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            java.util.concurrent.CompletableFuture<?> send = kafkaTemplate.send(
+                    properties.getKafka().getOrderUserCommandResultsTopic(), result.partitionKey(),
+                    objectMapper.writeValueAsString(result));
+            if (!(kafkaTemplate.isTransactional() && kafkaTemplate.inTransaction())) {
+                send.get(properties.getEventPublish().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            }
         } catch (Exception ex) {
             throw new KafkaException("订单用户命令结果发送失败: " + result.commandId(), ex);
         }

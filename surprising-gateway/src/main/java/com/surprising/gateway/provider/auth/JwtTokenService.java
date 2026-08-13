@@ -30,6 +30,10 @@ public class JwtTokenService {
     }
 
     public String createAccessToken(long userId, String username, List<String> roles, Instant now) {
+        return createAccessToken(userId, username, roles, 0L, now);
+    }
+
+    public String createAccessToken(long userId, String username, List<String> roles, long sessionId, Instant now) {
         Instant expiresAt = now.plus(properties.getSecurity().getAccessTokenTtl());
         Map<String, Object> header = Map.of("alg", "HS256", "typ", "JWT");
         Map<String, Object> claims = new LinkedHashMap<>();
@@ -41,6 +45,9 @@ public class JwtTokenService {
         claims.put("iat", now.getEpochSecond());
         claims.put("exp", expiresAt.getEpochSecond());
         claims.put("jti", UUID.randomUUID().toString());
+        if (sessionId > 0) {
+            claims.put("sid", sessionId);
+        }
         String unsigned = base64Json(header) + "." + base64Json(claims);
         return unsigned + "." + sign(unsigned);
     }
@@ -60,7 +67,7 @@ public class JwtTokenService {
                 ? values.stream().map(Object::toString).toList()
                 : List.of("USER");
         return new JwtPrincipal(Long.parseLong(asString(claims.get("sub"))),
-                asString(claims.get("username")), "UNKNOWN", roles, expiresAt);
+                asString(claims.get("username")), "UNKNOWN", roles, expiresAt, optionalLong(claims.get("sid")));
     }
 
     private Map<String, Object> verify(String token) {
@@ -107,5 +114,9 @@ public class JwtTokenService {
             return number.longValue();
         }
         return Long.parseLong(asString(value));
+    }
+
+    private static long optionalLong(Object value) {
+        return value == null ? 0L : asLong(value);
     }
 }

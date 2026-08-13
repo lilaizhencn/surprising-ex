@@ -72,23 +72,23 @@ TEST_MAX_PROVIDER_PROCESSES=<integer>
 
 当前生产目标以 `docs/linear-perpetual-aws-production-deployment.md` 为基准，部署到不同规格时必须按规格生成对应配置，不能临时修改阈值。
 
-| 指标 | 默认生产门槛 |
-|---|---:|
-| 下单/撤单/改单总吞吐 | 3000 ops/s |
-| 成交吞吐 | 1000 trades/s |
-| 下单受理 p99 | ≤80ms |
-| 受理到 match result p99 | ≤150ms |
-| trade 到余额/持仓可见 p99 | ≤300ms |
-| 正常 Kafka lag | <1s |
-| 故障恢复后 Kafka lag 清零 | ≤300s |
-| 单倍负载 CPU | <55% |
-| 双倍突发 CPU | <75% |
-| GC pause p99 | <20ms |
-| 单次 GC pause | <100ms |
-| 最终 Outbox pending | 0 |
-| 资金差异、重复扣款、重复结算 | 0 |
-| 1 倍负载稳定时间 | ≥60min |
-| 2 倍负载突发时间 | ≥15min |
+| 指标 |    默认生产门槛 |
+|---|----------------:|
+| 下单/撤单/改单总吞吐 |    300000 ops/s |
+| 成交吞吐 | 100000 trades/s |
+| 下单受理 p99 |           ≤80ms |
+| 受理到 match result p99 |          ≤150ms |
+| trade 到余额/持仓可见 p99 |          ≤300ms |
+| 正常 Kafka lag |             <1s |
+| 故障恢复后 Kafka lag 清零 |           ≤300s |
+| 单倍负载 CPU |            <55% |
+| 双倍突发 CPU |            <75% |
+| GC pause p99 |           <20ms |
+| 单次 GC pause |          <100ms |
+| 最终 Outbox pending |               0 |
+| 资金差异、重复扣款、重复结算 |               0 |
+| 1 倍负载稳定时间 |          ≥60min |
+| 2 倍负载突发时间 |          ≥15min |
 
 本地低配档位只使用缩放后的目标，报告必须同时写明 `scale_factor`，不得把本地通过等同于生产通过。
 

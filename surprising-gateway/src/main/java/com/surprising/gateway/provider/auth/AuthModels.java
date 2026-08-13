@@ -115,7 +115,11 @@ public final class AuthModels {
             String username,
             String status,
             List<String> roles,
-            Instant expiresAt) {
+            Instant expiresAt,
+            long sessionId) {
+        public JwtPrincipal(long userId, String username, String status, List<String> roles, Instant expiresAt) {
+            this(userId, username, status, roles, expiresAt, 0L);
+        }
     }
 
     public record AdminUserQueryResponse(

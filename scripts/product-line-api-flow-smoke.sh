@@ -384,8 +384,8 @@ wait_http() {
     return
   fi
   if [[ "${name}" == *-websocket ]]; then
-    until curl -sS -o /dev/null -w '%{http_code}' "http://localhost:${port}/actuator/health/readiness" \
-        | grep -Eq '^(200|401)$'; do
+    until curl -sS "http://localhost:${port}/actuator/health/readiness" \
+        | grep -q '"status":"UP"'; do
       if ((SECONDS >= deadline)); then
         echo "Timed out waiting for ${name} health on port ${port}" >&2
         tail -n 160 "${log_file}" >&2 || true
@@ -1478,7 +1478,7 @@ provider_port() {
     insurance) echo 9090 ;;
     funding) echo 9089 ;;
     adl) echo 9091 ;;
-    websocket) echo 9093 ;;
+    websocket) echo "${WEBSOCKET_PORT:-9097}" ;;
     gateway) echo 9094 ;;
     market-maker) echo 9096 ;;
     *) echo "unknown provider: $1" >&2; exit 1 ;;
@@ -1736,8 +1736,7 @@ product_provider_args() {
         "--surprising.price.mark.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS}" \
         "--surprising.price.mark.kafka.product-line=${product_line}" \
         "--surprising.price.mark.kafka.product-topics-enabled=true" \
-        "--surprising.price.mark.kafka.group-id=product-smoke-${RUN_ID}-${slug}-mark-price" \
-        "--spring.kafka.listener.auto-startup=false"
+        "--surprising.price.mark.kafka.group-id=product-smoke-${RUN_ID}-${slug}-mark-price"
       ;;
     gateway)
       printf '%s\n' \
@@ -2119,7 +2118,11 @@ adjust_product_balance() {
   local timestamp signature
   timestamp="$(date +%s)"
   signature="$(internal_product_balance_signature "${timestamp}" "${user_id}" "${account_type}" "${asset}" "${amount_units}" "${reference_id}" "${reason}")"
-  curl -fsS -X POST "http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments" \
+  local response_file="${TMP_DIR}/${RUN_ID}-balance-adjust-${user_id}-${asset}.json"
+  local http_code
+  http_code="$(curl --retry 20 --retry-delay 1 --retry-max-time 90 --retry-all-errors \
+    -sS -o "${response_file}" -w "%{http_code}" -X POST \
+    "http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments" \
     -H "Content-Type: application/json" \
     -H "X-Internal-Service: surprising-gateway" \
     -H "X-Internal-Timestamp: ${timestamp}" \
@@ -2132,7 +2135,12 @@ adjust_product_balance() {
       \"amountUnits\": ${amount_units},
       \"referenceId\": \"${reference_id}\",
       \"reason\": \"${reason}\"
-    }" >/dev/null
+    }")"
+  if [[ ! "${http_code}" =~ ^2 ]]; then
+    echo "产品线资金初始化失败 HTTP ${http_code}: user=${user_id} accountType=${account_type} asset=${asset} reference=${reference_id}" >&2
+    cat "${response_file}" >&2 || true
+    return 22
+  fi
 }
 
 initialize_account_snapshot() {

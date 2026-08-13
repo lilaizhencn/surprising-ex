@@ -85,6 +85,17 @@ class PartitionOwnerLaneTest {
     }
 
     @Test
+    void directOwnerBindingRunsNestedPartitionWorkOnTheCallingThread() {
+        try (PartitionOwnerLane<String> lane = new PartitionOwnerLane<>(1, 8, "owner-test")) {
+            String callbackThread = Thread.currentThread().getName();
+            String nestedThread = lane.runAsOwner("key", () -> lane.execute("key", () ->
+                    Thread.currentThread().getName()));
+            assertThat(nestedThread).isEqualTo(callbackThread);
+            assertThat(lane.isOwnerThread("key")).isFalse();
+        }
+    }
+
+    @Test
     void rejectsWhenOwnerMailboxCapacityIsReached() throws Exception {
         try (PartitionOwnerLane<String> lane = new PartitionOwnerLane<>(1, 1, "owner-test");
              ExecutorService executor = Executors.newSingleThreadExecutor()) {

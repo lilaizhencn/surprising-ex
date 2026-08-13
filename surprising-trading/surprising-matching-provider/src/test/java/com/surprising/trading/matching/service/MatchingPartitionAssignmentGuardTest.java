@@ -1,6 +1,7 @@
 package com.surprising.trading.matching.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.trading.matching.config.MatchingProperties;
 import java.util.ArrayList;
@@ -83,6 +84,35 @@ class MatchingPartitionAssignmentGuardTest {
         guard.onPartitionsLost(null, List.of(new TopicPartition(TOPIC, 0)));
 
         assertThat(guard.restartReasons).isEmpty();
+    }
+
+    @Test
+    void incrementsEpochOnAssignmentAndRevocationBoundaries() {
+        MatchingProperties properties = properties(60_000L, true);
+        RecordingGuard guard = new RecordingGuard(properties);
+        assertThat(guard.currentEpoch()).isZero();
+        TopicPartition partition = new TopicPartition(TOPIC, 0);
+        guard.onPartitionsAssigned(null, List.of(partition));
+        assertThat(guard.currentEpoch()).isEqualTo(1L);
+        guard.onPartitionsRevokedBeforeCommit(null, List.of(partition));
+        assertThat(guard.currentEpoch()).isEqualTo(2L);
+        guard.onPartitionsLost(null, List.of(partition));
+        assertThat(guard.currentEpoch()).isEqualTo(3L);
+    }
+
+    @Test
+    void rejectsACommandBatchThatCrossesAnAssignmentBoundary() {
+        MatchingProperties properties = properties(60_000L, true);
+        RecordingGuard guard = new RecordingGuard(properties);
+        guard.onPartitionsAssigned(null, List.of(new TopicPartition(TOPIC, 0)));
+        long epoch = guard.currentEpoch();
+        guard.onPartitionsRevokedBeforeCommit(null, List.of(new TopicPartition(TOPIC, 0)));
+
+        assertThatThrownBy(() -> guard.requireEpoch(epoch))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("assignment epoch changed")
+                .hasMessageContaining("expected=" + epoch)
+                .hasMessageContaining("actual=" + guard.currentEpoch());
     }
 
     private static MatchingProperties properties(long startupGraceMs, boolean restartOnPartitionReassignment) {

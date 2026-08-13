@@ -108,7 +108,7 @@ matching 使用 `exchange.core2:exchange-core:0.5.3` 及其 Chronicle/OpenHFT �
 | funding | 9089 |
 | insurance | 9090 |
 | adl | 9091 |
-| websocket | 9093 |
+| websocket | 9097 |
 | gateway | 9094 |
 | market-maker | 9096 |
 

@@ -180,6 +180,18 @@ public final class UserPartitionStateStore implements AutoCloseable {
         return currentSequence(partition);
     }
 
+    public StateSnapshot checkpoint(UserPartitionKey partition) {
+        return read(partition).orElseThrow(() ->
+                new IllegalStateException("user partition checkpoint is missing: " + partition.value()));
+    }
+
+    public boolean isCheckpointAt(UserPartitionKey partition, long sequence) {
+        if (sequence < 0L) {
+            throw new IllegalArgumentException("checkpoint sequence must not be negative");
+        }
+        return lastAppliedSequence(partition) == sequence;
+    }
+
     /** 返回状态库中已初始化的用户分区，供重启恢复扫描。 */
     public List<UserPartitionKey> partitions() {
         List<UserPartitionKey> result = new ArrayList<>();

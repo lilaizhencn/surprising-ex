@@ -19,6 +19,7 @@ NATIVE_IMAGE="${NATIVE_IMAGE:-false}"
 NATIVE_BINARY_DIR="${NATIVE_BINARY_DIR:-}"
 NATIVE_RUNTIME_ARGS="${NATIVE_RUNTIME_ARGS:-}"
 WAIT_HEALTH="${WAIT_HEALTH:-true}"
+WAIT_DEPENDENCIES="${WAIT_DEPENDENCIES:-true}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
 LOCAL_HOST="${LOCAL_HOST:-127.0.0.1}"
 LOG_DIR="${LOG_DIR:-}"
@@ -97,7 +98,7 @@ base_port_for() {
     funding) echo 9089 ;;
     insurance) echo 9090 ;;
     adl) echo 9091 ;;
-    websocket) echo 9093 ;;
+    websocket) echo "${WEBSOCKET_PORT:-9097}" ;;
     gateway) echo 9094 ;;
     trigger) echo 9095 ;;
     market-maker) echo 9096 ;;
@@ -207,6 +208,33 @@ common_env() {
 service_env() {
   local service="$1"
   local slug="$2"
+  local instrument_port=$((9080 + PORT_OFFSET))
+  local candlestick_port=$((9081 + PORT_OFFSET))
+  local index_price_port=$((9082 + PORT_OFFSET))
+  local mark_price_port=$((9083 + PORT_OFFSET))
+  local order_port=$((9084 + PORT_OFFSET))
+  local matching_port=$((9085 + PORT_OFFSET))
+  local account_port=$((9086 + PORT_OFFSET))
+  local risk_port=$((9087 + PORT_OFFSET))
+  local liquidation_port=$((9088 + PORT_OFFSET))
+  local funding_port=$((9089 + PORT_OFFSET))
+  local insurance_port=$((9090 + PORT_OFFSET))
+  local adl_port=$((9091 + PORT_OFFSET))
+  local trigger_port=$((9095 + PORT_OFFSET))
+  printf '%s\n' \
+    "SURPRISING_CLIENTS_INSTRUMENT_BASE_URL=http://${LOCAL_HOST}:${instrument_port}" \
+    "SURPRISING_CLIENTS_CANDLESTICK_BASE_URL=http://${LOCAL_HOST}:${candlestick_port}" \
+    "SURPRISING_CLIENTS_INDEX_PRICE_BASE_URL=http://${LOCAL_HOST}:${index_price_port}" \
+    "SURPRISING_CLIENTS_MARK_PRICE_BASE_URL=http://${LOCAL_HOST}:${mark_price_port}" \
+    "SURPRISING_CLIENTS_ORDER_BASE_URL=http://${LOCAL_HOST}:${order_port}" \
+    "SURPRISING_CLIENTS_MATCHING_BASE_URL=http://${LOCAL_HOST}:${matching_port}" \
+    "SURPRISING_CLIENTS_ACCOUNT_BASE_URL=http://${LOCAL_HOST}:${account_port}" \
+    "SURPRISING_CLIENTS_RISK_BASE_URL=http://${LOCAL_HOST}:${risk_port}" \
+    "SURPRISING_CLIENTS_LIQUIDATION_BASE_URL=http://${LOCAL_HOST}:${liquidation_port}" \
+    "SURPRISING_CLIENTS_FUNDING_BASE_URL=http://${LOCAL_HOST}:${funding_port}" \
+    "SURPRISING_CLIENTS_INSURANCE_BASE_URL=http://${LOCAL_HOST}:${insurance_port}" \
+    "SURPRISING_CLIENTS_ADL_BASE_URL=http://${LOCAL_HOST}:${adl_port}" \
+    "SURPRISING_CLIENTS_TRIGGER_BASE_URL=http://${LOCAL_HOST}:${trigger_port}"
   case "${service}" in
     instrument)
       printf '%s\n' \
@@ -313,7 +341,30 @@ service_env() {
         "SURPRISING_WEBSOCKET_KAFKA_GROUP_ID=surprising-websocket-${slug}-${HOSTNAME:-local}-$$"
       ;;
     gateway)
-      :
+      local route_values=()
+      local route_name route_port route_env_name
+      for route_name in instrument candlestick price-index price-mark trading trading-leverage trading-market trading-trades trading-trigger account risk liquidation funding insurance adl market-maker; do
+        case "${route_name}" in
+          instrument) route_port="${instrument_port}" ;;
+          candlestick) route_port="${candlestick_port}" ;;
+          price-index) route_port="${index_price_port}" ;;
+          price-mark) route_port="${mark_price_port}" ;;
+          trading|trading-leverage) route_port="${order_port}" ;;
+          trading-market|trading-trades) route_port="${matching_port}" ;;
+          trading-trigger) route_port="${trigger_port}" ;;
+          account) route_port="${account_port}" ;;
+          risk) route_port="${risk_port}" ;;
+          liquidation) route_port="${liquidation_port}" ;;
+          funding) route_port="${funding_port}" ;;
+          insurance) route_port="${insurance_port}" ;;
+          adl) route_port="${adl_port}" ;;
+          market-maker) route_port=$((9096 + PORT_OFFSET)) ;;
+        esac
+        route_env_name="${route_name//-/_}"
+        route_env_name="$(printf '%s' "${route_env_name}" | tr '[:lower:]' '[:upper:]')"
+        route_values+=("GATEWAY_ROUTE_${route_env_name}_${PRODUCT_LINE}_BASE_URL=http://${LOCAL_HOST}:${route_port}")
+      done
+      printf '%s\n' "${route_values[@]}"
       ;;
     market-maker)
       local mark_price_port=9083
@@ -379,6 +430,10 @@ start_service() {
   port=$(( $(base_port_for "${service}") + PORT_OFFSET ))
   if [[ "${BUILD_SERVICES}" == "true" ]]; then
     build_service "${service}"
+  fi
+  if [[ "${WAIT_DEPENDENCIES}" == "true" && "${service}" != "instrument" ]] \
+        && service_requested instrument; then
+    wait_health instrument $((9080 + PORT_OFFSET))
   fi
   if [[ "${NATIVE_IMAGE}" == "true" ]]; then
     launch_artifact="$(find_native_binary "${module}")"

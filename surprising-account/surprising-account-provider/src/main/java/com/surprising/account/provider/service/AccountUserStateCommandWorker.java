@@ -20,9 +20,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.KafkaException;
@@ -53,7 +53,7 @@ public class AccountUserStateCommandWorker {
     private final UserPartitionCommandLane lane;
     private final AccountUserStateReducer reducer;
     private final KafkaTemplate<String, String> kafkaTemplate;
-    private final Set<String> publishedCommands = ConcurrentHashMap.newKeySet();
+    private final Map<UserPartitionKey, Long> publishedSequences = new ConcurrentHashMap<>();
 
     public AccountUserStateCommandWorker(ObjectMapper objectMapper,
                                          AccountProperties properties,
@@ -96,11 +96,10 @@ public class AccountUserStateCommandWorker {
             throw new IllegalArgumentException("账户事实流分区不能为空");
         }
         try {
-            if (lane.isOwnerThread(partition)) {
+            lane.runAsOwner(partition, () -> {
                 applyPartition(partition);
-            } else {
-                lane.execute(partition, () -> applyPartition(partition));
-            }
+                return null;
+            });
         } catch (RuntimeException ex) {
             // 单个用户故障必须停在原序号，不能让其他用户或后续资金事件越过它。
             log.warn("账户事实流分区执行失败 partition={}", partition.value(), ex);
@@ -122,13 +121,13 @@ public class AccountUserStateCommandWorker {
                     throw new IllegalStateException("账户状态已提交但命令终态缺失 commandId="
                             + command.commandId() + " sequence=" + event.sequence());
                 }
-                if (!publishedCommands.contains(command.commandId())) {
+                if (!isPublished(partition, event.sequence())) {
                     publishStateSnapshot(reducer.state(partition)
                             .orElseThrow(() -> new AccountStateUnavailableException(
                                     "账户状态快照不存在: " + partition.value()))
                             .snapshot());
                 }
-                publishOnce(event.sequence(), command, existing);
+                publishOnce(partition, event.sequence(), command, existing);
                 continue;
             }
             long expected = applied + 1L;
@@ -165,7 +164,7 @@ public class AccountUserStateCommandWorker {
                         .orElseThrow(() -> new AccountStateUnavailableException(
                                 "账户状态快照不存在: " + partition.value()))
                         .snapshot());
-                publishOnce(event.sequence(), command, existing);
+                publishOnce(partition, event.sequence(), command, existing);
                 applied = event.sequence();
                 continue;
             }
@@ -186,7 +185,7 @@ public class AccountUserStateCommandWorker {
                     .orElseThrow(() -> new AccountStateUnavailableException(
                             "账户状态快照不存在: " + partition.value()))
                     .snapshot());
-            publishOnce(event.sequence(), command, terminal);
+            publishOnce(partition, event.sequence(), command, terminal);
             applied = event.sequence();
         }
         return null;
@@ -535,10 +534,15 @@ public class AccountUserStateCommandWorker {
         return objectMapper.writeValueAsString(result).getBytes(StandardCharsets.UTF_8);
     }
 
-    private void publishOnce(long sequence,
+    private boolean isPublished(UserPartitionKey partition, long sequence) {
+        return publishedSequences.getOrDefault(partition, 0L) >= sequence;
+    }
+
+    private void publishOnce(UserPartitionKey partition,
+                             long sequence,
                              AccountUserCommand command,
                              AccountCommandTerminalResult result) {
-        if (!publishedCommands.add(command.commandId())) {
+        if (isPublished(partition, sequence)) {
             return;
         }
         AccountCommandResultEvent event = new AccountCommandResultEvent(
@@ -546,11 +550,22 @@ public class AccountUserStateCommandWorker {
                 result.status(), command.source(), command.sourceReference(), result.resultPayload(),
                 result.errorCode(), result.errorMessage(), command.occurredAt(), command.traceId());
         try {
-            kafkaTemplate.send(properties.getKafka().getCommandResultsTopic(), command.partitionKey(),
-                    objectMapper.writeValueAsString(event)).get(3L, TimeUnit.SECONDS);
+            awaitKafkaIfOutsideTransaction(kafkaTemplate.send(properties.getKafka().getCommandResultsTopic(),
+                    command.partitionKey(), objectMapper.writeValueAsString(event)));
         } catch (Exception ex) {
-            publishedCommands.remove(command.commandId());
             throw new KafkaException("账户命令结果发布失败 commandId=" + command.commandId(), ex);
+        }
+        publishedSequences.put(partition, sequence);
+    }
+
+    private void awaitKafkaIfOutsideTransaction(java.util.concurrent.CompletableFuture<?> send) {
+        if (kafkaTemplate.isTransactional() && kafkaTemplate.inTransaction()) {
+            return;
+        }
+        try {
+            send.get(3L, TimeUnit.SECONDS);
+        } catch (Exception ex) {
+            throw new KafkaException("账户事实通知发送失败", ex);
         }
     }
 
@@ -560,8 +575,8 @@ public class AccountUserStateCommandWorker {
      */
     private void publishStateSnapshot(com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent snapshot) {
         try {
-            kafkaTemplate.send(properties.getKafka().getAccountStateEventsTopic(), snapshot.partitionKey(),
-                    objectMapper.writeValueAsString(snapshot)).get(3L, TimeUnit.SECONDS);
+            awaitKafkaIfOutsideTransaction(kafkaTemplate.send(properties.getKafka().getAccountStateEventsTopic(),
+                    snapshot.partitionKey(), objectMapper.writeValueAsString(snapshot)));
             publishPositionSnapshots(snapshot);
         } catch (Exception ex) {
             throw new KafkaException("账户状态快照发布失败 userId=" + snapshot.userId()
@@ -627,8 +642,8 @@ public class AccountUserStateCommandWorker {
                     position.updatedAt(),
                     snapshot.eventTime(),
                     snapshot.traceId());
-            kafkaTemplate.send(properties.getKafka().getPositionEventsTopic(), event.partitionKey(),
-                    objectMapper.writeValueAsString(event)).get(3L, TimeUnit.SECONDS);
+            awaitKafkaIfOutsideTransaction(kafkaTemplate.send(properties.getKafka().getPositionEventsTopic(),
+                    event.partitionKey(), objectMapper.writeValueAsString(event)));
         }
     }
 }

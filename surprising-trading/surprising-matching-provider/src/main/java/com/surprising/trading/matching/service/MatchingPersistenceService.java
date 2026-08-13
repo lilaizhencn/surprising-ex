@@ -16,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Objects;
+import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -56,6 +58,18 @@ public class MatchingPersistenceService {
     public void prepare(com.surprising.trading.api.model.OrderCommandEvent command) {
         if (localStateStore != null) {
             localStateStore.prepare(command);
+        }
+    }
+
+    public <T> T runAsSymbolOwner(String symbol, Supplier<T> action) {
+        Objects.requireNonNull(symbol, "symbol");
+        Objects.requireNonNull(action, "action");
+        return localStateStore == null ? action.get() : localStateStore.runAsOwner(symbol, action);
+    }
+
+    public void assertBookShard(String symbol, int shardId) {
+        if (localStateStore != null) {
+            localStateStore.assertSymbolShard(symbol, shardId);
         }
     }
 

@@ -58,6 +58,7 @@ public class MatchingCommandConsumer {
                 requireCurrentProductTopic(record.topic());
                 commands.add(command);
             }
+            long processingEpoch = partitionAssignmentGuard.currentEpoch();
             for (ConsumerRecord<String, String> record : records) {
                 partitionAssignmentGuard.recordProcessedCommand(record.topic(), record.partition());
             }
@@ -65,6 +66,7 @@ public class MatchingCommandConsumer {
             // 撮合结果、订单迁移、成交和 Outbox 记录后，才提交本次有界拉取。
             processingStarted = true;
             matchingService.processBatch(commands);
+            partitionAssignmentGuard.requireEpoch(processingEpoch);
         } catch (SymbolKeyMismatchException ex) {
             log.error("Rejected matching command with invalid Kafka key: {}", ex.getMessage());
             throw new IllegalStateException("failed to process matching command batch", ex);

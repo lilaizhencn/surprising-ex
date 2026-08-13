@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * 基于 RocksDB 的用户分区 WAL。
@@ -145,6 +146,10 @@ public final class UserPartitionWal implements AutoCloseable {
               throw new IllegalStateException("failed to append user partition WAL batch", ex);
           }
         });
+    }
+
+    public <T> T runAsOwner(UserPartitionKey partition, Supplier<T> action) {
+        return lane.runAsOwner(partition, action);
     }
 
     public Optional<UserPartitionEvent> readEvent(UserPartitionKey partition, long sequence) {

@@ -3,6 +3,7 @@ package com.surprising.trading.matching.service;
 import com.surprising.trading.api.model.MarketTickerSummary;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.PublicTradeEvent;
+import com.surprising.trading.api.model.UserMatchTradeQueryResponse;
 import com.surprising.trading.matching.repository.MatchingTradeRepository;
 import java.time.Instant;
 import java.util.Optional;
@@ -31,5 +32,9 @@ public class MatchingMarketDataService {
     public MarketTickerSummary ticker24hr(String symbol) {
         Instant to = Instant.now();
         return tradeRepository.summary(symbol, to.minusSeconds(86_400L), to);
+    }
+
+    public UserMatchTradeQueryResponse userTrades(long userId, String symbol, int limit, String cursor) {
+        return tradeRepository.userTrades(userId, symbol, limit, cursor);
     }
 }

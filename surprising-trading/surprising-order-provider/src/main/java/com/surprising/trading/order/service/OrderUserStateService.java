@@ -1002,9 +1002,8 @@ public class OrderUserStateService {
                 OrderUserStateSnapshot.CURRENT_SCHEMA_VERSION,
                 partition.productLine(), partition.userId(), state.revision(), state, Instant.now());
         try {
-            kafkaTemplate.send(properties.getKafka().getOrderStateEventsTopic(), snapshot.partitionKey(),
-                    objectMapper.writeValueAsString(snapshot)).get(
-                    properties.getEventPublish().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            awaitKafkaIfOutsideTransaction(kafkaTemplate.send(properties.getKafka().getOrderStateEventsTopic(),
+                    snapshot.partitionKey(), objectMapper.writeValueAsString(snapshot)));
             publishedSnapshotRevisions.put(partition, state.revision());
         } catch (Exception ex) {
             throw new KafkaException("订单完整快照发布失败 partition=" + partition.value()
@@ -1347,9 +1346,20 @@ public class OrderUserStateService {
 
     private void send(String topic, String key, String payload, String identity) {
         try {
-            kafkaTemplate.send(topic, key, payload).get(3L, TimeUnit.SECONDS);
+            awaitKafkaIfOutsideTransaction(kafkaTemplate.send(topic, key, payload));
         } catch (Exception ex) {
             throw new KafkaException("订单事实通知发送失败: " + identity, ex);
+        }
+    }
+
+    private void awaitKafkaIfOutsideTransaction(java.util.concurrent.CompletableFuture<?> send) {
+        if (kafkaTemplate.isTransactional() && kafkaTemplate.inTransaction()) {
+            return;
+        }
+        try {
+            send.get(3L, TimeUnit.SECONDS);
+        } catch (Exception ex) {
+            throw new KafkaException("订单事实通知发送失败", ex);
         }
     }
 

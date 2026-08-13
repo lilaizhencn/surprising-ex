@@ -170,10 +170,15 @@ public class AuthService {
         JwtPrincipal principal = jwtTokenService.verifyAccessToken(token);
         AuthenticatedUser user = repository.user(principal.userId())
                 .orElseThrow(() -> new IllegalArgumentException("user not found"));
+        if (principal.sessionId() > 0
+                && !repository.activeRefreshSession(principal.userId(), principal.sessionId(), Instant.now())) {
+            throw new IllegalArgumentException("access session is no longer active");
+        }
         if ("FROZEN".equals(user.status())) {
             throw new IllegalStateException("user is not active");
         }
-        return new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(), principal.expiresAt());
+        return new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(), principal.expiresAt(),
+                principal.sessionId());
     }
 
     public JwtPrincipal authenticateAdminBearer(String authorizationHeader) {
@@ -489,11 +494,13 @@ public class AuthService {
                                       HttpServletRequest request,
                                       Instant now,
                                       boolean requiresEmailVerification) {
-        String accessToken = jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), now);
         String refreshToken = newRefreshToken();
         Instant refreshExpiresAt = now.plus(properties.getSecurity().getRefreshTokenTtl());
-        repository.saveRefreshSession(user.userId(), hashRefreshToken(refreshToken), refreshExpiresAt,
+        long sessionId = repository.saveRefreshSession(user.userId(), hashRefreshToken(refreshToken), refreshExpiresAt,
                 userAgent(request), ipAddress(request), now);
+        String accessToken = sessionId > 0
+                ? jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), sessionId, now)
+                : jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), now);
         return new AuthResponse(user, accessToken, refreshToken,
                 now.plus(properties.getSecurity().getAccessTokenTtl()), refreshExpiresAt,
                 requiresEmailVerification);

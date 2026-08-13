@@ -172,6 +172,24 @@ class MatchingLocalStateStoreTest {
         }
     }
 
+    @Test
+    void persistsAssignmentEpochAndRejectsSymbolShardDrift() {
+        ObjectMapper mapper = new ObjectMapper();
+        try (MatchingLocalStateStore store = new MatchingLocalStateStore(directory, mapper, 2)) {
+            assertThat(store.assignmentEpoch()).isZero();
+            assertThat(store.advanceAssignmentEpoch()).isEqualTo(1L);
+            store.assertSymbolShard("BTC-USDT", 1);
+            assertThatThrownBy(() -> store.assertSymbolShard("BTC-USDT", 0))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("symbol 已绑定到其他撮合 shard");
+        }
+
+        try (MatchingLocalStateStore reopened = new MatchingLocalStateStore(directory, mapper, 2)) {
+            assertThat(reopened.assignmentEpoch()).isEqualTo(1L);
+            reopened.assertSymbolShard("BTC-USDT", 1);
+        }
+    }
+
     private static OrderCommandEvent command(long commandId, long orderId, long userId, Instant time) {
         return command(commandId, orderId, userId, "BTC-USDT", time);
     }

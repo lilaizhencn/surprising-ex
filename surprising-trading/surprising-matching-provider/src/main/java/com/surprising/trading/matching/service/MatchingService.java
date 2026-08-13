@@ -134,9 +134,13 @@ public class MatchingService {
     }
 
     public void process(OrderCommandEvent command) {
-        persistenceService.prepare(command);
-        process(command, persistenceService.commandState(command.commandId(), command.orderId()),
-                ProtectionChecks.REQUIRED, true);
+        persistenceService.runAsSymbolOwner(command.symbol(), () -> {
+            assertBookShard(command.symbol());
+            persistenceService.prepare(command);
+            process(command, persistenceService.commandState(command.commandId(), command.orderId()),
+                    ProtectionChecks.REQUIRED, true);
+            return null;
+        });
     }
 
     public void processBatch(List<OrderCommandEvent> commands) {
@@ -153,7 +157,17 @@ public class MatchingService {
                 throw new IllegalArgumentException("conflicting matching commands for commandId="
                         + command.commandId());
             }
-            persistenceService.prepare(command);
+        }
+        Map<String, List<OrderCommandEvent>> commandsBySymbol = new LinkedHashMap<>();
+        for (OrderCommandEvent command : uniqueCommands.values()) {
+            commandsBySymbol.computeIfAbsent(command.symbol(), ignored -> new ArrayList<>()).add(command);
+        }
+        for (Map.Entry<String, List<OrderCommandEvent>> entry : commandsBySymbol.entrySet()) {
+            persistenceService.runAsSymbolOwner(entry.getKey(), () -> {
+                assertBookShard(entry.getKey());
+                entry.getValue().forEach(persistenceService::prepare);
+                return null;
+            });
         }
         LinkedHashMap<Long, Long> commandOrderIds = new LinkedHashMap<>(uniqueCommands.size());
         uniqueCommands.forEach((commandId, command) -> commandOrderIds.put(commandId, command.orderId()));
@@ -161,22 +175,35 @@ public class MatchingService {
                 persistenceService.commandStates(commandOrderIds);
         Map<Long, ProtectionChecks> protectionChecks = batchProtectionChecks(uniqueCommands.values(), states);
         Map<String, DepthPublication> depthPublications = new LinkedHashMap<>();
-        for (OrderCommandEvent command : uniqueCommands.values()) {
-            MatchingPersistenceService.CommandState state = states.get(command.commandId());
-            if (state == null) {
-                throw new IllegalStateException("matching command state missing for commandId="
-                        + command.commandId());
-            }
-            MatchingSymbol changedSymbol = process(command, state,
-                    protectionChecks.getOrDefault(command.commandId(), ProtectionChecks.REQUIRED), false);
-            if (changedSymbol != null) {
-                depthPublications.put(changedSymbol.symbol(), new DepthPublication(changedSymbol, Instant.now()));
-            }
+        for (Map.Entry<String, List<OrderCommandEvent>> entry : commandsBySymbol.entrySet()) {
+            persistenceService.runAsSymbolOwner(entry.getKey(), () -> {
+                assertBookShard(entry.getKey());
+                for (OrderCommandEvent command : entry.getValue()) {
+                    MatchingPersistenceService.CommandState state = states.get(command.commandId());
+                    if (state == null) {
+                        throw new IllegalStateException("matching command state missing for commandId="
+                                + command.commandId());
+                    }
+                    MatchingSymbol changedSymbol = process(command, state,
+                            protectionChecks.getOrDefault(command.commandId(), ProtectionChecks.REQUIRED), false);
+                    if (changedSymbol != null) {
+                        depthPublications.put(changedSymbol.symbol(),
+                                new DepthPublication(changedSymbol, Instant.now()));
+                    }
+                }
+                return null;
+            });
         }
         // 公共深度是允许丢失中间状态的最新值流。每个变更交易对只生成一次最终快照，
         // 避免为同一 Kafka 批次中的每条指令重复遍历 exchange-core 订单簿。
         for (DepthPublication publication : depthPublications.values()) {
             publishOrderBookDepth(publication.symbol(), CommandResultCode.SUCCESS, publication.eventTime());
+        }
+    }
+
+    private void assertBookShard(String symbol) {
+        if (requireLocalState) {
+            persistenceService.assertBookShard(symbol, exchangeCoreEngine.bookShardId(symbol));
         }
     }
 

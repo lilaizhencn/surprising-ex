@@ -2,6 +2,7 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.eventstore.UserPartitionKey;
+import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionWal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -12,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.HexFormat;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 账户命令的唯一事实入口。
@@ -23,9 +25,17 @@ import org.springframework.stereotype.Service;
 public class AccountUserCommandWalIngress {
 
     private final UserPartitionWal wal;
+    private final UserPartitionCommandLane lane;
 
     public AccountUserCommandWalIngress(UserPartitionWal wal) {
         this.wal = wal;
+        this.lane = null;
+    }
+
+    @Autowired
+    public AccountUserCommandWalIngress(UserPartitionWal wal, UserPartitionCommandLane lane) {
+        this.wal = wal;
+        this.lane = lane;
     }
 
     public List<AppendOutcome> append(List<CommandEnvelope> envelopes) {
@@ -46,25 +56,39 @@ public class AccountUserCommandWalIngress {
         }
         for (Map.Entry<UserPartitionKey, List<IndexedEnvelope>> entry : byPartition.entrySet()) {
             List<IndexedEnvelope> values = entry.getValue();
+            appendPartition(entry.getKey(), values);
+            for (IndexedEnvelope value : values) {
+                outcomes.set(value.index(), AppendOutcome.DURABLE);
+            }
+        }
+        return List.copyOf(outcomes);
+    }
+
+    private void appendPartition(UserPartitionKey partition, List<IndexedEnvelope> values) {
+        Runnable append = () -> {
             boolean duplicateCommand = values.stream().map(value -> value.envelope().command().commandId())
                     .distinct().count() != values.size();
             if (duplicateCommand) {
                 for (IndexedEnvelope value : values) {
                     UserPartitionWal.AppendRequest request = toRequest(value.envelope());
-                    wal.append(entry.getKey(), request.eventId(), request.eventType(), request.payload(),
+                    wal.append(partition, request.eventId(), request.eventType(), request.payload(),
                             request.fingerprint(), request.occurredAt());
                 }
             } else {
                 List<UserPartitionWal.AppendRequest> requests = values.stream()
                         .map(value -> toRequest(value.envelope()))
                         .toList();
-                wal.appendBatch(entry.getKey(), requests);
+                wal.appendBatch(partition, requests);
             }
-            for (IndexedEnvelope value : values) {
-                outcomes.set(value.index(), AppendOutcome.DURABLE);
-            }
+        };
+        if (lane == null) {
+            append.run();
+        } else {
+            lane.runAsOwner(partition, () -> {
+                append.run();
+                return null;
+            });
         }
-        return List.copyOf(outcomes);
     }
 
     private UserPartitionWal.AppendRequest toRequest(CommandEnvelope envelope) {

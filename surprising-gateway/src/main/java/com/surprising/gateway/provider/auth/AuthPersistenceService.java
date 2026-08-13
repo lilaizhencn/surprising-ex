@@ -190,13 +190,17 @@ public class AuthPersistenceService {
         mfaRepository.disable(userId, now);
     }
 
-    public void saveRefreshSession(long userId,
+    public long saveRefreshSession(long userId,
                                    String tokenHash,
                                    Instant expiresAt,
                                    String userAgent,
                                    String ipAddress,
                                    Instant now) {
-        refreshSessionRepository.save(userId, tokenHash, expiresAt, userAgent, ipAddress, now);
+        return refreshSessionRepository.save(userId, tokenHash, expiresAt, userAgent, ipAddress, now);
+    }
+
+    public boolean activeRefreshSession(long userId, long sessionId, Instant now) {
+        return refreshSessionRepository.active(userId, sessionId, now);
     }
 
     public Optional<GatewayRefreshSessionRepository.RefreshSession> refreshSession(String tokenHash) {

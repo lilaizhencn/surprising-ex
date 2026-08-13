@@ -241,6 +241,7 @@ public class MatchingProperties {
     public static class Engine {
         private String exchangeId = "surprising-perp";
         private int matchingEngines = 4;
+        private int bookShards = 1;
         private int riskEngines = 2;
         private int orderBookDepthForPostOnly = 1;
         private int orderBookDepthLevels = 50;
@@ -260,6 +261,15 @@ public class MatchingProperties {
         public void setMatchingEngines(int matchingEngines) {
             requirePowerOfTwo(matchingEngines, "matchingEngines");
             this.matchingEngines = matchingEngines;
+        }
+
+        public int getBookShards() {
+            return bookShards;
+        }
+
+        public void setBookShards(int bookShards) {
+            requirePowerOfTwo(bookShards, "bookShards");
+            this.bookShards = bookShards;
         }
 
         public int getRiskEngines() {

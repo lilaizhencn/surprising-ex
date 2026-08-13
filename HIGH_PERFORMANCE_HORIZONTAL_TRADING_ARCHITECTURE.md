@@ -51,7 +51,7 @@
 - Kafka 保留为外部事件总线、审计流和异步投影入口。
 - 状态机必须完全确定性，不能直接读取数据库、系统时间或外部服务。
 
-在当前文档定义的 `3000 ops/s` 下单类吞吐和 `1000 trades/s` 成交吞吐目标下，Kafka 主路线已经足够，直接迁移 Aeron 的收益不足以抵消复杂度。
+在当前文档定义的 `300000 ops/s` 下单类吞吐和 `100000 trades/s` 成交吞吐目标下，Kafka 主路线已经足够，直接迁移 Aeron 的收益不足以抵消复杂度。
 
 ## 3. 当前实现审查
 
@@ -900,7 +900,7 @@ PostgreSQL 保留以下职责：
 
 完成标准：一个 shard 只有一个写线程，热路径无跨线程 Future 等待。
 
-当前状态：尚未完成。现有 `PartitionOwnerLane` 仍是安全的过渡单写实现，生产热路径仍有跨线程提交等待；在此阶段完成前不宣称达到最终低竞争执行器。
+当前状态：账户用户分区和撮合交易对在 Kafka 回调期间已经支持当前线程 owner 绑定；订单用户命令已统一通过有界用户分区 lane 串行执行，订单恢复、查询等非 Kafka 入口仍可使用 mailbox。订单用户命令结果在状态处理结束后再发布，避免把发送等待嵌入状态 reducer。最终单 Kafka partition 直接 reducer 和无同步网络 I/O 仍需继续收敛。
 
 ### 阶段 5：统一用户热写状态机
 
@@ -922,7 +922,7 @@ PostgreSQL 保留以下职责：
 
 完成标准：增加 Matching pod 能提高多 symbol 总吞吐，且热点 symbol 不影响其他 shard。
 
-当前状态：尚未完成。当前 JVM 仍由 `ExchangeCoreEngine` 承载多个 symbol，状态库已按 symbol 归属处理但尚未拆为独立 Book Shard 生命周期。
+当前状态：`ExchangeCoreEngine` 已支持按稳定 symbol hash 启动独立 Book Shard runtime，每个 shard 拥有独立 exchange-core、用户注册集合和生命周期；matching RocksDB 还会持久化 `symbol -> shard` 绑定并在撮合入口拒绝路由漂移。默认配置仍为 1 shard，RocksDB 状态库和恢复/输出编排仍是 JVM 级共享边界，尚未达到最终完全独立的 shard checkpoint/output 形态。
 
 ### 阶段 7：Kafka EOS 和 Warm Standby
 
@@ -933,7 +933,7 @@ PostgreSQL 保留以下职责：
 
 完成标准：任意事务边界崩溃后 RPO=0，无重复资金影响，恢复后状态等价。
 
-当前状态：尚未完成。当前实现仍以本地 WAL/RocksDB 同步事实和 Kafka 重试为过渡边界，尚未启用 Kafka transaction、epoch fencing 或 warm standby。
+当前状态：账户用户命令、订单用户命令和撮合命令的 Kafka producer 已启用稳定 transactional-id 前缀，相关 listener 已绑定 Kafka transaction manager；订单/账户 owner 在事务上下文内不再逐条等待发送，撮合批次会在处理前后校验并持久化 assignment epoch，用户状态库暴露 checkpoint 水位读取与连续序列校验。Kafka changelog 重建、本地 checkpoint 自动替换、跨输出的完整 shard epoch fencing 和 warm standby lag 调度仍未完成，因此尚未达到 RPO=0 最终验收。
 
 ### 阶段 8：评估 Aeron Cluster
 

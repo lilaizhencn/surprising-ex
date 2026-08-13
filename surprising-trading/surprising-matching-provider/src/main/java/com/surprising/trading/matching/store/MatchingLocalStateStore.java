@@ -51,6 +51,8 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     private static final byte[] OUTBOX_PREFIX = "local-outbox/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] OUTBOX_IDEMPOTENCY_PREFIX = "local-outbox-id/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] OUTBOX_SEQUENCE_PREFIX = "local-outbox-sequence/".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] ASSIGNMENT_EPOCH_KEY = "assignment-epoch".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] SYMBOL_SHARD_PREFIX = "symbol-shard/".getBytes(StandardCharsets.UTF_8);
 
     static {
         RocksDB.loadLibrary();
@@ -62,6 +64,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     private final WriteOptions writeOptions;
     private final PartitionOwnerLane<String> symbolOwners;
     private final boolean ownsSymbolOwners;
+    private final int bookShardCount;
     private final Map<String, Object> outboxStreamLocks = new ConcurrentHashMap<>();
 
     public MatchingLocalStateStore(Path directory, ObjectMapper objectMapper) {
@@ -70,20 +73,63 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                 "matching-symbol-owner"), true);
     }
 
+    public MatchingLocalStateStore(Path directory, ObjectMapper objectMapper, int bookShardCount) {
+        this(directory, objectMapper, new PartitionOwnerLane<>(
+                Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 32)),
+                "matching-symbol-owner"), true, bookShardCount);
+    }
+
     public MatchingLocalStateStore(Path directory,
                                    ObjectMapper objectMapper,
                                    PartitionOwnerLane<String> symbolOwners) {
-        this(directory, objectMapper, symbolOwners, false);
+        this(directory, objectMapper, symbolOwners, false, 1);
+    }
+
+    public MatchingLocalStateStore(Path directory,
+                                   ObjectMapper objectMapper,
+                                   PartitionOwnerLane<String> symbolOwners,
+                                   int bookShardCount) {
+        this(directory, objectMapper, symbolOwners, false, bookShardCount);
+    }
+
+    public synchronized long assignmentEpoch() {
+        try {
+            return readLong(database.get(ASSIGNMENT_EPOCH_KEY), 0L);
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("读取撮合 assignment epoch 失败", ex);
+        }
+    }
+
+    public synchronized long advanceAssignmentEpoch() {
+        long next = Math.addExact(assignmentEpoch(), 1L);
+        try {
+            database.put(writeOptions, ASSIGNMENT_EPOCH_KEY, encodeLong(next));
+            return next;
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("持久化撮合 assignment epoch 失败", ex);
+        }
     }
 
     private MatchingLocalStateStore(Path directory,
                                     ObjectMapper objectMapper,
                                     PartitionOwnerLane<String> symbolOwners,
                                     boolean ownsSymbolOwners) {
+        this(directory, objectMapper, symbolOwners, ownsSymbolOwners, 1);
+    }
+
+    private MatchingLocalStateStore(Path directory,
+                                    ObjectMapper objectMapper,
+                                    PartitionOwnerLane<String> symbolOwners,
+                                    boolean ownsSymbolOwners,
+                                    int bookShardCount) {
         try {
             this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
             this.symbolOwners = Objects.requireNonNull(symbolOwners, "symbolOwners");
             this.ownsSymbolOwners = ownsSymbolOwners;
+            if (bookShardCount <= 0) {
+                throw new IllegalArgumentException("bookShardCount must be positive");
+            }
+            this.bookShardCount = bookShardCount;
             Files.createDirectories(Objects.requireNonNull(directory, "directory"));
             options = new Options().setCreateIfMissing(true);
             database = RocksDB.open(options, directory.toString());
@@ -91,6 +137,29 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         } catch (Exception ex) {
             throw new IllegalStateException("打开撮合本地状态库失败: " + directory, ex);
         }
+    }
+
+    public void assertSymbolShard(String symbol, int shardId) {
+        String requiredSymbol = Objects.requireNonNull(symbol, "symbol");
+        if (shardId < 0 || shardId >= bookShardCount) {
+            throw new IllegalArgumentException("matching book shard id out of range: " + shardId);
+        }
+        withSymbolOwner(requiredSymbol, () -> {
+            byte[] key = key(SYMBOL_SHARD_PREFIX, requiredSymbol);
+            try {
+                byte[] existing = database.get(key);
+                if (existing != null && readLong(existing, -1L) != shardId) {
+                    throw new IllegalStateException("symbol 已绑定到其他撮合 shard symbol=" + requiredSymbol
+                            + " expected=" + readLong(existing, -1L) + " actual=" + shardId);
+                }
+                if (existing == null) {
+                    database.put(writeOptions, key, encodeLong(shardId));
+                }
+                return null;
+            } catch (RocksDBException ex) {
+                throw new IllegalStateException("读取撮合 symbol shard 归属失败 symbol=" + requiredSymbol, ex);
+            }
+        });
     }
 
     /** PLACE 命令在进入 exchange-core 前先登记到本地状态，避免等待订单表投影。 */
@@ -614,6 +683,15 @@ public final class MatchingLocalStateStore implements AutoCloseable {
 
     private <T> T withSymbolOwner(String symbol, java.util.function.Supplier<T> action) {
         String requiredSymbol = Objects.requireNonNull(symbol, "symbol");
+        if (symbolOwners.isOwnerThread(requiredSymbol)) {
+            return action.get();
+        }
+        return symbolOwners.execute(requiredSymbol, action);
+    }
+
+    public <T> T runAsOwner(String symbol, java.util.function.Supplier<T> action) {
+        String requiredSymbol = Objects.requireNonNull(symbol, "symbol");
+        Objects.requireNonNull(action, "action");
         if (symbolOwners.isOwnerThread(requiredSymbol)) {
             return action.get();
         }

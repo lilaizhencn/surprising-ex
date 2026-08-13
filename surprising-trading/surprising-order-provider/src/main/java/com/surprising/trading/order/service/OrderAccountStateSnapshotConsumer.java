@@ -109,7 +109,9 @@ public class OrderAccountStateSnapshotConsumer {
         }
         Map<TopicPartition, Long> endOffsets = consumer.endOffsets(assignment);
         for (TopicPartition partition : assignment) {
-            if (consumer.position(partition) < endOffsets.getOrDefault(partition, 0L)) {
+            long endOffset = endOffsets.getOrDefault(partition, 0L);
+            long visibleEndOffset = endOffset == 0L ? 0L : endOffset - 1L;
+            if (consumer.position(partition) < visibleEndOffset) {
                 return;
             }
         }

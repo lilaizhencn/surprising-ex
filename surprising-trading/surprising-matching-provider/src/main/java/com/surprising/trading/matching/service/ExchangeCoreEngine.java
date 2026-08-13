@@ -28,6 +28,7 @@ import exchange.core2.core.common.config.PerformanceConfiguration;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -53,11 +54,8 @@ public class ExchangeCoreEngine {
     private final MatchingProtectionIndex protectionIndex;
     private final MatchingLocalStateStore localStateStore;
     private final ConcurrentMap<String, MatchingSymbol> loadedSymbols = new ConcurrentHashMap<>();
-    private final Set<Long> createdUsers = ConcurrentHashMap.newKeySet();
     private volatile Set<String> activeSymbols = Set.of();
-
-    private ExchangeCore exchangeCore;
-    private ExchangeApi api;
+    private volatile List<BookShardRuntime> bookShardRuntimes = List.of();
 
     public ExchangeCoreEngine(MatchingProperties properties,
                               MatchingSymbolService symbolService,
@@ -87,25 +85,19 @@ public class ExchangeCoreEngine {
 
     @PostConstruct
     public void start() {
-        ExchangeConfiguration configuration = ExchangeConfiguration.defaultBuilder()
-                .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
-                        .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.NO_RISK_PROCESSING)
-                        .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
-                        .build())
-                .performanceCfg(PerformanceConfiguration.throughputPerformanceBuilder()
-                        .matchingEnginesNum(properties.getEngine().getMatchingEngines())
-                        .riskEnginesNum(properties.getEngine().getRiskEngines())
-                        .waitStrategy(CoreWaitStrategy.BLOCKING)
-                        .build())
-                .initStateCfg(InitialStateConfiguration.cleanStart(properties.getEngine().getExchangeId()))
-                .build();
-        exchangeCore = ExchangeCore.builder()
-                .exchangeConfiguration(configuration)
-                .resultsConsumer((cmd, seq) -> {
-                })
-                .build();
-        exchangeCore.startup();
-        api = exchangeCore.getApi();
+        int shardCount = properties.getEngine().getBookShards();
+        List<BookShardRuntime> runtimes = new ArrayList<>(shardCount);
+        try {
+            for (int shardId = 0; shardId < shardCount; shardId++) {
+                BookShardRuntime runtime = new BookShardRuntime(shardId, shardCount);
+                runtime.start();
+                runtimes.add(runtime);
+            }
+        } catch (RuntimeException ex) {
+            runtimes.forEach(BookShardRuntime::stop);
+            throw ex;
+        }
+        bookShardRuntimes = List.copyOf(runtimes);
         refreshSymbols();
         restoreOpenOrderBook();
         if (protectionIndex != null && !properties.getRecovery().isOpenOrderBookRestoreEnabled()) {
@@ -115,9 +107,8 @@ public class ExchangeCoreEngine {
 
     @PreDestroy
     public void stop() {
-        if (exchangeCore != null) {
-            exchangeCore.shutdown(5, TimeUnit.SECONDS);
-        }
+        bookShardRuntimes.forEach(BookShardRuntime::stop);
+        bookShardRuntimes = List.of();
     }
 
     public void refreshSymbols() {
@@ -174,7 +165,7 @@ public class ExchangeCoreEngine {
                     .marginBuy(0L)
                     .marginSell(0L)
                     .build();
-            CommandResultCode result = api.submitBinaryDataAsync(new BatchAddSymbolsCommand(spec)).join();
+            CommandResultCode result = runtimeFor(matchingSymbol.symbol()).addSymbol(spec);
             if (result != CommandResultCode.SUCCESS && result != CommandResultCode.SYMBOL_MGMT_SYMBOL_ALREADY_EXISTS) {
                 throw new IllegalStateException("exchange-core failed to add symbol "
                         + matchingSymbol.symbol() + ": " + result);
@@ -185,7 +176,9 @@ public class ExchangeCoreEngine {
     }
 
     public OrderCommand submit(OrderCommandEvent command, MatchingSymbol symbol, long effectivePrice) {
-        ensureUser(command.userId());
+        BookShardRuntime runtime = runtimeFor(symbol.symbol());
+        ensureUser(runtime, command.userId());
+        ExchangeApi api = runtime.api();
         if (command.commandType() == OrderCommandType.CANCEL) {
             ApiCancelOrder cancel = ApiCancelOrder.builder()
                     .orderId(command.orderId())
@@ -210,7 +203,9 @@ public class ExchangeCoreEngine {
     }
 
     public CommandResultCode restoreOpenOrder(RecoveredOrderBookOrder order, MatchingSymbol symbol) {
-        ensureUser(order.userId());
+        BookShardRuntime runtime = runtimeFor(symbol.symbol());
+        ensureUser(runtime, order.userId());
+        ExchangeApi api = runtime.api();
         ApiPlaceOrder place = ApiPlaceOrder.builder()
                 .orderId(order.orderId())
                 .uid(order.userId())
@@ -234,7 +229,7 @@ public class ExchangeCoreEngine {
         if (!command.postOnly()) {
             return false;
         }
-        L2MarketData book = api.requestOrderBookAsync(
+        L2MarketData book = runtimeFor(symbol.symbol()).api().requestOrderBookAsync(
                 symbol.symbolId(), properties.getEngine().getOrderBookDepthForPostOnly()).join();
         if (command.side() == com.surprising.trading.api.model.OrderSide.BUY) {
             return book.askSize > 0 && book.askPrices[0] <= effectivePriceTicks;
@@ -243,16 +238,32 @@ public class ExchangeCoreEngine {
     }
 
     public L2MarketData requestOrderBook(MatchingSymbol symbol, int depth) {
-        return api.requestOrderBookAsync(symbol.symbolId(), Math.max(1, depth)).join();
+        return runtimeFor(symbol.symbol()).api().requestOrderBookAsync(symbol.symbolId(), Math.max(1, depth)).join();
     }
 
-    private void ensureUser(long userId) {
-        if (!createdUsers.add(userId)) {
+    public int bookShardId(String symbol) {
+        return runtimeFor(symbol).shardId();
+    }
+
+    public int bookShardCount() {
+        return bookShardRuntimes.size();
+    }
+
+    private BookShardRuntime runtimeFor(String symbol) {
+        List<BookShardRuntime> runtimes = bookShardRuntimes;
+        if (runtimes.isEmpty()) {
+            throw new IllegalStateException("matching book shards are not started");
+        }
+        return runtimes.get(Math.floorMod(symbol.hashCode(), runtimes.size()));
+    }
+
+    private void ensureUser(BookShardRuntime runtime, long userId) {
+        if (!runtime.createdUsers().add(userId)) {
             return;
         }
-        CommandResultCode result = api.submitCommandAsync(ApiAddUser.builder().uid(userId).build()).join();
+        CommandResultCode result = runtime.api().submitCommandAsync(ApiAddUser.builder().uid(userId).build()).join();
         if (result != CommandResultCode.SUCCESS && result != CommandResultCode.USER_MGMT_USER_ALREADY_EXISTS) {
-            createdUsers.remove(userId);
+            runtime.createdUsers().remove(userId);
             throw new IllegalStateException("exchange-core failed to add user " + userId + ": " + result);
         }
     }
@@ -295,5 +306,65 @@ public class ExchangeCoreEngine {
             protectionIndex.markReady();
         }
         log.info("Restored exchange-core open order book orders={}", restored);
+    }
+
+    private final class BookShardRuntime {
+
+        private final int shardId;
+        private final int shardCount;
+        private final Set<Long> createdUsers = ConcurrentHashMap.newKeySet();
+        private ExchangeCore exchangeCore;
+        private ExchangeApi api;
+
+        private BookShardRuntime(int shardId, int shardCount) {
+            this.shardId = shardId;
+            this.shardCount = shardCount;
+        }
+
+        private void start() {
+            int engines = shardCount == 1 ? properties.getEngine().getMatchingEngines() : 1;
+            ExchangeConfiguration configuration = ExchangeConfiguration.defaultBuilder()
+                    .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
+                            .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.NO_RISK_PROCESSING)
+                            .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
+                            .build())
+                    .performanceCfg(PerformanceConfiguration.throughputPerformanceBuilder()
+                            .matchingEnginesNum(engines)
+                            .riskEnginesNum(properties.getEngine().getRiskEngines())
+                            .waitStrategy(CoreWaitStrategy.BLOCKING)
+                            .build())
+                    .initStateCfg(InitialStateConfiguration.cleanStart(
+                            properties.getEngine().getExchangeId() + "-book-" + shardId))
+                    .build();
+            exchangeCore = ExchangeCore.builder()
+                    .exchangeConfiguration(configuration)
+                    .resultsConsumer((cmd, seq) -> {
+                    })
+                    .build();
+            exchangeCore.startup();
+            api = exchangeCore.getApi();
+        }
+
+        private CommandResultCode addSymbol(CoreSymbolSpecification specification) {
+            return api.submitBinaryDataAsync(new BatchAddSymbolsCommand(specification)).join();
+        }
+
+        private int shardId() {
+            return shardId;
+        }
+
+        private ExchangeApi api() {
+            return api;
+        }
+
+        private Set<Long> createdUsers() {
+            return createdUsers;
+        }
+
+        private void stop() {
+            if (exchangeCore != null) {
+                exchangeCore.shutdown(5, TimeUnit.SECONDS);
+            }
+        }
     }
 }

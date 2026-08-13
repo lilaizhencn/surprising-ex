@@ -62,6 +62,7 @@ surprising:
       engine:
         exchange-id: surprising-perp
         matching-engines: ${MATCHING_ENGINE_SHARDS:4}
+        book-shards: ${MATCHING_BOOK_SHARDS:1}
         risk-engines: ${MATCHING_RISK_SHARDS:2}
         order-book-depth-for-post-only: 1
         order-book-depth-levels: 50

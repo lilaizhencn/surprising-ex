@@ -18,6 +18,7 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.transaction.KafkaTransactionManager;
 
 @Configuration
 public class MatchingKafkaConfiguration {
@@ -34,13 +35,22 @@ public class MatchingKafkaConfiguration {
         config.put(ProducerConfig.LINGER_MS_CONFIG, 2);
         config.put(ProducerConfig.BATCH_SIZE_CONFIG, 65_536);
         config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
-        return new DefaultKafkaProducerFactory<>(config);
+        DefaultKafkaProducerFactory<String, String> factory = new DefaultKafkaProducerFactory<>(config);
+        factory.setTransactionIdPrefix("matching-" + productLineName(properties.getKafka().getProductLine())
+                + "-" + properties.getKafka().getClientId() + "-");
+        return factory;
+    }
+
+    private String productLineName(com.surprising.product.api.ProductLine productLine) {
+        return productLine == null ? "unscoped" : productLine.name().toLowerCase();
     }
 
     @Bean
     public KafkaTemplate<String, String> matchingKafkaTemplate(
             ProducerFactory<String, String> matchingProducerFactory) {
-        return new KafkaTemplate<>(matchingProducerFactory);
+        KafkaTemplate<String, String> template = new KafkaTemplate<>(matchingProducerFactory);
+        template.setAllowNonTransactional(true);
+        return template;
     }
 
     @Bean("matchingMarketDataProducerFactory")
@@ -113,16 +123,29 @@ public class MatchingKafkaConfiguration {
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
-    @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> matchingKafkaListenerContainerFactory(
             ConsumerFactory<String, String> matchingConsumerFactory,
             MatchingProperties properties,
             MatchingPartitionAssignmentGuard partitionAssignmentGuard) {
+        return matchingKafkaListenerContainerFactory(matchingConsumerFactory, properties, partitionAssignmentGuard,
+                null);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> matchingKafkaListenerContainerFactory(
+            ConsumerFactory<String, String> matchingConsumerFactory,
+            MatchingProperties properties,
+            MatchingPartitionAssignmentGuard partitionAssignmentGuard,
+            @Qualifier("matchingKafkaTemplate") KafkaTemplate<String, String> matchingKafkaTemplate) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(matchingConsumerFactory);
         factory.setConcurrency(properties.getKafka().getConcurrency());
         factory.setBatchListener(true);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        if (matchingKafkaTemplate != null && matchingKafkaTemplate.getProducerFactory() != null) {
+            factory.getContainerProperties().setKafkaAwareTransactionManager(
+                    new KafkaTransactionManager<>(matchingKafkaTemplate.getProducerFactory()));
+        }
         factory.getContainerProperties().setConsumerRebalanceListener(partitionAssignmentGuard);
         return factory;
     }

@@ -3,12 +3,18 @@ package com.surprising.trading.matching.repository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.MarketTickerSummary;
+import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.UserMatchTradeQueryResponse;
+import com.surprising.trading.api.model.UserMatchTradeResponse;
 import com.surprising.trading.matching.config.MatchingProperties;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -124,6 +130,68 @@ public class MatchingTradeRepository {
                         timestamp(result.getTimestamp("close_time"))),
                 productLine(), symbol.trim().toUpperCase(java.util.Locale.ROOT),
                 Timestamp.from(from), Timestamp.from(to));
+    }
+
+    public UserMatchTradeQueryResponse userTrades(long userId, String symbol, int requestedLimit, String cursor) {
+        if (userId <= 0L || symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("user trade request is invalid");
+        }
+        int limit = Math.max(1, Math.min(requestedLimit, 100));
+        Long beforeTradeId = decodeCursor(cursor);
+        StringBuilder sql = new StringBuilder("""
+                SELECT trade_id, taker_order_id, maker_order_id, taker_user_id, taker_side,
+                       taker_fee_rate_ppm, maker_fee_rate_ppm, price_ticks, quantity_steps, event_time
+                  FROM trading_match_trades
+                 WHERE product_line = ? AND symbol = ?
+                   AND (taker_user_id = ? OR maker_user_id = ?)
+                """);
+        List<Object> args = new ArrayList<>(List.of(productLine(), symbol.trim().toUpperCase(java.util.Locale.ROOT),
+                userId, userId));
+        if (beforeTradeId != null) {
+            sql.append(" AND trade_id < ?");
+            args.add(beforeTradeId);
+        }
+        sql.append(" ORDER BY trade_id DESC LIMIT ?");
+        args.add(limit + 1);
+        List<UserMatchTradeResponse> fetched = jdbcTemplate.query(sql.toString(), (result, rowNum) -> {
+            long tradeId = result.getLong("trade_id");
+            long takerUserId = result.getLong("taker_user_id");
+            boolean taker = takerUserId == userId;
+            long orderId = taker ? result.getLong("taker_order_id") : result.getLong("maker_order_id");
+            OrderSide takerSide = OrderSide.valueOf(result.getString("taker_side"));
+            return new UserMatchTradeResponse(
+                    tradeId,
+                    orderId,
+                    symbol.trim().toUpperCase(java.util.Locale.ROOT),
+                    taker ? takerSide : opposite(takerSide),
+                    result.getLong("price_ticks"),
+                    result.getLong("quantity_steps"),
+                    taker ? result.getLong("taker_fee_rate_ppm") : result.getLong("maker_fee_rate_ppm"),
+                    timestamp(result.getTimestamp("event_time")));
+        }, args.toArray());
+        boolean hasMore = fetched.size() > limit;
+        List<UserMatchTradeResponse> rows = hasMore ? List.copyOf(fetched.subList(0, limit)) : List.copyOf(fetched);
+        String nextCursor = hasMore && !rows.isEmpty() ? encodeCursor(rows.get(rows.size() - 1).tradeId()) : null;
+        return new UserMatchTradeQueryResponse(rows, nextCursor, hasMore, "tradeId.desc", limit);
+    }
+
+    private OrderSide opposite(OrderSide side) {
+        return side == OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY;
+    }
+
+    private Long decodeCursor(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
+            return Long.parseLong(decoded);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("invalid trade cursor", ex);
+        }
+    }
+
+    private String encodeCursor(long tradeId) {
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(Long.toString(tradeId).getBytes(StandardCharsets.UTF_8));
     }
 
     private Instant timestamp(Timestamp value) {
