@@ -58,16 +58,23 @@ final class CoreExportState {
     }
 
     void append(CoreMessage command, ResponseStatus status, com.surprising.aeron.protocol.CoreResultCode resultCode,
-                long appliedCommandCount, long businessStateHash) {
+                long appliedCommandCount, long businessStateHash,
+                List<com.surprising.aeron.protocol.CoreUserStateView> changedUsers,
+                List<com.surprising.aeron.protocol.CoreOrderStateView> changedOrders,
+                List<com.surprising.aeron.protocol.CoreExecutionView> executions) {
         if (pending.size() >= MAX_PENDING_EVENTS) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached hard limit");
         }
         long sequence = nextSequence;
         CoreExportEvent event = new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
                 command.header().commandId(), command.header().messageType(), status, resultCode,
-                command.header().userId(), command.payload());
-        CoreMessage message = new CoreMessage(command.header().exportEvent(sequence),
-                CoreExportCodec.encodeEvent(event));
+                command.header().userId(), command.payload(), changedUsers, changedOrders, executions);
+        CoreMessage message;
+        try {
+            message = new CoreMessage(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));
+        } catch (IllegalArgumentException exception) {
+            throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export fact exceeds event limit");
+        }
         long eventBytes = encodedLength(message);
         if (pendingBytes + eventBytes > MAX_PENDING_BYTES) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached byte limit");
@@ -84,7 +91,7 @@ final class CoreExportState {
 
     boolean hasCapacityFor(CoreMessage command) {
         long eventBytes = Math.addExact(CoreProtocol.HEADER_LENGTH,
-                Math.addExact(64L, command.payload().length));
+                Math.addExact(80L, command.payload().length));
         return hasCapacity() && pendingBytes + eventBytes <= MAX_PENDING_BYTES;
     }
 

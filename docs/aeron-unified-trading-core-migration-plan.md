@@ -1196,6 +1196,9 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] Aeron 下单命令映射测试直接解码 payload，覆盖 MARKET 保护价、订单类型/TIF、费率快照和衍生品预留；Order provider 全依赖 `clean test` 128/128 通过。
 - [x] `REPLACE_ORDER` 升级为核心内原子撤旧建新，完整携带新 order/clientOrderId、数量、TIF、post-only、费率和资金预留；Exchange Core 任一步失败均重建到命令前 Book State，不暴露外围半撤单状态。
 - [x] 原子改单核心撮合 11/11、协议 3/3、Order provider 129/129 通过；旧订单终态、新订单成交/挂簿和 Snapshot 恢复均由同一 Aeron 命令裁决。
+- [x] Core Export v2 在命令审计外输出确定性 User 增量事实、完整变化后 Order State 和逐笔 Execution；旧 v1 pending event 仍可解码，避免保卷升级时 Export cursor 断链。
+- [x] User 事实仅携带本命令变化的余额/预占/仓位，不随用户历史订单数膨胀；单事件超限时 Core 与 Exchange Core 回滚到命令前状态并失败关闭。
+- [x] PostgreSQL 投影在单事务内写 audit、user fact、order latest state 和 execution；重复 `(product_line, export_sequence)` 整体幂等，Exporter 全依赖测试 7/7、Core 45/45 通过。
 - [ ] Account/Order/Funding/Risk/Liquidation 现有服务入口切换到 Aeron 后删除旧实现。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
@@ -1256,6 +1259,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P6 | 实现 | `clientOrderId` 索引由不可变 Order State 确定性派生，命令元数据使用真实 Cluster timestamp/position 盖章 | 满足订单 API 幂等和审计要求，同时避免第二套索引写流程或扩大幂等结果窗口 | `CoreProbeStateTest`、`CoreStateQueryCodecTest`、SPOT v5→v6 保卷恢复 | 单笔强查询直接走 Aeron；历史批量查询由 Exporter/PG 投影承接 |
 | 2026-08-13 | P6 | 实现 | Order 单笔生产入口直接提交 Aeron 原子下单/撤单命令，强查询必须携带用户归属 | 旧 reserve→matching 链会与 Core 原子预占重复锁资；无用户归属的查询无法安全路由 | `AeronOrderCommandServiceTest` 2/2、Order provider 全依赖 128/128 | 改单、批量撤单和历史列表仍在 P6 后续迁移；未保留运行时回退开关 |
 | 2026-08-13 | P6 | 实现 | 改单以单条 `REPLACE_ORDER` 原子撤销原单并创建完整替代单 | API 允许改数量/TIF/post-only/clientOrderId，Exchange Core 原地 move 只能改价且会造成语义缩水；外围两命令会暴露半状态 | `CoreMatchingStateTest` 11/11、`AeronOrderCommandServiceTest` 3/3、Order provider 129/129 | 新单失效时 Core 和 Exchange Core 同时恢复命令前状态；协议无需兼容未上线系统的旧 replace 日志 |
+| 2026-08-13 | P6 | 实现 | 唯一 Core Exporter 输出命令审计、变化 User 增量、变化后 Order 和 Execution 事实，并在一个 PG 事务投影 | 删除旧 Order WAL 前必须承接开放单/历史/成交/私有推送；导出全量 User 会使单事件随历史线性膨胀 | `CoreExportCodecTest`、`JdbcCoreEventProjectorTest`、Core 45/45、Exporter 7/7 | V002 migration 是 Projection 启动前门禁；旧 v1 pending event 可继续 drain，未新增 outbox/WAL/第二状态机 |
 | 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
 | 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
 | 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |

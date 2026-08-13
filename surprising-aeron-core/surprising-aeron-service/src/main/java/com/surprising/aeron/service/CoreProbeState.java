@@ -23,6 +23,7 @@ import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import com.surprising.product.api.ProductLine;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -41,6 +42,7 @@ public final class CoreProbeState implements AutoCloseable {
     private long appliedCommandCount;
     private long probeValue;
     private TradingCoreState tradingState;
+    private List<com.surprising.aeron.protocol.CoreExecutionView> commandExecutions = List.of();
 
     public CoreProbeState(ProductLine productLine) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
@@ -176,6 +178,7 @@ public final class CoreProbeState implements AutoCloseable {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
         TradingCoreState beforeTradingState = tradingState;
+        commandExecutions = List.of();
         try {
             status = applyCommand(message);
         } catch (CoreStateRejectedException exception) {
@@ -194,12 +197,19 @@ public final class CoreProbeState implements AutoCloseable {
         if (status == ResponseStatus.APPLIED) {
             tradingState = tradingState.stampOrderChanges(beforeTradingState, clusterTimestamp, clusterPosition);
         }
+        if (exportCommand) {
+            try {
+                exportState.append(message, status, resultCode, Math.incrementExact(appliedCommandCount),
+                        tradingState.businessStateHash(), changedUsers(beforeTradingState, tradingState),
+                        changedOrders(beforeTradingState, tradingState), commandExecutions);
+            } catch (CoreStateRejectedException exception) {
+                tradingState = beforeTradingState;
+                matchingAdapter.rebuild(beforeTradingState.bookState());
+                return rejected(CoreResultCode.fromRejectionCode(exception.code()));
+            }
+        }
         appliedCommandCount = Math.incrementExact(appliedCommandCount);
         lastSourceSequences.put(sourceKey, message.header().sourceSequence());
-        if (exportCommand) {
-            exportState.append(message, status, resultCode, appliedCommandCount,
-                    tradingState.businessStateHash());
-        }
         commandResults.put(message.header().commandId(),
                 new StoredResult(status, resultCode, appliedCommandCount, 0));
         trimIdempotencyWindow();
@@ -331,6 +341,7 @@ public final class CoreProbeState implements AutoCloseable {
             }
             tradingState = tradingReducer.applyMatches(reserved, command.orderId(),
                     command.baseAsset(), command.quoteAsset(), matchingResult.matches());
+            commandExecutions = executionViews(command.orderId(), message.header().userId(), matchingResult.matches());
         } catch (RuntimeException exception) {
             matchingAdapter.rebuild(before.bookState());
             throw exception;
@@ -380,6 +391,8 @@ public final class CoreProbeState implements AutoCloseable {
             }
             tradingState = tradingReducer.applyMatches(prepared, command.replacement().orderId(),
                     command.replacement().baseAsset(), command.replacement().quoteAsset(), matchingResult.matches());
+            commandExecutions = executionViews(command.replacement().orderId(), message.header().userId(),
+                    matchingResult.matches());
         } catch (RuntimeException exception) {
             matchingAdapter.rebuild(before.bookState());
             throw exception;
@@ -462,6 +475,69 @@ public final class CoreProbeState implements AutoCloseable {
                         value.positionMarginUnits())).toList());
         return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.userStateHash(userId),
                 CoreStateQueryCodec.encodeUserState(view));
+    }
+
+    private static List<com.surprising.aeron.protocol.CoreExecutionView> executionViews(
+            long takerOrderId, long takerUserId, List<com.surprising.aeron.service.matching.CoreMatch> matches) {
+        return matches.stream().map(match -> new com.surprising.aeron.protocol.CoreExecutionView(
+                takerOrderId, match.makerOrderId(), takerUserId, match.makerUserId(),
+                match.priceTicks(), match.quantitySteps())).toList();
+    }
+
+    private static List<CoreUserStateView> changedUsers(TradingCoreState before, TradingCoreState after) {
+        return after.users().values().stream()
+                .filter(user -> !user.equals(before.users().get(user.userId())))
+                .map(user -> userDelta(before.users().get(user.userId()), user)).toList();
+    }
+
+    private static List<CoreOrderStateView> changedOrders(TradingCoreState before, TradingCoreState after) {
+        return after.orders().values().stream()
+                .filter(order -> !order.equals(before.orders().get(order.orderId())))
+                .map(CoreProbeState::orderView).toList();
+    }
+
+    private static CoreUserStateView userView(com.surprising.aeron.service.state.CoreUserState user) {
+        return new CoreUserStateView(user.productLine(), user.userId(), user.revision(), user.positionMode(),
+                user.balances().values().stream().map(value -> new CoreBalanceView(
+                        value.asset(), value.availableUnits(), value.lockedUnits())).toList(),
+                user.reservations().values().stream().map(value -> new CoreReservationView(
+                        value.orderId(), value.symbol(), value.instrumentVersion(), value.kind(), value.asset(),
+                        value.reservedUnits(), value.releasedUnits(), value.consumedUnits(),
+                        value.orderQuantitySteps())).toList(),
+                user.positions().values().stream().map(value -> new CorePositionView(
+                        value.symbol(), value.marginAsset(), value.marginMode(), value.positionSide(),
+                        value.instrumentVersion(), value.signedQuantitySteps(), value.entryPriceTicks(),
+                        value.entryValueTicks(), value.realizedPnlUnits(), value.positionMarginUnits())).toList());
+    }
+
+    private static CoreUserStateView userDelta(com.surprising.aeron.service.state.CoreUserState before,
+                                                com.surprising.aeron.service.state.CoreUserState after) {
+        return new CoreUserStateView(after.productLine(), after.userId(), after.revision(), after.positionMode(),
+                after.balances().values().stream()
+                        .filter(value -> before == null || !value.equals(before.balances().get(value.asset())))
+                        .map(value -> new CoreBalanceView(value.asset(), value.availableUnits(), value.lockedUnits()))
+                        .toList(),
+                after.reservations().values().stream()
+                        .filter(value -> before == null || !value.equals(before.reservations().get(value.orderId())))
+                        .map(value -> new CoreReservationView(value.orderId(), value.symbol(), value.instrumentVersion(),
+                                value.kind(), value.asset(), value.reservedUnits(), value.releasedUnits(),
+                                value.consumedUnits(), value.orderQuantitySteps())).toList(),
+                after.positions().values().stream()
+                        .filter(value -> before == null || !value.equals(before.positions().get(value.key())))
+                        .map(value -> new CorePositionView(value.symbol(), value.marginAsset(), value.marginMode(),
+                                value.positionSide(), value.instrumentVersion(), value.signedQuantitySteps(),
+                                value.entryPriceTicks(), value.entryValueTicks(), value.realizedPnlUnits(),
+                                value.positionMarginUnits())).toList());
+    }
+
+    private static CoreOrderStateView orderView(com.surprising.aeron.service.state.CoreOrderState order) {
+        return new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(), order.symbol(),
+                order.instrumentVersion(), order.side(), order.priceTicks(), order.quantitySteps(),
+                order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
+                order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(), order.postOnly(),
+                order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
+                order.createdAtEpochMillis(), order.updatedAtEpochMillis(), order.clusterPosition(),
+                order.status().name(), order.revision());
     }
 
     private CoreResponse orderStateResponse(long orderId) {

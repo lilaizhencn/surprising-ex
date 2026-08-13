@@ -8,6 +8,7 @@ import java.util.UUID;
 
 public final class CoreExportCodec {
 
+    private static final int EVENT_V2_MARKER = 0xC0E2_0002;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
             CoreMessageCodec.MAX_PAYLOAD_LENGTH - EVENT_FIXED_LENGTH;
@@ -43,10 +44,17 @@ public final class CoreExportCodec {
 
     public static byte[] encodeEvent(CoreExportEvent event) {
         byte[] payload = event.commandPayload();
-        if (payload.length > MAX_COMMAND_PAYLOAD) {
+        List<byte[]> users = event.changedUsers().stream().map(CoreStateQueryCodec::encodeUserState).toList();
+        List<byte[]> orders = event.changedOrders().stream().map(CoreStateQueryCodec::encodeOrderState).toList();
+        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 3L + payload.length;
+        for (byte[] user : users) length = Math.addExact(length, Integer.BYTES + user.length);
+        for (byte[] order : orders) length = Math.addExact(length, Integer.BYTES + order.length);
+        length = Math.addExact(length, Math.multiplyExact(event.executions().size(), Long.BYTES * 6L));
+        if (payload.length > MAX_COMMAND_PAYLOAD || length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("export event payload is too large");
         }
-        ByteBuffer output = littleEndian(Math.addExact(EVENT_FIXED_LENGTH, payload.length));
+        ByteBuffer output = littleEndian(Math.toIntExact(length));
+        output.putInt(EVENT_V2_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
         output.putLong(event.businessStateHash());
@@ -58,6 +66,13 @@ public final class CoreExportCodec {
         output.putLong(event.userId());
         output.putInt(payload.length);
         output.put(payload);
+        putItems(output, users);
+        putItems(output, orders);
+        output.putInt(event.executions().size());
+        event.executions().forEach(execution -> output.putLong(execution.takerOrderId())
+                .putLong(execution.makerOrderId()).putLong(execution.takerUserId())
+                .putLong(execution.makerUserId()).putLong(execution.priceTicks())
+                .putLong(execution.quantitySteps()));
         return output.array();
     }
 
@@ -66,6 +81,8 @@ public final class CoreExportCodec {
             throw new ProtocolException("export event is truncated");
         }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
+        boolean version2 = input.remaining() >= Integer.BYTES && input.getInt(input.position()) == EVENT_V2_MARKER;
+        if (version2) input.getInt();
         long sequence = input.getLong();
         long appliedCount = input.getLong();
         long businessHash = input.getLong();
@@ -75,13 +92,56 @@ public final class CoreExportCodec {
         CoreResultCode resultCode = CoreResultCode.fromWireCode(input.getInt());
         long userId = input.getLong();
         int payloadLength = input.getInt();
-        if (payloadLength < 0 || payloadLength > MAX_COMMAND_PAYLOAD || input.remaining() != payloadLength) {
+        if (payloadLength < 0 || payloadLength > MAX_COMMAND_PAYLOAD
+                || input.remaining() < payloadLength) {
             throw new ProtocolException("invalid export event payload length");
         }
         byte[] payload = new byte[payloadLength];
         input.get(payload);
+        if (!version2) {
+            if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
+            return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
+                    commandType, status, resultCode, userId, payload);
+        }
+        List<CoreUserStateView> users = readItems(input, CoreStateQueryCodec::decodeUserState);
+        List<CoreOrderStateView> orders = readItems(input, CoreStateQueryCodec::decodeOrderState);
+        int executionCount = readCount(input);
+        if (input.remaining() != Math.multiplyExact(executionCount, Long.BYTES * 6)) {
+            throw new ProtocolException("invalid execution facts length");
+        }
+        List<CoreExecutionView> executions = new ArrayList<>(executionCount);
+        for (int index = 0; index < executionCount; index++) {
+            executions.add(new CoreExecutionView(input.getLong(), input.getLong(), input.getLong(), input.getLong(),
+                    input.getLong(), input.getLong()));
+        }
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
-                commandType, status, resultCode, userId, payload);
+                commandType, status, resultCode, userId, payload, users, orders, executions);
+    }
+
+    private static void putItems(ByteBuffer output, List<byte[]> items) {
+        output.putInt(items.size());
+        items.forEach(item -> output.putInt(item.length).put(item));
+    }
+
+    private static <T> List<T> readItems(ByteBuffer input, java.util.function.Function<byte[], T> decoder) {
+        int count = readCount(input);
+        List<T> values = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            if (input.remaining() < Integer.BYTES) throw new ProtocolException("export fact is truncated");
+            int length = input.getInt();
+            if (length <= 0 || length > input.remaining()) throw new ProtocolException("invalid export fact length");
+            byte[] encoded = new byte[length];
+            input.get(encoded);
+            values.add(decoder.apply(encoded));
+        }
+        return List.copyOf(values);
+    }
+
+    private static int readCount(ByteBuffer input) {
+        if (input.remaining() < Integer.BYTES) throw new ProtocolException("export fact count is truncated");
+        int count = input.getInt();
+        if (count < 0 || count > 100_000) throw new ProtocolException("invalid export fact count");
+        return count;
     }
 
     public static byte[] encodeBatch(List<CoreMessage> events) {
