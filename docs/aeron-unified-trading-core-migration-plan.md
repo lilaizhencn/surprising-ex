@@ -1203,6 +1203,20 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] 开放单使用稳定 orderId cursor，历史支持 symbol/orderId/time 过滤；Order provider 全依赖 129/129 通过。
 - [x] 管理单笔/跨用户批量撤单、预览和到期生命周期撤单均由 PG 投影选集后逐笔提交 Aeron；Aeron 已提交撤单返回 `CANCELED` 并按成功统计。
 - [x] 管理与生命周期迁移后 Order provider 全依赖 129/129 通过；PG lag 最多造成一次无害重复撤单，Core 终态幂等裁决。
+- [x] Funding 到期结算由“逐用户扫描→本地 RocksDB/WAL→Kafka Account 命令→结果对账”收敛为每个
+  `(productLine, symbol, fundingTime)` 一条 `APPLY_FUNDING`；Core 在同一确定性命令内扫描权威 Position、
+  修改余额和 Treasury，并生成实际入账的逐持仓支付事实。
+- [x] Funding 使用 `fundingTime.epochMillis` 作为每个 symbol 单调结算 ID，命令 ID 同时包含 productLine、
+  symbol 和结算 ID；外围在 Aeron 成功前不移除到期费率，超时重试不会重复结算，不同合约同一结算时刻
+  也不会发生 commandId 冲突。
+- [x] Core Export 升级 v3，增加 `CoreFundingPaymentView`；v1/v2 未 ACK 事件仍可解码。Exporter 在原事务中
+  写入 `core_funding_settlement_projection` 与 `core_funding_payment_projection`，原 Funding 查询 API 改读
+  Core 投影，不新增 outbox、WAL 或第二状态机。
+- [x] 删除 Funding 账户命令 producer/consumer、账户 JVM 快照、候选扫描、完成对账、本地结算/序号 RocksDB、
+  WAL Bean 和相关测试；Funding provider 生产代码中 `FundingAccount|FundingLocal|funding-wal|AccountUserCommand`
+  引用为零。
+- [x] Core 资金费事实覆盖多空零和、同用户 HEDGE 净额为零仍保留双腿账单、余额不足时事实等于实际扣款；
+  联合 `clean test` 通过：Protocol 12/12、Core 47/47、Exporter 8/8、Funding provider 12/12。
 - [ ] Account/Order/Funding/Risk/Liquidation 现有服务入口切换到 Aeron 后删除旧实现。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
@@ -1266,6 +1280,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P6 | 实现 | 唯一 Core Exporter 输出命令审计、变化 User 增量、变化后 Order 和 Execution 事实，并在一个 PG 事务投影 | 删除旧 Order WAL 前必须承接开放单/历史/成交/私有推送；导出全量 User 会使单事件随历史线性膨胀 | `CoreExportCodecTest`、`JdbcCoreEventProjectorTest`、Core 45/45、Exporter 7/7 | V002 migration 是 Projection 启动前门禁；旧 v1 pending event 可继续 drain，未新增 outbox/WAL/第二状态机 |
 | 2026-08-13 | P6 | 实现 | Order 列表/历史/管理查询使用 Core Export PG 投影，批量撤单只用投影选集并由 Aeron 逐单裁决 | 批量与历史查询不应扩大 Cluster duty cycle；旧 RocksDB 用户分区不能在删 WAL 后继续承接查询 | Order provider 129/129 | 投影具有短暂 lag，单实体/资金仍走 Aeron 强查询；管理撤单和生命周期 fanout 后续清零旧引用 |
 | 2026-08-13 | P6 | 实现 | 管理、跨用户和生命周期撤单统一为投影选集加 Aeron 单单裁决 | 跨用户扫描属于查询负载，不应进入 Cluster；最终写裁决必须仍由 Core 检查 owner 和终态 | Order provider 129/129 | `CANCELED` 是 Aeron 同步成功，不再沿用旧异步 `CANCEL_REQUESTED` 统计语义 |
+| 2026-08-13 | P6 | 实现 | Funding 每个结算周期只提交一条 Aeron 命令，Core Export v3 输出实际逐持仓支付并由 PG 投影承接查询 | 删除逐用户账户命令可减少 O(position) 外围消息、WAL 与结果对账；账单和 funds-diff 仍必须来自权威裁决 | Core 47/47、Exporter 8/8、Funding 12/12 | 命令 ID 包含 productLine/symbol/fundingTime；v1/v2 Export 兼容读取；V003 是 Projection 启动前门禁 |
 | 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
 | 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
 | 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |

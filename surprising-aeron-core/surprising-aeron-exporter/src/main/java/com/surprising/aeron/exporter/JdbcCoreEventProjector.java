@@ -4,6 +4,8 @@ import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.product.api.ProductLine;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -44,6 +46,20 @@ public final class JdbcCoreEventProjector {
                  taker_user_id, maker_user_id, price_ticks, quantity_steps)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
+    private static final String INSERT_FUNDING_SETTLEMENT = """
+            INSERT INTO core_funding_settlement_projection
+                (product_line, settlement_id, export_sequence, symbol, instrument_version,
+                 funding_rate_ppm, command_status, result_code, total_long_payment_units,
+                 total_short_payment_units, position_count, occurred_at_epoch_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+    private static final String INSERT_FUNDING_PAYMENT = """
+            INSERT INTO core_funding_payment_projection
+                (product_line, export_sequence, payment_index, settlement_id, user_id, symbol,
+                 margin_mode, position_side, asset, signed_quantity_steps, notional_units,
+                 funding_rate_ppm, amount_units, occurred_at_epoch_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
 
     private final DataSource dataSource;
 
@@ -61,7 +77,7 @@ public final class JdbcCoreEventProjector {
             connection.setAutoCommit(false);
             try {
                 insertEvent(connection, productLine, message, event);
-                insertFacts(connection, productLine, event);
+                insertFacts(connection, productLine, message, event);
                 connection.commit();
                 return true;
             } catch (SQLException exception) {
@@ -91,7 +107,7 @@ public final class JdbcCoreEventProjector {
         }
     }
 
-    private static void insertFacts(Connection connection, ProductLine productLine,
+    private static void insertFacts(Connection connection, ProductLine productLine, CoreMessage message,
                                     CoreExportEvent event) throws SQLException {
         try (PreparedStatement users = connection.prepareStatement(INSERT_USER_FACT)) {
             for (var user : event.changedUsers()) {
@@ -153,6 +169,55 @@ public final class JdbcCoreEventProjector {
                 executions.addBatch();
             }
             executions.executeBatch();
+        }
+        insertFundingFacts(connection, productLine, message, event);
+    }
+
+    private static void insertFundingFacts(Connection connection, ProductLine productLine, CoreMessage message,
+                                           CoreExportEvent event) throws SQLException {
+        if (event.commandType() != CoreMessageType.APPLY_FUNDING) return;
+        var command = TradingCommandCodec.decodeApplyFunding(event.commandPayload());
+        long totalLong = 0;
+        long totalShort = 0;
+        for (var payment : event.fundingPayments()) {
+            if (payment.signedQuantitySteps() > 0) totalLong = Math.addExact(totalLong, payment.amountUnits());
+            else totalShort = Math.addExact(totalShort, payment.amountUnits());
+        }
+        try (PreparedStatement settlement = connection.prepareStatement(INSERT_FUNDING_SETTLEMENT)) {
+            settlement.setString(1, productLine.name());
+            settlement.setLong(2, command.settlementId());
+            settlement.setLong(3, event.exportSequence());
+            settlement.setString(4, command.symbol());
+            settlement.setLong(5, command.instrumentVersion());
+            settlement.setLong(6, command.fundingRatePpm());
+            settlement.setString(7, event.commandStatus().name());
+            settlement.setString(8, event.resultCode().name());
+            settlement.setLong(9, totalLong);
+            settlement.setLong(10, totalShort);
+            settlement.setInt(11, event.fundingPayments().size());
+            settlement.setLong(12, message.header().submittedAtEpochMillis());
+            settlement.executeUpdate();
+        }
+        try (PreparedStatement payments = connection.prepareStatement(INSERT_FUNDING_PAYMENT)) {
+            for (int index = 0; index < event.fundingPayments().size(); index++) {
+                var payment = event.fundingPayments().get(index);
+                payments.setString(1, productLine.name());
+                payments.setLong(2, event.exportSequence());
+                payments.setInt(3, index);
+                payments.setLong(4, payment.settlementId());
+                payments.setLong(5, payment.userId());
+                payments.setString(6, payment.symbol());
+                payments.setString(7, payment.marginMode().name());
+                payments.setString(8, payment.positionSide().name());
+                payments.setString(9, payment.asset());
+                payments.setLong(10, payment.signedQuantitySteps());
+                payments.setLong(11, payment.notionalUnits());
+                payments.setLong(12, payment.fundingRatePpm());
+                payments.setLong(13, payment.amountUnits());
+                payments.setLong(14, message.header().submittedAtEpochMillis());
+                payments.addBatch();
+            }
+            payments.executeBatch();
         }
     }
 

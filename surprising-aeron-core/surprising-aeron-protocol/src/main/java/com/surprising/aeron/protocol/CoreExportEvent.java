@@ -15,25 +15,38 @@ public record CoreExportEvent(
         byte[] commandPayload,
         List<CoreUserStateView> changedUsers,
         List<CoreOrderStateView> changedOrders,
-        List<CoreExecutionView> executions) {
+        List<CoreExecutionView> executions,
+        List<CoreFundingPaymentView> fundingPayments) {
 
     public CoreExportEvent {
         if (exportSequence <= 0 || appliedCommandCount <= 0 || commandId == null || commandType == null
                 || commandType.kind() != WireMessageKind.COMMAND || commandStatus == null || resultCode == null
-                || commandPayload == null || changedUsers == null || changedOrders == null || executions == null) {
+                || commandPayload == null || changedUsers == null || changedOrders == null || executions == null
+                || fundingPayments == null) {
             throw new IllegalArgumentException("invalid core export event");
         }
         commandPayload = commandPayload.clone();
         changedUsers = List.copyOf(changedUsers);
         changedOrders = List.copyOf(changedOrders);
         executions = List.copyOf(executions);
+        fundingPayments = List.copyOf(fundingPayments);
     }
 
     public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
                            UUID commandId, CoreMessageType commandType, ResponseStatus commandStatus,
                            CoreResultCode resultCode, long userId, byte[] commandPayload) {
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
-                commandStatus, resultCode, userId, commandPayload, List.of(), List.of(), List.of());
+                commandStatus, resultCode, userId, commandPayload, List.of(), List.of(), List.of(), List.of());
+    }
+
+    public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
+                           UUID commandId, CoreMessageType commandType, ResponseStatus commandStatus,
+                           CoreResultCode resultCode, long userId, byte[] commandPayload,
+                           List<CoreUserStateView> changedUsers, List<CoreOrderStateView> changedOrders,
+                           List<CoreExecutionView> executions) {
+        this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
+                commandStatus, resultCode, userId, commandPayload, changedUsers, changedOrders,
+                executions, List.of());
     }
 
     @Override

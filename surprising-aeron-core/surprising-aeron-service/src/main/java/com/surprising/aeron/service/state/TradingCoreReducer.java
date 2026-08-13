@@ -407,6 +407,10 @@ public final class TradingCoreReducer {
     }
 
     public TradingCoreState applyFunding(TradingCoreState state, ApplyFundingCommand command) {
+        return applyFundingWithFacts(state, command).state();
+    }
+
+    public FundingApplication applyFundingWithFacts(TradingCoreState state, ApplyFundingCommand command) {
         if (!state.productLine().isFundingProduct()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
@@ -422,24 +426,59 @@ public final class TradingCoreReducer {
         }
         Map<Long, CoreUserState> users = new TreeMap<>(state.users());
         CoreTreasuryState treasury = state.treasuryState();
+        java.util.ArrayList<com.surprising.aeron.protocol.CoreFundingPaymentView> payments = new java.util.ArrayList<>();
         for (CoreUserState user : state.users().values()) {
             long delta = 0;
-            for (CorePositionState position : positionsForSymbol(user, instrument.symbol())) {
-                delta = Math.addExact(delta, CoreContractMath.fundingDeltaUnits(instrument,
-                        position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm()));
+            java.util.List<CorePositionState> positions = positionsForSymbol(user, instrument.symbol());
+            java.util.ArrayList<Long> positionDeltas = new java.util.ArrayList<>(positions.size());
+            for (CorePositionState position : positions) {
+                long positionDelta = CoreContractMath.fundingDeltaUnits(instrument,
+                        position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
+                positionDeltas.add(positionDelta);
+                delta = Math.addExact(delta, positionDelta);
             }
-            if (delta == 0) continue;
+            if (positions.isEmpty()) continue;
             CashResult result = applyCash(requireBalance(user, instrument.settleAsset()), delta);
-            Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
-            balances.put(instrument.settleAsset(), result.balance());
-            users.put(user.userId(), new CoreUserState(user.productLine(), user.userId(),
-                    Math.incrementExact(user.revision()), balances, user.reservations(), user.positions(),
-                    user.positionMode()));
-            treasury = treasury.adjustInsurance(instrument.settleAsset(), Math.negateExact(result.appliedDelta()));
+            if (result.appliedDelta() != 0) {
+                Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
+                balances.put(instrument.settleAsset(), result.balance());
+                users.put(user.userId(), new CoreUserState(user.productLine(), user.userId(),
+                        Math.incrementExact(user.revision()), balances, user.reservations(), user.positions(),
+                        user.positionMode()));
+                treasury = treasury.adjustInsurance(instrument.settleAsset(), Math.negateExact(result.appliedDelta()));
+            }
+            long debitRelief = Math.subtractExact(result.appliedDelta(), delta);
+            for (int index = 0; index < positions.size(); index++) {
+                CorePositionState position = positions.get(index);
+                long amount = positionDeltas.get(index);
+                if (amount < 0 && debitRelief > 0) {
+                    long relief = Math.min(Math.negateExact(amount), debitRelief);
+                    amount = Math.addExact(amount, relief);
+                    debitRelief = Math.subtractExact(debitRelief, relief);
+                }
+                if (amount != 0) {
+                    long notional = com.surprising.instrument.api.math.PerpetualContractMath.notionalUnits(
+                            instrument.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),
+                            instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
+                            instrument.settleScaleUnits());
+                    payments.add(new com.surprising.aeron.protocol.CoreFundingPaymentView(
+                            command.settlementId(), user.userId(), instrument.symbol(), position.marginMode(),
+                            position.positionSide(), instrument.settleAsset(), position.signedQuantitySteps(),
+                            notional, command.fundingRatePpm(), amount));
+                }
+            }
+            if (debitRelief != 0) throw new IllegalStateException("funding debit relief was not fully allocated");
         }
         treasury = treasury.recordFunding(instrument.symbol(), command.settlementId());
-        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury);
+        return new FundingApplication(new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
+                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury), payments);
+    }
+
+    public record FundingApplication(TradingCoreState state,
+                                     java.util.List<com.surprising.aeron.protocol.CoreFundingPaymentView> payments) {
+        public FundingApplication {
+            payments = java.util.List.copyOf(payments);
+        }
     }
 
     public TradingCoreState settleInstrument(TradingCoreState state, SettleInstrumentCommand command) {

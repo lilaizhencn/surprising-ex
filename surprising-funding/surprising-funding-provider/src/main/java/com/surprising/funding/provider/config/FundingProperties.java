@@ -24,7 +24,7 @@ public class FundingProperties {
     @Valid
     private Coordination coordination = new Coordination();
     @Valid
-    private Wal wal = new Wal();
+    private Aeron aeron = new Aeron();
 
     /** 启动时拒绝未隔离的资金费 Topic 配置。 */
     @PostConstruct
@@ -64,23 +64,48 @@ public class FundingProperties {
         this.coordination = coordination;
     }
 
-    public Wal getWal() {
-        return wal;
+    public Aeron getAeron() {
+        return aeron;
     }
 
-    public void setWal(Wal wal) {
-        this.wal = wal;
+    public void setAeron(Aeron aeron) {
+        this.aeron = aeron == null ? new Aeron() : aeron;
     }
 
-    public static class Wal {
-        private String directory = "data/funding-wal";
+    public static class Aeron {
+        private java.util.List<String> hostnames = java.util.List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private Duration responseTimeout = Duration.ofSeconds(5);
+        private int clientConnections = 2;
 
-        public String getDirectory() {
-            return directory;
+        public java.util.List<String> getHostnames() { return hostnames; }
+        public void setHostnames(java.util.List<String> hostnames) {
+            if (hostnames == null || hostnames.size() != 3
+                    || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
+                throw new IllegalArgumentException("aeron hostnames must contain three non-blank members");
+            }
+            this.hostnames = java.util.List.copyOf(hostnames);
         }
-
-        public void setDirectory(String directory) {
-            this.directory = directory;
+        public String getEgressHostname() { return egressHostname; }
+        public void setEgressHostname(String egressHostname) {
+            if (egressHostname == null || egressHostname.isBlank()) {
+                throw new IllegalArgumentException("aeron egress hostname is required");
+            }
+            this.egressHostname = egressHostname.trim();
+        }
+        public Duration getResponseTimeout() { return responseTimeout; }
+        public void setResponseTimeout(Duration responseTimeout) {
+            if (responseTimeout == null || responseTimeout.isZero() || responseTimeout.isNegative()) {
+                throw new IllegalArgumentException("aeron response timeout must be positive");
+            }
+            this.responseTimeout = responseTimeout;
+        }
+        public int getClientConnections() { return clientConnections; }
+        public void setClientConnections(int clientConnections) {
+            if (clientConnections < 1 || clientConnections > 64) {
+                throw new IllegalArgumentException("aeron client connections must be in [1,64]");
+            }
+            this.clientConnections = clientConnections;
         }
     }
 
@@ -90,9 +115,7 @@ public class FundingProperties {
         private boolean productTopicsEnabled;
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String cacheGroupId = "surprising-funding-rate-cache-local";
-        private String accountStateSnapshotGroupId = "surprising-funding-account-state-v1";
         private int concurrency = 1;
-        private int commandResultsConcurrency = 4;
         private int maxPollRecords = 500;
 
         public String getBootstrapServers() {
@@ -137,14 +160,6 @@ public class FundingProperties {
             return "surprising-" + productLine.topicSegment() + "-funding-instrument-snapshot-v1";
         }
 
-        public String getUserCommandsTopic() {
-            return ProductTopicNames.of(productLine).accountUserCommandsTopic();
-        }
-
-        public String getCommandResultsTopic() {
-            return ProductTopicNames.of(productLine).accountCommandResultsTopic();
-        }
-
         public String getCacheGroupId() {
             return cacheGroupId;
         }
@@ -153,40 +168,12 @@ public class FundingProperties {
             this.cacheGroupId = cacheGroupId;
         }
 
-        public String getCommandResultsGroupId() {
-            return ProductTopicNames.of(productLine).consumerGroup("funding-account-results");
-        }
-
-        public String getAccountStateEventsTopic() {
-            return productTopicsEnabled
-                    ? ProductTopicNames.of(productLine).accountStateEventsTopic()
-                    : "surprising.account.state.events.v1";
-        }
-
-        public String getAccountStateSnapshotGroupId() {
-            return productTopicsEnabled
-                    ? ProductTopicNames.of(productLine).consumerGroup("funding-account-state")
-                    : accountStateSnapshotGroupId;
-        }
-
-        public void setAccountStateSnapshotGroupId(String accountStateSnapshotGroupId) {
-            this.accountStateSnapshotGroupId = accountStateSnapshotGroupId;
-        }
-
         public int getConcurrency() {
             return concurrency;
         }
 
         public void setConcurrency(int concurrency) {
             this.concurrency = concurrency;
-        }
-
-        public int getCommandResultsConcurrency() {
-            return commandResultsConcurrency;
-        }
-
-        public void setCommandResultsConcurrency(int commandResultsConcurrency) {
-            this.commandResultsConcurrency = commandResultsConcurrency;
         }
 
         public int getMaxPollRecords() {
@@ -244,15 +231,6 @@ public class FundingProperties {
         @Min(1)
         @Max(10_000)
         private int batchSize = 20;
-        @Min(1)
-        @Max(10_000)
-        private int paymentPageSize = 500;
-        @Min(1)
-        @Max(1_000)
-        private int maxPagesPerRun = 20;
-        @Min(1)
-        @Max(10_000)
-        private int reconcileBatchSize = 500;
 
         public boolean isEnabled() {
             return enabled;
@@ -278,29 +256,6 @@ public class FundingProperties {
             this.batchSize = batchSize;
         }
 
-        public int getPaymentPageSize() {
-            return paymentPageSize;
-        }
-
-        public void setPaymentPageSize(int paymentPageSize) {
-            this.paymentPageSize = paymentPageSize;
-        }
-
-        public int getMaxPagesPerRun() {
-            return maxPagesPerRun;
-        }
-
-        public void setMaxPagesPerRun(int maxPagesPerRun) {
-            this.maxPagesPerRun = maxPagesPerRun;
-        }
-
-        public int getReconcileBatchSize() {
-            return reconcileBatchSize;
-        }
-
-        public void setReconcileBatchSize(int reconcileBatchSize) {
-            this.reconcileBatchSize = reconcileBatchSize;
-        }
     }
 
     public static class Coordination {

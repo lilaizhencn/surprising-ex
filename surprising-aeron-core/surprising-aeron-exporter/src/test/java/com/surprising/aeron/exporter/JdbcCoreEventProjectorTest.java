@@ -10,6 +10,11 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreExecutionView;
+import com.surprising.aeron.protocol.CoreFundingPaymentView;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.ApplyFundingCommand;
+import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.CoreBalanceView;
@@ -89,10 +94,43 @@ class JdbcCoreEventProjectorTest {
         }
     }
 
+    @Test
+    void projectsFundingSettlementAndPaymentsFromAuthoritativeEvent() throws Exception {
+        JdbcDataSource dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:mem:funding_projection;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+        migrate(dataSource);
+        UUID commandId = UUID.randomUUID();
+        var command = new ApplyFundingCommand(81, "BTC-USDT", 7, 100);
+        var longPayment = new CoreFundingPaymentView(81, 17, "BTC-USDT", CoreMarginMode.CROSS,
+                CorePositionSide.NET, "USDT", 2, 120_000, 100, -12);
+        var shortPayment = new CoreFundingPaymentView(81, 18, "BTC-USDT", CoreMarginMode.CROSS,
+                CorePositionSide.NET, "USDT", -2, 120_000, 100, 12);
+        var event = new CoreExportEvent(3, 3, 9, commandId, CoreMessageType.APPLY_FUNDING,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 0, TradingCommandCodec.encodeApplyFunding(command),
+                java.util.List.of(), java.util.List.of(), java.util.List.of(),
+                java.util.List.of(longPayment, shortPayment));
+        var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_FUNDING, commandId,
+                ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 1, 0, 1234, 1).exportEvent(3),
+                CoreExportCodec.encodeEvent(event));
+
+        assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.LINEAR_PERPETUAL, message)).isTrue();
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            assertCount(statement, "core_funding_settlement_projection", 1);
+            assertCount(statement, "core_funding_payment_projection", 2);
+            try (var result = statement.executeQuery("SELECT total_long_payment_units, total_short_payment_units "
+                    + "FROM core_funding_settlement_projection")) {
+                result.next();
+                assertThat(result.getLong(1)).isEqualTo(-12);
+                assertThat(result.getLong(2)).isEqualTo(12);
+            }
+        }
+    }
+
     private static void migrate(JdbcDataSource dataSource) throws Exception {
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             for (String resource : java.util.List.of("/db/migration/V001__create_core_event_projection.sql",
-                    "/db/migration/V002__create_core_state_projections.sql")) {
+                    "/db/migration/V002__create_core_state_projections.sql",
+                    "/db/migration/V003__create_core_funding_projections.sql")) {
                 try (var stream = JdbcCoreEventProjectorTest.class.getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) if (!sql.isBlank()) statement.execute(sql);

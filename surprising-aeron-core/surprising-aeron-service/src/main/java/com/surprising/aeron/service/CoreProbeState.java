@@ -43,6 +43,7 @@ public final class CoreProbeState implements AutoCloseable {
     private long probeValue;
     private TradingCoreState tradingState;
     private List<com.surprising.aeron.protocol.CoreExecutionView> commandExecutions = List.of();
+    private List<com.surprising.aeron.protocol.CoreFundingPaymentView> commandFundingPayments = List.of();
 
     public CoreProbeState(ProductLine productLine) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
@@ -179,6 +180,7 @@ public final class CoreProbeState implements AutoCloseable {
         }
         TradingCoreState beforeTradingState = tradingState;
         commandExecutions = List.of();
+        commandFundingPayments = List.of();
         try {
             status = applyCommand(message);
         } catch (CoreStateRejectedException exception) {
@@ -201,7 +203,7 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 exportState.append(message, status, resultCode, Math.incrementExact(appliedCommandCount),
                         tradingState.businessStateHash(), changedUsers(beforeTradingState, tradingState),
-                        changedOrders(beforeTradingState, tradingState), commandExecutions);
+                        changedOrders(beforeTradingState, tradingState), commandExecutions, commandFundingPayments);
             } catch (CoreStateRejectedException exception) {
                 tradingState = beforeTradingState;
                 matchingAdapter.rebuild(beforeTradingState.bookState());
@@ -307,8 +309,12 @@ public final class CoreProbeState implements AutoCloseable {
                     TradingCommandCodec.decodeUpsertInstrument(message.payload()));
             case APPLY_MARK_PRICE -> tradingState = tradingReducer.applyMarkPrice(tradingState,
                     TradingCommandCodec.decodeApplyMarkPrice(message.payload()));
-            case APPLY_FUNDING -> tradingState = tradingReducer.applyFunding(tradingState,
-                    TradingCommandCodec.decodeApplyFunding(message.payload()));
+            case APPLY_FUNDING -> {
+                var result = tradingReducer.applyFundingWithFacts(tradingState,
+                        TradingCommandCodec.decodeApplyFunding(message.payload()));
+                tradingState = result.state();
+                commandFundingPayments = result.payments();
+            }
             case SETTLE_INSTRUMENT -> settleInstrument(message);
             case EXECUTE_LIQUIDATION -> executeLiquidation(message);
             case RESOLVE_LIQUIDATION -> tradingState = tradingReducer.resolveLiquidation(tradingState,

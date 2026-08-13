@@ -45,6 +45,70 @@ class CoreLifecycleStateTest {
     }
 
     @Test
+    void fundingApplicationEmitsActualZeroSumPaymentFacts() {
+        TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 100, 10, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1));
+
+        TradingCoreReducer.FundingApplication application = reducer.applyFundingWithFacts(state,
+                new ApplyFundingCommand(92, "BTC-USDT", 1, 10_000));
+
+        assertThat(application.payments()).hasSize(2);
+        assertThat(application.payments()).extracting(payment -> payment.userId())
+                .containsExactly(1L, 2L);
+        assertThat(application.payments()).extracting(payment -> payment.amountUnits())
+                .containsExactly(-10L, 10L);
+        assertThat(application.payments().stream().mapToLong(payment -> payment.amountUnits()).sum()).isZero();
+        assertThat(application.state().user(1).totalUnits("USDT") - state.user(1).totalUnits("USDT"))
+                .isEqualTo(-10);
+        assertThat(application.state().user(2).totalUnits("USDT") - state.user(2).totalUnits("USDT"))
+                .isEqualTo(10);
+    }
+
+    @Test
+    void fundingFactsPreserveHedgedLegsAndCapDebitsAtAvailableCash() {
+        TradingCoreState base = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 0);
+        CoreUserState current = base.user(1);
+        Map<String, CorePositionState> hedgedPositions = new TreeMap<>();
+        hedgedPositions.put("BTC-USDT:LONG", new CorePositionState("BTC-USDT", "USDT",
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.LONG, 1, 10, 100, 1_000, 0, 0));
+        hedgedPositions.put("BTC-USDT:SHORT", new CorePositionState("BTC-USDT", "USDT",
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.SHORT, 1, -10, 100, 1_000, 0, 0));
+        CoreUserState hedgedUser = new CoreUserState(base.productLine(), 1, current.revision() + 1,
+                current.balances(), current.reservations(), hedgedPositions,
+                com.surprising.aeron.protocol.CorePositionMode.HEDGE);
+        Map<Long, CoreUserState> users = new TreeMap<>(base.users());
+        users.put(1L, hedgedUser);
+        TradingCoreState hedged = new TradingCoreState(base.productLine(), base.revision() + 1, users,
+                base.orders(), base.bookState(), base.instruments(), base.riskState(), base.treasuryState());
+        hedged = reducer.applyMarkPrice(hedged, new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1));
+
+        TradingCoreReducer.FundingApplication netZero = reducer.applyFundingWithFacts(hedged,
+                new ApplyFundingCommand(93, "BTC-USDT", 1, 10_000));
+
+        assertThat(netZero.payments()).extracting(payment -> payment.positionSide())
+                .containsExactly(com.surprising.aeron.protocol.CorePositionSide.LONG,
+                        com.surprising.aeron.protocol.CorePositionSide.SHORT);
+        assertThat(netZero.payments()).extracting(payment -> payment.amountUnits())
+                .containsExactly(-10L, 10L);
+        assertThat(netZero.state().user(1)).isEqualTo(hedged.user(1));
+
+        TradingCoreState lowCash = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 5, 0);
+        lowCash = reducer.applyMarkPrice(lowCash, new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1));
+        TradingCoreReducer.FundingApplication capped = reducer.applyFundingWithFacts(lowCash,
+                new ApplyFundingCommand(94, "BTC-USDT", 1, 10_000));
+
+        assertThat(capped.payments()).singleElement().satisfies(payment ->
+                assertThat(payment.amountUnits()).isEqualTo(-5));
+        assertThat(capped.state().user(1).totalUnits("USDT")).isZero();
+        assertThat(capped.state().treasuryState().insuranceBalances()).containsEntry("USDT", 5L);
+    }
+
+    @Test
     void deliveryAndOptionSettlementReleaseMarginFlattenPositionsAndConserveFunds() {
         TradingCoreState delivery = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
                 ContractType.LINEAR_DELIVERY, 100, 10, 100);

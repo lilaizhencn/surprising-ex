@@ -9,6 +9,7 @@ import java.util.UUID;
 public final class CoreExportCodec {
 
     private static final int EVENT_V2_MARKER = 0xC0E2_0002;
+    private static final int EVENT_V3_MARKER = 0xC0E3_0003;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
             CoreMessageCodec.MAX_PAYLOAD_LENGTH - EVENT_FIXED_LENGTH;
@@ -46,15 +47,18 @@ public final class CoreExportCodec {
         byte[] payload = event.commandPayload();
         List<byte[]> users = event.changedUsers().stream().map(CoreStateQueryCodec::encodeUserState).toList();
         List<byte[]> orders = event.changedOrders().stream().map(CoreStateQueryCodec::encodeOrderState).toList();
-        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 3L + payload.length;
+        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 4L + payload.length;
         for (byte[] user : users) length = Math.addExact(length, Integer.BYTES + user.length);
         for (byte[] order : orders) length = Math.addExact(length, Integer.BYTES + order.length);
         length = Math.addExact(length, Math.multiplyExact(event.executions().size(), Long.BYTES * 6L));
+        for (CoreFundingPaymentView payment : event.fundingPayments()) {
+            length = Math.addExact(length, fundingPaymentLength(payment));
+        }
         if (payload.length > MAX_COMMAND_PAYLOAD || length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("export event payload is too large");
         }
         ByteBuffer output = littleEndian(Math.toIntExact(length));
-        output.putInt(EVENT_V2_MARKER);
+        output.putInt(EVENT_V3_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
         output.putLong(event.businessStateHash());
@@ -73,6 +77,8 @@ public final class CoreExportCodec {
                 .putLong(execution.makerOrderId()).putLong(execution.takerUserId())
                 .putLong(execution.makerUserId()).putLong(execution.priceTicks())
                 .putLong(execution.quantitySteps()));
+        output.putInt(event.fundingPayments().size());
+        event.fundingPayments().forEach(payment -> putFundingPayment(output, payment));
         return output.array();
     }
 
@@ -81,8 +87,10 @@ public final class CoreExportCodec {
             throw new ProtocolException("export event is truncated");
         }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
-        boolean version2 = input.remaining() >= Integer.BYTES && input.getInt(input.position()) == EVENT_V2_MARKER;
-        if (version2) input.getInt();
+        int marker = input.remaining() >= Integer.BYTES ? input.getInt(input.position()) : 0;
+        boolean version2 = marker == EVENT_V2_MARKER;
+        boolean version3 = marker == EVENT_V3_MARKER;
+        if (version2 || version3) input.getInt();
         long sequence = input.getLong();
         long appliedCount = input.getLong();
         long businessHash = input.getLong();
@@ -98,7 +106,7 @@ public final class CoreExportCodec {
         }
         byte[] payload = new byte[payloadLength];
         input.get(payload);
-        if (!version2) {
+        if (!version2 && !version3) {
             if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
             return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                     commandType, status, resultCode, userId, payload);
@@ -106,7 +114,8 @@ public final class CoreExportCodec {
         List<CoreUserStateView> users = readItems(input, CoreStateQueryCodec::decodeUserState);
         List<CoreOrderStateView> orders = readItems(input, CoreStateQueryCodec::decodeOrderState);
         int executionCount = readCount(input);
-        if (input.remaining() != Math.multiplyExact(executionCount, Long.BYTES * 6)) {
+        int executionBytes = Math.multiplyExact(executionCount, Long.BYTES * 6);
+        if (input.remaining() < executionBytes) {
             throw new ProtocolException("invalid execution facts length");
         }
         List<CoreExecutionView> executions = new ArrayList<>(executionCount);
@@ -114,8 +123,68 @@ public final class CoreExportCodec {
             executions.add(new CoreExecutionView(input.getLong(), input.getLong(), input.getLong(), input.getLong(),
                     input.getLong(), input.getLong()));
         }
+        if (version2) {
+            if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
+            return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
+                    commandType, status, resultCode, userId, payload, users, orders, executions, List.of());
+        }
+        int fundingCount = readCount(input);
+        List<CoreFundingPaymentView> fundingPayments = new ArrayList<>(fundingCount);
+        for (int index = 0; index < fundingCount; index++) fundingPayments.add(readFundingPayment(input));
+        if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
-                commandType, status, resultCode, userId, payload, users, orders, executions);
+                commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments);
+    }
+
+    private static int fundingPaymentLength(CoreFundingPaymentView payment) {
+        return Integer.BYTES * 4 + Long.BYTES * 6
+                + utf8(payment.symbol()).length + utf8(payment.asset()).length;
+    }
+
+    private static void putFundingPayment(ByteBuffer output, CoreFundingPaymentView payment) {
+        output.putLong(payment.settlementId()).putLong(payment.userId());
+        putString(output, payment.symbol());
+        output.putInt(payment.marginMode().ordinal()).putInt(payment.positionSide().ordinal());
+        putString(output, payment.asset());
+        output.putLong(payment.signedQuantitySteps()).putLong(payment.notionalUnits())
+                .putLong(payment.fundingRatePpm()).putLong(payment.amountUnits());
+    }
+
+    private static CoreFundingPaymentView readFundingPayment(ByteBuffer input) {
+        if (input.remaining() < Long.BYTES * 6 + Integer.BYTES * 4) {
+            throw new ProtocolException("funding payment fact is truncated");
+        }
+        long settlementId = input.getLong();
+        long userId = input.getLong();
+        String symbol = readString(input);
+        int marginMode = input.getInt();
+        int positionSide = input.getInt();
+        String asset = readString(input);
+        if (input.remaining() < Long.BYTES * 4 || marginMode < 0 || marginMode >= CoreMarginMode.values().length
+                || positionSide < 0 || positionSide >= CorePositionSide.values().length) {
+            throw new ProtocolException("invalid funding payment fact");
+        }
+        return new CoreFundingPaymentView(settlementId, userId, symbol, CoreMarginMode.values()[marginMode],
+                CorePositionSide.values()[positionSide], asset, input.getLong(), input.getLong(),
+                input.getLong(), input.getLong());
+    }
+
+    private static void putString(ByteBuffer output, String value) {
+        byte[] encoded = utf8(value);
+        output.putInt(encoded.length).put(encoded);
+    }
+
+    private static String readString(ByteBuffer input) {
+        if (input.remaining() < Integer.BYTES) throw new ProtocolException("string is truncated");
+        int length = input.getInt();
+        if (length <= 0 || length > input.remaining()) throw new ProtocolException("invalid string length");
+        byte[] encoded = new byte[length];
+        input.get(encoded);
+        return new String(encoded, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static byte[] utf8(String value) {
+        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private static void putItems(ByteBuffer output, List<byte[]> items) {
