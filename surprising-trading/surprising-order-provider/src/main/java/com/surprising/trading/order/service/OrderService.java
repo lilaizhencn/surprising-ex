@@ -679,7 +679,7 @@ public class OrderService {
         return new OrderQueryResponse(page.size(), List.copyOf(page), next, hasMore, "createdAt.desc", limit);
     }
 
-    private List<OrderResponse> projectionOpenOrders(ProductLine productLine, long userId, String symbol,
+    private List<OrderResponse> projectionOpenOrders(ProductLine productLine, Long userId, String symbol,
                                                      int limit, long beforeOrderId) {
         List<OrderResponse> accepted = aeronOrderProjection.query(productLine, userId, symbol,
                 OrderStatus.ACCEPTED, null, beforeOrderId, null, null, null, limit, false);
@@ -766,11 +766,16 @@ public class OrderService {
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
         requireOrderId(orderId);
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-        OrderResponse local = orderUserStateService.findAnyLocal(resolved, orderId)
-                .orElseThrow(() -> new IllegalStateException("订单所属用户分区不在当前节点，不能直接管理撤单: " + orderId));
-        OrderResponse canceled = orderUserCommandGateway.cancel(resolved, local.userId(), orderId,
-                adminCancelReason(reason));
-        boolean requested = canceled.status() == OrderStatus.CANCEL_REQUESTED;
+        OrderResponse selected = aeronOrders == null
+                ? orderUserStateService.findAnyLocal(resolved, orderId).orElseThrow(() ->
+                new IllegalStateException("订单所属用户分区不在当前节点，不能直接管理撤单: " + orderId))
+                : aeronOrderProjection.query(resolved, null, null, null, orderId, null,
+                null, null, null, 1, false).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
+        OrderResponse canceled = aeronOrders == null
+                ? orderUserCommandGateway.cancel(resolved, selected.userId(), orderId, adminCancelReason(reason))
+                : aeronOrders.cancel(selected.userId(), orderId);
+        boolean requested = cancelSucceeded(canceled.status());
         return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.symbol(),
                 canceled.status(), requested, requested ? "cancel requested" : "order is already "
                 + canceled.status().name(), canceled);
@@ -792,18 +797,30 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        if (userId == null) {
-            throw new IllegalStateException("管理员跨用户撤单必须先按用户分区路由，已禁止本地全量扫描");
-        }
         String reason = adminCancelReason(request == null ? null : request.reason());
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-        OrderBatchResponse batch = orderUserCommandGateway.cancelOpen(resolved, userId, symbol, limit, reason);
-        List<OrderResponse> canceled = batch.results().stream().filter(OrderBatchItemResponse::success)
-                .map(OrderBatchItemResponse::order).toList();
+        List<OrderResponse> canceled;
+        if (aeronOrders == null) {
+            if (userId == null) throw new IllegalStateException(
+                    "管理员跨用户撤单必须先按用户分区路由，已禁止本地全量扫描");
+            OrderBatchResponse batch = orderUserCommandGateway.cancelOpen(resolved, userId, symbol, limit, reason);
+            canceled = batch.results().stream().filter(OrderBatchItemResponse::success)
+                    .map(OrderBatchItemResponse::order).toList();
+        } else {
+            List<OrderResponse> selected = projectionOpenOrders(resolved, userId, symbol, limit, Long.MAX_VALUE);
+            List<OrderResponse> values = new ArrayList<>();
+            for (OrderResponse order : selected) {
+                try {
+                    values.add(aeronOrders.cancel(order.userId(), order.orderId()));
+                } catch (IllegalStateException ignored) {
+                }
+            }
+            canceled = List.copyOf(values);
+        }
         List<AdminCancelOrderResult> results = canceled.stream()
                 .map(order -> new AdminCancelOrderResult(order.orderId(), order.userId(), order.symbol(),
-                        order.status(), order.status() == OrderStatus.CANCEL_REQUESTED,
-                        order.status() == OrderStatus.CANCEL_REQUESTED ? "cancel requested"
+                        order.status(), cancelSucceeded(order.status()),
+                        cancelSucceeded(order.status()) ? "cancel completed"
                                 : "order is already " + order.status().name(), order))
                 .toList();
         int canceledCount = (int) results.stream().filter(AdminCancelOrderResult::cancelRequested).count();
@@ -824,7 +841,14 @@ public class OrderService {
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
         ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
-        return orderUserStateService.adminCancelPreview(resolvedProductLine, userId, normalizedSymbol, limit);
+        if (aeronOrders == null) return orderUserStateService.adminCancelPreview(resolvedProductLine, userId,
+                normalizedSymbol, limit);
+        List<OrderResponse> orders = projectionOpenOrders(resolvedProductLine, userId, normalizedSymbol,
+                limit, Long.MAX_VALUE);
+        long quantity = orders.stream().mapToLong(OrderResponse::remainingQuantitySteps).sum();
+        int buys = (int) orders.stream().filter(order -> order.side() == OrderSide.BUY).count();
+        return new AdminCancelOrdersPreviewResponse(userId, normalizedSymbol, orders.size(), orders.size(),
+                quantity, buys, orders.size() - buys, orders);
     }
 
     public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request) {
@@ -846,6 +870,17 @@ public class OrderService {
     public int requestLifecycleCancellation(String symbol, int limit) {
         String normalizedSymbol = normalizeSymbol(symbol);
         ProductLine line = currentProductLine();
+        if (aeronOrders != null) {
+            List<OrderResponse> selected = projectionOpenOrders(line, null, normalizedSymbol, limit, Long.MAX_VALUE);
+            int completed = 0;
+            for (OrderResponse order : selected) {
+                try {
+                    if (cancelSucceeded(aeronOrders.cancel(order.userId(), order.orderId()).status())) completed++;
+                } catch (IllegalStateException ignored) {
+                }
+            }
+            return completed;
+        }
         int requested = 0;
         for (long userId : orderUserStateService.localUserIds(line)) {
             requested += orderUserCommandGateway.cancelOpen(line, userId, normalizedSymbol, limit,
@@ -855,7 +890,10 @@ public class OrderService {
     }
 
     public boolean hasLifecycleActiveOrders(String symbol) {
-        return orderUserStateService.hasLifecycleActiveOrders(currentProductLine(), normalizeSymbol(symbol));
+        if (aeronOrders == null) return orderUserStateService.hasLifecycleActiveOrders(
+                currentProductLine(), normalizeSymbol(symbol));
+        return !projectionOpenOrders(currentProductLine(), null, normalizeSymbol(symbol), 1,
+                Long.MAX_VALUE).isEmpty();
     }
 
     /**
@@ -880,6 +918,10 @@ public class OrderService {
             normalized = normalized.substring(0, 500);
         }
         return "admin cancel: " + normalized;
+    }
+
+    private static boolean cancelSucceeded(OrderStatus status) {
+        return status == OrderStatus.CANCEL_REQUESTED || status == OrderStatus.CANCELED;
     }
 
     private TestOrderResponse testRejected(ValidationResult validation, String stage) {
