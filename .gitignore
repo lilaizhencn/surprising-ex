@@ -1,8 +1,14 @@
 target/
 .idea/
 *.iml
+.classpath
+.project
+.settings/
 .DS_Store
 *.log
+*.pid
+javacore.*.txt
 logs/
+.local-logs/
 data/
 .codegraph/

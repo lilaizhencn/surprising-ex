@@ -7,6 +7,9 @@
 
 ## 架构与数据
 
+- [Aeron 统一交易核心迁移实施方案](aeron-unified-trading-core-migration-plan.md)
+- [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md)
+- [Aeron 统一交易核心术语表](aeron-unified-trading-core-glossary.md)
 - [产品线架构](product-line-architecture.md)
 - [账户资金单写者与单用户串行](account-single-writer-command-lane.md)
 - [数据库设计](database.md)
