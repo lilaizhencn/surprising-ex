@@ -131,7 +131,8 @@ public class OrderUserCommandConsumer {
                 AccountCommandResultEvent result = objectMapper.readValue(command.payload(),
                         AccountCommandResultEvent.class);
                 source = "ACCOUNT";
-                sourceReference = result.sourceReference();
+                sourceReference = result.sourceReference() == null || result.sourceReference().isBlank()
+                        ? command.commandId() : result.sourceReference();
                 dependency = result.commandId();
             } catch (Exception ex) {
                 throw new IllegalStateException("账户结果 mutation 负载无法解析", ex);
