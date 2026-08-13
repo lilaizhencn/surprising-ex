@@ -91,7 +91,7 @@ class LiquidationFeeEventConsumerTest {
         private LiquidationFeeSettledEvent event;
 
         private RecordingInsuranceService(InsuranceProperties properties) {
-            super(properties, null, null, null, null, null, null, null, new ObjectMapper());
+            super(properties, null, null, null, null, null);
         }
 
         @Override

@@ -1,31 +1,29 @@
 package com.surprising.insurance.provider.service;
 
-import com.surprising.account.api.model.AccountUserCommand;
-import com.surprising.account.api.model.AccountUserCommandType;
-import com.surprising.account.api.model.DeficitReservationAccountCommand;
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
+import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreStateQueryCodec;
+import com.surprising.aeron.protocol.ResolveLiquidationCommand;
+import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.insurance.api.model.InsuranceCoverageQueryResponse;
 import com.surprising.insurance.api.model.InsuranceFundAdjustmentRequest;
 import com.surprising.insurance.api.model.InsuranceFundBalanceQueryResponse;
 import com.surprising.insurance.api.model.InsuranceFundBalanceResponse;
 import com.surprising.insurance.api.model.InsuranceLedgerQueryResponse;
 import com.surprising.insurance.provider.config.InsuranceProperties;
-import com.surprising.insurance.provider.model.InsuranceDeficitRow;
-import com.surprising.insurance.provider.model.InsuranceFundBalanceState;
 import com.surprising.insurance.provider.model.InsuranceLedgerReference;
-import com.surprising.insurance.provider.repository.InsuranceAccountOutboxRepository;
+import com.surprising.insurance.provider.repository.CoreInsuranceProjectionRepository;
 import com.surprising.insurance.provider.repository.InsuranceCoverageRepository;
-import com.surprising.insurance.provider.repository.InsuranceFundBalanceRepository;
 import com.surprising.insurance.provider.repository.InsuranceFundLedgerRepository;
-import com.surprising.insurance.provider.repository.InsuranceLegacyDeficitRepository;
-import com.surprising.insurance.provider.repository.InsuranceProductDeficitRepository;
 import com.surprising.insurance.provider.repository.InsuranceSequenceRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 @Service
     public class InsuranceService {
@@ -34,36 +32,27 @@ import tools.jackson.databind.ObjectMapper;
 
     private final InsuranceProperties properties;
     private final InsuranceSequenceRepository sequenceRepository;
-    private final InsuranceFundBalanceRepository balanceRepository;
     private final InsuranceFundLedgerRepository ledgerRepository;
     private final InsuranceCoverageRepository coverageRepository;
-    private final InsuranceProductDeficitRepository productDeficitRepository;
-    private final InsuranceLegacyDeficitRepository legacyDeficitRepository;
-    private final InsuranceAccountOutboxRepository accountOutboxRepository;
-    private final ObjectMapper objectMapper;
+    private final CoreInsuranceProjectionRepository projectionRepository;
+    private final InsuranceAeronGateway aeron;
 
     public InsuranceService(InsuranceProperties properties,
                             InsuranceSequenceRepository sequenceRepository,
-                            InsuranceFundBalanceRepository balanceRepository,
                             InsuranceFundLedgerRepository ledgerRepository,
                             InsuranceCoverageRepository coverageRepository,
-                            InsuranceProductDeficitRepository productDeficitRepository,
-                            InsuranceLegacyDeficitRepository legacyDeficitRepository,
-                            InsuranceAccountOutboxRepository accountOutboxRepository,
-                            ObjectMapper objectMapper) {
+                            CoreInsuranceProjectionRepository projectionRepository,
+                            InsuranceAeronGateway aeron) {
         this.properties = properties;
         this.sequenceRepository = sequenceRepository;
-        this.balanceRepository = balanceRepository;
         this.ledgerRepository = ledgerRepository;
         this.coverageRepository = coverageRepository;
-        this.productDeficitRepository = productDeficitRepository;
-        this.legacyDeficitRepository = legacyDeficitRepository;
-        this.accountOutboxRepository = accountOutboxRepository;
-        this.objectMapper = objectMapper;
+        this.projectionRepository = projectionRepository;
+        this.aeron = aeron;
     }
 
     /**
-     * 周期性覆盖账户结算产生的穿仓缺口；同一事务包含基金余额锁、预留、覆盖记录和账户命令 outbox。
+     * PostgreSQL 只选择待处理投影，覆盖金额和最终状态由 Aeron Core 同步裁决。
      */
     @Transactional
     public void coverDeficits() {
@@ -71,11 +60,9 @@ import tools.jackson.databind.ObjectMapper;
             return;
         }
         int batchSize = properties.getCoverage().getBatchSize();
-        String accountType = accountType();
-        List<InsuranceDeficitRow> deficits = properties.getKafka().isProductTopicsEnabled()
-                ? productDeficitRepository.findPositive(accountType, batchSize)
-                : legacyDeficitRepository.findPositive(accountType, batchSize);
-        for (InsuranceDeficitRow deficit : deficits) {
+        List<com.surprising.insurance.provider.model.CoreLiquidationProjection> deficits =
+                projectionRepository.pendingInsurance(properties.getKafka().getProductLine().name(), batchSize);
+        for (var deficit : deficits) {
             coverDeficit(deficit);
         }
     }
@@ -89,22 +76,23 @@ import tools.jackson.databind.ObjectMapper;
         String referenceId = normalizeReferenceId(request.referenceId());
         String accountType = accountType();
         Instant now = Instant.now();
-        balanceRepository.ensure(accountType, asset, now);
-        InsuranceFundBalanceState current = balanceRepository.lock(accountType, asset);
-        long nextBalance = Math.addExact(current.balanceUnits(), request.amountUnits());
-        if (nextBalance < current.reservedUnits()) {
-            throw new IllegalArgumentException("insufficient insurance fund balance");
-        }
+        long currentBalance = aeron.balance(asset);
+        long nextBalance = Math.addExact(currentBalance, request.amountUnits());
+        if (nextBalance < 0) throw new IllegalArgumentException("insufficient insurance fund balance");
+        UUID commandId = stableId("INSURANCE_FUND:" + properties.getKafka().getProductLine() + ':' + referenceId);
+        aeron.command(CoreMessageType.ADJUST_INSURANCE_FUND, commandId,
+                TradingCommandCodec.encodeAdjustInsuranceFund(
+                        new AdjustInsuranceFundCommand(asset, request.amountUnits())));
+        long committedBalance = aeron.balance(asset);
         boolean inserted = ledgerRepository.insert(sequenceRepository.next("insurance-ledger"),
-                accountType, asset, request.amountUnits(), nextBalance,
+                accountType, asset, request.amountUnits(), committedBalance,
                 "FUND_ADJUSTMENT", referenceId, request.reason(), now);
         if (!inserted) {
             requireReferenceMatches("FUND_ADJUSTMENT", referenceId, accountType, asset,
                     request.amountUnits(), request.reason());
-            return balanceRepository.findOne(accountType, asset).orElseThrow();
+            return new InsuranceFundBalanceResponse(asset, committedBalance, now);
         }
-        balanceRepository.updateBalance(accountType, asset, nextBalance, now);
-        return new InsuranceFundBalanceResponse(asset, nextBalance, now);
+        return new InsuranceFundBalanceResponse(asset, committedBalance, now);
     }
 
     @Transactional
@@ -116,23 +104,28 @@ import tools.jackson.databind.ObjectMapper;
         requireProviderAccountType(accountType);
         Instant now = event.eventTime() == null ? Instant.now() : event.eventTime();
         String referenceId = event.tradeId() + ":" + event.orderId();
-        balanceRepository.ensure(accountType, event.asset(), now);
-        InsuranceFundBalanceState current = balanceRepository.lock(accountType, event.asset());
-        long nextBalance = Math.addExact(current.balanceUnits(), event.amountUnits());
+        String asset = normalizeAsset(event.asset());
+        UUID commandId = stableId("LIQUIDATION_FEE:" + properties.getKafka().getProductLine() + ':' + referenceId);
+        aeron.command(CoreMessageType.ADJUST_INSURANCE_FUND, commandId,
+                TradingCommandCodec.encodeAdjustInsuranceFund(
+                        new AdjustInsuranceFundCommand(asset, event.amountUnits())));
+        long nextBalance = aeron.balance(asset);
         boolean inserted = ledgerRepository.insert(sequenceRepository.next("insurance-ledger"),
-                accountType, event.asset(), event.amountUnits(), nextBalance,
+                accountType, asset, event.amountUnits(), nextBalance,
                 "LIQUIDATION_FEE", referenceId, "COLLECT_LIQUIDATION_FEE", now);
         if (!inserted) {
-            requireReferenceMatches("LIQUIDATION_FEE", referenceId, accountType, event.asset(),
+            requireReferenceMatches("LIQUIDATION_FEE", referenceId, accountType, asset,
                     event.amountUnits(), "COLLECT_LIQUIDATION_FEE");
             return;
         }
-        balanceRepository.updateBalance(accountType, event.asset(), nextBalance, now);
     }
 
     public InsuranceFundBalanceQueryResponse balances(String asset) {
-        var rows = balanceRepository.find(
-                accountType(), asset == null || asset.isBlank() ? null : normalizeAsset(asset));
+        String normalized = asset == null || asset.isBlank() ? null : normalizeAsset(asset);
+        var rows = CoreStateQueryCodec.decodeTreasuryState(aeron.treasury()).stream()
+                .filter(value -> normalized == null || value.asset().equals(normalized))
+                .map(value -> new InsuranceFundBalanceResponse(value.asset(), value.insuranceBalanceUnits(),
+                        Instant.now())).toList();
         return new InsuranceFundBalanceQueryResponse(rows.size(), rows);
     }
 
@@ -167,53 +160,34 @@ import tools.jackson.databind.ObjectMapper;
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    private boolean coverDeficit(InsuranceDeficitRow deficit) {
+    private boolean coverDeficit(com.surprising.insurance.provider.model.CoreLiquidationProjection deficit) {
         Instant now = Instant.now();
-        balanceRepository.ensure(deficit.accountType(), deficit.asset(), now);
-        InsuranceFundBalanceState fund = balanceRepository.lock(deficit.accountType(), deficit.asset());
-        long availableFund = Math.subtractExact(fund.balanceUnits(), fund.reservedUnits());
+        long availableFund = aeron.balance(deficit.asset());
         long coverUnits = InsuranceMath.coverAmount(deficit.deficitUnits(), availableFund);
         if (coverUnits <= 0) {
             return false;
         }
         long coverageId = sequenceRepository.next("insurance-coverage");
         long remainingDeficit = Math.subtractExact(deficit.deficitUnits(), coverUnits);
-        String commandPrefix = properties.getKafka().getProductLine().name() + ":" + coverageId;
-        String reserveCommandId = "INSURANCE_RESERVE:" + commandPrefix;
-        String finalizeCommandId = "INSURANCE_FINALIZE:" + commandPrefix;
-        balanceRepository.reserve(deficit.accountType(), deficit.asset(), coverUnits, now);
-        coverageRepository.insert(coverageId, deficit, coverUnits, remainingDeficit,
-                reserveCommandId, finalizeCommandId, now);
-        DeficitReservationAccountCommand payload =
-                new DeficitReservationAccountCommand(deficit.asset(), coverUnits);
-        accountOutboxRepository.enqueue(coverageId, accountCommand(
-                reserveCommandId, deficit.userId(), AccountUserCommandType.INSURANCE_DEFICIT_RESERVE,
-                coverageId, null, payload, now), now);
-        accountOutboxRepository.enqueue(coverageId, accountCommand(
-                finalizeCommandId, deficit.userId(), AccountUserCommandType.INSURANCE_DEFICIT_FINALIZE,
-                coverageId, reserveCommandId, payload, now), now);
+        UUID commandId = stableId("INSURANCE_COVER:" + properties.getKafka().getProductLine() + ':'
+                + deficit.liquidationId() + ':' + deficit.deficitUnits());
+        aeron.command(CoreMessageType.RESOLVE_LIQUIDATION, commandId,
+                TradingCommandCodec.encodeResolveLiquidation(new ResolveLiquidationCommand(
+                        deficit.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE, coverUnits)));
+        long balance = aeron.balance(deficit.asset());
+        coverageRepository.insertCompleted(coverageId, accountType(), deficit, coverUnits, remainingDeficit, now);
+        boolean inserted = ledgerRepository.insert(sequenceRepository.next("insurance-ledger"), accountType(), deficit.asset(),
+                Math.negateExact(coverUnits), balance, "DEFICIT_COVERAGE", Long.toString(deficit.liquidationId()),
+                "COVER_LIQUIDATION_DEFICIT", now);
+        if (!inserted) {
+            requireReferenceMatches("DEFICIT_COVERAGE", Long.toString(deficit.liquidationId()), accountType(),
+                    deficit.asset(), Math.negateExact(coverUnits), "COVER_LIQUIDATION_DEFICIT");
+        }
         return true;
     }
 
-    private AccountUserCommand accountCommand(String commandId,
-                                              long userId,
-                                              AccountUserCommandType type,
-                                              long coverageId,
-                                              String dependency,
-                                              Object payload,
-                                              Instant now) {
-        return new AccountUserCommand(
-                AccountUserCommand.CURRENT_SCHEMA_VERSION,
-                commandId,
-                properties.getKafka().getProductLine(),
-                userId,
-                type,
-                "INSURANCE",
-                Long.toString(coverageId),
-                dependency,
-                objectMapper.writeValueAsString(payload),
-                now,
-                null);
+    private static UUID stableId(String value) {
+        return UUID.nameUUIDFromBytes(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private void requireReferenceMatches(String referenceType,

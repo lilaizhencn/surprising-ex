@@ -2,8 +2,7 @@ package com.surprising.insurance.provider.repository;
 
 import com.surprising.insurance.api.model.AdminCursorPage;
 import com.surprising.insurance.api.model.InsuranceCoverageResponse;
-import com.surprising.insurance.provider.model.InsuranceDeficitRow;
-import com.surprising.insurance.provider.model.InsurancePendingCoverage;
+import com.surprising.insurance.provider.model.CoreLiquidationProjection;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -23,56 +22,29 @@ public class InsuranceCoverageRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void insert(long coverageId,
-                       InsuranceDeficitRow deficit,
-                       long coveredUnits,
-                       long remainingDeficit,
-                       String reserveCommandId,
-                       String finalizeCommandId,
-                       Instant now) {
-        requireSingle(jdbcTemplate.update("""
+    public void insertCompleted(long coverageId,
+                                String accountType,
+                                CoreLiquidationProjection deficit,
+                                long coveredUnits,
+                                long remainingDeficit,
+                                Instant now) {
+        String status = remainingDeficit == 0 ? "COVERED" : "PARTIALLY_COVERED";
+        int inserted = jdbcTemplate.update("""
                 INSERT INTO insurance_deficit_coverages (
                     coverage_id, account_type, user_id, asset, requested_units, covered_units,
                     remaining_deficit_units, reserve_command_id, finalize_command_id,
-                    status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_RESERVE',
-                          'DEFICIT_COVERAGE', ?, ?)
-                """, coverageId, deficit.accountType(), deficit.userId(), deficit.asset(), deficit.deficitUnits(),
-                coveredUnits, remainingDeficit, reserveCommandId, finalizeCommandId,
-                Timestamp.from(now), Timestamp.from(now)), "insurance deficit coverage insert");
-    }
-
-    public void markPendingFinalize(long coverageId, Instant now) {
-        int rows = jdbcTemplate.update("""
-                UPDATE insurance_deficit_coverages
-                   SET status = 'PENDING_FINALIZE', updated_at = ?
-                 WHERE coverage_id = ? AND status = 'PENDING_RESERVE'
-                """, Timestamp.from(now), coverageId);
-        if (rows != 0 && rows != 1) {
-            throw new IllegalStateException("failed to update insurance coverage progress");
+                    status, reason, completed_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AERON_LIQUIDATION_COVERAGE', ?, ?, ?, ?)
+                ON CONFLICT (finalize_command_id) DO NOTHING
+                """, coverageId, accountType, deficit.userId(), deficit.asset(), deficit.deficitUnits(),
+                coveredUnits, remainingDeficit, "AERON:" + deficit.liquidationId(),
+                "AERON:" + deficit.liquidationId(), status, Timestamp.from(now), Timestamp.from(now),
+                Timestamp.from(now), Timestamp.from(now));
+        if (inserted != 0 && inserted != 1) {
+            throw new IllegalStateException("failed to write Aeron insurance coverage audit");
         }
     }
 
-    public void markFailed(InsurancePendingCoverage coverage, Instant now) {
-        requireSingle(jdbcTemplate.update("""
-                UPDATE insurance_deficit_coverages
-                   SET status = 'FAILED', error_code = ?, error_message = ?,
-                       completed_at = ?, updated_at = ?
-                 WHERE coverage_id = ? AND status IN ('PENDING_RESERVE', 'PENDING_FINALIZE')
-                """, coverage.errorCode(), truncate(coverage.errorMessage()), Timestamp.from(now),
-                Timestamp.from(now), coverage.coverageId()), "insurance coverage failed transition");
-    }
-
-    public void markCompleted(long coverageId, long remainingDeficitUnits, Instant now) {
-        requireSingle(jdbcTemplate.update("""
-                UPDATE insurance_deficit_coverages
-                   SET remaining_deficit_units = ?,
-                       status = CASE WHEN ? = 0 THEN 'COVERED' ELSE 'PARTIALLY_COVERED' END,
-                       completed_at = ?, updated_at = ?
-                 WHERE coverage_id = ? AND status IN ('PENDING_RESERVE', 'PENDING_FINALIZE')
-                """, remainingDeficitUnits, remainingDeficitUnits, Timestamp.from(now),
-                Timestamp.from(now), coverageId), "insurance coverage completion");
-    }
 
     public AdminCursorPage.CursorPage<InsuranceCoverageResponse> page(String accountType,
                                                                       Long userId,
@@ -122,16 +94,4 @@ public class InsuranceCoverageRepository {
                 InsuranceCoverageResponse::coverageId);
     }
 
-    private void requireSingle(int rows, String operation) {
-        if (rows != 1) {
-            throw new IllegalStateException("failed to write " + operation);
-        }
-    }
-
-    private String truncate(String value) {
-        if (value == null || value.length() <= 1000) {
-            return value;
-        }
-        return value.substring(0, 1000);
-    }
 }
