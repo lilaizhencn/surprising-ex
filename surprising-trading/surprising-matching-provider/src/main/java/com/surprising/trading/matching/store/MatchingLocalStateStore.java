@@ -435,7 +435,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         Map<String, List<LocalOutboxRecord>> byStream = new LinkedHashMap<>();
         for (LocalOutboxRecord record : records) {
             if (record != null && !record.published()) {
-                if (record.assignmentEpoch() > 0L && record.assignmentEpoch() != expectedEpoch) {
+                if (record.assignmentEpoch() != expectedEpoch) {
                     throw new IllegalStateException("撮合 outbox 记录属于旧 assignment epoch sequence="
                             + record.sequence());
                 }
