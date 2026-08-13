@@ -1,6 +1,8 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.account.api.model.AccountCommandResultEvent;
 import com.surprising.trading.api.model.OrderUserCommand;
+import com.surprising.trading.api.model.OrderUserCommandType;
 import com.surprising.trading.api.model.OrderUserCommandResult;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.eventstore.UserMutation;
@@ -121,8 +123,22 @@ public class OrderUserCommandConsumer {
     }
 
     private UserMutation toUserMutation(OrderUserCommand command) {
+        String source = "ORDER";
+        String sourceReference = command.commandId();
+        String dependency = null;
+        if (command.commandType() == OrderUserCommandType.ACCOUNT_RESULT) {
+            try {
+                AccountCommandResultEvent result = objectMapper.readValue(command.payload(),
+                        AccountCommandResultEvent.class);
+                source = "ACCOUNT";
+                sourceReference = result.sourceReference();
+                dependency = result.commandId();
+            } catch (Exception ex) {
+                throw new IllegalStateException("账户结果 mutation 负载无法解析", ex);
+            }
+        }
         return new UserMutation(UserMutation.CURRENT_SCHEMA_VERSION, command.commandId(), command.productLine(),
-                command.userId(), command.commandType().name(), "ORDER", command.commandId(), null,
+                command.userId(), command.commandType().name(), source, sourceReference, dependency,
                 command.payload(), command.occurredAt(), command.traceId());
     }
 
