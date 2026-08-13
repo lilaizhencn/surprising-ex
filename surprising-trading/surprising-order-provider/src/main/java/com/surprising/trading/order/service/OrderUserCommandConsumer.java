@@ -3,9 +3,12 @@ package com.surprising.trading.order.service;
 import com.surprising.trading.api.model.OrderUserCommand;
 import com.surprising.trading.api.model.OrderUserCommandResult;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.eventstore.UserMutation;
+import com.surprising.eventstore.UserMutationBatch;
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionKey;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.KafkaException;
@@ -64,10 +67,19 @@ public class OrderUserCommandConsumer {
         if (records == null || records.isEmpty()) {
             return;
         }
-        for (ConsumerRecord<String, String> record : records) {
-            OrderUserCommand command = null;
+        List<OrderUserCommand> commands = records.stream().map(this::decode).toList();
+        UserMutationBatch mutationBatch = new UserMutationBatch(commands.stream().map(this::toUserMutation).toList());
+        Map<String, ConsumerRecord<String, String>> recordsByCommandId = new java.util.LinkedHashMap<>();
+        Map<String, OrderUserCommand> commandsById = new java.util.LinkedHashMap<>();
+        for (int index = 0; index < records.size(); index++) {
+            recordsByCommandId.put(commands.get(index).commandId(), records.get(index));
+            commandsById.put(commands.get(index).commandId(), commands.get(index));
+        }
+        for (List<UserMutation> partitionMutations : mutationBatch.byPartition().values()) {
+            for (UserMutation mutation : partitionMutations) {
+                ConsumerRecord<String, String> record = recordsByCommandId.get(mutation.commandId());
+                OrderUserCommand command = commandsById.get(mutation.commandId());
             try {
-                command = decode(record);
                 OrderUserCommand decodedCommand = command;
                 OrderUserCommandResult result;
                 if (lane == null) {
@@ -84,7 +96,14 @@ public class OrderUserCommandConsumer {
                         command == null ? "unknown" : command.commandId(), ex);
                 throw ex;
             }
+            }
         }
+    }
+
+    private UserMutation toUserMutation(OrderUserCommand command) {
+        return new UserMutation(UserMutation.CURRENT_SCHEMA_VERSION, command.commandId(), command.productLine(),
+                command.userId(), command.commandType().name(), "ORDER", command.commandId(), null,
+                command.payload(), command.occurredAt(), command.traceId());
     }
 
     private OrderUserCommand decode(ConsumerRecord<String, String> record) {

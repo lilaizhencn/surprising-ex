@@ -127,6 +127,10 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("order.state.events");
     }
 
+    public String userMutationsTopic() {
+        return topic("user.mutations");
+    }
+
     public String accountRiskEventsTopic() {
         return topic("risk.account.events");
     }

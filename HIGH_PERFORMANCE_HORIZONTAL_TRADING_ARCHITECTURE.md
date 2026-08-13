@@ -911,7 +911,10 @@ PostgreSQL 保留以下职责：
 
 完成标准：普通下单不再经过 Order -> Account -> Order 的同步结果往返。
 
-当前状态：尚未完成。订单和账户仍保留独立用户命令与兼容结果等待边界。
+当前状态：统一 mutation 契约和用户分区批次入口已接入订单/账户 Kafka 消费边界，
+并新增产品线隔离的 `user.mutations.v1` 迁移 Topic；现有订单与账户 reducer 仍作为兼容
+写模型运行，普通下单尚未切换为同一 reducer 内完成订单创建、资金预占和 MatchingCommand
+输出，因此“无 Order -> Account -> Order 往返”的最终完成标准仍未宣称达成。
 
 ### 阶段 6：独立 Matching Book Shard
 

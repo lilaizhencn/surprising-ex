@@ -5,7 +5,7 @@
 
 `surprising-ex` 已从单一永续链路推进到按产品线隔离运行的交易系统。当前共享同一套 Java 模块和数据库 schema，但通过 `ProductLine`、账户类型、Kafka topic、consumer group、provider 启动参数和 gateway 路由把业务逻辑隔离到不同产品线。
 
-当前高性能迁移已完成结果等待器有界化、账户 WAL 批量 group commit、订单号窗口预留、撮合 Outbox 按 stream 分序和批量发布；账户/撮合 Kafka 回调 owner 绑定、订单用户命令有界 lane、独立 Book Shard runtime、持久化 symbol-shard 绑定、撮合批次 assignment epoch 校验和账户/订单/撮合 Kafka transaction 基础设施已接入，但统一 User State、Kafka changelog 重建、完整跨输出 epoch fencing、warm standby 与 Aeron Cluster 仍不是最终完成状态。
+当前高性能迁移已完成结果等待器有界化、账户 WAL 批量 group commit、订单号窗口预留、撮合 Outbox 按 stream 分序和批量发布；账户/撮合 Kafka 回调 owner 绑定、订单用户命令有界 lane、统一 UserMutation 契约与批次分区校验、独立 Book Shard runtime、持久化 symbol-shard 绑定、撮合批次 assignment epoch 校验和账户/订单/撮合 Kafka transaction 基础设施已接入，但统一 User State reducer、Kafka changelog 重建、完整跨输出 epoch fencing、warm standby 与 Aeron Cluster 仍不是最终完成状态。
 
 当前主要运行和测试覆盖的四条线：
 

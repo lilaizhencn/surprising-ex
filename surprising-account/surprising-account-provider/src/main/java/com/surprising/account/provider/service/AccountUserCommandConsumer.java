@@ -1,10 +1,11 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountUserCommand;
+import com.surprising.eventstore.UserMutation;
+import com.surprising.eventstore.UserMutationBatch;
 import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.account.provider.config.AccountProperties;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -63,6 +64,9 @@ public class AccountUserCommandConsumer {
             }
         }
         try {
+            UserMutationBatch mutationBatch = new UserMutationBatch(parsed.stream()
+                    .map(value -> toUserMutation(value.command()))
+                    .toList());
             List<AccountUserCommandWalIngress.CommandEnvelope> envelopes = parsed.stream()
                     .map(value -> new AccountUserCommandWalIngress.CommandEnvelope(
                             value.command(), value.record().value()))
@@ -77,11 +81,7 @@ public class AccountUserCommandConsumer {
             if (stateWorker == null) {
                 throw new IllegalStateException("账户状态执行器未配置，禁止只写 WAL 后提交 Kafka offset");
             }
-            Set<UserPartitionKey> partitions = new LinkedHashSet<>();
-            for (ParsedRecord value : parsed) {
-                partitions.add(new UserPartitionKey(value.command().productLine(), value.command().userId()));
-            }
-            for (UserPartitionKey partition : partitions) {
+            for (UserPartitionKey partition : mutationBatch.byPartition().keySet()) {
                 stateWorker.applyPendingPartition(partition);
             }
             for (int index = 0; index < parsed.size(); index++) {
@@ -96,6 +96,12 @@ public class AccountUserCommandConsumer {
             }
             throw ex;
         }
+    }
+
+    private UserMutation toUserMutation(AccountUserCommand command) {
+        return new UserMutation(UserMutation.CURRENT_SCHEMA_VERSION, command.commandId(), command.productLine(),
+                command.userId(), command.commandType().name(), command.source(), command.sourceReference(),
+                command.dependsOnCommandId(), command.payload(), command.occurredAt(), command.traceId());
     }
 
     private AccountUserCommand parseAndValidate(ConsumerRecord<String, String> record) {

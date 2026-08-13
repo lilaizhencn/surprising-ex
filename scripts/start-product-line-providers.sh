@@ -245,8 +245,9 @@ service_env() {
         "SURPRISING_CANDLESTICK_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}" \
         "SURPRISING_CANDLESTICK_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_CANDLESTICK_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
-        "SURPRISING_CANDLESTICK_KAFKA_APPLICATION_ID=surprising-candlestick-${slug}-v1" \
-        "SURPRISING_CANDLESTICK_STREAM_STATE_DIR=${ROOT_DIR}/data/kafka-streams/${slug}/candlestick"
+        "SURPRISING_CANDLESTICK_KAFKA_APPLICATION_ID=surprising-candlestick-${slug}-${PORT_OFFSET}-v1" \
+        "SURPRISING_CANDLESTICK_STREAM_STATE_DIR=${ROOT_DIR}/data/kafka-streams/${slug}/candlestick" \
+        "SURPRISING_CANDLESTICK_KAFKA_APPLICATION_SERVER=${LOCAL_HOST}:0"
       ;;
     index-price)
       printf '%s\n' \
@@ -509,7 +510,13 @@ validate_port_offset
 
 # 所有业务模块都依赖 instrument JVM 快照；启动时即使调用方只指定了部分服务，也必须先启动它。
 if [[ "${ACTION}" == "start" ]] && ! service_requested instrument; then
-  SERVICES="instrument ${SERVICES}"
+  instrument_port=$((9080 + PORT_OFFSET))
+  if curl -fsS "http://${LOCAL_HOST}:${instrument_port}/actuator/health/readiness" \
+      | grep -q '"status":"UP"'; then
+    echo "instrument: already ready on port ${instrument_port}; reusing existing provider"
+  else
+    SERVICES="instrument ${SERVICES}"
+  fi
 fi
 validate_provider_budget
 
