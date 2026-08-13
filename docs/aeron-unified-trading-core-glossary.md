@@ -20,6 +20,10 @@ ADR 中说明，而不是为同一概念继续增加别名。
 | Unified Core State | 一条产品线内 User、Order、Book、Risk、Liquidation 和 Export 的顶层状态。 | 把六条产品线资金合并。 |
 | User State | 用户产品账户余额、冻结、保证金、持仓和账务版本。 | 用户登录资料、KYC 或 wallet 私钥。 |
 | Order State | 订单、预占、已成交/剩余数量、状态和幂等索引。 | 仅供后台展示的订单表。 |
+| Reservation State | 订单维度的预占资产、原始数量、已释放、已消费和剩余锁定；剩余锁定必须可重建 Balance locked。 | 只保存一个按资产汇总的冻结数。 |
+| Business State Hash | 只覆盖规范化业务状态的稳定哈希。 | 包含幂等窗口和来源高水位的完整内部恢复哈希。 |
+| Internal Recovery Hash | 同时覆盖业务状态、幂等结果和来源高水位，用于 Snapshot/replay 完整一致性验证。 | 对外账户余额或订单查询结果。 |
+| Strong Core Query | 从当前 Product Line Cluster 已提交状态直接返回 User/Order 等权威视图。 | PostgreSQL 或 Valkey 的最终一致查询。 |
 | Book State | 能精确恢复价格时间优先级的开放订单簿权威状态。 | Kafka depth 行情快照。 |
 | Exchange Core Adapter | 把统一核心命令映射到 Exchange Core 并将 fill 原子应用回权威状态的适配层。 | 独立权威撮合服务或本地 journal。 |
 | Risk State | 标记价、风险参数、账户风险快照、索引和扫描游标。 | Redis 风险缓存。 |
@@ -32,6 +36,8 @@ ADR 中说明，而不是为同一概念继续增加别名。
 | correlationId | 用于串联调用、日志和响应的追踪 ID。 | 状态变化幂等键。 |
 | sourceId | 同类命令来源内的稳定实例或分区标识，例如 Gateway client agent ID 或 Kafka partition。 | 用户 ID 或随机请求 ID。 |
 | sourceSequence | 在 `(source, sourceId)` 范围内严格单调的外部序号，例如 Kafka offset。 | Cluster position 或跨所有来源共用的全局序号。 |
+| commandStatus | 命令首次执行时的原始业务裁决；重复响应的 transport status 为 `DUPLICATE` 时仍返回该值。 | 本次网络传输是否为重试。 |
+| resultCode | 首次业务裁决的稳定机器可读结果码，随幂等结果和 Snapshot 保存。 | 只供日志阅读的异常 message。 |
 | Source High Watermark | Cluster 对每个 `(source, sourceId)` 已执行最大序号的记录；完整幂等结果淘汰后仍阻止旧命令重放。 | 可返回原业务响应的完整幂等窗口。 |
 | eventId | Exporter 重试时保持不变的稳定事件 ID，供所有消费者幂等。 | Kafka producer 自动生成的消息 ID。 |
 | stateVersion | 聚合在状态变化后的单调业务版本。 | 数据库更新时间。 |

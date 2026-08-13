@@ -78,6 +78,28 @@ services:
       - -jar
       - /opt/surprising/tools.jar
 
+  funds-smoke:
+    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    profiles: [tools]
+    init: true
+    hostname: funds-smoke
+    shm_size: 256mb
+    networks:
+      - cluster
+    entrypoint:
+      - java
+      - --add-opens
+      - java.base/jdk.internal.misc=ALL-UNNAMED
+      - -Dsurprising.aeron.product-line=${PRODUCT_LINE:-SPOT}
+      - -Dsurprising.aeron.hostnames=node0,node1,node2
+      - -Dsurprising.aeron.egress-hostname=funds-smoke
+      - -Dsurprising.aeron.source-id=${FUNDS_SMOKE_SOURCE_ID:-9001}
+      - -Dsurprising.aeron.smoke-seed=${FUNDS_SMOKE_SEED:-1}
+      - -Dsurprising.aeron.smoke-mode=${FUNDS_SMOKE_MODE:-execute}
+      - -cp
+      - /opt/surprising/tools.jar
+      - com.surprising.aeron.tools.ClusterFundsSmokeMain
+
 networks:
   cluster:
 

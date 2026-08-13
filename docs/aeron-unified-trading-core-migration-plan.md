@@ -8,7 +8,7 @@
 | 基线分支 | `master` |
 | 基线提交 | `dc46edabcd606fea85517974391739942d5f51e2` |
 | 目标实施分支 | `codex/aeron-unified-core` |
-| 当前阶段 | `P2 User/Order State 设计与实现` |
+| 当前阶段 | `P3 Exchange Core Adapter 设计与实现` |
 | 最后更新日期 | `2026-08-13` |
 | 上线状态 | 项目尚未上线，无生产历史数据和兼容包袱 |
 | 架构决策 | [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md) |
@@ -880,8 +880,8 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 阶段 | 状态 | 目标 | 完成证据 | 完成提交 |
 | --- | --- | --- | --- | --- |
 | P0 | `DONE` | 方案冻结、基线和垃圾文件清理 | 本文档、ADR、术语表；基线模块测试通过 | `e4917e3` |
-| P1 | `DONE` | Aeron 协议、三节点骨架和工具 | schema v1 golden；Snapshot/幂等测试；三节点 Leader kill 后 hash 连续 | 本阶段提交 |
-| P2 | `NOT_STARTED` | User/Order State 和资金预占 | 订单/账户单测、幂等、资金不变量测试 | 待填写 |
+| P1 | `DONE` | Aeron 协议、三节点骨架和工具 | schema v1 golden；Snapshot/幂等测试；三节点 Leader kill 后 hash 连续 | `6bd1cb3` |
+| P2 | `DONE` | User/Order State 和资金预占 | 订单/账户单测、六线规则、幂等、资金不变量和 Snapshot v2 | 本阶段提交 |
 | P3 | `NOT_STARTED` | Exchange Core Adapter 和 Book State | 撮合矩阵、book hash、Snapshot 重建测试 | 待填写 |
 | P4 | `NOT_STARTED` | Risk、强平和生命周期进入核心 | 风险/强平/资金费/交割/期权组件测试 | 待填写 |
 | P5 | `NOT_STARTED` | Snapshot、Replay、Exporter 和投影 | Leader kill、冷恢复、Exporter 故障测试 | 待填写 |
@@ -956,12 +956,52 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 
 任务：
 
-- [ ] 定义 User、Balance、Reservation、Position、Order 状态结构。
-- [ ] 抽取账户和订单纯 reducer。
-- [ ] 实现余额调整、下单预占、撤单释放和幂等结果。
-- [ ] 实现现货双资产预占和衍生品保证金预占。
-- [ ] 实现强一致核心查询。
-- [ ] 建立每命令不变量检查和 debug hash。
+- [x] 定义 User、Balance、Reservation、Position、Order 状态结构。
+- [x] 抽取账户和订单纯 reducer。
+- [x] 实现余额调整、下单预占、撤单释放和幂等结果。
+- [x] 实现现货双资产预占和衍生品保证金预占。
+- [x] 实现强一致核心查询。
+- [x] 建立每命令不变量检查和 debug hash。
+
+实际修改：
+
+- 新增固定小端 `ADJUST_BALANCE`、`PLACE_ORDER`、`CANCEL_ORDER` payload，显式携带
+  `instrumentVersion`、`baseAsset`、`quoteAsset`、`settleAsset` 和预占资产，不从 symbol 字符串猜资产。
+- 新增 `TradingCoreState`、`CoreUserState`、`CoreOrderState`、`AssetBalance`、
+  `OrderReservation` 和 `CorePositionState`。Map 使用稳定排序的不可变副本，资金使用 `long` 定点单位和
+  `Math.*Exact`。
+- `TradingCoreReducer` 原子完成余额调整、资金预占、订单插入、撤单与剩余预占释放。失败不发布半状态；
+  终态重复撤单直接返回原状态，不重复释放。
+- 现货 BUY 只能预占 quote asset，SELL 只能预占 base asset；五条衍生品线统一要求
+  `DERIVATIVE_MARGIN` 且预占 instrument settle asset。
+- `CoreProbeState` 演进为包含正式 `TradingCoreState` 的顶层权威对象；业务拒绝也推进来源高水位并保存
+  原始裁决。重复 `commandId` 返回 `DUPLICATE + commandStatus + resultCode`，可恢复原成功/拒绝及错误码。
+- 新增完整 User/Order 强一致查询视图，以及 business/user/order 分域 hash；查询直接读取已提交核心状态。
+- Snapshot 升级为 v2，保存 User/Order、幂等结果和来源高水位，仍可读取 P1 v1；写入按 Aeron
+  `maxPayloadLength` 分块，恢复可组装多 fragment。
+
+验收证据（2026-08-13，JDK `25.0.4`，Aeron `1.52.2`）：
+
+- Maven：product-api 18、protocol 9、service 20、tools 2 个测试全部通过，client/exporter 编译通过。
+- 资金不变量：充值总额、预占前后 `available + locked`、撤单全释放、重复撤单、余额不足、重复 orderId、
+  整数溢出均通过 fail-closed 测试。
+- 产品线规则：`SPOT` 买卖双资产规则和五条衍生品线 margin/settle asset 规则全部通过参数化测试；反向
+  永续和反向交割使用基础结算币，不套用 U 本位资产。
+- 幂等与恢复：成功和拒绝命令均保存原始裁决；同 `commandId` 重试不重复扣款；Snapshot round-trip 后
+  顶层 hash、业务 hash、User/Order 状态和去重结果一致。
+- 强一致查询：User 查询返回余额、预占和持仓视图，Order 查询返回订单状态；截断和尾随字节均拒绝。
+- Docker 三节点 SPOT：固定 seed 执行充值 `10000`、预占 `2500`、查询、撤单，结果
+  `fundsSmoke=PASS totalUnits=10000 lockedUnits=0`；三节点全部停止且保留卷后重启，同一 userId 只读验证为
+  `fundsRecovery=PASS totalUnits=10000 lockedUnits=0`。脚本含 Cluster 就绪门禁，避免选举窗口产生假失败。
+
+阶段边界：
+
+- P2 不接 Exchange Core，因此不处理 fill、position margin transfer 或成交结算；P3 与 maker/taker
+  订单和资金原子应用。
+- P2 对 `reduceOnly=true` fail-closed，拒绝码为 `REDUCE_ONLY_REQUIRES_POSITION_STATE`；P3 接入可验证的
+  Position/Book State 后放开。
+- Snapshot v2 已能恢复 P2 状态，但 P5 仍负责 checksum、manifest、Archive replay、冷恢复矩阵和
+  Export State；P2 完成不代表生产恢复链已经验收。
 
 阶段出口：不接撮合也能证明预占/释放/重复命令资金正确。
 
@@ -1066,6 +1106,10 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
 | 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
 | 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |
+| 2026-08-13 | P2 | 决策 | 业务 payload 继续使用手写固定小端 codec，不在 P2 引入 SBE 生成插件 | 命令仅三类且字段冻结；严格长度、截断、尾随字节和 round-trip 测试已覆盖 | `TradingCommandCodecTest`、`CoreStateQueryCodecTest` | P3 fill/book 事件数量增加前再次评估 SBE |
+| 2026-08-13 | P2 | 决策 | 预占命令显式携带 base/quote/settle asset | symbol 命名不能成为资金币种事实源；核心必须校验现货方向资产与衍生品结算资产 | `TradingCoreReducerTest` | P3 instrument state 必须按 version 再校验这些字段 |
+| 2026-08-13 | P2 | 决策 | 重复响应增加原始 `commandStatus` | 只有 `DUPLICATE` 无法判断超时前原命令成功还是拒绝 | `CoreProbeStateTest` | Gateway 必须按 `commandStatus` 返回原始业务裁决 |
+| 2026-08-13 | P2 | 边界 | `reduceOnly` 在 P2 fail-closed | 未接持仓和成交状态时无法证明订单真的降低风险 | `TradingCoreReducerTest` | P3 接入 Position/Book 后解除 |
 
 ## 20. 阶段更新模板
 

@@ -29,6 +29,10 @@ Redis Risk State、Redis 强平候选队列和 PostgreSQL 强平事务维持不�
 11. 性能测试一次只运行一条产品线，且压测前必须证明该线功能正常、资金差异为零。
 12. Cluster Log 协议 v1 使用固定小端二进制 envelope；幂等边界由 `commandId` 和
     `(source, sourceId, sourceSequence)` 高水位共同保证，不使用 Java serialization。
+13. 核心命令显式携带 instrument version 对应的 base/quote/settle asset；状态机按产品线规则校验
+    预占币种，不允许从 symbol 名称或外部缓存猜测资金资产。
+14. `commandId` 重试返回传输状态 `DUPLICATE` 时必须同时返回原始 `commandStatus`，调用方不能把重复
+    误判为成功或失败。
 
 ## 选择统一 Cluster 而不是多 Cluster
 

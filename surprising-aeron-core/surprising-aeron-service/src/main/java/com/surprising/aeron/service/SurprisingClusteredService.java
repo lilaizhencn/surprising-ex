@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
+import io.aeron.FragmentAssembler;
 import io.aeron.Image;
 import io.aeron.cluster.codecs.CloseReason;
 import io.aeron.cluster.service.ClientSession;
@@ -14,6 +15,7 @@ import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.Header;
 import java.util.concurrent.atomic.AtomicReference;
+import java.io.ByteArrayOutputStream;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
 
@@ -48,7 +50,12 @@ public final class SurprisingClusteredService implements ClusteredService {
             Header header) {
         byte[] encoded = new byte[length];
         buffer.getBytes(offset, encoded);
-        CoreMessage request = CoreMessageCodec.decode(encoded);
+        CoreMessage request;
+        try {
+            request = CoreMessageCodec.decode(encoded);
+        } catch (IllegalArgumentException exception) {
+            return;
+        }
         var result = state.apply(request);
         if (session != null) {
             CoreMessage response = new CoreMessage(request.header().response(responseType(request)),
@@ -62,8 +69,13 @@ public final class SurprisingClusteredService implements ClusteredService {
         byte[] snapshot = state.snapshot();
         org.agrona.concurrent.UnsafeBuffer buffer = new org.agrona.concurrent.UnsafeBuffer(snapshot);
         idleStrategy.reset();
-        while (snapshotPublication.offer(buffer, 0, snapshot.length) < 0) {
-            idleStrategy.idle();
+        int offset = 0;
+        while (offset < snapshot.length) {
+            int chunkLength = Math.min(snapshotPublication.maxPayloadLength(), snapshot.length - offset);
+            while (snapshotPublication.offer(buffer, offset, chunkLength) < 0) {
+                idleStrategy.idle();
+            }
+            offset += chunkLength;
         }
     }
 
@@ -93,22 +105,20 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void loadSnapshot(Image snapshotImage) {
-        final byte[][] snapshot = new byte[1][];
+        ByteArrayOutputStream snapshot = new ByteArrayOutputStream();
+        FragmentAssembler assembler = new FragmentAssembler((buffer, offset, length, header) -> {
+            byte[] data = new byte[length];
+            buffer.getBytes(offset, data);
+            snapshot.writeBytes(data);
+        });
         while (!snapshotImage.isEndOfStream()) {
-            int fragments = snapshotImage.poll((buffer, offset, length, header) -> {
-                if (snapshot[0] != null) {
-                    throw new IllegalStateException("Aeron core snapshot must contain one fragment");
-                }
-                byte[] data = new byte[length];
-                buffer.getBytes(offset, data);
-                snapshot[0] = data;
-            }, 1);
+            int fragments = snapshotImage.poll(assembler, 10);
             idleStrategy.idle(fragments);
         }
-        if (snapshot[0] == null) {
+        if (snapshot.size() == 0) {
             throw new IllegalStateException("incomplete Aeron core snapshot");
         }
-        state = CoreProbeState.fromSnapshot(productLine, snapshot[0]);
+        state = CoreProbeState.fromSnapshot(productLine, snapshot.toByteArray());
     }
 
     private void offer(ClientSession session, byte[] encoded) {
@@ -120,8 +130,11 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private static CoreMessageType responseType(CoreMessage request) {
-        return request.header().kind() == WireMessageKind.QUERY
-                ? CoreMessageType.STATE_HASH_RESULT
-                : CoreMessageType.COMMAND_RESULT;
+        return switch (request.header().messageType()) {
+            case USER_STATE_QUERY -> CoreMessageType.USER_STATE_RESULT;
+            case ORDER_STATE_QUERY -> CoreMessageType.ORDER_STATE_RESULT;
+            default -> request.header().kind() == WireMessageKind.QUERY
+                    ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
+        };
     }
 }

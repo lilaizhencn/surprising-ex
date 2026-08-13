@@ -3,8 +3,8 @@
 本目录承载按产品线隔离的 Aeron Cluster 交易核心。每条 `ProductLine` 使用相同代码、独立 `clusterId`、
 端口空间、Archive 和数据卷，生产目标是一条产品线三个 Member。
 
-当前 P1 只实现可验证的确定性探针状态，真实 User、Order、Book、Risk 和 Liquidation State 按迁移方案
-P2–P5 接入。探针状态不是生产交易状态，也不能提前替代资金验收。
+当前 P2 已实现 User/Order、余额调整、下单预占、撤单释放、强一致查询和可恢复 Snapshot。Exchange Core、
+Book、成交结算、Risk、Liquidation 和 Export State 按 P3–P5 接入；P2 smoke 不能替代后续全链路资金验收。
 
 ## 模块
 
@@ -25,8 +25,12 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
 export PATH="${JAVA_HOME}/bin:${PATH}"
 PRODUCT_LINE=SPOT scripts/aeron-core-local.sh build
 PRODUCT_LINE=SPOT scripts/aeron-core-local.sh up
+PRODUCT_LINE=SPOT scripts/aeron-core-local.sh wait-ready
 PRODUCT_LINE=SPOT scripts/aeron-core-local.sh probe
 PRODUCT_LINE=SPOT scripts/aeron-core-local.sh hash
+PRODUCT_LINE=SPOT scripts/aeron-core-local.sh funds-smoke
+# 重启后用同一 FUNDS_SMOKE_SEED 只读验证已恢复资金
+PRODUCT_LINE=SPOT FUNDS_SMOKE_SEED=1 scripts/aeron-core-local.sh funds-verify
 PRODUCT_LINE=SPOT scripts/aeron-core-local.sh down
 ```
 
