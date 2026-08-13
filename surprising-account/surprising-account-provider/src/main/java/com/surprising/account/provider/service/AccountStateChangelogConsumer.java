@@ -2,6 +2,7 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.eventstore.UserStateChangelog;
+import com.surprising.eventstore.UserStateChangelogReplay;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -13,6 +14,7 @@ public class AccountStateChangelogConsumer {
     private final ObjectMapper objectMapper;
     private final AccountProperties properties;
     private final AccountUserStateReducer reducer;
+    private final UserStateChangelogReplay replay = new UserStateChangelogReplay();
 
     public AccountStateChangelogConsumer(ObjectMapper objectMapper,
                                          AccountProperties properties,
@@ -33,10 +35,12 @@ public class AccountStateChangelogConsumer {
             }
             UserStateChangelog changelog = objectMapper.readValue(record.value(), UserStateChangelog.class);
             if (changelog.productLine() != properties.getKafka().getProductLine()
-                    || !changelog.partitionKey().equals(record.key())) {
+                        || !changelog.partitionKey().equals(record.key())) {
                 throw new IllegalArgumentException("账户状态 changelog 产品线或 Kafka key 不匹配");
             }
-            reducer.restoreChangelog(changelog);
+            if (replay.observe(changelog) == UserStateChangelogReplay.Decision.APPLY) {
+                reducer.restoreChangelog(changelog);
+            }
         } catch (Exception ex) {
             throw new IllegalStateException("账户状态 changelog 恢复失败", ex);
         }

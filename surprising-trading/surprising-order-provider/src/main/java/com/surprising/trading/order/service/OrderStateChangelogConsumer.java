@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.eventstore.UserStateChangelog;
+import com.surprising.eventstore.UserStateChangelogReplay;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -14,6 +15,7 @@ public class OrderStateChangelogConsumer {
     private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final OrderUserStateService stateService;
+    private final UserStateChangelogReplay replay = new UserStateChangelogReplay();
 
     public OrderStateChangelogConsumer(ObjectMapper objectMapper,
                                        TradingOrderProperties properties,
@@ -41,7 +43,9 @@ public class OrderStateChangelogConsumer {
                         || !changelog.partitionKey().equals(record.key())) {
                     throw new IllegalArgumentException("订单状态 changelog 产品线或 Kafka key 不匹配");
                 }
-                stateService.restoreChangelog(changelog);
+                if (replay.observe(changelog) == UserStateChangelogReplay.Decision.APPLY) {
+                    stateService.restoreChangelog(changelog);
+                }
             }
         } catch (Exception ex) {
             throw new IllegalStateException("订单状态 changelog 恢复失败", ex);
