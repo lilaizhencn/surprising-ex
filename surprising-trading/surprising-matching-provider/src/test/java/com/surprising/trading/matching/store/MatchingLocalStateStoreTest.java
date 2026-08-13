@@ -51,6 +51,7 @@ class MatchingLocalStateStoreTest {
             assertThat(store.result(command.commandId())).isPresent();
             assertThat(store.order(command.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.ACCEPTED);
             assertThat(store.pendingOutbox(10)).hasSize(1);
+            assertThat(store.shardCheckpoint(0).lastSequence()).isEqualTo(1L);
         }
 
         try (MatchingLocalStateStore reopened = new MatchingLocalStateStore(directory, mapper)) {

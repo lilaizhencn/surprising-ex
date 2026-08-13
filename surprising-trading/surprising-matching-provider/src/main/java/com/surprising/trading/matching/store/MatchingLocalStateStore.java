@@ -53,6 +53,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     private static final byte[] OUTBOX_SEQUENCE_PREFIX = "local-outbox-sequence/".getBytes(StandardCharsets.UTF_8);
     private static final byte[] ASSIGNMENT_EPOCH_KEY = "assignment-epoch".getBytes(StandardCharsets.UTF_8);
     private static final byte[] SYMBOL_SHARD_PREFIX = "symbol-shard/".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] SHARD_SEQUENCE_PREFIX = "shard-sequence/".getBytes(StandardCharsets.UTF_8);
 
     static {
         RocksDB.loadLibrary();
@@ -66,6 +67,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     private final boolean ownsSymbolOwners;
     private final int bookShardCount;
     private final Map<String, Object> outboxStreamLocks = new ConcurrentHashMap<>();
+    private final Map<Integer, Object> shardSequenceLocks = new ConcurrentHashMap<>();
 
     public MatchingLocalStateStore(Path directory, ObjectMapper objectMapper) {
         this(directory, objectMapper, new PartitionOwnerLane<>(
@@ -219,6 +221,16 @@ public final class MatchingLocalStateStore implements AutoCloseable {
         }
     }
 
+    public ShardCheckpoint shardCheckpoint(int shardId) {
+        requireShard(shardId);
+        try {
+            byte[] value = database.get(key(SHARD_SEQUENCE_PREFIX, Integer.toString(shardId)));
+            return new ShardCheckpoint(shardId, value == null ? 0L : readLong(value, 0L));
+        } catch (RocksDBException ex) {
+            throw new IllegalStateException("读取撮合 shard checkpoint 失败 shardId=" + shardId, ex);
+        }
+    }
+
     public MatchedOrderSnapshot snapshot(long orderId) {
         StoredOrder order = order(orderId)
                 .orElseThrow(() -> new IllegalStateException("撮合订单快照不存在 orderId=" + orderId));
@@ -367,12 +379,21 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     }
 
     public List<LocalOutboxRecord> pendingOutbox(int limit) {
+        return pendingOutboxInternal(null, limit);
+    }
+
+    public List<LocalOutboxRecord> pendingOutbox(int shardId, int limit) {
+        requireShard(shardId);
+        return pendingOutboxInternal(shardId, limit);
+    }
+
+    private List<LocalOutboxRecord> pendingOutboxInternal(Integer shardId, int limit) {
         List<LocalOutboxRecord> result = new ArrayList<>();
         try (var iterator = database.newIterator()) {
             iterator.seek(OUTBOX_PREFIX);
             while (iterator.isValid() && startsWith(iterator.key(), OUTBOX_PREFIX)) {
                 LocalOutboxRecord record = decode(iterator.value(), LocalOutboxRecord.class);
-                if (!record.published()) {
+                if (!record.published() && (shardId == null || record.shardId() == shardId)) {
                     result.add(record);
                 }
                 iterator.next();
@@ -425,7 +446,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                         if (!current.published()) {
                             batch.put(key, encode(new LocalOutboxRecord(current.sequence(), current.aggregateType(),
                                     current.aggregateId(), current.topic(), current.eventKey(), current.eventType(),
-                                    current.payload(), current.createdAt(), true)));
+                                    current.payload(), current.createdAt(), true, current.shardId())));
                         }
                     }
                     if (batch.count() > 0) {
@@ -442,12 +463,28 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     public List<RecoveredOrderBookOrder> recoverableOpenOrdersAfter(Instant createdAt,
                                                                      long lastOrderId,
                                                                      int limit) {
+        return recoverableOpenOrdersAfter(null, createdAt, lastOrderId, limit);
+    }
+
+    public List<RecoveredOrderBookOrder> recoverableOpenOrdersAfter(int shardId,
+                                                                     Instant createdAt,
+                                                                     long lastOrderId,
+                                                                     int limit) {
+        requireShard(shardId);
+        return recoverableOpenOrdersAfter(Integer.valueOf(shardId), createdAt, lastOrderId, limit);
+    }
+
+    private List<RecoveredOrderBookOrder> recoverableOpenOrdersAfter(Integer shardId,
+                                                                       Instant createdAt,
+                                                                       long lastOrderId,
+                                                                       int limit) {
         List<StoredOrder> open = new ArrayList<>();
         try (var iterator = database.newIterator()) {
             iterator.seek(ORDER_PREFIX);
             while (iterator.isValid() && startsWith(iterator.key(), ORDER_PREFIX)) {
                 StoredOrder order = decode(iterator.value(), StoredOrder.class);
                 if (order.remainingQuantitySteps() > 0L && isOpen(order.status())
+                        && (shardId == null || shardForSymbol(order.command().symbol()) == shardId)
                         && (order.command().commandTime().isAfter(createdAt)
                         || (order.command().commandTime().equals(createdAt)
                         && order.command().orderId() > lastOrderId))) {
@@ -503,7 +540,9 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                         fill.completed() ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED,
                         fill.eventTime()));
             }
-            withOutboxStreamLocks(outboxWrites, () -> {
+            int shardId = shardForSymbol(result.symbol());
+            synchronized (shardSequenceLocks.computeIfAbsent(shardId, ignored -> new Object())) {
+                withOutboxStreamLocks(outboxWrites, () -> {
                 try {
                     try (WriteBatch batch = new WriteBatch()) {
                         batch.put(resultKey, resultBytes);
@@ -521,14 +560,17 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                                 batch.put(key, value);
                             }
                         }
-                        appendOutbox(batch, outboxWrites);
+                        appendOutbox(batch, outboxWrites, shardId);
+                        batch.put(key(SHARD_SEQUENCE_PREFIX, Integer.toString(shardId)),
+                                encodeLong(shardCheckpoint(shardId).lastSequence() + 1L));
                         database.write(writeOptions, batch);
                     }
                     return null;
                 } catch (RocksDBException ex) {
                     throw new IllegalStateException("提交撮合本地事实失败 commandId=" + result.commandId(), ex);
                 }
-            });
+                });
+            }
             return true;
         } catch (RocksDBException ex) {
             throw new IllegalStateException("提交撮合本地事实失败 commandId=" + result.commandId(), ex);
@@ -536,6 +578,12 @@ public final class MatchingLocalStateStore implements AutoCloseable {
     }
 
     private void appendOutbox(WriteBatch batch, List<MatchingOutboxWrite> writes) throws RocksDBException {
+        appendOutbox(batch, writes, null);
+    }
+
+    private void appendOutbox(WriteBatch batch,
+                              List<MatchingOutboxWrite> writes,
+                              Integer originShardId) throws RocksDBException {
         if (writes == null || writes.isEmpty()) {
             return;
         }
@@ -548,13 +596,14 @@ public final class MatchingLocalStateStore implements AutoCloseable {
             byStream.computeIfAbsent(write.eventKey(), ignored -> new ArrayList<>()).add(write);
         }
         for (Map.Entry<String, List<MatchingOutboxWrite>> entry : byStream.entrySet()) {
-            appendOutboxStream(batch, entry.getKey(), entry.getValue());
+            appendOutboxStream(batch, entry.getKey(), entry.getValue(), originShardId);
         }
     }
 
     private void appendOutboxStream(WriteBatch batch,
                                     String eventKey,
-                                    List<MatchingOutboxWrite> writes) throws RocksDBException {
+                                    List<MatchingOutboxWrite> writes,
+                                    Integer originShardId) throws RocksDBException {
         byte[] sequenceKey = key(OUTBOX_SEQUENCE_PREFIX, streamKey(eventKey));
         byte[] stored = database.get(sequenceKey);
         long next = stored == null ? findNextStreamSequence(eventKey) : readLong(stored, 1L);
@@ -571,7 +620,8 @@ public final class MatchingLocalStateStore implements AutoCloseable {
             }
             LocalOutboxRecord record = new LocalOutboxRecord(next++,
                     write.aggregateType(), write.aggregateId(),
-                    write.topic(), write.eventKey(), write.eventType(), write.payload(), write.now(), false);
+                    write.topic(), write.eventKey(), write.eventType(), write.payload(), write.now(), false,
+                    originShardId == null ? shardForEventKey(write.eventKey()) : originShardId);
             batch.put(outboxKey(stream, identity), encode(record));
             batch.put(identityKey, encodeLong(record.sequence()));
             advanced = true;
@@ -598,6 +648,20 @@ public final class MatchingLocalStateStore implements AutoCloseable {
             throw new IllegalStateException("撮合本地通知序列耗尽");
         }
         return maximum + 1L;
+    }
+
+    private int shardForSymbol(String symbol) {
+        return Math.floorMod(Objects.requireNonNull(symbol, "symbol").hashCode(), bookShardCount);
+    }
+
+    private int shardForEventKey(String eventKey) {
+        return Math.floorMod(Objects.requireNonNull(eventKey, "eventKey").hashCode(), bookShardCount);
+    }
+
+    private void requireShard(int shardId) {
+        if (shardId < 0 || shardId >= bookShardCount) {
+            throw new IllegalArgumentException("matching book shard id out of range: " + shardId);
+        }
     }
 
     private <T> T withOutboxStreamLocks(List<MatchingOutboxWrite> writes,
@@ -776,7 +840,7 @@ public final class MatchingLocalStateStore implements AutoCloseable {
             if (!current.published()) {
                 database.put(writeOptions, key, encode(new LocalOutboxRecord(current.sequence(), current.aggregateType(),
                         current.aggregateId(), current.topic(), current.eventKey(), current.eventType(),
-                        current.payload(), current.createdAt(), true)));
+                        current.payload(), current.createdAt(), true, current.shardId())));
             }
         } catch (RocksDBException ex) {
             throw new IllegalStateException("标记撮合本地通知失败 sequence=" + record.sequence(), ex);
@@ -907,11 +971,32 @@ public final class MatchingLocalStateStore implements AutoCloseable {
                                     String eventType,
                                     String payload,
                                     Instant createdAt,
-                                    boolean published) {
+                                    boolean published,
+                                    int shardId) {
+        public LocalOutboxRecord(long sequence,
+                                 String aggregateType,
+                                 long aggregateId,
+                                 String topic,
+                                 String eventKey,
+                                 String eventType,
+                                 String payload,
+                                 Instant createdAt,
+                                 boolean published) {
+            this(sequence, aggregateType, aggregateId, topic, eventKey, eventType, payload, createdAt, published, 0);
+        }
+
         public LocalOutboxRecord {
             if (sequence <= 0L || aggregateType == null || topic == null || eventKey == null
                     || eventType == null || payload == null || createdAt == null) {
                 throw new IllegalArgumentException("撮合本地通知字段无效");
+            }
+        }
+    }
+
+    public record ShardCheckpoint(int shardId, long lastSequence) {
+        public ShardCheckpoint {
+            if (shardId < 0 || lastSequence < 0L) {
+                throw new IllegalArgumentException("撮合 shard checkpoint 字段无效");
             }
         }
     }

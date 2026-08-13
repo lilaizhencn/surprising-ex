@@ -925,7 +925,7 @@ PostgreSQL 保留以下职责：
 
 完成标准：增加 Matching pod 能提高多 symbol 总吞吐，且热点 symbol 不影响其他 shard。
 
-当前状态：`ExchangeCoreEngine` 已支持按稳定 symbol hash 启动独立 Book Shard runtime，每个 shard 拥有独立 exchange-core、用户注册集合和生命周期；matching RocksDB 还会持久化 `symbol -> shard` 绑定并在撮合入口拒绝路由漂移。默认配置仍为 1 shard，RocksDB 状态库和恢复/输出编排仍是 JVM 级共享边界，尚未达到最终完全独立的 shard checkpoint/output 形态。
+当前状态：`ExchangeCoreEngine` 已支持按稳定 symbol hash 启动独立 Book Shard runtime，每个 shard 拥有独立 exchange-core、用户注册集合和生命周期；matching RocksDB 持久化 `symbol -> shard` 绑定并在撮合入口拒绝路由漂移。每个 shard 现在持有独立 checkpoint 序号，开放订单恢复和本地 outbox 发布均按 shard 隔离，outbox 记录携带来源 shard，避免跨 shard 扫描和发布批次混合。默认配置仍为 1 shard；独立进程级 RocksDB 目录和热点 symbol 独占 pod 仍需生产部署验证。
 
 ### 阶段 7：Kafka EOS 和 Warm Standby
 

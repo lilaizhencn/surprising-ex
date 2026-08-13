@@ -28,18 +28,24 @@ public class MatchingLocalOutboxPublisher {
     }
 
     public void publishPending() {
-        List<MatchingLocalStateStore.LocalOutboxRecord> records = stateStore.pendingOutbox(
-                Math.max(1, properties.getOutbox().getBatchSize()));
-        List<CompletableFuture<?>> sends = new ArrayList<>(records.size());
-        try {
-            for (MatchingLocalStateStore.LocalOutboxRecord record : records) {
-                sends.add(kafkaTemplate.send(record.topic(), record.eventKey(), record.payload()));
+        int shardCount = Math.max(1, properties.getEngine().getBookShards());
+        for (int shardId = 0; shardId < shardCount; shardId++) {
+            List<MatchingLocalStateStore.LocalOutboxRecord> records = stateStore.pendingOutbox(shardId,
+                    Math.max(1, properties.getOutbox().getBatchSize()));
+            if (records.isEmpty()) {
+                continue;
             }
-            CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
-                    .get(properties.getOutbox().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
-            stateStore.markOutboxPublished(records);
-        } catch (Exception ex) {
-            throw new KafkaException("撮合本地通知批量发布失败", ex);
+            List<CompletableFuture<?>> sends = new ArrayList<>(records.size());
+            try {
+                for (MatchingLocalStateStore.LocalOutboxRecord record : records) {
+                    sends.add(kafkaTemplate.send(record.topic(), record.eventKey(), record.payload()));
+                }
+                CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
+                        .get(properties.getOutbox().getSendTimeout().toMillis(), TimeUnit.MILLISECONDS);
+                stateStore.markOutboxPublished(records);
+            } catch (Exception ex) {
+                throw new KafkaException("撮合本地通知批量发布失败 shardId=" + shardId, ex);
+            }
         }
     }
 }
