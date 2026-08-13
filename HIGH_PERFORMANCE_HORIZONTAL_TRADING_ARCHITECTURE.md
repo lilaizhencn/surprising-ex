@@ -900,7 +900,7 @@ PostgreSQL 保留以下职责：
 
 完成标准：一个 shard 只有一个写线程，热路径无跨线程 Future 等待。
 
-当前状态：账户用户分区和撮合交易对在 Kafka 回调期间已经支持当前线程 owner 绑定；订单用户命令已统一通过有界用户分区 lane 串行执行，订单恢复、查询等非 Kafka 入口仍可使用 mailbox。订单用户命令结果在状态处理结束后再发布，避免把发送等待嵌入状态 reducer。最终单 Kafka partition 直接 reducer 和无同步网络 I/O 仍需继续收敛。
+当前状态：账户用户分区和撮合交易对在 Kafka 回调期间已经支持当前线程 owner 绑定；订单用户命令按 poll 内用户分区分组后一次绑定 owner 并连续执行，结果在状态处理结束后再发布，避免逐条跨线程等待和把发送等待嵌入状态 reducer。订单恢复、查询等非 Kafka 入口仍可使用 mailbox；最终单 Kafka partition 直接 reducer 和无同步网络 I/O 仍需继续收敛。
 
 ### 阶段 5：统一用户热写状态机
 

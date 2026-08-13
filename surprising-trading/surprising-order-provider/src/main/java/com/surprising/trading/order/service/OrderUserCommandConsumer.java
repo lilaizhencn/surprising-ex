@@ -7,6 +7,7 @@ import com.surprising.eventstore.UserMutation;
 import com.surprising.eventstore.UserMutationBatch;
 import com.surprising.eventstore.UserPartitionCommandLane;
 import com.surprising.eventstore.UserPartitionKey;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -67,7 +68,16 @@ public class OrderUserCommandConsumer {
         if (records == null || records.isEmpty()) {
             return;
         }
-        List<OrderUserCommand> commands = records.stream().map(this::decode).toList();
+        List<OrderUserCommand> commands = new ArrayList<>(records.size());
+        for (ConsumerRecord<String, String> record : records) {
+            try {
+                commands.add(decode(record));
+            } catch (RuntimeException ex) {
+                log.error("订单用户命令解析失败 topic={} partition={} offset={} key={}",
+                        record.topic(), record.partition(), record.offset(), record.key(), ex);
+                throw ex;
+            }
+        }
         UserMutationBatch mutationBatch = new UserMutationBatch(commands.stream().map(this::toUserMutation).toList());
         Map<String, ConsumerRecord<String, String>> recordsByCommandId = new java.util.LinkedHashMap<>();
         Map<String, OrderUserCommand> commandsById = new java.util.LinkedHashMap<>();
@@ -75,28 +85,38 @@ public class OrderUserCommandConsumer {
             recordsByCommandId.put(commands.get(index).commandId(), records.get(index));
             commandsById.put(commands.get(index).commandId(), commands.get(index));
         }
-        for (List<UserMutation> partitionMutations : mutationBatch.byPartition().values()) {
-            for (UserMutation mutation : partitionMutations) {
-                ConsumerRecord<String, String> record = recordsByCommandId.get(mutation.commandId());
-                OrderUserCommand command = commandsById.get(mutation.commandId());
-            try {
-                OrderUserCommand decodedCommand = command;
-                OrderUserCommandResult result;
-                if (lane == null) {
-                    result = stateService.executeUserCommand(decodedCommand);
-                } else {
-                    UserPartitionKey partition = new UserPartitionKey(decodedCommand.productLine(), decodedCommand.userId());
-                    result = lane.execute(partition, () -> stateService.executeUserCommand(decodedCommand));
+        List<ProcessedCommand> processed = new ArrayList<>(commands.size());
+        for (Map.Entry<UserPartitionKey, List<UserMutation>> entry : mutationBatch.byPartition().entrySet()) {
+            Runnable processPartition = () -> {
+                for (UserMutation mutation : entry.getValue()) {
+                    String commandId = mutation.commandId();
+                    processCommand(commandsById.get(commandId), recordsByCommandId.get(commandId), processed);
                 }
-                publishResult(result);
-            } catch (RuntimeException ex) {
-                // 记录分区和偏移，便于定位某一条坏命令导致分区后续命令持续重试。
-                log.error("订单用户命令处理失败 topic={} partition={} offset={} key={} commandId={}",
-                        record.topic(), record.partition(), record.offset(), record.key(),
-                        command == null ? "unknown" : command.commandId(), ex);
-                throw ex;
+            };
+            if (lane == null) {
+                processPartition.run();
+            } else {
+                lane.runAsOwner(entry.getKey(), () -> {
+                    processPartition.run();
+                    return null;
+                });
             }
-            }
+        }
+        for (ProcessedCommand command : processed) {
+            publishResult(command.result());
+        }
+    }
+
+    private void processCommand(OrderUserCommand command,
+                                ConsumerRecord<String, String> record,
+                                List<ProcessedCommand> processed) {
+        try {
+            OrderUserCommandResult result = stateService.executeUserCommand(command);
+            processed.add(new ProcessedCommand(command.commandId(), result));
+        } catch (RuntimeException ex) {
+            log.error("订单用户命令处理失败 topic={} partition={} offset={} key={} commandId={}",
+                    record.topic(), record.partition(), record.offset(), record.key(), command.commandId(), ex);
+            throw ex;
         }
     }
 
@@ -141,5 +161,8 @@ public class OrderUserCommandConsumer {
 
     public String groupId() {
         return properties.getKafka().getOrderUserCommandGroupId();
+    }
+
+    private record ProcessedCommand(String commandId, OrderUserCommandResult result) {
     }
 }
