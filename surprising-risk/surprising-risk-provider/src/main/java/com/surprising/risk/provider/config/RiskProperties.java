@@ -1,203 +1,60 @@
 package com.surprising.risk.provider.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
-import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
-import jakarta.annotation.PostConstruct;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.risk")
 public class RiskProperties {
 
-    private Kafka kafka = new Kafka();
+    private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     private Calculation calculation = new Calculation();
-    private Outbox outbox = new Outbox();
-    private RedisState redisState = new RedisState();
-    private LocalState localState = new LocalState();
+    private Aeron aeron = new Aeron();
 
-    /** 启动时拒绝未隔离的风险 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "risk");
+    public ProductLine getProductLine() { return productLine; }
+    public void setProductLine(ProductLine value) {
+        productLine = value == null ? ProductLine.LINEAR_PERPETUAL : value;
     }
+    public Calculation getCalculation() { return calculation; }
+    public void setCalculation(Calculation value) { calculation = value == null ? new Calculation() : value; }
+    public Aeron getAeron() { return aeron; }
+    public void setAeron(Aeron value) { aeron = value == null ? new Aeron() : value; }
 
-    public Kafka getKafka() {
-        return kafka;
-    }
+    public static class Aeron {
+        private List<String> hostnames = List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private Duration responseTimeout = Duration.ofSeconds(5);
+        private int clientConnections = 2;
 
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
-    }
-
-    public Calculation getCalculation() {
-        return calculation;
-    }
-
-    public void setCalculation(Calculation calculation) {
-        this.calculation = calculation;
-    }
-
-    public Outbox getOutbox() {
-        return outbox;
-    }
-
-    public void setOutbox(Outbox outbox) {
-        this.outbox = outbox;
-    }
-
-    public RedisState getRedisState() {
-        return redisState;
-    }
-
-    public void setRedisState(RedisState redisState) {
-        this.redisState = redisState;
-    }
-
-    public LocalState getLocalState() {
-        return localState;
-    }
-
-    public void setLocalState(LocalState localState) {
-        this.localState = localState;
-    }
-
-    /** 风险计算结果的本地持久化队列配置。 */
-    public static class LocalState {
-        private String walDirectory = "data/risk-projection-wal";
-        private int projectionBatchSize = 100;
-
-        public String getWalDirectory() {
-            return walDirectory;
-        }
-
-        public void setWalDirectory(String walDirectory) {
-            if (walDirectory == null || walDirectory.isBlank()) {
-                throw new IllegalArgumentException("risk local state walDirectory 不能为空");
+        public List<String> getHostnames() { return hostnames; }
+        public void setHostnames(List<String> value) {
+            if (value == null || value.size() != 3
+                    || value.stream().anyMatch(host -> host == null || host.isBlank())) {
+                throw new IllegalArgumentException("aeron.hostnames must contain exactly three nonblank hosts");
             }
-            this.walDirectory = walDirectory.trim();
+            hostnames = List.copyOf(value);
         }
-
-        public int getProjectionBatchSize() {
-            return projectionBatchSize;
-        }
-
-        public void setProjectionBatchSize(int projectionBatchSize) {
-            if (projectionBatchSize <= 0) {
-                throw new IllegalArgumentException("risk local state projectionBatchSize 必须为正数");
+        public String getEgressHostname() { return egressHostname; }
+        public void setEgressHostname(String value) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException("aeron.egress-hostname must be nonblank");
             }
-            this.projectionBatchSize = projectionBatchSize;
+            egressHostname = value.trim();
         }
-    }
-
-    public static class Kafka {
-        private String bootstrapServers = "localhost:9092";
-        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private boolean productTopicsEnabled;
-        private String groupId = "surprising-risk-v1";
-        private String positionEventsTopic = "surprising.account.position.events.v1";
-        private String accountStateEventsTopic = "surprising.account.state.events.v1";
-        private String accountRiskEventsTopic = "surprising.risk.account.events.v1";
-        private String positionRiskEventsTopic = "surprising.risk.position.events.v1";
-        private String liquidationCandidatesTopic = "surprising.perp.liquidation.candidates.v1";
-        private int concurrency = 2;
-        private int maxPollRecords = 500;
-
-        public String getBootstrapServers() {
-            return bootstrapServers;
+        public Duration getResponseTimeout() { return responseTimeout; }
+        public void setResponseTimeout(Duration value) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException("aeron.response-timeout must be positive");
+            }
+            responseTimeout = value;
         }
-
-        public void setBootstrapServers(String bootstrapServers) {
-            this.bootstrapServers = bootstrapServers;
-        }
-
-        public ProductLine getProductLine() {
-            return productLine;
-        }
-
-        public void setProductLine(ProductLine productLine) {
-            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
-        }
-
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
-        public String getGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("risk") : groupId;
-        }
-
-        public void setGroupId(String groupId) {
-            this.groupId = groupId;
-        }
-
-        public String getPositionEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
-        }
-
-        public void setPositionEventsTopic(String positionEventsTopic) {
-            this.positionEventsTopic = positionEventsTopic;
-        }
-
-        public String getAccountStateEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountStateEventsTopic() : accountStateEventsTopic;
-        }
-
-        public void setAccountStateEventsTopic(String accountStateEventsTopic) {
-            this.accountStateEventsTopic = accountStateEventsTopic;
-        }
-
-        public String getAccountRiskEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountRiskEventsTopic() : accountRiskEventsTopic;
-        }
-
-        public void setAccountRiskEventsTopic(String accountRiskEventsTopic) {
-            this.accountRiskEventsTopic = accountRiskEventsTopic;
-        }
-
-        public String getPositionRiskEventsTopic() {
-            return productTopicsEnabled ? productTopics().positionRiskEventsTopic() : positionRiskEventsTopic;
-        }
-
-        public void setPositionRiskEventsTopic(String positionRiskEventsTopic) {
-            this.positionRiskEventsTopic = positionRiskEventsTopic;
-        }
-
-        public String getLiquidationCandidatesTopic() {
-            return productTopicsEnabled ? productTopics().liquidationCandidatesTopic() : liquidationCandidatesTopic;
-        }
-
-        public void setLiquidationCandidatesTopic(String liquidationCandidatesTopic) {
-            this.liquidationCandidatesTopic = liquidationCandidatesTopic;
-        }
-
-        public int getConcurrency() {
-            return concurrency;
-        }
-
-        public void setConcurrency(int concurrency) {
-            this.concurrency = concurrency;
-        }
-
-        public int getMaxPollRecords() {
-            return maxPollRecords;
-        }
-
-        public String getAccountStateGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("risk-account-state")
-                    : groupId + "-account-state";
-        }
-
-        public void setMaxPollRecords(int maxPollRecords) {
-            this.maxPollRecords = maxPollRecords;
-        }
-
-        private ProductTopicNames productTopics() {
-            return ProductTopicNames.of(productLine);
+        public int getClientConnections() { return clientConnections; }
+        public void setClientConnections(int value) {
+            if (value < 1 || value > 64) {
+                throw new IllegalArgumentException("aeron.client-connections must be in [1,64]");
+            }
+            clientConnections = value;
         }
     }
 
@@ -209,242 +66,34 @@ public class RiskProperties {
         private Duration maxMarkAge = Duration.ofSeconds(10);
         private int scanBatchSize = 500;
 
-        public boolean isEnabled() {
-            return enabled;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean value) { enabled = value; }
+        public long getScanDelayMs() { return scanDelayMs; }
+        public void setScanDelayMs(long value) {
+            if (value < 0) throw new IllegalArgumentException("scanDelayMs must be non-negative");
+            scanDelayMs = value;
         }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
+        public long getWarningMarginRatioPpm() { return warningMarginRatioPpm; }
+        public void setWarningMarginRatioPpm(long value) {
+            if (value < 0) throw new IllegalArgumentException("warningMarginRatioPpm must be non-negative");
+            warningMarginRatioPpm = value;
         }
-
-        public long getScanDelayMs() {
-            return scanDelayMs;
+        public long getLiquidationMarginRatioPpm() { return liquidationMarginRatioPpm; }
+        public void setLiquidationMarginRatioPpm(long value) {
+            if (value < 0) throw new IllegalArgumentException("liquidationMarginRatioPpm must be non-negative");
+            liquidationMarginRatioPpm = value;
         }
-
-        public void setScanDelayMs(long scanDelayMs) {
-            this.scanDelayMs = scanDelayMs;
+        public Duration getMaxMarkAge() { return maxMarkAge; }
+        public void setMaxMarkAge(Duration value) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException("maxMarkAge must be positive");
+            }
+            maxMarkAge = value;
         }
-
-        public long getWarningMarginRatioPpm() {
-            return warningMarginRatioPpm;
-        }
-
-        public void setWarningMarginRatioPpm(long warningMarginRatioPpm) {
-            this.warningMarginRatioPpm = warningMarginRatioPpm;
-        }
-
-        public long getLiquidationMarginRatioPpm() {
-            return liquidationMarginRatioPpm;
-        }
-
-        public void setLiquidationMarginRatioPpm(long liquidationMarginRatioPpm) {
-            this.liquidationMarginRatioPpm = liquidationMarginRatioPpm;
-        }
-
-        public Duration getMaxMarkAge() {
-            return maxMarkAge;
-        }
-
-        public void setMaxMarkAge(Duration maxMarkAge) {
-            this.maxMarkAge = maxMarkAge;
-        }
-
-        public int getScanBatchSize() {
-            return scanBatchSize;
-        }
-
-        public void setScanBatchSize(int scanBatchSize) {
-            this.scanBatchSize = scanBatchSize;
+        public int getScanBatchSize() { return scanBatchSize; }
+        public void setScanBatchSize(int value) {
+            if (value < 1 || value > 10_000) throw new IllegalArgumentException("scanBatchSize must be in [1,10000]");
+            scanBatchSize = value;
         }
     }
-
-    public static class Outbox {
-        private int batchSize = 1000;
-        private long publishDelayMs = 20L;
-        private Duration sendTimeout = Duration.ofSeconds(3);
-        private boolean asyncEnabled = true;
-        private int maxInFlight = 32;
-        private int maxRowsPerKey = 32;
-        private Duration retention = Duration.ofDays(7);
-        private long cleanupDelayMs = 60_000L;
-        private int cleanupBatchSize = 10_000;
-        private int cleanupMaxBatches = 10;
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
-        }
-
-        public Duration getSendTimeout() {
-            return sendTimeout;
-        }
-
-        public void setSendTimeout(Duration sendTimeout) {
-            this.sendTimeout = sendTimeout;
-        }
-
-        public boolean isAsyncEnabled() {
-            return asyncEnabled;
-        }
-
-        public void setAsyncEnabled(boolean asyncEnabled) {
-            this.asyncEnabled = asyncEnabled;
-        }
-
-        public int getMaxInFlight() {
-            return maxInFlight;
-        }
-
-        public void setMaxInFlight(int maxInFlight) {
-            this.maxInFlight = maxInFlight;
-        }
-
-        public int getMaxRowsPerKey() {
-            return maxRowsPerKey;
-        }
-
-        public void setMaxRowsPerKey(int maxRowsPerKey) {
-            this.maxRowsPerKey = maxRowsPerKey;
-        }
-
-        public Duration getRetention() {
-            return retention;
-        }
-
-        public void setRetention(Duration retention) {
-            if (retention == null || retention.isZero() || retention.isNegative()) {
-                throw new IllegalArgumentException("risk outbox retention must be positive");
-            }
-            this.retention = retention;
-        }
-
-        public long getCleanupDelayMs() {
-            return cleanupDelayMs;
-        }
-
-        public void setCleanupDelayMs(long cleanupDelayMs) {
-            if (cleanupDelayMs <= 0) {
-                throw new IllegalArgumentException("risk outbox cleanupDelayMs must be positive");
-            }
-            this.cleanupDelayMs = cleanupDelayMs;
-        }
-
-        public int getCleanupBatchSize() {
-            return cleanupBatchSize;
-        }
-
-        public void setCleanupBatchSize(int cleanupBatchSize) {
-            if (cleanupBatchSize <= 0) {
-                throw new IllegalArgumentException("risk outbox cleanupBatchSize must be positive");
-            }
-            this.cleanupBatchSize = cleanupBatchSize;
-        }
-
-        public int getCleanupMaxBatches() {
-            return cleanupMaxBatches;
-        }
-
-        public void setCleanupMaxBatches(int cleanupMaxBatches) {
-            if (cleanupMaxBatches <= 0) {
-                throw new IllegalArgumentException("risk outbox cleanupMaxBatches must be positive");
-            }
-            this.cleanupMaxBatches = cleanupMaxBatches;
-        }
-    }
-
-    public static class RedisState {
-        private String keyPrefix = "surprising:risk-state:v2";
-        private Duration stateTtl = Duration.ofMinutes(10);
-        private Duration readyTtl = Duration.ofSeconds(30);
-        private Duration unchangedTriggerInterval = Duration.ofSeconds(30);
-        private Duration projectionLeaseTtl = Duration.ofMinutes(1);
-        private Duration projectionGroupLockTtl = Duration.ofSeconds(30);
-        private Duration projectionGroupLockWait = Duration.ofSeconds(2);
-        private int triggerBatchSize = 250;
-        private int triggerConcurrency = 4;
-
-        public String getKeyPrefix() {
-            return keyPrefix;
-        }
-
-        public void setKeyPrefix(String keyPrefix) {
-            this.keyPrefix = keyPrefix;
-        }
-
-        public Duration getStateTtl() {
-            return stateTtl;
-        }
-
-        public void setStateTtl(Duration stateTtl) {
-            this.stateTtl = stateTtl;
-        }
-
-        public Duration getReadyTtl() {
-            return readyTtl;
-        }
-
-        public void setReadyTtl(Duration readyTtl) {
-            this.readyTtl = readyTtl;
-        }
-
-        public Duration getUnchangedTriggerInterval() {
-            return unchangedTriggerInterval;
-        }
-
-        public void setUnchangedTriggerInterval(Duration unchangedTriggerInterval) {
-            this.unchangedTriggerInterval = unchangedTriggerInterval;
-        }
-
-        public Duration getProjectionLeaseTtl() {
-            return projectionLeaseTtl;
-        }
-
-        public void setProjectionLeaseTtl(Duration projectionLeaseTtl) {
-            this.projectionLeaseTtl = projectionLeaseTtl;
-        }
-
-        public Duration getProjectionGroupLockTtl() {
-            return projectionGroupLockTtl;
-        }
-
-        public void setProjectionGroupLockTtl(Duration projectionGroupLockTtl) {
-            this.projectionGroupLockTtl = projectionGroupLockTtl;
-        }
-
-        public Duration getProjectionGroupLockWait() {
-            return projectionGroupLockWait;
-        }
-
-        public void setProjectionGroupLockWait(Duration projectionGroupLockWait) {
-            this.projectionGroupLockWait = projectionGroupLockWait;
-        }
-
-        public int getTriggerBatchSize() {
-            return triggerBatchSize;
-        }
-
-        public void setTriggerBatchSize(int triggerBatchSize) {
-            this.triggerBatchSize = triggerBatchSize;
-        }
-
-        public int getTriggerConcurrency() {
-            return triggerConcurrency;
-        }
-
-        public void setTriggerConcurrency(int triggerConcurrency) {
-            this.triggerConcurrency = triggerConcurrency;
-        }
-    }
-
 }

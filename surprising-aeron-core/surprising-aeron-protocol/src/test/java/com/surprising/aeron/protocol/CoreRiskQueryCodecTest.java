@@ -9,8 +9,9 @@ import org.junit.jupiter.api.Test;
 class CoreRiskQueryCodecTest {
     @Test
     void roundTripsRiskSnapshots() {
-        var value = new CoreRiskSnapshotView(1001, "BTC-USDT", CorePositionSide.LONG, 9,
-                100, -20, 50, 500_000, "WARNING");
+        var value = new CoreRiskSnapshotView(1001, "BTC-USDT", CoreMarginMode.CROSS, CorePositionSide.LONG,
+                7, "USDT", 10, 50_000, 55_000, 550_000, 0, 9,
+                1_000, 100, -20, 50, 500_000, "WARNING");
         assertThat(CoreRiskQueryCodec.decode(CoreRiskQueryCodec.encode(List.of(value)))).containsExactly(value);
     }
 

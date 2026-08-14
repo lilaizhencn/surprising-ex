@@ -24,6 +24,32 @@ import java.util.UUID;
 
 public final class TradingCoreReducer {
 
+    public java.util.List<com.surprising.aeron.protocol.CoreRiskSnapshotView> riskSnapshots(
+            TradingCoreState state, long userId) {
+        return state.riskState().snapshots().values().stream()
+                .filter(risk -> userId == 0 || risk.userId() == userId)
+                .map(risk -> {
+                    CoreUserState user = state.user(risk.userId());
+                    CorePositionState position = user.positions().get(positionKey(risk.symbol(), risk.positionSide()));
+                    CoreInstrumentState instrument = state.instruments().get(risk.symbol());
+                    CoreMarkPriceState mark = state.riskState().markPrices().get(risk.symbol());
+                    if (position == null || instrument == null || mark == null) {
+                        throw new IllegalStateException("risk snapshot source state is missing");
+                    }
+                    long notional = com.surprising.instrument.api.math.PerpetualContractMath.notionalUnits(
+                            instrument.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),
+                            instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
+                            instrument.settleScaleUnits());
+                    long walletBalance = crossWalletBalance(state, user, instrument.settleAsset());
+                    return new com.surprising.aeron.protocol.CoreRiskSnapshotView(risk.userId(), risk.symbol(),
+                            position.marginMode(), risk.positionSide(), position.instrumentVersion(),
+                            instrument.settleAsset(), position.signedQuantitySteps(), position.entryPriceTicks(),
+                            mark.markPriceTicks(), notional, position.positionMarginUnits(), risk.priceSequence(), walletBalance,
+                            risk.equityUnits(), risk.unrealizedPnlUnits(), risk.maintenanceMarginUnits(),
+                            risk.marginRatioPpm(), risk.status().name());
+                }).toList();
+    }
+
     private static final long PPM = 1_000_000L;
 
     public TradingCoreState updatePositionMode(
@@ -371,35 +397,19 @@ public final class TradingCoreReducer {
             }
             processed++;
             lastUserId = user.userId();
-            for (CorePositionState position : positionsForSymbol(user, scan.symbol())) {
-                long unrealized = PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(),
-                        position.signedQuantitySteps(), position.entryPriceTicks(), mark.markPriceTicks(),
-                        instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
-                        instrument.settleScaleUnits());
-                AssetBalance balance = user.balances().get(instrument.settleAsset());
-                long wallet = position.marginMode() == CoreMarginMode.ISOLATED
-                        ? position.positionMarginUnits() : balance == null ? 0 : balance.totalUnits();
-                long equity = Math.addExact(wallet, unrealized);
-                long maintenance = CoreContractMath.maintenanceMarginUnits(instrument,
-                        position.signedQuantitySteps(), mark.markPriceTicks());
-                long ratio = maintenance <= 0 ? 0 : equity <= 0 ? Long.MAX_VALUE : safeRatio(maintenance, equity);
-                CoreRiskStatus status = ratio >= 1_000_000 ? CoreRiskStatus.LIQUIDATION
-                        : ratio >= 800_000 ? CoreRiskStatus.WARNING : CoreRiskStatus.NORMAL;
-                CoreRiskSnapshot snapshot = new CoreRiskSnapshot(user.userId(), scan.symbol(),
-                        position.positionSide(), scan.priceSequence(), equity, unrealized, maintenance, ratio, status);
-                snapshots.put(snapshot.key(), snapshot);
-                boolean activeLiquidation = liquidations.values().stream().anyMatch(value ->
-                        value.userId() == user.userId() && value.symbol().equals(scan.symbol())
-                                && value.positionSide() == position.positionSide()
-                                && value.status() != CoreLiquidationState.Status.COMPLETED);
-                if (status == CoreRiskStatus.LIQUIDATION && !activeLiquidation) {
-                    CoreLiquidationState liquidation = new CoreLiquidationState(nextLiquidationId, user.userId(),
-                            scan.symbol(), position.positionSide(), instrument.version(), scan.priceSequence(),
-                            position.signedQuantitySteps(), Math.absExact(position.signedQuantitySteps()), 0,
-                            CoreLiquidationState.Status.PLANNED);
-                    liquidations.put(nextLiquidationId, liquidation);
-                    nextLiquidationId = Math.incrementExact(nextLiquidationId);
+            List<CorePositionState> changedPositions = positionsForSymbol(user, scan.symbol());
+            if (changedPositions.isEmpty()) {
+                continue;
+            }
+            for (CorePositionState position : changedPositions) {
+                if (position.marginMode() == CoreMarginMode.ISOLATED) {
+                    nextLiquidationId = updateIsolatedRisk(state, user, position, instrument, mark,
+                            snapshots, liquidations, nextLiquidationId);
                 }
+            }
+            if (changedPositions.stream().anyMatch(position -> position.marginMode() == CoreMarginMode.CROSS)) {
+                nextLiquidationId = updateCrossRisk(state, user, instrument.settleAsset(), snapshots,
+                        liquidations, nextLiquidationId);
             }
         }
         CoreRiskState nextRisk = new CoreRiskState(state.riskState().markPrices(), snapshots, liquidations,
@@ -408,6 +418,112 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
                 state.orders(), state.bookState(), state.instruments(), nextRisk, state.treasuryState());
     }
+
+    private long updateIsolatedRisk(TradingCoreState state, CoreUserState user, CorePositionState position,
+                                    CoreInstrumentState instrument, CoreMarkPriceState mark,
+                                    Map<String, CoreRiskSnapshot> snapshots,
+                                    Map<Long, CoreLiquidationState> liquidations, long nextLiquidationId) {
+        PositionRisk risk = positionRisk(position, instrument, mark);
+        long equity = Math.addExact(position.positionMarginUnits(), risk.unrealizedPnlUnits());
+        long ratio = riskRatio(risk.maintenanceMarginUnits(), equity);
+        CoreRiskStatus status = riskStatus(ratio);
+        CoreRiskSnapshot snapshot = new CoreRiskSnapshot(user.userId(), position.symbol(), position.positionSide(),
+                mark.priceSequence(), equity, risk.unrealizedPnlUnits(), risk.maintenanceMarginUnits(), ratio, status);
+        snapshots.put(snapshot.key(), snapshot);
+        return ensureLiquidation(user.userId(), position, instrument, mark.priceSequence(), status,
+                liquidations, nextLiquidationId);
+    }
+
+    private long updateCrossRisk(TradingCoreState state, CoreUserState user, String settleAsset,
+                                 Map<String, CoreRiskSnapshot> snapshots,
+                                 Map<Long, CoreLiquidationState> liquidations, long nextLiquidationId) {
+        List<PositionRisk> risks = user.positions().values().stream()
+                .filter(position -> position.signedQuantitySteps() != 0)
+                .filter(position -> position.marginMode() == CoreMarginMode.CROSS)
+                .filter(position -> position.marginAsset().equals(settleAsset))
+                .map(position -> {
+                    CoreInstrumentState instrument = state.instruments().get(position.symbol());
+                    CoreMarkPriceState mark = state.riskState().markPrices().get(position.symbol());
+                    return instrument == null || mark == null ? null : positionRisk(position, instrument, mark);
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        long unrealized = 0;
+        long maintenance = 0;
+        for (PositionRisk risk : risks) {
+            unrealized = Math.addExact(unrealized, risk.unrealizedPnlUnits());
+            maintenance = Math.addExact(maintenance, risk.maintenanceMarginUnits());
+        }
+        long wallet = crossWalletBalance(state, user, settleAsset);
+        long equity = Math.addExact(wallet, unrealized);
+        long ratio = riskRatio(maintenance, equity);
+        CoreRiskStatus status = riskStatus(ratio);
+        for (PositionRisk risk : risks) {
+            CoreRiskSnapshot snapshot = new CoreRiskSnapshot(user.userId(), risk.position().symbol(),
+                    risk.position().positionSide(), risk.mark().priceSequence(), equity, risk.unrealizedPnlUnits(),
+                    risk.maintenanceMarginUnits(), ratio, status);
+            snapshots.put(snapshot.key(), snapshot);
+            nextLiquidationId = ensureLiquidation(user.userId(), risk.position(), risk.instrument(),
+                    risk.mark().priceSequence(), status, liquidations, nextLiquidationId);
+        }
+        return nextLiquidationId;
+    }
+
+    private PositionRisk positionRisk(CorePositionState position, CoreInstrumentState instrument,
+                                      CoreMarkPriceState mark) {
+        long unrealized = PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(),
+                position.signedQuantitySteps(), position.entryPriceTicks(), mark.markPriceTicks(),
+                instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
+        long maintenance = CoreContractMath.maintenanceMarginUnits(instrument,
+                position.signedQuantitySteps(), mark.markPriceTicks());
+        return new PositionRisk(position, instrument, mark, unrealized, maintenance);
+    }
+
+    private long ensureLiquidation(long userId, CorePositionState position, CoreInstrumentState instrument,
+                                   long priceSequence, CoreRiskStatus status,
+                                   Map<Long, CoreLiquidationState> liquidations, long nextLiquidationId) {
+        boolean active = liquidations.values().stream().anyMatch(value -> value.userId() == userId
+                && value.symbol().equals(position.symbol()) && value.positionSide() == position.positionSide()
+                && value.status() != CoreLiquidationState.Status.COMPLETED);
+        if (status != CoreRiskStatus.LIQUIDATION || active) return nextLiquidationId;
+        CoreLiquidationState liquidation = new CoreLiquidationState(nextLiquidationId, userId, position.symbol(),
+                position.positionSide(), instrument.version(), priceSequence, position.signedQuantitySteps(),
+                Math.absExact(position.signedQuantitySteps()), 0, CoreLiquidationState.Status.PLANNED);
+        liquidations.put(nextLiquidationId, liquidation);
+        return Math.incrementExact(nextLiquidationId);
+    }
+
+    private long riskRatio(long maintenance, long equity) {
+        return maintenance <= 0 ? 0 : equity <= 0 ? Long.MAX_VALUE : safeRatio(maintenance, equity);
+    }
+
+    private CoreRiskStatus riskStatus(long ratio) {
+        return ratio >= 1_000_000 ? CoreRiskStatus.LIQUIDATION
+                : ratio >= 800_000 ? CoreRiskStatus.WARNING : CoreRiskStatus.NORMAL;
+    }
+
+    private long crossWalletBalance(TradingCoreState state, CoreUserState user, String asset) {
+        AssetBalance balance = user.balances().get(asset);
+        long wallet = balance == null ? 0 : balance.totalUnits();
+        for (CorePositionState position : user.positions().values()) {
+            if (position.marginMode() == CoreMarginMode.ISOLATED && position.marginAsset().equals(asset)) {
+                wallet = Math.subtractExact(wallet, position.positionMarginUnits());
+            }
+        }
+        for (OrderReservation reservation : user.reservations().values()) {
+            CoreOrderState order = state.orders().get(reservation.orderId());
+            if (order != null && order.marginMode() == CoreMarginMode.ISOLATED
+                    && reservation.asset().equals(asset)) {
+                wallet = Math.subtractExact(wallet, reservation.remainingUnits());
+            }
+        }
+        if (wallet < 0) throw new IllegalStateException("isolated margin exceeds wallet balance");
+        return wallet;
+    }
+
+    private record PositionRisk(CorePositionState position, CoreInstrumentState instrument,
+                                CoreMarkPriceState mark, long unrealizedPnlUnits,
+                                long maintenanceMarginUnits) {}
 
     public TradingCoreState applyFunding(TradingCoreState state, ApplyFundingCommand command) {
         return applyFundingWithFacts(state, command).state();

@@ -1232,11 +1232,15 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] ADL 执行通过单条 `EXECUTE_ADL` 原子校验并修改目标仓位与强平缺口；PG 仅读取 `core_liquidation_projection` 选集并写审计。
 - [x] 删除 ADL Redis 候选索引、Risk Kafka 消费、Account outbox/deficit/saga/reconcile 和旧 ADL 数据模型；生产代码不再包含旧 ADL 权威类。
 - [x] ADL provider 重写为 Aeron gateway + Core liquidation projection；Aeron 查询、事件 cursor 和禁用扫描边界测试 6/6 通过，模块依赖链测试通过。
-- [ ] Order/Risk/Matching 仍存在旧 WAL/Redis 回退入口，继续在 P6.3 清理。
+- [ ] Order/Matching/Account/Liquidation 仍存在旧 WAL 或旧强平入口，继续在 P6.3 清理。
 - [x] Order REST 写入、改单、撤单、查询、批量管理和生命周期入口均不再使用 Aeron-null 回退；无 Aeron Bean 时显式失败关闭。
 - [x] Order provider 全依赖测试 129/129 通过；旧 WAL 行为测试改为验证无 Aeron 不执行旧命令。
-- [ ] Order WAL Bean/投影 worker 及 Risk Redis 权威实现仍待 P6.3 后续删除。
+- [ ] Order WAL Bean/投影 worker 仍待 P6.3 后续删除。
 - [x] Core 新增只读 `RISK_STATE_QUERY/RESULT`，按 userId 返回现有 Aeron Risk Snapshot；不增加第二状态容器，Protocol 14/14、Core 49/49 通过。
+- [x] Risk Provider 删除 Redis Risk、Kafka 账户/持仓/标记价计算消费者、本地 WAL、风险 outbox、旧风险快照和候选仓储；生产模块只保留 Aeron 强查询、`core_liquidation_projection` 只读选集和 PG 风控管理规则。
+- [x] `RISK_STATE_RESULT` 返回 instrument、仓位、标记价、名义价值、逐仓保证金和 Core 钱包余额；账户与持仓 API 直接映射 Core 结果，无 PG/Redis 计算回退。
+- [x] Core 全仓 Risk 改为按同结算资产组合计算权益、未实现 PnL 和维持保证金；逐仓仍独立，且全仓钱包排除逐仓仓位及挂单占用。多标的回归验证标记价变更会同步更新组合内全部全仓快照和强平计划。
+- [x] Risk 联合 `clean test` 通过：Protocol 14/14、Core 50/50、Risk Provider 5/5；Risk Provider 生产源码中 `RedisRisk|RiskOutbox|RiskLocalProjection|risk-projection-wal|risk_liquidation_candidates|risk_account_snapshots|risk_position_snapshots` 引用为零。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 
@@ -1304,6 +1308,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P6 | 实现 | Core Export v4 输出变化后的 Liquidation 与 Treasury 资产事实，V004 在 PostgreSQL 投影最新状态 | Insurance/ADL 不得继续把旧 Account deficit 表、基金表或 Redis 队列当权威；外围只允许用 PG 选集，最终裁决回 Aeron | Protocol 12/12、Core 47/47、Exporter 9/9 | v1-v3 pending event 保持可解码；投影使用 revision/sequence 门禁，不新增 outbox、WAL 或运行时回退 |
 | 2026-08-13 | P6 | 实现 | 保险基金余额进入 Core Treasury；保险覆盖支持全额或部分覆盖，余量确定性进入 `ADL_REQUIRED`；ADL 以单条命令原子校验目标仓位、标记价、平仓利润并减少坏账 | 数据库基金余额、Account deficit 和四命令 ADL saga 会形成多资金权威及半减仓窗口；目标仓位方向必须随 Liquidation/Snapshot v7 保存 | Protocol 12/12、Core 49/49、Exporter 9/9；现金+未实现PnL-未决坏账守恒 | 旧 Snapshot v1-v6 可读；旧 `RESOLVE_LIQUIDATION(ADL)` fail-closed，外围只能调用 `EXECUTE_ADL` |
 | 2026-08-14 | P6 | 实现 | Insurance 的注资、强平费和坏账覆盖全部同步提交 Aeron；PG 只选择 `core_liquidation_projection` 并保存覆盖审计 | 删除数据库基金余额预留、旧 Account deficit 扫描、Account outbox 和 reconcile 双阶段链，避免资金双权威 | Insurance provider 14/14；生产旧类引用清零 | commandId 由产品线与业务引用确定性生成；Core 成功后审计可幂等补写，不提供旧链回退 |
+| 2026-08-14 | P6 | 实现 | Risk Provider 收缩为 Aeron 强查询、Core Liquidation PG 投影和管理规则；Core 全仓风险按同结算资产组合计算 | Redis/Kafka/WAL 重算会形成第二权威；逐仓位计算全仓权益会在多标的盈亏对冲时错误强平 | Protocol 14/14、Core 50/50、Risk 5/5；Risk 旧链生产引用清零 | 无 Redis、Kafka 计算消费者、风险 outbox 或本地 WAL；PG 候选只读且最终状态由 Aeron 裁决 |
 | 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
 | 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
 | 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |

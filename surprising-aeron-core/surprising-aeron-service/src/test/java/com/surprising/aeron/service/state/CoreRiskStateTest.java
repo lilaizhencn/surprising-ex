@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
@@ -81,9 +83,44 @@ class CoreRiskStateTest {
         assertThat(completed.riskState().snapshots()).hasSize(300);
     }
 
+    @Test
+    void crossMarginUsesPortfolioEquityAcrossSameSettlementAsset() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument("BTC-USDT"));
+        state = reducer.upsertInstrument(state, instrument("ETH-USDT"));
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 1_000));
+        state = withPosition(state, new CorePositionState("BTC-USDT", "USDT", CoreMarginMode.CROSS,
+                CorePositionSide.NET, 1, 10, 100, 1_000, 0, 0));
+        state = withPosition(state, new CorePositionState("ETH-USDT", "USDT", CoreMarginMode.CROSS,
+                CorePositionSide.NET, 1, 10, 100, 1_000, 0, 0));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("ETH-USDT", 1, 120, 1));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2));
+
+        CoreRiskSnapshot btc = state.riskState().snapshots().get("7:BTC-USDT");
+        CoreRiskSnapshot eth = state.riskState().snapshots().get("7:ETH-USDT");
+        assertThat(btc.equityUnits()).isEqualTo(1_000);
+        assertThat(eth.equityUnits()).isEqualTo(1_000);
+        assertThat(btc.marginRatioPpm()).isEqualTo(200_000);
+        assertThat(eth.marginRatioPpm()).isEqualTo(200_000);
+        assertThat(state.riskState().liquidations()).isEmpty();
+
+        TradingCoreState moved = reducer.applyMarkPrice(state,
+                new ApplyMarkPriceCommand("ETH-USDT", 1, 20, 3));
+        assertThat(moved.riskState().snapshots().get("7:BTC-USDT").equityUnits()).isEqualTo(0);
+        assertThat(moved.riskState().snapshots().get("7:BTC-USDT").status())
+                .isEqualTo(CoreRiskStatus.LIQUIDATION);
+        assertThat(moved.riskState().liquidations()).hasSize(2);
+    }
+
     private static UpsertInstrumentCommand instrument(ContractType type, long settleScale) {
         return new UpsertInstrumentCommand("BTC-USDT", 1, type.ordinal(), "BTC", "USDT", "USDT",
                 1, 1, settleScale, 100_000, 100_000, 0, 0, 0, -1, 0);
+    }
+
+    private static UpsertInstrumentCommand instrument(String symbol) {
+        return new UpsertInstrumentCommand(symbol, 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+                symbol.substring(0, symbol.indexOf('-')), "USDT", "USDT", 1, 1, 1,
+                100_000, 100_000, 0, 0, 0, -1, 0);
     }
 
     private static TradingCoreState withPosition(TradingCoreState state, CorePositionState position) {
@@ -101,7 +138,7 @@ class CoreRiskStateTest {
                 Math.subtractExact(marginBalance.availableUnits(), position.positionMarginUnits()),
                 Math.addExact(marginBalance.lockedUnits(), position.positionMarginUnits())));
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
-        positions.put(position.symbol(), position);
+        positions.put(position.key(), position);
         CoreUserState user = new CoreUserState(state.productLine(), userId, current.revision() + 1,
                 balances, current.reservations(), positions);
         Map<Long, CoreUserState> users = new TreeMap<>(state.users());

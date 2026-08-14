@@ -16,12 +16,8 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-openfeign</artifactId>
-        </dependency>
-        <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-product-api</artifactId>
+            <artifactId>surprising-aeron-client</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -30,29 +26,7 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-event-store</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-instrument-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-account-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-price-consumer</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
             <artifactId>surprising-trading-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>tools.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -67,16 +41,8 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.springframework.kafka</groupId>
-            <artifactId>spring-kafka</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
@@ -108,9 +74,6 @@
                 <artifactId>native-maven-plugin</artifactId>
                 <configuration>
                     <mainClass>com.surprising.risk.provider.SurprisingRiskApplication</mainClass>
-                    <buildArgs>
-                        <buildArg>-H:IncludeResources=librocksdbjni-.*</buildArg>
-                    </buildArgs>
                 </configuration>
             </plugin>
         </plugins>

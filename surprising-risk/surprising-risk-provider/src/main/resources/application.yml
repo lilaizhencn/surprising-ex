@@ -4,14 +4,6 @@ server:
 spring:
   application:
     name: surprising-risk-provider
-  task:
-    scheduling:
-      pool:
-        size: 4
-      thread-name-prefix: risk-scheduler-
-      shutdown:
-        await-termination: true
-        await-termination-period: 10s
   datasource:
     url: jdbc:postgresql://localhost:5432/surprising_exchange
     username: surprising
@@ -27,57 +19,16 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
-  price:
-    consumer:
-      bootstrap-servers: localhost:9092
-      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:false}
-      topic: surprising.perp.mark.price.v1
-      group-id: surprising-risk-mark-price-${HOSTNAME:${random.uuid}}
-      max-age: 10s
-      allowed-future-skew: 1s
-      concurrency: 1
-      max-poll-records: 500
   risk:
-    kafka:
-      bootstrap-servers: localhost:9092
-      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:false}
-      group-id: surprising-risk-v1
-      position-events-topic: surprising.account.position.events.v1
-      account-state-events-topic: surprising.account.state.events.v1
-      account-risk-events-topic: surprising.risk.account.events.v1
-      position-risk-events-topic: surprising.risk.position.events.v1
-      liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
-      concurrency: 2
-      max-poll-records: 500
+    product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+    aeron:
+      hostnames: ${AERON_HOSTNAMES:localhost,localhost,localhost}
+      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+      client-connections: ${AERON_CLIENT_CONNECTIONS:2}
     calculation:
       scan-delay-ms: 1000
       warning-margin-ratio-ppm: 800000
       liquidation-margin-ratio-ppm: 1000000
       max-mark-age: 10s
       scan-batch-size: 500
-    local-state:
-      wal-directory: data/risk-projection-wal
-      projection-batch-size: 100
-    redis-state:
-      key-prefix: surprising:risk-state:v2
-      state-ttl: 10m
-      ready-ttl: 30s
-      unchanged-trigger-interval: 30s
-      projection-lease-ttl: 1m
-      projection-group-lock-ttl: 30s
-      projection-group-lock-wait: 2s
-      trigger-batch-size: 250
-      trigger-concurrency: 4
-    outbox:
-      batch-size: 1000
-      publish-delay-ms: 20
-      async-enabled: true
-      max-in-flight: 32
-      max-rows-per-key: 32
-      send-timeout: 3s
-      retention: 7d
-      cleanup-delay-ms: 60000
-      cleanup-batch-size: 10000
-      cleanup-max-batches: 10
