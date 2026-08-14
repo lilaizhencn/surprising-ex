@@ -43,8 +43,9 @@ public final class JdbcCoreEventProjector {
     private static final String INSERT_EXECUTION = """
             INSERT INTO core_execution_projection
                 (product_line, export_sequence, execution_index, taker_order_id, maker_order_id,
-                 taker_user_id, maker_user_id, price_ticks, quantity_steps)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 taker_user_id, maker_user_id, symbol, instrument_version, taker_side,
+                 taker_fee_rate_ppm, maker_fee_rate_ppm, price_ticks, quantity_steps, occurred_at_epoch_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
     private static final String INSERT_FUNDING_SETTLEMENT = """
             INSERT INTO core_funding_settlement_projection
@@ -191,8 +192,19 @@ public final class JdbcCoreEventProjector {
                 executions.setLong(5, execution.makerOrderId());
                 executions.setLong(6, execution.takerUserId());
                 executions.setLong(7, execution.makerUserId());
-                executions.setLong(8, execution.priceTicks());
-                executions.setLong(9, execution.quantitySteps());
+                var taker = requireChangedOrder(event, execution.takerOrderId());
+                var maker = requireChangedOrder(event, execution.makerOrderId());
+                if (!taker.symbol().equals(maker.symbol())) {
+                    throw new IllegalArgumentException("execution order symbols differ");
+                }
+                executions.setString(8, taker.symbol());
+                executions.setLong(9, taker.instrumentVersion());
+                executions.setString(10, taker.side().name());
+                executions.setLong(11, taker.takerFeeRatePpm());
+                executions.setLong(12, maker.makerFeeRatePpm());
+                executions.setLong(13, execution.priceTicks());
+                executions.setLong(14, execution.quantitySteps());
+                executions.setLong(15, message.header().submittedAtEpochMillis());
                 executions.addBatch();
             }
             executions.executeBatch();
@@ -200,6 +212,13 @@ public final class JdbcCoreEventProjector {
         insertFundingFacts(connection, productLine, message, event);
         upsertLiquidations(connection, productLine, message, event);
         upsertTreasury(connection, productLine, message, event);
+    }
+
+    private static com.surprising.aeron.protocol.CoreOrderStateView requireChangedOrder(
+            CoreExportEvent event, long orderId) {
+        return event.changedOrders().stream().filter(order -> order.orderId() == orderId).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "execution order is missing from changed orders: " + orderId));
     }
 
     private static void upsertLiquidations(Connection connection, ProductLine productLine, CoreMessage message,

@@ -139,6 +139,29 @@ public final class CoreProbeState implements AutoCloseable {
             }
         }
         if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.BOOK_STATE_QUERY) {
+            java.util.Map<BookLevelKey, long[]> aggregated = new java.util.HashMap<>();
+            tradingState.bookState().openOrders().values().forEach(order -> {
+                BookLevelKey key = new BookLevelKey(order.symbol(), order.side(), order.priceTicks());
+                aggregated.compute(key, (ignored, current) -> current == null
+                        ? new long[] {order.remainingQuantitySteps(), 1}
+                        : new long[] {Math.addExact(current[0], order.remainingQuantitySteps()),
+                                Math.incrementExact(current[1])});
+            });
+            var levels = aggregated.entrySet().stream()
+                    .sorted(java.util.Comparator.comparing((java.util.Map.Entry<BookLevelKey, long[]> entry)
+                                    -> entry.getKey().symbol())
+                            .thenComparing(entry -> entry.getKey().side())
+                            .thenComparingLong(entry -> entry.getKey().priceTicks()))
+                    .map(entry -> new com.surprising.aeron.protocol.CoreBookLevelView(entry.getKey().symbol(),
+                            entry.getKey().side(), entry.getKey().priceTicks(), entry.getValue()[0],
+                            entry.getValue()[1])).toList();
+            var view = new com.surprising.aeron.protocol.CoreBookStateView(
+                    Math.decrementExact(exportState.nextSequence()), levels);
+            return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                    CoreStateQueryCodec.encodeBookState(view));
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.EXPORT_BATCH_QUERY) {
             try {
                 int maxEvents = CoreExportCodec.decodeBatchQuery(message.payload());
@@ -335,6 +358,9 @@ public final class CoreProbeState implements AutoCloseable {
         commandResults.put(message.header().commandId(),
                 new StoredResult(status, resultCode, appliedCommandCount, stateHash));
         return new CoreResponse(status, status, resultCode, appliedCommandCount, stateHash);
+    }
+
+    private record BookLevelKey(String symbol, com.surprising.aeron.protocol.CoreOrderSide side, long priceTicks) {
     }
 
     public long stateHash() {

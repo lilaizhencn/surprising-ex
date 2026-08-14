@@ -1273,7 +1273,10 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] 删除 Order 的账户/OI Kafka 消费、RPC 初始化、JVM 快照、`ReduceOnlyValidator`、外围 Margin/Spot Reservation 计算器及 Account API 依赖；readiness 只保留行情新鲜度。
 - [x] Snapshot 升级 v11 并兼容 v1–v10；Instrument Risk Policy 进入业务 hash 和恢复状态。风险策略联合测试 Protocol 19/19、Core 57/57，Order provider 84/84 通过；随后新增 preflight 的目标测试 Protocol 1/1、Core 33/33 通过。
 - [x] maker/taker 手续费结算改为读取订单创建时的费率快照，现货以 quote asset 同步记入 Treasury，衍生品按 maker/taker 角色结算；现货双边守恒与衍生品返佣目标测试各 1/1 通过。
-- [ ] Matching 与 Liquidation 旧权威入口继续在 P6.4/P6.5 清理。
+- [x] P6.4 删除 Matching 的订单命令消费者、独立 Exchange Core、WAL/RocksDB、PG outbox、保护索引和旧撮合结果表写入；模块不再依赖 Account API、Event Store、Price Consumer 或 exchange-core。
+- [x] Matching 收缩为 Market Data Projection：启动通过 `BOOK_STATE_QUERY` 从 Aeron 读取聚合 L2 与 Export watermark，Kafka Core Event 必须单分区连续消费；实时深度/成交不依赖 PG，24h 与历史成交只读异步 Core execution projection。
+- [x] P6.4 最小验证：Matching 依赖链编译成功；Book codec、Core Book Query 各 1/1 通过，Core 行情增量的 bootstrap、部分/完全成交、取消、新挂单与断序 4/4 通过，受影响 JDBC execution 投影 1/1 通过，未重复运行无关测试套件。
+- [ ] Liquidation 旧权威入口继续在 P6.5 清理。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 

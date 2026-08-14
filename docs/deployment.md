@@ -99,8 +99,8 @@ Topic 创建脚本是幂等的，不需要每次删除重建。本地测试可�
 
 ## Java 运行时
 
-所有服务使用 JDK 25。`surprising-matching-provider` 依赖 exchange-core/OpenHFT Chronicle，
-启动时需要以下模块参数：
+所有服务使用 JDK 25。`surprising-aeron-service` 在 Cluster 内嵌 exchange-core/OpenHFT Chronicle，
+启动 Core 节点时需要以下模块参数；`surprising-matching-provider` 已是纯行情投影，不再加载 exchange-core：
 
 ```bash
 export JAVA_TOOL_OPTIONS="--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
@@ -112,10 +112,9 @@ exchange-core 内部的私有代码，而是独立的 Maven 依赖。父 POM 通
 和 `chronicle-threads 2026.3`。这样不需要修改 exchange-core 源码，也能修复旧版 Chronicle
 在 JDK 25 中查找已不存在的 `FileChannelImpl.unmap0` 所造成的 `Bytes` 初始化失败。
 
-撮合服务仍必须使用 JDK 25，并保留上面的 module opens/exports。升级 Chronicle 后必须至少执行
-`mvn -pl surprising-trading/surprising-matching-provider -am test`，确认订单簿恢复、撮合保护和
-撮合服务测试通过后再发布。启动时若仍看到 Chronicle 关于直接内存反射的非致命告警，只要测试和
-撮合运行正常即可；该告警不等同于 `Bytes` 初始化失败。
+Core 服务仍必须使用 JDK 25，并保留上面的 module opens/exports。升级 Chronicle 后必须执行受影响的
+Aeron Core 撮合/恢复目标测试，并在阶段出口执行 Core 联合门禁。启动时若仍看到 Chronicle 关于直接内存
+反射的非致命告警，只要门禁和撮合运行正常即可；该告警不等同于 `Bytes` 初始化失败。
 
 ## 多节点规则
 
@@ -129,20 +128,19 @@ exchange-core 内部的私有代码，而是独立的 Maven 依赖。父 POM 通
   不允许 HTTP 节点直接写另一个节点的用户 WAL。
 - `order.user.command.results.v1` 是同步等待通知，不是事实源。每个订单 HTTP 节点必须配置唯一
   `surprising.trading.order.kafka.client-id`，使结果消费组独立，否则跨节点请求可能收不到终态。
-- 撮合命令必须以 `symbol` 为 Key，保证同一交易对在一个分区有序。
-- 撮合命令和强平候选消费者拒绝 Kafka Key 与载荷 `symbol` 不一致的记录。账户命令和持仓事件
-  必须使用 `<PRODUCT_LINE>:<userId>`。
-- 所有 matching-provider 使用相同 `group-id`，由 Kafka 保证一个分区只有一个在线撮合节点。
-- 撮合启动时从 PostgreSQL 恢复订单簿。已经处理过命令的节点如果在再均衡后获得新分区，会主动
-  关闭 Spring 上下文；systemd 或 Auto Scaling 必须重启它并重新恢复。
+- 每条产品线的 `core.events.v1` 必须固定为一个分区；它承载全局连续 Export Sequence，禁止原地增加分区。
+- 所有 matching-provider 使用相同 market-data `group-id`，同一产品线仅一个实例应用实时 L2 增量；
+  WebSocket 等下游可独立横向扩展。
+- matching-provider 启动时直接从 Aeron `BOOK_STATE_QUERY` 恢复聚合价格层级和 Export watermark，随后
+  从消费组已提交 offset 继续；新消费组从 earliest 开始并跳过 watermark 以前事件。PostgreSQL 不参与
+  实时深度/成交恢复，仅承接 24h、历史、审计和对账查询；PG 故障不得阻断下单、撮合或实时行情增量。
 - instrument、order、matching、price、risk、liquidation、funding 生产者统一使用
   `acks=all`、`enable.idempotence=true`、`compression.type=zstd` 和
   `max.in.flight.requests.per.connection=5`。
 - matching、account、risk、liquidation、insurance 消费者关闭自动提交，使用
   `auto.offset.reset=earliest` 和 cooperative-sticky 分配。
-- 撮合命令采用有界批量监听器，默认 `MATCHING_MAX_POLL_RECORDS=16`，`AckMode.BATCH`。
-  同一事务批量读取幂等、合约版本和自成交保护状态，再持久化撮合结果、订单变更、成交和 Outbox，
-  同时保持分区内顺序。同用户同交易对批次在命令边界重新检查保护，防止前一命令改变状态后绕过校验。
+- matching-provider 采用单消费者有界批量读取 Core Event，默认 `MATCHING_MAX_POLL_RECORDS=1024`；事件
+  序号不连续时失败关闭，不使用数据库事务、outbox 或本地 WAL 修补缺口。
 - 根据消费者积压、处理延迟和数据库事务时间调整 `max-poll-records`。默认值只针对本地开发。
 - 生产保持 `restart-on-partition-reassignment=true`；只允许在本地调试时关闭。
 - `partition-assignment-startup-grace-ms` 应覆盖并发监听容器完成首次分配的时间，默认 30 秒。

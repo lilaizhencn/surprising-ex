@@ -22,26 +22,28 @@ Redis Risk State、Redis 强平候选队列和 PostgreSQL 强平事务维持不�
    Instrument Risk Policy（最大仓位、动态未平仓量限额、风险档位和档位杠杆）同样属于该状态机；普通下单
    在单条命令中完成风险裁决和精确资金预占，外围不得先算一个可替代的 JVM 风控结果。
 3. Exchange Core 0.5.3 继续作为订单簿和撮合算法，通过 Adapter 嵌入状态机，不独立拥有权威 journal。
+   原 matching-provider 删除订单命令入口、独立 Exchange Core、WAL/outbox 和恢复库，仅作为 Market Data
+   Projection：启动时从 Aeron 强查询聚合 L2 与 Export watermark，之后消费连续 Core Event 发布实时深度和成交。
 4. Aeron Cluster Log、Archive 和 Snapshot 是正常交易核心唯一权威恢复链。
 5. Kafka 保留外部输入缓冲和对外事件分发，不作为核心资金状态恢复链。
 6. `/test-order` 等无副作用检查使用 Core Preflight Query 复用同一 reducer；生产下单不增加 preflight 往返。
 7. PostgreSQL 保留查询、审计、投影和对账，不参与正常交易裁决。
 8. Valkey保留限流和缓存，不保存权威 Risk 或强平状态。
 9. Risk 重算、强平决策和强平订单执行进入 Aeron 状态机。
-9. 新核心通过功能、资金和恢复门禁后立即删除旧 WAL、Redis Risk 和旧强平链路，删除早于性能压测。
-10. 不做长期双写、运行时回退开关或影子集群；通过离线确定性重放、状态哈希和三节点故障测试验证。
-11. 性能测试一次只运行一条产品线，且压测前必须证明该线功能正常、资金差异为零。
-12. Cluster Log 协议 v1 使用固定小端二进制 envelope；幂等边界由 `commandId` 和
+10. 新核心通过功能、资金和恢复门禁后立即删除旧 WAL、Redis Risk 和旧强平链路，删除早于性能压测。
+11. 不做长期双写、运行时回退开关或影子集群；通过离线确定性重放、状态哈希和三节点故障测试验证。
+12. 性能测试一次只运行一条产品线，且压测前必须证明该线功能正常、资金差异为零。
+13. Cluster Log 协议 v1 使用固定小端二进制 envelope；幂等边界由 `commandId` 和
     `(source, sourceId, sourceSequence)` 高水位共同保证，不使用 Java serialization。
-13. 核心命令显式携带 instrument version 对应的 base/quote/settle asset；状态机按产品线规则校验
+14. 核心命令显式携带 instrument version 对应的 base/quote/settle asset；状态机按产品线规则校验
     预占币种，不允许从 symbol 名称或外部缓存猜测资金资产。
-14. `commandId` 重试返回传输状态 `DUPLICATE` 时必须同时返回原始 `commandStatus`，调用方不能把重复
+15. `commandId` 重试返回传输状态 `DUPLICATE` 时必须同时返回原始 `commandStatus`，调用方不能把重复
     误判为成功或失败。
-15. Export State 与业务状态保存在同一个 Aeron Snapshot；Exporter 只有在 Kafka 全批确认后提交连续
+16. Export State 与业务状态保存在同一个 Aeron Snapshot；Exporter 只有在 Kafka 全批确认后提交连续
     ACK，不增加数据库 outbox 或应用 WAL。
-16. Kafka Input Bridge 使用 topic/partition/offset 稳定映射命令来源和 `commandId`，只有 Aeron 明确业务
+17. Kafka Input Bridge 使用 topic/partition/offset 稳定映射命令来源和 `commandId`，只有 Aeron 明确业务
     裁决后提交 offset；`EXPORT_BACKLOG_FULL` 与结果未知都必须原 offset 重试。
-17. PostgreSQL 投影主键为 `(product_line, export_sequence)`，只接受 at-least-once 重放，不能反向覆盖
+18. PostgreSQL 投影主键为 `(product_line, export_sequence)`，只接受 at-least-once 重放，不能反向覆盖
     Aeron 权威状态。
 
 ## 选择统一 Cluster 而不是多 Cluster

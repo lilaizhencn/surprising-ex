@@ -47,7 +47,7 @@ import tools.jackson.databind.ObjectMapper;
     public KafkaPublicTradePublisher(
             ObjectMapper objectMapper,
             MatchingProperties properties,
-            @Qualifier("matchingPublicTradeKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
+            @Qualifier("matchingMarketDataKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.kafkaTemplate = kafkaTemplate;

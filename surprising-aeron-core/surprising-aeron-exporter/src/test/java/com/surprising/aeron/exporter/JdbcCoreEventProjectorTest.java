@@ -39,7 +39,8 @@ class JdbcCoreEventProjectorTest {
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             for (String resource : java.util.List.of("/db/migration/V001__create_core_event_projection.sql",
                     "/db/migration/V002__create_core_state_projections.sql",
-                    "/db/migration/V004__create_core_liquidation_projections.sql")) {
+                    "/db/migration/V004__create_core_liquidation_projections.sql",
+                    "/db/migration/V005__enrich_core_execution_projection.sql")) {
                 try (var stream = getClass().getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) {
@@ -76,10 +77,12 @@ class JdbcCoreEventProjectorTest {
                 java.util.List.of(new CoreBalanceView("USDT", 900, 100)), java.util.List.of(), java.util.List.of());
         var order = new CoreOrderStateView(71, ProductLine.SPOT, 17, "BTC-USDT", 3,
                 CoreOrderSide.BUY, 60_000, 2, 0, 2, false, "OPEN", 1);
+        var maker = new CoreOrderStateView(72, ProductLine.SPOT, 18, "BTC-USDT", 3,
+                CoreOrderSide.SELL, 60_000, 2, 1, 1, false, "OPEN", 2);
         var execution = new CoreExecutionView(71, 72, 17, 18, 60_000, 1);
         var event = new CoreExportEvent(1, 1, 9, commandId, CoreMessageType.PLACE_ORDER,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17, new byte[] {1},
-                java.util.List.of(user), java.util.List.of(order), java.util.List.of(execution));
+                java.util.List.of(user), java.util.List.of(order, maker), java.util.List.of(execution));
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
                 ProductLine.SPOT, CommandSource.GATEWAY, 1, 1, 17, 1, 1).exportEvent(1),
                 CoreExportCodec.encodeEvent(event));
@@ -90,7 +93,7 @@ class JdbcCoreEventProjectorTest {
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             assertCount(statement, "core_event_projection", 1);
             assertCount(statement, "core_user_fact_projection", 1);
-            assertCount(statement, "core_order_projection", 1);
+            assertCount(statement, "core_order_projection", 2);
             assertCount(statement, "core_execution_projection", 1);
         }
     }
@@ -164,7 +167,8 @@ class JdbcCoreEventProjectorTest {
             for (String resource : java.util.List.of("/db/migration/V001__create_core_event_projection.sql",
                     "/db/migration/V002__create_core_state_projections.sql",
                     "/db/migration/V003__create_core_funding_projections.sql",
-                    "/db/migration/V004__create_core_liquidation_projections.sql")) {
+                    "/db/migration/V004__create_core_liquidation_projections.sql",
+                    "/db/migration/V005__enrich_core_execution_projection.sql")) {
                 try (var stream = JdbcCoreEventProjectorTest.class.getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) if (!sql.isBlank()) statement.execute(sql);

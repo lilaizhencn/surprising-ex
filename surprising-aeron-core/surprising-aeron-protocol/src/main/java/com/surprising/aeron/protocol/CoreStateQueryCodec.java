@@ -215,6 +215,36 @@ public final class CoreStateQueryCodec {
         return state;
     }
 
+    public static byte[] encodeBookState(CoreBookStateView state) {
+        Writer writer = new Writer();
+        writer.intValue(VERSION);
+        writer.longValue(state.exportSequence());
+        writer.intValue(state.levels().size());
+        for (CoreBookLevelView level : state.levels()) {
+            writer.text(level.symbol());
+            writer.intValue(level.side().wireCode());
+            writer.longValue(level.priceTicks());
+            writer.longValue(level.quantitySteps());
+            writer.longValue(level.orderCount());
+        }
+        return writer.toByteArray();
+    }
+
+    public static CoreBookStateView decodeBookState(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        reader.version(VERSION);
+        long exportSequence = reader.nonNegativeLong("exportSequence");
+        int count = reader.count("levels");
+        List<CoreBookLevelView> levels = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            levels.add(new CoreBookLevelView(reader.text(), CoreOrderSide.fromWireCode(reader.intValue()),
+                    reader.positiveLong("priceTicks"), reader.positiveLong("quantitySteps"),
+                    reader.positiveLong("orderCount")));
+        }
+        reader.requireConsumed();
+        return new CoreBookStateView(exportSequence, levels);
+    }
+
     private static final class Writer {
         private final ByteArrayOutputStream output = new ByteArrayOutputStream();
 

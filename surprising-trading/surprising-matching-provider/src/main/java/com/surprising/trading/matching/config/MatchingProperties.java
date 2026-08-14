@@ -3,29 +3,21 @@ package com.surprising.trading.matching.config;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
-import java.time.Duration;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
 import jakarta.annotation.PostConstruct;
+import java.time.Duration;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.trading.matching")
 public class MatchingProperties {
 
     private Kafka kafka = new Kafka();
-    private Engine engine = new Engine();
-    private Recovery recovery = new Recovery();
-    private Protection protection = new Protection();
+    private Aeron aeron = new Aeron();
     private MarketData marketData = new MarketData();
-    private Outbox outbox = new Outbox();
-    private Wal wal = new Wal();
 
-    /** 启动时拒绝未隔离的撮合 Topic 配置。 */
     @PostConstruct
     void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "matching");
+        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "matching-market-data");
     }
 
     public Kafka getKafka() {
@@ -33,99 +25,45 @@ public class MatchingProperties {
     }
 
     public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
-    }
-
-    public Engine getEngine() {
-        return engine;
-    }
-
-    public void setEngine(Engine engine) {
-        this.engine = engine;
-    }
-
-    public Protection getProtection() {
-        return protection;
-    }
-
-    public Recovery getRecovery() {
-        return recovery;
-    }
-
-    public void setRecovery(Recovery recovery) {
-        this.recovery = recovery;
-    }
-
-    public void setProtection(Protection protection) {
-        this.protection = protection;
+        this.kafka = kafka == null ? new Kafka() : kafka;
     }
 
     public MarketData getMarketData() {
         return marketData;
     }
 
+    public Aeron getAeron() {
+        return aeron;
+    }
+
+    public void setAeron(Aeron aeron) {
+        this.aeron = aeron == null ? new Aeron() : aeron;
+    }
+
     public void setMarketData(MarketData marketData) {
-        this.marketData = marketData;
-    }
-
-    public Outbox getOutbox() {
-        return outbox;
-    }
-
-    public void setOutbox(Outbox outbox) {
-        this.outbox = outbox;
-    }
-
-    public Wal getWal() {
-        return wal;
-    }
-
-    public void setWal(Wal wal) {
-        this.wal = wal == null ? new Wal() : wal;
-    }
-
-    /** 撮合本地事实库配置；目录按产品线隔离。 */
-    public static class Wal {
-        private String directory = "data/matching-wal";
-
-        public String getDirectory() {
-            return directory;
-        }
-
-        public void setDirectory(String directory) {
-            if (directory == null || directory.isBlank()) {
-                throw new IllegalArgumentException("撮合 WAL 目录不能为空");
-            }
-            this.directory = directory.trim();
-        }
-
-        public Path productLineDirectory(ProductLine productLine) {
-            return Path.of(directory, productLine.name());
-        }
+        this.marketData = marketData == null ? new MarketData() : marketData;
     }
 
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
-        /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
         private boolean productTopicsEnabled;
-        private String groupId = "surprising-matching-v1";
-        private String clientId = "surprising-matching";
-        private String orderCommandsTopic = "surprising.perp.order.commands.v1";
-        private String matchResultsTopic = "surprising.perp.match.results.v1";
+        private String groupId = "surprising-matching-market-data-v1";
+        private String clientId = "surprising-matching-market-data";
+        private String coreEventsTopic;
         private String matchTradesTopic = "surprising.perp.match.trades.v1";
         private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
-        private int concurrency = 4;
-        private int maxPollRecords = 16;
-        private boolean restartOnPartitionReassignment = true;
-        private long partitionAssignmentStartupGraceMs = 30000L;
+        private int maxPollRecords = 1_024;
 
         public String getBootstrapServers() {
             return bootstrapServers;
         }
 
         public void setBootstrapServers(String bootstrapServers) {
-            this.bootstrapServers = bootstrapServers;
+            if (bootstrapServers == null || bootstrapServers.isBlank()) {
+                throw new IllegalArgumentException("Kafka bootstrap servers are required");
+            }
+            this.bootstrapServers = bootstrapServers.trim();
         }
 
         public ProductLine getProductLine() {
@@ -145,11 +83,11 @@ public class MatchingProperties {
         }
 
         public String getGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("matching") : groupId;
+            return productTopicsEnabled ? productTopics().consumerGroup("matching-market-data") : groupId;
         }
 
         public void setGroupId(String groupId) {
-            this.groupId = groupId;
+            this.groupId = required(groupId, "Kafka group id");
         }
 
         public String getClientId() {
@@ -157,23 +95,21 @@ public class MatchingProperties {
         }
 
         public void setClientId(String clientId) {
-            this.clientId = clientId;
+            this.clientId = required(clientId, "Kafka client id");
         }
 
-        public String getOrderCommandsTopic() {
-            return productTopicsEnabled ? productTopics().orderCommandsTopic() : orderCommandsTopic;
+        public String getCoreEventsTopic() {
+            if (coreEventsTopic != null && !coreEventsTopic.isBlank()) {
+                return coreEventsTopic.trim();
+            }
+            if (productLine == null) {
+                throw new IllegalStateException("product line is required for Core events topic");
+            }
+            return "surprising." + productLine.topicSegment() + ".core.events.v1";
         }
 
-        public void setOrderCommandsTopic(String orderCommandsTopic) {
-            this.orderCommandsTopic = orderCommandsTopic;
-        }
-
-        public String getMatchResultsTopic() {
-            return productTopicsEnabled ? productTopics().matchResultsTopic() : matchResultsTopic;
-        }
-
-        public void setMatchResultsTopic(String matchResultsTopic) {
-            this.matchResultsTopic = matchResultsTopic;
+        public void setCoreEventsTopic(String coreEventsTopic) {
+            this.coreEventsTopic = coreEventsTopic;
         }
 
         public String getMatchTradesTopic() {
@@ -181,13 +117,7 @@ public class MatchingProperties {
         }
 
         public void setMatchTradesTopic(String matchTradesTopic) {
-            this.matchTradesTopic = matchTradesTopic;
-        }
-
-        public String getAccountUserCommandsTopic() {
-            return productTopicsEnabled
-                    ? productTopics().accountUserCommandsTopic()
-                    : "surprising.perp.account.user.commands.v1";
+            this.matchTradesTopic = required(matchTradesTopic, "match trades topic");
         }
 
         public String getOrderBookDepthTopic() {
@@ -195,18 +125,7 @@ public class MatchingProperties {
         }
 
         public void setOrderBookDepthTopic(String orderBookDepthTopic) {
-            this.orderBookDepthTopic = orderBookDepthTopic;
-        }
-
-        public int getConcurrency() {
-            return concurrency;
-        }
-
-        public void setConcurrency(int concurrency) {
-            if (concurrency < 1 || concurrency > 64) {
-                throw new IllegalArgumentException("matching Kafka concurrency must be in [1, 64]");
-            }
-            this.concurrency = concurrency;
+            this.orderBookDepthTopic = required(orderBookDepthTopic, "order-book depth topic");
         }
 
         public int getMaxPollRecords() {
@@ -214,399 +133,100 @@ public class MatchingProperties {
         }
 
         public void setMaxPollRecords(int maxPollRecords) {
+            if (maxPollRecords <= 0) {
+                throw new IllegalArgumentException("max poll records must be positive");
+            }
             this.maxPollRecords = maxPollRecords;
-        }
-
-        public boolean isRestartOnPartitionReassignment() {
-            return restartOnPartitionReassignment;
-        }
-
-        public void setRestartOnPartitionReassignment(boolean restartOnPartitionReassignment) {
-            this.restartOnPartitionReassignment = restartOnPartitionReassignment;
-        }
-
-        public long getPartitionAssignmentStartupGraceMs() {
-            return partitionAssignmentStartupGraceMs;
-        }
-
-        public void setPartitionAssignmentStartupGraceMs(long partitionAssignmentStartupGraceMs) {
-            this.partitionAssignmentStartupGraceMs = partitionAssignmentStartupGraceMs;
         }
 
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);
         }
-    }
 
-    public static class Engine {
-        private String exchangeId = "surprising-perp";
-        private int matchingEngines = 4;
-        private int bookShards = 1;
-        private int riskEngines = 2;
-        private int orderBookDepthForPostOnly = 1;
-        private int orderBookDepthLevels = 50;
-
-        public String getExchangeId() {
-            return exchangeId;
-        }
-
-        public void setExchangeId(String exchangeId) {
-            this.exchangeId = exchangeId;
-        }
-
-        public int getMatchingEngines() {
-            return matchingEngines;
-        }
-
-        public void setMatchingEngines(int matchingEngines) {
-            requirePowerOfTwo(matchingEngines, "matchingEngines");
-            this.matchingEngines = matchingEngines;
-        }
-
-        public int getBookShards() {
-            return bookShards;
-        }
-
-        public void setBookShards(int bookShards) {
-            requirePowerOfTwo(bookShards, "bookShards");
-            this.bookShards = bookShards;
-        }
-
-        public int getRiskEngines() {
-            return riskEngines;
-        }
-
-        public void setRiskEngines(int riskEngines) {
-            requirePowerOfTwo(riskEngines, "riskEngines");
-            this.riskEngines = riskEngines;
-        }
-
-        private void requirePowerOfTwo(int value, String name) {
-            if (value < 1 || value > 64 || (value & (value - 1)) != 0) {
-                throw new IllegalArgumentException(name + " must be a power of two in [1, 64]");
+        private static String required(String value, String name) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException(name + " is required");
             }
-        }
-
-        public int getOrderBookDepthForPostOnly() {
-            return orderBookDepthForPostOnly;
-        }
-
-        public void setOrderBookDepthForPostOnly(int orderBookDepthForPostOnly) {
-            this.orderBookDepthForPostOnly = orderBookDepthForPostOnly;
-        }
-
-        public int getOrderBookDepthLevels() {
-            return orderBookDepthLevels;
-        }
-
-        public void setOrderBookDepthLevels(int orderBookDepthLevels) {
-            this.orderBookDepthLevels = orderBookDepthLevels;
-        }
-
-    }
-
-    public static class Recovery {
-        private boolean openOrderBookRestoreEnabled = true;
-        private int openOrderBatchSize = 10000;
-
-        public boolean isOpenOrderBookRestoreEnabled() {
-            return openOrderBookRestoreEnabled;
-        }
-
-        public void setOpenOrderBookRestoreEnabled(boolean openOrderBookRestoreEnabled) {
-            this.openOrderBookRestoreEnabled = openOrderBookRestoreEnabled;
-        }
-
-        public int getOpenOrderBatchSize() {
-            return openOrderBatchSize;
-        }
-
-        public void setOpenOrderBatchSize(int openOrderBatchSize) {
-            this.openOrderBatchSize = openOrderBatchSize;
-        }
-    }
-
-    public static class Protection {
-        private boolean selfTradePreventionEnabled = true;
-        private List<Long> internalMarketMakerUserIds = new ArrayList<>();
-        private long marketMaxSlippagePpm = 10_000L;
-        private long marketMaxMarkAgeMs = 5_000L;
-
-        public boolean isSelfTradePreventionEnabled() {
-            return selfTradePreventionEnabled;
-        }
-
-        public void setSelfTradePreventionEnabled(boolean selfTradePreventionEnabled) {
-            this.selfTradePreventionEnabled = selfTradePreventionEnabled;
-        }
-
-        public List<Long> getInternalMarketMakerUserIds() {
-            return internalMarketMakerUserIds;
-        }
-
-        public void setInternalMarketMakerUserIds(List<Long> internalMarketMakerUserIds) {
-            if (internalMarketMakerUserIds == null) {
-                this.internalMarketMakerUserIds = new ArrayList<>();
-                return;
-            }
-            LinkedHashSet<Long> uniqueUserIds = new LinkedHashSet<>();
-            for (Long userId : internalMarketMakerUserIds) {
-                if (userId == null || userId <= 0) {
-                    throw new IllegalArgumentException("internal market-maker userId must be positive");
-                }
-                if (!uniqueUserIds.add(userId)) {
-                    throw new IllegalArgumentException("duplicate internal market-maker userId " + userId);
-                }
-            }
-            this.internalMarketMakerUserIds = List.copyOf(uniqueUserIds);
-        }
-
-        public boolean isInternalMarketMaker(long userId) {
-            return internalMarketMakerUserIds.contains(userId);
-        }
-
-        public long getMarketMaxSlippagePpm() {
-            return marketMaxSlippagePpm;
-        }
-
-        public void setMarketMaxSlippagePpm(long marketMaxSlippagePpm) {
-            this.marketMaxSlippagePpm = marketMaxSlippagePpm;
-        }
-
-        public long getMarketMaxMarkAgeMs() {
-            return marketMaxMarkAgeMs;
-        }
-
-        public void setMarketMaxMarkAgeMs(long marketMaxMarkAgeMs) {
-            this.marketMaxMarkAgeMs = marketMaxMarkAgeMs;
+            return value.trim();
         }
     }
 
     public static class MarketData {
         private boolean enabled = true;
+        private int depthLevels = 50;
         private int batchSize = 512;
         private int maxInFlight = 256;
-        private long publishDelayMs = 5L;
-        private long maxBlockMs = 5L;
+        private long publishDelayMs = 5;
+        private long maxBlockMs = 5;
         private int deliveryTimeoutMs = 500;
         private int requestTimeoutMs = 300;
         private int lingerMs = 10;
         private int producerBatchSize = 65_536;
-        private long bufferMemoryBytes = 33_554_432L;
+        private long bufferMemoryBytes = 33_554_432;
 
-        public boolean isEnabled() {
-            return enabled;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getDepthLevels() { return depthLevels; }
+        public void setDepthLevels(int value) { depthLevels = positive(value, "depth levels"); }
+        public int getBatchSize() { return batchSize; }
+        public void setBatchSize(int value) { batchSize = positive(value, "batch size"); }
+        public int getMaxInFlight() { return maxInFlight; }
+        public void setMaxInFlight(int value) { maxInFlight = positive(value, "max in flight"); }
+        public long getPublishDelayMs() { return publishDelayMs; }
+        public void setPublishDelayMs(long value) { publishDelayMs = positive(value, "publish delay"); }
+        public long getMaxBlockMs() { return maxBlockMs; }
+        public void setMaxBlockMs(long value) { maxBlockMs = nonNegative(value, "max block"); }
+        public int getDeliveryTimeoutMs() { return deliveryTimeoutMs; }
+        public void setDeliveryTimeoutMs(int value) { deliveryTimeoutMs = positive(value, "delivery timeout"); }
+        public int getRequestTimeoutMs() { return requestTimeoutMs; }
+        public void setRequestTimeoutMs(int value) { requestTimeoutMs = positive(value, "request timeout"); }
+        public int getLingerMs() { return lingerMs; }
+        public void setLingerMs(int value) { lingerMs = Math.toIntExact(nonNegative(value, "linger")); }
+        public int getProducerBatchSize() { return producerBatchSize; }
+        public void setProducerBatchSize(int value) { producerBatchSize = positive(value, "producer batch size"); }
+        public long getBufferMemoryBytes() { return bufferMemoryBytes; }
+        public void setBufferMemoryBytes(long value) { bufferMemoryBytes = positive(value, "buffer memory"); }
+
+        private static int positive(int value, String name) {
+            if (value <= 0) throw new IllegalArgumentException(name + " must be positive");
+            return value;
         }
 
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
+        private static long positive(long value, String name) {
+            if (value <= 0) throw new IllegalArgumentException(name + " must be positive");
+            return value;
         }
 
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            if (batchSize <= 0) {
-                throw new IllegalArgumentException("matching market data batchSize must be positive");
-            }
-            this.batchSize = batchSize;
-        }
-
-        public int getMaxInFlight() {
-            return maxInFlight;
-        }
-
-        public void setMaxInFlight(int maxInFlight) {
-            if (maxInFlight <= 0) {
-                throw new IllegalArgumentException("matching market data maxInFlight must be positive");
-            }
-            this.maxInFlight = maxInFlight;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            if (publishDelayMs <= 0) {
-                throw new IllegalArgumentException("matching market data publishDelayMs must be positive");
-            }
-            this.publishDelayMs = publishDelayMs;
-        }
-
-        public long getMaxBlockMs() {
-            return maxBlockMs;
-        }
-
-        public void setMaxBlockMs(long maxBlockMs) {
-            if (maxBlockMs < 0) {
-                throw new IllegalArgumentException("matching market data maxBlockMs must be non-negative");
-            }
-            this.maxBlockMs = maxBlockMs;
-        }
-
-        public int getDeliveryTimeoutMs() {
-            return deliveryTimeoutMs;
-        }
-
-        public void setDeliveryTimeoutMs(int deliveryTimeoutMs) {
-            if (deliveryTimeoutMs <= 0) {
-                throw new IllegalArgumentException("matching market data deliveryTimeoutMs must be positive");
-            }
-            this.deliveryTimeoutMs = deliveryTimeoutMs;
-        }
-
-        public int getRequestTimeoutMs() {
-            return requestTimeoutMs;
-        }
-
-        public void setRequestTimeoutMs(int requestTimeoutMs) {
-            if (requestTimeoutMs <= 0) {
-                throw new IllegalArgumentException("matching market data requestTimeoutMs must be positive");
-            }
-            this.requestTimeoutMs = requestTimeoutMs;
-        }
-
-        public int getLingerMs() {
-            return lingerMs;
-        }
-
-        public void setLingerMs(int lingerMs) {
-            if (lingerMs < 0) {
-                throw new IllegalArgumentException("matching market data lingerMs must be non-negative");
-            }
-            this.lingerMs = lingerMs;
-        }
-
-        public int getProducerBatchSize() {
-            return producerBatchSize;
-        }
-
-        public void setProducerBatchSize(int producerBatchSize) {
-            if (producerBatchSize <= 0) {
-                throw new IllegalArgumentException("matching market data producerBatchSize must be positive");
-            }
-            this.producerBatchSize = producerBatchSize;
-        }
-
-        public long getBufferMemoryBytes() {
-            return bufferMemoryBytes;
-        }
-
-        public void setBufferMemoryBytes(long bufferMemoryBytes) {
-            if (bufferMemoryBytes <= 0) {
-                throw new IllegalArgumentException("matching market data bufferMemoryBytes must be positive");
-            }
-            this.bufferMemoryBytes = bufferMemoryBytes;
+        private static long nonNegative(long value, String name) {
+            if (value < 0) throw new IllegalArgumentException(name + " must not be negative");
+            return value;
         }
     }
 
-    public static class Outbox {
-        private int batchSize = 1000;
-        private long publishDelayMs = 20L;
-        private Duration sendTimeout = Duration.ofSeconds(3);
-        private boolean asyncEnabled = true;
-        private int maxInFlight = 64;
-        private int maxRowsPerKey = 32;
-        private Duration retention = Duration.ofDays(7);
-        private long cleanupDelayMs = 60_000L;
-        private int cleanupBatchSize = 10_000;
-        private int cleanupMaxBatches = 10;
+    public static class Aeron {
+        private List<String> hostnames = List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private Duration responseTimeout = Duration.ofSeconds(5);
 
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
-        }
-
-        public Duration getSendTimeout() {
-            return sendTimeout;
-        }
-
-        public void setSendTimeout(Duration sendTimeout) {
-            this.sendTimeout = sendTimeout;
-        }
-
-        public boolean isAsyncEnabled() {
-            return asyncEnabled;
-        }
-
-        public void setAsyncEnabled(boolean asyncEnabled) {
-            this.asyncEnabled = asyncEnabled;
-        }
-
-        public int getMaxInFlight() {
-            return maxInFlight;
-        }
-
-        public void setMaxInFlight(int maxInFlight) {
-            this.maxInFlight = maxInFlight;
-        }
-
-        public int getMaxRowsPerKey() {
-            return maxRowsPerKey;
-        }
-
-        public void setMaxRowsPerKey(int maxRowsPerKey) {
-            if (maxRowsPerKey <= 0) {
-                throw new IllegalArgumentException("matching outbox maxRowsPerKey must be positive");
+        public List<String> getHostnames() { return hostnames; }
+        public void setHostnames(List<String> hostnames) {
+            if (hostnames == null || hostnames.size() != 3
+                    || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
+                throw new IllegalArgumentException("Aeron hostnames must contain three members");
             }
-            this.maxRowsPerKey = maxRowsPerKey;
+            this.hostnames = List.copyOf(hostnames);
         }
-
-        public Duration getRetention() {
-            return retention;
+        public String getEgressHostname() { return egressHostname; }
+        public void setEgressHostname(String value) {
+            if (value == null || value.isBlank()) throw new IllegalArgumentException("Aeron egress host is required");
+            egressHostname = value.trim();
         }
-
-        public void setRetention(Duration retention) {
-            if (retention == null || retention.isZero() || retention.isNegative()) {
-                throw new IllegalArgumentException("matching outbox retention must be positive");
+        public Duration getResponseTimeout() { return responseTimeout; }
+        public void setResponseTimeout(Duration value) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException("Aeron response timeout must be positive");
             }
-            this.retention = retention;
-        }
-
-        public long getCleanupDelayMs() {
-            return cleanupDelayMs;
-        }
-
-        public void setCleanupDelayMs(long cleanupDelayMs) {
-            if (cleanupDelayMs <= 0) {
-                throw new IllegalArgumentException("matching outbox cleanupDelayMs must be positive");
-            }
-            this.cleanupDelayMs = cleanupDelayMs;
-        }
-
-        public int getCleanupBatchSize() {
-            return cleanupBatchSize;
-        }
-
-        public void setCleanupBatchSize(int cleanupBatchSize) {
-            if (cleanupBatchSize <= 0) {
-                throw new IllegalArgumentException("matching outbox cleanupBatchSize must be positive");
-            }
-            this.cleanupBatchSize = cleanupBatchSize;
-        }
-
-        public int getCleanupMaxBatches() {
-            return cleanupMaxBatches;
-        }
-
-        public void setCleanupMaxBatches(int cleanupMaxBatches) {
-            if (cleanupMaxBatches <= 0) {
-                throw new IllegalArgumentException("matching outbox cleanupMaxBatches must be positive");
-            }
-            this.cleanupMaxBatches = cleanupMaxBatches;
+            responseTimeout = value;
         }
     }
 }

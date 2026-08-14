@@ -283,8 +283,7 @@ service_env() {
         "SURPRISING_TRADING_MATCHING_KAFKA_PRODUCT_LINE=${PRODUCT_LINE}" \
         "SURPRISING_TRADING_MATCHING_KAFKA_PRODUCT_TOPICS_ENABLED=${PRODUCT_TOPICS_ENABLED}" \
         "SURPRISING_TRADING_MATCHING_KAFKA_GROUP_ID=surprising-matching-${slug}-v1" \
-        "SURPRISING_TRADING_MATCHING_KAFKA_CLIENT_ID=surprising-matching-${slug}-${HOSTNAME:-local}-$$" \
-        "SURPRISING_TRADING_MATCHING_ENGINE_EXCHANGE_ID=surprising-${slug}"
+        "SURPRISING_TRADING_MATCHING_KAFKA_CLIENT_ID=surprising-matching-${slug}-${HOSTNAME:-local}-$$"
       ;;
     trigger)
       printf '%s\n' \

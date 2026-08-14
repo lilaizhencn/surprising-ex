@@ -2,10 +2,9 @@ package com.surprising.trading.matching.config;
 
 import java.util.HashMap;
 import java.util.Map;
-import com.surprising.trading.matching.service.MatchingPartitionAssignmentGuard;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -18,47 +17,17 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
-import org.springframework.kafka.transaction.KafkaTransactionManager;
+import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
 public class MatchingKafkaConfiguration {
-
-    @Bean
-    public ProducerFactory<String, String> matchingProducerFactory(MatchingProperties properties) {
-        Map<String, Object> config = new HashMap<>();
-        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.ACKS_CONFIG, "all");
-        config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
-        config.put(ProducerConfig.LINGER_MS_CONFIG, 2);
-        config.put(ProducerConfig.BATCH_SIZE_CONFIG, 65_536);
-        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
-        DefaultKafkaProducerFactory<String, String> factory = new DefaultKafkaProducerFactory<>(config);
-        factory.setTransactionIdPrefix("matching-" + productLineName(properties.getKafka().getProductLine())
-                + "-" + properties.getKafka().getClientId() + "-");
-        return factory;
-    }
-
-    private String productLineName(com.surprising.product.api.ProductLine productLine) {
-        return productLine == null ? "unscoped" : productLine.name().toLowerCase();
-    }
-
-    @Bean
-    public KafkaTemplate<String, String> matchingKafkaTemplate(
-            ProducerFactory<String, String> matchingProducerFactory) {
-        KafkaTemplate<String, String> template = new KafkaTemplate<>(matchingProducerFactory);
-        template.setAllowNonTransactional(true);
-        return template;
-    }
 
     @Bean("matchingMarketDataProducerFactory")
     public ProducerFactory<String, String> matchingMarketDataProducerFactory(MatchingProperties properties) {
         MatchingProperties.MarketData marketData = properties.getMarketData();
         Map<String, Object> config = new HashMap<>();
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        config.put(ProducerConfig.CLIENT_ID_CONFIG, properties.getKafka().getClientId() + "-public-depth");
+        config.put(ProducerConfig.CLIENT_ID_CONFIG, properties.getKafka().getClientId() + "-publisher");
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.ACKS_CONFIG, "1");
@@ -76,88 +45,35 @@ public class MatchingKafkaConfiguration {
 
     @Bean("matchingMarketDataKafkaTemplate")
     public KafkaTemplate<String, String> matchingMarketDataKafkaTemplate(
-            @Qualifier("matchingMarketDataProducerFactory")
-            ProducerFactory<String, String> matchingMarketDataProducerFactory) {
-        return new KafkaTemplate<>(matchingMarketDataProducerFactory);
-    }
-
-    @Bean("matchingPublicTradeProducerFactory")
-    public ProducerFactory<String, String> matchingPublicTradeProducerFactory(MatchingProperties properties) {
-        Map<String, Object> config = new HashMap<>();
-        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        config.put(ProducerConfig.CLIENT_ID_CONFIG, properties.getKafka().getClientId() + "-public-trade");
-        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.ACKS_CONFIG, "1");
-        config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, false);
-        config.put(ProducerConfig.RETRIES_CONFIG, 0);
-        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
-        config.put(ProducerConfig.LINGER_MS_CONFIG, 25);
-        config.put(ProducerConfig.BATCH_SIZE_CONFIG, 131_072);
-        config.put(ProducerConfig.BUFFER_MEMORY_CONFIG, 67_108_864L);
-        config.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 5L);
-        config.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 1_000);
-        config.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 500);
-        return new DefaultKafkaProducerFactory<>(config);
-    }
-
-    @Bean("matchingPublicTradeKafkaTemplate")
-    public KafkaTemplate<String, String> matchingPublicTradeKafkaTemplate(
-            @Qualifier("matchingPublicTradeProducerFactory")
-            ProducerFactory<String, String> matchingPublicTradeProducerFactory) {
-        return new KafkaTemplate<>(matchingPublicTradeProducerFactory);
+            @Qualifier("matchingMarketDataProducerFactory") ProducerFactory<String, String> producerFactory) {
+        return new KafkaTemplate<>(producerFactory);
     }
 
     @Bean
-    public ConsumerFactory<String, String> matchingConsumerFactory(MatchingProperties properties) {
+    public ConsumerFactory<String, byte[]> matchingCoreEventsConsumerFactory(MatchingProperties properties) {
         Map<String, Object> config = new HashMap<>();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
         config.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getKafka().getGroupId());
-        config.put(ConsumerConfig.CLIENT_ID_CONFIG, properties.getKafka().getClientId());
+        config.put(ConsumerConfig.CLIENT_ID_CONFIG, properties.getKafka().getClientId() + "-core-events");
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, properties.getKafka().getMaxPollRecords());
-        config.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, CooperativeStickyAssignor.class.getName());
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
-    public ConcurrentKafkaListenerContainerFactory<String, String> matchingKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> matchingConsumerFactory,
-            MatchingProperties properties,
-            MatchingPartitionAssignmentGuard partitionAssignmentGuard) {
-        return matchingKafkaListenerContainerFactory(matchingConsumerFactory, properties, partitionAssignmentGuard,
-                null);
-    }
-
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> matchingKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> matchingConsumerFactory,
-            MatchingProperties properties,
-            MatchingPartitionAssignmentGuard partitionAssignmentGuard,
-            @Qualifier("matchingKafkaTemplate") KafkaTemplate<String, String> matchingKafkaTemplate) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(matchingConsumerFactory);
-        factory.setConcurrency(properties.getKafka().getConcurrency());
+    @Bean("matchingCoreEventsKafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<String, byte[]> matchingCoreEventsKafkaListenerContainerFactory(
+            ConsumerFactory<String, byte[]> matchingCoreEventsConsumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, byte[]> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(matchingCoreEventsConsumerFactory);
+        factory.setConcurrency(1);
         factory.setBatchListener(true);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
-        if (matchingKafkaTemplate != null && matchingKafkaTemplate.getProducerFactory() != null) {
-            factory.getContainerProperties().setKafkaAwareTransactionManager(
-                    new KafkaTransactionManager<>(matchingKafkaTemplate.getProducerFactory()));
-        }
-        factory.getContainerProperties().setConsumerRebalanceListener(partitionAssignmentGuard);
-        return factory;
-    }
-
-    @Bean(name = "matchingInstrumentSnapshotKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> matchingInstrumentSnapshotKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> matchingConsumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(matchingConsumerFactory);
         factory.setCommonErrorHandler(new org.springframework.kafka.listener.DefaultErrorHandler(
-                new org.springframework.util.backoff.FixedBackOff(1_000L, Long.MAX_VALUE)));
+                new FixedBackOff(1_000, Long.MAX_VALUE)));
         return factory;
     }
 }

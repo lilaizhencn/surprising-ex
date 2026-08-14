@@ -40,6 +40,7 @@ public enum CoreMessageType {
     ALGO_ORDER_QUERY(113, WireMessageKind.QUERY),
     CANCEL_ALL_AFTER_QUERY(114, WireMessageKind.QUERY),
     ORDER_PREFLIGHT_QUERY(115, WireMessageKind.QUERY),
+    BOOK_STATE_QUERY(116, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -51,6 +52,7 @@ public enum CoreMessageType {
     ALGO_ORDER_RESULT(208, WireMessageKind.RESPONSE),
     CANCEL_ALL_AFTER_RESULT(209, WireMessageKind.RESPONSE),
     ORDER_PREFLIGHT_RESULT(210, WireMessageKind.RESPONSE),
+    BOOK_STATE_RESULT(211, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

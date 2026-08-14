@@ -42,4 +42,13 @@ class CoreStateQueryCodecTest {
                 java.util.Arrays.copyOf(encoded, encoded.length - 1)))
                 .isInstanceOf(ProtocolException.class);
     }
+
+    @Test
+    void roundTripsBookStateWithExportWatermark() {
+        CoreBookStateView state = new CoreBookStateView(19,
+                List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 10, 4, 2)));
+
+        assertThat(CoreStateQueryCodec.decodeBookState(CoreStateQueryCodec.encodeBookState(state)))
+                .isEqualTo(state);
+    }
 }
