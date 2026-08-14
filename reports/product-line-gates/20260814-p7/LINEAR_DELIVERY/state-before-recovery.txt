@@ -1,0 +1,1 @@
+status=OK appliedCommandCount=6 stateHash=837876fb8945a859 commandId=073d4d59-6a85-4f40-bdd7-68abfe3dd644

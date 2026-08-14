@@ -1,0 +1,1 @@
+exportInfrastructure=PASS productLine=OPTION sequence=1786682735132 kafkaTopic=surprising.option.core.events.v1 pgRows=1

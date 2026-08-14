@@ -1,0 +1,1 @@
+exportDrain=PASS productLine=SPOT published=5 ack=5 pending=0

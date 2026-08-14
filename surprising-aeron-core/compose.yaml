@@ -141,6 +141,27 @@ services:
       - /opt/surprising/tools.jar
       - com.surprising.aeron.tools.ClusterDerivativeSmokeMain
 
+  product-line-gate:
+    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    profiles: [tools]
+    init: true
+    hostname: product-line-gate
+    shm_size: 256mb
+    networks:
+      - cluster
+    entrypoint:
+      - java
+      - --add-opens
+      - java.base/jdk.internal.misc=ALL-UNNAMED
+      - -Dsurprising.aeron.product-line=${PRODUCT_LINE:-SPOT}
+      - -Dsurprising.aeron.hostnames=node0,node1,node2
+      - -Dsurprising.aeron.egress-hostname=product-line-gate
+      - -Dsurprising.aeron.smoke-seed=${PRODUCT_LINE_GATE_SEED:-7001}
+      - -Dsurprising.aeron.smoke-mode=${PRODUCT_LINE_GATE_MODE:-execute}
+      - -cp
+      - /opt/surprising/tools.jar
+      - com.surprising.aeron.tools.ClusterProductLineGateMain
+
   export-smoke:
     image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
     profiles: [tools]

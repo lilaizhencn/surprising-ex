@@ -1,0 +1,1 @@
+exportInfrastructure=PASS productLine=SPOT sequence=1786681452595 kafkaTopic=surprising.spot.core.events.v1 pgRows=1

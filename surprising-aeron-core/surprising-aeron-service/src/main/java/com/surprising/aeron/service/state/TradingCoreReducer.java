@@ -166,6 +166,12 @@ public final class TradingCoreReducer {
             TradingCoreState state, long userId) {
         return state.riskState().snapshots().values().stream()
                 .filter(risk -> userId == 0 || risk.userId() == userId)
+                .filter(risk -> {
+                    CoreUserState user = state.user(risk.userId());
+                    CorePositionState position = user.positions()
+                            .get(positionKey(risk.symbol(), risk.positionSide()));
+                    return position != null && position.signedQuantitySteps() != 0;
+                })
                 .map(risk -> {
                     CoreUserState user = state.user(risk.userId());
                     CorePositionState position = user.positions().get(positionKey(risk.symbol(), risk.positionSide()));

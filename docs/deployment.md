@@ -231,10 +231,11 @@ PRODUCT_LINE=OPTION PORT_OFFSET=300 ORDER_WAL_NODE_ID=301 ACTION=stop ./scripts/
 脚本会自动把 instrument-provider 放在服务列表第一项并等待其健康检查通过，即使显式 `SERVICES` 未包含
 `instrument` 也不会跳过合约 JVM 快照初始化。
 
-四条产品线的服务清单、启动前检查、验证和回滚必须分别遵循
-[SPOT Runbook](runbook-spot.md)、[LINEAR_PERPETUAL Runbook](runbook-linear-perpetual.md)、
-[LINEAR_DELIVERY Runbook](runbook-linear-delivery.md) 和 [OPTION Runbook](runbook-option.md)，
-不能把一条线的 margin、funding 或 settlement 步骤复制到另一条线。
+六条产品线共同遵循 [Aeron 六产品线统一运行手册](runbook-aeron-six-product-lines.md)，产品特有检查见
+[SPOT](runbook-spot.md)、[LINEAR_PERPETUAL](runbook-linear-perpetual.md)、
+[INVERSE_PERPETUAL](runbook-inverse-perpetual.md)、[LINEAR_DELIVERY](runbook-linear-delivery.md)、
+[INVERSE_DELIVERY](runbook-inverse-delivery.md) 和 [OPTION](runbook-option.md)。不能把一条线的结算资产、
+反向数学、funding、delivery 或 exercise 规则复制到另一条线。
 
 systemd/EC2 部署采用相同环境变量：
 
@@ -328,18 +329,16 @@ Redis、外部客户端或开启事务。长任务使用独立工作池，避免
 开关只暂停对应执行，不得清理待处理状态。强平恢复后重新查询 Aeron Liquidation Work 并续跑
 Snapshot 中的 symbol Risk Scan；不能从 Kafka candidate 或 PostgreSQL 猜测执行状态。
 
-## API 冒烟测试
+## Aeron 六线门禁
 
-优先使用现有脚本，每次只启动和验证一条产品线：
+P7 使用最终 Aeron 权威边界逐线验证，不使用仍依赖旧 WAL、Redis Risk 或旧强平 Saga 的历史脚本：
 
 ```bash
-./scripts/product-line-api-flow-smoke.sh
-./scripts/product-line-funds-reconcile.sh
-./scripts/live-runtime-trading-reconciliation.sh
+./scripts/run-six-product-line-gates.sh
 ```
 
-覆盖下单、撤单、撮合、成交、持仓形成、主动平仓、强平、风控事件以及 WebSocket 公私推送，并同时
-核对用户账号与做市账号资金。
+覆盖六线核心撮合、资金、资金费、Risk/强平、交割/行权、Leader 切换、Snapshot、冷恢复及
+Kafka/PG 投影。Gateway、WebSocket 和完整对外 API 正式准入属于 P8，必须在用户确认后单独执行。
 
 ## 本地集成测试
 

@@ -27,15 +27,17 @@ export ALL_PROXY=http://127.0.0.1:7897
 
 ## 2. 六线功能门禁
 
-门禁必须逐条产品线执行，不用一条线的结果替代另一条线。脚本会先运行 API/smoke、恢复和资金
-对账；任何一条失败立即停止，证据写入 `reports/product-line-gates/<UTC>/`。
+门禁必须逐条产品线执行，不用一条线的结果替代另一条线。脚本直接连接最终三节点 Aeron Cluster，
+运行产品线核心 smoke、恢复和资金对账；任何一条失败立即停止，证据写入
+`reports/product-line-gates/<UTC>/`。
 
 ```bash
 ./scripts/run-six-product-line-gates.sh
 ```
 
-只有每条线都具备 `functional-gate=PASS` 且 `funds-diff=0`，才允许进入压测。SPOT 不执行衍生品
-专属 funding/liquidation 场景，但必须通过现货余额、双资产成交、撤单和恢复验证。
+只有每条线都具备 `functional-gate=PASS` 且 `funds-diff=0`，才具备申请 P8 的条件。SPOT 不执行
+衍生品专属 funding/liquidation 场景，但必须通过现货余额、双资产成交和恢复验证。P7 完成不会自动
+开始 P8 或 P9。
 
 ## 3. 无预设 OPS 压测
 

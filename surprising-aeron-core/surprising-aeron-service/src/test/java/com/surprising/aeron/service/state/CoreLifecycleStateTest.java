@@ -210,6 +210,7 @@ class CoreLifecycleStateTest {
         assertThat(liquidated.treasuryState().insuranceBalances()).containsEntry("USDT", 180L);
         assertThat(liquidated.user(1).totalUnits("USDT")).isZero();
         assertThat(total(liquidated, "USDT")).isEqualTo(before);
+        assertThat(reducer.riskSnapshots(liquidated, 1)).isEmpty();
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(liquidated), ProductLine.LINEAR_PERPETUAL);
         assertThat(restored).isEqualTo(liquidated);

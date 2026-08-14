@@ -1,0 +1,1 @@
+exportInfrastructure=PASS productLine=LINEAR_PERPETUAL sequence=1786681623719 kafkaTopic=surprising.linear-perp.core.events.v1 pgRows=1

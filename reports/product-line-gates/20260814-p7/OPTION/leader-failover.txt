@@ -1,0 +1,2 @@
+leader_before_kill=node1
+productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=80500

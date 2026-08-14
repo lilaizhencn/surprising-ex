@@ -9,7 +9,7 @@ PRODUCT_LINE_SLUG="$(printf '%s' "${PRODUCT_LINE}" | tr '[:upper:]_' '[:lower:]-
 export PRODUCT_LINE PRODUCT_LINE_SLUG
 
 usage() {
-  echo "usage: PRODUCT_LINE=SPOT $0 build|up|down|wait-ready|probe|hash|funds-smoke|funds-verify|spot-match-smoke|spot-match-verify|export-status|export-fail|export-drain|logs|ps"
+  echo "usage: PRODUCT_LINE=SPOT $0 build|up|down|wait-ready|probe|hash|product-line-gate|product-line-verify|funds-smoke|funds-verify|spot-match-smoke|spot-match-verify|export-status|export-fail|export-drain|logs|ps"
 }
 
 wait_ready() {
@@ -45,6 +45,14 @@ case "${1:-}" in
     ;;
   hash)
     PROBE_MODE=query docker compose -f "${COMPOSE_FILE}" run --rm probe
+    ;;
+  product-line-gate)
+    wait_ready
+    PRODUCT_LINE_GATE_MODE=execute docker compose -f "${COMPOSE_FILE}" run --rm product-line-gate
+    ;;
+  product-line-verify)
+    wait_ready
+    PRODUCT_LINE_GATE_MODE=verify docker compose -f "${COMPOSE_FILE}" run --rm product-line-gate
     ;;
   funds-smoke)
     wait_ready
