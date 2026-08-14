@@ -44,6 +44,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private final long seed;
     private final int workers;
     private final int connections;
+    private final int userCount;
+    private final int pairCount;
     private final int warmupSeconds;
     private final int durationSeconds;
     private final long offeredCommandsPerSecond;
@@ -67,6 +69,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             long seed,
             int workers,
             int connections,
+            int userCount,
             int warmupSeconds,
             int durationSeconds,
             long offeredCommandsPerSecond,
@@ -76,6 +79,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
         this.seed = seed;
         this.workers = workers;
         this.connections = connections;
+        this.userCount = userCount;
+        this.pairCount = userCount / 2;
         this.warmupSeconds = warmupSeconds;
         this.durationSeconds = durationSeconds;
         this.offeredCommandsPerSecond = offeredCommandsPerSecond;
@@ -102,6 +107,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
         long seed = positiveLong("surprising.aeron.capacity-seed", 9901);
         int workers = positiveInt("surprising.aeron.capacity-workers", 4);
         int connections = positiveInt("surprising.aeron.capacity-connections", workers);
+        int userCount = positiveInt("surprising.aeron.capacity-user-count", workers * 2);
+        if ((userCount & 1) != 0) throw new IllegalArgumentException("capacity-user-count must be even");
         int warmupSeconds = nonNegativeInt("surprising.aeron.capacity-warmup-seconds", 5);
         int durationSeconds = positiveInt("surprising.aeron.capacity-duration-seconds", 15);
         long offered = nonNegativeLong("surprising.aeron.capacity-offered-commands-per-second", 0);
@@ -109,7 +116,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 "surprising.aeron.capacity-workload", "MATCH").trim().toUpperCase());
         String mode = System.getProperty("surprising.aeron.capacity-mode", "run").trim().toLowerCase();
         try (ClusterCapacityMain benchmark = new ClusterCapacityMain(productLine, hosts, egress, symbols, seed,
-                workers, connections, warmupSeconds, durationSeconds, offered, workload)) {
+                workers, connections, userCount, warmupSeconds, durationSeconds, offered, workload)) {
             if ("verify".equals(mode)) {
                 benchmark.cancelOrders(System.getProperty("surprising.aeron.capacity-cancel-orders", ""));
                 benchmark.verifyFundsAndBook();
@@ -147,11 +154,11 @@ public final class ClusterCapacityMain implements AutoCloseable {
         long commandCount = commands.get();
         long matchCount = matches.get();
         double elapsedSeconds = elapsedNanos / 1_000_000_000.0;
-        System.out.printf("capacity=PASS scope=LOCAL_CAPACITY productLine=%s workload=%s symbols=%d workers=%d connections=%d "
+        System.out.printf("capacity=PASS scope=LOCAL_CAPACITY productLine=%s workload=%s symbols=%d users=%d workers=%d connections=%d "
                         + "offeredCommandsPerSec=%d commands=%d matches=%d failures=%d elapsedSeconds=%.3f "
                         + "coreCommittedOpsPerSec=%.3f coreMatchEventsPerSec=%.3f p50Micros=%d p95Micros=%d "
                         + "p99Micros=%d p999Micros=%d maxMicros=%d fundsDiff=0 bookLevels=0%n",
-                productLine, workload, symbols.size(), workers, connections, offeredCommandsPerSecond, commandCount, matchCount,
+                productLine, workload, symbols.size(), userCount, workers, connections, offeredCommandsPerSecond, commandCount, matchCount,
                 failures.get(), elapsedSeconds, commandCount / elapsedSeconds, matchCount / elapsedSeconds,
                 percentileMicros(sorted, 0.50), percentileMicros(sorted, 0.95), percentileMicros(sorted, 0.99),
                 percentileMicros(sorted, 0.999), percentileMicros(sorted, 1.0));
@@ -162,9 +169,9 @@ public final class ClusterCapacityMain implements AutoCloseable {
             applied(CoreMessageType.UPSERT_INSTRUMENT, 1,
                     TradingCommandCodec.encodeUpsertInstrument(instrument(symbol)), stableId("instrument:" + symbol));
         }
-        for (int worker = 0; worker < workers; worker++) {
-            long first = firstUser(worker);
-            long second = secondUser(worker);
+        for (int pair = 0; pair < pairCount; pair++) {
+            long first = firstUser(pair);
+            long second = secondUser(pair);
             if (productLine == ProductLine.SPOT) {
                 adjust(first, "BTC", FUNDING_UNITS);
                 adjust(first, "USDT", FUNDING_UNITS);
@@ -225,8 +232,9 @@ public final class ClusterCapacityMain implements AutoCloseable {
         String symbol = symbol(worker, cycle);
         synchronized (symbolLocks[symbols.indexOf(symbol)]) {
             boolean reverse = (cycle & 1L) != 0;
-            long makerUser = firstUser(worker);
-            long takerUser = secondUser(worker);
+            int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
+            long makerUser = firstUser(pair);
+            long takerUser = secondUser(pair);
             CoreOrderSide makerSide = reverse ? CoreOrderSide.BUY : CoreOrderSide.SELL;
             CoreOrderSide takerSide = reverse ? CoreOrderSide.SELL : CoreOrderSide.BUY;
             long makerOrder = nextOrderId.incrementAndGet();
@@ -260,7 +268,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
     }
 
     private void cancelCycle(int worker, boolean measured) {
-        long userId = firstUser(worker);
+        int pair = Math.floorMod(worker, pairCount);
+        long userId = firstUser(pair);
         long orderId = nextOrderId.incrementAndGet();
         String symbol = symbol(worker, orderId);
         submitOrder(userId, order(symbol, orderId, CoreOrderSide.SELL, CoreTimeInForce.GTC, 110), measured);
@@ -278,7 +287,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             long started = System.nanoTime();
             long sequence = nextPriceSequence.incrementAndGet();
             var response = clients.command(CoreMessageType.APPLY_MARK_PRICE,
-                    stableId("mark-price:" + worker + ':' + cycle), firstUser(worker),
+                    stableId("mark-price:" + worker + ':' + cycle), firstUser(Math.floorMod(worker, pairCount)),
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                             symbol, 1, PRICE_TICKS + (cycle & 1L), sequence)));
             record(response.commandStatus(), System.nanoTime() - started, measured);
@@ -322,12 +331,12 @@ public final class ClusterCapacityMain implements AutoCloseable {
             throw new IllegalStateException("capacity book is not empty levels=" + book.levels().size());
         }
         long actual = 0;
-        for (int worker = 0; worker < workers; worker++) {
-            actual = Math.addExact(actual, economicFunds(firstUser(worker)));
-            actual = Math.addExact(actual, economicFunds(secondUser(worker)));
+        for (int pair = 0; pair < pairCount; pair++) {
+            actual = Math.addExact(actual, economicFunds(firstUser(pair)));
+            actual = Math.addExact(actual, economicFunds(secondUser(pair)));
         }
         long expectedMultiplier = productLine == ProductLine.SPOT ? 4L : 2L;
-        long expected = Math.multiplyExact(Math.multiplyExact(FUNDING_UNITS, workers), expectedMultiplier);
+        long expected = Math.multiplyExact(Math.multiplyExact(FUNDING_UNITS, pairCount), expectedMultiplier);
         if (actual != expected) {
             throw new IllegalStateException("capacity funds mismatch expected=" + expected + " actual=" + actual);
         }
@@ -385,12 +394,12 @@ public final class ClusterCapacityMain implements AutoCloseable {
         }
     }
 
-    private long firstUser(int worker) {
-        return 50_000_000_000L + seed * 1_000L + worker * 2L;
+    private long firstUser(int pair) {
+        return 50_000_000_000L + seed * 1_000L + pair * 2L;
     }
 
-    private long secondUser(int worker) {
-        return firstUser(worker) + 1;
+    private long secondUser(int pair) {
+        return firstUser(pair) + 1;
     }
 
     private String settleAsset() {
