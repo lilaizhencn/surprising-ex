@@ -20,6 +20,7 @@ WARMUP_SECONDS="${WARMUP_SECONDS:-3}"
 WORKERS="${WORKERS:-4}"
 CONNECTIONS="${CONNECTIONS:-${WORKERS}}"
 USER_COUNT="${USER_COUNT:-$((WORKERS * 2))}"
+ASYNC_IN_FLIGHT="${ASYNC_IN_FLIGHT:-1}"
 WORKLOAD="${WORKLOAD:-MATCH}"
 SYMBOL_COUNT="${SYMBOL_COUNT:-1}"
 SCENARIO="${SCENARIO:-capacity-step}"
@@ -132,7 +133,7 @@ validate() {
     SPOT|LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION) ;;
     *) echo "unsupported PRODUCT_LINE=${PRODUCT_LINE}" >&2; exit 2 ;;
   esac
-  for value in START_OPS STEP_OPS MAX_OPS STEP_SECONDS WORKERS CONNECTIONS USER_COUNT SYMBOL_COUNT SLO_MIN_ACHIEVEMENT_PERCENT SLO_P99_MICROS SLO_MAX_PROCESS_CPU_PERCENT SLO_MAX_TOTAL_RSS_MB SLO_MAX_GC_PAUSE_MS; do
+  for value in START_OPS STEP_OPS MAX_OPS STEP_SECONDS WORKERS CONNECTIONS USER_COUNT ASYNC_IN_FLIGHT SYMBOL_COUNT SLO_MIN_ACHIEVEMENT_PERCENT SLO_P99_MICROS SLO_MAX_PROCESS_CPU_PERCENT SLO_MAX_TOTAL_RSS_MB SLO_MAX_GC_PAUSE_MS; do
     [[ "${!value}" =~ ^[1-9][0-9]*$ ]] || { echo "${value} must be positive" >&2; exit 2; }
   done
   ((USER_COUNT % 2 == 0)) || { echo "USER_COUNT must be even" >&2; exit 2; }
@@ -145,7 +146,7 @@ validate() {
   fi
   ((START_OPS <= MAX_OPS)) || { echo "START_OPS must be <= MAX_OPS" >&2; exit 2; }
   ((CONNECTIONS <= 64)) || { echo "CONNECTIONS must be <= 64" >&2; exit 2; }
-  case "${WORKLOAD}" in MATCH|CANCEL|MARK_PRICE) ;; *) echo "WORKLOAD must be MATCH, CANCEL or MARK_PRICE" >&2; exit 2 ;; esac
+  case "${WORKLOAD}" in MATCH|MATCH_ASYNC|CANCEL|MARK_PRICE) ;; *) echo "WORKLOAD must be MATCH, MATCH_ASYNC, CANCEL or MARK_PRICE" >&2; exit 2 ;; esac
   case "${ASSESSMENT_MODE}" in strict|observe) ;; *) echo "ASSESSMENT_MODE must be strict or observe" >&2; exit 2 ;; esac
   case "${RECOVERY_GATE}" in true|false) ;; *) echo "RECOVERY_GATE must be true or false" >&2; exit 2 ;; esac
   case "${LIFECYCLE_GATE}" in true|false) ;; *) echo "LIFECYCLE_GATE must be true or false" >&2; exit 2 ;; esac
@@ -503,6 +504,7 @@ run_capacity_java() {
     -Dsurprising.aeron.capacity-workers="${WORKERS}" \
     -Dsurprising.aeron.capacity-connections="${CONNECTIONS}" \
     -Dsurprising.aeron.capacity-user-count="${USER_COUNT}" \
+    -Dsurprising.aeron.capacity-async-in-flight="${ASYNC_IN_FLIGHT:-1}" \
     -Dsurprising.aeron.capacity-symbol-count="${SYMBOL_COUNT}" \
     -Dsurprising.aeron.capacity-warmup-seconds="${WARMUP_SECONDS}" \
     -Dsurprising.aeron.capacity-duration-seconds="${STEP_SECONDS}" \
@@ -570,6 +572,7 @@ write_manifest() {
     echo "workers=${WORKERS}"
     echo "connections=${CONNECTIONS}"
     echo "user_count=${USER_COUNT}"
+    echo "async_in_flight=${ASYNC_IN_FLIGHT}"
     echo "workload=${WORKLOAD}"
     echo "symbol_count=${SYMBOL_COUNT}"
     echo "scenario=${SCENARIO}"

@@ -14,6 +14,9 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class AeronClientPool implements AutoCloseable {
 
@@ -24,6 +27,7 @@ public final class AeronClientPool implements AutoCloseable {
     private final String egressHostname;
     private final Duration responseTimeout;
     private final ClientSlot[] clients;
+    private final ExecutorService asyncExecutor;
     private final AtomicInteger nextClient = new AtomicInteger();
 
     public AeronClientPool(
@@ -54,6 +58,11 @@ public final class AeronClientPool implements AutoCloseable {
             throw new IllegalArgumentException("clientConnections must be in [1,64]");
         }
         this.clients = new ClientSlot[clientConnections];
+        this.asyncExecutor = Executors.newFixedThreadPool(Math.min(128, clientConnections * 2), runnable -> {
+            Thread thread = new Thread(runnable, clientName + "-async");
+            thread.setDaemon(true);
+            return thread;
+        });
         long processId = ProcessHandle.current().pid();
         long epoch = System.currentTimeMillis();
         for (int index = 0; index < clients.length; index++) {
@@ -78,6 +87,11 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
+    public CompletableFuture<CoreResponse> commandAsync(CoreMessageType type, UUID commandId,
+                                                         long userId, byte[] payload) {
+        return CompletableFuture.supplyAsync(() -> command(type, commandId, userId, payload), asyncExecutor);
+    }
+
     public CoreResponse query(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
         if (type == null || type.kind() != com.surprising.aeron.protocol.WireMessageKind.QUERY) {
             throw new IllegalArgumentException("query message type is required");
@@ -96,6 +110,7 @@ public final class AeronClientPool implements AutoCloseable {
     @Override
     public void close() {
         RuntimeException failure = null;
+        asyncExecutor.shutdownNow();
         for (ClientSlot slot : clients) {
             synchronized (slot) {
                 try {

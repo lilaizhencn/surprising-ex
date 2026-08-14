@@ -9,6 +9,7 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -26,6 +27,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -46,6 +48,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private final int connections;
     private final int userCount;
     private final int pairCount;
+    private final int asyncInFlight;
     private final int warmupSeconds;
     private final int durationSeconds;
     private final long offeredCommandsPerSecond;
@@ -70,6 +73,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             int workers,
             int connections,
             int userCount,
+            int asyncInFlight,
             int warmupSeconds,
             int durationSeconds,
             long offeredCommandsPerSecond,
@@ -81,6 +85,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         this.connections = connections;
         this.userCount = userCount;
         this.pairCount = userCount / 2;
+        this.asyncInFlight = asyncInFlight;
         this.warmupSeconds = warmupSeconds;
         this.durationSeconds = durationSeconds;
         this.offeredCommandsPerSecond = offeredCommandsPerSecond;
@@ -109,6 +114,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         int connections = positiveInt("surprising.aeron.capacity-connections", workers);
         int userCount = positiveInt("surprising.aeron.capacity-user-count", workers * 2);
         if ((userCount & 1) != 0) throw new IllegalArgumentException("capacity-user-count must be even");
+        int asyncInFlight = positiveInt("surprising.aeron.capacity-async-in-flight", 1);
         int warmupSeconds = nonNegativeInt("surprising.aeron.capacity-warmup-seconds", 5);
         int durationSeconds = positiveInt("surprising.aeron.capacity-duration-seconds", 15);
         long offered = nonNegativeLong("surprising.aeron.capacity-offered-commands-per-second", 0);
@@ -116,7 +122,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 "surprising.aeron.capacity-workload", "MATCH").trim().toUpperCase());
         String mode = System.getProperty("surprising.aeron.capacity-mode", "run").trim().toLowerCase();
         try (ClusterCapacityMain benchmark = new ClusterCapacityMain(productLine, hosts, egress, symbols, seed,
-                workers, connections, userCount, warmupSeconds, durationSeconds, offered, workload)) {
+                workers, connections, userCount, asyncInFlight, warmupSeconds, durationSeconds, offered, workload)) {
             if ("verify".equals(mode)) {
                 benchmark.cancelOrders(System.getProperty("surprising.aeron.capacity-cancel-orders", ""));
                 benchmark.verifyFundsAndBook();
@@ -200,6 +206,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                         try {
                             if (workload == Workload.MATCH) {
                                 matchCycle(workerId, cycle++, measured);
+                            } else if (workload == Workload.MATCH_ASYNC) {
+                                asyncMatch(workerId, deadline, measured);
                             } else if (workload == Workload.CANCEL) {
                                 cancelCycle(workerId, measured);
                             } else {
@@ -243,6 +251,46 @@ public final class ClusterCapacityMain implements AutoCloseable {
             submitOrder(takerUser, order(symbol, takerOrder, takerSide, CoreTimeInForce.IOC), measured);
             if (measured) {
                 matches.incrementAndGet();
+            }
+        }
+    }
+
+    private void asyncMatch(int worker, long deadline, boolean measured) {
+        List<AsyncPair> pending = new ArrayList<>();
+        long cycle = 0;
+        while (System.nanoTime() < deadline || !pending.isEmpty()) {
+            while (System.nanoTime() < deadline && pending.size() < asyncInFlight) {
+                int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
+                String symbol = symbol(worker, cycle);
+                long makerOrder = nextOrderId.incrementAndGet();
+                long takerOrder = nextOrderId.incrementAndGet();
+                CoreOrderSide makerSide = CoreOrderSide.SELL;
+                CoreOrderSide takerSide = CoreOrderSide.BUY;
+                long started = System.nanoTime();
+                throttle();
+                CompletableFuture<CoreResponse> maker = clients.commandAsync(CoreMessageType.PLACE_ORDER,
+                        stableId("async-maker:" + makerOrder), firstUser(pair),
+                        TradingCommandCodec.encodePlaceOrder(order(symbol, makerOrder, makerSide, CoreTimeInForce.GTC)));
+                throttle();
+                CompletableFuture<CoreResponse> pairResult = maker.thenCompose(response -> {
+                    if (response.commandStatus() != ResponseStatus.APPLIED) {
+                        throw new IllegalStateException("async maker rejected status=" + response.commandStatus());
+                    }
+                    return clients.commandAsync(CoreMessageType.PLACE_ORDER,
+                            stableId("async-taker:" + takerOrder), secondUser(pair),
+                            TradingCommandCodec.encodePlaceOrder(order(symbol, takerOrder, takerSide, CoreTimeInForce.IOC)));
+                });
+                pending.add(new AsyncPair(pairResult, started));
+                cycle++;
+            }
+            if (!pending.isEmpty()) {
+                AsyncPair pair = pending.remove(0);
+                CoreResponse response = pair.result().join();
+                record(response.commandStatus(), System.nanoTime() - pair.startedNanos(), measured);
+                if (measured) {
+                    commands.incrementAndGet();
+                    matches.incrementAndGet();
+                }
             }
         }
     }
@@ -453,8 +501,12 @@ public final class ClusterCapacityMain implements AutoCloseable {
 
     private enum Workload {
         MATCH,
+        MATCH_ASYNC,
         CANCEL,
         MARK_PRICE
+    }
+
+    private record AsyncPair(CompletableFuture<CoreResponse> result, long startedNanos) {
     }
 
     @Override
