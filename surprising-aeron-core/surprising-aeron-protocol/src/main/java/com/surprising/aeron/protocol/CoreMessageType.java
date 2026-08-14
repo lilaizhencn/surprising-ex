@@ -33,6 +33,7 @@ public enum CoreMessageType {
     TREASURY_STATE_QUERY(109, WireMessageKind.QUERY),
     ADL_CANDIDATE_QUERY(110, WireMessageKind.QUERY),
     RISK_STATE_QUERY(111, WireMessageKind.QUERY),
+    OPEN_INTEREST_QUERY(112, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -40,6 +41,7 @@ public enum CoreMessageType {
     TREASURY_STATE_RESULT(204, WireMessageKind.RESPONSE),
     ADL_CANDIDATE_RESULT(205, WireMessageKind.RESPONSE),
     RISK_STATE_RESULT(206, WireMessageKind.RESPONSE),
+    OPEN_INTEREST_RESULT(207, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

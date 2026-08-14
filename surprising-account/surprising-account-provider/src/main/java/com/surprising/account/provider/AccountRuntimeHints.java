@@ -1,7 +1,6 @@
 package com.surprising.account.provider;
 
 import com.surprising.account.api.model.AccountCommandResultEvent;
-import com.surprising.account.api.model.AccountUserCommand;
 import com.surprising.account.api.model.AdlTargetSettlementAccountCommand;
 import com.surprising.account.api.model.BalanceAdjustmentAccountCommand;
 import com.surprising.account.api.model.DeficitReservationAccountCommand;
@@ -29,20 +28,11 @@ import com.surprising.price.consumer.MarkPriceConsumerProperties;
 import com.surprising.price.consumer.MarkPriceKafkaConsumer;
 import com.surprising.account.api.model.ProductBalanceAdjustmentAccountCommand;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
-import com.surprising.account.provider.service.AccountCommandResultWaiter;
 import com.surprising.account.provider.model.CachedPosition;
 import com.surprising.account.provider.model.CachedPositionMargin;
 import com.surprising.account.provider.model.AccountCommandTerminalResult;
-import com.surprising.account.provider.service.AccountInstrumentDrainConsumer;
-import com.surprising.account.provider.service.AccountUserReducerState;
-import com.surprising.account.provider.service.AccountStateChangelogConsumer;
-import com.surprising.account.provider.service.AccountStateProjectionConsumer;
-import com.surprising.account.provider.service.AccountStateSnapshotReducerConsumer;
-import com.surprising.account.provider.service.AccountUserCommandConsumer;
 import com.surprising.account.provider.service.ExpiringContractSettlementConsumer;
 import com.surprising.account.provider.service.InstrumentSnapshotConsumer;
-import com.surprising.account.provider.service.PositionCacheProjectionConsumer;
-import com.surprising.eventstore.UserStateChangelog;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
@@ -62,7 +52,6 @@ public final class AccountRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, AccountCommandTerminalResult.class);
         registerRecord(hints, CachedPosition.class);
         registerRecord(hints, CachedPositionMargin.class);
-        registerRecord(hints, AccountUserCommand.class);
         registerRecord(hints, AdlTargetSettlementAccountCommand.class);
         registerRecord(hints, BalanceAdjustmentAccountCommand.class);
         registerRecord(hints, DeficitReservationAccountCommand.class);
@@ -79,22 +68,12 @@ public final class AccountRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, InstrumentEvent.class);
         registerRecord(hints, InstrumentLifecycleDrainEvent.class);
         registerRecord(hints, OptionExerciseEvent.class);
-        register(hints, AccountCommandResultWaiter.class);
-        register(hints, AccountInstrumentDrainConsumer.class);
-        registerRecord(hints, AccountUserReducerState.class);
-        registerRecord(hints, AccountUserReducerState.Reservation.class);
-        registerRecord(hints, UserStateChangelog.class);
         registerRecord(hints, ProductBalanceAdjustmentAccountCommand.class);
         registerRecord(hints, ProductBalanceAdjustmentRequest.class);
-        register(hints, AccountStateProjectionConsumer.class);
-        register(hints, AccountStateSnapshotReducerConsumer.class);
-        register(hints, AccountStateChangelogConsumer.class);
-        register(hints, AccountUserCommandConsumer.class);
         register(hints, ExpiringContractSettlementConsumer.class);
         register(hints, InstrumentSnapshotConsumer.class);
         register(hints, MarkPriceConsumerProperties.class);
         register(hints, MarkPriceKafkaConsumer.class);
-        register(hints, PositionCacheProjectionConsumer.class);
         hints.reflection().registerType(
                 TypeReference.of("org.springframework.boot.webmvc.WebMvcWebApplicationTypeDeducer"),
                 MemberCategory.INVOKE_DECLARED_CONSTRUCTORS);

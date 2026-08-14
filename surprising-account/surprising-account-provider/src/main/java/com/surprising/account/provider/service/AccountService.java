@@ -25,7 +25,6 @@ import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
-import com.surprising.eventstore.UserPartitionKey;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
@@ -44,27 +43,24 @@ import org.springframework.stereotype.Service;
 /**
  * 账户统一业务入口。
  *
- * <p>余额和持仓命令只能进入 {@link AccountCommandGateway}，由用户分区 WAL 和 reducer 顺序裁决；
- * 在线余额、持仓和仓位模式只能读取本地 JVM 快照。数据库查询服务只用于账本、转账记录和后台
- * 审计等异步投影查询，不允许作为账户事实状态的回退来源。</p>
+ * <p>余额和持仓命令只能通过 {@link AccountCommandGateway} 进入 Aeron Cluster 顺序裁决；在线余额、
+ * 持仓和仓位模式直接强查询 Aeron User State。数据库查询服务只用于账本、转账记录和后台审计等
+ * 异步投影查询，不允许作为账户事实状态的回退来源。</p>
  */
 @Service
 public class AccountService {
 
     private final AccountProperties properties;
-    private final AccountUserStateReducer stateReducer;
     private final AccountCommandGateway commandGateway;
     private final AccountAeronGateway aeronGateway;
     private final AccountQueryService projectionQueryService;
 
     @Autowired
     public AccountService(AccountProperties properties,
-                          AccountUserStateReducer stateReducer,
                           AccountCommandGateway commandGateway,
                           AccountAeronGateway aeronGateway,
                           AccountQueryService projectionQueryService) {
         this.properties = properties;
-        this.stateReducer = stateReducer;
         this.commandGateway = commandGateway;
         this.aeronGateway = aeronGateway;
         this.projectionQueryService = projectionQueryService;
@@ -331,14 +327,6 @@ public class AccountService {
         return commandGateway.adjustPositionMargin(request);
     }
 
-    private PerpetualAccountStateUpdatedEvent localSnapshot(ProductLine productLine, long userId) {
-        requireUserId(userId);
-        requireCurrentProduct(productLine);
-        return stateReducer.snapshot(new UserPartitionKey(productLine, userId))
-                .orElseThrow(() -> new AccountStateUnavailableException("账户 JVM 快照尚未初始化: "
-                        + productLine + ":" + userId));
-    }
-
     private CoreUserStateView coreSnapshot(ProductLine productLine, long userId) {
         requireUserId(userId);
         requireCurrentProduct(productLine);
@@ -373,40 +361,6 @@ public class AccountService {
                 MarginMode.valueOf(position.marginMode().name()),
                 com.surprising.trading.api.model.PositionSide.valueOf(position.positionSide().name()),
                 position.signedQuantitySteps(), position.entryPriceTicks(), position.realizedPnlUnits(), Instant.now());
-    }
-
-    private Optional<PositionResponse> localPosition(PerpetualAccountStateUpdatedEvent snapshot,
-                                                      long userId,
-                                                      String symbol,
-                                                      MarginMode marginMode,
-                                                      com.surprising.trading.api.model.PositionSide positionSide) {
-        return snapshot.positions().stream()
-                .filter(value -> value.symbol().equalsIgnoreCase(symbol))
-                .filter(value -> value.marginMode() == marginMode)
-                .filter(value -> value.positionSide() == positionSide)
-                .map(value -> toPositionResponse(userId, value))
-                .findFirst();
-    }
-
-    private Optional<PositionMarginResponse> localPositionMargin(PerpetualAccountStateUpdatedEvent snapshot,
-                                                                  long userId,
-                                                                  String symbol,
-                                                                  MarginMode marginMode,
-                                                                  com.surprising.trading.api.model.PositionSide side) {
-        return snapshot.positionMargins().stream()
-                .filter(value -> value.symbol().equalsIgnoreCase(symbol))
-                .filter(value -> value.marginMode() == marginMode)
-                .filter(value -> value.positionSide() == side)
-                .map(value -> new PositionMarginResponse(userId, value.symbol(), value.asset(), value.marginMode(),
-                        value.positionSide(), value.marginUnits(), snapshot.eventTime()))
-                .findFirst();
-    }
-
-    private PositionResponse toPositionResponse(long userId,
-                                                PerpetualAccountStateUpdatedEvent.Position position) {
-        return new PositionResponse(userId, position.symbol(), position.instrumentVersion(), position.marginMode(),
-                position.positionSide(), position.signedQuantitySteps(), position.entryPriceTicks(),
-                position.realizedPnlUnits(), position.updatedAt());
     }
 
     private ProductLine currentProductLine() {

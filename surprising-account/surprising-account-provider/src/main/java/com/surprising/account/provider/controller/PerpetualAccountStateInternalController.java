@@ -1,12 +1,15 @@
 package com.surprising.account.provider.controller;
 
 import com.surprising.account.api.AccountApiPaths;
+import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
-import com.surprising.account.provider.service.PerpetualAccountStateSnapshotService;
-import com.surprising.account.provider.service.AccountUserStateReducer;
-import com.surprising.account.provider.service.AccountUserStateCommandWorker;
-import com.surprising.eventstore.UserPartitionKey;
+import com.surprising.account.provider.service.AccountAeronGateway;
 import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionMode;
+import com.surprising.trading.api.model.PositionSide;
+import java.time.Instant;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,53 +18,66 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** 订单等下游模块启动或用户首次接入时使用的产品线账户快照初始化入口。 */
 @RestController
 @RequestMapping(AccountApiPaths.INTERNAL_BASE_PATH)
 public class PerpetualAccountStateInternalController {
 
-    private final PerpetualAccountStateSnapshotService snapshotService;
-    private final AccountUserStateReducer stateReducer;
-    private final AccountUserStateCommandWorker stateWorker;
+    private final AccountAeronGateway aeron;
 
-    public PerpetualAccountStateInternalController(PerpetualAccountStateSnapshotService snapshotService,
-                                                   AccountUserStateReducer stateReducer,
-                                                   AccountUserStateCommandWorker stateWorker) {
-        this.snapshotService = snapshotService;
-        this.stateReducer = stateReducer;
-        this.stateWorker = stateWorker;
+    public PerpetualAccountStateInternalController(AccountAeronGateway aeron) {
+        this.aeron = aeron;
     }
 
     @GetMapping("/perpetual-state/snapshot")
     public PerpetualAccountStateUpdatedEvent snapshot(@RequestParam("productLine") ProductLine productLine,
                                                        @RequestParam("userId") long userId) {
         try {
-            var local = stateReducer.snapshot(new UserPartitionKey(productLine, userId));
-            if (local.isPresent()) {
-                return local.get();
+            var state = aeron.userState(userId);
+            if (state == null || state.productLine() != productLine) {
+                throw new IllegalStateException("Aeron user state does not exist for product line");
             }
-            // 只有显式初始化入口才允许从数据库恢复基线，并立即写入本地 reducer；
-            // 账户命令执行器不会在热路径隐式查库。所有产品线都使用同一条边界。
-            var snapshot = snapshotService.snapshot(productLine, userId);
-            stateReducer.initialize(snapshot);
-            return snapshot;
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+            Instant now = Instant.now();
+            var balances = state.balances().stream().map(value -> new PerpetualAccountStateUpdatedEvent.Balance(
+                    value.asset(), value.availableUnits(), value.lockedUnits())).toList();
+            var positions = state.positions().stream().map(value -> new PerpetualAccountStateUpdatedEvent.Position(
+                    value.symbol(), value.instrumentVersion(), MarginMode.valueOf(value.marginMode().name()),
+                    PositionSide.valueOf(value.positionSide().name()), value.signedQuantitySteps(),
+                    value.entryPriceTicks(), value.entryValueTicks(), value.realizedPnlUnits(), now)).toList();
+            var margins = state.positions().stream().map(value -> new PerpetualAccountStateUpdatedEvent.PositionMargin(
+                    value.symbol(), value.marginAsset(), MarginMode.valueOf(value.marginMode().name()),
+                    PositionSide.valueOf(value.positionSide().name()), value.positionMarginUnits())).toList();
+            var locks = state.reservations().stream().collect(java.util.stream.Collectors.groupingBy(
+                    value -> value.asset(), java.util.TreeMap::new,
+                    java.util.stream.Collectors.summingLong(value -> Math.subtractExact(value.reservedUnits(),
+                            Math.addExact(value.releasedUnits(), value.consumedUnits())))))
+                    .entrySet().stream().map(entry -> new PerpetualAccountStateUpdatedEvent.OrderLock(
+                            entry.getKey(), entry.getValue())).toList();
+            long revision = Math.max(1L, state.revision());
+            return new PerpetualAccountStateUpdatedEvent(
+                    PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, revision, revision, productLine, userId,
+                    accountType(productLine).name(), balances, List.of(), positions, margins, locks,
+                    PositionMode.valueOf(state.positionMode().name()), now, "aeron-query");
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
         }
     }
 
-    /**
-     * 将现有账户快照重新发布到事实流，供订单等下游服务恢复 JVM 缓存。
-     *
-     * <p>该操作不创建余额、不改变账户修订号，也不会绕过资金校验。</p>
-     */
     @PostMapping("/perpetual-state/recover")
     public PerpetualAccountStateUpdatedEvent recover(@RequestParam("productLine") ProductLine productLine,
                                                       @RequestParam("userId") long userId) {
-        PerpetualAccountStateUpdatedEvent snapshot = snapshot(productLine, userId);
-        stateWorker.publishStateSnapshotForRecovery(snapshot);
-        return snapshot;
+        return snapshot(productLine, userId);
+    }
+
+    private static AccountType accountType(ProductLine productLine) {
+        return switch (productLine) {
+            case SPOT -> AccountType.SPOT;
+            case LINEAR_PERPETUAL -> AccountType.USDT_PERPETUAL;
+            case INVERSE_PERPETUAL -> AccountType.COIN_PERPETUAL;
+            case LINEAR_DELIVERY -> AccountType.USDT_DELIVERY;
+            case INVERSE_DELIVERY -> AccountType.COIN_DELIVERY;
+            case OPTION -> AccountType.OPTION;
+        };
     }
 }

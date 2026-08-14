@@ -1245,6 +1245,11 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] 删除旧 Kafka 仓位事件驱动的只减仓订单维护消费者；只减仓最终容量由 Core 在单条下单命令内确定性裁决，不再由外围异步修剪订单。
 - [x] 普通订单入口删除 `placeWal/amendWal`、账户预占命令规划及旧批次 reservation sequence；Order 全依赖 `clean test` 127/127 通过。
 - [ ] 算法单、杠杆设置和旧订单投影/维护任务仍引用 Order WAL，完成 Aeron/PG 边界迁移后再删除 WAL Bean 与 `surprising-event-store` 依赖。
+- [x] Account 在线用户状态和内部永续账户快照统一直接查询 Aeron `USER_STATE_QUERY`；未命中的余额、仓位和模式由权威结果映射，不读取 JVM/Redis/PG 回退。
+- [x] Account 开放持仓量新增只读 `OPEN_INTEREST_QUERY/RESULT`，由 Core 权威 Position State 按 symbol 聚合多空数量；不维护第二套 open-interest repository 或 Kafka reducer。
+- [x] 删除 Account 用户命令 WAL、command/result waiter、本地 reducer、RocksDB 状态/变更日志、Redis Position、旧账户投影 worker、旧强平/结算协调器及其运行配置；模块移除 `surprising-event-store`、Redis 和 RocksDB 原生构建依赖。
+- [x] Account 生产源码中 `UserPartitionWal|surprising.eventstore|RedisPosition|PositionCache|AccountUserStateReducer|AccountUserCommandWalIngress|AccountCommandSubmissionService|account-wal` 引用清零；联合 `clean test` 通过：Protocol 16/16、Core 51/51、Account Provider 49/49。
+- [ ] Account 数据库旧表 migration 暂不执行破坏性 drop；它们不再被生产权威链路引用，最终 schema 清理归入部署前独立可回滚 migration。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 

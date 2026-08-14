@@ -51,8 +51,7 @@ class AccountServiceLocalSnapshotTest {
         AccountQueryService projection = mock(AccountQueryService.class);
         AccountCommandGateway gateway = mock(AccountCommandGateway.class);
         AccountAeronGateway aeron = mock(AccountAeronGateway.class);
-        AccountService service = new AccountService(properties(), mock(AccountUserStateReducer.class), gateway,
-                aeron, projection);
+        AccountService service = new AccountService(properties(), gateway, aeron, projection);
 
         assertThatThrownBy(() -> service.positionMode(ProductLine.LINEAR_DELIVERY, 1001L))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -63,8 +62,7 @@ class AccountServiceLocalSnapshotTest {
     }
 
     private static AccountService service(AccountAeronGateway aeron, AccountQueryService projection) {
-        return new AccountService(properties(), mock(AccountUserStateReducer.class),
-                mock(AccountCommandGateway.class), aeron, projection);
+        return new AccountService(properties(), mock(AccountCommandGateway.class), aeron, projection);
     }
 
     private static AccountProperties properties() {

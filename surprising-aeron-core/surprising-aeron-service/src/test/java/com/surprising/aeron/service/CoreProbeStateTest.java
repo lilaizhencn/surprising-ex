@@ -157,6 +157,16 @@ class CoreProbeStateTest {
     }
 
     @Test
+    void openInterestQueryReturnsAuthoritativePositionTotals() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+
+        var response = state.apply(query(CoreMessageType.OPEN_INTEREST_QUERY, 0, new byte[0]));
+
+        assertThat(response.status()).isEqualTo(ResponseStatus.OK);
+        assertThat(com.surprising.aeron.protocol.CoreOpenInterestCodec.decode(response.data())).isEmpty();
+    }
+
+    @Test
     void recordsRejectedTradingCommandWithoutChangingBusinessState() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         applySpotInstrument(state);

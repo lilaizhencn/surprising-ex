@@ -183,6 +183,27 @@ public final class CoreProbeState implements AutoCloseable {
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
                     com.surprising.aeron.protocol.CoreRiskQueryCodec.encode(views));
         }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.OPEN_INTEREST_QUERY) {
+            java.util.Map<String, long[]> totals = new java.util.TreeMap<>();
+            for (var user : tradingState.users().values()) {
+                for (var position : user.positions().values()) {
+                    if (position.signedQuantitySteps() == 0L) continue;
+                    long[] value = totals.computeIfAbsent(position.symbol(), ignored -> new long[2]);
+                    if (position.signedQuantitySteps() > 0L) {
+                        value[0] = Math.addExact(value[0], position.signedQuantitySteps());
+                    } else {
+                        value[1] = Math.addExact(value[1], Math.absExact(position.signedQuantitySteps()));
+                    }
+                }
+            }
+            var views = totals.entrySet().stream()
+                    .map(entry -> new com.surprising.aeron.protocol.CoreOpenInterestView(
+                            entry.getKey(), entry.getValue()[0], entry.getValue()[1]))
+                    .toList();
+            return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                    com.surprising.aeron.protocol.CoreOpenInterestCodec.encode(views));
+        }
         StoredResult duplicate = commandResults.get(message.header().commandId());
         if (duplicate != null) {
             return new CoreResponse(ResponseStatus.DUPLICATE,

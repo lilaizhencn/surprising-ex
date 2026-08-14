@@ -3,6 +3,8 @@ package com.surprising.account.provider.service;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreOpenInterestCodec;
+import com.surprising.aeron.protocol.CoreOpenInterestView;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreUserStateView;
@@ -10,6 +12,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PreDestroy;
 import java.util.UUID;
+import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -38,6 +41,20 @@ public class AccountAeronGateway implements AutoCloseable {
             throw new AccountStateUnavailableException("Aeron user query failed: " + response.resultCode());
         }
         return CoreStateQueryCodec.decodeUserState(response.data());
+    }
+
+    public OpenInterestState openInterest() {
+        CoreResponse response = clients.query(CoreMessageType.OPEN_INTEREST_QUERY, UUID.randomUUID(), 0L, new byte[0]);
+        if (response.status() != com.surprising.aeron.protocol.ResponseStatus.OK) {
+            throw new AccountStateUnavailableException("Aeron open interest query failed: " + response.resultCode());
+        }
+        return new OpenInterestState(response.appliedCommandCount(), CoreOpenInterestCodec.decode(response.data()));
+    }
+
+    public record OpenInterestState(long revision, List<CoreOpenInterestView> values) {
+        public OpenInterestState {
+            values = List.copyOf(values);
+        }
     }
 
     @Override
