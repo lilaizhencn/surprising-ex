@@ -46,7 +46,7 @@ fail() {
 }
 
 validate() {
-  case "${PRODUCT_LINE}" in SPOT|LINEAR_PERPETUAL|LINEAR_DELIVERY|OPTION) ;; *) fail "unsupported product line ${PRODUCT_LINE}" ;; esac
+  case "${PRODUCT_LINE}" in SPOT|LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION) ;; *) fail "unsupported product line ${PRODUCT_LINE}" ;; esac
   case "${TEST_MODE}" in smoke|performance) ;; *) fail "TEST_MODE must be smoke or performance" ;; esac
   case "${EXECUTE}" in true|false) ;; *) fail "EXECUTE must be true or false" ;; esac
   [[ "${STRESS_TARGET_TPS}" =~ ^[1-9][0-9]*$ ]] || fail "STRESS_TARGET_TPS must be positive"

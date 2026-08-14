@@ -884,10 +884,10 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | P3 | `DONE` | Exchange Core Adapter 和 Book State | 六线撮合组件测试；SPOT 三节点成交、Leader kill、冷恢复资金守恒 | `e206eee` |
 | P4 | `DONE` | Risk、强平和生命周期进入核心 | 35 个 service 测试；SPOT、线性永续三节点恢复；资金守恒 | `cb525dc` |
 | P5 | `DONE` | Snapshot、Replay、Exporter 和投影 | SPOT Leader/Follower kill、冷恢复、Exporter 故障、Kafka/PG 幂等投影 | `本 P5 阶段提交` |
-| P6 | `IN_PROGRESS` | 删除旧 WAL、Redis Risk 和旧强平链 | 全仓引用清零、全量 Maven 测试 | 待填写 |
-| P7 | `NOT_STARTED` | 补齐六条产品线 | 六线 smoke、恢复、资金核对 | 待填写 |
-| P8 | `NOT_STARTED` | 单产品线功能和资金正式验收 | 第 15 节门禁报告 | 待填写 |
-| P9 | `NOT_STARTED` | 单产品线性能和故障容量测试 | 六份独立容量报告 | 待填写 |
+| P6 | `IN_PROGRESS` | 删除旧 WAL、Redis Risk 和旧强平链 | ADL、Order 子阶段已通过；全仓引用仍未清零 | `65769e6` |
+| P7 | `NOT_STARTED` | 补齐六条产品线 | 六线 smoke、恢复、资金核对 | `scripts/run-six-product-line-gates.sh` |
+| P8 | `NOT_STARTED` | 单产品线功能和资金正式验收 | 第 15 节门禁报告 | `scripts/run-six-product-line-gates.sh` |
+| P9 | `NOT_STARTED` | 单产品线性能和故障容量测试 | 六份独立容量报告 | `scripts/run-uncapped-aeron-capacity.sh` |
 | P10 | `NOT_STARTED` | 生产部署与 Runbook 冻结 | 三机演练、Backup 恢复、值班手册 | 待填写 |
 
 ### 18.1 P0：方案冻结与基线固化

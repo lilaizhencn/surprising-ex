@@ -14,7 +14,7 @@ test_profile_detect
 fail() { echo "RECOVERY_MATRIX_FAIL: $*" >&2; exit 1; }
 
 case "${MATRIX_EXECUTE}" in true|false) ;; *) fail "MATRIX_EXECUTE must be true or false" ;; esac
-case "${PRODUCT_LINE}" in SPOT|LINEAR_PERPETUAL|LINEAR_DELIVERY|OPTION) ;; *) fail "unsupported product line ${PRODUCT_LINE}" ;; esac
+case "${PRODUCT_LINE}" in SPOT|LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION) ;; *) fail "unsupported product line ${PRODUCT_LINE}" ;; esac
 
 if [[ "${RECOVERY_CASES}" == "auto" ]]; then
   case "${TEST_PROFILE}" in
