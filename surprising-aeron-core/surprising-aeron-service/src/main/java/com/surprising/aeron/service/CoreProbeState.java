@@ -271,6 +271,34 @@ public final class CoreProbeState implements AutoCloseable {
             }
         }
         if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.LIQUIDATION_WORK_QUERY) {
+            try {
+                int limit = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeQuery(message.payload());
+                var actions = tradingState.riskState().liquidations().values().stream()
+                        .filter(value -> value.status()
+                                == com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED)
+                        .sorted(java.util.Comparator.comparingLong(
+                                com.surprising.aeron.service.state.CoreLiquidationState::liquidationId))
+                        .map(value -> {
+                            var mark = tradingState.riskState().markPrices().get(value.symbol());
+                            if (mark == null || mark.priceSequence() != value.triggerPriceSequence()) return null;
+                            return new com.surprising.aeron.protocol.CoreLiquidationActionView(
+                                    value.liquidationId(), value.userId(), value.symbol(), value.marginMode(),
+                                    value.positionSide(), value.instrumentVersion(), value.triggerPriceSequence(),
+                                    value.signedQuantitySteps(), value.closeQuantitySteps(), mark.markPriceTicks());
+                        })
+                        .filter(java.util.Objects::nonNull)
+                        .limit(limit)
+                        .toList();
+                var work = new com.surprising.aeron.protocol.CoreLiquidationWorkView(
+                        tradingState.riskState().hasPendingScans(), actions);
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                        com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.ORDER_PREFLIGHT_QUERY) {
             try {
                 var command = TradingCommandCodec.decodePlaceOrder(message.payload());
@@ -566,6 +594,10 @@ public final class CoreProbeState implements AutoCloseable {
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
         }
+        if (!tradingReducer.isLiquidationExecutable(before, command)) {
+            tradingState = tradingReducer.executeLiquidation(before, command);
+            return;
+        }
         var openOrders = before.orders().values().stream()
                 .filter(order -> order.userId() == liquidation.userId()
                         && order.symbol().equals(liquidation.symbol())
@@ -688,9 +720,11 @@ public final class CoreProbeState implements AutoCloseable {
                     var instrument = after.instruments().get(value.symbol());
                     if (instrument == null) throw new IllegalStateException("liquidation instrument is missing");
                     return new com.surprising.aeron.protocol.CoreLiquidationView(value.liquidationId(),
-                            value.userId(), value.symbol(), instrument.settleAsset(), value.positionSide(),
-                            value.instrumentVersion(), value.triggerPriceSequence(), value.signedQuantitySteps(),
-                            value.closeQuantitySteps(), value.deficitUnits(), value.status().name());
+                            value.userId(), value.symbol(), instrument.settleAsset(), value.marginMode(),
+                            value.positionSide(), value.instrumentVersion(), value.triggerPriceSequence(),
+                            value.signedQuantitySteps(), value.closeQuantitySteps(), value.deficitUnits(),
+                            value.executionPriceTicks(), value.liquidationFeeRatePpm(),
+                            value.liquidationFeeUnits(), value.status().name());
                 }).toList();
     }
 

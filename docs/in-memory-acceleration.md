@@ -1,5 +1,10 @@
 # 内存与无锁热点路径
 
+> 历史文档：本文描述 P6 之前的 JVM/WAL/Redis 优化路径，不能作为当前交易权威或部署说明。
+> 当前 User、Order、Book、Risk 与 Liquidation 权威边界见
+> [Aeron 统一交易核心迁移方案](aeron-unified-trading-core-migration-plan.md) 和
+> [术语表](aeron-unified-trading-core-glossary.md)。
+
 本文记录当前已经落地的 JVM 内存化和 Owner Thread 改造。内存结构只服务于读多写少或由单线程/分区顺序驱动的热点路径；同步 WAL、产品线 Kafka 事件和可重放的本地事实负责恢复，PostgreSQL、Redis 只承担投影、查询、协调和审计。
 
 ## 撮合保护

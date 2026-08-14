@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
@@ -538,10 +539,15 @@ public final class TradingCoreReducer {
         Map<String, CoreMarkPriceState> marks = new TreeMap<>(state.riskState().markPrices());
         marks.put(instrument.symbol(), new CoreMarkPriceState(instrument.symbol(), instrument.version(),
                 command.markPriceTicks(), command.priceSequence()));
+        Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>(state.riskState().scans());
+        CoreRiskState.RiskScan currentScan = scans.get(instrument.symbol());
+        long scanStart = currentScan != null && !currentScan.complete()
+                ? currentScan.scanStartPriceSequence() : command.priceSequence();
+        long lastUserId = currentScan != null && !currentScan.complete() ? currentScan.lastUserId() : 0;
+        scans.put(instrument.symbol(), new CoreRiskState.RiskScan(instrument.symbol(), command.priceSequence(),
+                scanStart, lastUserId, false));
         CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
-                state.riskState().liquidations(),
-                new CoreRiskState.RiskScan(instrument.symbol(), command.priceSequence(), 0, false),
-                state.riskState().nextLiquidationId());
+                state.riskState().liquidations(), scans, state.riskState().nextLiquidationId());
         TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers());
@@ -592,9 +598,14 @@ public final class TradingCoreReducer {
                         liquidations, nextLiquidationId);
             }
         }
+        Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>(state.riskState().scans());
+        CoreRiskState.RiskScan nextScan = complete && scan.scanStartPriceSequence() != scan.priceSequence()
+                ? new CoreRiskState.RiskScan(scan.symbol(), scan.priceSequence(), scan.priceSequence(), 0, false)
+                : new CoreRiskState.RiskScan(scan.symbol(), scan.priceSequence(), scan.scanStartPriceSequence(),
+                        lastUserId, complete);
+        scans.put(scan.symbol(), nextScan);
         CoreRiskState nextRisk = new CoreRiskState(state.riskState().markPrices(), snapshots, liquidations,
-                new CoreRiskState.RiskScan(scan.symbol(), scan.priceSequence(), lastUserId, complete),
-                nextLiquidationId);
+                scans, nextLiquidationId);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
                 state.orders(), state.bookState(), state.instruments(), nextRisk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers());
@@ -663,13 +674,27 @@ public final class TradingCoreReducer {
     private long ensureLiquidation(long userId, CorePositionState position, CoreInstrumentState instrument,
                                    long priceSequence, CoreRiskStatus status,
                                    Map<Long, CoreLiquidationState> liquidations, long nextLiquidationId) {
-        boolean active = liquidations.values().stream().anyMatch(value -> value.userId() == userId
+        CoreLiquidationState active = liquidations.values().stream().filter(value -> value.userId() == userId
                 && value.symbol().equals(position.symbol()) && value.positionSide() == position.positionSide()
-                && value.status() != CoreLiquidationState.Status.COMPLETED);
-        if (status != CoreRiskStatus.LIQUIDATION || active) return nextLiquidationId;
+                && value.status() != CoreLiquidationState.Status.COMPLETED
+                && value.status() != CoreLiquidationState.Status.CANCELED).findFirst().orElse(null);
+        if (status != CoreRiskStatus.LIQUIDATION) {
+            if (active != null && active.status() == CoreLiquidationState.Status.PLANNED) {
+                liquidations.put(active.liquidationId(), active.canceled());
+            }
+            return nextLiquidationId;
+        }
+        if (active != null) {
+            if (active.status() == CoreLiquidationState.Status.PLANNED) {
+                liquidations.put(active.liquidationId(), active.refreshed(position.marginMode(), priceSequence,
+                        position.signedQuantitySteps()));
+            }
+            return nextLiquidationId;
+        }
         CoreLiquidationState liquidation = new CoreLiquidationState(nextLiquidationId, userId, position.symbol(),
-                position.positionSide(), instrument.version(), priceSequence, position.signedQuantitySteps(),
-                Math.absExact(position.signedQuantitySteps()), 0, CoreLiquidationState.Status.PLANNED);
+                position.marginMode(), position.positionSide(), instrument.version(), priceSequence,
+                position.signedQuantitySteps(), Math.absExact(position.signedQuantitySteps()), 0,
+                0, 0, 0, CoreLiquidationState.Status.PLANNED);
         liquidations.put(nextLiquidationId, liquidation);
         return Math.incrementExact(nextLiquidationId);
     }
@@ -838,14 +863,15 @@ public final class TradingCoreReducer {
         if (liquidation.status() != CoreLiquidationState.Status.PLANNED) {
             throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not planned");
         }
+        validateLiquidationPrice(state, liquidation, command);
+        if (!isLiquidationExecutable(state, liquidation)) {
+            return cancelLiquidation(state, liquidation);
+        }
         CoreInstrumentState instrument = requireInstrument(state, liquidation.symbol(),
                 liquidation.instrumentVersion());
         CoreUserState user = state.user(liquidation.userId());
         String positionKey = positionKey(liquidation.symbol(), liquidation.positionSide());
-        CorePositionState position = user == null ? null : user.positions().get(positionKey);
-        if (position == null || position.signedQuantitySteps() == 0) {
-            throw new CoreStateRejectedException("POSITION_NOT_FOUND", "liquidation position does not exist");
-        }
+        CorePositionState position = user.positions().get(positionKey);
         TradingCoreState canceled = cancelUserSymbolOrders(state, user.userId(), liquidation.symbol());
         user = canceled.user(user.userId());
         position = user.positions().get(positionKey);
@@ -859,10 +885,15 @@ public final class TradingCoreReducer {
         CashResult cash = applyCash(balance, pnl);
         long uncovered = pnl < 0 ? Math.subtractExact(Math.negateExact(pnl),
                 Math.negateExact(Math.min(0, cash.appliedDelta()))) : 0;
+        long feeDue = Math.negateExact(CoreContractMath.feeDeltaUnits(instrument,
+                command.executionPriceTicks(), liquidation.closeQuantitySteps(), command.liquidationFeeRatePpm()));
+        CashResult feeCash = applyCash(cash.balance(), Math.negateExact(feeDue));
+        long collectedFee = Math.negateExact(feeCash.appliedDelta());
         CoreTreasuryState treasury = canceled.treasuryState()
-                .adjustInsurance(instrument.settleAsset(), Math.negateExact(cash.appliedDelta()));
+                .adjustInsurance(instrument.settleAsset(),
+                        Math.addExact(Math.negateExact(cash.appliedDelta()), collectedFee));
         Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
-        balances.put(instrument.settleAsset(), cash.balance());
+        balances.put(instrument.settleAsset(), feeCash.balance());
         Map<String, CorePositionState> positions = new TreeMap<>(user.positions());
         positions.put(positionKey, new CorePositionState(instrument.symbol(), instrument.settleAsset(),
                 position.marginMode(), position.positionSide(), 0, 0, 0, 0,
@@ -872,12 +903,59 @@ public final class TradingCoreReducer {
         Map<Long, CoreUserState> users = new TreeMap<>(canceled.users());
         users.put(nextUser.userId(), nextUser);
         Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(canceled.riskState().liquidations());
-        liquidations.put(liquidation.liquidationId(), liquidation.executed(uncovered));
+        liquidations.put(liquidation.liquidationId(), liquidation.executed(uncovered,
+                command.executionPriceTicks(), command.liquidationFeeRatePpm(), collectedFee));
         CoreRiskState risk = new CoreRiskState(canceled.riskState().markPrices(), canceled.riskState().snapshots(),
-                liquidations, canceled.riskState().scan(), canceled.riskState().nextLiquidationId());
+                liquidations, canceled.riskState().scans(), canceled.riskState().nextLiquidationId());
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
                 canceled.orders(), canceled.bookState(), canceled.instruments(), risk, treasury,
                 canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers());
+    }
+
+    public boolean isLiquidationExecutable(TradingCoreState state, ExecuteLiquidationCommand command) {
+        CoreLiquidationState liquidation = state.riskState().liquidations().get(command.liquidationId());
+        if (liquidation == null || liquidation.status() != CoreLiquidationState.Status.PLANNED) return false;
+        validateLiquidationPrice(state, liquidation, command);
+        return isLiquidationExecutable(state, liquidation);
+    }
+
+    private static boolean isLiquidationExecutable(TradingCoreState state, CoreLiquidationState liquidation) {
+        CoreUserState user = state.user(liquidation.userId());
+        CorePositionState position = user == null ? null
+                : user.positions().get(positionKey(liquidation.symbol(), liquidation.positionSide()));
+        CoreRiskSnapshot risk = state.riskState().snapshots().get(
+                riskKey(liquidation.userId(), liquidation.symbol(), liquidation.positionSide()));
+        return position != null && position.instrumentVersion() == liquidation.instrumentVersion()
+                && position.marginMode() == liquidation.marginMode()
+                && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
+                && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
+                && risk.status() == CoreRiskStatus.LIQUIDATION;
+    }
+
+    private static void validateLiquidationPrice(TradingCoreState state, CoreLiquidationState liquidation,
+                                                 ExecuteLiquidationCommand command) {
+        CoreMarkPriceState mark = state.riskState().markPrices().get(liquidation.symbol());
+        if (mark == null || mark.priceSequence() != liquidation.triggerPriceSequence()
+                || command.triggerPriceSequence() > 0
+                && command.triggerPriceSequence() != liquidation.triggerPriceSequence()
+                || command.executionPriceTicks() != mark.markPriceTicks()) {
+            throw new CoreStateRejectedException("STALE_MARK_PRICE", "liquidation mark price changed");
+        }
+    }
+
+    private static TradingCoreState cancelLiquidation(TradingCoreState state, CoreLiquidationState liquidation) {
+        Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(state.riskState().liquidations());
+        liquidations.put(liquidation.liquidationId(), liquidation.canceled());
+        CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
+                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
+                state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState(),
+                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers());
+    }
+
+    private static String riskKey(long userId, String symbol, CorePositionSide positionSide) {
+        return positionSide == CorePositionSide.NET
+                ? userId + ":" + symbol : userId + ":" + symbol + ":" + positionSide.name();
     }
 
     public TradingCoreState resolveLiquidation(TradingCoreState state, ResolveLiquidationCommand command) {
@@ -926,7 +1004,7 @@ public final class TradingCoreReducer {
                 ? liquidation.withStatus(nextStatus) : liquidation.covered(command.coveredUnits(), nextStatus);
         liquidations.put(liquidation.liquidationId(), nextLiquidation);
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
-                liquidations, state.riskState().scan(), state.riskState().nextLiquidationId());
+                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
                 state.orders(), state.bookState(), state.instruments(), risk, treasury, state.leverages(),
                 state.algoOrders(), state.cancelAllAfterTimers());
@@ -1009,7 +1087,7 @@ public final class TradingCoreReducer {
         Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(state.riskState().liquidations());
         liquidations.put(liquidation.liquidationId(), liquidation.covered(command.coveredUnits(), nextStatus));
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
-                liquidations, state.riskState().scan(), state.riskState().nextLiquidationId());
+                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers());

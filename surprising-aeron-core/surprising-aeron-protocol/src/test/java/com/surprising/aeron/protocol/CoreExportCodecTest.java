@@ -21,7 +21,8 @@ class CoreExportCodecTest {
         CoreFundingPaymentView funding = new CoreFundingPaymentView(8, 17, "BTC-USDT",
                 CoreMarginMode.CROSS, CorePositionSide.NET, "USDT", 2, 120_000, 100, -12);
         CoreLiquidationView liquidation = new CoreLiquidationView(3, 17, "BTC-USDT", "USDT",
-                CorePositionSide.NET, 3, 8, 2, 2, 12, "INSURANCE_REQUIRED");
+                CoreMarginMode.ISOLATED, CorePositionSide.NET, 3, 8, 2, 2, 12,
+                59_000, 25_000, 3, "INSURANCE_REQUIRED");
         CoreTreasuryAssetView treasury = new CoreTreasuryAssetView("USDT", 4, 9, 12);
         CoreExportEvent event = new CoreExportEvent(7, 11, 13, commandId,
                 CoreMessageType.ADJUST_BALANCE, ResponseStatus.APPLIED, CoreResultCode.NONE,

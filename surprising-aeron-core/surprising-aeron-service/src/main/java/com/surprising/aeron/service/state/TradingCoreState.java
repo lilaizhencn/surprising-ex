@@ -229,18 +229,25 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, liquidation.liquidationId());
             hash = CoreStateHash.mix(hash, liquidation.userId());
             hash = CoreStateHash.mix(hash, liquidation.symbol());
+            hash = CoreStateHash.mix(hash, liquidation.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, liquidation.positionSide().wireCode());
             hash = CoreStateHash.mix(hash, liquidation.instrumentVersion());
             hash = CoreStateHash.mix(hash, liquidation.triggerPriceSequence());
             hash = CoreStateHash.mix(hash, liquidation.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, liquidation.closeQuantitySteps());
             hash = CoreStateHash.mix(hash, liquidation.deficitUnits());
+            hash = CoreStateHash.mix(hash, liquidation.executionPriceTicks());
+            hash = CoreStateHash.mix(hash, liquidation.liquidationFeeRatePpm());
+            hash = CoreStateHash.mix(hash, liquidation.liquidationFeeUnits());
             hash = CoreStateHash.mix(hash, liquidation.status().ordinal());
         }
-        hash = CoreStateHash.mix(hash, riskState.scan().symbol());
-        hash = CoreStateHash.mix(hash, riskState.scan().priceSequence());
-        hash = CoreStateHash.mix(hash, riskState.scan().lastUserId());
-        hash = CoreStateHash.mix(hash, riskState.scan().complete());
+        for (CoreRiskState.RiskScan scan : riskState.scans().values()) {
+            hash = CoreStateHash.mix(hash, scan.symbol());
+            hash = CoreStateHash.mix(hash, scan.priceSequence());
+            hash = CoreStateHash.mix(hash, scan.scanStartPriceSequence());
+            hash = CoreStateHash.mix(hash, scan.lastUserId());
+            hash = CoreStateHash.mix(hash, scan.complete());
+        }
         hash = CoreStateHash.mix(hash, riskState.nextLiquidationId());
         for (Map.Entry<String, Long> entry : treasuryState.feeBalances().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());

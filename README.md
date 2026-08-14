@@ -1,40 +1,28 @@
 # surprising-ex
 
 
-Surprising-EX 是基于 Java 25、PostgreSQL、Kafka 和 Redis/Valkey 的多产品线交易所后端。仓库覆盖
-现货、U 本位永续、U 本位交割和欧式现金结算期权；生产部署时每个进程只运行一条产品线，并使用
-独立 Topic、消费组、订单簿和账户类型。
+Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 的六产品线交易所后端。
+仓库覆盖现货、U/币本位永续、U/币本位交割和欧式现金结算期权；每条产品线使用独立的三节点
+Aeron Cluster、Topic、投影和账户类型。
 
 ## 核心边界
 
-- 订单和账户的交易事实由按用户分区的本地 WAL/RocksDB 单写者维护；PostgreSQL 只承担异步投影、启动恢复和审计。
-- account-provider 是资金、持仓、保证金和亏空的唯一写者；其他模块通过按用户分区的账户指令请求变更，快照缺失时失败关闭。
-- 跨服务一致性使用本地事实流、Kafka 至少一次投递和消费端幂等，不使用 XA；数据库投影落后不能改变交易裁决。
-- 交易订单和撮合 Outbox 通过一次 pending 行窗口扫描，按 `topic + eventKey` 领取有上限的连续前缀并用
-  MVCC CAS 竞争，不同 stream 并发流水线写入 Kafka，ACK 后批量标记发布状态。
-- 用户持仓和订单状态优先从各模块 JVM 快照读取；Redis 只能作为查询或跨节点协调投影。Redis、数据库
-  或 Kafka 投影未就绪时不得把空集合当成正确状态，也不授权成交、撤单、资金变更或最终强平执行。
-- risk-provider 在 Redis 维护完整风险组和 `symbol + instrumentVersion -> group` 反向索引；标记价更新
-  只计算受影响的风险组，PostgreSQL 在同一事务内批量写风险快照、强平 candidate 和 candidate Outbox，
-  liquidation 执行前仍重新校验并锁定 PostgreSQL 权威状态。内部规格缓存已引入
-  `productLine + symbol + version` 规格键，历史订单和持仓继续使用同一内部版本号定位规格。
-- 风险持仓事件和标记价事件优先复用本 JVM/Redis 风险组快照；定时扫描仍承担恢复核对职责。
-  强平候选输入直接使用候选事件中的风险值和持仓锁结果，只查询最新风险状态，避免重复读取持仓和账户快照。
-- 强平 candidate 进入带版本和租约的候选队列，由 JVM/Redis 做排序与跨节点协调；最终资金命令仍必须
-  进入 account-provider 用户分区事实流。候选投影丢失时暂停执行并等待事件或恢复，不回退到主库猜测。
-- 同一产品线、同一用户的账户指令固定使用 `<PRODUCT_LINE>:<userId>` 作为 Kafka key，并通过
-  32 个分区串行处理。
-- 撮合命令、成交、盘口和价格事件使用 `symbol` 作为 key。同一 symbol 的命令必须保持有序。
-- 撮合保护、最新成交、盘口和热 K 线优先使用进程内内存或 RocksDB；行情数据库只负责关闭 K 线、恢复快照和最终审计，具体边界见[内存与无锁热点路径](docs/in-memory-acceleration.md)。
-- WebSocket 公共行情按 Kafka 批次分组入队，连接使用有界队列和背压指标；私有事件仍按用户和产品线隔离。
-- Instrument 是唯一配置入口：各模块启动时通过 Instrument 内部聚合 RPC 加载本产品线快照，运行中消费
-  `surprising.instrument.events.v1` 增量事件，在本 JVM 内以不可变引用整体替换。下单、撮合、账户、风控、
-  价格、K 线和做市热路径不再逐笔访问 Instrument 主库；快照未完成时服务不得接受交易流量。
-- 未平仓量由 account-provider 唯一写入分片表；订单等模块启动时通过账户内部快照 RPC 初始化，运行中消费
-  产品线隔离的 Kafka 分片绝对值事件，在各自 JVM 聚合。下单保证金命中快照后不查询未平仓量视图，数据库
-  只承担账户持久化、启动恢复和最终审计。
-- 内部做市账户之间的自成交继续产生公共成交、盘口、K 线和 WebSocket 行情，但不生成经济成交、
-  持仓、手续费和资金结算；做市账户与真实用户成交时执行完整结算。
+- Aeron Cluster 中的 Unified Core State 是资金、订单、订单簿、持仓、Risk、强平和 Treasury 的唯一
+  在线权威；Cluster Log、Archive 和 Snapshot 是唯一核心恢复链。
+- Exchange Core 作为确定性订单簿执行器嵌入 Aeron 状态机，不运行独立 journal；同一核心命令原子完成
+  资金预占、撮合、成交结算、风险更新和必要的强平状态推进。
+- PostgreSQL 只保存 Core Export 查询投影、审计、报表和对账数据；投影延迟或不可用不能改变交易裁决。
+- Kafka 保留外部输入缓冲与 WebSocket、K 线、通知、数据仓库等外围事件分发，不恢复核心资金状态。
+- Valkey 只承担限流和非权威缓存，不保存 Risk 状态、强平候选、资金或订单恢复进度。
+- Risk 按 symbol 保存确定性有界扫描游标；强平 Work、触发价格序列、仓位身份、执行、强平费和
+  Insurance Treasury 全部由 Aeron 校验并原子提交。
+- `surprising-liquidation-provider` 是无状态协调器：查询 Aeron Liquidation Work、续跑 Risk Scan，使用
+  稳定 `commandId` 重试强平命令；它不消费强平 Kafka 回环，也不维护 Redis 队列或 PostgreSQL 强平事务。
+- Core Exporter 以连续 Export Sequence 向 Kafka at-least-once 发布并幂等写 PostgreSQL；只有完整批次
+  成功后才向 Aeron 提交 ACK，不新增数据库 outbox 或应用 WAL。
+- Matching Provider 只做 Market Data Projection：启动从 Aeron 强查询恢复 L2 和 watermark，随后消费
+  单分区连续 Core Event 发布公共深度与成交；历史成交和 24h 查询读取 PG 投影。
+- 六条产品线必须隔离部署和验证；压测前每条线都必须达到 `functional-gate=PASS`、`funds-diff=0`。
 
 ## 产品线
 

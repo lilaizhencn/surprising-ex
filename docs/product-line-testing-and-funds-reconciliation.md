@@ -68,10 +68,10 @@ STRESS_REPORT_FILE=/tmp/linear-perp-liquidation-5000.md \
 ```
 
 该场景必须保持均匀 symbol 分配，因为预注资按相同分配精确计算。报告会额外输出强平发现、
-强平单提交和完成延迟，完成 TPS，candidate/order 状态，Risk 与 liquidation consumer lag，
-以及用户强平费与保险基金入账。
+Liquidation Work 发现和 Takeover 完成延迟、完成 TPS、Risk Scan pending、Core Export backlog，
+以及用户实际强平费与 Insurance Treasury 入账。
 
-阅读报告时要区分“强平单提交吞吐”和“candidate 最终完成 TPS”：后者必须等待账户结算后的新风险投影。
+阅读报告时要区分“Risk Scan 发现吞吐”和“Takeover 最终完成 TPS”：后者必须等待 Core 原子资金结算完成。
 
 矩阵脚本默认只打印将要执行的命令。确认环境和预计运行时间后显式执行：
 

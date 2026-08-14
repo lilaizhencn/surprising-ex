@@ -40,7 +40,8 @@ class JdbcCoreEventProjectorTest {
             for (String resource : java.util.List.of("/db/migration/V001__create_core_event_projection.sql",
                     "/db/migration/V002__create_core_state_projections.sql",
                     "/db/migration/V004__create_core_liquidation_projections.sql",
-                    "/db/migration/V005__enrich_core_execution_projection.sql")) {
+                    "/db/migration/V005__enrich_core_execution_projection.sql",
+                    "/db/migration/V006__enrich_core_liquidation_projection.sql")) {
                 try (var stream = getClass().getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) {
@@ -137,7 +138,8 @@ class JdbcCoreEventProjectorTest {
         migrate(dataSource);
         UUID commandId = UUID.randomUUID();
         var liquidation = new com.surprising.aeron.protocol.CoreLiquidationView(9, 17, "BTC-USDT", "USDT",
-                CorePositionSide.NET, 3, 8, 2, 2, 12, "INSURANCE_REQUIRED");
+                com.surprising.aeron.protocol.CoreMarginMode.ISOLATED, CorePositionSide.NET,
+                3, 8, 2, 2, 12, 60_000, 25_000, 3, "INSURANCE_REQUIRED");
         var treasury = new com.surprising.aeron.protocol.CoreTreasuryAssetView("USDT", 4, 9, 12);
         var event = new CoreExportEvent(4, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17,
@@ -153,11 +155,16 @@ class JdbcCoreEventProjectorTest {
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             assertCount(statement, "core_liquidation_projection", 1);
             assertCount(statement, "core_treasury_projection", 1);
-            try (var result = statement.executeQuery("SELECT status, deficit_units "
+            try (var result = statement.executeQuery("SELECT status, deficit_units, margin_mode, "
+                    + "execution_price_ticks, liquidation_fee_rate_ppm, liquidation_fee_units "
                     + "FROM core_liquidation_projection")) {
                 result.next();
                 assertThat(result.getString(1)).isEqualTo("INSURANCE_REQUIRED");
                 assertThat(result.getLong(2)).isEqualTo(12);
+                assertThat(result.getString(3)).isEqualTo("ISOLATED");
+                assertThat(result.getLong(4)).isEqualTo(60_000);
+                assertThat(result.getLong(5)).isEqualTo(25_000);
+                assertThat(result.getLong(6)).isEqualTo(3);
             }
         }
     }
@@ -168,7 +175,8 @@ class JdbcCoreEventProjectorTest {
                     "/db/migration/V002__create_core_state_projections.sql",
                     "/db/migration/V003__create_core_funding_projections.sql",
                     "/db/migration/V004__create_core_liquidation_projections.sql",
-                    "/db/migration/V005__enrich_core_execution_projection.sql")) {
+                    "/db/migration/V005__enrich_core_execution_projection.sql",
+                    "/db/migration/V006__enrich_core_liquidation_projection.sql")) {
                 try (var stream = JdbcCoreEventProjectorTest.class.getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) if (!sql.isBlank()) statement.execute(sql);

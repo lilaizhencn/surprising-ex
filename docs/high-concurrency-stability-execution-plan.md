@@ -1,5 +1,8 @@
 # 高并发与资金安全改造执行计划
 
+> 历史文档：本文记录 Aeron 统一核心迁移前的稳定性方案，其中 WAL、Redis Risk 和旧强平链路已在 P6
+> 删除。当前实施与验收以 [Aeron 统一交易核心迁移方案](aeron-unified-trading-core-migration-plan.md) 为准。
+
 ## 1. 目标和执行原则
 
 本计划以统一的用户分区事实流为主线，四条业务线共用顺序、幂等、快照和恢复边界；现货、永续、交割和期权只实现各自的结算规则。具体实现使用 `SPOT`、`LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 和 `OPTION` 六个隔离的 `ProductLine` 值。

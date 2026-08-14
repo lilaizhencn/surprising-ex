@@ -7,8 +7,6 @@ import com.surprising.liquidation.provider.service.LiquidationService;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -46,28 +44,4 @@ public class LiquidationController {
         return runtimeConfigService.current();
     }
 
-    @PostMapping(LiquidationApiPaths.BASE_PATH + "/admin/runtime-config")
-    public Map<String, Object> updateRuntimeConfig(@RequestHeader("X-Admin-User-Id") String adminUserId,
-                                                   @RequestBody RuntimeConfigUpdate request) {
-        try {
-            return runtimeConfigService.update(
-                    request.executionEnabled(),
-                    request.liquidationFeeRatePpm(),
-                    request.normalCloseRatioPpm(),
-                    request.severeCloseRatioPpm(),
-                    request.fullCloseMarginRatioPpm(),
-                    request.minCloseSteps());
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    public record RuntimeConfigUpdate(
-            Boolean executionEnabled,
-            Long liquidationFeeRatePpm,
-            Long normalCloseRatioPpm,
-            Long severeCloseRatioPpm,
-            Long fullCloseMarginRatioPpm,
-            Long minCloseSteps) {
-    }
 }

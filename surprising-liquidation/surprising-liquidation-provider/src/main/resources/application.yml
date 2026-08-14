@@ -7,8 +7,8 @@ spring:
   task:
     scheduling:
       pool:
-        size: 3
-      thread-name-prefix: liquidation-scheduler-
+        size: 1
+      thread-name-prefix: liquidation-coordinator-
       shutdown:
         await-termination: true
         await-termination-period: 10s
@@ -17,9 +17,10 @@ spring:
     username: surprising
     password: surprising
     hikari:
-      maximum-pool-size: 32
-      minimum-idle: 8
+      maximum-pool-size: 8
+      minimum-idle: 1
       connection-timeout: 3000
+
 management:
   endpoints:
     web:
@@ -27,54 +28,20 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
-  price:
-    consumer:
-      bootstrap-servers: localhost:9092
-      product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-      topic: surprising.perp.mark.price.v1
-      group-id: surprising-liquidation-mark-price-${HOSTNAME:${random.uuid}}
-      max-age: 5s
-      allowed-future-skew: 1s
-      concurrency: 1
-      max-poll-records: 500
   liquidation:
-    kafka:
-      bootstrap-servers: localhost:9092
-      product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-      group-id: surprising-liquidation-v1
-      liquidation-candidates-topic: surprising.perp.liquidation.candidates.v1
-      match-results-topic: surprising.perp.match.results.v1
-      order-commands-topic: surprising.perp.order.commands.v1
-      order-events-topic: surprising.perp.order.events.v1
-      account-state-events-topic: surprising.account.state.events.v1
-      candidate-concurrency: 32
-      match-result-concurrency: 8
-      max-poll-records: 500
-    outbox:
-      batch-size: 200
-      publish-delay-ms: 100
-      send-timeout: 3s
-      max-in-flight: 32
-      retention: 7d
-      cleanup-delay-ms: 60000
-      cleanup-batch-size: 10000
-      cleanup-max-batches: 10
-    sizing:
-      normal-close-ratio-ppm: 500000
-      severe-margin-ratio-ppm: 1500000
-      severe-close-ratio-ppm: 750000
-      full-close-margin-ratio-ppm: 3000000
-      min-close-steps: 1
-    risk:
-      max-mark-age: 5s
+    product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+    aeron:
+      hostnames:
+        - ${AERON_NODE_0_HOST:localhost}
+        - ${AERON_NODE_1_HOST:localhost}
+        - ${AERON_NODE_2_HOST:localhost}
+      egress-hostname: ${AERON_EGRESS_HOST:localhost}
+      response-timeout: 5s
+      client-connections: 2
+    coordinator:
+      delay-ms: 25
+      work-batch-size: 256
+      risk-scan-batch-size: 1000
     execution:
       enabled: true
       liquidation-fee-rate-ppm: 3000
-    redis-index:
-      key-prefix: surprising:liquidation:v2
-      candidate-batch-size: 128
-      worker-count: 16
-      lease-duration: 30s
-      retry-delay: 500ms

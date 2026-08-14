@@ -1345,7 +1345,6 @@ wait_product_topics_ready() {
     topics+=(
       "${prefix}.risk.account.events.v1"
       "${prefix}.risk.position.events.v1"
-      "${prefix}.liquidation.candidates.v1"
     )
   fi
   if is_funding_product "${product_line}"; then
@@ -3207,20 +3206,18 @@ stress_kafka_lag_sample() {
 
 stress_kafka_lag_monitor() {
   local product_line="$1"
-  local matching_group account_group order_result_group position_group risk_group liquidation_group
+  local matching_group account_group order_result_group position_group risk_group
   matching_group="$(consumer_group "${product_line}" "matching")"
   account_group="$(consumer_group "${product_line}" "account-user-command")"
   order_result_group="$(consumer_group "${product_line}" "order-account-results")"
   position_group="$(consumer_group "${product_line}" "order-position-maintenance")"
   risk_group="$(consumer_group "${product_line}" "risk")"
-  liquidation_group="$(consumer_group "${product_line}" "liquidation")"
   while [[ ! -f "${STRESS_KAFKA_LAG_STOP_FILE}" ]]; do
     stress_kafka_lag_sample "${matching_group}" "$(topic_name "${product_line}" "order.commands")"
     stress_kafka_lag_sample "${account_group}" "$(topic_name "${product_line}" "account.user.commands")"
     stress_kafka_lag_sample "${order_result_group}" "$(topic_name "${product_line}" "account.command.results")"
     stress_kafka_lag_sample "${position_group}" "$(topic_name "${product_line}" "account.position.events")"
     stress_kafka_lag_sample "${risk_group}" "$(topic_name "${product_line}" "account.position.events")"
-    stress_kafka_lag_sample "${liquidation_group}" "$(topic_name "${product_line}" "liquidation.candidates")"
     sleep "${STRESS_KAFKA_LAG_SAMPLE_SECONDS}"
   done
 }

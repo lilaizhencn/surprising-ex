@@ -143,10 +143,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("risk.position.events");
     }
 
-    public String liquidationCandidatesTopic() {
-        return topic("liquidation.candidates");
-    }
-
     public String deliverySettlementsTopic() {
         return topic("delivery.settlements");
     }

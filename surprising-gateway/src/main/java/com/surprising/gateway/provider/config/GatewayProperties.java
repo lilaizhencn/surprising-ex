@@ -1131,9 +1131,6 @@ public class GatewayProperties implements EnvironmentAware {
                     new KafkaConsumerGroup("surprising-linear-perp-account-user-command-v1",
                             List.of("surprising.linear-perp.account.user.commands.v1")),
                     new KafkaConsumerGroup("surprising-risk-v1", List.of("surprising.account.position.events.v1")),
-                    new KafkaConsumerGroup("surprising-liquidation-v1", List.of(
-                            "surprising.perp.liquidation.candidates.v1",
-                            "surprising.perp.match.results.v1")),
                     new KafkaConsumerGroup("surprising-trigger-v1", List.of(
                             "surprising.perp.mark.price.v1",
                             "surprising.perp.index.price.v1",
@@ -1157,8 +1154,6 @@ public class GatewayProperties implements EnvironmentAware {
                             List.of(topics.accountUserCommandsTopic())),
                     new KafkaConsumerGroup(topics.consumerGroup("risk"),
                             List.of(topics.accountPositionEventsTopic())),
-                    new KafkaConsumerGroup(topics.consumerGroup("liquidation"),
-                            List.of(topics.liquidationCandidatesTopic(), topics.matchResultsTopic())),
                     new KafkaConsumerGroup(topics.consumerGroup("trigger"),
                             List.of(topics.markPriceTopic(), topics.indexPriceTopic(), topics.matchTradesTopic(),
                                     topics.accountPositionEventsTopic())),

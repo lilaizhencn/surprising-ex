@@ -33,7 +33,6 @@ class GatewayKafkaLagPropertiesTest {
                         "surprising-linear-delivery-matching-v1",
                         "surprising-linear-delivery-account-user-command-v1",
                         "surprising-linear-delivery-risk-v1",
-                        "surprising-linear-delivery-liquidation-v1",
                         "surprising-linear-delivery-trigger-v1",
                         "surprising-linear-delivery-mark-price-v1",
                         "surprising-linear-delivery-candlestick-v1");
@@ -42,14 +41,11 @@ class GatewayKafkaLagPropertiesTest {
         assertThat(kafka.getConsumerGroups().get(1).getTopics())
                 .containsExactly("surprising.linear-delivery.account.user.commands.v1");
         assertThat(kafka.getConsumerGroups().get(3).getTopics())
-                .containsExactly("surprising.linear-delivery.liquidation.candidates.v1",
-                        "surprising.linear-delivery.match.results.v1");
-        assertThat(kafka.getConsumerGroups().get(4).getTopics())
                 .containsExactly("surprising.linear-delivery.mark.price.v1",
                         "surprising.linear-delivery.index.price.v1",
                         "surprising.linear-delivery.match.trades.v1",
                         "surprising.linear-delivery.account.position.events.v1");
-        assertThat(kafka.getConsumerGroups().get(5).getTopics())
+        assertThat(kafka.getConsumerGroups().get(4).getTopics())
                 .containsExactly("surprising.linear-delivery.index.price.v1",
                         "surprising.linear-delivery.book.ticker.v1",
                         "surprising.linear-delivery.trade.events.v1");
@@ -61,7 +57,7 @@ class GatewayKafkaLagPropertiesTest {
         kafka.setProductLine(ProductLine.INVERSE_PERPETUAL);
         kafka.setProductTopicsEnabled(true);
 
-        assertThat(kafka.getConsumerGroups().get(5).getTopics())
+        assertThat(kafka.getConsumerGroups().get(4).getTopics())
                 .containsExactly("surprising.inverse-perp.index.price.v1",
                         "surprising.inverse-perp.book.ticker.v1",
                         "surprising.inverse-perp.trade.events.v1",

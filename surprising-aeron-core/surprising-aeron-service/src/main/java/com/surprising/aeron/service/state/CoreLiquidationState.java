@@ -1,41 +1,57 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreMarginMode;
 
 public record CoreLiquidationState(
         long liquidationId,
         long userId,
         String symbol,
+        CoreMarginMode marginMode,
         CorePositionSide positionSide,
         long instrumentVersion,
         long triggerPriceSequence,
         long signedQuantitySteps,
         long closeQuantitySteps,
         long deficitUnits,
+        long executionPriceTicks,
+        long liquidationFeeRatePpm,
+        long liquidationFeeUnits,
         Status status) {
 
     public CoreLiquidationState {
         symbol = OrderReservation.normalizeSymbol(symbol);
-        if (liquidationId <= 0 || userId <= 0 || positionSide == null || instrumentVersion <= 0
+        if (liquidationId <= 0 || userId <= 0 || marginMode == null || positionSide == null || instrumentVersion <= 0
                 || triggerPriceSequence <= 0 || signedQuantitySteps == 0 || closeQuantitySteps <= 0
-                || closeQuantitySteps > Math.absExact(signedQuantitySteps) || deficitUnits < 0 || status == null) {
+                || closeQuantitySteps > Math.absExact(signedQuantitySteps) || deficitUnits < 0
+                || executionPriceTicks < 0 || liquidationFeeRatePpm < 0
+                || liquidationFeeRatePpm > 1_000_000 || liquidationFeeUnits < 0 || status == null
+                || (status == Status.PLANNED || status == Status.CANCELED)
+                && (executionPriceTicks != 0 || liquidationFeeRatePpm != 0 || liquidationFeeUnits != 0)) {
             throw new IllegalArgumentException("invalid liquidation state");
         }
+    }
+
+    public CoreLiquidationState(long liquidationId, long userId, String symbol, CorePositionSide positionSide,
+                                long instrumentVersion, long triggerPriceSequence, long signedQuantitySteps,
+                                long closeQuantitySteps, long deficitUnits, Status status) {
+        this(liquidationId, userId, symbol, CoreMarginMode.CROSS, positionSide, instrumentVersion,
+                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, deficitUnits, 0, 0, 0, status);
     }
 
     public CoreLiquidationState(long liquidationId, long userId, String symbol, long instrumentVersion,
                                 long triggerPriceSequence, long closeQuantitySteps, long deficitUnits,
                                 Status status) {
-        this(liquidationId, userId, symbol, CorePositionSide.NET, instrumentVersion, triggerPriceSequence,
-                closeQuantitySteps, closeQuantitySteps, deficitUnits, status);
+        this(liquidationId, userId, symbol, CoreMarginMode.CROSS, CorePositionSide.NET, instrumentVersion,
+                triggerPriceSequence, closeQuantitySteps, closeQuantitySteps, deficitUnits, 0, 0, 0, status);
     }
 
     public CoreLiquidationState(long liquidationId, long userId, String symbol, CorePositionSide positionSide,
                                 long instrumentVersion, long triggerPriceSequence, long closeQuantitySteps,
                                 long deficitUnits, Status status) {
-        this(liquidationId, userId, symbol, positionSide, instrumentVersion, triggerPriceSequence,
+        this(liquidationId, userId, symbol, CoreMarginMode.CROSS, positionSide, instrumentVersion, triggerPriceSequence,
                 positionSide == CorePositionSide.SHORT ? Math.negateExact(closeQuantitySteps) : closeQuantitySteps,
-                closeQuantitySteps, deficitUnits, status);
+                closeQuantitySteps, deficitUnits, 0, 0, 0, status);
     }
 
     public enum Status {
@@ -43,17 +59,35 @@ public record CoreLiquidationState(
         ORDERED,
         COMPLETED,
         INSURANCE_REQUIRED,
-        ADL_REQUIRED
+        ADL_REQUIRED,
+        CANCELED
     }
 
     public CoreLiquidationState withStatus(Status nextStatus) {
-        return new CoreLiquidationState(liquidationId, userId, symbol, positionSide, instrumentVersion,
-                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, deficitUnits, nextStatus);
+        return new CoreLiquidationState(liquidationId, userId, symbol, marginMode, positionSide, instrumentVersion,
+                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, deficitUnits,
+                executionPriceTicks, liquidationFeeRatePpm, liquidationFeeUnits, nextStatus);
     }
 
-    public CoreLiquidationState executed(long uncoveredUnits) {
-        return new CoreLiquidationState(liquidationId, userId, symbol, positionSide, instrumentVersion,
+    public CoreLiquidationState refreshed(CoreMarginMode nextMarginMode, long nextPriceSequence,
+                                          long nextSignedQuantitySteps) {
+        if (status != Status.PLANNED) throw new IllegalStateException("only planned liquidation can refresh");
+        return new CoreLiquidationState(liquidationId, userId, symbol, nextMarginMode, positionSide,
+                instrumentVersion, nextPriceSequence, nextSignedQuantitySteps,
+                Math.absExact(nextSignedQuantitySteps), 0, 0, 0, 0, Status.PLANNED);
+    }
+
+    public CoreLiquidationState canceled() {
+        if (status != Status.PLANNED) throw new IllegalStateException("only planned liquidation can cancel");
+        return new CoreLiquidationState(liquidationId, userId, symbol, marginMode, positionSide,
+                instrumentVersion, triggerPriceSequence, signedQuantitySteps, closeQuantitySteps,
+                0, 0, 0, 0, Status.CANCELED);
+    }
+
+    public CoreLiquidationState executed(long uncoveredUnits, long priceTicks, long feeRatePpm, long feeUnits) {
+        return new CoreLiquidationState(liquidationId, userId, symbol, marginMode, positionSide, instrumentVersion,
                 triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, uncoveredUnits,
+                priceTicks, feeRatePpm, feeUnits,
                 uncoveredUnits > 0 ? Status.INSURANCE_REQUIRED : Status.COMPLETED);
     }
 
@@ -61,8 +95,9 @@ public record CoreLiquidationState(
         if (coveredUnits <= 0 || coveredUnits > deficitUnits) {
             throw new IllegalArgumentException("invalid liquidation coverage");
         }
-        return new CoreLiquidationState(liquidationId, userId, symbol, positionSide, instrumentVersion,
+        return new CoreLiquidationState(liquidationId, userId, symbol, marginMode, positionSide, instrumentVersion,
                 triggerPriceSequence, signedQuantitySteps, closeQuantitySteps,
-                Math.subtractExact(deficitUnits, coveredUnits), nextStatus);
+                Math.subtractExact(deficitUnits, coveredUnits), executionPriceTicks,
+                liquidationFeeRatePpm, liquidationFeeUnits, nextStatus);
     }
 }

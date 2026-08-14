@@ -21,7 +21,8 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 11;
+    private static final int VERSION = 12;
+    private static final int VERSION_11 = 11;
     private static final int VERSION_10 = 10;
     private static final int VERSION_9 = 9;
     private static final int VERSION_8 = 8;
@@ -174,18 +175,26 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(liquidation.liquidationId());
             writer.longValue(liquidation.userId());
             writer.text(liquidation.symbol());
+            writer.intValue(liquidation.marginMode().wireCode());
             writer.intValue(liquidation.positionSide().wireCode());
             writer.longValue(liquidation.instrumentVersion());
             writer.longValue(liquidation.triggerPriceSequence());
             writer.longValue(liquidation.signedQuantitySteps());
             writer.longValue(liquidation.closeQuantitySteps());
             writer.longValue(liquidation.deficitUnits());
+            writer.longValue(liquidation.executionPriceTicks());
+            writer.longValue(liquidation.liquidationFeeRatePpm());
+            writer.longValue(liquidation.liquidationFeeUnits());
             writer.intValue(liquidation.status().ordinal());
         });
-        writer.text(state.riskState().scan().symbol());
-        writer.longValue(state.riskState().scan().priceSequence());
-        writer.longValue(state.riskState().scan().lastUserId());
-        writer.byteValue(state.riskState().scan().complete() ? 1 : 0);
+        writer.intValue(state.riskState().scans().size());
+        state.riskState().scans().values().forEach(scan -> {
+            writer.text(scan.symbol());
+            writer.longValue(scan.priceSequence());
+            writer.longValue(scan.scanStartPriceSequence());
+            writer.longValue(scan.lastUserId());
+            writer.byteValue(scan.complete() ? 1 : 0);
+        });
         writer.longValue(state.riskState().nextLiquidationId());
         writeUnits(writer, state.treasuryState().feeBalances());
         writeUnits(writer, state.treasuryState().insuranceBalances());
@@ -231,7 +240,7 @@ public final class TradingStateSnapshotCodec {
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_10 && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
+        if (version != VERSION && version != VERSION_11 && version != VERSION_10 && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
                 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
@@ -456,6 +465,8 @@ public final class TradingStateSnapshotCodec {
                 long liquidationId = reader.positiveLong("liquidationId");
                 long userId = reader.positiveLong("liquidation userId");
                 String symbol = reader.text();
+                CoreMarginMode marginMode = version >= VERSION
+                        ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
                 CorePositionSide positionSide = version >= VERSION_6
                         ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
                 long instrumentVersion = reader.positiveLong("liquidation instrument version");
@@ -467,21 +478,42 @@ public final class TradingStateSnapshotCodec {
                             ? Math.negateExact(closeQuantity) : closeQuantity;
                 }
                 long deficitUnits = reader.nonNegativeLong("liquidation deficit");
+                long executionPriceTicks = version >= VERSION
+                        ? reader.nonNegativeLong("liquidation execution price") : 0;
+                long liquidationFeeRatePpm = version >= VERSION
+                        ? reader.nonNegativeLong("liquidation fee rate") : 0;
+                long liquidationFeeUnits = version >= VERSION
+                        ? reader.nonNegativeLong("liquidation fee units") : 0;
                 int status = reader.intValue();
                 if (status < 0 || status >= CoreLiquidationState.Status.values().length) {
                     throw new ProtocolException("invalid liquidation status: " + status);
                 }
                 CoreLiquidationState liquidation = new CoreLiquidationState(liquidationId, userId, symbol,
-                        positionSide,
+                        marginMode, positionSide,
                         instrumentVersion, priceSequence, signedQuantity, closeQuantity,
-                        deficitUnits, CoreLiquidationState.Status.values()[status]);
+                        deficitUnits, executionPriceTicks, liquidationFeeRatePpm, liquidationFeeUnits,
+                        CoreLiquidationState.Status.values()[status]);
                 putUnique(liquidations, liquidationId, liquidation);
             }
-            String scanSymbol = reader.text();
-            CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(scanSymbol,
-                    reader.nonNegativeLong("scan price sequence"), reader.nonNegativeLong("scan userId"),
-                    reader.booleanValue());
-            riskState = new CoreRiskState(marks, risks, liquidations, scan,
+            Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>();
+            if (version >= VERSION) {
+                int scanCount = reader.count("risk scans");
+                for (int index = 0; index < scanCount; index++) {
+                    String scanSymbol = reader.text();
+                    CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(scanSymbol,
+                            reader.nonNegativeLong("scan price sequence"),
+                            reader.nonNegativeLong("scan start price sequence"),
+                            reader.nonNegativeLong("scan userId"), reader.booleanValue());
+                    putUnique(scans, scanSymbol, scan);
+                }
+            } else {
+                String scanSymbol = reader.text();
+                CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(scanSymbol,
+                        reader.nonNegativeLong("scan price sequence"), reader.nonNegativeLong("scan userId"),
+                        reader.booleanValue());
+                if (!"-".equals(scan.symbol())) scans.put(scan.symbol(), scan);
+            }
+            riskState = new CoreRiskState(marks, risks, liquidations, scans,
                     reader.positiveLong("next liquidation id"));
             treasuryState = new CoreTreasuryState(readUnits(reader, "fee balances"),
                     readUnits(reader, "insurance balances"), readUnits(reader, "insurance deficits"),

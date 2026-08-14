@@ -44,7 +44,6 @@ RF=3 时按实际 Topic 数量计算副本。
 | 产品线 | `account.state.events.v1`（compact） | 32 | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `risk.account.events.v1` | 32 | `<userId>:<accountType>:<asset>` |
 | 产品线 | `risk.position.events.v1` | 32 | `symbol` |
-| 产品线 | `liquidation.candidates.v1` | 32 | `symbol` |
 | 产品线 | `account.user.commands.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
 | 产品线 | `account.user.commands.dlt.v1` | **32** | 原命令 Key 和分区 |
 | 产品线 | `account.command.results.v1` | **32** | `<PRODUCT_LINE>:<userId>` |
@@ -294,16 +293,12 @@ systemd/EC2 部署采用相同环境变量：
 Redis、外部客户端或开启事务。长任务使用独立工作池，避免阻塞 Spring 默认调度线程；批次大小和
 并发度必须有上限。
 
-## 风控 Redis 投影
+## Core 风控与强平
 
-- 每条产品线由唯一 token 租约选出定时对账协调节点，其他副本不能清空或改写整条投影。
-- 对账不清空活动投影。每轮 keyset 扫描使用 generation seen-set，并发持仓事件也加入当前
-  generation；结束时只删除同一有效 generation 未观察到的组。
-- 每个风险组使用 Redis token 锁串行化 PostgreSQL 权威读取和 Redis 替换，Lua 一次原子更新
-  组状态、成员集合和所有反向索引。
-- 首次完整扫描结束后才创建就绪标记；已存在的完整投影在接管对账期间保持可读。
-- 投影故障删除就绪标记并失败关闭；旧节点丢失租约后停止，不得删除新所有者的 generation 或投影。
-- 标记价格只从 `symbol + instrumentVersion` 反向索引定位风险组，不回退扫描 PostgreSQL。
+- Risk State、每 symbol 扫描游标和 Liquidation State 都随 Aeron Snapshot/Archive 恢复。
+- Liquidation Coordinator 只查询有界 `Liquidation Work`、提交稳定幂等命令并续跑 Risk Scan。
+- PostgreSQL 仅保存 `core_liquidation_projection` 查询投影；Valkey/Redis 不参与风险或强平裁决。
+- 不创建 `liquidation.candidates.v1`，也不部署 candidate consumer、Redis lease 或 PG 强平事务。
 
 ## Kafka 客户端身份
 
@@ -313,24 +308,25 @@ Redis、外部客户端或开启事务。长任务使用独立工作池，避免
 
 ## 部署顺序
 
-1. 执行数据库迁移并验证索引、约束和 sequence。
-2. 创建并校验 Kafka Topic、分区数、副本数和 `min.insync.replicas`。
-3. 启动共享 instrument-provider，确认当前合约快照可读。
-4. 启动价格服务，确认指数和标记价格新鲜。
-5. 启动 account、order、trigger、matching；撮合完成数据库订单簿恢复后再接流量。
-6. 启动 risk、liquidation、insurance、ADL、funding，并检查 Redis 就绪和消费者积压。
-7. 启动 candlestick、WebSocket、Gateway 和客户端入口。
-8. 使用单产品线冒烟脚本验证下单、撤单、撮合、资金、持仓和推送，再逐步放量。
+1. 执行 Core Exporter Flyway migration，至少包含 `V006__enrich_core_liquidation_projection.sql`。
+2. 为当前产品线启动三节点 Aeron Cluster，验证 Leader、Archive、Snapshot 目录和三 Member 状态一致。
+3. 创建并校验当前产品线 Kafka Topic；启动 Core Exporter，确认 Export backlog 可 drain 且 PG 投影推进。
+4. 启动 instrument 和价格输入，确认版本化 instrument、指数价与标记价能提交到当前 Product Line Cluster。
+5. 启动 account、order、risk、liquidation、insurance、ADL、funding 和 matching projection；这些服务
+   不得在 Aeron 不可用时回退旧 WAL、Redis Risk 或 PostgreSQL 强平事务。
+6. 启动 trigger、candlestick、WebSocket、Gateway 和客户端入口。
+7. 使用单产品线冒烟和资金核对脚本验证功能、恢复和 `funds-diff=0`，再逐步放量。
 
 ## 运行开关
 
 - `surprising.risk.calculation.enabled=false`：暂停定时风控和持仓事件触发。
-- `surprising.liquidation.execution.enabled=false`：在领取候选前暂停强平执行。
+- `surprising.liquidation.execution.enabled=false`：暂停 Liquidation Work 执行和 Risk Scan 续跑。
 - `surprising.insurance.coverage.enabled=false`：暂停保险基金覆盖，穿仓保持显式不变。
 - `surprising.adl.scanner.enabled=false`：暂停 ADL 领取。
 - `surprising.market-maker.engine.enabled=false`：暂停做市。
 
-开关只暂停对应执行，不得清理待处理状态。恢复后由 Kafka 回放或后续扫描继续处理。
+开关只暂停对应执行，不得清理待处理状态。强平恢复后重新查询 Aeron Liquidation Work 并续跑
+Snapshot 中的 symbol Risk Scan；不能从 Kafka candidate 或 PostgreSQL 猜测执行状态。
 
 ## API 冒烟测试
 
@@ -374,19 +370,18 @@ Redis、外部客户端或开启事务。长任务使用独立工作池，避免
   只能作为查询或跨节点协调投影，丢失时暂停相关查询和执行，不回退数据库猜测空状态。
 - `GET /orders/open` 遇到快照未就绪、用户分区序号断裂或投影不完整时返回未就绪。撤单、改单、冻结、
   解冻和终态都通过用户分区 WAL 按序追加，数据库仅异步投影和审计。
-- ADL Redis 队列只做候选排序。每个候选执行前重新计算新鲜标记价格，并由 PostgreSQL 锁定；
-  Redis 不完整时使用数据库队列。
-- 强平 Redis 队列按保证金率排序；缺少就绪标记、载荷或 Redis 故障时，定时任务回退有界
-  PostgreSQL `NEW` 候选扫描。`claimCandidate` 和后续风险、价格、持仓复核是最终权威。
+- ADL 候选和执行条件读取 Aeron，PG 只选择 `core_liquidation_projection` 中待覆盖缺口并保存审计；
+  不存在 Redis 或数据库权威候选回退。
+- 强平协调器使用 `LIQUIDATION_WORK_QUERY` 获取当前有界工作，只有 trigger sequence 与 Core 当前 mark
+  一致的 `PLANNED` action 才会返回；执行命令仍在 Core 内重新校验仓位、Risk 和 mark。
 - 市价单在标记价格缺失或过期时拒绝；名义价值和初始保证金按受保护执行区间计算。
-- 撮合启动只恢复已获得成功 `PLACE` 结果的数据库未完成 `LIMIT + GTC/GTX` 订单。恢复后出现
-  交叉订单簿必须启动失败，先修复持久状态。
+- Matching 启动从 Aeron `BOOK_STATE_QUERY` 恢复聚合 L2 与 Export watermark，不从数据库重建订单簿；
+  Core Event 断序时停止增量投影并重新 bootstrap。
 - 公共深度不写 Outbox；每个交易对只保留一个待发布完整快照，Kafka 背压可以丢中间快照，
   下一份完整快照自愈。公共成交使用独立有界 FIFO，不合并成交；溢出只丢该交易对最旧公共事件。
   这些公共链路失败不能阻断金融结算。
-- 撮合必须持久化完整成交审计，通过耐久 Outbox 发送 Maker/Taker 账户命令，并在
-  `match.results.v1` 中包含私有通知及未完成订单投影所需完整成交。
-- 撮合处理解码后命令失败或不安全分区再分配时主动退出，由编排系统重启并从数据库恢复后回放。
+- 成交和双边资金结算在同一 Aeron 命令内完成；Core Export Event 承担成交审计和外围分发，不存在
+  Matching 成交 outbox、Account 结算命令回环或数据库订单簿恢复。
 - 成交持久化要求订单仍为未完成状态、`remaining_quantity_steps >= fillQty` 且
   `quantity_steps = executed_quantity_steps + remaining_quantity_steps`。禁止用
   `LEAST/GREATEST` 掩盖超额成交。
@@ -409,15 +404,15 @@ Redis、外部客户端或开启事务。长任务使用独立工作池，避免
 - risk-provider 不信任持仓事件中的会计数值；它在风险组锁内重新加载 PostgreSQL 的完整持仓、
   余额和穿仓，再替换 Redis。
 - 资金费每页的流水、余额、穿仓、支付和增量完成状态快速失败；支付行和账户命令 Outbox 同事务提交。
-- 风险快照、强平候选和候选 Outbox 批量写快速失败；只有活动候选部分唯一冲突允许跳过。
+- Risk Snapshot、每 symbol 扫描游标、Liquidation State 和强平费都随 Aeron Snapshot 恢复；PG 投影失败
+  只影响历史查询，不得停止或改变 Core 裁决。
 - insurance-provider 使用 `FOR UPDATE SKIP LOCKED` 拆分穿仓，并在每次扣款前锁基金余额。
   基金为空时穿仓保持显式，补充基金后重试。
-- 强平服务锁实时持仓，抢占同方向用户只减仓订单，再按实时持仓提交分阶段平仓单。
-- 强平风险复核要求相同用户、交易对、保证金模式、持仓方向和合约版本的风险快照不早于候选快照，
-  并要求标记价格在配置新鲜度内。
-- 强平预撤单和下单必须使用相同 `symbol` Kafka Key。`CANCEL_REQUESTED` 仍需再次撤单，因为它
-  可能尚存在于 exchange-core。
-- 强平订单、订单事件、Outbox 或审计任一写入失败时回滚，不能把候选标为完成。
+- Core takeover liquidation 在一条命令内校验用户、symbol、保证金模式、仓位方向、instrument version、
+  完整仓位数量、Risk 状态和 trigger price sequence；校验成功后撤销该 symbol 开放单、按当前 mark
+  结算仓位、收取实际可收强平费并记入 Insurance Treasury。
+- 价格或仓位已变化时 Core 取消/拒绝旧计划且不撤开放单；网络超时重试必须复用由产品线、liquidationId、
+  trigger sequence、执行价和费率生成的稳定 `commandId`。
 - ADL 只在对应资产保险基金为零时领取达到最小年龄的穿仓；减仓前重新锁目标持仓。
   保证金释放要求 `margin_units >= releaseUnits`，未命中时事务失败。
 - 合约配置采用不可变版本；下游读取当前快照或消费 `instrument.events.v1` 后替换本地缓存。

@@ -218,93 +218,63 @@ liquidationMarginRatioPpm = 1000000
 
 ## 7. 风险检测频率和负责业务
 
-当前项目由 `surprising-risk-provider` 负责检测用户持仓风险。
+当前项目由每条产品线的 Aeron Core 负责检测用户持仓风险，`surprising-risk-provider` 只提供 Core 强查询、
+历史投影查询和管理规则。
 
-配置位置：
-
-```yaml
-surprising:
-  risk:
-    calculation:
-      scan-delay-ms: 1000
-      warning-margin-ratio-ppm: 800000
-      liquidation-margin-ratio-ppm: 1000000
-      max-mark-age: 10s
-```
-
-含义：
-
-- 默认每 `1000ms` 扫描一次。
-- 只使用 `10s` 内更新过的 mark price。
-- 保证金率达到 `800000 ppm` 进入预警。
-- 保证金率达到 `1000000 ppm` 生成爆仓候选。
-
-风险投影与标记价触发链路：
+标记价触发链路：
 
 ```text
-账户 JVM 快照
-  + Instrument JVM 快照
-  + 标记价 JVM 快照
-  -> Redis 风险组与反向索引（跨节点协调）
-  -> Redis symbol + instrumentVersion 反向索引
-Kafka 标记价更新
-  -> 只读取反向索引命中的风险组
-  -> 精确整数风险计算
-  -> 风险本地 RocksDB 投影队列
-  -> 异步数据库读模型投影
-  -> risk_account_snapshots
-  -> risk_position_snapshots
-  -> risk_liquidation_candidates
-  -> surprising.linear-perp.liquidation.candidates.v1
+版本化标记价输入
+  -> Aeron Cluster Log
+  -> 更新 Core Mark State
+  -> 为该 symbol 启动或刷新有界 Risk Scan
+  -> 使用权威 User/Position/Instrument State 做精确整数计算
+  -> 创建、刷新或取消 Core Liquidation State
+  -> Core Exporter 异步投影 PostgreSQL
 ```
 
-标记价不从审计表读取。account position 事件和账户钱包事件只合并已经初始化的 JVM/Redis 风险组，
-缓存缺失时失败关闭，禁止在事件热路径回查 PostgreSQL。风险计算完成后先同步追加本地 RocksDB
-投影队列；独立投影任务再申请数据库序列并写入风险快照、candidate 和 candidate Outbox。
-投影水位在数据库事务成功后推进，崩溃时按原批次重放，数据库读模型只用于查询、审计和启动恢复。
-如果 position 风险事件暂时拿不到新鲜标记价，Kafka batch 会无限重试而不是丢弃；定时扫描是补充校验，
-不能作为提交并跳过资金风险事件的理由。
+每个 symbol 拥有独立扫描游标；扫描期间到达更新价格时，当前遍结束后自动从头补扫，不能被其他 symbol
+覆盖。Core 使用仓位锁定的 Instrument Version 和精确整数数学；PostgreSQL/Valkey 不参与裁决或恢复。
 
 当前实现注意点：
 
-- risk-provider 使用持仓锁定的 `instrument_version` 计算风险，不会用最新合约版本重新解释旧仓位。
-- risk-provider 会按当前仓位名义价值匹配 `instrument_risk_brackets` 中最高适用档位的维持保证金率。
-- 如果某个合约版本没有配置风险档位，risk-provider 会回退使用 `instruments.maintenance_margin_rate_ppm`。
-- liquidation sizing 也会使用风险档位地板做分阶段减仓，优先把高风险大仓位降到更低档位附近。
+- Core 使用持仓锁定的 `instrument_version`，不会用最新合约版本重新解释旧仓位。
+- Core 按权威 Risk Bracket 和合约最低维持保证金率选择更严格结果。
+- 陈旧 mark、trigger sequence 或仓位身份变化会取消/拒绝旧计划，不得先撤用户开放单。
 
 ## 8. 强平执行由哪个业务做
 
-risk-provider 只负责发现风险和生成候选，不直接下强平单。
+risk-provider 只提供 Aeron Risk 强查询和 PG 历史投影。标记价进入 Aeron 后，Core 使用每个 symbol
+独立的有界扫描游标计算 Risk，并在同一权威状态中创建或刷新 Liquidation State。
 
-强平由 `surprising-liquidation-provider` 执行：
+`surprising-liquidation-provider` 只负责无状态续跑：
 
 ```text
-surprising.linear-perp.liquidation.candidates.v1
-  -> 独立 batch listener 按 candidateId 写入 Redis 优先队列
-  -> Redis Lua 原子去重、优先级领取、lease 和延迟重试
-  -> 固定 worker 批量抢占 candidate: NEW -> PROCESSING
-  -> PostgreSQL 批量锁定持仓并复核最新 risk snapshot
-  -> 批量抢占用户已有 reduce-only 平仓单
-  -> 批量创建 reduce-only MARKET IOC 强平单、事件和 Outbox
-  -> 进入 order/matching/account 正常链路
+LIQUIDATION_WORK_QUERY(limit)
+  -> 返回 Risk Scan 是否待续跑以及当前价格序列匹配的 PLANNED action
+  -> 对 action 使用稳定 commandId 提交 EXECUTE_LIQUIDATION
+  -> Core 再次校验 mark sequence、Risk、仓位身份、模式、版本和完整数量
+  -> 原子撤销该用户 symbol 开放单
+  -> 按 Core 当前 mark 接管并结算完整仓位
+  -> 实际可收强平费进入 Insurance Treasury，未覆盖损失进入 Insurance/ADL 状态
+  -> CONTINUE_RISK_SCAN(maxUsers) 推进 Snapshot 中的 symbol 扫描游标
 ```
 
-Redis 负责调度效率，不负责判断用户是否真的应该被强平。ready/delayed/inflight/payload/priority 五个 key
-使用同一个 Redis Cluster hash-tag，Lua 在一个原子操作中完成领取或重试；Redis 队列丢失时从
-PostgreSQL 的 `NEW/PROCESSING` candidate 恢复。最终订单提交前仍以 PostgreSQL 行锁下的持仓、风险快照
-和订单状态为准。强平单成交后 candidate 暂时保持 `PROCESSING`，直到更新后的风险投影确认仓位已经变化，
-防止结算窗口内重复提交第二张强平单。
+系统不再维护 Redis candidate、Kafka candidate/match-result 回环、PG 强平行锁事务或强平订单 outbox。
+PostgreSQL 的 `core_liquidation_projection` 只用于 API 历史、后台、审计和对账；删除投影不会改变 Core
+中的待执行工作。协调器超时后重新查询 Work，强平执行重试复用相同 `commandId`。
 
-强平单规则：
+Takeover liquidation 规则：
 
-- 多仓爆仓：提交 `SELL` 平仓。
-- 空仓爆仓：提交 `BUY` 平仓。
-- `orderType = MARKET`
-- `timeInForce = IOC`
-- `reduceOnly = true`
-- `postOnly = false`
+- 多仓接管等价于按当前 mark 关闭 `SELL` 数量。
+- 空仓接管等价于按当前 mark 关闭 `BUY` 数量。
+- 执行数量必须等于计划保存的完整权威仓位，仓位变化后旧计划只能取消。
+- 执行价必须等于相同 trigger sequence 的 Core 当前 mark，外围不能传任意成交价。
+- Risk 已恢复或仓位不存在时取消计划，不允许管理员强制执行或强制取消仍处于爆仓状态的仓位。
 
-强平不直接改持仓。它仍然走统一订单、撮合、成交、账户结算链路。这样资金变化、手续费、已实现盈亏、持仓变化都由 account-provider 统一处理。
+Takeover 不等待外部订单簿成交；这是为了在极端行情中保持单一资金原子边界。用户开放单、仓位、PnL、
+实际可收强平费、Insurance Treasury 和 deficit 在一条 Aeron 命令中提交。对手盘处置由后续
+Insurance/ADL 状态处理，不创建第二套强平订单 Saga。
 
 ## 9. reduce-only 是什么
 

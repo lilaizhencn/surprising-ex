@@ -1,446 +1,106 @@
 package com.surprising.liquidation.provider.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
-import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
-import jakarta.annotation.PostConstruct;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.liquidation")
 public class LiquidationProperties {
 
-    private Kafka kafka = new Kafka();
-    private Outbox outbox = new Outbox();
-    private Sizing sizing = new Sizing();
-    private Risk risk = new Risk();
+    private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+    private Aeron aeron = new Aeron();
+    private Coordinator coordinator = new Coordinator();
     private Execution execution = new Execution();
-    private RedisIndex redisIndex = new RedisIndex();
 
-    /** 启动时拒绝未隔离的强平 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "liquidation");
+    public ProductLine getProductLine() { return productLine; }
+    public void setProductLine(ProductLine value) {
+        productLine = value == null ? ProductLine.LINEAR_PERPETUAL : value;
     }
-
-    public Kafka getKafka() {
-        return kafka;
+    public Aeron getAeron() { return aeron; }
+    public void setAeron(Aeron value) { aeron = value == null ? new Aeron() : value; }
+    public Coordinator getCoordinator() { return coordinator; }
+    public void setCoordinator(Coordinator value) {
+        coordinator = value == null ? new Coordinator() : value;
     }
+    public Execution getExecution() { return execution; }
+    public void setExecution(Execution value) { execution = value == null ? new Execution() : value; }
 
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
-    }
+    public static class Aeron {
+        private List<String> hostnames = List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private Duration responseTimeout = Duration.ofSeconds(5);
+        private int clientConnections = 2;
 
-    public Outbox getOutbox() {
-        return outbox;
-    }
-
-    public void setOutbox(Outbox outbox) {
-        this.outbox = outbox;
-    }
-
-    public Sizing getSizing() {
-        return sizing;
-    }
-
-    public void setSizing(Sizing sizing) {
-        this.sizing = sizing;
-    }
-
-    public Risk getRisk() {
-        return risk;
-    }
-
-    public void setRisk(Risk risk) {
-        this.risk = risk;
-    }
-
-    public Execution getExecution() {
-        return execution;
-    }
-
-    public void setExecution(Execution execution) {
-        this.execution = execution;
-    }
-    public RedisIndex getRedisIndex() { return redisIndex; }
-    public void setRedisIndex(RedisIndex redisIndex) { this.redisIndex = redisIndex; }
-
-    public static class Kafka {
-        private String bootstrapServers = "localhost:9092";
-        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private boolean productTopicsEnabled;
-        private String groupId = "surprising-liquidation-v1";
-        private String liquidationCandidatesTopic = "surprising.perp.liquidation.candidates.v1";
-        private String matchResultsTopic = "surprising.perp.match.results.v1";
-        private String orderCommandsTopic = "surprising.perp.order.commands.v1";
-        private String orderEventsTopic = "surprising.perp.order.events.v1";
-        private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
-        private String positionEventsTopic = "surprising.account.position.events.v1";
-        private String accountStateEventsTopic = "surprising.account.state.events.v1";
-        private String instrumentSnapshotGroupId = "surprising-liquidation-instrument-snapshot-v1";
-        private String positionSnapshotGroupId = "surprising-liquidation-position-snapshot-v1";
-        private String accountStateSnapshotGroupId = "surprising-liquidation-account-state-v1";
-        private int candidateConcurrency = 32;
-        private int matchResultConcurrency = 8;
-        private int maxPollRecords = 500;
-
-        public String getBootstrapServers() {
-            return bootstrapServers;
-        }
-
-        public void setBootstrapServers(String bootstrapServers) {
-            this.bootstrapServers = bootstrapServers;
-        }
-
-        public ProductLine getProductLine() {
-            return productLine;
-        }
-
-        public void setProductLine(ProductLine productLine) {
-            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
-        }
-
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
-        public String getGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("liquidation") : groupId;
-        }
-
-        public void setGroupId(String groupId) {
-            this.groupId = groupId;
-        }
-
-        public String getLiquidationCandidatesTopic() {
-            return productTopicsEnabled ? productTopics().liquidationCandidatesTopic() : liquidationCandidatesTopic;
-        }
-
-        public void setLiquidationCandidatesTopic(String liquidationCandidatesTopic) {
-            this.liquidationCandidatesTopic = liquidationCandidatesTopic;
-        }
-
-        public String getMatchResultsTopic() {
-            return productTopicsEnabled ? productTopics().matchResultsTopic() : matchResultsTopic;
-        }
-
-        public void setMatchResultsTopic(String matchResultsTopic) {
-            this.matchResultsTopic = matchResultsTopic;
-        }
-
-        public String getOrderCommandsTopic() {
-            return productTopicsEnabled ? productTopics().orderCommandsTopic() : orderCommandsTopic;
-        }
-
-        public void setOrderCommandsTopic(String orderCommandsTopic) {
-            this.orderCommandsTopic = orderCommandsTopic;
-        }
-
-        public String getOrderEventsTopic() {
-            return productTopicsEnabled ? productTopics().orderEventsTopic() : orderEventsTopic;
-        }
-
-        public void setOrderEventsTopic(String orderEventsTopic) {
-            this.orderEventsTopic = orderEventsTopic;
-        }
-
-        public String getFeeScheduleEventsTopic() {
-            return productTopicsEnabled ? productTopics().feeScheduleEventsTopic() : feeScheduleEventsTopic;
-        }
-
-        public void setFeeScheduleEventsTopic(String feeScheduleEventsTopic) {
-            this.feeScheduleEventsTopic = feeScheduleEventsTopic;
-        }
-
-        public String getPositionEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
-        }
-
-        public void setPositionEventsTopic(String positionEventsTopic) {
-            this.positionEventsTopic = positionEventsTopic;
-        }
-
-        public String getAccountStateEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountStateEventsTopic() : accountStateEventsTopic;
-        }
-
-        public void setAccountStateEventsTopic(String accountStateEventsTopic) {
-            this.accountStateEventsTopic = accountStateEventsTopic;
-        }
-
-        public String getPositionSnapshotGroupId() {
-            return productTopicsEnabled
-                    ? productTopics().consumerGroup("liquidation-position-snapshot")
-                    : positionSnapshotGroupId;
-        }
-
-        public String getAccountStateSnapshotGroupId() {
-            return productTopicsEnabled
-                    ? productTopics().consumerGroup("liquidation-account-state")
-                    : accountStateSnapshotGroupId;
-        }
-
-        public void setPositionSnapshotGroupId(String positionSnapshotGroupId) {
-            this.positionSnapshotGroupId = positionSnapshotGroupId;
-        }
-
-        public String getInstrumentSnapshotGroupId() {
-            return instrumentSnapshotGroupId;
-        }
-
-        public void setInstrumentSnapshotGroupId(String instrumentSnapshotGroupId) {
-            this.instrumentSnapshotGroupId = instrumentSnapshotGroupId;
-        }
-
-        public String getFeeScheduleSnapshotGroupId() {
-            return productTopics().consumerGroup("liquidation-fee-snapshot");
-        }
-
-        public int getCandidateConcurrency() {
-            return candidateConcurrency;
-        }
-
-        public void setCandidateConcurrency(int candidateConcurrency) {
-            if (candidateConcurrency <= 0) {
-                throw new IllegalArgumentException("liquidation candidateConcurrency must be positive");
+        public List<String> getHostnames() { return hostnames; }
+        public void setHostnames(List<String> value) {
+            if (value == null || value.size() != 3
+                    || value.stream().anyMatch(host -> host == null || host.isBlank())) {
+                throw new IllegalArgumentException("aeron.hostnames must contain exactly three nonblank hosts");
             }
-            this.candidateConcurrency = candidateConcurrency;
+            hostnames = List.copyOf(value);
         }
-
-        public int getMatchResultConcurrency() {
-            return matchResultConcurrency;
-        }
-
-        public void setMatchResultConcurrency(int matchResultConcurrency) {
-            if (matchResultConcurrency <= 0) {
-                throw new IllegalArgumentException("liquidation matchResultConcurrency must be positive");
+        public String getEgressHostname() { return egressHostname; }
+        public void setEgressHostname(String value) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException("aeron.egress-hostname must be nonblank");
             }
-            this.matchResultConcurrency = matchResultConcurrency;
+            egressHostname = value.trim();
         }
-
-        public int getMaxPollRecords() {
-            return maxPollRecords;
+        public Duration getResponseTimeout() { return responseTimeout; }
+        public void setResponseTimeout(Duration value) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException("aeron.response-timeout must be positive");
+            }
+            responseTimeout = value;
         }
-
-        public void setMaxPollRecords(int maxPollRecords) {
-            this.maxPollRecords = maxPollRecords;
-        }
-
-        private ProductTopicNames productTopics() {
-            return ProductTopicNames.of(productLine);
+        public int getClientConnections() { return clientConnections; }
+        public void setClientConnections(int value) {
+            if (value < 1 || value > 64) {
+                throw new IllegalArgumentException("aeron.client-connections must be in [1,64]");
+            }
+            clientConnections = value;
         }
     }
 
-    public static class Outbox {
-        private int batchSize = 200;
-        private long publishDelayMs = 100L;
-        private Duration sendTimeout = Duration.ofSeconds(3);
-        private int maxInFlight = 32;
-        private Duration retention = Duration.ofDays(7);
-        private long cleanupDelayMs = 60_000L;
-        private int cleanupBatchSize = 10_000;
-        private int cleanupMaxBatches = 10;
+    public static class Coordinator {
+        private long delayMs = 25;
+        private int workBatchSize = 256;
+        private int riskScanBatchSize = 1_000;
 
-        public int getBatchSize() {
-            return batchSize;
+        public long getDelayMs() { return delayMs; }
+        public void setDelayMs(long value) {
+            if (value < 1) throw new IllegalArgumentException("coordinator.delay-ms must be positive");
+            delayMs = value;
         }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
-        }
-
-        public Duration getSendTimeout() {
-            return sendTimeout;
-        }
-
-        public void setSendTimeout(Duration sendTimeout) {
-            this.sendTimeout = sendTimeout;
-        }
-
-        public int getMaxInFlight() {
-            return maxInFlight;
-        }
-
-        public void setMaxInFlight(int maxInFlight) {
-            if (maxInFlight <= 0) {
-                throw new IllegalArgumentException("liquidation outbox maxInFlight must be positive");
+        public int getWorkBatchSize() { return workBatchSize; }
+        public void setWorkBatchSize(int value) {
+            if (value < 1 || value > 1_000) {
+                throw new IllegalArgumentException("coordinator.work-batch-size must be in [1,1000]");
             }
-            this.maxInFlight = maxInFlight;
+            workBatchSize = value;
         }
-
-        public Duration getRetention() {
-            return retention;
-        }
-
-        public void setRetention(Duration retention) {
-            if (retention == null || retention.isZero() || retention.isNegative()) {
-                throw new IllegalArgumentException("liquidation outbox retention must be positive");
+        public int getRiskScanBatchSize() { return riskScanBatchSize; }
+        public void setRiskScanBatchSize(int value) {
+            if (value < 1 || value > 4_096) {
+                throw new IllegalArgumentException("coordinator.risk-scan-batch-size must be in [1,4096]");
             }
-            this.retention = retention;
-        }
-
-        public long getCleanupDelayMs() {
-            return cleanupDelayMs;
-        }
-
-        public void setCleanupDelayMs(long cleanupDelayMs) {
-            if (cleanupDelayMs <= 0) {
-                throw new IllegalArgumentException("liquidation outbox cleanupDelayMs must be positive");
-            }
-            this.cleanupDelayMs = cleanupDelayMs;
-        }
-
-        public int getCleanupBatchSize() {
-            return cleanupBatchSize;
-        }
-
-        public void setCleanupBatchSize(int cleanupBatchSize) {
-            if (cleanupBatchSize <= 0) {
-                throw new IllegalArgumentException("liquidation outbox cleanupBatchSize must be positive");
-            }
-            this.cleanupBatchSize = cleanupBatchSize;
-        }
-
-        public int getCleanupMaxBatches() {
-            return cleanupMaxBatches;
-        }
-
-        public void setCleanupMaxBatches(int cleanupMaxBatches) {
-            if (cleanupMaxBatches <= 0) {
-                throw new IllegalArgumentException("liquidation outbox cleanupMaxBatches must be positive");
-            }
-            this.cleanupMaxBatches = cleanupMaxBatches;
-        }
-    }
-
-    public static class Sizing {
-        private long normalCloseRatioPpm = 500_000L;
-        private long severeMarginRatioPpm = 1_500_000L;
-        private long severeCloseRatioPpm = 750_000L;
-        private long fullCloseMarginRatioPpm = 3_000_000L;
-        private long minCloseSteps = 1L;
-
-        public long getNormalCloseRatioPpm() {
-            return normalCloseRatioPpm;
-        }
-
-        public void setNormalCloseRatioPpm(long normalCloseRatioPpm) {
-            this.normalCloseRatioPpm = normalCloseRatioPpm;
-        }
-
-        public long getSevereMarginRatioPpm() {
-            return severeMarginRatioPpm;
-        }
-
-        public void setSevereMarginRatioPpm(long severeMarginRatioPpm) {
-            this.severeMarginRatioPpm = severeMarginRatioPpm;
-        }
-
-        public long getSevereCloseRatioPpm() {
-            return severeCloseRatioPpm;
-        }
-
-        public void setSevereCloseRatioPpm(long severeCloseRatioPpm) {
-            this.severeCloseRatioPpm = severeCloseRatioPpm;
-        }
-
-        public long getFullCloseMarginRatioPpm() {
-            return fullCloseMarginRatioPpm;
-        }
-
-        public void setFullCloseMarginRatioPpm(long fullCloseMarginRatioPpm) {
-            this.fullCloseMarginRatioPpm = fullCloseMarginRatioPpm;
-        }
-
-        public long getMinCloseSteps() {
-            return minCloseSteps;
-        }
-
-        public void setMinCloseSteps(long minCloseSteps) {
-            this.minCloseSteps = minCloseSteps;
-        }
-    }
-
-    public static class Risk {
-        private Duration maxMarkAge = Duration.ofSeconds(5);
-
-        public Duration getMaxMarkAge() {
-            return maxMarkAge;
-        }
-
-        public void setMaxMarkAge(Duration maxMarkAge) {
-            this.maxMarkAge = maxMarkAge;
+            riskScanBatchSize = value;
         }
     }
 
     public static class Execution {
         private boolean enabled = true;
-        private long liquidationFeeRatePpm = 3_000L;
+        private long liquidationFeeRatePpm = 3_000;
 
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public long getLiquidationFeeRatePpm() {
-            return liquidationFeeRatePpm;
-        }
-
-        public void setLiquidationFeeRatePpm(long liquidationFeeRatePpm) {
-            this.liquidationFeeRatePpm = liquidationFeeRatePpm;
-        }
-    }
-
-    public static class RedisIndex {
-        private String keyPrefix = "surprising:liquidation:v2";
-        private int candidateBatchSize = 128;
-        private int workerCount = 16;
-        private Duration leaseDuration = Duration.ofSeconds(30);
-        private Duration retryDelay = Duration.ofMillis(500);
-        public String getKeyPrefix() { return keyPrefix; }
-        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
-        public int getCandidateBatchSize() { return candidateBatchSize; }
-        public void setCandidateBatchSize(int candidateBatchSize) {
-            if (candidateBatchSize <= 0 || candidateBatchSize > 2_000) {
-                throw new IllegalArgumentException("liquidation candidateBatchSize must be between 1 and 2000");
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean value) { enabled = value; }
+        public long getLiquidationFeeRatePpm() { return liquidationFeeRatePpm; }
+        public void setLiquidationFeeRatePpm(long value) {
+            if (value < 0 || value > 1_000_000) {
+                throw new IllegalArgumentException("liquidation-fee-rate-ppm must be in [0,1000000]");
             }
-            this.candidateBatchSize = candidateBatchSize;
-        }
-        public int getWorkerCount() { return workerCount; }
-        public void setWorkerCount(int workerCount) {
-            if (workerCount <= 0) {
-                throw new IllegalArgumentException("liquidation workerCount must be positive");
-            }
-            this.workerCount = workerCount;
-        }
-        public Duration getLeaseDuration() { return leaseDuration; }
-        public void setLeaseDuration(Duration leaseDuration) {
-            if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
-                throw new IllegalArgumentException("liquidation leaseDuration must be positive");
-            }
-            this.leaseDuration = leaseDuration;
-        }
-        public Duration getRetryDelay() { return retryDelay; }
-        public void setRetryDelay(Duration retryDelay) {
-            if (retryDelay == null || retryDelay.isZero() || retryDelay.isNegative()) {
-                throw new IllegalArgumentException("liquidation retryDelay must be positive");
-            }
-            this.retryDelay = retryDelay;
+            liquidationFeeRatePpm = value;
         }
     }
 }

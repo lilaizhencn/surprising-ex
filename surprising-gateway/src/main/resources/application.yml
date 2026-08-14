@@ -768,10 +768,6 @@ surprising:
           - group-id: surprising-risk-v1
             topics:
               - surprising.account.position.events.v1
-          - group-id: surprising-liquidation-v1
-            topics:
-              - surprising.perp.liquidation.candidates.v1
-              - surprising.perp.match.results.v1
           - group-id: surprising-trigger-v1
             topics:
               - surprising.perp.mark.price.v1

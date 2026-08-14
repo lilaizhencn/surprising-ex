@@ -63,16 +63,19 @@ public final class JdbcCoreEventProjector {
             """;
     private static final String INSERT_LIQUIDATION = """
             INSERT INTO core_liquidation_projection
-                (product_line, liquidation_id, user_id, symbol, asset, position_side,
+                (product_line, liquidation_id, user_id, symbol, asset, margin_mode, position_side,
                  instrument_version, trigger_price_sequence, signed_quantity_steps,
-                 close_quantity_steps, deficit_units, status, export_sequence, updated_at_epoch_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 close_quantity_steps, deficit_units, execution_price_ticks,
+                 liquidation_fee_rate_ppm, liquidation_fee_units, status,
+                 export_sequence, updated_at_epoch_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
     private static final String UPDATE_LIQUIDATION = """
             UPDATE core_liquidation_projection SET
-                user_id = ?, symbol = ?, asset = ?, position_side = ?, instrument_version = ?,
+                user_id = ?, symbol = ?, asset = ?, margin_mode = ?, position_side = ?, instrument_version = ?,
                 trigger_price_sequence = ?, signed_quantity_steps = ?, close_quantity_steps = ?,
-                deficit_units = ?, status = ?,
+                deficit_units = ?, execution_price_ticks = ?, liquidation_fee_rate_ppm = ?,
+                liquidation_fee_units = ?, status = ?,
                 export_sequence = ?, updated_at_epoch_ms = ?
             WHERE product_line = ? AND liquidation_id = ? AND export_sequence < ?
             """;
@@ -229,33 +232,41 @@ public final class JdbcCoreEventProjector {
                 update.setLong(1, liquidation.userId());
                 update.setString(2, liquidation.symbol());
                 update.setString(3, liquidation.asset());
-                update.setString(4, liquidation.positionSide().name());
-                update.setLong(5, liquidation.instrumentVersion());
-                update.setLong(6, liquidation.triggerPriceSequence());
-                update.setLong(7, liquidation.signedQuantitySteps());
-                update.setLong(8, liquidation.closeQuantitySteps());
-                update.setLong(9, liquidation.deficitUnits());
-                update.setString(10, liquidation.status());
-                update.setLong(11, event.exportSequence());
-                update.setLong(12, message.header().submittedAtEpochMillis());
-                update.setString(13, productLine.name());
-                update.setLong(14, liquidation.liquidationId());
+                update.setString(4, liquidation.marginMode().name());
+                update.setString(5, liquidation.positionSide().name());
+                update.setLong(6, liquidation.instrumentVersion());
+                update.setLong(7, liquidation.triggerPriceSequence());
+                update.setLong(8, liquidation.signedQuantitySteps());
+                update.setLong(9, liquidation.closeQuantitySteps());
+                update.setLong(10, liquidation.deficitUnits());
+                update.setLong(11, liquidation.executionPriceTicks());
+                update.setLong(12, liquidation.liquidationFeeRatePpm());
+                update.setLong(13, liquidation.liquidationFeeUnits());
+                update.setString(14, liquidation.status());
                 update.setLong(15, event.exportSequence());
+                update.setLong(16, message.header().submittedAtEpochMillis());
+                update.setString(17, productLine.name());
+                update.setLong(18, liquidation.liquidationId());
+                update.setLong(19, event.exportSequence());
                 if (update.executeUpdate() == 0) {
                     insert.setString(1, productLine.name());
                     insert.setLong(2, liquidation.liquidationId());
                     insert.setLong(3, liquidation.userId());
                     insert.setString(4, liquidation.symbol());
                     insert.setString(5, liquidation.asset());
-                    insert.setString(6, liquidation.positionSide().name());
-                    insert.setLong(7, liquidation.instrumentVersion());
-                    insert.setLong(8, liquidation.triggerPriceSequence());
-                    insert.setLong(9, liquidation.signedQuantitySteps());
-                    insert.setLong(10, liquidation.closeQuantitySteps());
-                    insert.setLong(11, liquidation.deficitUnits());
-                    insert.setString(12, liquidation.status());
-                    insert.setLong(13, event.exportSequence());
-                    insert.setLong(14, message.header().submittedAtEpochMillis());
+                    insert.setString(6, liquidation.marginMode().name());
+                    insert.setString(7, liquidation.positionSide().name());
+                    insert.setLong(8, liquidation.instrumentVersion());
+                    insert.setLong(9, liquidation.triggerPriceSequence());
+                    insert.setLong(10, liquidation.signedQuantitySteps());
+                    insert.setLong(11, liquidation.closeQuantitySteps());
+                    insert.setLong(12, liquidation.deficitUnits());
+                    insert.setLong(13, liquidation.executionPriceTicks());
+                    insert.setLong(14, liquidation.liquidationFeeRatePpm());
+                    insert.setLong(15, liquidation.liquidationFeeUnits());
+                    insert.setString(16, liquidation.status());
+                    insert.setLong(17, event.exportSequence());
+                    insert.setLong(18, message.header().submittedAtEpochMillis());
                     insert.executeUpdate();
                 }
             }

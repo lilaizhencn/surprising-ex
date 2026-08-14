@@ -8,7 +8,9 @@ import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -24,6 +26,7 @@ import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
+import java.util.Map;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.junit.jupiter.api.Test;
@@ -197,6 +200,41 @@ class CoreProbeStateTest {
 
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
         assertThat(com.surprising.aeron.protocol.CoreOpenInterestCodec.decode(response.data())).isEmpty();
+    }
+
+    @Test
+    void liquidationWorkQueryReturnsOnlyCurrentBoundedPlansAndScanReadiness() {
+        var current = new com.surprising.aeron.service.state.CoreLiquidationState(1, 1001, "BTC-USDT",
+                CoreMarginMode.CROSS, CorePositionSide.NET, 1, 7, 10, 10, 0, 0, 0, 0,
+                com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED);
+        var stale = new com.surprising.aeron.service.state.CoreLiquidationState(2, 1002, "ETH-USDT",
+                CoreMarginMode.ISOLATED, CorePositionSide.LONG, 1, 8, 5, 5, 0, 0, 0, 0,
+                com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED);
+        var risk = new com.surprising.aeron.service.state.CoreRiskState(
+                Map.of("BTC-USDT", new com.surprising.aeron.service.state.CoreMarkPriceState(
+                                "BTC-USDT", 1, 81, 7),
+                        "ETH-USDT", new com.surprising.aeron.service.state.CoreMarkPriceState(
+                                "ETH-USDT", 1, 120, 9)),
+                Map.of(), Map.of(1L, current, 2L, stale),
+                Map.of("BTC-USDT", new com.surprising.aeron.service.state.CoreRiskState.RiskScan(
+                        "BTC-USDT", 7, 7, 1001, false)), 3);
+        var trading = new com.surprising.aeron.service.state.TradingCoreState(ProductLine.SPOT, 1,
+                Map.of(), Map.of(), com.surprising.aeron.service.state.CoreBookState.empty(), Map.of(), risk,
+                com.surprising.aeron.service.state.CoreTreasuryState.empty());
+        CoreProbeState state = CoreProbeState.restore(ProductLine.SPOT, 0, 0,
+                Map.of(), Map.of(), trading, new CoreExportState());
+
+        var response = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
+                com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeQuery(1)));
+        var work = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeWork(response.data());
+
+        assertThat(response.status()).isEqualTo(ResponseStatus.OK);
+        assertThat(work.riskScanPending()).isTrue();
+        assertThat(work.actions()).singleElement().satisfies(action -> {
+            assertThat(action.liquidationId()).isEqualTo(1);
+            assertThat(action.markPriceTicks()).isEqualTo(81);
+            assertThat(action.triggerPriceSequence()).isEqualTo(7);
+        });
     }
 
     @Test

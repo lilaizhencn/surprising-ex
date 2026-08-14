@@ -8,8 +8,8 @@
 | 基线分支 | `master` |
 | 基线提交 | `dc46edabcd606fea85517974391739942d5f51e2` |
 | 目标实施分支 | `codex/aeron-unified-core` |
-| 当前阶段 | `P6 删除旧 WAL、Redis Risk 和旧强平链路` |
-| 最后更新日期 | `2026-08-13` |
+| 当前阶段 | `P6 DONE；P7 等待用户确认` |
+| 最后更新日期 | `2026-08-14` |
 | 上线状态 | 项目尚未上线，无生产历史数据和兼容包袱 |
 | 架构决策 | [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md) |
 | 术语表 | [Aeron 统一交易核心术语表](aeron-unified-trading-core-glossary.md) |
@@ -888,7 +888,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | P3 | `DONE` | Exchange Core Adapter 和 Book State | 六线撮合组件测试；SPOT 三节点成交、Leader kill、冷恢复资金守恒 | `e206eee` |
 | P4 | `DONE` | Risk、强平和生命周期进入核心 | 35 个 service 测试；SPOT、线性永续三节点恢复；资金守恒 | `cb525dc` |
 | P5 | `DONE` | Snapshot、Replay、Exporter 和投影 | SPOT Leader/Follower kill、冷恢复、Exporter 故障、Kafka/PG 幂等投影 | `本 P5 阶段提交` |
-| P6 | `IN_PROGRESS` | 删除旧 WAL、Redis Risk 和旧强平链 | ADL、Order 子阶段已通过；全仓引用仍未清零 | `65769e6` |
+| P6 | `DONE` | 删除旧 WAL、Redis Risk 和旧强平链 | Aeron 强平接管、旧生产链引用清零、联合门禁全绿 | `本 P6 阶段提交` |
 | P7 | `NOT_STARTED` | 补齐六条产品线 | 六线 smoke、恢复、资金核对 | `scripts/run-six-product-line-gates.sh` |
 | P8 | `NOT_STARTED` | 单产品线功能和资金正式验收 | 第 15 节门禁报告 | `scripts/run-six-product-line-gates.sh` |
 | P9 | `NOT_STARTED` | 单产品线性能和故障容量测试 | 六份独立容量报告 | `scripts/run-uncapped-aeron-capacity.sh` |
@@ -1276,9 +1276,16 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] P6.4 删除 Matching 的订单命令消费者、独立 Exchange Core、WAL/RocksDB、PG outbox、保护索引和旧撮合结果表写入；模块不再依赖 Account API、Event Store、Price Consumer 或 exchange-core。
 - [x] Matching 收缩为 Market Data Projection：启动通过 `BOOK_STATE_QUERY` 从 Aeron 读取聚合 L2 与 Export watermark，Kafka Core Event 必须单分区连续消费；实时深度/成交不依赖 PG，24h 与历史成交只读异步 Core execution projection。
 - [x] P6.4 最小验证：Matching 依赖链编译成功；Book codec、Core Book Query 各 1/1 通过，Core 行情增量的 bootstrap、部分/完全成交、取消、新挂单与断序 4/4 通过，受影响 JDBC execution 投影 1/1 通过，未重复运行无关测试套件。
-- [ ] Liquidation 旧权威入口继续在 P6.5 清理。
+- [x] P6.5 将强平执行收敛为 `Liquidation Work` 与 `Takeover Liquidation`：Core 按每 symbol 独立游标扫描 Risk，使用当前 mark sequence 原子复核仓位并结算 PnL、实际强平费、Insurance Treasury 和 deficit。
+- [x] Liquidation Coordinator 只做有界 Work 查询、稳定 `commandId` 执行与 Risk Scan 续跑；删除 Redis candidate queue/lease、Kafka candidate/match-result 回环、PG 行锁强平事务、订单 Saga、账户/持仓/费率 JVM 快照和运行时写配置。
+- [x] Snapshot 升级 v12 并兼容 v1–v11；Core Export 升级 v5 并兼容 v1–v4；`V006__enrich_core_liquidation_projection.sql` 保存保证金模式、执行价、强平费率和实际强平费只读事实。
+- [x] 删除 `liquidation.candidates.v1` 的产品线 Topic、创建脚本、smoke readiness、Gateway lag 配置和测试；生产源码中旧 Liquidation queue/processor/order persistence/outbox 类引用为零。
+- [x] P6.5 定向资金、Risk、Snapshot、Work 测试 20/20 通过；最终联合 `clean test` 通过：Product API 18/18、Protocol 22/22、Instrument API 11/11、Core 66/66、Aeron Client 2/2、Exporter 9/9、Trading API 13/13、Liquidation Provider 4/4、Gateway 216（其中 22 个外部 PostgreSQL 条件测试跳过）。
+- [x] `bash -n`、`git diff --check` 通过；旧强平类和 `liquidation.candidates` 在指定生产模块与脚本中搜索结果为零。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
+
+P7、P8、P9 未开始；必须等待用户明确确认后才能继续。
 
 ### 18.8 P7：六线补齐
 
@@ -1345,6 +1352,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | 2026-08-13 | P6 | 实现 | 保险基金余额进入 Core Treasury；保险覆盖支持全额或部分覆盖，余量确定性进入 `ADL_REQUIRED`；ADL 以单条命令原子校验目标仓位、标记价、平仓利润并减少坏账 | 数据库基金余额、Account deficit 和四命令 ADL saga 会形成多资金权威及半减仓窗口；目标仓位方向必须随 Liquidation/Snapshot v7 保存 | Protocol 12/12、Core 49/49、Exporter 9/9；现金+未实现PnL-未决坏账守恒 | 旧 Snapshot v1-v6 可读；旧 `RESOLVE_LIQUIDATION(ADL)` fail-closed，外围只能调用 `EXECUTE_ADL` |
 | 2026-08-14 | P6 | 实现 | Insurance 的注资、强平费和坏账覆盖全部同步提交 Aeron；PG 只选择 `core_liquidation_projection` 并保存覆盖审计 | 删除数据库基金余额预留、旧 Account deficit 扫描、Account outbox 和 reconcile 双阶段链，避免资金双权威 | Insurance provider 14/14；生产旧类引用清零 | commandId 由产品线与业务引用确定性生成；Core 成功后审计可幂等补写，不提供旧链回退 |
 | 2026-08-14 | P6 | 实现 | Risk Provider 收缩为 Aeron 强查询、Core Liquidation PG 投影和管理规则；Core 全仓风险按同结算资产组合计算 | Redis/Kafka/WAL 重算会形成第二权威；逐仓位计算全仓权益会在多标的盈亏对冲时错误强平 | Protocol 14/14、Core 50/50、Risk 5/5；Risk 旧链生产引用清零 | 无 Redis、Kafka 计算消费者、风险 outbox 或本地 WAL；PG 候选只读且最终状态由 Aeron 裁决 |
+| 2026-08-14 | P6 | 实现 | 强平采用 Aeron `Takeover Liquidation`，外围只协调 `Liquidation Work` 和 Risk Scan 续跑 | 外部 MARKET IOC Saga 依赖 Kafka、Redis、PG 和多服务回环，极端行情还会留下部分成交与多权威恢复窗口 | Protocol 22/22、Core 66/66、Exporter 9/9、Liquidation 4/4；旧链引用清零 | 当前 mark sequence、Risk 和完整仓位身份必须在 Core 原子复核；实际强平费同步进入 Insurance Treasury；见 ADR-0002 |
 | 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
 | 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
 | 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |

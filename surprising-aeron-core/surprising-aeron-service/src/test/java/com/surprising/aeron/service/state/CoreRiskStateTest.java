@@ -84,6 +84,53 @@ class CoreRiskStateTest {
     }
 
     @Test
+    void pendingRiskScansRemainIndependentAcrossSymbols() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument("BTC-USDT"));
+        state = reducer.upsertInstrument(state, instrument("ETH-USDT"));
+        for (long userId = 1; userId <= 300; userId++) {
+            state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 200));
+            state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
+                    1, 100, 100, 0, 10));
+            state = withPosition(state, userId, new CorePositionState("ETH-USDT", "USDT", 1,
+                    1, 100, 100, 0, 10));
+        }
+
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("ETH-USDT", 1, 80, 1));
+
+        assertThat(state.riskState().scans()).containsOnlyKeys("BTC-USDT", "ETH-USDT");
+        assertThat(state.riskState().scans().get("BTC-USDT").complete()).isTrue();
+        assertThat(state.riskState().scans().get("ETH-USDT").complete()).isFalse();
+        state = reducer.continueRiskScan(state, 256);
+        state = reducer.continueRiskScan(state, 256);
+        assertThat(state.riskState().scans().values()).allMatch(CoreRiskState.RiskScan::complete);
+    }
+
+    @Test
+    void newerPriceDuringScanForcesACompleteSecondPass() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument(ContractType.LINEAR_PERPETUAL, 1));
+        for (long userId = 1; userId <= 300; userId++) {
+            state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
+            state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
+                    1, 100, 100, 0, 10));
+        }
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 1));
+
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2));
+
+        CoreRiskState.RiskScan restarted = state.riskState().scans().get("BTC-USDT");
+        assertThat(restarted.priceSequence()).isEqualTo(2);
+        assertThat(restarted.lastUserId()).isZero();
+        assertThat(restarted.complete()).isFalse();
+        state = reducer.continueRiskScan(state, 4_096);
+        assertThat(state.riskState().scans().get("BTC-USDT").complete()).isTrue();
+        assertThat(state.riskState().snapshots().values())
+                .allMatch(snapshot -> snapshot.priceSequence() == 2);
+    }
+
+    @Test
     void crossMarginUsesPortfolioEquityAcrossSameSettlementAsset() {
         TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 instrument("BTC-USDT"));

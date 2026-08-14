@@ -11,6 +11,7 @@ public final class CoreExportCodec {
     private static final int EVENT_V2_MARKER = 0xC0E2_0002;
     private static final int EVENT_V3_MARKER = 0xC0E3_0003;
     private static final int EVENT_V4_MARKER = 0xC0E4_0004;
+    private static final int EVENT_V5_MARKER = 0xC0E5_0005;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
             CoreMessageCodec.MAX_PAYLOAD_LENGTH - EVENT_FIXED_LENGTH;
@@ -65,7 +66,7 @@ public final class CoreExportCodec {
             throw new IllegalArgumentException("export event payload is too large");
         }
         ByteBuffer output = littleEndian(Math.toIntExact(length));
-        output.putInt(EVENT_V4_MARKER);
+        output.putInt(EVENT_V5_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
         output.putLong(event.businessStateHash());
@@ -102,7 +103,8 @@ public final class CoreExportCodec {
         boolean version2 = marker == EVENT_V2_MARKER;
         boolean version3 = marker == EVENT_V3_MARKER;
         boolean version4 = marker == EVENT_V4_MARKER;
-        if (version2 || version3 || version4) input.getInt();
+        boolean version5 = marker == EVENT_V5_MARKER;
+        if (version2 || version3 || version4 || version5) input.getInt();
         long sequence = input.getLong();
         long appliedCount = input.getLong();
         long businessHash = input.getLong();
@@ -118,7 +120,7 @@ public final class CoreExportCodec {
         }
         byte[] payload = new byte[payloadLength];
         input.get(payload);
-        if (!version2 && !version3 && !version4) {
+        if (!version2 && !version3 && !version4 && !version5) {
             if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
             return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                     commandType, status, resultCode, userId, payload);
@@ -150,7 +152,9 @@ public final class CoreExportCodec {
         }
         int liquidationCount = readCount(input);
         List<CoreLiquidationView> liquidations = new ArrayList<>(liquidationCount);
-        for (int index = 0; index < liquidationCount; index++) liquidations.add(readLiquidation(input));
+        for (int index = 0; index < liquidationCount; index++) {
+            liquidations.add(readLiquidation(input, version5));
+        }
         int treasuryCount = readCount(input);
         List<CoreTreasuryAssetView> treasuryAssets = new ArrayList<>(treasuryCount);
         for (int index = 0; index < treasuryCount; index++) treasuryAssets.add(readTreasury(input));
@@ -161,7 +165,7 @@ public final class CoreExportCodec {
     }
 
     private static int liquidationLength(CoreLiquidationView liquidation) {
-        return Long.BYTES * 7 + Integer.BYTES * 4
+        return Long.BYTES * 10 + Integer.BYTES * 5
                 + utf8(liquidation.symbol()).length + utf8(liquidation.asset()).length
                 + utf8(liquidation.status()).length;
     }
@@ -170,13 +174,16 @@ public final class CoreExportCodec {
         output.putLong(liquidation.liquidationId()).putLong(liquidation.userId());
         putString(output, liquidation.symbol());
         putString(output, liquidation.asset());
-        output.putInt(liquidation.positionSide().ordinal()).putLong(liquidation.instrumentVersion())
+        output.putInt(liquidation.marginMode().ordinal()).putInt(liquidation.positionSide().ordinal())
+                .putLong(liquidation.instrumentVersion())
                 .putLong(liquidation.triggerPriceSequence()).putLong(liquidation.closeQuantitySteps())
-                .putLong(liquidation.signedQuantitySteps()).putLong(liquidation.deficitUnits());
+                .putLong(liquidation.signedQuantitySteps()).putLong(liquidation.deficitUnits())
+                .putLong(liquidation.executionPriceTicks()).putLong(liquidation.liquidationFeeRatePpm())
+                .putLong(liquidation.liquidationFeeUnits());
         putString(output, liquidation.status());
     }
 
-    private static CoreLiquidationView readLiquidation(ByteBuffer input) {
+    private static CoreLiquidationView readLiquidation(ByteBuffer input, boolean enriched) {
         if (input.remaining() < Long.BYTES * 7 + Integer.BYTES * 4) {
             throw new ProtocolException("liquidation fact is truncated");
         }
@@ -184,22 +191,29 @@ public final class CoreExportCodec {
         long userId = input.getLong();
         String symbol = readString(input);
         String asset = readString(input);
-        if (input.remaining() < Integer.BYTES + Long.BYTES * 4) {
+        int remainingFixedLength = Integer.BYTES * (enriched ? 2 : 1) + Long.BYTES * (enriched ? 8 : 5);
+        if (input.remaining() < remainingFixedLength) {
             throw new ProtocolException("liquidation fact is truncated");
         }
+        int marginMode = enriched ? input.getInt() : CoreMarginMode.CROSS.ordinal();
         int positionSide = input.getInt();
         long instrumentVersion = input.getLong();
         long triggerPriceSequence = input.getLong();
         long closeQuantitySteps = input.getLong();
         long signedQuantitySteps = input.getLong();
         long deficitUnits = input.getLong();
+        long executionPriceTicks = enriched ? input.getLong() : 0;
+        long liquidationFeeRatePpm = enriched ? input.getLong() : 0;
+        long liquidationFeeUnits = enriched ? input.getLong() : 0;
         String status = readString(input);
-        if (positionSide < 0 || positionSide >= CorePositionSide.values().length) {
+        if (marginMode < 0 || marginMode >= CoreMarginMode.values().length
+                || positionSide < 0 || positionSide >= CorePositionSide.values().length) {
             throw new ProtocolException("invalid liquidation position side");
         }
         return new CoreLiquidationView(liquidationId, userId, symbol, asset,
-                CorePositionSide.values()[positionSide], instrumentVersion, triggerPriceSequence,
-                signedQuantitySteps, closeQuantitySteps, deficitUnits, status);
+                CoreMarginMode.values()[marginMode], CorePositionSide.values()[positionSide], instrumentVersion,
+                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, deficitUnits,
+                executionPriceTicks, liquidationFeeRatePpm, liquidationFeeUnits, status);
     }
 
     private static int treasuryLength(CoreTreasuryAssetView treasury) {

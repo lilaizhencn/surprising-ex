@@ -231,7 +231,10 @@ PRIMARY KEY (symbol, sequence)
 资金费服务在同一事务中写入 `reference_type = FUNDING` 的 `account_ledger_entries`，并更新
 `account_balances` / `account_deficits`。
 
-## 风控表
+## 历史风控表（P6 后已废弃）
+
+以下表结构由旧 migration 保留，仅用于理解或清理未上线环境的历史 schema。P6 完成后生产 Risk、强平、
+恢复和管理员裁决均不读取或写入这些表；当前边界见本页“Core 强平投影”。
 
 `risk_account_snapshots` 按 `snapshot_id` 保存账户级保证金状态，包括钱包余额、未实现盈亏、权益、
 维持保证金、保证金率和状态。
@@ -280,7 +283,7 @@ CREATE UNIQUE INDEX risk_liquidation_candidates_active_uidx
     WHERE status IN ('NEW', 'PROCESSING');
 ```
 
-Redis 投影采用失败关闭。多节点定时对账由产品线 token 租约协调，不清空正在服务的完整投影；
+旧 Redis 投影采用失败关闭。多节点定时对账由产品线 token 租约协调，不清空正在服务的完整投影；
 每轮 generation 记录扫描和并发事件观察到的风险组，仅清理同一有效 generation 中未出现的陈旧组。
 权威数据库加载与 Redis 替换受风险组锁保护，Lua 原子更新组状态、成员关系和反向索引。只有完整
 首轮扫描结束后才建立就绪标记；投影失败会删除就绪标记。
@@ -482,21 +485,19 @@ PostgreSQL 不参与在线资金裁决。
 投影器必须按账户修订号幂等：旧修订忽略、同修订相同内容忽略、同修订不同内容使产品线投影进入不可用状态并触发重建。
 Kafka 重复、数据库不可用或 Redis 投影失败都不能回滚或改变用户分区事实；恢复必须从 WAL、结果库和 Kafka 快照重放。
 
-## 强平表
+## Core 强平投影
 
-`liquidation_orders` 审计每个强平候选结果：
+`core_liquidation_projection` 是 Aeron Core Export 的最终一致只读投影，主键为
+`(product_line, liquidation_id)`。它保存仓位身份、保证金模式、trigger price sequence、完整接管数量、
+执行价、强平费率、实际收取强平费、deficit、状态和最后 Export Sequence。
 
-- `SUBMITTED` 必须具有正 `quantity_steps`。
-- 账户恢复或持仓消失时可以写 `CANCELED`，此时数量允许为零。
-- 破产价、接管价、强平费率和强平费在提交时冻结，供保险基金和 ADL 对账；取消记录保持为零。
-- 服务锁定实时 `account_positions` 和同方向现存只减仓订单，先写撤单事件及命令，再根据
-  `abs(livePosition)` 计算分阶段强平数量。
-- 用户已有只减仓订单不能占用强平容量，否则远价 GTC 平仓单会阻断强制平仓。
-- 强平订单写入不能对 `trading_orders` 使用宽泛冲突忽略，唯一性冲突必须回滚事务。
-- 数量计算先尝试降至风险档位，再应用配置的部分平仓比例，只有保证金率达到全平阈值才全部平仓。
-- 提交前读取最新风险账户及持仓快照；快照数量与锁定实时持仓不一致时，以
-  `RISK_POSITION_CHANGED` 取消候选。
+- `PLANNED` 只表示 Core 中存在待执行计划；PG 行不能作为执行凭证。
+- `CANCELED` 表示扫描发现 Risk 已恢复、仓位消失或身份变化；取消计划不修改资金。
+- `COMPLETED`、`INSURANCE_REQUIRED`、`ADL_REQUIRED` 保存 Core 原子接管后的结果。
+- `execution_price_ticks` 必须来自相同 trigger sequence 的 Core mark。
+- `liquidation_fee_units` 是实际从用户抵押品收取并同步记入 Insurance Treasury 的金额，不是理论应收。
+- Exporter 按更大的 `export_sequence` 更新；重复投影幂等，旧事件不得反向覆盖。
 
-`liquidation_admin_actions` 保存管理端对强平候选的操作。目前支持 `CANCEL_CANDIDATE`，并持久化
-管理员、原因和时间。只有候选为 `NEW` 或 `PROCESSING` 且不存在
-`SUBMITTED` / `PARTIALLY_FILLED` 活动强平订单时，管理端才可取消。
+旧 `liquidation_orders`、`risk_liquidation_candidates`、`liquidation_admin_actions` 和相关 outbox 表可能仍由
+历史 migration 创建，但 P6 完成后生产代码不读取或写入这些表。它们不参与强平、恢复或管理员裁决，
+部署前可通过独立可回滚 schema migration 清理。

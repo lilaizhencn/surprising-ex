@@ -385,14 +385,23 @@ public final class TradingCommandCodec {
     }
 
     public static byte[] encodeExecuteLiquidation(ExecuteLiquidationCommand command) {
-        return ByteBuffer.allocate(Long.BYTES * 2).order(ByteOrder.LITTLE_ENDIAN)
-                .putLong(command.liquidationId()).putLong(command.executionPriceTicks()).array();
+        return ByteBuffer.allocate(Long.BYTES * 4).order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(command.liquidationId()).putLong(command.triggerPriceSequence())
+                .putLong(command.executionPriceTicks()).putLong(command.liquidationFeeRatePpm()).array();
     }
 
     public static ExecuteLiquidationCommand decodeExecuteLiquidation(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         requireRemaining(buffer, Long.BYTES * 2);
-        ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(buffer.getLong(), buffer.getLong());
+        long liquidationId = buffer.getLong();
+        if (buffer.remaining() == Long.BYTES) {
+            ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(liquidationId, buffer.getLong());
+            requireConsumed(buffer);
+            return command;
+        }
+        requireRemaining(buffer, Long.BYTES * 3);
+        ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(liquidationId, buffer.getLong(),
+                buffer.getLong(), buffer.getLong());
         requireConsumed(buffer);
         return command;
     }

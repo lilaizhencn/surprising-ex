@@ -35,8 +35,11 @@ ADR 中说明，而不是为同一概念继续增加别名。
 | Exchange Core Adapter | 把统一核心命令映射到 Exchange Core 并将 fill 原子应用回权威状态的适配层。 | 独立权威撮合服务或本地 journal。 |
 | Market Data Projection | 从 Aeron 聚合 L2 强查询恢复 watermark 和价格层级，再按连续 Core Event 增量发布公共深度/成交；24h 与历史成交只读 PG 投影。 | 订单命令消费者、第二套 Exchange Core、交易资金状态或 PG 启动恢复依赖。 |
 | Core Query Projection | Exporter 将 Core Event 异步写入 PostgreSQL 形成的历史、审计、报表和对账读模型；口语中的 “Core PG” 统一指它。 | Aeron Core 权威状态、实时下单/撮合/资金依赖或故障恢复来源。 |
-| Risk State | 标记价、风险参数、账户风险快照、索引和扫描游标。 | Redis 风险缓存。 |
-| Liquidation State | 强平从发现、撤单、重算、下强平单、结算到保险/ADL 的可恢复进度。 | Redis candidate queue 中的一条临时记录。 |
+| Risk State | 标记价、风险参数、账户风险快照以及每个 symbol 独立的确定性扫描游标；同 symbol 新价格会在当前遍结束后强制完整补扫。 | Redis 风险缓存、单个可被其它 symbol 覆盖的全局游标。 |
+| Liquidation State | 强平计划、触发价格序列、权威仓位身份、执行价、实际强平费、deficit 及 Insurance/ADL 终态。 | Redis candidate queue 中的一条临时记录。 |
+| Liquidation Work | Aeron 强查询返回的有界待办视图，包含是否需要续跑 Risk Scan 以及 trigger sequence 与当前 mark 一致的 `PLANNED` action。 | Kafka candidate、PG claim、Redis lease 或新的权威队列。 |
+| Takeover Liquidation | Core 在单条命令内撤销用户同 symbol 开放单、按相同 trigger sequence 的当前 mark 关闭完整仓位并结算资金、强平费和 deficit。 | 等待外部订单簿成交的 MARKET IOC 强平订单 Saga。 |
+| Liquidation Coordinator | 无状态查询 Liquidation Work、提交稳定幂等执行命令并续跑 Risk Scan 的外围进程。 | Risk/仓位/价格裁决者、强平状态存储或 PG/Redis 恢复器。 |
 | Export State | Cluster 内保存的待导出事件、连续确认游标和稳定内容摘要；使用条数与总字节双硬上限。 | Kafka 本身的 consumer offset。 |
 | Reliable Exporter | 从 Export State 向 Kafka at-least-once 发布并将 ack 提交回 Cluster 的进程。 | Aeron 与 Kafka 的分布式事务。 |
 | Export Sequence | 单条产品线内由 Aeron State 连续分配的对外事件序号；Kafka key 和 PG 幂等主键都包含它。 | Kafka offset 或 Cluster position。 |

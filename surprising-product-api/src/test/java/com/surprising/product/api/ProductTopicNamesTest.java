@@ -50,8 +50,6 @@ class ProductTopicNamesTest {
                 .isEqualTo("surprising.linear-perp.user.state.changelog.v1");
         assertThat(linear.accountRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.account.events.v1");
         assertThat(linear.positionRiskEventsTopic()).isEqualTo("surprising.linear-perp.risk.position.events.v1");
-        assertThat(linear.liquidationCandidatesTopic())
-                .isEqualTo("surprising.linear-perp.liquidation.candidates.v1");
     }
 
     @Test

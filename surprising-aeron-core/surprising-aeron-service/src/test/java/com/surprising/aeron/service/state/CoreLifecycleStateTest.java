@@ -162,6 +162,61 @@ class CoreLifecycleStateTest {
     }
 
     @Test
+    void liquidationRejectsStaleTriggerSequenceWithoutMutation() {
+        TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 180, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 1));
+        long hash = state.businessStateHash();
+        TradingCoreState planned = state;
+
+        assertThatThrownBy(() -> reducer.executeLiquidation(planned,
+                new ExecuteLiquidationCommand(1, 2, 90, 100_000)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("STALE_MARK_PRICE"));
+        assertThat(planned.businessStateHash()).isEqualTo(hash);
+        assertThat(planned.riskState().liquidations().get(1L).status())
+                .isEqualTo(CoreLiquidationState.Status.PLANNED);
+    }
+
+    @Test
+    void riskRecoveryCancelsPlanWithoutClosingPosition() {
+        TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 180, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 1));
+
+        TradingCoreState recovered = reducer.applyMarkPrice(state,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 2));
+
+        assertThat(recovered.riskState().liquidations().get(1L).status())
+                .isEqualTo(CoreLiquidationState.Status.CANCELED);
+        assertThat(recovered.user(1).positions().get("BTC-USDT").signedQuantitySteps()).isEqualTo(10);
+    }
+
+    @Test
+    void liquidationFeeIsCappedByCollateralAndCreditedToInsurance() {
+        TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 180, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 1));
+        long before = total(state, "USDT");
+
+        TradingCoreState liquidated = reducer.executeLiquidation(state,
+                new ExecuteLiquidationCommand(1, 1, 90, 100_000));
+
+        CoreLiquidationState result = liquidated.riskState().liquidations().get(1L);
+        assertThat(result.status()).isEqualTo(CoreLiquidationState.Status.COMPLETED);
+        assertThat(result.executionPriceTicks()).isEqualTo(90);
+        assertThat(result.liquidationFeeRatePpm()).isEqualTo(100_000);
+        assertThat(result.liquidationFeeUnits()).isEqualTo(80);
+        assertThat(liquidated.treasuryState().insuranceBalances()).containsEntry("USDT", 180L);
+        assertThat(liquidated.user(1).totalUnits("USDT")).isZero();
+        assertThat(total(liquidated, "USDT")).isEqualTo(before);
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(liquidated), ProductLine.LINEAR_PERPETUAL);
+        assertThat(restored).isEqualTo(liquidated);
+        assertThat(restored.businessStateHash()).isEqualTo(liquidated.businessStateHash());
+    }
+
+    @Test
     void partialInsuranceCoverageLeavesOnlyResidualForAdl() {
         TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
                 ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 100);
