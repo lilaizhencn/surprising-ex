@@ -146,7 +146,7 @@ validate() {
   fi
   ((START_OPS <= MAX_OPS)) || { echo "START_OPS must be <= MAX_OPS" >&2; exit 2; }
   ((CONNECTIONS <= 64)) || { echo "CONNECTIONS must be <= 64" >&2; exit 2; }
-  case "${WORKLOAD}" in MATCH|MATCH_ASYNC|CANCEL|MARK_PRICE) ;; *) echo "WORKLOAD must be MATCH, MATCH_ASYNC, CANCEL or MARK_PRICE" >&2; exit 2 ;; esac
+  case "${WORKLOAD}" in MATCH|MATCH_ASYNC|PLACE_ONLY|CANCEL|MARK_PRICE) ;; *) echo "WORKLOAD must be MATCH, MATCH_ASYNC, PLACE_ONLY, CANCEL or MARK_PRICE" >&2; exit 2 ;; esac
   case "${ASSESSMENT_MODE}" in strict|observe) ;; *) echo "ASSESSMENT_MODE must be strict or observe" >&2; exit 2 ;; esac
   case "${RECOVERY_GATE}" in true|false) ;; *) echo "RECOVERY_GATE must be true or false" >&2; exit 2 ;; esac
   case "${LIFECYCLE_GATE}" in true|false) ;; *) echo "LIFECYCLE_GATE must be true or false" >&2; exit 2 ;; esac

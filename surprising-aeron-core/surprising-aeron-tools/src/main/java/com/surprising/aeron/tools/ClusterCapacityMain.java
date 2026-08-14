@@ -210,6 +210,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                                 asyncMatch(workerId, deadline, measured);
                             } else if (workload == Workload.CANCEL) {
                                 cancelCycle(workerId, measured);
+                            } else if (workload == Workload.PLACE_ONLY) {
+                                placeOnlyCycle(workerId, cycle++, measured);
                             } else {
                                 markPriceCycle(workerId, cycle++, measured);
                             }
@@ -326,6 +328,14 @@ public final class ClusterCapacityMain implements AutoCloseable {
         var response = clients.command(CoreMessageType.CANCEL_ORDER, stableId("cancel:" + orderId), userId,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
         record(response.commandStatus(), System.nanoTime() - started, measured);
+    }
+
+    private void placeOnlyCycle(int worker, long cycle, boolean measured) {
+        int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
+        long userId = firstUser(pair);
+        long orderId = nextOrderId.incrementAndGet();
+        String symbol = symbol(worker, cycle);
+        submitOrder(userId, order(symbol, orderId, CoreOrderSide.BUY, CoreTimeInForce.IOC, 90), measured);
     }
 
     private void markPriceCycle(int worker, long cycle, boolean measured) {
@@ -502,6 +512,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private enum Workload {
         MATCH,
         MATCH_ASYNC,
+        PLACE_ONLY,
         CANCEL,
         MARK_PRICE
     }
