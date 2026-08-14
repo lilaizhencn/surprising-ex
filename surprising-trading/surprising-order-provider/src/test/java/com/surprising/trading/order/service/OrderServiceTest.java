@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
@@ -57,18 +58,12 @@ class OrderServiceTest {
     private OrderUserCommandGateway commandGateway;
 
     @Test
-    void placeUsesUserWalAndDoesNotNeedDatabaseState() {
+    void placeFailsClosedWithoutAeronGateway() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
         PlaceOrderRequest request = request("client-1");
-        OrderResponse expected = response(901L, request.clientOrderId(), OrderStatus.ACCEPTED);
-        when(userState.nextOrderId()).thenReturn(901L);
-        when(commandGateway.place(any(OrderRecord.class))).thenReturn(expected);
-
-        assertThat(service.place(request)).isEqualTo(expected);
-
-        verify(commandGateway).place(any(OrderRecord.class));
-        verify(orderMarginCalculator, never()).requirement(anyString(), anyLong(), anyLong(), any(), any(), any(),
-                any(), anyLong(), anyLong(), anyLong(), anyLong());
+        assertThatThrownBy(() -> service.place(request)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Aeron order gateway");
+        verifyNoInteractions(commandGateway);
     }
 
     @Test
@@ -76,57 +71,32 @@ class OrderServiceTest {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.empty());
-        when(commandGateway.place(any(OrderRecord.class)))
-                .thenReturn(response(904L, "no-fee", OrderStatus.REJECTED));
-
-        assertThat(service.place(request("no-fee")).status()).isEqualTo(OrderStatus.REJECTED);
-        verify(commandGateway).place(any(OrderRecord.class));
+        assertThatThrownBy(() -> service.place(request("no-fee"))).isInstanceOf(IllegalStateException.class);
+        verifyNoInteractions(commandGateway);
     }
 
     @Test
     void cancelAndReadCommandsDelegateToLocalUserPartition() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
-        OrderResponse canceled = response(902L, "cancel-1", OrderStatus.CANCEL_REQUESTED);
-        when(commandGateway.cancel(ProductLine.LINEAR_PERPETUAL, 1001L, 902L, null)).thenReturn(canceled);
-        when(userState.get(902L)).thenReturn(canceled);
-
-        assertThat(service.cancel(new CancelOrderRequest(1001L, 902L))).isEqualTo(canceled);
-        assertThat(service.get(902L)).isEqualTo(canceled);
-
-        verify(commandGateway).cancel(ProductLine.LINEAR_PERPETUAL, 1001L, 902L, null);
-        verify(userState).get(902L);
+        assertThatThrownBy(() -> service.cancel(new CancelOrderRequest(1001L, 902L)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("Aeron order gateway");
     }
 
     @Test
     void adminCancelUsesLocalPartitionAndProductLine() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
-        OrderResponse canceled = response(903L, "admin-1", OrderStatus.CANCEL_REQUESTED);
-        when(commandGateway.cancelOpen(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
-                "admin cancel: risk"))
-                .thenReturn(new com.surprising.trading.api.model.OrderBatchResponse(1, 1, 0,
-                        java.util.List.of(new com.surprising.trading.api.model.OrderBatchItemResponse(
-                                0, true, "cancel requested", canceled))));
-
-        var result = service.adminCancelOrders(new AdminBatchCancelOrdersRequest(
-                1001L, "BTC-USDT", 10, "risk"));
-
-        assertThat(result.requested()).isEqualTo(1);
-        verify(commandGateway).cancelOpen(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
-                "admin cancel: risk");
+        assertThatThrownBy(() -> service.adminCancelOrders(new AdminBatchCancelOrdersRequest(
+                1001L, "BTC-USDT", 10, "risk"))).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     void optionProductLineUsesTheLocalAccountFactStream() {
         OrderService service = service(ProductLine.OPTION);
-        when(userState.nextOrderId()).thenReturn(905L);
-        when(commandGateway.place(any(OrderRecord.class)))
-                .thenReturn(response(905L, "option-1", OrderStatus.REJECTED));
         PlaceOrderRequest optionRequest = new PlaceOrderRequest(1001L, "option-1", "BTC-USDT",
                 OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 10L,
                 MarginMode.CROSS, PositionSide.NET, false, false);
 
-        assertThat(service.place(optionRequest)).isNotNull();
-        verify(commandGateway).place(any(OrderRecord.class));
+        assertThatThrownBy(() -> service.place(optionRequest)).isInstanceOf(IllegalStateException.class);
     }
 
     private OrderService service(ProductLine productLine) {

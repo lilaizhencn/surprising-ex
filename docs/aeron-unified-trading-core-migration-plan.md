@@ -1233,6 +1233,9 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] 删除 ADL Redis 候选索引、Risk Kafka 消费、Account outbox/deficit/saga/reconcile 和旧 ADL 数据模型；生产代码不再包含旧 ADL 权威类。
 - [x] ADL provider 重写为 Aeron gateway + Core liquidation projection；Aeron 查询、事件 cursor 和禁用扫描边界测试 6/6 通过，模块依赖链测试通过。
 - [ ] Order/Risk/Matching 仍存在旧 WAL/Redis 回退入口，继续在 P6.3 清理。
+- [x] Order REST 写入、改单、撤单、查询、批量管理和生命周期入口均不再使用 Aeron-null 回退；无 Aeron Bean 时显式失败关闭。
+- [x] Order provider 全依赖测试 129/129 通过；旧 WAL 行为测试改为验证无 Aeron 不执行旧命令。
+- [ ] Order WAL Bean/投影 worker 及 Risk Redis 权威实现仍待 P6.3 后续删除。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 
