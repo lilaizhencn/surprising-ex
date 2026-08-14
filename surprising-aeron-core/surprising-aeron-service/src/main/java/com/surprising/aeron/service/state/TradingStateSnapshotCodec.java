@@ -9,6 +9,7 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.product.api.ProductLine;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
@@ -20,7 +21,8 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 10;
+    private static final int VERSION = 11;
+    private static final int VERSION_10 = 10;
     private static final int VERSION_9 = 9;
     private static final int VERSION_8 = 8;
     private static final int VERSION_7 = 7;
@@ -134,6 +136,19 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(instrument.expiryEpochMillis());
             writer.intValue(instrument.optionType() == null ? -1 : instrument.optionType().ordinal());
             writer.longValue(instrument.strikePriceTicks());
+            writer.longValue(instrument.maxLeveragePpm());
+            writer.longValue(instrument.maxPositionNotionalUnits());
+            writer.longValue(instrument.userOpenInterestLimitRatePpm());
+            writer.longValue(instrument.userOpenInterestLimitFloorUnits());
+            writer.intValue(instrument.riskLimitBrackets().size());
+            instrument.riskLimitBrackets().forEach(bracket -> {
+                writer.intValue(bracket.bracketNo());
+                writer.longValue(bracket.notionalFloorUnits());
+                writer.longValue(bracket.notionalCapUnits());
+                writer.longValue(bracket.maxLeveragePpm());
+                writer.longValue(bracket.initialMarginRatePpm());
+                writer.longValue(bracket.maintenanceMarginRatePpm());
+            });
         });
         writer.intValue(state.riskState().markPrices().size());
         state.riskState().markPrices().values().forEach(mark -> {
@@ -216,7 +231,7 @@ public final class TradingStateSnapshotCodec {
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
+        if (version != VERSION && version != VERSION_10 && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
                 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
@@ -342,7 +357,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         CoreRiskState riskState = CoreRiskState.empty();
         CoreTreasuryState treasuryState = CoreTreasuryState.empty();
-        if (version == VERSION || version == VERSION_9 || version == VERSION_8 || version == VERSION_7 || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
+        if (version == VERSION || version == VERSION_10 || version == VERSION_9 || version == VERSION_8 || version == VERSION_7 || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
             int instrumentCount = reader.count("instruments");
             for (int index = 0; index < instrumentCount; index++) {
                 String symbol = reader.text();
@@ -367,11 +382,42 @@ public final class TradingStateSnapshotCodec {
                 if (optionTypeCode < -1 || optionTypeCode >= OptionType.values().length) {
                     throw new ProtocolException("invalid option type: " + optionTypeCode);
                 }
+                long strikePrice = reader.nonNegativeLong("strike price");
+                long maxLeverage;
+                long maxPosition;
+                long openInterestRate;
+                long openInterestFloor;
+                java.util.List<CoreRiskLimitBracket> brackets;
+                if (version >= VERSION) {
+                    maxLeverage = reader.positiveLong("max leverage");
+                    maxPosition = reader.positiveLong("max position notional");
+                    openInterestRate = reader.nonNegativeLong("open interest limit rate");
+                    openInterestFloor = reader.positiveLong("open interest limit floor");
+                    int bracketCount = reader.count("risk limit brackets");
+                    if (bracketCount == 0) throw new ProtocolException("risk limit brackets are empty");
+                    java.util.List<CoreRiskLimitBracket> decodedBrackets = new java.util.ArrayList<>(bracketCount);
+                    for (int bracketIndex = 0; bracketIndex < bracketCount; bracketIndex++) {
+                        decodedBrackets.add(new CoreRiskLimitBracket(reader.intValue(),
+                                reader.nonNegativeLong("risk bracket floor"),
+                                reader.positiveLong("risk bracket cap"),
+                                reader.positiveLong("risk bracket max leverage"),
+                                reader.positiveLong("risk bracket initial margin"),
+                                reader.positiveLong("risk bracket maintenance margin")));
+                    }
+                    brackets = java.util.List.copyOf(decodedBrackets);
+                } else {
+                    maxLeverage = leverageFromRate(initialMargin);
+                    maxPosition = Long.MAX_VALUE;
+                    openInterestRate = 0;
+                    openInterestFloor = Long.MAX_VALUE;
+                    brackets = java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, maxLeverage,
+                            initialMargin, maintenanceMargin));
+                }
                 CoreInstrumentState instrument = new CoreInstrumentState(symbol, instrumentVersion,
                         decodedType, baseAsset, quoteAsset, settleAsset, multiplier, priceTick, settleScale,
                         initialMargin, maintenanceMargin, makerFee, takerFee, expiry,
                         optionTypeCode < 0 ? null : OptionType.values()[optionTypeCode],
-                        reader.nonNegativeLong("strike price"));
+                        strikePrice, maxLeverage, maxPosition, openInterestRate, openInterestFloor, brackets);
                 putUnique(instruments, symbol, instrument);
             }
             Map<String, CoreMarkPriceState> marks = new TreeMap<>();
@@ -461,7 +507,7 @@ public final class TradingStateSnapshotCodec {
             }
         }
         Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new TreeMap<>();
-        if (version >= VERSION) {
+        if (version >= VERSION_10) {
             int timerCount = reader.count("cancel-all-after timers");
             for (int index = 0; index < timerCount; index++) {
                 long userId = reader.positiveLong("cancel-all-after userId");
@@ -485,6 +531,11 @@ public final class TradingStateSnapshotCodec {
         reader.requireConsumed();
         return new TradingCoreState(productLine, revision, users, orders, bookState, instruments, riskState,
                 treasuryState, leverages, algoOrders, cancelAllAfterTimers);
+    }
+
+    private static long leverageFromRate(long ratePpm) {
+        return java.math.BigInteger.valueOf(1_000_000L).multiply(java.math.BigInteger.valueOf(1_000_000L))
+                .divide(java.math.BigInteger.valueOf(ratePpm)).longValueExact();
     }
 
     private static void writeUnits(Writer writer, Map<String, Long> values) {

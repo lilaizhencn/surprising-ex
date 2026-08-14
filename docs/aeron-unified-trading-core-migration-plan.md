@@ -682,6 +682,10 @@ service 与 client 不得循环依赖。任何合并都要记录在第 19 节。
 
 任何性能压测开始前，当前被压产品线必须通过本节全部门禁。门禁失败时禁止“先压一下看看”。
 
+测试执行遵循最小必要原则：开发循环只运行受改动影响的测试类或测试方法；每个子阶段出口只执行一次相关
+模块联合门禁，除非门禁后代码再次变化，否则不重复执行已经通过的测试套件。P7 六线验收和 P9 压测前置门禁
+仍必须按本节完整执行，不能用目标测试代替阶段出口证据。
+
 ### 15.1 功能门禁
 
 - [ ] 所有相关 Maven 单元和组件测试通过。
@@ -1263,7 +1267,12 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] 删除 Order WAL Bean、本地 reducer、RocksDB 投影 worker、Kafka account/match/result/state-changelog 链、Order ID 本地序列库和旧用户状态模型；Order 模块移除 `surprising-event-store`、RocksDB 和 Redis 依赖。
 - [x] Order ID 和费率 ID 统一使用无 I/O 的节点 Snowflake 生成器；Aeron Order State 的唯一 ID 与 commandId 幂等仍是最终冲突裁决。
 - [x] 联合门禁通过：Protocol 18/18、Core 54/54、Order provider 100/100；生产源码中 `UserPartitionWal|surprising.eventstore|OrderWal|RocksDB|StringRedisTemplate` 引用为零。
-- [ ] Order 的旧账户/未平仓量 JVM 风控预览链仍需将动态仓位限额和 risk bracket 最终裁决迁入 Core 后删除；不能把尚未迁移的规则静默删掉。
+- [x] Instrument Risk Policy 进入 Aeron State：最大仓位、动态 OI 限额、连续 risk bracket 和档位杠杆在同一 `PLACE_ORDER` 内根据权威 Position/Open Order 计算并裁决。
+- [x] Core 在同一命令内计算并锁定精确 Reservation；`reservedUnits=0` 表示由 Core 计算，兼容客户端提供的正数只允许不低报，不再让外围预览值决定实际冻结资金。
+- [x] 新增无副作用 `ORDER_PREFLIGHT_QUERY` 供测试下单复用同一 reducer；正式下单不执行 preflight，不增加 Aeron 往返。
+- [x] 删除 Order 的账户/OI Kafka 消费、RPC 初始化、JVM 快照、`ReduceOnlyValidator`、外围 Margin/Spot Reservation 计算器及 Account API 依赖；readiness 只保留行情新鲜度。
+- [x] Snapshot 升级 v11 并兼容 v1–v10；Instrument Risk Policy 进入业务 hash 和恢复状态。风险策略联合测试 Protocol 19/19、Core 57/57，Order provider 84/84 通过；随后新增 preflight 的目标测试 Protocol 1/1、Core 33/33 通过。
+- [x] maker/taker 手续费结算改为读取订单创建时的费率快照，现货以 quote asset 同步记入 Treasury，衍生品按 maker/taker 角色结算；现货双边守恒与衍生品返佣目标测试各 1/1 通过。
 - [ ] Matching 与 Liquidation 旧权威入口继续在 P6.4/P6.5 清理。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。

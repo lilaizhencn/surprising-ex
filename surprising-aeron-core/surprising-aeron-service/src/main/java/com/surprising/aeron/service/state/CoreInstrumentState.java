@@ -1,9 +1,11 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
+import java.util.List;
 
 public record CoreInstrumentState(
         String symbol,
@@ -21,7 +23,12 @@ public record CoreInstrumentState(
         long takerFeeRatePpm,
         long expiryEpochMillis,
         OptionType optionType,
-        long strikePriceTicks) {
+        long strikePriceTicks,
+        long maxLeveragePpm,
+        long maxPositionNotionalUnits,
+        long userOpenInterestLimitRatePpm,
+        long userOpenInterestLimitFloorUnits,
+        List<CoreRiskLimitBracket> riskLimitBrackets) {
 
     public CoreInstrumentState {
         symbol = OrderReservation.normalizeSymbol(symbol);
@@ -29,9 +36,13 @@ public record CoreInstrumentState(
         quoteAsset = AssetBalance.normalizeAsset(quoteAsset);
         settleAsset = AssetBalance.normalizeAsset(settleAsset);
         if (version <= 0 || contractType == null || notionalMultiplierUnits <= 0 || priceTickUnits <= 0
-                || settleScaleUnits <= 0 || initialMarginRatePpm <= 0 || maintenanceMarginRatePpm <= 0) {
+                || settleScaleUnits <= 0 || initialMarginRatePpm <= 0 || maintenanceMarginRatePpm <= 0
+                || maxLeveragePpm < 1_000_000L || maxPositionNotionalUnits <= 0
+                || userOpenInterestLimitRatePpm < 0 || userOpenInterestLimitFloorUnits <= 0
+                || riskLimitBrackets == null || riskLimitBrackets.isEmpty()) {
             throw new IllegalArgumentException("invalid instrument state");
         }
+        riskLimitBrackets = List.copyOf(riskLimitBrackets);
         if (contractType.isDelivery() && expiryEpochMillis <= 0) {
             throw new IllegalArgumentException("delivery instrument requires expiry time");
         }
@@ -67,6 +78,8 @@ public record CoreInstrumentState(
                 command.notionalMultiplierUnits(), command.priceTickUnits(), command.settleScaleUnits(),
                 command.initialMarginRatePpm(), command.maintenanceMarginRatePpm(),
                 command.makerFeeRatePpm(), command.takerFeeRatePpm(), command.expiryEpochMillis(),
-                optionType, command.strikePriceTicks());
+                optionType, command.strikePriceTicks(), command.maxLeveragePpm(),
+                command.maxPositionNotionalUnits(), command.userOpenInterestLimitRatePpm(),
+                command.userOpenInterestLimitFloorUnits(), command.riskLimitBrackets());
     }
 }

@@ -31,10 +31,13 @@ public record PlaceOrderCommand(
                 || settleAsset == null || settleAsset.isBlank()
                 || quantitySteps <= 0 || marginMode == null || positionSide == null
                 || reservationKind == null || reservationAsset == null
-                || reservationAsset.isBlank() || reservedUnits <= 0 || orderType == null || timeInForce == null
+                || reservationAsset.isBlank() || reservedUnits < 0 || orderType == null || timeInForce == null
                 || matchingPriceTicks <= 0 || orderType == CoreOrderType.LIMIT && priceTicks <= 0
                 || orderType == CoreOrderType.MARKET && priceTicks != 0
                 || clientOrderId == null || clientOrderId.length() > 64
+                || makerFeeRatePpm < -1_000_000 || makerFeeRatePpm > 1_000_000
+                || takerFeeRatePpm < -1_000_000 || takerFeeRatePpm > 1_000_000
+                || makerFeeRatePpm > takerFeeRatePpm
                 || postOnly && (orderType != CoreOrderType.LIMIT || timeInForce != CoreTimeInForce.GTX)) {
             throw new IllegalArgumentException("invalid place order command");
         }

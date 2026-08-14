@@ -67,6 +67,16 @@ public class OrderAeronGateway implements AutoCloseable {
                 .findFirst().orElse(null);
     }
 
+    public PreflightResult preflight(long userId, com.surprising.aeron.protocol.PlaceOrderCommand command) {
+        CoreResponse response = clients.query(CoreMessageType.ORDER_PREFLIGHT_QUERY, UUID.randomUUID(), userId,
+                TradingCommandCodec.encodePlaceOrder(command));
+        if (response.status() == ResponseStatus.OK) {
+            return new PreflightResult(CoreResultCode.NONE,
+                    com.surprising.aeron.protocol.CoreOrderPreflightCodec.decode(response.data()));
+        }
+        return new PreflightResult(response.resultCode(), null);
+    }
+
     public java.util.List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoOrders(
             long userId, String symbol, long dueAtEpochMillis, int limit) {
         CoreResponse response = clients.query(CoreMessageType.ALGO_ORDER_QUERY, UUID.randomUUID(), userId,
@@ -114,5 +124,12 @@ public class OrderAeronGateway implements AutoCloseable {
     @PreDestroy
     public void close() {
         clients.close();
+    }
+
+    public record PreflightResult(CoreResultCode resultCode,
+                                  com.surprising.aeron.protocol.CoreOrderPreflightView view) {
+        public boolean accepted() {
+            return resultCode == CoreResultCode.NONE && view != null;
+        }
     }
 }

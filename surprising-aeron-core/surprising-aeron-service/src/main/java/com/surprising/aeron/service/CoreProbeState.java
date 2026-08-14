@@ -247,6 +247,26 @@ public final class CoreProbeState implements AutoCloseable {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
         }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.ORDER_PREFLIGHT_QUERY) {
+            try {
+                var command = TradingCommandCodec.decodePlaceOrder(message.payload());
+                TradingCoreState preview = tradingReducer.placeOrder(tradingState, message.header().userId(), command,
+                        message.header().commandId());
+                var reservation = preview.user(message.header().userId()).reservations().get(command.orderId());
+                if (reservation == null) throw new IllegalStateException("preflight reservation is missing");
+                var view = new com.surprising.aeron.protocol.CoreOrderPreflightView(
+                        reservation.asset(), reservation.reservedUnits());
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                        com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(view));
+            } catch (CoreStateRejectedException exception) {
+                return rejected(CoreResultCode.fromRejectionCode(exception.code()));
+            } catch (ArithmeticException exception) {
+                return rejected(CoreResultCode.ARITHMETIC_OVERFLOW);
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
         StoredResult duplicate = commandResults.get(message.header().commandId());
         if (duplicate != null) {
             return new CoreResponse(ResponseStatus.DUPLICATE,

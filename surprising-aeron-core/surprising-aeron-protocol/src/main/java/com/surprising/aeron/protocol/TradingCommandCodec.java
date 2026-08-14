@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 public final class TradingCommandCodec {
 
     private static final int PLACE_ORDER_V2_MARKER = 0x504f5632;
+    private static final int INSTRUMENT_RISK_V2_MARKER = 0x49525632;
 
     private static final int MAX_TEXT_BYTES = 64;
 
@@ -251,8 +252,9 @@ public final class TradingCommandCodec {
         byte[] base = text(command.baseAsset());
         byte[] quote = text(command.quoteAsset());
         byte[] settle = text(command.settleAsset());
-        return ByteBuffer.allocate(Short.BYTES * 4 + symbol.length + base.length + quote.length + settle.length
-                        + Integer.BYTES * 2 + Long.BYTES * 10)
+        int bracketBytes = command.riskLimitBrackets().size() * (Integer.BYTES + Long.BYTES * 5);
+        ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES * 4 + symbol.length + base.length + quote.length + settle.length
+                        + Integer.BYTES * 4 + Long.BYTES * 14 + bracketBytes)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) symbol.length).put(symbol)
                 .putLong(command.instrumentVersion()).putInt(command.contractTypeCode())
@@ -263,7 +265,18 @@ public final class TradingCommandCodec {
                 .putLong(command.settleScaleUnits()).putLong(command.initialMarginRatePpm())
                 .putLong(command.maintenanceMarginRatePpm()).putLong(command.makerFeeRatePpm())
                 .putLong(command.takerFeeRatePpm()).putLong(command.expiryEpochMillis())
-                .putInt(command.optionTypeCode()).putLong(command.strikePriceTicks()).array();
+                .putInt(command.optionTypeCode()).putLong(command.strikePriceTicks())
+                .putInt(INSTRUMENT_RISK_V2_MARKER)
+                .putLong(command.maxLeveragePpm()).putLong(command.maxPositionNotionalUnits())
+                .putLong(command.userOpenInterestLimitRatePpm())
+                .putLong(command.userOpenInterestLimitFloorUnits())
+                .putInt(command.riskLimitBrackets().size());
+        for (CoreRiskLimitBracket bracket : command.riskLimitBrackets()) {
+            buffer.putInt(bracket.bracketNo()).putLong(bracket.notionalFloorUnits())
+                    .putLong(bracket.notionalCapUnits()).putLong(bracket.maxLeveragePpm())
+                    .putLong(bracket.initialMarginRatePpm()).putLong(bracket.maintenanceMarginRatePpm());
+        }
+        return buffer.array();
     }
 
     public static UpsertInstrumentCommand decodeUpsertInstrument(byte[] payload) {
@@ -276,10 +289,43 @@ public final class TradingCommandCodec {
         String quote = readText(buffer);
         String settle = readText(buffer);
         requireRemaining(buffer, Long.BYTES * 9 + Integer.BYTES);
+        long multiplier = buffer.getLong();
+        long priceTick = buffer.getLong();
+        long settleScale = buffer.getLong();
+        long initialMargin = buffer.getLong();
+        long maintenanceMargin = buffer.getLong();
+        long makerFee = buffer.getLong();
+        long takerFee = buffer.getLong();
+        long expiry = buffer.getLong();
+        int optionType = buffer.getInt();
+        long strike = buffer.getLong();
+        if (!buffer.hasRemaining()) {
+            return new UpsertInstrumentCommand(symbol, version, contractTypeCode, base, quote, settle,
+                    multiplier, priceTick, settleScale, initialMargin, maintenanceMargin, makerFee, takerFee,
+                    expiry, optionType, strike);
+        }
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 4 + Integer.BYTES);
+        if (buffer.getInt() != INSTRUMENT_RISK_V2_MARKER) {
+            throw new ProtocolException("invalid instrument risk policy marker");
+        }
+        long maxLeverage = buffer.getLong();
+        long maxPosition = buffer.getLong();
+        long openInterestRate = buffer.getLong();
+        long openInterestFloor = buffer.getLong();
+        int bracketCount = buffer.getInt();
+        if (bracketCount <= 0 || bracketCount > 128) {
+            throw new ProtocolException("invalid risk bracket count");
+        }
+        requireRemaining(buffer, bracketCount * (Integer.BYTES + Long.BYTES * 5));
+        java.util.List<CoreRiskLimitBracket> brackets = new java.util.ArrayList<>(bracketCount);
+        for (int index = 0; index < bracketCount; index++) {
+            brackets.add(new CoreRiskLimitBracket(buffer.getInt(), buffer.getLong(), buffer.getLong(),
+                    buffer.getLong(), buffer.getLong(), buffer.getLong()));
+        }
         UpsertInstrumentCommand command = new UpsertInstrumentCommand(symbol, version, contractTypeCode,
-                base, quote, settle, buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong(),
-                buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getInt(),
-                buffer.getLong());
+                base, quote, settle, multiplier, priceTick, settleScale, initialMargin, maintenanceMargin,
+                makerFee, takerFee, expiry, optionType, strike, maxLeverage, maxPosition, openInterestRate,
+                openInterestFloor, brackets);
         requireConsumed(buffer);
         return command;
     }

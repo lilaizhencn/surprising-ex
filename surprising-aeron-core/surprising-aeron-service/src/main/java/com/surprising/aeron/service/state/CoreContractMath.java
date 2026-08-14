@@ -89,17 +89,28 @@ final class CoreContractMath {
             CoreInstrumentState instrument,
             long priceTicks,
             long quantitySteps,
-            boolean taker) {
-        long rate = taker ? instrument.takerFeeRatePpm() : instrument.makerFeeRatePpm();
-        if (rate == 0) {
+            long feeRatePpm) {
+        if (feeRatePpm == 0) {
             return 0;
         }
-        long notional = instrument.contractType().isOption()
+        long notional = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
+                ? Math.multiplyExact(priceTicks, quantitySteps)
+                : instrument.contractType().isOption()
                 ? optionPremiumUnits(instrument, priceTicks, quantitySteps)
                 : PerpetualContractMath.notionalUnits(instrument.contractType(), quantitySteps, priceTicks,
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
-        long fee = divideCeiling(big(notional).multiply(big(Math.absExact(rate))), PPM);
-        return rate > 0 ? Math.negateExact(fee) : fee;
+        long fee = divideCeiling(big(notional).multiply(big(Math.absExact(feeRatePpm))), PPM);
+        return feeRatePpm > 0 ? Math.negateExact(fee) : fee;
+    }
+
+    static long notionalUnits(CoreInstrumentState instrument, long quantitySteps, long priceTicks) {
+        if (quantitySteps <= 0) return 0;
+        if (instrument.contractType().isOption()) {
+            return big(priceTicks).multiply(big(quantitySteps))
+                    .multiply(big(instrument.notionalMultiplierUnits())).longValueExact();
+        }
+        return PerpetualContractMath.notionalUnits(instrument.contractType(), quantitySteps, priceTicks,
+                instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
     }
 
     static long fundingDeltaUnits(

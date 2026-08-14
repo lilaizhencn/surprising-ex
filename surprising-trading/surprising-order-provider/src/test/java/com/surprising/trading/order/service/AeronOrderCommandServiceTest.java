@@ -75,7 +75,7 @@ class AeronOrderCommandServiceTest {
 
         assertThat(service.place(request,
                 ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL),
-                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test"), "USDT", 900).status())
+                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test")).status())
                 .isEqualTo(OrderStatus.ACCEPTED);
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
@@ -88,7 +88,7 @@ class AeronOrderCommandServiceTest {
         assertThat(command.matchingPriceTicks()).isGreaterThan(60_000L);
         assertThat(command.reservationKind()).isEqualTo(ReservationKind.DERIVATIVE_MARGIN);
         assertThat(command.reservationAsset()).isEqualTo("USDT");
-        assertThat(command.reservedUnits()).isEqualTo(900);
+        assertThat(command.reservedUnits()).isZero();
         assertThat(command.clientOrderId()).isEqualTo("client-1");
         assertThat(command.makerFeeRatePpm()).isEqualTo(-10);
         assertThat(command.takerFeeRatePpm()).isEqualTo(25);
@@ -130,7 +130,7 @@ class AeronOrderCommandServiceTest {
 
         assertThat(service.replace(original, replacementRequest,
                 ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL),
-                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test"), "USDT", 800)
+                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test"))
                 .replacementOrder().clientOrderId()).isEqualTo("new");
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
@@ -142,7 +142,7 @@ class AeronOrderCommandServiceTest {
         assertThat(command.replacement().quantitySteps()).isEqualTo(4);
         assertThat(command.replacement().timeInForce()).isEqualTo(CoreTimeInForce.GTX);
         assertThat(command.replacement().postOnly()).isTrue();
-        assertThat(command.replacement().reservedUnits()).isEqualTo(800);
+        assertThat(command.replacement().reservedUnits()).isZero();
     }
 
     private static InstrumentRule perpetualRule() {

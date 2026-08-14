@@ -19,12 +19,15 @@ Redis Risk State、Redis 强平候选队列和 PostgreSQL 强平事务维持不�
 1. 六条产品线分别部署一套三节点 Aeron Cluster。
 2. 每套 Cluster 内由一个统一确定性状态机共同持有 User、Order（含算法父单和自动撤单倒计时）、Book、
    Risk、Liquidation 和 Export State。
+   Instrument Risk Policy（最大仓位、动态未平仓量限额、风险档位和档位杠杆）同样属于该状态机；普通下单
+   在单条命令中完成风险裁决和精确资金预占，外围不得先算一个可替代的 JVM 风控结果。
 3. Exchange Core 0.5.3 继续作为订单簿和撮合算法，通过 Adapter 嵌入状态机，不独立拥有权威 journal。
 4. Aeron Cluster Log、Archive 和 Snapshot 是正常交易核心唯一权威恢复链。
 5. Kafka 保留外部输入缓冲和对外事件分发，不作为核心资金状态恢复链。
-6. PostgreSQL 保留查询、审计、投影和对账，不参与正常交易裁决。
-7. Valkey保留限流和缓存，不保存权威 Risk 或强平状态。
-8. Risk 重算、强平决策和强平订单执行进入 Aeron 状态机。
+6. `/test-order` 等无副作用检查使用 Core Preflight Query 复用同一 reducer；生产下单不增加 preflight 往返。
+7. PostgreSQL 保留查询、审计、投影和对账，不参与正常交易裁决。
+8. Valkey保留限流和缓存，不保存权威 Risk 或强平状态。
+9. Risk 重算、强平决策和强平订单执行进入 Aeron 状态机。
 9. 新核心通过功能、资金和恢复门禁后立即删除旧 WAL、Redis Risk 和旧强平链路，删除早于性能压测。
 10. 不做长期双写、运行时回退开关或影子集群；通过离线确定性重放、状态哈希和三节点故障测试验证。
 11. 性能测试一次只运行一条产品线，且压测前必须证明该线功能正常、资金差异为零。

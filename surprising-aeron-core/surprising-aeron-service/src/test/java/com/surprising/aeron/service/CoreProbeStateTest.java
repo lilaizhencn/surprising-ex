@@ -108,7 +108,7 @@ class CoreProbeStateTest {
         assertThat(original.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(original.apply(place).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(original.apply(place).status()).isEqualTo(ResponseStatus.DUPLICATE);
-        assertThat(original.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(7_500);
+        assertThat(original.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(8_000);
 
         CoreMessage userQuery = query(CoreMessageType.USER_STATE_QUERY, 1001, new byte[0]);
         CoreMessage orderQuery = query(CoreMessageType.ORDER_STATE_QUERY, 1001,
@@ -119,7 +119,7 @@ class CoreProbeStateTest {
         var orderResult = original.apply(orderQuery);
         assertThat(userResult.status()).isEqualTo(ResponseStatus.OK);
         assertThat(CoreStateQueryCodec.decodeUserState(userResult.data()).balances().getFirst().lockedUnits())
-                .isEqualTo(2_500);
+                .isEqualTo(2_000);
         assertThat(orderResult.status()).isEqualTo(ResponseStatus.OK);
         assertThat(CoreStateQueryCodec.decodeOrderState(orderResult.data()).orderId()).isEqualTo(91);
         var byClientId = CoreStateQueryCodec.decodeOrderState(original.apply(clientOrderQuery).data());
@@ -154,6 +154,31 @@ class CoreProbeStateTest {
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(91)));
         assertThat(restored.apply(cancel).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+    }
+
+    @Test
+    void orderPreflightUsesAuthoritativeRulesWithoutMutatingState() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
+        long hash = state.tradingState().businessStateHash();
+        PlaceOrderCommand command = new PlaceOrderCommand(99, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+                CoreOrderSide.BUY, 1_000, 2, false,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                ReservationKind.SPOT_ASSET, "USDT", 0,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, 1_000, false, "", 0, 0);
+        CoreMessage query = query(CoreMessageType.ORDER_PREFLIGHT_QUERY, 1001,
+                TradingCommandCodec.encodePlaceOrder(command));
+
+        var response = state.apply(query);
+
+        assertThat(response.status()).isEqualTo(ResponseStatus.OK);
+        assertThat(com.surprising.aeron.protocol.CoreOrderPreflightCodec.decode(response.data()))
+                .isEqualTo(new com.surprising.aeron.protocol.CoreOrderPreflightView("USDT", 2_000));
+        assertThat(state.tradingState().businessStateHash()).isEqualTo(hash);
+        assertThat(state.tradingState().orders()).isEmpty();
     }
 
     @Test

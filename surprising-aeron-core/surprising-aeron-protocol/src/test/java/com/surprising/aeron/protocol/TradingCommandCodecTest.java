@@ -83,6 +83,18 @@ class TradingCommandCodecTest {
     }
 
     @Test
+    void decodesLegacyInstrumentPayloadWithEquivalentUnlimitedRiskPolicy() {
+        UpsertInstrumentCommand command = new UpsertInstrumentCommand("BTC-USDT", 1, 1,
+                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
+                0, -1, 0);
+        byte[] current = TradingCommandCodec.encodeUpsertInstrument(command);
+        int appendedRiskPolicyBytes = Integer.BYTES * 3 + Long.BYTES * 9;
+        byte[] legacy = java.util.Arrays.copyOf(current, current.length - appendedRiskPolicyBytes);
+
+        assertThat(TradingCommandCodec.decodeUpsertInstrument(legacy)).isEqualTo(command);
+    }
+
+    @Test
     void responseRoundTripPreservesOriginalCommandStatusAndData() {
         CoreResponse response = new CoreResponse(ResponseStatus.DUPLICATE, ResponseStatus.REJECTED,
                 CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, 9, 17, new byte[] {1, 2, 3});

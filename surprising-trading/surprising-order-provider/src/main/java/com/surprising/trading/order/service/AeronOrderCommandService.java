@@ -53,11 +53,9 @@ public class AeronOrderCommandService {
     public OrderResponse place(
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation,
-            OrderFeeSnapshot fee,
-            String reservationAsset,
-            long reservedUnits) {
+            OrderFeeSnapshot fee) {
         long orderId = orderIds.next();
-        PlaceOrderCommand command = placeCommand(orderId, request, validation, fee, reservationAsset, reservedUnits);
+        PlaceOrderCommand command = placeCommand(orderId, request, validation, fee);
         UUID commandId = stableId("ORDER_PLACE:" + request.userId() + ':'
                 + (request.clientOrderId() == null ? orderId : request.clientOrderId()));
         aeron.command(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
@@ -69,12 +67,9 @@ public class AeronOrderCommandService {
             OrderResponse original,
             com.surprising.trading.api.model.PlaceOrderRequest replacement,
             ValidationResult validation,
-            OrderFeeSnapshot fee,
-            String reservationAsset,
-            long reservedUnits) {
+            OrderFeeSnapshot fee) {
         long replacementOrderId = orderIds.next();
-        PlaceOrderCommand replacementCommand = placeCommand(replacementOrderId, replacement, validation, fee,
-                reservationAsset, reservedUnits);
+        PlaceOrderCommand replacementCommand = placeCommand(replacementOrderId, replacement, validation, fee);
         UUID commandId = stableId("ORDER_REPLACE:" + replacement.userId() + ':' + original.orderId() + ':'
                 + (replacement.clientOrderId() == null ? replacementOrderId : replacement.clientOrderId()));
         aeron.command(CoreMessageType.REPLACE_ORDER, commandId, replacement.userId(),
@@ -91,21 +86,29 @@ public class AeronOrderCommandService {
             long orderId,
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation,
-            OrderFeeSnapshot fee,
-            String reservationAsset,
-            long reservedUnits) {
+            OrderFeeSnapshot fee) {
         InstrumentRule instrument = instrumentRules.currentRule(request.symbol())
                 .filter(value -> value.version() == validation.instrumentVersion())
                 .orElseThrow(() -> new IllegalStateException("instrument snapshot changed before Aeron submit"));
         long matchingPriceTicks = matchingPriceTicks(request, validation.instrumentVersion());
+        String reservationAsset = instrument.spot()
+                ? (request.side() == OrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset())
+                : instrument.settleAsset();
         return new PlaceOrderCommand(orderId, request.symbol(), validation.instrumentVersion(),
                 instrument.baseAsset(), instrument.quoteAsset(), instrument.settleAsset(), side(request.side()),
                 request.priceTicks(), request.quantitySteps(), request.reduceOnly(), marginMode(request.marginMode()),
                 positionSide(request.positionSide()), instrument.spot() ? ReservationKind.SPOT_ASSET
-                : ReservationKind.DERIVATIVE_MARGIN, reservationAsset, reservedUnits,
+                : ReservationKind.DERIVATIVE_MARGIN, reservationAsset, 0,
                 orderType(request.orderType()), timeInForce(request.timeInForce()), matchingPriceTicks,
                 request.postOnly(), request.clientOrderId() == null ? "" : request.clientOrderId(),
                 fee.makerFeeRatePpm(), fee.takerFeeRatePpm());
+    }
+
+    public OrderAeronGateway.PreflightResult preflight(
+            com.surprising.trading.api.model.PlaceOrderRequest request,
+            ValidationResult validation,
+            OrderFeeSnapshot fee) {
+        return aeron.preflight(request.userId(), placeCommand(orderIds.next(), request, validation, fee));
     }
 
     public OrderResponse cancel(long userId, long orderId) {

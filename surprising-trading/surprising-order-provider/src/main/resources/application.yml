@@ -52,11 +52,7 @@ surprising:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
         product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-        order-commands-topic: surprising.perp.order.commands.v1
-        order-events-topic: surprising.perp.order.events.v1
         instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
-        open-interest-events-topic: surprising.account.open-interest.events.v1
-        account-state-events-topic: surprising.account.state.events.v1
       aeron:
         hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
         egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}

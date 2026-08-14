@@ -25,6 +25,8 @@ ADR 中说明，而不是为同一概念继续增加别名。
 | Order State | 订单、预占、已成交/剩余数量、状态和幂等索引。 | 仅供后台展示的订单表。 |
 | Algorithm Order State | TWAP 等算法父单的不可变意图、修订、调度时间和权威子订单引用；执行进度由子 Order State 派生。 | Redis 调度索引、外围 WAL 或独立资金状态机。 |
 | Cancel-All-After State | 用户自动撤单倒计时的状态、触发时间、原子认领修订和执行结果；随 Product Line Cluster Snapshot 恢复。 | Order JVM 的本地 RocksDB 定时器或 Redis ZSET。 |
+| Instrument Risk Policy | 绑定 Instrument Version 的最大杠杆、最大仓位名义价值、动态 Open Interest 限额和连续 Risk Bracket；是下单风险裁决与保证金率选择的权威参数。 | Order JVM 的合约快照计算结果或 Redis 风控配置。 |
+| Core Preflight | 对候选订单执行与正式命令相同的确定性校验和预占计算但不提交状态，用于测试接口。 | 正式下单前的强制双往返、外围资金预占或第二套 reducer。 |
 | Reservation State | 订单维度的预占资产、原始数量、已释放、已消费和剩余锁定；剩余锁定必须可重建 Balance locked。 | 只保存一个按资产汇总的冻结数。 |
 | Business State Hash | 只覆盖规范化业务状态的稳定哈希。 | 包含幂等窗口和来源高水位的完整内部恢复哈希。 |
 | Internal Recovery Hash | 同时覆盖业务状态、幂等结果和来源高水位，用于 Snapshot/replay 完整一致性验证。 | 对外账户余额或订单查询结果。 |

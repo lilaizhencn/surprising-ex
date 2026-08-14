@@ -8,7 +8,6 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
-import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 
@@ -37,7 +36,7 @@ class TradingOrderKafkaConfigurationTest {
     }
 
     @Test
-    void stateProjectionConsumesAndAcknowledgesKafkaInBatches() {
+    void lifecycleConsumersUseBoundedDurableFetchSettings() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
@@ -46,29 +45,8 @@ class TradingOrderKafkaConfigurationTest {
         Map<String, Object> consumerConfig = consumerFactory.getConfigurationProperties();
         assertThat(consumerConfig).containsEntry(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, 4 * 1024 * 1024);
         assertThat(consumerConfig).containsEntry(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 4 * 1024 * 1024);
-        var listenerFactory = configuration.orderStateKafkaListenerContainerFactory(consumerFactory);
-
-        assertThat(listenerFactory.isBatchListener()).isTrue();
-        assertThat(listenerFactory.getContainerProperties().getAckMode())
-                .isEqualTo(ContainerProperties.AckMode.BATCH);
-    }
-
-    @Test
-    void accountCommandResultsUseDedicatedPartitionParallelBatchListener() {
-        TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        properties.getKafka().setAccountCommandResultsConcurrency(32);
-        TradingOrderKafkaConfiguration configuration = new TradingOrderKafkaConfiguration();
-        var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
-                configuration.orderStateConsumerFactory(properties);
-        var listenerFactory = configuration.orderAccountCommandResultKafkaListenerContainerFactory(
-                consumerFactory, properties);
-        var container = listenerFactory.createContainer("surprising.linear-perp.account.command.results.v1");
-
-        assertThat(listenerFactory.isBatchListener()).isTrue();
-        assertThat(container.getConcurrency()).isEqualTo(32);
-        assertThat(listenerFactory.getContainerProperties().getAckMode())
-                .isEqualTo(ContainerProperties.AckMode.BATCH);
+        assertThat(configuration.orderInstrumentLifecycleKafkaListenerContainerFactory(consumerFactory))
+                .isNotNull();
     }
 
     @Test
@@ -76,30 +54,9 @@ class TradingOrderKafkaConfigurationTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
 
-        assertThat(properties.getKafka().getOrderCommandsTopic())
-                .isEqualTo("surprising.linear-perp.order.commands.v1");
-        assertThat(properties.getKafka().getOrderEventsTopic())
-                .isEqualTo("surprising.linear-perp.order.events.v1");
-        assertThat(properties.getKafka().getPositionEventsTopic())
-                .isEqualTo("surprising.linear-perp.account.position.events.v1");
-        assertThat(properties.getKafka().getPositionMaintenanceGroupId())
-                .isEqualTo("surprising-linear-perp-order-position-maintenance-v1");
-    }
-
-    @Test
-    void canResolveOrderTopicsFromProductLine() {
-        TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getKafka().setProductLine(ProductLine.SPOT);
-        properties.getKafka().setProductTopicsEnabled(true);
-
-        assertThat(properties.getKafka().getOrderCommandsTopic())
-                .isEqualTo("surprising.spot.order.commands.v1");
-        assertThat(properties.getKafka().getOrderEventsTopic())
-                .isEqualTo("surprising.spot.order.events.v1");
-        assertThat(properties.getKafka().getPositionEventsTopic())
-                .isEqualTo("surprising.spot.account.position.events.v1");
-        assertThat(properties.getKafka().getPositionMaintenanceGroupId())
-                .contains("spot")
-                .contains("order-position-maintenance");
+        assertThat(properties.getKafka().getFeeScheduleEventsTopic())
+                .isEqualTo("surprising.linear-perp.fee.schedule.events.v1");
+        assertThat(properties.getKafka().getInstrumentLifecycleDrainTopic())
+                .isEqualTo("surprising.instrument.lifecycle-drain.v1");
     }
 }

@@ -17,7 +17,6 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
-import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -41,13 +40,7 @@ class OrderServiceTest {
     @Mock
     private OrderValidator orderValidator;
     @Mock
-    private ReduceOnlyValidator reduceOnlyValidator;
-    @Mock
     private OrderPlacementStateService placementStateService;
-    @Mock
-    private OrderMarginCalculator orderMarginCalculator;
-    @Mock
-    private SpotReservationCalculator spotReservationCalculator;
     @Mock
     private OrderFeeSnapshotLookup feeSnapshotLookup;
     @Mock
@@ -106,15 +99,10 @@ class OrderServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
         properties.getKafka().setProductTopicsEnabled(true);
-        when(placementStateService.positionMode(productLine, 1001L)).thenReturn(PositionMode.ONE_WAY);
-        when(placementStateService.positionMarginModeConflict(productLine, 1001L, "BTC-USDT",
-                MarginMode.CROSS)).thenReturn(false);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, 100L, 200L, "JVM")));
-        return new OrderService(properties, orderValidator, reduceOnlyValidator, placementStateService,
-                orderMarginCalculator, spotReservationCalculator, feeSnapshotLookup, aeron, null);
+        return new OrderService(properties, orderValidator, placementStateService, feeSnapshotLookup, aeron, null);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

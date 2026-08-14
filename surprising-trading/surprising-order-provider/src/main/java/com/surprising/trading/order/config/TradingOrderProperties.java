@@ -108,21 +108,8 @@ public class TradingOrderProperties {
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
         private boolean productTopicsEnabled;
-        private String orderCommandsTopic = "surprising.perp.order.commands.v1";
-        private String orderEventsTopic = "surprising.perp.order.events.v1";
-        private String matchResultsTopic = "surprising.perp.match.results.v1";
-        private String positionEventsTopic = "surprising.account.position.events.v1";
-        private String accountStateEventsTopic = "surprising.account.state.events.v1";
-        private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
-        private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
-        private String accountStateSnapshotGroupId = "surprising-order-account-state-v1";
-        private int accountCommandResultsConcurrency = 32;
-        private int userCommandConcurrency = 32;
-        private Duration userCommandTimeout = Duration.ofSeconds(5);
-        private Duration resultCacheTtl = Duration.ofMinutes(5);
-        private int resultCacheMaxEntries = 10_000;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -155,132 +142,6 @@ public class TradingOrderProperties {
             this.productTopicsEnabled = productTopicsEnabled;
         }
 
-        public String getOrderCommandsTopic() {
-            return productTopics().orderCommandsTopic();
-        }
-
-        public void setOrderCommandsTopic(String orderCommandsTopic) {
-            this.orderCommandsTopic = orderCommandsTopic;
-        }
-
-        public String getOrderEventsTopic() {
-            return productTopics().orderEventsTopic();
-        }
-
-        public void setOrderEventsTopic(String orderEventsTopic) {
-            this.orderEventsTopic = orderEventsTopic;
-        }
-        public String getMatchResultsTopic() { return productTopics().matchResultsTopic(); }
-        public void setMatchResultsTopic(String matchResultsTopic) { this.matchResultsTopic = matchResultsTopic; }
-        public String getAccountUserCommandsTopic() {
-            return productTopics().accountUserCommandsTopic();
-        }
-        public String getAccountCommandResultsTopic() {
-            return productTopics().accountCommandResultsTopic();
-        }
-        public String getOrderUserCommandsTopic() {
-            return productTopics().orderUserCommandsTopic();
-        }
-        public String getOrderUserCommandResultsTopic() {
-            return productTopics().orderUserCommandResultsTopic();
-        }
-        public String getOrderStateEventsTopic() {
-            return productTopics().orderStateEventsTopic();
-        }
-        public String getUserMutationsTopic() {
-            return productTopics().userMutationsTopic();
-        }
-        public String getUserStateChangelogTopic() {
-            return productTopics().userStateChangelogTopic();
-        }
-        public String getOrderUserCommandGroupId() {
-            return productTopics().consumerGroup("order-user-state");
-        }
-        public String getOrderUserCommandResultsGroupId() {
-            return productTopics().consumerGroup("order-user-command-results") + "-" + clientId;
-        }
-        public String getAccountCommandResultsGroupId() {
-            return productTopics().consumerGroup("order-account-results");
-        }
-        public int getAccountCommandResultsConcurrency() { return accountCommandResultsConcurrency; }
-        public void setAccountCommandResultsConcurrency(int accountCommandResultsConcurrency) {
-            this.accountCommandResultsConcurrency = Math.max(1, accountCommandResultsConcurrency);
-        }
-        public int getUserCommandConcurrency() { return userCommandConcurrency; }
-        public void setUserCommandConcurrency(int userCommandConcurrency) {
-            this.userCommandConcurrency = Math.max(1, userCommandConcurrency);
-        }
-        public Duration getUserCommandTimeout() { return userCommandTimeout; }
-        public void setUserCommandTimeout(Duration userCommandTimeout) {
-            if (userCommandTimeout == null || userCommandTimeout.isZero() || userCommandTimeout.isNegative()) {
-                throw new IllegalArgumentException("订单用户命令等待时间必须为正数");
-            }
-            this.userCommandTimeout = userCommandTimeout;
-        }
-
-        public Duration getResultCacheTtl() {
-            return resultCacheTtl;
-        }
-
-        public void setResultCacheTtl(Duration resultCacheTtl) {
-            if (resultCacheTtl == null || resultCacheTtl.isZero() || resultCacheTtl.isNegative()) {
-                throw new IllegalArgumentException("订单结果缓存 TTL 必须为正数");
-            }
-            this.resultCacheTtl = resultCacheTtl;
-        }
-
-        public int getResultCacheMaxEntries() {
-            return resultCacheMaxEntries;
-        }
-
-        public void setResultCacheMaxEntries(int resultCacheMaxEntries) {
-            if (resultCacheMaxEntries <= 0) {
-                throw new IllegalArgumentException("订单结果缓存容量必须为正数");
-            }
-            this.resultCacheMaxEntries = resultCacheMaxEntries;
-        }
-        public String getPositionEventsTopic() {
-            return productTopics().accountPositionEventsTopic();
-        }
-        public void setPositionEventsTopic(String positionEventsTopic) {
-            this.positionEventsTopic = positionEventsTopic;
-        }
-
-        public String getAccountStateEventsTopic() {
-            return productTopics().accountStateEventsTopic();
-        }
-
-        public void setAccountStateEventsTopic(String accountStateEventsTopic) {
-            this.accountStateEventsTopic = accountStateEventsTopic;
-        }
-
-        public String getOpenInterestEventsTopic() {
-            return productTopics().accountOpenInterestEventsTopic();
-        }
-
-        public void setOpenInterestEventsTopic(String openInterestEventsTopic) {
-            this.openInterestEventsTopic = openInterestEventsTopic;
-        }
-        public String getPositionMaintenanceGroupId() {
-            return productTopics().consumerGroup("order-position-maintenance");
-        }
-
-        public String getOpenInterestSnapshotGroupId() {
-            return productTopics().consumerGroup("order-open-interest-snapshot");
-        }
-        public void setPositionMaintenanceGroupId(String positionMaintenanceGroupId) {
-            this.positionMaintenanceGroupId = positionMaintenanceGroupId;
-        }
-
-        public String getAccountStateSnapshotGroupId() {
-            // 账户完整快照是每个订单 JVM 的本地读快照，必须广播到每个实例，不能被共享消费组分摊。
-            return productTopics().consumerGroup("order-account-state") + "-" + clientId;
-        }
-
-        public String getOrderStateSnapshotGroupId() {
-            // 订单完整快照是每个订单 JVM 的本地事实恢复输入，必须广播到每个实例。
-            return productTopics().consumerGroup("order-state") + "-" + clientId;
-        }
         public String getInstrumentLifecycleDrainTopic() { return instrumentLifecycleDrainTopic; }
         public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {
             this.instrumentLifecycleDrainTopic = instrumentLifecycleDrainTopic;

@@ -17,7 +17,6 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.FixedBackOff;
-import org.springframework.kafka.transaction.KafkaTransactionManager;
 
 @Configuration
 public class TradingOrderKafkaConfiguration {
@@ -68,70 +67,6 @@ public class TradingOrderKafkaConfiguration {
         config.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, ORDER_STATE_SNAPSHOT_MAX_BYTES);
         config.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, ORDER_STATE_SNAPSHOT_MAX_BYTES);
         return new DefaultKafkaConsumerFactory<>(config);
-    }
-
-    @Bean(name = "orderStateKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> orderStateKafkaListenerContainerFactory(
-            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.setBatchListener(true);
-        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.BATCH);
-        return factory;
-    }
-
-    /**
-     * 资金预占结果以 productLine:userId 为键。每个 Topic 分区使用一个消费者，使不同用户可以并发推进，
-     * 同时由 Kafka 保证同一用户的全部指令结果串行。
-     */
-    @Bean(name = "orderAccountCommandResultKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> orderAccountCommandResultKafkaListenerContainerFactory(
-            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory,
-            TradingOrderProperties properties) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.setConcurrency(properties.getKafka().getAccountCommandResultsConcurrency());
-        factory.setBatchListener(true);
-        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.BATCH);
-        return factory;
-    }
-
-    /** 用户订单命令按用户分区串行消费；同一用户不会在两个订单节点同时写 WAL。 */
-    @Bean(name = "orderUserCommandKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> orderUserCommandKafkaListenerContainerFactory(
-            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory,
-            TradingOrderProperties properties,
-            @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> orderKafkaTemplate) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.setConcurrency(properties.getKafka().getUserCommandConcurrency());
-        factory.setBatchListener(true);
-        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.BATCH);
-        factory.getContainerProperties().setKafkaAwareTransactionManager(
-                new KafkaTransactionManager<>(orderKafkaTemplate.getProducerFactory()));
-        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
-        return factory;
-    }
-
-    /** 结果 Topic 每个 HTTP 节点使用独立消费组，保证等待请求能在发起节点完成。 */
-    @Bean(name = "orderUserCommandResultKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> orderUserCommandResultKafkaListenerContainerFactory(
-            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.RECORD);
-        return factory;
-    }
-
-    @Bean(name = "orderMatchResultKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> orderMatchResultKafkaListenerContainerFactory(
-            @Qualifier("orderStateConsumerFactory") ConsumerFactory<String, String> consumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.setBatchListener(true);
-        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.BATCH);
-        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
-        return factory;
     }
 
     /**

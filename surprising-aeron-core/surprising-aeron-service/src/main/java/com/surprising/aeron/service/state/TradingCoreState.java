@@ -172,6 +172,18 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, instrument.expiryEpochMillis());
             hash = CoreStateHash.mix(hash, instrument.optionType() == null ? -1 : instrument.optionType().ordinal());
             hash = CoreStateHash.mix(hash, instrument.strikePriceTicks());
+            hash = CoreStateHash.mix(hash, instrument.maxLeveragePpm());
+            hash = CoreStateHash.mix(hash, instrument.maxPositionNotionalUnits());
+            hash = CoreStateHash.mix(hash, instrument.userOpenInterestLimitRatePpm());
+            hash = CoreStateHash.mix(hash, instrument.userOpenInterestLimitFloorUnits());
+            for (var bracket : instrument.riskLimitBrackets()) {
+                hash = CoreStateHash.mix(hash, bracket.bracketNo());
+                hash = CoreStateHash.mix(hash, bracket.notionalFloorUnits());
+                hash = CoreStateHash.mix(hash, bracket.notionalCapUnits());
+                hash = CoreStateHash.mix(hash, bracket.maxLeveragePpm());
+                hash = CoreStateHash.mix(hash, bracket.initialMarginRatePpm());
+                hash = CoreStateHash.mix(hash, bracket.maintenanceMarginRatePpm());
+            }
         }
         for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey().userId());

@@ -16,7 +16,6 @@ import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.ClosePositionRequest;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
@@ -32,11 +31,9 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.MarginRequirement;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
-import com.surprising.trading.order.model.SpotReservationRequirement;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import java.nio.charset.StandardCharsets;
@@ -52,10 +49,7 @@ public class OrderService {
 
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
-    private final ReduceOnlyValidator reduceOnlyValidator;
     private final OrderPlacementStateService placementStateService;
-    private final OrderMarginCalculator orderMarginCalculator;
-    private final SpotReservationCalculator spotReservationCalculator;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final AeronOrderCommandService aeronOrders;
     private final AeronOrderProjectionRepository aeronOrderProjection;
@@ -63,19 +57,13 @@ public class OrderService {
     @Autowired
     public OrderService(TradingOrderProperties properties,
                         OrderValidator orderValidator,
-                        ReduceOnlyValidator reduceOnlyValidator,
                         OrderPlacementStateService placementStateService,
-                        OrderMarginCalculator orderMarginCalculator,
-                        SpotReservationCalculator spotReservationCalculator,
                         OrderFeeSnapshotLookup feeSnapshotLookup,
                         AeronOrderCommandService aeronOrders,
                         AeronOrderProjectionRepository aeronOrderProjection) {
         this.properties = properties;
         this.orderValidator = orderValidator;
-        this.reduceOnlyValidator = reduceOnlyValidator;
         this.placementStateService = placementStateService;
-        this.orderMarginCalculator = orderMarginCalculator;
-        this.spotReservationCalculator = spotReservationCalculator;
         this.feeSnapshotLookup = feeSnapshotLookup;
         this.aeronOrders = aeronOrders;
         this.aeronOrderProjection = aeronOrderProjection;
@@ -83,13 +71,9 @@ public class OrderService {
 
     public OrderService(TradingOrderProperties properties,
                         OrderValidator orderValidator,
-                        ReduceOnlyValidator reduceOnlyValidator,
                         OrderPlacementStateService placementStateService,
-                        OrderMarginCalculator orderMarginCalculator,
-                        SpotReservationCalculator spotReservationCalculator,
                         OrderFeeSnapshotLookup feeSnapshotLookup) {
-        this(properties, orderValidator, reduceOnlyValidator, placementStateService, orderMarginCalculator,
-                spotReservationCalculator, feeSnapshotLookup, null, null);
+        this(properties, orderValidator, placementStateService, feeSnapshotLookup, null, null);
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
@@ -107,66 +91,18 @@ public class OrderService {
             }
         }
         PreparedAeronOrder prepared = prepareAeronOrder(normalized);
-        return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee(),
-                prepared.reservation().asset(), prepared.reservation().units());
+        return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee());
     }
 
     private PreparedAeronOrder prepareAeronOrder(PlaceOrderRequest normalized) {
         ProductLine productLine = currentProductLine();
-        PositionMode positionMode = productLine == ProductLine.SPOT
-                ? PositionMode.ONE_WAY : placementStateService.positionMode(productLine, normalized.userId());
-        normalized = normalizePositionMode(normalized, positionMode);
-        ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
-        if (validation.accepted()) validation = orderValidator.validate(normalized);
-        if (validation.accepted() && normalized.reduceOnly()) {
-            ValidationResult reduceValidation = reduceOnlyValidator.validate(normalized);
-            validation = reduceValidation.accepted()
-                    ? ValidationResult.ok(reduceValidation.instrumentVersion(), validation.instrumentType(), validation.contractType())
-                    : ValidationResult.reject(reduceValidation.rejectReason(), validation.instrumentVersion(),
-                    validation.instrumentType(), validation.contractType());
-        }
+        normalized = normalizePositionSemantics(normalized, productLine);
+        ValidationResult validation = orderValidator.validate(normalized);
         if (!validation.accepted()) throw new IllegalArgumentException(validation.rejectReason());
         OrderFeeSnapshot fee = feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
                         validation.instrumentVersion(), Instant.now())
                 .orElseThrow(() -> new IllegalStateException("fee schedule unavailable"));
-        ReservationInput reservation = reservationInput(normalized, validation, fee);
-        return new PreparedAeronOrder(normalized, validation, fee, reservation);
-    }
-
-    private ReservationInput reservationInput(PlaceOrderRequest request, ValidationResult validation,
-                                              OrderFeeSnapshot fee) {
-        if (validation.instrumentType() == InstrumentType.SPOT) {
-            SpotReservationRequirement value = spotReservationCalculator.requirement(request.symbol(),
-                            validation.instrumentVersion(), request.side(), request.orderType(), request.priceTicks(),
-                            request.quantitySteps(), fee)
-                    .orElseThrow(() -> new IllegalStateException("spot reservation requirement unavailable"));
-            if (!value.accepted()) throw new IllegalStateException(value.rejectReason());
-            return new ReservationInput(value.asset(), value.reservedUnits());
-        }
-        MarginRequirement value = orderMarginCalculator.requirement(request.symbol(), validation.instrumentVersion(),
-                        request.userId(), request.marginMode(), request.positionSide(), request.side(), request.orderType(),
-                        request.priceTicks(), request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
-                        properties.getRisk().getMarketMaxMarkAgeMs())
-                .orElseThrow(() -> new IllegalStateException("margin requirement unavailable"));
-        if (!value.accepted()) throw new IllegalStateException(value.rejectReason());
-        return new ReservationInput(value.asset(), Math.max(1, value.initialMarginUnits()));
-    }
-
-    /** Aeron User State 提供仓位模式预校验，最终裁决仍在同一 Core 命令中完成。 */
-    private ValidationResult validateMarginModeForLocalState(ProductLine productLine,
-                                                             PlaceOrderRequest request) {
-        if (productLine == ProductLine.SPOT) {
-            return ValidationResult.ok();
-        }
-        if (request.reduceOnly()) {
-            // 只减仓不会新增保证金模式状态；仓位模式和仓位快照由只减仓校验统一确认。
-            return ValidationResult.ok();
-        }
-        if (placementStateService.positionMarginModeConflict(productLine, request.userId(),
-                request.symbol(), request.marginMode())) {
-            return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
-        }
-        return ValidationResult.ok();
+        return new PreparedAeronOrder(normalized, validation, fee);
     }
 
     public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
@@ -192,25 +128,10 @@ public class OrderService {
     private TestOrderResponse testLocal(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
-        PositionMode positionMode = productLine == ProductLine.SPOT
-                ? PositionMode.ONE_WAY
-                : placementStateService.positionMode(productLine, normalized.userId());
-        normalized = normalizePositionMode(normalized, positionMode);
-        ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
-        if (!validation.accepted()) {
-            return testRejected(validation, "MARGIN_MODE");
-        }
-        validation = orderValidator.validate(normalized);
+        normalized = normalizePositionSemantics(normalized, productLine);
+        ValidationResult validation = orderValidator.validate(normalized);
         if (!validation.accepted()) {
             return testRejected(validation, "ORDER_RULES");
-        }
-        if (normalized.reduceOnly()) {
-            ValidationResult reduceOnlyValidation = reduceOnlyValidator.validate(normalized);
-            if (!reduceOnlyValidation.accepted()) {
-                return testRejected(reduceOnlyValidation, "REDUCE_ONLY");
-            }
-            validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
-                    validation.instrumentType(), validation.contractType());
         }
         var resolvedFeeSnapshot = feeSnapshotLookup == null
                 ? java.util.Optional.<OrderFeeSnapshot>empty()
@@ -219,10 +140,6 @@ public class OrderService {
         if (resolvedFeeSnapshot.isEmpty()) {
             return new TestOrderResponse(false, "fee schedule unavailable", validation.instrumentVersion(),
                     "FEE", null, null, 0L);
-        }
-        if (normalized.reduceOnly() && !requiresReduceOnlyFunds(normalized, validation)) {
-            return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
-                    null, null, 0L);
         }
         return dryRunOpeningFunds(normalized, validation, resolvedFeeSnapshot.get());
     }
@@ -255,8 +172,7 @@ public class OrderService {
             }
         }
         PreparedAeronOrder prepared = prepareAeronOrder(normalize(replacement));
-        return aeronOrders.replace(original, prepared.request(), prepared.validation(), prepared.fee(),
-                prepared.reservation().asset(), prepared.reservation().units());
+        return aeronOrders.replace(original, prepared.request(), prepared.validation(), prepared.fee());
     }
 
     public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
@@ -315,48 +231,14 @@ public class OrderService {
     private TestOrderResponse dryRunOpeningFunds(PlaceOrderRequest request,
                                                  ValidationResult validation,
                                                  OrderFeeSnapshot feeSnapshot) {
-        if (validation.instrumentType() == InstrumentType.SPOT) {
-            var requirement = spotReservationCalculator.requirement(
-                    request.symbol(), validation.instrumentVersion(), request.side(), request.orderType(),
-                    request.priceTicks(), request.quantitySteps(), feeSnapshot);
-            if (requirement.isEmpty()) {
-                return new TestOrderResponse(false, "spot reservation requirement unavailable",
-                        validation.instrumentVersion(), "RESERVE_REQUIREMENT", "SPOT", null, 0L);
-            }
-            SpotReservationRequirement value = requirement.get();
-            if (!value.accepted()) {
-                return new TestOrderResponse(false, value.rejectReason(), validation.instrumentVersion(),
-                        "RESERVE_REQUIREMENT", "SPOT", value.asset(), value.reservedUnits());
-            }
-            return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
-                    "SPOT", value.asset(), value.reservedUnits());
-        }
-        var requirement = orderMarginCalculator.requirement(
-                request.symbol(), validation.instrumentVersion(), request.userId(), request.marginMode(),
-                request.positionSide(), request.side(), request.orderType(), request.priceTicks(),
-                request.quantitySteps(), properties.getRisk().getMarketMaxSlippagePpm(),
-                properties.getRisk().getMarketMaxMarkAgeMs());
-        if (requirement.isEmpty()) {
-            return new TestOrderResponse(false, "margin requirement unavailable", validation.instrumentVersion(),
-                    "RESERVE_REQUIREMENT", null, null, 0L);
-        }
-        MarginRequirement value = requirement.get();
-        if (!value.accepted()) {
-            return new TestOrderResponse(false, value.rejectReason(), validation.instrumentVersion(),
-                    "RESERVE_REQUIREMENT", value.accountType(), value.asset(), value.initialMarginUnits());
-        }
-        if (value.initialMarginUnits() <= 0) {
-            return new TestOrderResponse(false, "invalid margin requirement", validation.instrumentVersion(),
-                    "RESERVE_REQUIREMENT", value.accountType(), value.asset(), value.initialMarginUnits());
+        OrderAeronGateway.PreflightResult result = requireAeron().preflight(request, validation, feeSnapshot);
+        if (!result.accepted()) {
+            return new TestOrderResponse(false, result.resultCode().name(), validation.instrumentVersion(),
+                    "CORE_PREFLIGHT", currentProductLine().accountTypeCode(), null, 0L);
         }
         return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
-                value.accountType(), value.asset(), value.initialMarginUnits());
-    }
-
-    private boolean requiresReduceOnlyFunds(PlaceOrderRequest request, ValidationResult validation) {
-        return request.reduceOnly()
-                && validation.contractType() == ContractType.VANILLA_OPTION
-                && request.side() == OrderSide.BUY;
+                currentProductLine().accountTypeCode(), result.view().reservationAsset(),
+                result.view().reservedUnits());
     }
 
     public OrderResponse cancel(CancelOrderRequest request) {
@@ -676,11 +558,8 @@ public class OrderService {
         return new AmendOrderBatchResponse(results.size(), completed, results.size() - completed, results);
     }
 
-    private record ReservationInput(String asset, long units) {
-    }
-
     private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation,
-                                      OrderFeeSnapshot fee, ReservationInput reservation) {
+                                      OrderFeeSnapshot fee) {
     }
 
     private PlaceOrderRequest normalize(PlaceOrderRequest request) {
@@ -741,24 +620,15 @@ public class OrderService {
                 request.priceTicks(), request.quantitySteps(), request.timeInForce(), request.postOnly());
     }
 
-    private PlaceOrderRequest normalizePositionMode(PlaceOrderRequest request, PositionMode positionMode) {
-        if (currentProductLine() == ProductLine.SPOT) {
+    private PlaceOrderRequest normalizePositionSemantics(PlaceOrderRequest request, ProductLine productLine) {
+        if (productLine == ProductLine.SPOT) {
             if (PositionSide.defaultIfNull(request.positionSide()).isHedgeSide()) {
                 throw new IllegalArgumentException("现货订单不支持 LONG/SHORT 仓位方向");
             }
             return request;
         }
-        PositionMode normalizedMode = PositionMode.defaultIfNull(positionMode);
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
-        if (normalizedMode == PositionMode.ONE_WAY) {
-            if (positionSide.isHedgeSide()) {
-                throw new IllegalArgumentException("positionSide LONG/SHORT requires HEDGE position mode");
-            }
-            return request;
-        }
-        if (!positionSide.isHedgeSide()) {
-            throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
-        }
+        if (!positionSide.isHedgeSide()) return request;
         boolean reduceOnly = request.reduceOnly() || positionSide.isClosingSide(request.side());
         return new PlaceOrderRequest(
                 request.userId(),

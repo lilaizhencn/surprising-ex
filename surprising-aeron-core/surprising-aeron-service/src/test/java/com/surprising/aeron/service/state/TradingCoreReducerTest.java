@@ -14,6 +14,9 @@ import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
@@ -35,9 +38,9 @@ class TradingCoreReducerTest {
                 order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 3_000));
         TradingCoreState canceled = reducer.cancelOrder(placed, 101, new CancelOrderCommand(1));
 
-        assertBalance(placed, "USDT", 7_000, 3_000);
+        assertBalance(placed, "USDT", 9_900, 100);
         assertThat(placed.user(101).totalUnits("USDT")).isEqualTo(10_000);
-        assertThat(placed.user(101).reservations().get(1L).remainingUnits()).isEqualTo(3_000);
+        assertThat(placed.user(101).reservations().get(1L).remainingUnits()).isEqualTo(100);
         assertThat(placed.order(1).status()).isEqualTo(CoreOrderStatus.OPEN);
         assertBalance(canceled, "USDT", 10_000, 0);
         assertThat(canceled.user(101).reservations().get(1L).remainingUnits()).isZero();
@@ -67,7 +70,9 @@ class TradingCoreReducerTest {
                 order(10 + productLine.ordinal(), CoreOrderSide.BUY,
                         ReservationKind.DERIVATIVE_MARGIN, settleAsset, 2_000));
 
-        assertBalance(placed, settleAsset, 8_000, 2_000);
+        assertThat(placed.user(101).totalUnits(settleAsset)).isEqualTo(10_000);
+        assertThat(placed.user(101).balances().get(settleAsset).lockedUnits()).isPositive();
+        assertThat(placed.user(101).balances().get(settleAsset).lockedUnits()).isLessThan(2_000);
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
                 order(100 + productLine.ordinal(), CoreOrderSide.BUY,
                         ReservationKind.SPOT_ASSET, settleAsset, 2_000)))
@@ -94,7 +99,7 @@ class TradingCoreReducerTest {
 
     @Test
     void insufficientFundsAndDuplicateOrderLeavePriorStateUntouched() {
-        TradingCoreState funded = funded(ProductLine.SPOT, "USDT", 1_000);
+        TradingCoreState funded = funded(ProductLine.SPOT, "USDT", 99);
         long initialHash = funded.businessStateHash();
 
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
@@ -104,13 +109,14 @@ class TradingCoreReducerTest {
         assertThat(funded.businessStateHash()).isEqualTo(initialHash);
         assertThat(funded.orders()).isEmpty();
 
-        TradingCoreState placed = reducer.placeOrder(funded, 101,
+        TradingCoreState sufficientlyFunded = funded(ProductLine.SPOT, "USDT", 1_000);
+        TradingCoreState placed = reducer.placeOrder(sufficientlyFunded, 101,
                 order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 400));
         assertThatThrownBy(() -> reducer.placeOrder(placed, 101,
                 order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 400)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("DUPLICATE_ORDER_ID"));
-        assertBalance(placed, "USDT", 600, 400);
+        assertBalance(placed, "USDT", 900, 100);
     }
 
     @Test
@@ -122,6 +128,97 @@ class TradingCoreReducerTest {
 
         assertThat(secondCancel).isSameAs(firstCancel);
         assertBalance(secondCancel, "USDT", 1_000, 0);
+    }
+
+    @Test
+    void coreComputesExactReservationAndRejectsUnderstatedPositiveHint() {
+        TradingCoreState funded = funded(ProductLine.SPOT, "USDT", 1_000);
+
+        assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
+                order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 50)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("INSUFFICIENT_ORDER_RESERVATION"));
+
+        TradingCoreState placed = reducer.placeOrder(funded, 101,
+                order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 0));
+        assertBalance(placed, "USDT", 900, 100);
+    }
+
+    @Test
+    void spotMatchAppliesOrderFeeSnapshotsAndPreservesAssets() {
+        TradingCoreState state = funded(ProductLine.SPOT, "USDT", 1_000);
+        state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("BTC", 10));
+        PlaceOrderCommand makerSell = feeOrder(2, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET,
+                "BTC", -50_000, 100_000);
+        PlaceOrderCommand takerBuy = feeOrder(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET,
+                "USDT", 0, 100_000);
+        state = reducer.placeOrder(state, 202, makerSell);
+        state = reducer.placeOrder(state, 101, takerBuy);
+
+        TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
+                List.of(new CoreMatch(2, 202, 10, 10, true, true)));
+
+        assertThat(matched.user(101).totalUnits("USDT")).isEqualTo(890);
+        assertThat(matched.user(101).totalUnits("BTC")).isEqualTo(10);
+        assertThat(matched.user(202).totalUnits("BTC")).isZero();
+        assertThat(matched.user(202).totalUnits("USDT")).isEqualTo(105);
+        assertThat(matched.treasuryState().feeBalances()).containsEntry("USDT", 5L);
+    }
+
+    @Test
+    void derivativeMatchUsesMakerAndTakerFeeSnapshots() {
+        TradingCoreState state = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 1_000);
+        state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("USDT", 1_000));
+        state = reducer.placeOrder(state, 202, feeOrder(2, CoreOrderSide.SELL,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", -100_000, 200_000));
+        state = reducer.placeOrder(state, 101, feeOrder(1, CoreOrderSide.BUY,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 200_000));
+
+        TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
+                List.of(new CoreMatch(2, 202, 10, 10, true, true)));
+
+        assertThat(matched.user(101).totalUnits("USDT")).isEqualTo(980);
+        assertThat(matched.user(202).totalUnits("USDT")).isEqualTo(1_010);
+        assertThat(matched.user(101).positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(10);
+        assertThat(matched.user(202).positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(10);
+        assertThat(matched.treasuryState().feeBalances()).containsEntry("USDT", 10L);
+    }
+
+    @Test
+    void projectedSameSideOrdersCannotExceedCoreInstrumentLimit() {
+        TradingCoreState state = derivativeWithRiskPolicy(150, 1_000, 10_000_000L, 150, 10_000_000L);
+        state = reducer.adjustBalance(state, 101, new BalanceAdjustmentCommand("USDT", 10_000));
+        state = reducer.placeOrder(state, 101,
+                order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+        TradingCoreState placed = state;
+
+        assertThatThrownBy(() -> reducer.placeOrder(placed, 101,
+                new PlaceOrderCommand(2, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+                        CoreOrderSide.BUY, 10, 6, false, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("POSITION_NOTIONAL_LIMIT_EXCEEDED"));
+    }
+
+    @Test
+    void dynamicOpenInterestFloorAndRiskBracketLeverageAreCoreAuthority() {
+        TradingCoreState floorLimited = derivativeWithRiskPolicy(1_000, 80, 1_000_000L,
+                1_000, 10_000_000L);
+        floorLimited = reducer.adjustBalance(floorLimited, 101, new BalanceAdjustmentCommand("USDT", 10_000));
+        TradingCoreState fundedFloorLimited = floorLimited;
+        assertThatThrownBy(() -> reducer.placeOrder(fundedFloorLimited, 101,
+                order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("OPEN_INTEREST_LIMIT_EXCEEDED"));
+
+        TradingCoreState leverageLimited = derivativeWithRiskPolicy(1_000, 1_000, 10_000_000L,
+                1_000, 5_000_000L);
+        leverageLimited = reducer.adjustBalance(leverageLimited, 101,
+                new BalanceAdjustmentCommand("USDT", 10_000));
+        TradingCoreState fundedLeverageLimited = leverageLimited;
+        assertThatThrownBy(() -> reducer.placeOrder(fundedLeverageLimited, 101,
+                order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("LEVERAGE_EXCEEDS_RISK_BRACKET"));
     }
 
     @Test
@@ -297,8 +394,34 @@ class TradingCoreReducerTest {
                 10, 10, false, kind, asset, reservedUnits);
     }
 
+    private static PlaceOrderCommand feeOrder(
+            long orderId,
+            CoreOrderSide side,
+            ReservationKind kind,
+            String asset,
+            long makerFeeRatePpm,
+            long takerFeeRatePpm) {
+        String settleAsset = kind == ReservationKind.DERIVATIVE_MARGIN ? asset : "USDT";
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", settleAsset, side,
+                10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, kind, asset, 0,
+                com.surprising.aeron.protocol.CoreOrderType.LIMIT,
+                com.surprising.aeron.protocol.CoreTimeInForce.GTC, 10, false, "",
+                makerFeeRatePpm, takerFeeRatePpm);
+    }
+
     private static Stream<ProductLine> derivativeProductLines() {
         return Stream.of(ProductLine.values()).filter(ProductLine::isDerivative);
+    }
+
+    private TradingCoreState derivativeWithRiskPolicy(long maxPosition, long openInterestFloor,
+                                                       long openInterestRate, long bracketCap,
+                                                       long bracketMaxLeverage) {
+        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+                com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
+                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
+                0, -1, 0, 10_000_000L, maxPosition, openInterestRate, openInterestFloor,
+                List.of(new CoreRiskLimitBracket(1, 0, bracketCap, bracketMaxLeverage, 100_000, 50_000)));
+        return reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument);
     }
 
     private static void assertBalance(
