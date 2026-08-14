@@ -177,6 +177,17 @@ public final class CoreProbeState implements AutoCloseable {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
         }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.RISK_STATE_QUERY) {
+            var views = tradingState.riskState().snapshots().values().stream()
+                    .filter(value -> message.header().userId() == 0 || value.userId() == message.header().userId())
+                    .map(value -> new com.surprising.aeron.protocol.CoreRiskSnapshotView(value.userId(),
+                            value.symbol(), value.positionSide(), value.priceSequence(), value.equityUnits(),
+                            value.unrealizedPnlUnits(), value.maintenanceMarginUnits(), value.marginRatioPpm(),
+                            value.status().name())).toList();
+            return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                    com.surprising.aeron.protocol.CoreRiskQueryCodec.encode(views));
+        }
         StoredResult duplicate = commandResults.get(message.header().commandId());
         if (duplicate != null) {
             return new CoreResponse(ResponseStatus.DUPLICATE,

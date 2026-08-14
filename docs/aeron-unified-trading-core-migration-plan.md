@@ -1236,6 +1236,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] Order REST 写入、改单、撤单、查询、批量管理和生命周期入口均不再使用 Aeron-null 回退；无 Aeron Bean 时显式失败关闭。
 - [x] Order provider 全依赖测试 129/129 通过；旧 WAL 行为测试改为验证无 Aeron 不执行旧命令。
 - [ ] Order WAL Bean/投影 worker 及 Risk Redis 权威实现仍待 P6.3 后续删除。
+- [x] Core 新增只读 `RISK_STATE_QUERY/RESULT`，按 userId 返回现有 Aeron Risk Snapshot；不增加第二状态容器，Protocol 14/14、Core 49/49 通过。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 
