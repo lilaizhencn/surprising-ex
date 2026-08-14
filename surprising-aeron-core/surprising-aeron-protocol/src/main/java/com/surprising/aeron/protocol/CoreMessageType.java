@@ -31,11 +31,13 @@ public enum CoreMessageType {
     EXPORT_STATUS_QUERY(107, WireMessageKind.QUERY),
     CLIENT_ORDER_STATE_QUERY(108, WireMessageKind.QUERY),
     TREASURY_STATE_QUERY(109, WireMessageKind.QUERY),
+    ADL_CANDIDATE_QUERY(110, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
     ORDER_STATE_RESULT(203, WireMessageKind.RESPONSE),
     TREASURY_STATE_RESULT(204, WireMessageKind.RESPONSE),
+    ADL_CANDIDATE_RESULT(205, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

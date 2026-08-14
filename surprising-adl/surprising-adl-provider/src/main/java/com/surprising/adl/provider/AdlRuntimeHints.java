@@ -8,8 +8,6 @@ public final class AdlRuntimeHints implements RuntimeHintsRegistrar {
 
     @Override
     public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
-        registerRecord(hints, classLoader, "com.surprising.account.api.model.AccountCommandResultEvent");
-        registerRecord(hints, classLoader, "com.surprising.account.api.model.AccountUserCommand");
         registerRecord(hints, classLoader, "com.surprising.instrument.api.model.InstrumentEvent");
     }
 

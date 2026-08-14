@@ -1,314 +1,173 @@
 package com.surprising.adl.provider.service;
 
 import com.surprising.adl.api.model.AdminCursorPage;
-import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlEventQueryResponse;
+import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlQueuePositionResponse;
 import com.surprising.adl.api.model.AdlQueueQueryResponse;
+import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.config.AdlProperties;
-import com.surprising.adl.provider.model.AdlCandidate;
-import com.surprising.adl.provider.model.AdlExecutionPlan;
-import com.surprising.adl.provider.model.DeficitRow;
+import com.surprising.adl.provider.model.CoreAdlLiquidationProjection;
 import com.surprising.adl.provider.repository.AdlEventRepository;
-import com.surprising.adl.provider.repository.AdlRepository;
 import com.surprising.adl.provider.repository.AdlSequenceRepository;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.Base64;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Optional;
-import com.surprising.trading.api.model.MarginMode;
+import com.surprising.adl.provider.repository.CoreAdlProjectionRepository;
+import com.surprising.aeron.protocol.CoreAdlCandidateView;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.ExecuteAdlCommand;
+import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.trading.api.model.PositionSide;
-import org.springframework.beans.factory.annotation.Autowired;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.List;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
-    public class AdlService {
+public class AdlService {
 
     private final AdlProperties properties;
-    private final AdlRepository adlRepository;
-    private final AdlEventRepository eventRepository;
-    private final AdlSequenceRepository sequenceRepository;
-    private final AdlExecutionPersistenceService executionPersistenceService;
-    private final RedisAdlCandidateIndex redisCandidateIndex;
+    private final CoreAdlProjectionRepository projections;
+    private final AdlAeronGateway aeron;
+    private final AdlEventRepository events;
+    private final AdlSequenceRepository sequences;
 
-    public AdlService(AdlProperties properties, AdlRepository adlRepository) {
-        this(properties, adlRepository, null, null, null, null);
-    }
-
-    @Autowired
-    public AdlService(AdlProperties properties, AdlRepository adlRepository,
-                      RedisAdlCandidateIndex redisCandidateIndex,
-                      AdlEventRepository eventRepository,
-                      AdlSequenceRepository sequenceRepository,
-                      AdlExecutionPersistenceService executionPersistenceService) {
+    public AdlService(AdlProperties properties, CoreAdlProjectionRepository projections,
+                      AdlAeronGateway aeron, AdlEventRepository events, AdlSequenceRepository sequences) {
         this.properties = properties;
-        this.adlRepository = adlRepository;
-        this.redisCandidateIndex = redisCandidateIndex;
-        this.eventRepository = eventRepository;
-        this.sequenceRepository = sequenceRepository;
-        this.executionPersistenceService = executionPersistenceService;
+        this.projections = projections;
+        this.aeron = aeron;
+        this.events = events;
+        this.sequences = sequences;
     }
 
-    /**
-     * ADL 刻意排在保险基金覆盖之后；只要对应资产仍有保险基金余额，就把缺口留给保险基金优先处理。
-     */
-    @Transactional
     public void processResidualDeficits() {
-        var scanner = properties.getScanner();
-        if (!scanner.isEnabled()) {
-            return;
-        }
-        List<DeficitRow> deficits = adlRepository.claimResidualDeficits(
-                Math.max(1, scanner.getBatchSize()),
-                Duration.ofMillis(Math.max(0L, scanner.getMinDeficitAgeMs())));
-        for (DeficitRow deficit : deficits) {
-            processDeficit(deficit);
+        if (!properties.getScanner().isEnabled()) return;
+        List<CoreAdlLiquidationProjection> pending = projections.pending(
+                properties.getKafka().getProductLine().name(), properties.getScanner().getBatchSize());
+        for (CoreAdlLiquidationProjection liquidation : pending) process(liquidation);
+    }
+
+    private void process(CoreAdlLiquidationProjection liquidation) {
+        long remaining = liquidation.deficitUnits();
+        int max = Math.max(1, properties.getScanner().getMaxDeleveragesPerDeficit());
+        int candidateLimit = Math.min(1000, max * Math.max(1, properties.getScanner().getCandidateMultiplier()));
+        int executed = 0;
+        for (CoreAdlCandidateView candidate : aeron.candidates(liquidation.asset(), candidateLimit)) {
+            if (remaining <= 0 || executed >= max) break;
+            if (candidate.userId() == liquidation.userId()
+                    || Long.signum(candidate.signedQuantitySteps()) == Long.signum(liquidation.signedQuantitySteps())) {
+                continue;
+            }
+            long closeSteps = AdlMath.closeStepsForCover(remaining,
+                    Math.absExact(candidate.signedQuantitySteps()), candidate.unrealizedProfitUnits());
+            long realized = AdlMath.proportionalUnits(candidate.unrealizedProfitUnits(), closeSteps,
+                    Math.absExact(candidate.signedQuantitySteps()));
+            long covered = Math.min(remaining, realized);
+            if (closeSteps <= 0 || covered <= 0) continue;
+            long eventId = sequences.next("adl-execution");
+            UUID commandId = UUID.nameUUIDFromBytes((properties.getKafka().getProductLine() + ":ADL:"
+                    + liquidation.liquidationId() + ':' + candidate.userId() + ':' + candidate.symbol() + ':'
+                    + candidate.markPriceSequence() + ':' + closeSteps).getBytes(StandardCharsets.UTF_8));
+            aeron.execute(commandId, TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(
+                    liquidation.liquidationId(), candidate.userId(), candidate.symbol(), candidate.marginMode(),
+                    candidate.positionSide(), candidate.signedQuantitySteps(), candidate.entryPriceTicks(),
+                    candidate.markPriceSequence(), closeSteps, covered)));
+            remaining = Math.subtractExact(remaining, covered);
+            events.insertCompleted(eventId, accountType(), liquidation, candidate, closeSteps, realized,
+                    covered, remaining, Instant.now());
+            executed++;
         }
     }
 
     public AdlQueueQueryResponse queue(String asset, int limit) {
-        int capped = normalizeLimit(limit);
-        var positions = adlRepository.queue(normalizeAsset(asset), capped, maxMarkAge()).stream()
-                .map(this::toQueuePosition)
-                .toList();
-        return new AdlQueueQueryResponse(positions.size(), positions);
+        return queue(asset, limit, null, null);
     }
 
     public AdlQueueQueryResponse queue(String asset, int limit, String cursor, String sort) {
-        int capped = normalizeLimit(limit);
-        QueueSortSpec sortSpec = parseQueueSort(sort);
-        QueueCursor decodedCursor = decodeQueueCursor(cursor);
-        List<AdlQueuePositionResponse> fetched = adlRepository.queue(normalizeAsset(asset), 5000, maxMarkAge())
-                .stream()
-                .map(this::toQueuePosition)
-                .sorted(queueComparator(sortSpec))
-                .filter(position -> decodedCursor == null || afterQueueCursor(position, decodedCursor, sortSpec))
-                .limit(capped + 1L)
-                .toList();
-        boolean hasMore = fetched.size() > capped;
-        List<AdlQueuePositionResponse> positions = hasMore
-                ? List.copyOf(fetched.subList(0, capped))
-                : List.copyOf(fetched);
-        String nextCursor = hasMore && !positions.isEmpty()
-                ? encodeQueueCursor(positions.get(positions.size() - 1))
-                : null;
-        return new AdlQueueQueryResponse(positions.size(), positions, nextCursor, hasMore, sortSpec.token(), capped);
+        if (sort != null && !sort.isBlank() && !"priorityScorePpm.desc".equals(sort.trim())) {
+            throw new IllegalArgumentException("unsupported sort: " + sort);
+        }
+        int safeLimit = normalizeLimit(limit);
+        CoreAdlCandidateView after = decodeCursor(cursor);
+        List<CoreAdlCandidateView> fetched = aeron.candidates(normalizeAsset(asset), 1000).stream()
+                .filter(value -> after == null || isAfter(value, after)).limit(safeLimit + 1L).toList();
+        boolean hasMore = fetched.size() > safeLimit;
+        List<CoreAdlCandidateView> page = hasMore ? fetched.subList(0, safeLimit) : fetched;
+        List<AdlQueuePositionResponse> positions = page.stream().map(this::response).toList();
+        String next = hasMore ? encodeCursor(page.getLast()) : null;
+        return new AdlQueueQueryResponse(positions.size(), positions, next, hasMore,
+                "priorityScorePpm.desc", safeLimit);
     }
 
     public AdlEventQueryResponse events(Long userId, String asset, String symbol, int limit) {
-        if (userId != null && userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        int capped = normalizeLimit(limit);
-        var rows = eventRepository.page(accountType(), userId,
-                asset == null || asset.isBlank() ? null : normalizeAsset(asset),
-                symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
-                capped, null, null).items();
-        return new AdlEventQueryResponse(rows.size(), rows);
+        return events(userId, asset, symbol, limit, null, null);
     }
 
-    public AdlEventQueryResponse events(Long userId,
-                                        String asset,
-                                        String symbol,
-                                        int limit,
-                                        String cursor,
-                                        String sort) {
-        if (userId != null && userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        AdminCursorPage.CursorPage<AdlEventResponse> page = eventRepository.page(accountType(), userId,
+    public AdlEventQueryResponse events(Long userId, String asset, String symbol, int limit,
+                                        String cursor, String sort) {
+        AdminCursorPage.CursorPage<AdlEventResponse> page = events.page(accountType(), userId,
                 asset == null || asset.isBlank() ? null : normalizeAsset(asset),
-                symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol),
+                symbol == null || symbol.isBlank() ? null : symbol.trim().toUpperCase(),
                 normalizeLimit(limit), cursor, sort);
         return new AdlEventQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
 
-    private void processDeficit(DeficitRow deficit) {
-        var scanner = properties.getScanner();
-        int maxDeleverages = Math.max(1, scanner.getMaxDeleveragesPerDeficit());
-        int candidateLimit = Math.max(maxDeleverages,
-                maxDeleverages * Math.max(1, scanner.getCandidateMultiplier()));
-        long remaining = deficit.deficitUnits();
-        int executions = 0;
-        var candidates = redisCandidates(deficit, candidateLimit).stream()
-                .sorted(Comparator.comparingLong((com.surprising.adl.provider.model.AdlCandidate c) ->
-                                c.priorityScorePpm()).reversed()
-                        .thenComparing(Comparator.comparingLong(
-                                com.surprising.adl.provider.model.AdlCandidate::unrealizedProfitUnits).reversed()))
-                .toList();
-        for (var candidate : candidates) {
-            if (remaining <= 0 || executions >= maxDeleverages) {
-                break;
-            }
-            var locked = adlRepository.lockCandidate(candidate.userId(), candidate.symbol(), candidate.marginMode(),
-                    candidate.positionSide(), deficit.asset(), maxMarkAge());
-            if (locked.isEmpty()) {
-                continue;
-            }
-            AdlExecutionPlan plan = plan(deficit, locked.get(), remaining);
-            if (executionPersistenceService == null) {
-                throw new IllegalStateException("ADL execution repository is not configured");
-            }
-            executionPersistenceService.create(plan, java.time.Instant.now());
-            remaining = Math.subtractExact(remaining, plan.coveredUnits());
-            executions++;
-        }
+    private AdlQueuePositionResponse response(CoreAdlCandidateView value) {
+        return new AdlQueuePositionResponse(value.userId(), value.asset(), value.symbol(),
+                positionSide(value.positionSide()), value.signedQuantitySteps() > 0 ? AdlSide.LONG : AdlSide.SHORT,
+                value.signedQuantitySteps(), value.entryPriceTicks(), value.markPriceTicks(), value.notionalUnits(),
+                value.unrealizedProfitUnits(), value.marginUnits(), value.profitRatePpm(),
+                value.effectiveLeveragePpm(), value.priorityScorePpm());
     }
 
-    private AdlExecutionPlan plan(DeficitRow deficit, AdlCandidate candidate, long remainingDeficitUnits) {
-        long closeSteps = AdlMath.closeStepsForCover(remainingDeficitUnits, candidate.absQuantitySteps(),
-                candidate.unrealizedProfitUnits());
-        long realizedProfitUnits = AdlMath.proportionalUnits(candidate.unrealizedProfitUnits(), closeSteps,
-                candidate.absQuantitySteps());
-        long coveredUnits = Math.min(remainingDeficitUnits, realizedProfitUnits);
-        if (closeSteps <= 0 || realizedProfitUnits <= 0 || coveredUnits <= 0) {
-            throw new IllegalStateException("invalid ADL execution plan");
-        }
-        long executionId = sequenceRepository.next("adl-execution");
-        var productLine = properties.getKafka().getProductLine();
-        String prefix = productLine.name() + ":" + executionId;
-        return new AdlExecutionPlan(
-                executionId, productLine, deficit.accountType(), deficit.userId(), candidate.userId(),
-                candidate.asset(), candidate.symbol(), candidate.side(), candidate.marginMode(),
-                candidate.positionSide(), candidate.signedQuantitySteps(), closeSteps,
-                candidate.entryPriceTicks(), candidate.markPriceTicks(), deficit.deficitUnits(),
-                realizedProfitUnits, coveredUnits, candidate.priorityScorePpm(),
-                "ADL_RESERVE:" + prefix, "ADL_TARGET:" + prefix, "ADL_FINALIZE:" + prefix);
+    private static boolean isAfter(CoreAdlCandidateView value, CoreAdlCandidateView cursor) {
+        return value.priorityScorePpm() < cursor.priorityScorePpm()
+                || value.priorityScorePpm() == cursor.priorityScorePpm()
+                && (value.unrealizedProfitUnits() < cursor.unrealizedProfitUnits()
+                || value.unrealizedProfitUnits() == cursor.unrealizedProfitUnits()
+                && (value.userId() > cursor.userId()
+                || value.userId() == cursor.userId() && value.symbol().compareTo(cursor.symbol()) > 0));
     }
 
-    private List<com.surprising.adl.provider.model.AdlCandidate> redisCandidates(DeficitRow deficit, int limit) {
-        if (redisCandidateIndex != null) {
-            Optional<List<RedisAdlCandidateIndex.Member>> members = redisCandidateIndex.candidates(
-                    properties.getKafka().getProductLine(), deficit.asset(), limit);
-            if (members.isPresent()) {
-                return members.get().stream()
-                        .filter(member -> member.userId() != deficit.userId())
-                        .map(member -> adlRepository.lockCandidate(member.userId(), member.symbol(),
-                                MarginMode.valueOf(member.marginMode()), PositionSide.valueOf(member.positionSide()),
-                                deficit.asset(), maxMarkAge()))
-                        .flatMap(Optional::stream)
-                        .toList();
-            }
-        }
-        return adlRepository.queue(deficit.asset(), deficit.userId(), limit, maxMarkAge());
-    }
-
-    private String normalizeAsset(String asset) {
-        if (asset == null || asset.isBlank()) {
-            throw new IllegalArgumentException("asset is required");
-        }
-        String normalized = asset.trim().toUpperCase();
-        if (!normalized.matches("[A-Z0-9]{2,20}")) {
-            throw new IllegalArgumentException("invalid asset: " + asset);
-        }
-        return normalized;
-    }
-
-    private int normalizeLimit(int limit) {
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be between 1 and 1000");
-        }
-        return limit;
-    }
-
-    private Duration maxMarkAge() {
-        return Duration.ofMillis(Math.max(1L, properties.getScanner().getMaxMarkAgeMs()));
-    }
-
-    private String accountType() {
-        String accountType = properties.getKafka().getAccountType();
-        return accountType == null || accountType.isBlank()
-                ? "USDT_PERPETUAL"
-                : accountType.trim().toUpperCase();
-    }
-
-    private String normalizeSymbol(String symbol) {
-        String normalized = symbol.trim().toUpperCase();
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
-        }
-        return normalized;
-    }
-
-    private AdlQueuePositionResponse toQueuePosition(AdlCandidate candidate) {
-        return new AdlQueuePositionResponse(candidate.userId(), candidate.asset(),
-                candidate.symbol(), candidate.positionSide(), candidate.side(), candidate.signedQuantitySteps(),
-                candidate.entryPriceTicks(), candidate.markPriceTicks(), candidate.notionalUnits(),
-                candidate.unrealizedProfitUnits(), candidate.marginUnits(), candidate.profitRatePpm(),
-                candidate.effectiveLeveragePpm(), candidate.priorityScorePpm());
-    }
-
-    private QueueSortSpec parseQueueSort(String value) {
-        if (value == null || value.isBlank() || "priorityScorePpm.desc".equals(value.trim())) {
-            return new QueueSortSpec("priorityScorePpm.desc");
-        }
-        throw new IllegalArgumentException("unsupported sort: " + value);
-    }
-
-    private Comparator<AdlQueuePositionResponse> queueComparator(QueueSortSpec sortSpec) {
-        return Comparator.comparingLong(AdlQueuePositionResponse::priorityScorePpm).reversed()
-                .thenComparing(Comparator.comparingLong(AdlQueuePositionResponse::unrealizedProfitUnits).reversed())
-                .thenComparingLong(AdlQueuePositionResponse::userId)
-                .thenComparing(AdlQueuePositionResponse::symbol)
-                .thenComparing(position -> position.positionSide().name());
-    }
-
-    private boolean afterQueueCursor(AdlQueuePositionResponse position,
-                                     QueueCursor cursor,
-                                     QueueSortSpec sortSpec) {
-        int priority = Long.compare(position.priorityScorePpm(), cursor.priorityScorePpm());
-        if (priority != 0) {
-            return priority < 0;
-        }
-        int profit = Long.compare(position.unrealizedProfitUnits(), cursor.unrealizedProfitUnits());
-        if (profit != 0) {
-            return profit < 0;
-        }
-        int user = Long.compare(position.userId(), cursor.userId());
-        if (user != 0) {
-            return user > 0;
-        }
-        int symbol = position.symbol().compareTo(cursor.symbol());
-        if (symbol != 0) {
-            return symbol > 0;
-        }
-        return position.positionSide().name().compareTo(cursor.positionSide()) > 0;
-    }
-
-    private QueueCursor decodeQueueCursor(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            String[] parts = decoded.split(":", 5);
-            if (parts.length != 4 && parts.length != 5) {
-                throw new IllegalArgumentException("invalid cursor");
-            }
-            return new QueueCursor(Long.parseLong(parts[0]), Long.parseLong(parts[1]),
-                    Long.parseLong(parts[2]), parts[3], parts.length == 5 ? parts[4] : "NET");
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("invalid cursor", ex);
-        }
-    }
-
-    private String encodeQueueCursor(AdlQueuePositionResponse position) {
-        String raw = position.priorityScorePpm() + ":" + position.unrealizedProfitUnits()
-                + ":" + position.userId() + ":" + position.symbol() + ":" + position.positionSide().name();
+    private static String encodeCursor(CoreAdlCandidateView value) {
+        String raw = value.priorityScorePpm() + ":" + value.unrealizedProfitUnits() + ":"
+                + value.userId() + ":" + value.symbol();
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
-    private record QueueSortSpec(String token) {
+    private static CoreAdlCandidateView decodeCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) return null;
+        try {
+            String[] parts = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8).split(":", 4);
+            if (parts.length != 4) throw new IllegalArgumentException("invalid cursor");
+            return new CoreAdlCandidateView(Long.parseLong(parts[2]), parts[3], "USDT", CoreMarginMode.CROSS,
+                    CorePositionSide.NET, 1, 1, 1, 1, 1, Long.parseLong(parts[1]), 1, 1, 1,
+                    Long.parseLong(parts[0]));
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("invalid cursor", exception);
+        }
     }
 
-    private record QueueCursor(long priorityScorePpm,
-                               long unrealizedProfitUnits,
-                               long userId,
-                               String symbol,
-                               String positionSide) {
+    private static PositionSide positionSide(CorePositionSide side) {
+        return switch (side) { case NET -> PositionSide.NET; case LONG -> PositionSide.LONG; case SHORT -> PositionSide.SHORT; };
+    }
+
+    private int normalizeLimit(int limit) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1,1000]");
+        return limit;
+    }
+
+    private String normalizeAsset(String asset) {
+        if (asset == null || !asset.trim().toUpperCase().matches("[A-Z0-9]{2,20}")) {
+            throw new IllegalArgumentException("invalid asset");
+        }
+        return asset.trim().toUpperCase();
+    }
+
+    private String accountType() {
+        return properties.getKafka().getAccountType();
     }
 }

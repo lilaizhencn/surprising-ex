@@ -24,6 +24,8 @@ import java.util.UUID;
 
 public final class TradingCoreReducer {
 
+    private static final long PPM = 1_000_000L;
+
     public TradingCoreState updatePositionMode(
             TradingCoreState state, long userId, UpdatePositionModeCommand command) {
         requireUserId(userId);
@@ -708,6 +710,57 @@ public final class TradingCoreReducer {
                 liquidations, state.riskState().scan(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState());
+    }
+
+    public java.util.List<com.surprising.aeron.protocol.CoreAdlCandidateView> adlCandidates(
+            TradingCoreState state, String asset, int limit) {
+        String normalizedAsset = AssetBalance.normalizeAsset(asset);
+        java.util.ArrayList<com.surprising.aeron.protocol.CoreAdlCandidateView> result = new java.util.ArrayList<>();
+        for (CoreUserState user : state.users().values()) {
+            for (CorePositionState position : user.positions().values()) {
+                if (position.signedQuantitySteps() == 0 || !position.marginAsset().equals(normalizedAsset)) continue;
+                CoreInstrumentState instrument = state.instruments().get(position.symbol());
+                CoreMarkPriceState mark = state.riskState().markPrices().get(position.symbol());
+                if (instrument == null || mark == null || !instrument.contractType().isPerpetual()
+                        || !instrument.settleAsset().equals(normalizedAsset)) continue;
+                long profit = CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
+                        position.entryPriceTicks(), mark.markPriceTicks());
+                if (profit <= 0) continue;
+                long notional = com.surprising.instrument.api.math.PerpetualContractMath.notionalUnits(
+                        instrument.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),
+                        instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
+                        instrument.settleScaleUnits());
+                long margin = position.marginMode() == com.surprising.aeron.protocol.CoreMarginMode.ISOLATED
+                        ? position.positionMarginUnits()
+                        : user.totalUnits(normalizedAsset);
+                long profitRate = ratio(profit, notional);
+                long leverage = margin <= 0 ? Long.MAX_VALUE : ratio(notional, margin);
+                long priority = multiplyDivideCapped(profitRate, leverage, PPM);
+                result.add(new com.surprising.aeron.protocol.CoreAdlCandidateView(user.userId(), position.symbol(),
+                        normalizedAsset, position.marginMode(), position.positionSide(),
+                        position.signedQuantitySteps(), position.entryPriceTicks(), mark.markPriceTicks(),
+                        mark.priceSequence(), notional, profit, margin, profitRate, leverage, priority));
+            }
+        }
+        return result.stream().sorted(java.util.Comparator
+                        .comparingLong(com.surprising.aeron.protocol.CoreAdlCandidateView::priorityScorePpm).reversed()
+                        .thenComparing(java.util.Comparator.comparingLong(
+                                com.surprising.aeron.protocol.CoreAdlCandidateView::unrealizedProfitUnits).reversed())
+                        .thenComparingLong(com.surprising.aeron.protocol.CoreAdlCandidateView::userId)
+                        .thenComparing(com.surprising.aeron.protocol.CoreAdlCandidateView::symbol))
+                .limit(limit).toList();
+    }
+
+    private static long ratio(long numerator, long denominator) {
+        return numerator <= 0 || denominator <= 0 ? 0 : multiplyDivideCapped(numerator, PPM, denominator);
+    }
+
+    private static long multiplyDivideCapped(long left, long right, long divisor) {
+        try {
+            return Math.multiplyExact(left, right) / divisor;
+        } catch (ArithmeticException exception) {
+            return Long.MAX_VALUE;
+        }
     }
 
     private TradingCoreState cancelUserSymbolOrders(TradingCoreState state, long userId, String symbol) {

@@ -1226,6 +1226,14 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
   Option payload，Account provider 全依赖测试 126/126 通过。
 - [ ] Account/Order/Funding/Risk/Liquidation 现有服务入口切换到 Aeron 后删除旧实现。
 
+执行记录（2026-08-14，子阶段 P6.2）：
+
+- [x] ADL 候选查询新增 `ADL_CANDIDATE_QUERY/RESULT`，候选排序、标记序列和利润容量直接由 Aeron Core 读取。
+- [x] ADL 执行通过单条 `EXECUTE_ADL` 原子校验并修改目标仓位与强平缺口；PG 仅读取 `core_liquidation_projection` 选集并写审计。
+- [x] 删除 ADL Redis 候选索引、Risk Kafka 消费、Account outbox/deficit/saga/reconcile 和旧 ADL 数据模型；生产代码不再包含旧 ADL 权威类。
+- [x] ADL provider 重写为 Aeron gateway + Core liquidation projection；Aeron 查询、事件 cursor 和禁用扫描边界测试 6/6 通过，模块依赖链测试通过。
+- [ ] Order/Risk/Matching 仍存在旧 WAL/Redis 回退入口，继续在 P6.3 清理。
+
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 
 ### 18.8 P7：六线补齐

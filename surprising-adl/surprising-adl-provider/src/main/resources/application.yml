@@ -55,3 +55,10 @@ surprising:
       allowed-future-skew: 1s
       concurrency: 1
       max-poll-records: 500
+surprising:
+  adl:
+    aeron:
+      hostnames: ${AERON_HOSTNAMES:localhost,localhost,localhost}
+      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+      client-connections: ${AERON_CLIENT_CONNECTIONS:2}

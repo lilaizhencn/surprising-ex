@@ -166,6 +166,17 @@ public final class CoreProbeState implements AutoCloseable {
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
                     CoreStateQueryCodec.encodeTreasuryState(views));
         }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.ADL_CANDIDATE_QUERY) {
+            try {
+                var query = com.surprising.aeron.protocol.CoreAdlQueryCodec.decodeQuery(message.payload());
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                        com.surprising.aeron.protocol.CoreAdlQueryCodec.encodeCandidates(
+                                tradingReducer.adlCandidates(tradingState, query.asset(), query.limit())));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
         StoredResult duplicate = commandResults.get(message.header().commandId());
         if (duplicate != null) {
             return new CoreResponse(ResponseStatus.DUPLICATE,

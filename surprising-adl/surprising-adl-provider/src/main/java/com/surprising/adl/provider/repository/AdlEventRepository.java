@@ -3,7 +3,8 @@ package com.surprising.adl.provider.repository;
 import com.surprising.adl.api.model.AdminCursorPage;
 import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlSide;
-import com.surprising.adl.provider.model.AdlSagaState;
+import com.surprising.adl.provider.model.CoreAdlLiquidationProjection;
+import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.trading.api.model.PositionSide;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -24,7 +25,9 @@ public class AdlEventRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void insert(AdlSagaState saga, long remainingDeficitUnits, Instant now) {
+    public void insertCompleted(long eventId, String accountType, CoreAdlLiquidationProjection liquidation,
+                                CoreAdlCandidateView candidate, long closeSteps, long realizedProfitUnits,
+                                long coveredUnits, long remainingDeficitUnits, Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO adl_events (
                     event_id, account_type, deficit_user_id, target_user_id, asset, symbol,
@@ -32,17 +35,14 @@ public class AdlEventRepository {
                     entry_price_ticks, mark_price_ticks, requested_deficit_units,
                     realized_profit_units, covered_units, remaining_deficit_units,
                     priority_score_ppm, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          'ADL_DEFICIT_COVERAGE', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AERON_ADL_COVERAGE', ?)
                 ON CONFLICT (event_id) DO NOTHING
-                """, saga.executionId(), saga.accountType(), saga.deficitUserId(), saga.targetUserId(),
-                saga.asset(), saga.symbol(), saga.targetSide(), saga.targetPositionSide(),
-                saga.closedQuantitySteps(), saga.entryPriceTicks(), saga.markPriceTicks(),
-                saga.requestedDeficitUnits(), saga.realizedProfitUnits(), saga.coveredUnits(),
-                remainingDeficitUnits, saga.priorityScorePpm(), Timestamp.from(now));
-        if (rows != 1) {
-            throw new IllegalStateException("failed to write ADL event completion insert");
-        }
+                """, eventId, accountType, liquidation.userId(), candidate.userId(), liquidation.asset(),
+                candidate.symbol(), candidate.signedQuantitySteps() > 0 ? "LONG" : "SHORT",
+                candidate.positionSide().name(), closeSteps, candidate.entryPriceTicks(),
+                candidate.markPriceTicks(), liquidation.deficitUnits(), realizedProfitUnits, coveredUnits,
+                remainingDeficitUnits, candidate.priorityScorePpm(), Timestamp.from(now));
+        if (rows != 0 && rows != 1) throw new IllegalStateException("failed to write ADL event audit");
     }
 
     public AdminCursorPage.CursorPage<AdlEventResponse> page(String accountType,

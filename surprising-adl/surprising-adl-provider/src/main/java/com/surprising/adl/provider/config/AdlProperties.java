@@ -4,6 +4,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import jakarta.annotation.PostConstruct;
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.adl")
@@ -11,7 +12,7 @@ public class AdlProperties {
 
     private Kafka kafka = new Kafka();
     private Scanner scanner = new Scanner();
-    private RedisIndex redisIndex = new RedisIndex();
+    private Aeron aeron = new Aeron();
 
     /** 启动时拒绝未隔离的 ADL 风控 Topic 配置。 */
     @PostConstruct
@@ -34,8 +35,8 @@ public class AdlProperties {
     public void setScanner(Scanner scanner) {
         this.scanner = scanner;
     }
-    public RedisIndex getRedisIndex() { return redisIndex; }
-    public void setRedisIndex(RedisIndex redisIndex) { this.redisIndex = redisIndex; }
+    public Aeron getAeron() { return aeron; }
+    public void setAeron(Aeron aeron) { this.aeron = aeron == null ? new Aeron() : aeron; }
 
     public static class Kafka {
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
@@ -82,13 +83,30 @@ public class AdlProperties {
         }
     }
 
-    public static class RedisIndex {
-        private String keyPrefix = "surprising:adl:v1";
-        private long readyTtlMs = 30_000L;
-        public String getKeyPrefix() { return keyPrefix; }
-        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
-        public long getReadyTtlMs() { return readyTtlMs; }
-        public void setReadyTtlMs(long readyTtlMs) { this.readyTtlMs = readyTtlMs; }
+    public static class Aeron {
+        private java.util.List<String> hostnames = java.util.List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private Duration responseTimeout = Duration.ofSeconds(5);
+        private int clientConnections = 2;
+        public java.util.List<String> getHostnames() { return hostnames; }
+        public void setHostnames(java.util.List<String> value) {
+            if (value == null || value.size() != 3 || value.stream().anyMatch(host -> host == null || host.isBlank())) {
+                throw new IllegalArgumentException("aeron.hostnames must contain exactly three nonblank hosts");
+            }
+            hostnames = java.util.List.copyOf(value);
+        }
+        public String getEgressHostname() { return egressHostname; }
+        public void setEgressHostname(String value) { egressHostname = value; }
+        public Duration getResponseTimeout() { return responseTimeout; }
+        public void setResponseTimeout(Duration value) {
+            if (value == null || value.isZero() || value.isNegative()) throw new IllegalArgumentException("aeron.response-timeout must be positive");
+            responseTimeout = value;
+        }
+        public int getClientConnections() { return clientConnections; }
+        public void setClientConnections(int value) {
+            if (value < 1 || value > 64) throw new IllegalArgumentException("aeron.client-connections must be in [1,64]");
+            clientConnections = value;
+        }
     }
 
     public static class Scanner {

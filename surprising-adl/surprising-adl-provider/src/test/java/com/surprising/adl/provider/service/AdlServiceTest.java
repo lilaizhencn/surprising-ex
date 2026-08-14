@@ -1,161 +1,85 @@
 package com.surprising.adl.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.*;
 
 import com.surprising.adl.api.model.AdminCursorPage;
 import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.config.AdlProperties;
-import com.surprising.adl.provider.model.AdlCandidate;
-import com.surprising.adl.provider.model.DeficitRow;
+import com.surprising.adl.provider.model.CoreAdlLiquidationProjection;
 import com.surprising.adl.provider.repository.AdlEventRepository;
-import com.surprising.adl.provider.repository.AdlRepository;
-import java.time.Duration;
+import com.surprising.adl.provider.repository.AdlSequenceRepository;
+import com.surprising.adl.provider.repository.CoreAdlProjectionRepository;
+import com.surprising.aeron.protocol.CoreAdlCandidateView;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CorePositionSide;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class AdlServiceTest {
 
     @Test
-    void processResidualDeficitsDoesNothingWhenScannerIsDisabled() {
+    void disabledScannerDoesNotReadPostgres() {
         AdlProperties properties = new AdlProperties();
         properties.getScanner().setEnabled(false);
-        FakeAdlRepository repository = new FakeAdlRepository();
-        AdlService service = new AdlService(properties, repository);
+        CoreAdlProjectionRepository projections = mock(CoreAdlProjectionRepository.class);
+        AdlService service = service(properties, projections, mock(AdlAeronGateway.class),
+                mock(AdlEventRepository.class), mock(AdlSequenceRepository.class));
 
         service.processResidualDeficits();
 
-        assertThat(repository.claimCalls).isZero();
+        verifyNoInteractions(projections);
     }
 
     @Test
-    void processResidualDeficitsClaimsWithConfiguredScannerLimitsWhenEnabled() {
-        AdlProperties properties = new AdlProperties();
-        properties.getScanner().setBatchSize(3);
-        properties.getScanner().setMinDeficitAgeMs(2500L);
-        FakeAdlRepository repository = new FakeAdlRepository();
-        AdlService service = new AdlService(properties, repository);
+    void queueUsesAeronCandidatesAndCursor() {
+        AdlAeronGateway aeron = mock(AdlAeronGateway.class);
+        CoreAdlCandidateView first = candidate(1001, 900_000);
+        CoreAdlCandidateView second = candidate(1002, 800_000);
+        when(aeron.candidates("USDT", 1000)).thenReturn(List.of(first, second));
+        AdlService service = service(new AdlProperties(), mock(CoreAdlProjectionRepository.class), aeron,
+                mock(AdlEventRepository.class), mock(AdlSequenceRepository.class));
 
-        service.processResidualDeficits();
+        var page = service.queue("usdt", 1);
+        var next = service.queue("USDT", 1, page.nextCursor(), null);
 
-        assertThat(repository.claimCalls).isEqualTo(1);
-        assertThat(repository.lastBatchSize).isEqualTo(3);
-        assertThat(repository.lastMinAge).isEqualTo(Duration.ofMillis(2500L));
+        assertThat(page.positions()).singleElement().extracting("userId").isEqualTo(1001L);
+        assertThat(page.hasMore()).isTrue();
+        assertThat(next.positions()).singleElement().extracting("userId").isEqualTo(1002L);
     }
 
     @Test
-    void adminQueueExposesRankingCursorMetadata() {
-        FakeAdlRepository repository = new FakeAdlRepository();
-        repository.queueRows.add(new AdlCandidate(1001L, "USDT", "BTC-USDT", AdlSide.LONG,
-                10L, 10L, 50_000L, 55_000L, 5_000L, 550_000L,
-                50_000L, 100_000L, 500_000L, 1_000_000L, 900_000L));
-        repository.queueRows.add(new AdlCandidate(1002L, "USDT", "ETH-USDT", AdlSide.LONG,
-                10L, 10L, 3_000L, 3_500L, 500L, 35_000L,
-                5_000L, 10_000L, 500_000L, 1_000_000L, 800_000L));
-        AdlService service = new AdlService(
-                new AdlProperties(), repository, null, new FakeAdlEventRepository(), null, null);
+    void eventsKeepPostgresAuditCursorContract() {
+        AdlEventRepository events = mock(AdlEventRepository.class);
+        AdlEventResponse event = new AdlEventResponse(7, 1, 2, "USDT", "BTC-USDT", AdlSide.LONG,
+                3, 10, 11, 100, 20, 20, 80, 900_000, "AERON_ADL_COVERAGE", Instant.EPOCH);
+        when(events.page(any(), any(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(new AdminCursorPage.CursorPage<>(List.of(event), "next", true,
+                        "createdAt.desc", 50));
+        AdlService service = service(new AdlProperties(), mock(CoreAdlProjectionRepository.class),
+                mock(AdlAeronGateway.class), events, mock(AdlSequenceRepository.class));
 
-        var firstPage = service.queue("usdt", 1, null, null);
-        var secondPage = service.queue("USDT", 1, firstPage.nextCursor(), null);
+        var response = service.events(1L, "usdt", "btc-usdt", 50, "cursor", "createdAt.desc");
 
-        assertThat(repository.lastAsset).isEqualTo("USDT");
-        assertThat(repository.lastLimit).isEqualTo(5000);
-        assertThat(firstPage.positions()).singleElement().satisfies(position -> {
-            assertThat(position.userId()).isEqualTo(1001L);
-            assertThat(position.priorityScorePpm()).isEqualTo(900_000L);
-        });
-        assertThat(firstPage.hasMore()).isTrue();
-        assertThat(firstPage.sort()).isEqualTo("priorityScorePpm.desc");
-        assertThat(secondPage.positions()).singleElement()
-                .satisfies(position -> assertThat(position.userId()).isEqualTo(1002L));
-    }
-
-    @Test
-    void adminEventsExposeCursorMetadata() {
-        FakeAdlRepository repository = new FakeAdlRepository();
-        AdlEventResponse event = new AdlEventResponse(7001L, 1001L, 1002L, "USDT",
-                "BTC-USDT", AdlSide.LONG, 10L, 50_000L, 55_000L,
-                1_000L, 500L, 500L, 500L, 900_000L, "ADL_DEFICIT_COVERAGE",
-                Instant.parse("2026-07-01T00:00:00Z"));
-        FakeAdlEventRepository eventRepository = new FakeAdlEventRepository();
-        eventRepository.eventPage = new AdminCursorPage.CursorPage<>(List.of(event), "next-events",
-                true, "createdAt.desc", 50);
-        AdlService service = new AdlService(
-                new AdlProperties(), repository, null, eventRepository, null, null);
-
-        var response = service.events(1001L, "usdt", "btc-usdt", 50, "cursor-events", "createdAt.desc");
-
-        assertThat(eventRepository.lastEventsUserId).isEqualTo(1001L);
-        assertThat(eventRepository.lastEventsAsset).isEqualTo("USDT");
-        assertThat(eventRepository.lastEventsSymbol).isEqualTo("BTC-USDT");
-        assertThat(eventRepository.lastEventsCursor).isEqualTo("cursor-events");
         assertThat(response.events()).containsExactly(event);
-        assertThat(response.nextCursor()).isEqualTo("next-events");
-        assertThat(response.hasMore()).isTrue();
-        assertThat(response.limit()).isEqualTo(50);
+        assertThat(response.nextCursor()).isEqualTo("next");
+        verify(events).page(any(), eq(1L), eq("USDT"), eq("BTC-USDT"), eq(50), eq("cursor"), eq("createdAt.desc"));
     }
 
-    private static final class FakeAdlRepository extends AdlRepository {
-        private int claimCalls;
-        private int lastBatchSize;
-        private Duration lastMinAge;
-        private final List<AdlCandidate> queueRows = new ArrayList<>();
-        private String lastAsset;
-        private int lastLimit;
-        private FakeAdlRepository() {
-            super(null);
-        }
-
-        @Override
-        public List<DeficitRow> claimResidualDeficits(int batchSize, Duration minAge) {
-            claimCalls++;
-            lastBatchSize = batchSize;
-            lastMinAge = minAge;
-            return List.of();
-        }
-
-        @Override
-        public List<AdlCandidate> queue(String asset, long excludedUserId, int limit, Duration maxMarkAge) {
-            lastAsset = asset;
-            lastLimit = limit;
-            return queueRows.stream().limit(limit).toList();
-        }
-
-        @Override
-        public Optional<AdlCandidate> lockCandidate(long userId, String symbol, String asset, Duration maxMarkAge) {
-            return Optional.empty();
-        }
-
+    private static AdlService service(AdlProperties properties, CoreAdlProjectionRepository projections,
+                                      AdlAeronGateway aeron, AdlEventRepository events,
+                                      AdlSequenceRepository sequences) {
+        return new AdlService(properties, projections, aeron, events, sequences);
     }
 
-    private static final class FakeAdlEventRepository extends AdlEventRepository {
-        private Long lastEventsUserId;
-        private String lastEventsAsset;
-        private String lastEventsSymbol;
-        private String lastEventsCursor;
-        private AdminCursorPage.CursorPage<AdlEventResponse> eventPage =
-                new AdminCursorPage.CursorPage<>(List.of(), null, false, "createdAt.desc", 0);
-
-        private FakeAdlEventRepository() {
-            super(null);
-        }
-
-        @Override
-        public AdminCursorPage.CursorPage<AdlEventResponse> page(String accountType,
-                                                                 Long userId,
-                                                                 String asset,
-                                                                 String symbol,
-                                                                 int limit,
-                                                                 String cursor,
-                                                                 String sort) {
-            lastEventsUserId = userId;
-            lastEventsAsset = asset;
-            lastEventsSymbol = symbol;
-            lastEventsCursor = cursor;
-            return eventPage;
-        }
+    private static CoreAdlCandidateView candidate(long userId, long priority) {
+        return new CoreAdlCandidateView(userId, "BTC-USDT", "USDT", CoreMarginMode.CROSS,
+                CorePositionSide.LONG, 10, 50_000, 55_000, 9, 550_000, 100_000, 50_000,
+                100_000, 10_000_000, priority);
     }
 }
