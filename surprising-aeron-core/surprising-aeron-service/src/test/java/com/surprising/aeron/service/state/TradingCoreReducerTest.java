@@ -18,6 +18,7 @@ import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Stream;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -216,6 +217,68 @@ class TradingCoreReducerTest {
                 new CoreLeverageKey(101, "BTC-USDT", CoreMarginMode.CROSS), 5_000_000L);
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(leveraged),
                 ProductLine.LINEAR_PERPETUAL)).isEqualTo(leveraged);
+    }
+
+    @Test
+    void algoParentUsesAuthoritativeChildOrdersAndSurvivesSnapshot() {
+        TradingCoreState funded = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 10_000);
+        var initial = algo(501, 101, 1, List.of());
+        TradingCoreState created = reducer.upsertAlgoOrder(funded, 101, initial);
+        TradingCoreState withChild = reducer.placeOrder(created, 101,
+                order(601, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
+        TradingCoreState linked = reducer.upsertAlgoOrder(withChild, 101, algo(501, 101, 2, List.of(601L)));
+
+        assertThat(linked.algoOrders().get(501L).childOrderIds()).containsExactly(601L);
+        assertThatThrownBy(() -> reducer.upsertAlgoOrder(linked, 101, algo(501, 101, 2, List.of(601L))))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("STALE_ALGO_ORDER_REVISION"));
+        assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(linked),
+                ProductLine.LINEAR_PERPETUAL)).isEqualTo(linked);
+        assertThatThrownBy(() -> reducer.upsertAlgoOrder(withChild, 101,
+                algo(501, 101, 2, List.of(999L))))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("INVALID_ALGO_CHILD"));
+    }
+
+    @Test
+    void cancelAllAfterUsesRevisionedAeronStateAndSurvivesSnapshot() {
+        TradingCoreState state = TradingCoreState.empty(ProductLine.SPOT);
+        var set = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
+                com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, 101, "BTC-USDT",
+                1_000, 2_000, 0, 0, 0, 1_000);
+        TradingCoreState active = reducer.updateCancelAllAfter(state, 101, set);
+        CoreCancelAllAfterState activeTimer = active.cancelAllAfterTimers()
+                .get(new CoreCancelAllAfterKey(101, "BTC-USDT"));
+        var claim = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
+                com.surprising.aeron.protocol.CoreCancelAllAfterAction.CLAIM, 101, "BTC-USDT",
+                1_000, 2_000, activeTimer.revision(), 0, 0, 2_000);
+        TradingCoreState triggering = reducer.updateCancelAllAfter(active, 101, claim);
+        CoreCancelAllAfterState triggeringTimer = triggering.cancelAllAfterTimers()
+                .get(new CoreCancelAllAfterKey(101, "BTC-USDT"));
+        var complete = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
+                com.surprising.aeron.protocol.CoreCancelAllAfterAction.COMPLETE, 101, "BTC-USDT",
+                1_000, 2_000, triggeringTimer.revision(), 3, 2, 2_100);
+        TradingCoreState completed = reducer.updateCancelAllAfter(triggering, 101, complete);
+
+        assertThat(activeTimer.status()).isEqualTo(com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE);
+        assertThat(triggeringTimer.status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreCancelAllAfterStatus.TRIGGERING);
+        assertThat(completed.cancelAllAfterTimers().get(activeTimer.key()).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreCancelAllAfterStatus.TRIGGERED);
+        assertThat(completed.cancelAllAfterTimers().get(activeTimer.key()).canceledOrders()).isEqualTo(3);
+        assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(completed), ProductLine.SPOT))
+                .isEqualTo(completed);
+        assertThatThrownBy(() -> reducer.updateCancelAllAfter(triggering, 101, claim))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("STALE_CANCEL_ALL_AFTER_REVISION"));
+    }
+
+    private static com.surprising.aeron.protocol.CoreAlgoOrderView algo(
+            long id, long userId, long revision, List<Long> children) {
+        return new com.surprising.aeron.protocol.CoreAlgoOrderView(id, userId, "algo-client", "BTC-USDT", 0,
+                CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
+                false, false, com.surprising.aeron.protocol.CoreTimeInForce.IOC, 0, 0, "", "trace",
+                1, 1, 0, 1, revision, revision, children, 0, 0, 0);
     }
 
     private TradingCoreState funded(ProductLine productLine, String asset, long units) {

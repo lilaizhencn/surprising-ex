@@ -20,7 +20,9 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 8;
+    private static final int VERSION = 10;
+    private static final int VERSION_9 = 9;
+    private static final int VERSION_8 = 8;
     private static final int VERSION_7 = 7;
     private static final int VERSION_6 = 6;
     private static final int VERSION_5 = 5;
@@ -182,13 +184,39 @@ public final class TradingStateSnapshotCodec {
             writer.intValue(key.marginMode().wireCode());
             writer.longValue(leverage);
         });
+        writer.intValue(state.algoOrders().size());
+        state.algoOrders().values().forEach(algo -> {
+            byte[] encoded = com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(
+                    new com.surprising.aeron.protocol.CoreAlgoOrderView(algo.algoOrderId(), algo.userId(),
+                            algo.clientAlgoOrderId(), algo.symbol(), algo.algoTypeCode(), algo.side(), algo.priceTicks(),
+                            algo.quantitySteps(), algo.childQuantitySteps(), algo.intervalSeconds(), algo.durationSeconds(),
+                            algo.marginMode(), algo.positionSide(), algo.reduceOnly(), algo.postOnly(), algo.timeInForce(),
+                            algo.statusCode(), algo.currentOrderId(), algo.rejectReason(), algo.traceId(),
+                            algo.startAtEpochMillis(), algo.nextSliceAtEpochMillis(), algo.completedAtEpochMillis(),
+                            algo.createdAtEpochMillis(), algo.updatedAtEpochMillis(), algo.revision(), algo.childOrderIds(),
+                            0, 0, 0));
+            writer.intValue(encoded.length);
+            writer.bytes(encoded);
+        });
+        writer.intValue(state.cancelAllAfterTimers().size());
+        state.cancelAllAfterTimers().values().forEach(timer -> {
+            writer.longValue(timer.userId());
+            writer.text(timer.symbolScope());
+            writer.longValue(timer.countdownMillis());
+            writer.intValue(timer.status().wireCode());
+            writer.longValue(timer.triggerAtEpochMillis());
+            writer.longValue(timer.updatedAtEpochMillis());
+            writer.intValue(timer.canceledOrders());
+            writer.intValue(timer.canceledTriggerOrders());
+            writer.longValue(timer.revision());
+        });
         return writer.toByteArray();
     }
 
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
+        if (version != VERSION && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
                 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
@@ -314,7 +342,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         CoreRiskState riskState = CoreRiskState.empty();
         CoreTreasuryState treasuryState = CoreTreasuryState.empty();
-        if (version == VERSION || version == VERSION_7 || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
+        if (version == VERSION || version == VERSION_9 || version == VERSION_8 || version == VERSION_7 || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
             int instrumentCount = reader.count("instruments");
             for (int index = 0; index < instrumentCount; index++) {
                 String symbol = reader.text();
@@ -386,9 +414,9 @@ public final class TradingStateSnapshotCodec {
                         ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
                 long instrumentVersion = reader.positiveLong("liquidation instrument version");
                 long priceSequence = reader.positiveLong("liquidation price sequence");
-                long signedQuantity = version == VERSION ? reader.longValue() : 0;
+                long signedQuantity = version >= VERSION_9 ? reader.longValue() : 0;
                 long closeQuantity = reader.positiveLong("liquidation close quantity");
-                if (version != VERSION) {
+                if (version < VERSION_9) {
                     signedQuantity = positionSide == CorePositionSide.SHORT
                             ? Math.negateExact(closeQuantity) : closeQuantity;
                 }
@@ -414,7 +442,7 @@ public final class TradingStateSnapshotCodec {
                     readUnits(reader, "funding settlements"), readUnits(reader, "lifecycle settlements"));
         }
         Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
-        if (version >= VERSION) {
+        if (version >= VERSION_8) {
             int leverageCount = reader.count("leverages");
             for (int index = 0; index < leverageCount; index++) {
                 CoreLeverageKey key = new CoreLeverageKey(reader.positiveLong("leverage userId"), reader.text(),
@@ -422,9 +450,41 @@ public final class TradingStateSnapshotCodec {
                 putUnique(leverages, key, reader.positiveLong("leveragePpm"));
             }
         }
+        Map<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();
+        if (version >= VERSION_9) {
+            int algoCount = reader.count("algo orders");
+            for (int index = 0; index < algoCount; index++) {
+                int length = reader.count("algo payload bytes");
+                CoreAlgoOrderState algo = CoreAlgoOrderState.from(
+                        com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(reader.bytes(length)));
+                putUnique(algoOrders, algo.algoOrderId(), algo);
+            }
+        }
+        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new TreeMap<>();
+        if (version >= VERSION) {
+            int timerCount = reader.count("cancel-all-after timers");
+            for (int index = 0; index < timerCount; index++) {
+                long userId = reader.positiveLong("cancel-all-after userId");
+                String symbolScope = reader.text();
+                long countdownMillis = reader.nonNegativeLong("cancel-all-after countdown");
+                com.surprising.aeron.protocol.CoreCancelAllAfterStatus status =
+                        com.surprising.aeron.protocol.CoreCancelAllAfterStatus.fromWireCode(reader.intValue());
+                long triggerAt = reader.nonNegativeLong("cancel-all-after trigger time");
+                long updatedAt = reader.positiveLong("cancel-all-after updated time");
+                int canceledOrders = reader.intValue();
+                int canceledTriggerOrders = reader.intValue();
+                if (canceledOrders < 0 || canceledTriggerOrders < 0) {
+                    throw new ProtocolException("negative cancel-all-after result count");
+                }
+                CoreCancelAllAfterState timer = new CoreCancelAllAfterState(userId, symbolScope, countdownMillis,
+                        status, triggerAt, updatedAt, canceledOrders, canceledTriggerOrders,
+                        reader.positiveLong("cancel-all-after revision"));
+                putUnique(cancelAllAfterTimers, timer.key(), timer);
+            }
+        }
         reader.requireConsumed();
         return new TradingCoreState(productLine, revision, users, orders, bookState, instruments, riskState,
-                treasuryState, leverages);
+                treasuryState, leverages, algoOrders, cancelAllAfterTimers);
     }
 
     private static void writeUnits(Writer writer, Map<String, Long> values) {
@@ -485,6 +545,13 @@ public final class TradingStateSnapshotCodec {
             }
             intValue(bytes.length);
             output.writeBytes(bytes);
+        }
+
+        void bytes(byte[] value) {
+            if (value == null || value.length == 0 || value.length > 65_536) {
+                throw new IllegalArgumentException("invalid snapshot payload length");
+            }
+            output.writeBytes(value);
         }
 
         byte[] toByteArray() {
@@ -568,6 +635,16 @@ public final class TradingStateSnapshotCodec {
             }
             require(length);
             String value = new String(input, offset, length, StandardCharsets.UTF_8);
+            offset += length;
+            return value;
+        }
+
+        byte[] bytes(int length) {
+            if (length <= 0 || length > 65_536) {
+                throw new ProtocolException("invalid snapshot payload length: " + length);
+            }
+            require(length);
+            byte[] value = java.util.Arrays.copyOfRange(input, offset, offset + length);
             offset += length;
             return value;
         }

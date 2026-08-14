@@ -24,7 +24,7 @@ public class TradingFeeService {
     private static final int DEFAULT_LIMIT = 100;
 
     private final OrderFeeRepository orderFeeRepository;
-    private final OrderIdSequenceStore idSequenceStore;
+    private final AeronOrderIdGenerator idGenerator;
     private final InstrumentRuleLookup instrumentRuleLookup;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final FeeScheduleEventPublisher eventPublisher;
@@ -33,14 +33,14 @@ public class TradingFeeService {
 
     @org.springframework.beans.factory.annotation.Autowired
     public TradingFeeService(OrderFeeRepository orderFeeRepository,
-                             OrderIdSequenceStore idSequenceStore,
+                             AeronOrderIdGenerator idGenerator,
                              InstrumentRuleLookup instrumentRuleLookup,
                              OrderFeeSnapshotLookup feeSnapshotLookup,
                              FeeScheduleEventPublisher eventPublisher,
                              FeeScheduleSnapshotCache feeScheduleSnapshotCache,
                              TradingOrderProperties properties) {
         this.orderFeeRepository = orderFeeRepository;
-        this.idSequenceStore = idSequenceStore;
+        this.idGenerator = idGenerator;
         this.instrumentRuleLookup = instrumentRuleLookup;
         this.feeSnapshotLookup = feeSnapshotLookup;
         this.eventPublisher = eventPublisher;
@@ -77,7 +77,7 @@ public class TradingFeeService {
         OrderFeeRepository.validateSchedule(request);
         requireCurrentProductLine(request.productLine());
         long feeScheduleId = request.feeScheduleId() == null
-                ? idSequenceStore.next()
+                ? idGenerator.next()
                 : request.feeScheduleId();
         if (feeScheduleId <= 0) {
             throw new IllegalArgumentException("feeScheduleId must be positive");

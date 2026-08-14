@@ -52,36 +52,19 @@ surprising:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
         product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-        # 用户命令按用户键分区；每个分区独占消费者，避免做市流量阻塞普通用户的命令结果。
-        account-command-results-concurrency: ${ORDER_ACCOUNT_COMMAND_RESULTS_CONCURRENCY:32}
-        user-command-concurrency: ${ORDER_USER_COMMAND_CONCURRENCY:32}
-        # 用户命令包含 Kafka 发送和单写者落盘，等待时间必须覆盖启动重平衡窗口。
-        user-command-timeout: ${ORDER_USER_COMMAND_TIMEOUT:15s}
-        result-cache-ttl: ${ORDER_COMMAND_RESULT_CACHE_TTL:5m}
-        result-cache-max-entries: ${ORDER_COMMAND_RESULT_CACHE_MAX_ENTRIES:10000}
         order-commands-topic: surprising.perp.order.commands.v1
         order-events-topic: surprising.perp.order.events.v1
         instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
         open-interest-events-topic: surprising.account.open-interest.events.v1
         account-state-events-topic: surprising.account.state.events.v1
-      redis-index:
-        key-prefix: surprising:order:v1
-        reconcile-delay-ms: 10000
-        rebuild-batch-size: 1000
-        rebuild-max-age: 5m
-        ready-ttl: 30s
-        lock-ttl: 30s
-      wal:
-        directory: ${ORDER_WAL_DIR:data/order-wal}
-        node-id: ${ORDER_WAL_NODE_ID}
-        worker-delay-ms: ${ORDER_WAL_WORKER_DELAY_MS:25}
       aeron:
         hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
         egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
         response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
         client-connections: ${AERON_CLIENT_CONNECTIONS:4}
-    event-publish:
-      send-timeout: 3s
+        node-id: ${ORDER_NODE_ID:0}
+      event-publish:
+        send-timeout: 3s
       risk:
         market-max-slippage-ppm: 10000
         market-max-mark-age-ms: 5000
@@ -91,6 +74,7 @@ surprising:
       algo:
         enabled: true
         claim-batch-size: 100
+        claim-lease: 30s
         scan-delay-ms: 250
         min-interval-seconds: 1
         max-interval-seconds: 86400

@@ -1255,6 +1255,17 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] User State 强查询返回杠杆配置，Snapshot 升级 v8 并兼容 v1–v7；业务 hash、用户 hash和恢复状态均覆盖杠杆，不会在 Leader 切换或冷恢复后退回默认值。
 - [x] Leverage REST 写入/读取和新订单保证金预览直接使用 Aeron；不再由 Kafka 杠杆事件、PG 设置表或 JVM 杠杆快照参与交易裁决。Order provider 全依赖 `clean test` 128/128 通过。
 
+执行记录（2026-08-14，子阶段 P6.3）：
+
+- [x] 算法父单进入 Aeron Order State；意图不可变、revision 单调、子订单 ID 只能追加且必须引用同用户同 symbol 的权威普通订单，执行/活动数量从子 Order State 派生。
+- [x] 算法订单查询支持精确 `algoOrderId`，不再通过“最多扫描用户前 1000 条”实现单笔查询；调度认领使用 Core revision CAS，竞争失败实例直接跳过。
+- [x] Cancel-All-After 倒计时进入 Aeron State，`SET/CLAIM/COMPLETE/RETRY` 全部由单条核心命令裁决；本地 RocksDB 和 Redis 时间索引删除，Snapshot v10 兼容 v1–v9。
+- [x] 删除 Order WAL Bean、本地 reducer、RocksDB 投影 worker、Kafka account/match/result/state-changelog 链、Order ID 本地序列库和旧用户状态模型；Order 模块移除 `surprising-event-store`、RocksDB 和 Redis 依赖。
+- [x] Order ID 和费率 ID 统一使用无 I/O 的节点 Snowflake 生成器；Aeron Order State 的唯一 ID 与 commandId 幂等仍是最终冲突裁决。
+- [x] 联合门禁通过：Protocol 18/18、Core 54/54、Order provider 100/100；生产源码中 `UserPartitionWal|surprising.eventstore|OrderWal|RocksDB|StringRedisTemplate` 引用为零。
+- [ ] Order 的旧账户/未平仓量 JVM 风控预览链仍需将动态仓位限额和 risk bracket 最终裁决迁入 Core 后删除；不能把尚未迁移的规则静默删掉。
+- [ ] Matching 与 Liquidation 旧权威入口继续在 P6.4/P6.5 清理。
+
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 
 ### 18.8 P7：六线补齐

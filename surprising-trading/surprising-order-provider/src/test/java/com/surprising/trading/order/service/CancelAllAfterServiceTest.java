@@ -6,27 +6,27 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.client.TriggerOrderRpcApi;
 import com.surprising.trading.api.model.CancelAllAfterRequest;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.CancelOpenTriggerOrdersRequest;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.TriggerOrderBatchResponse;
-import com.surprising.trading.order.config.TradingOrderProperties;
-import java.nio.file.Files;
+import com.surprising.trading.order.model.CancelAllAfterTimer;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
 
 class CancelAllAfterServiceTest {
 
     @Test
-    void zeroCountdownDisablesTimerInLocalState() throws Exception {
-        CancelAllAfterLocalStateStore store = store();
-        CancelAllAfterService service = service(ProductLine.LINEAR_DELIVERY, store,
-                mock(OrderService.class), mock(TriggerOrderRpcApi.class));
+    void zeroCountdownDisablesAuthoritativeTimer() {
+        AeronCancelAllAfterStore store = mock(AeronCancelAllAfterStore.class);
+        CancelAllAfterService service = service(store, mock(OrderService.class), mock(TriggerOrderRpcApi.class));
+        when(store.set(org.mockito.ArgumentMatchers.eq(1001L), org.mockito.ArgumentMatchers.eq("BTC-USDT"),
+                org.mockito.ArgumentMatchers.eq(0L), org.mockito.ArgumentMatchers.isNull(), any()))
+                .thenReturn(timer("DISABLED", null));
 
         var response = service.set(new CancelAllAfterRequest(1001L, "btc-usdt", 0L));
 
@@ -36,54 +36,50 @@ class CancelAllAfterServiceTest {
     }
 
     @Test
-    void dueTimerCancelsOpenOrdersAndTriggerOrders() throws Exception {
-        CancelAllAfterLocalStateStore store = store();
+    void dueTimerCancelsBothOrderKindsAndCompletesInAeron() {
+        AeronCancelAllAfterStore store = mock(AeronCancelAllAfterStore.class);
         OrderService orderService = mock(OrderService.class);
         TriggerOrderRpcApi triggerOrderRpcApi = mock(TriggerOrderRpcApi.class);
-        CancelAllAfterService service = service(ProductLine.OPTION, store, orderService, triggerOrderRpcApi);
-        Instant now = Instant.now();
-        store.upsert(ProductLine.OPTION, 1001L, "BTC-USDT", 1000L, now.minusMillis(1), "TRIGGERING", now);
+        CancelAllAfterService service = service(store, orderService, triggerOrderRpcApi);
+        CancelAllAfterTimer claimed = timer("TRIGGERING", Instant.now().minusMillis(1));
         when(orderService.cancelOpenOrders(any())).thenReturn(new OrderBatchResponse(2, 2, 0, List.of()));
         when(triggerOrderRpcApi.cancelOpen(any())).thenReturn(new TriggerOrderBatchResponse(1, 1, 0, List.of()));
 
-        service.cancelDueTimer(new com.surprising.trading.order.model.CancelAllAfterTimer(
-                1001L, "BTC-USDT", 1000L, "TRIGGERING", now.minusMillis(1), now, 0, 0));
+        service.cancelDueTimer(claimed);
 
         verify(orderService).cancelOpenOrders(any(CancelOpenOrdersRequest.class));
         verify(triggerOrderRpcApi).cancelOpen(any(CancelOpenTriggerOrdersRequest.class));
-        assertThat(store.read(ProductLine.OPTION, 1001L, "BTC-USDT").orElseThrow().status())
-                .isEqualTo("TRIGGERED");
+        verify(store).complete(org.mockito.ArgumentMatchers.eq(claimed),
+                org.mockito.ArgumentMatchers.eq(2), org.mockito.ArgumentMatchers.eq(1), any());
     }
 
     @Test
-    void scanDueTimersClaimsOnlyCurrentProductLine() throws Exception {
-        CancelAllAfterLocalStateStore store = store();
+    void scanClaimsAeronDueTimerBeforeExecuting() {
+        AeronCancelAllAfterStore store = mock(AeronCancelAllAfterStore.class);
         OrderService orderService = mock(OrderService.class);
         TriggerOrderRpcApi triggerOrderRpcApi = mock(TriggerOrderRpcApi.class);
-        CancelAllAfterService service = service(ProductLine.LINEAR_DELIVERY, store, orderService, triggerOrderRpcApi);
-        Instant now = Instant.now();
-        store.upsert(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT", 1000L, now.minusMillis(1), "ACTIVE", now);
+        CancelAllAfterService service = service(store, orderService, triggerOrderRpcApi);
+        CancelAllAfterTimer active = timer("ACTIVE", Instant.now().minusMillis(1));
+        CancelAllAfterTimer claimed = timer("TRIGGERING", active.triggerAt());
+        when(store.due(any(), org.mockito.ArgumentMatchers.eq(100))).thenReturn(List.of(active));
+        when(store.claim(org.mockito.ArgumentMatchers.eq(active), any())).thenReturn(Optional.of(claimed));
         when(orderService.cancelOpenOrders(any())).thenReturn(new OrderBatchResponse(0, 0, 0, List.of()));
         when(triggerOrderRpcApi.cancelOpen(any())).thenReturn(new TriggerOrderBatchResponse(0, 0, 0, List.of()));
 
         service.scanDueTimers();
 
-        assertThat(store.read(ProductLine.LINEAR_DELIVERY, 1001L, "BTC-USDT").orElseThrow().status())
-                .isEqualTo("TRIGGERED");
+        verify(store).claim(org.mockito.ArgumentMatchers.eq(active), any());
+        verify(store).complete(org.mockito.ArgumentMatchers.eq(claimed),
+                org.mockito.ArgumentMatchers.eq(0), org.mockito.ArgumentMatchers.eq(0), any());
     }
 
-    private CancelAllAfterService service(ProductLine line,
-                                          CancelAllAfterLocalStateStore store,
-                                          OrderService orderService,
+    private CancelAllAfterService service(AeronCancelAllAfterStore store, OrderService orderService,
                                           TriggerOrderRpcApi triggerOrderRpcApi) {
-        TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getKafka().setProductLine(line);
-        return new CancelAllAfterService(properties, orderService, triggerOrderRpcApi, store,
-                OrderScheduleIndex.disabled());
+        return new CancelAllAfterService(orderService, triggerOrderRpcApi, store);
     }
 
-    private CancelAllAfterLocalStateStore store() throws Exception {
-        return new CancelAllAfterLocalStateStore(Files.createTempDirectory("cancel-all-after-test"),
-                new ObjectMapper());
+    private CancelAllAfterTimer timer(String status, Instant triggerAt) {
+        return new CancelAllAfterTimer(1001L, "BTC-USDT", "DISABLED".equals(status) ? 0 : 1000,
+                status, triggerAt, Instant.now(), 0, 0);
     }
 }

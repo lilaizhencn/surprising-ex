@@ -17,7 +17,8 @@ Redis Risk State、Redis 强平候选队列和 PostgreSQL 强平事务维持不�
 ## 决策
 
 1. 六条产品线分别部署一套三节点 Aeron Cluster。
-2. 每套 Cluster 内由一个统一确定性状态机共同持有 User、Order、Book、Risk、Liquidation 和 Export State。
+2. 每套 Cluster 内由一个统一确定性状态机共同持有 User、Order（含算法父单和自动撤单倒计时）、Book、
+   Risk、Liquidation 和 Export State。
 3. Exchange Core 0.5.3 继续作为订单簿和撮合算法，通过 Adapter 嵌入状态机，不独立拥有权威 journal。
 4. Aeron Cluster Log、Archive 和 Snapshot 是正常交易核心唯一权威恢复链。
 5. Kafka 保留外部输入缓冲和对外事件分发，不作为核心资金状态恢复链。

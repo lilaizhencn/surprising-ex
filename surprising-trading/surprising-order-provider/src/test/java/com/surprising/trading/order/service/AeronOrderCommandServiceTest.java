@@ -59,7 +59,7 @@ class AeronOrderCommandServiceTest {
     @BeforeEach
     void setUp() {
         TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getWal().setNodeId(3);
+        properties.getAeron().setNodeId(3);
         service = new AeronOrderCommandService(aeron, new AeronOrderIdGenerator(properties), instrumentRules,
                 markPrices, properties);
     }

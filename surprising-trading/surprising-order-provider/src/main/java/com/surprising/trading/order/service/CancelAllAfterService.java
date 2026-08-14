@@ -1,6 +1,5 @@
 package com.surprising.trading.order.service;
 
-import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.client.TriggerOrderRpcApi;
 import com.surprising.trading.api.model.CancelAllAfterRequest;
 import com.surprising.trading.api.model.CancelAllAfterResponse;
@@ -8,7 +7,6 @@ import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.CancelOpenTriggerOrdersRequest;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.TriggerOrderBatchResponse;
-import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.CancelAllAfterTimer;
 import java.time.Instant;
 import java.util.List;
@@ -17,8 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class CancelAllAfterService {
@@ -28,23 +24,17 @@ public class CancelAllAfterService {
     private static final int CLAIM_LIMIT = 100;
     private static final long MAX_COUNTDOWN_MS = 120_000L;
 
-    private final TradingOrderProperties properties;
     private final OrderService orderService;
     private final TriggerOrderRpcApi triggerOrderRpcApi;
-    private final OrderScheduleIndex scheduleIndex;
-    private final CancelAllAfterLocalStateStore localStateStore;
+    private final AeronCancelAllAfterStore timerStore;
 
     @Autowired
-    public CancelAllAfterService(TradingOrderProperties properties,
-                                 OrderService orderService,
+    public CancelAllAfterService(OrderService orderService,
                                  TriggerOrderRpcApi triggerOrderRpcApi,
-                                 CancelAllAfterLocalStateStore localStateStore,
-                                 OrderScheduleIndex scheduleIndex) {
-        this.properties = properties;
+                                 AeronCancelAllAfterStore timerStore) {
         this.orderService = orderService;
         this.triggerOrderRpcApi = triggerOrderRpcApi;
-        this.scheduleIndex = scheduleIndex;
-        this.localStateStore = localStateStore;
+        this.timerStore = timerStore;
     }
 
     public CancelAllAfterResponse set(CancelAllAfterRequest request) {
@@ -65,16 +55,14 @@ public class CancelAllAfterService {
         Instant now = Instant.now();
         boolean active = request.countdownMs() > 0;
         Instant triggerAt = active ? now.plusMillis(request.countdownMs()) : null;
-        CancelAllAfterTimer timer = localStateStore.upsert(currentProductLine(), request.userId(), symbolScope,
-                request.countdownMs(), triggerAt, active ? "ACTIVE" : "DISABLED", now);
-        afterCommit(() -> scheduleIndex.synchronizeTimer(currentProductLine(), timer));
+        CancelAllAfterTimer timer = timerStore.set(request.userId(), symbolScope, request.countdownMs(), triggerAt, now);
         return toResponse(timer);
     }
 
     public void scanDueTimers() {
         Instant now = Instant.now();
-        List<CancelAllAfterTimer> timers = localStateStore.due(currentProductLine(), now, CLAIM_LIMIT).stream()
-                .map(timer -> localStateStore.claim(currentProductLine(), timer.userId(), timer.symbolScope(), now))
+        List<CancelAllAfterTimer> timers = timerStore.due(now, CLAIM_LIMIT).stream()
+                .map(timer -> timerStore.claim(timer, now))
                 .flatMap(java.util.Optional::stream)
                 .toList();
         for (CancelAllAfterTimer timer : timers) {
@@ -89,15 +77,9 @@ public class CancelAllAfterService {
                     new CancelOpenOrdersRequest(timer.userId(), symbol, CANCEL_LIMIT));
             TriggerOrderBatchResponse triggerResponse = triggerOrderRpcApi.cancelOpen(
                     new CancelOpenTriggerOrdersRequest(timer.userId(), symbol, CANCEL_LIMIT));
-            localStateStore.markTriggered(currentProductLine(), timer.userId(), timer.symbolScope(),
-                    orderResponse.completed(), triggerResponse.completed(), Instant.now());
-            scheduleIndex.removeTimer(currentProductLine(), timer.userId(), timer.symbolScope());
+            timerStore.complete(timer, orderResponse.completed(), triggerResponse.completed(), Instant.now());
         } catch (RuntimeException ex) {
-            localStateStore.releaseForRetry(currentProductLine(), timer.userId(), timer.symbolScope(),
-                    ex.getMessage(), Instant.now());
-            scheduleIndex.synchronizeTimer(currentProductLine(), new CancelAllAfterTimer(
-                    timer.userId(), timer.symbolScope(), timer.countdownMs(), "ACTIVE", timer.triggerAt(),
-                    Instant.now(), timer.canceledOrders(), timer.canceledTriggerOrders()));
+            timerStore.retry(timer, Instant.now());
             log.warn("cancel-all-after execution failed for userId={} symbolScope={}",
                     timer.userId(), timer.symbolScope(), ex);
         }
@@ -130,17 +112,4 @@ public class CancelAllAfterService {
         return "*".equals(symbolScope) ? null : symbolScope;
     }
 
-    private ProductLine currentProductLine() {
-        return properties.getKafka().getProductLine();
-    }
-
-    private void afterCommit(Runnable action) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            action.run();
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override public void afterCommit() { action.run(); }
-        });
-    }
 }

@@ -34,8 +34,8 @@ import org.springframework.stereotype.Service;
 /**
  * 算法单服务。
  *
- * <p>算法单和普通订单共用同一个用户分区 WAL、状态快照和单写入 lane。算法单仓储表只作为
- * 异步投影/历史查询，不参与幂等、切片进度或撤单裁决。</p>
+ * <p>算法父单状态与普通子订单统一由 Aeron Cluster 顺序裁决；切片任务只提交父单 revision，
+ * 子订单仍复用普通订单原子下单路径，不维护外围 WAL 或第二资金状态机。</p>
  */
 @Service
 public class AlgoOrderService {
@@ -44,21 +44,18 @@ public class AlgoOrderService {
 
     private final TradingOrderProperties properties;
     private final OrderService orderService;
-    private final OrderUserStateService orderUserStateService;
-    private final OrderUserCommandGateway orderUserCommandGateway;
-    private final OrderScheduleIndex scheduleIndex;
+    private final AeronAlgoOrderStore store;
+    private final AeronOrderIdGenerator ids;
 
     @Autowired
     public AlgoOrderService(TradingOrderProperties properties,
                             OrderService orderService,
-                            OrderUserStateService orderUserStateService,
-                            OrderScheduleIndex scheduleIndex,
-                            OrderUserCommandGateway orderUserCommandGateway) {
+                            AeronAlgoOrderStore store,
+                            AeronOrderIdGenerator ids) {
         this.properties = properties;
         this.orderService = orderService;
-        this.orderUserStateService = orderUserStateService;
-        this.orderUserCommandGateway = orderUserCommandGateway;
-        this.scheduleIndex = scheduleIndex;
+        this.store = store;
+        this.ids = ids;
     }
 
     public AlgoOrderResponse place(PlaceAlgoOrderRequest request) {
@@ -69,14 +66,14 @@ public class AlgoOrderService {
         Instant startAt = normalized.startAt() == null || normalized.startAt().isBefore(now)
                 ? now : normalized.startAt();
         AlgoOrderRecord record = new AlgoOrderRecord(
-                orderUserStateService.nextOrderId(), productLine, normalized.userId(), normalized.clientAlgoOrderId(),
+                ids.next(), productLine, normalized.userId(), normalized.clientAlgoOrderId(),
                 normalized.symbol(), normalized.algoType(), normalized.side(), normalized.priceTicks(),
                 normalized.quantitySteps(), normalized.childQuantitySteps(), normalized.intervalSeconds(),
                 normalized.durationSeconds(), normalized.marginMode(), normalized.positionSide(), normalized.reduceOnly(),
                 normalized.postOnly(), normalized.timeInForce(), AlgoOrderStatus.PENDING, null, null,
                 TraceContext.currentOrCreate(), startAt, startAt, null, now, now);
-        AlgoOrderResponse response = orderUserCommandGateway.placeAlgo(record);
-        scheduleIndex.synchronizeAlgo(record);
+        var persisted = store.upsert(record, List.of(), 1);
+        AlgoOrderResponse response = store.response(store.get(persisted.userId(), persisted.algoOrderId()));
         return response;
     }
 
@@ -84,10 +81,10 @@ public class AlgoOrderService {
         if (request == null || request.userId() <= 0 || request.algoOrderId() <= 0) {
             throw new IllegalArgumentException("userId and algoOrderId must be positive");
         }
-        AlgoOrderRecord record = orderUserStateService.algo(request.userId(), request.algoOrderId());
+        AlgoOrderRecord record = store.record(store.get(request.userId(), request.algoOrderId()));
         requireCurrentProductLine(record);
         if (isTerminal(record.status())) {
-            return orderUserStateService.algoResponse(record);
+            return store.response(store.get(record.userId(), record.algoOrderId()));
         }
         return cancelRecord(record);
     }
@@ -102,7 +99,9 @@ public class AlgoOrderService {
         }
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null : normalizeSymbol(request.symbol());
-        List<AlgoOrderResponse> canceled = orderUserStateService.openAlgos(request.userId(), symbol, limit).stream()
+        List<AlgoOrderResponse> canceled = store.query(request.userId(), symbol, 0, limit).stream()
+                .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
+                .map(store::response)
                 .map(value -> cancel(new CancelAlgoOrderRequest(value.userId(), value.algoOrderId())))
                 .toList();
         List<AlgoOrderBatchItemResponse> results = new ArrayList<>(canceled.size());
@@ -113,21 +112,26 @@ public class AlgoOrderService {
     }
 
     public AlgoOrderResponse get(long algoOrderId) {
-        AlgoOrderRecord record = orderUserStateService.algoById(algoOrderId);
+        AlgoOrderRecord record = store.query(0, "", 0, 1000).stream()
+                .filter(value -> value.algoOrderId() == algoOrderId).findFirst().map(store::record)
+                .orElseThrow(() -> new IllegalStateException("算法单不存在: " + algoOrderId));
         requireCurrentProductLine(record);
-        return orderUserStateService.algoResponse(record);
+        return store.response(store.get(record.userId(), record.algoOrderId()));
     }
 
     public int cancelLifecycleOrders(String symbol, int limit) {
         String normalizedSymbol = normalizeSymbol(symbol);
-        List<AlgoOrderRecord> orders = orderUserStateService.lifecycleAlgos(
-                currentProductLine(), normalizedSymbol, Math.max(1, Math.min(limit, MAX_OPEN_CANCEL_LIMIT)));
+        List<AlgoOrderRecord> orders = store.query(0, normalizedSymbol, 0,
+                        Math.max(1, Math.min(limit, MAX_OPEN_CANCEL_LIMIT))).stream()
+                .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
+                .map(store::record).toList();
         orders.forEach(this::cancelRecord);
         return orders.size();
     }
 
     public boolean hasLifecycleActiveOrders(String symbol) {
-        return orderUserStateService.hasLifecycleActiveAlgos(currentProductLine(), normalizeSymbol(symbol));
+        return store.query(0, normalizeSymbol(symbol), 0, 1).stream()
+                .anyMatch(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]));
     }
 
     public AlgoOrderQueryResponse openOrders(long userId, String symbol, int limit) {
@@ -137,7 +141,9 @@ public class AlgoOrderService {
         if (limit < 1 || limit > MAX_OPEN_CANCEL_LIMIT) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        List<AlgoOrderResponse> orders = orderUserStateService.openAlgos(userId, symbol, limit);
+        List<AlgoOrderResponse> orders = store.query(userId, symbol, 0, limit).stream()
+                .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
+                .map(store::response).toList();
         return new AlgoOrderQueryResponse(orders.size(), orders);
     }
 
@@ -146,69 +152,76 @@ public class AlgoOrderService {
             return;
         }
         Instant now = Instant.now();
-        Duration lease = properties.getRedisIndex().getAlgoClaimLease();
-        List<AlgoOrderRecord> due = orderUserStateService.dueAlgos(
-                currentProductLine(), now, Math.max(1, properties.getAlgo().getClaimBatchSize()));
-        for (AlgoOrderRecord record : due) {
+        Duration lease = properties.getAlgo().getClaimLease();
+        var due = store.query(0, "", now.toEpochMilli(),
+                        Math.max(1, properties.getAlgo().getClaimBatchSize())).stream()
+                .filter(value -> value.statusCode() == AlgoOrderStatus.PENDING.ordinal()
+                        || value.statusCode() == AlgoOrderStatus.RUNNING.ordinal())
+                .toList();
+        for (var candidate : due) {
+            AlgoOrderRecord record = store.record(candidate);
+            AlgoOrderRecord claimed = withStatus(record, AlgoOrderStatus.RUNNING, null,
+                    now.plus(lease), null, now, record.currentOrderId());
+            var claimedView = store.tryClaim(candidate, claimed);
+            if (claimedView == null) {
+                continue;
+            }
             try {
-                AlgoOrderRecord claimed = withStatus(record, AlgoOrderStatus.RUNNING, null,
-                        now.plus(lease), null, now, record.currentOrderId());
-                orderUserCommandGateway.updateAlgo(claimed);
-                executeDue(claimed, now);
+                executeDue(store.record(claimedView), now);
             } catch (RuntimeException ex) {
-                orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.FAILED, ex.getMessage(),
-                        null, now, now, record.currentOrderId()));
+                update(withStatus(store.record(claimedView), AlgoOrderStatus.FAILED, ex.getMessage(),
+                        null, now, now, claimedView.currentOrderId()), claimedView.childOrderIds());
             }
         }
     }
 
     void executeDue(AlgoOrderRecord record, Instant now) {
-        AlgoOrderProgress progress = orderUserStateService.algoProgress(record.userId(), record.algoOrderId());
+        var current = store.get(record.userId(), record.algoOrderId());
+        AlgoOrderProgress progress = store.progress(current);
         if (progress.executedQuantitySteps() >= record.quantitySteps()
                 && progress.activeChildOrderCount() == 0) {
-        orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.COMPLETED, null,
-                    null, now, now, record.currentOrderId()));
-            scheduleIndex.removeAlgo(record.productLine(), record.algoOrderId());
+        update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
+                    null, now, now, record.currentOrderId()), current.childOrderIds());
             return;
         }
         if (progress.activeChildOrderCount() > 0) {
-        orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.RUNNING, null,
-                    now.plusMillis(properties.getAlgo().getScanDelayMs()), null, now, record.currentOrderId()));
+        update(withStatus(record, AlgoOrderStatus.RUNNING, null,
+                    now.plusMillis(properties.getAlgo().getScanDelayMs()), null, now, record.currentOrderId()), current.childOrderIds());
             return;
         }
 
         long remainingTarget = Math.subtractExact(record.quantitySteps(), progress.executedQuantitySteps());
         if (remainingTarget <= 0L) {
-        orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.COMPLETED, null,
-                    null, now, now, record.currentOrderId()));
-            scheduleIndex.removeAlgo(record.productLine(), record.algoOrderId());
+        update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
+                    null, now, now, record.currentOrderId()), current.childOrderIds());
             return;
         }
         long childQuantity = Math.min(record.childQuantitySteps(), remainingTarget);
         PlaceOrderRequest childRequest = childRequest(record, progress.nextSliceIndex(), childQuantity);
         OrderResponse child = orderService.place(childRequest);
         if (child.status() == OrderStatus.REJECTED) {
-        orderUserCommandGateway.updateAlgo(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
-                    null, now, now, null));
+        update(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
+                    null, now, now, null), current.childOrderIds());
             return;
         }
         Instant nextSliceAt = nextSliceAt(record, now);
         AlgoOrderRecord updated = withStatus(record, AlgoOrderStatus.RUNNING, null, nextSliceAt,
                 null, now, child.orderId());
-        orderUserCommandGateway.linkAlgoChild(updated,
-                new AlgoOrderChild(record.algoOrderId(), progress.nextSliceIndex(), child.orderId(), childQuantity));
-        scheduleIndex.synchronizeAlgo(updated);
+        List<Long> children = new ArrayList<>(current.childOrderIds());
+        children.add(child.orderId());
+        update(updated, children);
     }
 
     private AlgoOrderResponse cancelRecord(AlgoOrderRecord record) {
         if (isTerminal(record.status())) {
-            return orderUserStateService.algoResponse(record);
+            return store.response(store.get(record.userId(), record.algoOrderId()));
         }
         Instant now = Instant.now();
         AlgoOrderRecord requested = withStatus(record, AlgoOrderStatus.CANCEL_REQUESTED, null,
                 null, null, now, record.currentOrderId());
-        orderUserCommandGateway.updateAlgo(requested);
-        for (AlgoOrderChild child : orderUserStateService.algoChildren(record.userId(), record.algoOrderId())) {
+        var current = store.get(record.userId(), record.algoOrderId());
+        update(requested, current.childOrderIds());
+        for (AlgoOrderChild child : store.children(current)) {
             try {
                 orderService.cancel(new CancelOrderRequest(record.userId(), child.orderId()));
             } catch (RuntimeException ignored) {
@@ -217,9 +230,8 @@ public class AlgoOrderService {
         }
         AlgoOrderRecord canceled = withStatus(requested, AlgoOrderStatus.CANCELED, null,
                 null, now, Instant.now(), record.currentOrderId());
-        orderUserCommandGateway.updateAlgo(canceled);
-        scheduleIndex.removeAlgo(record.productLine(), record.algoOrderId());
-        return orderUserStateService.algoResponse(canceled);
+        update(canceled, current.childOrderIds());
+        return store.response(store.get(canceled.userId(), canceled.algoOrderId()));
     }
 
     private PlaceOrderRequest childRequest(AlgoOrderRecord record, int sliceIndex, long quantitySteps) {
@@ -229,6 +241,12 @@ public class AlgoOrderService {
                 record.symbol(), record.side(), orderType, timeInForce,
                 orderType == OrderType.MARKET ? 0L : record.priceTicks(), quantitySteps,
                 record.marginMode(), record.positionSide(), record.reduceOnly(), record.postOnly());
+    }
+
+    private void update(AlgoOrderRecord record, List<Long> childOrderIds) {
+        var current = store.get(record.userId(), record.algoOrderId());
+        List<Long> children = childOrderIds.isEmpty() ? current.childOrderIds() : childOrderIds;
+        store.upsert(record, children, current.revision() + 1);
     }
 
     private Instant nextSliceAt(AlgoOrderRecord record, Instant now) {
@@ -350,9 +368,7 @@ public class AlgoOrderService {
     }
 
     private void requireLocalProductLine(ProductLine productLine) {
-        if (productLine != ProductLine.LINEAR_PERPETUAL) {
-            throw new IllegalStateException("产品线尚未接入本地订单事实流: " + productLine);
-        }
+        if (productLine == null) throw new IllegalStateException("订单节点产品线未配置");
     }
 
     private void requireCurrentProductLine(AlgoOrderRecord order) {

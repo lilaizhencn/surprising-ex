@@ -204,6 +204,49 @@ public final class CoreProbeState implements AutoCloseable {
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
                     com.surprising.aeron.protocol.CoreOpenInterestCodec.encode(views));
         }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.ALGO_ORDER_QUERY) {
+            try {
+                var query = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeQuery(message.payload());
+                var values = tradingState.algoOrders().values().stream()
+                        .filter(value -> query.userId() == 0 || value.userId() == query.userId())
+                        .filter(value -> query.algoOrderId() == 0 || value.algoOrderId() == query.algoOrderId())
+                        .filter(value -> query.symbol().isEmpty() || value.symbol().equalsIgnoreCase(query.symbol()))
+                        .filter(value -> query.dueAtEpochMillis() == 0 || value.nextSliceAtEpochMillis() > 0
+                                && value.nextSliceAtEpochMillis() <= query.dueAtEpochMillis())
+                        .sorted(java.util.Comparator.comparingLong(com.surprising.aeron.service.state.CoreAlgoOrderState::nextSliceAtEpochMillis)
+                                .thenComparingLong(com.surprising.aeron.service.state.CoreAlgoOrderState::algoOrderId))
+                        .limit(query.limit()).map(this::algoView).toList();
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                        com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeList(values));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.CANCEL_ALL_AFTER_QUERY) {
+            try {
+                var query = com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeQuery(message.payload());
+                var values = tradingState.cancelAllAfterTimers().values().stream()
+                        .filter(value -> query.userId() == 0 || value.userId() == query.userId())
+                        .filter(value -> query.symbolScope().isEmpty()
+                                || value.symbolScope().equals(query.symbolScope()))
+                        .filter(value -> query.dueAtEpochMillis() == 0
+                                || value.status() == com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE
+                                && value.triggerAtEpochMillis() <= query.dueAtEpochMillis())
+                        .sorted(java.util.Comparator
+                                .comparingLong(com.surprising.aeron.service.state.CoreCancelAllAfterState::triggerAtEpochMillis)
+                                .thenComparingLong(com.surprising.aeron.service.state.CoreCancelAllAfterState::userId)
+                                .thenComparing(com.surprising.aeron.service.state.CoreCancelAllAfterState::symbolScope))
+                        .limit(query.limit())
+                        .map(com.surprising.aeron.service.state.CoreCancelAllAfterState::view)
+                        .toList();
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                        com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeList(values));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
         StoredResult duplicate = commandResults.get(message.header().commandId());
         if (duplicate != null) {
             return new CoreResponse(ResponseStatus.DUPLICATE,
@@ -388,6 +431,11 @@ public final class CoreProbeState implements AutoCloseable {
             case UPDATE_LEVERAGE -> tradingState = tradingReducer.updateLeverage(
                     tradingState, message.header().userId(),
                     TradingCommandCodec.decodeUpdateLeverage(message.payload()));
+            case UPSERT_ALGO_ORDER -> tradingState = tradingReducer.upsertAlgoOrder(tradingState,
+                    message.header().userId(), com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(message.payload()));
+            case UPDATE_CANCEL_ALL_AFTER -> tradingState = tradingReducer.updateCancelAllAfter(tradingState,
+                    message.header().userId(),
+                    com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payload()));
             default -> {
                 return null;
             }
@@ -545,6 +593,26 @@ public final class CoreProbeState implements AutoCloseable {
                                 entry.getKey().marginMode(), entry.getValue())).toList());
         return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.userStateHash(userId),
                 CoreStateQueryCodec.encodeUserState(view));
+    }
+
+    private com.surprising.aeron.protocol.CoreAlgoOrderView algoView(
+            com.surprising.aeron.service.state.CoreAlgoOrderState state) {
+        long executed = 0, active = 0; int activeCount = 0;
+        for (long childOrderId : state.childOrderIds()) {
+            var child = tradingState.order(childOrderId);
+            if (child == null) throw new IllegalStateException("algo child order missing");
+            executed = Math.addExact(executed, child.executedQuantitySteps());
+            if (child.status() == com.surprising.aeron.service.state.CoreOrderStatus.OPEN) {
+                active = Math.addExact(active, child.remainingQuantitySteps()); activeCount++;
+            }
+        }
+        return new com.surprising.aeron.protocol.CoreAlgoOrderView(state.algoOrderId(), state.userId(),
+                state.clientAlgoOrderId(), state.symbol(), state.algoTypeCode(), state.side(), state.priceTicks(),
+                state.quantitySteps(), state.childQuantitySteps(), state.intervalSeconds(), state.durationSeconds(),
+                state.marginMode(), state.positionSide(), state.reduceOnly(), state.postOnly(), state.timeInForce(),
+                state.statusCode(), state.currentOrderId(), state.rejectReason(), state.traceId(), state.startAtEpochMillis(),
+                state.nextSliceAtEpochMillis(), state.completedAtEpochMillis(), state.createdAtEpochMillis(),
+                state.updatedAtEpochMillis(), state.revision(), state.childOrderIds(), executed, active, activeCount);
     }
 
     private static List<com.surprising.aeron.protocol.CoreExecutionView> executionViews(

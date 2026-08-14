@@ -11,7 +11,7 @@ public final class AeronOrderIdGenerator {
     private final AtomicReference<Sequence> sequence = new AtomicReference<>(new Sequence(0, -1));
 
     public AeronOrderIdGenerator(TradingOrderProperties properties) {
-        this.nodeId = properties.getWal().getNodeId();
+        this.nodeId = properties.getAeron().getNodeId();
         if (nodeId < 0) {
             throw new IllegalStateException("ORDER_WAL_NODE_ID is required as the order gateway node id");
         }

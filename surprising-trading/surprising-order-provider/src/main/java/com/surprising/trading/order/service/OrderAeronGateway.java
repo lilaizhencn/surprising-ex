@@ -34,6 +34,10 @@ public class OrderAeronGateway implements AutoCloseable {
         return response;
     }
 
+    public boolean tryCommand(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+        return clients.command(type, commandId, userId, payload).commandStatus() == ResponseStatus.APPLIED;
+    }
+
     public CoreOrderStateView order(long userId, long orderId) {
         return query(CoreMessageType.ORDER_STATE_QUERY, userId,
                 TradingCommandCodec.encodeOrderStateQuery(orderId));
@@ -61,6 +65,38 @@ public class OrderAeronGateway implements AutoCloseable {
         return user.leverages().stream()
                 .filter(value -> value.symbol().equalsIgnoreCase(symbol) && value.marginMode() == mode)
                 .findFirst().orElse(null);
+    }
+
+    public java.util.List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoOrders(
+            long userId, String symbol, long dueAtEpochMillis, int limit) {
+        CoreResponse response = clients.query(CoreMessageType.ALGO_ORDER_QUERY, UUID.randomUUID(), userId,
+                com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeQuery(
+                        userId, 0, symbol, dueAtEpochMillis, limit));
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode().name() + ": Aeron algo query failed");
+        }
+        return com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeList(response.data());
+    }
+
+    public com.surprising.aeron.protocol.CoreAlgoOrderView algoOrder(long userId, long algoOrderId) {
+        CoreResponse response = clients.query(CoreMessageType.ALGO_ORDER_QUERY, UUID.randomUUID(), userId,
+                com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeQuery(userId, algoOrderId, "", 0, 1));
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode().name() + ": Aeron algo query failed");
+        }
+        return com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeList(response.data()).stream()
+                .findFirst().orElse(null);
+    }
+
+    public java.util.List<com.surprising.aeron.protocol.CoreCancelAllAfterView> cancelAllAfterTimers(
+            long userId, String symbolScope, long dueAtEpochMillis, int limit) {
+        CoreResponse response = clients.query(CoreMessageType.CANCEL_ALL_AFTER_QUERY, UUID.randomUUID(), userId,
+                com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeQuery(
+                        userId, symbolScope, dueAtEpochMillis, limit));
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode().name() + ": Aeron cancel-all-after query failed");
+        }
+        return com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeList(response.data());
     }
 
     private CoreOrderStateView query(CoreMessageType type, long userId, byte[] payload) {

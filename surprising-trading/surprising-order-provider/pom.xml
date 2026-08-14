@@ -31,11 +31,6 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-event-store</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
             <artifactId>surprising-trading-api</artifactId>
         </dependency>
         <dependency>
@@ -78,10 +73,6 @@
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
         </dependency>
@@ -111,10 +102,7 @@
                 <artifactId>native-maven-plugin</artifactId>
                 <configuration>
                     <mainClass>com.surprising.trading.order.SurprisingOrderApplication</mainClass>
-                    <buildArgs>
-                        <buildArg>-H:IncludeResources=librocksdbjni-.*</buildArg>
-                        <buildArg>-H:DeadlockWatchdogInterval=60</buildArg>
-                    </buildArgs>
+                    <buildArgs><buildArg>-H:DeadlockWatchdogInterval=60</buildArg></buildArgs>
                 </configuration>
             </plugin>
         </plugins>

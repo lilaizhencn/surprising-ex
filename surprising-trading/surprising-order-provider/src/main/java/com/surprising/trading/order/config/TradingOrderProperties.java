@@ -14,8 +14,6 @@ public class TradingOrderProperties {
     private EventPublish eventPublish = new EventPublish();
     private Risk risk = new Risk();
     private Algo algo = new Algo();
-    private RedisIndex redisIndex = new RedisIndex();
-    private Wal wal = new Wal();
     private Aeron aeron = new Aeron();
 
     /** 启动时拒绝未隔离的订单 Topic 配置。 */
@@ -56,18 +54,6 @@ public class TradingOrderProperties {
         this.algo = algo;
     }
 
-    public RedisIndex getRedisIndex() { return redisIndex; }
-
-    public void setRedisIndex(RedisIndex redisIndex) { this.redisIndex = redisIndex; }
-
-    public Wal getWal() {
-        return wal;
-    }
-
-    public void setWal(Wal wal) {
-        this.wal = wal == null ? new Wal() : wal;
-    }
-
     public Aeron getAeron() { return aeron; }
 
     public void setAeron(Aeron aeron) { this.aeron = aeron == null ? new Aeron() : aeron; }
@@ -77,6 +63,7 @@ public class TradingOrderProperties {
         private String egressHostname = "localhost";
         private Duration responseTimeout = Duration.ofSeconds(5);
         private int clientConnections = 4;
+        private int nodeId;
 
         public java.util.List<String> getHostnames() { return hostnames; }
         public void setHostnames(java.util.List<String> hostnames) {
@@ -107,6 +94,11 @@ public class TradingOrderProperties {
             }
             this.clientConnections = clientConnections;
         }
+        public int getNodeId() { return nodeId; }
+        public void setNodeId(int nodeId) {
+            if (nodeId < 0 || nodeId > 1023) throw new IllegalArgumentException("order nodeId must be in [0,1023]");
+            this.nodeId = nodeId;
+        }
     }
 
     public static class Kafka {
@@ -124,7 +116,6 @@ public class TradingOrderProperties {
         private String openInterestEventsTopic = "surprising.account.open-interest.events.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
-        private String leverageSettingEventsTopic = "surprising.perp.leverage.setting.events.v1";
         private String positionMaintenanceGroupId = "surprising-order-position-maintenance-v1";
         private String accountStateSnapshotGroupId = "surprising-order-account-state-v1";
         private int accountCommandResultsConcurrency = 32;
@@ -300,12 +291,6 @@ public class TradingOrderProperties {
         public void setFeeScheduleEventsTopic(String feeScheduleEventsTopic) {
             this.feeScheduleEventsTopic = feeScheduleEventsTopic;
         }
-        public String getLeverageSettingEventsTopic() {
-            return productTopics().leverageSettingEventsTopic();
-        }
-        public void setLeverageSettingEventsTopic(String leverageSettingEventsTopic) {
-            this.leverageSettingEventsTopic = leverageSettingEventsTopic;
-        }
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("order-instrument-lifecycle");
         }
@@ -315,10 +300,6 @@ public class TradingOrderProperties {
         public String getFeeScheduleSnapshotGroupId() {
             return productTopics().consumerGroup("order-fee-snapshot");
         }
-        public String getLeverageSettingSnapshotGroupId() {
-            return productTopics().consumerGroup("order-leverage-snapshot");
-        }
-
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);
         }
@@ -337,46 +318,6 @@ public class TradingOrderProperties {
                 throw new IllegalArgumentException("事件通知 sendTimeout 必须为正数");
             }
             this.sendTimeout = sendTimeout;
-        }
-    }
-
-    /** 订单用户分区事实流的本地存储配置。 */
-    public static class Wal {
-        private String directory = "data/order-wal";
-        private int nodeId = -1;
-        private long workerDelayMs = 25L;
-
-        public String getDirectory() {
-            return directory;
-        }
-
-        public void setDirectory(String directory) {
-            if (directory == null || directory.isBlank()) {
-                throw new IllegalArgumentException("订单 WAL 目录不能为空");
-            }
-            this.directory = directory.trim();
-        }
-
-        public int getNodeId() {
-            return nodeId;
-        }
-
-        public void setNodeId(int nodeId) {
-            if (nodeId < 0 || nodeId > 1023) {
-                throw new IllegalArgumentException("订单 WAL nodeId 必须在 0 到 1023 之间");
-            }
-            this.nodeId = nodeId;
-        }
-
-        public long getWorkerDelayMs() {
-            return workerDelayMs;
-        }
-
-        public void setWorkerDelayMs(long workerDelayMs) {
-            if (workerDelayMs <= 0L) {
-                throw new IllegalArgumentException("订单 WAL workerDelayMs 必须为正数");
-            }
-            this.workerDelayMs = workerDelayMs;
         }
     }
 
@@ -436,6 +377,7 @@ public class TradingOrderProperties {
         private long maxIntervalSeconds = 86_400L;
         private long minDurationSeconds = 5L;
         private long maxDurationSeconds = 86_400L;
+        private Duration claimLease = Duration.ofSeconds(30);
 
         public boolean isEnabled() {
             return enabled;
@@ -492,32 +434,16 @@ public class TradingOrderProperties {
         public void setMaxDurationSeconds(long maxDurationSeconds) {
             this.maxDurationSeconds = maxDurationSeconds;
         }
-    }
 
-    public static class RedisIndex {
-        private String keyPrefix = "surprising:order:v1";
-        private long reconcileDelayMs = 10_000L;
-        private int rebuildBatchSize = 1_000;
-        private Duration rebuildMaxAge = Duration.ofMinutes(5);
-        private Duration readyTtl = Duration.ofSeconds(30);
-        private Duration lockTtl = Duration.ofSeconds(30);
-        private Duration algoClaimLease = Duration.ofSeconds(30);
-        public String getKeyPrefix() { return keyPrefix; }
-        public void setKeyPrefix(String keyPrefix) { this.keyPrefix = keyPrefix; }
-        public long getReconcileDelayMs() { return reconcileDelayMs; }
-        public void setReconcileDelayMs(long reconcileDelayMs) { this.reconcileDelayMs = reconcileDelayMs; }
-        public int getRebuildBatchSize() { return rebuildBatchSize; }
-        public void setRebuildBatchSize(int rebuildBatchSize) { this.rebuildBatchSize = rebuildBatchSize; }
-        public Duration getRebuildMaxAge() { return rebuildMaxAge; }
-        public void setRebuildMaxAge(Duration rebuildMaxAge) {
-            this.rebuildMaxAge = rebuildMaxAge == null || rebuildMaxAge.isNegative() || rebuildMaxAge.isZero()
-                    ? Duration.ofMinutes(5) : rebuildMaxAge;
+        public Duration getClaimLease() {
+            return claimLease;
         }
-        public Duration getReadyTtl() { return readyTtl; }
-        public void setReadyTtl(Duration readyTtl) { this.readyTtl = readyTtl; }
-        public Duration getLockTtl() { return lockTtl; }
-        public void setLockTtl(Duration lockTtl) { this.lockTtl = lockTtl; }
-        public Duration getAlgoClaimLease() { return algoClaimLease; }
-        public void setAlgoClaimLease(Duration algoClaimLease) { this.algoClaimLease = algoClaimLease; }
+
+        public void setClaimLease(Duration claimLease) {
+            if (claimLease == null || claimLease.isZero() || claimLease.isNegative()) {
+                throw new IllegalArgumentException("algo claim lease must be positive");
+            }
+            this.claimLease = claimLease;
+        }
     }
 }

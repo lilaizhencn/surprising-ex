@@ -22,6 +22,8 @@ public enum CoreMessageType {
     ADJUST_INSURANCE_FUND(30, WireMessageKind.COMMAND),
     EXECUTE_ADL(31, WireMessageKind.COMMAND),
     UPDATE_LEVERAGE(32, WireMessageKind.COMMAND),
+    UPSERT_ALGO_ORDER(33, WireMessageKind.COMMAND),
+    UPDATE_CANCEL_ALL_AFTER(34, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),
@@ -35,6 +37,8 @@ public enum CoreMessageType {
     ADL_CANDIDATE_QUERY(110, WireMessageKind.QUERY),
     RISK_STATE_QUERY(111, WireMessageKind.QUERY),
     OPEN_INTEREST_QUERY(112, WireMessageKind.QUERY),
+    ALGO_ORDER_QUERY(113, WireMessageKind.QUERY),
+    CANCEL_ALL_AFTER_QUERY(114, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -43,6 +47,8 @@ public enum CoreMessageType {
     ADL_CANDIDATE_RESULT(205, WireMessageKind.RESPONSE),
     RISK_STATE_RESULT(206, WireMessageKind.RESPONSE),
     OPEN_INTEREST_RESULT(207, WireMessageKind.RESPONSE),
+    ALGO_ORDER_RESULT(208, WireMessageKind.RESPONSE),
+    CANCEL_ALL_AFTER_RESULT(209, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;
