@@ -1,0 +1,1 @@
+apiAcceptance=PASS mode=verify-final productLine=INVERSE_PERPETUAL symbol=P8-INVERSE-PERPETUAL-BTC-USDT seller=30000092031 buyer=30000092032 fundsDiff=0 seed=9203

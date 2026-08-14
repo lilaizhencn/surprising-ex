@@ -1,0 +1,441 @@
+{
+  "pass": true,
+  "productLine": "INVERSE_DELIVERY",
+  "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+  "userId": 30000092051,
+  "otherUserId": 30000092059,
+  "requiredChannels": [
+    "depth",
+    "orders",
+    "executionReports",
+    "positions"
+  ],
+  "observedChannels": [
+    "orders",
+    "executionReports",
+    "positions",
+    "depth"
+  ],
+  "anonymousPrivateSubscription": "private websocket channel requires authenticated user",
+  "actions": [
+    {
+      "action": "connected",
+      "userId": 30000092051
+    },
+    {
+      "action": "connected",
+      "userId": 30000092059
+    },
+    {
+      "action": "connected",
+      "userId": null
+    },
+    {
+      "action": "send",
+      "userId": 30000092051,
+      "command": {
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "INVERSE_DELIVERY",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:49.577458Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092051,
+      "command": {
+        "id": "primary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092051,
+        "productLine": "INVERSE_DELIVERY",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:49.585370Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092059,
+      "command": {
+        "id": "secondary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092059,
+      "message": {
+        "op": "subscribed",
+        "id": "secondary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092059,
+        "productLine": "INVERSE_DELIVERY",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:49.588272Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092051,
+      "command": {
+        "id": "primary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092051,
+        "productLine": "INVERSE_DELIVERY",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:49.589176Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092059,
+      "command": {
+        "id": "secondary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092059,
+      "message": {
+        "op": "subscribed",
+        "id": "secondary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092059,
+        "productLine": "INVERSE_DELIVERY",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:49.589931Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092051,
+      "command": {
+        "id": "primary-positions",
+        "channel": "positions",
+        "symbol": "*",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-positions",
+        "channel": "positions",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092051,
+        "productLine": "INVERSE_DELIVERY",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:49.590636Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092059,
+      "command": {
+        "id": "secondary-positions",
+        "channel": "positions",
+        "symbol": "*",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092059,
+      "message": {
+        "op": "subscribed",
+        "id": "secondary-positions",
+        "channel": "positions",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092059,
+        "productLine": "INVERSE_DELIVERY",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:49.591801Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": null,
+      "command": {
+        "id": "anonymous-private",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": null,
+      "message": {
+        "op": "error",
+        "id": null,
+        "channel": null,
+        "symbol": null,
+        "period": null,
+        "userId": null,
+        "productLine": null,
+        "data": null,
+        "error": "private websocket channel requires authenticated user",
+        "eventTime": "2026-08-14T06:23:49.592791Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092051,
+      "command": {
+        "op": "ping",
+        "id": "primary-ping"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "pong",
+        "id": "primary-ping",
+        "channel": null,
+        "symbol": null,
+        "period": null,
+        "userId": null,
+        "productLine": null,
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:49.593751Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092051,
+        "productLine": "INVERSE_DELIVERY",
+        "data": {
+          "exportSequence": 7,
+          "order": {
+            "orderId": 7493915273196470000,
+            "productLine": "INVERSE_DELIVERY",
+            "userId": 30000092051,
+            "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+            "instrumentVersion": 1,
+            "side": "SELL",
+            "priceTicks": 100,
+            "quantitySteps": 10,
+            "executedQuantitySteps": 0,
+            "remainingQuantitySteps": 10,
+            "reduceOnly": false,
+            "marginMode": "CROSS",
+            "positionSide": "NET",
+            "orderType": "LIMIT",
+            "timeInForce": "GTC",
+            "postOnly": false,
+            "clientOrderId": "p8-maker-9205",
+            "commandId": "96c2287f-819b-3ed4-8be3-11f02e389f1e",
+            "makerFeeRatePpm": 0,
+            "takerFeeRatePpm": 0,
+            "createdAtEpochMillis": 1786688631344,
+            "updatedAtEpochMillis": 1786688631344,
+            "clusterPosition": 252096,
+            "status": "OPEN",
+            "revision": 1
+          }
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:23:51.343Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092051,
+        "productLine": "INVERSE_DELIVERY",
+        "data": {
+          "reportType": "CORE_ORDER",
+          "userId": 30000092051,
+          "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+          "orderId": 7493915273196470000,
+          "commandId": null,
+          "tradeId": null,
+          "counterpartyOrderId": null,
+          "counterpartyUserId": null,
+          "instrumentVersion": 1,
+          "orderEventType": null,
+          "commandType": "PLACE_ORDER",
+          "orderStatus": "OPEN",
+          "resultCode": "NONE",
+          "liquidityRole": null,
+          "side": "SELL",
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "priceTicks": 100,
+          "quantitySteps": 10,
+          "filledQuantitySteps": 0,
+          "orderCompleted": false,
+          "reason": null,
+          "traceId": "96c2287f-819b-3ed4-8be3-11f02e389f1e",
+          "eventTime": "2026-08-14T06:23:51.343Z"
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:23:51.343Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "positions",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092051,
+        "productLine": "INVERSE_DELIVERY",
+        "data": {
+          "exportSequence": 7,
+          "productLine": "INVERSE_DELIVERY",
+          "userId": 30000092051,
+          "revision": 6,
+          "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+          "instrumentVersion": 1,
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "signedQuantitySteps": 0,
+          "entryPriceTicks": 0,
+          "entryValueTicks": 0,
+          "realizedPnlUnits": 0,
+          "marginAsset": "",
+          "marginUnits": 0
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:23:51.343Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "depth",
+        "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "INVERSE_DELIVERY",
+        "data": {
+          "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+          "sequence": 7,
+          "previousSequence": 6,
+          "updateType": "SNAPSHOT",
+          "depth": 50,
+          "bids": [],
+          "asks": [
+            {
+              "priceTicks": 100,
+              "quantitySteps": 10,
+              "orderCount": 1
+            }
+          ],
+          "eventTime": "2026-08-14T06:23:51.343Z"
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:23:51.343Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092051,
+      "command": {
+        "op": "unsubscribe",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+        "productLine": "INVERSE_DELIVERY"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092051,
+      "message": {
+        "op": "unsubscribed",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-INVERSE-DELIVERY-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "INVERSE_DELIVERY",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:23:51.404378Z"
+      }
+    }
+  ]
+}

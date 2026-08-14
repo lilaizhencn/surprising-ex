@@ -62,6 +62,10 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("trade.events");
     }
 
+    public String coreEventsTopic() {
+        return topic("core.events");
+    }
+
     public String candleEventsTopic() {
         return topic("candle.events");
     }

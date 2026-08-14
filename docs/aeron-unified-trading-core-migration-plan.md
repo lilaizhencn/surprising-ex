@@ -8,7 +8,7 @@
 | 基线分支 | `master` |
 | 基线提交 | `dc46edabcd606fea85517974391739942d5f51e2` |
 | 目标实施分支 | `codex/aeron-unified-core` |
-| 当前阶段 | `P7 DONE；P8 等待用户确认` |
+| 当前阶段 | `P8 DONE；P9 等待用户确认` |
 | 最后更新日期 | `2026-08-14` |
 | 上线状态 | 项目尚未上线，无生产历史数据和兼容包袱 |
 | 架构决策 | [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md) |
@@ -890,7 +890,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | P5 | `DONE` | Snapshot、Replay、Exporter 和投影 | SPOT Leader/Follower kill、冷恢复、Exporter 故障、Kafka/PG 幂等投影 | `本 P5 阶段提交` |
 | P6 | `DONE` | 删除旧 WAL、Redis Risk 和旧强平链 | Aeron 强平接管、旧生产链引用清零、联合门禁全绿 | `本 P6 阶段提交` |
 | P7 | `DONE` | 补齐六条产品线 | 六线三节点 smoke、恢复、Exporter/PG 和资金差异为零 | `本 P7 阶段提交` |
-| P8 | `NOT_STARTED` | 单产品线功能和资金正式验收 | 第 15 节门禁报告 | `scripts/run-six-product-line-gates.sh` |
+| P8 | `DONE` | 单产品线功能和资金正式验收 | 六线 Gateway/API/WebSocket、资金、Exporter/PG 正式报告 | `本 P8 阶段提交` |
 | P9 | `NOT_STARTED` | 单产品线性能和故障容量测试 | 六份独立容量报告 | `scripts/run-uncapped-aeron-capacity.sh` |
 | P10 | `NOT_STARTED` | 生产部署与 Runbook 冻结 | 三机演练、Backup 恢复、值班手册 | 待填写 |
 
@@ -1285,7 +1285,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 
-P7 已获得用户确认并完成；P8、P9 未开始，必须等待用户再次明确确认后才能继续。
+P8 已获得用户确认并完成；P9 未开始，必须等待用户再次明确确认后才能继续。
 
 ### 18.8 P7：六线补齐
 
@@ -1317,13 +1317,41 @@ P7 已获得用户确认并完成；P8、P9 未开始，必须等待用户再次
 
 阶段出口：六条线逐线功能、恢复和资金差异均为零。
 
-P8、P9 未开始；P7 完成后按用户要求停止，等待下一次明确确认。
+P8 已完成；P9 未开始，按用户要求等待下一次明确确认。
 
 ### 18.9 P8：压测前正式门禁
 
 对将要压测的每条产品线单独执行第 15 节。每条线形成不可修改的 environment manifest 和验收报告。
 
+任务：
+
+- [x] 六条产品线逐线使用独立、干净的本地三节点 Aeron Cluster，且只运行一条产品线。
+- [x] Gateway 未认证请求返回 401；认证用户完成下单、强查询、原子改单、撤单和历史查询。
+- [x] 真实 maker/taker 成交后，以 Aeron 强查询验证 SPOT 双资产余额和五条衍生品双边仓位。
+- [x] WebSocket 验证 depth、orders、executionReports、匿名私有订阅拒绝和跨用户隔离。
+- [x] 两条永续验证 mark price 前置和 funding；两条交割与 OPTION 验证最终结算和仓位归零。
+- [x] Core Export 单分区 Kafka 事件、PostgreSQL execution/order/user 投影和最终 pending=0 通过。
+- [x] 六条产品线 `functional-gate=PASS`、`funds-diff=0`，逐线报告和 SHA256 证据生成完成。
+
+执行记录（2026-08-14）：
+
+- 新增 `scripts/run-six-product-line-acceptance.sh` 和 `ClusterApiAcceptanceMain`。驱动固定使用本次构建的
+  service jar 启动三节点，独立临时数据目录、端口占用前置检查和失败清理，避免常驻 Docker 或残留旧
+  Java Cluster 污染验收。
+- 正式 SPOT 首次资金门禁识别出验收实际连接到残留旧 jar 节点；切换为驱动自管的干净 Cluster 后，
+  Core 强查询、Account API 与 PostgreSQL 投影一致，成交后双资产资金差为零。Core 原子成交定向测试通过。
+- Provider 启动顺序冻结为 Instrument 启动、合约 upsert、再启动 Order/Matching/Account/WebSocket/Gateway；
+  不允许依赖 PostgreSQL 中已有合约快照偶然启动。永续不再携带交割 `settlementMethod`。
+- 永续后置验收在 funding 前提交确定性 mark price；交割与期权提交 `SETTLE_INSTRUMENT`。所有产品线最终
+  Book 为空，交割和期权仓位归零，经济资金总额保持不变。
+- WebSocket 直接消费单分区 `surprising.<line>.core.events.v1`；私有订阅从可信 `X-User-Id` 或显式启用的
+  query userId 建立身份，匿名订阅和跨用户数据均被拒绝。
+- 证据目录：`reports/product-line-acceptance/20260814-p8/`。顶层索引包含六条 PASS；逐线保存 environment
+  manifest、API 响应、WebSocket 结果、Core setup/verify/finalize、投影对账、funds diff 和 SHA256。
+
 阶段出口：当前产品线 `functional-gate=PASS`、`funds-diff=0`，方可进入 P9 对应压测。
+
+阶段出口已满足：六条产品线均 `functional-gate=PASS`、`funds-diff=0`。P9 等待用户明确确认。
 
 ### 18.10 P9：单产品线压测
 
@@ -1374,6 +1402,9 @@ P8、P9 未开始；P7 完成后按用户要求停止，等待下一次明确确
 | 2026-08-14 | P7 | 证据 | 六条产品线统一使用真实三节点 Gate，逐线验证功能、资金、Leader 切换、Snapshot、冷恢复和 Export | 旧 API smoke 仍依赖已删除的 WAL、Redis Risk 和强平 Saga，不能证明最终权威边界 | `reports/product-line-gates/20260814-p7/`、`ClusterProductLineGateMain` | 六线 `fundsDiff=0`；P8 的 Gateway/WebSocket 正式准入仍需单独确认 |
 | 2026-08-14 | P7 | 修复 | Risk Query 不再为零数量仓位生成 Snapshot，期权 Gate 使用 Core 确定性保证金要求 | 强平后保留的零仓位会触发禁止零数量的名义价值计算；期权权利金和卖方风险高于普通衍生品预留 | `CoreLifecycleStateTest` 10/10、OPTION 三节点 Gate | 不降低风控阈值，不改变 Snapshot 中零仓位的恢复兼容性 |
 | 2026-08-14 | P7 | 运维 | 六线统一单分区 Core Export Topic、中央 Runbook 和仪表盘/告警模板 | Export Sequence 必须保持全局单调，币本位产品不能继续缺少独立运行说明 | `scripts/create-topics.sh` dry-run、`runbook-aeron-six-product-lines.md` | 生产告警数值阈值等待 P9/P10 证据后冻结 |
+| 2026-08-14 | P8 | 证据 | 六线逐线通过正式 Gateway/API/WebSocket、资金与 Kafka/PG 投影验收 | P7 的核心恢复门禁不能替代外部 API 身份、查询、推送隔离和最终资金可见性 | `reports/product-line-acceptance/20260814-p8/` | 六线 `functional-gate=PASS`、`funds-diff=0`；P9 等待用户确认 |
+| 2026-08-14 | P8 | 修复 | 正式验收自管当前 jar 的干净本地三节点，并固定 Instrument 先于依赖 Provider 启动 | Compose 内网 Cluster 未被宿主机 Provider 使用，残留旧节点会污染结论；空合约快照必须失败关闭 | `scripts/run-six-product-line-acceptance.sh`、六线 environment manifest | 验收不依赖常驻 Docker Aeron、旧进程或 PostgreSQL 历史合约快照 |
+| 2026-08-14 | P8 | 修复 | WebSocket 私有身份绑定可信 header/显式 query userId，并直接消费单分区 Core Export Topic | 原身份函数恒为 null，且旧 fanout topic 不能证明唯一 Core 事件链 | `ClientWebSocketHandlerTest`、`CoreEventFanoutConsumerTest`、六线 WebSocket evidence | 匿名私有订阅和跨用户泄漏均失败关闭；公共行情保持可订阅 |
 | 2026-08-13 | P1 | 决策 | v1 采用等价固定二进制 codec，不引入代码生成 SBE | P1 envelope 字段固定且简单，先控制构建复杂度；golden 和扩展兼容测试已覆盖 | `CoreMessageCodecTest` | P2 新增业务 payload 前重新评估 SBE schema 生成 |
 | 2026-08-13 | P1 | 决策 | 幂等由 `commandId` 和 `(source, sourceId, sourceSequence)` 双层保护 | 完整结果窗口必须有界，但资金命令不能因淘汰而重放 | `CoreProbeStateTest` | Snapshot 必须保存两类状态 |
 | 2026-08-13 | P1 | 偏差 | Docker Desktop 未继承终端 Clash 代理 | Docker Hub JRE 25 元数据请求 60 秒超时 | P1 本地验证记录 | 宿主机经 Clash 下载官方 JRE 25 构建仅用于验证的本地基础镜像 |

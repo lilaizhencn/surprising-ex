@@ -63,6 +63,7 @@ public class WebSocketProperties {
         private String groupId = "surprising-websocket-local";
         private int concurrency = 2;
         private int maxPollRecords = 1000;
+        private boolean corePrivateEventsEnabled = true;
         private String candleTopic = "surprising.perp.candle.events.v1";
         private String tradeTopic = "surprising.perp.trade.events.v1";
         private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
@@ -123,6 +124,18 @@ public class WebSocketProperties {
 
         public void setMaxPollRecords(int maxPollRecords) {
             this.maxPollRecords = maxPollRecords;
+        }
+
+        public boolean isCorePrivateEventsEnabled() {
+            return corePrivateEventsEnabled;
+        }
+
+        public void setCorePrivateEventsEnabled(boolean corePrivateEventsEnabled) {
+            this.corePrivateEventsEnabled = corePrivateEventsEnabled;
+        }
+
+        public String getCoreEventsTopic() {
+            return productTopics().coreEventsTopic();
         }
 
         public String getCandleTopic() {

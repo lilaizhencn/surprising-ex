@@ -1,0 +1,1 @@
+exportDrain=PASS productLine=INVERSE_PERPETUAL published=0 ack=10 pending=0

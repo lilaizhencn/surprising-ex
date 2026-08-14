@@ -4,6 +4,7 @@ import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,9 +37,7 @@ public final class KafkaCoreExportSink implements CoreExportSink, AutoCloseable 
         String topic = topic(productLine);
         List<Future<RecordMetadata>> writes = new ArrayList<>(events.size());
         for (CoreMessage message : events) {
-            long sequence = CoreExportCodec.decodeEvent(message.payload()).exportSequence();
-            writes.add(producer.send(new ProducerRecord<>(topic,
-                    productLine.name() + ":" + sequence, CoreMessageCodec.encode(message))));
+            writes.add(producer.send(record(topic, productLine, message)));
         }
         for (Future<RecordMetadata> write : writes) {
             write.get();
@@ -46,7 +45,13 @@ public final class KafkaCoreExportSink implements CoreExportSink, AutoCloseable 
     }
 
     public static String topic(ProductLine productLine) {
-        return "surprising." + productLine.topicSegment() + ".core.events.v1";
+        return ProductTopicNames.of(productLine).coreEventsTopic();
+    }
+
+    static ProducerRecord<String, byte[]> record(String topic, ProductLine productLine, CoreMessage message) {
+        long sequence = CoreExportCodec.decodeEvent(message.payload()).exportSequence();
+        return new ProducerRecord<>(topic, 0, productLine.name() + ":" + sequence,
+                CoreMessageCodec.encode(message));
     }
 
     @Override

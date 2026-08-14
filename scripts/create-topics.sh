@@ -125,6 +125,19 @@ create_topic_with_partitions() {
     --topic "${topic}" \
     --partitions "${partitions}" \
     --replication-factor "${REPLICATION_FACTOR}"
+  require_topic_partitions "${topic}" "${partitions}"
+}
+
+require_topic_partitions() {
+  local topic="$1"
+  local expected="$2"
+  local actual
+  actual="$("${KAFKA_TOPICS_CMD[@]}" --bootstrap-server "${BOOTSTRAP_SERVERS}" \
+    --describe --topic "${topic}" | sed -n 's/.*PartitionCount: \([0-9][0-9]*\).*/\1/p' | head -n 1)"
+  if [[ "${actual}" != "${expected}" ]]; then
+    echo "Topic ${topic} must have ${expected} partitions, actual=${actual:-unknown}" >&2
+    exit 1
+  fi
 }
 
 create_compacted_topic() {
@@ -145,6 +158,7 @@ create_compacted_topic_with_partitions() {
     --partitions "${partitions}" \
     --replication-factor "${REPLICATION_FACTOR}" \
     --config cleanup.policy=compact
+  require_topic_partitions "${topic}" "${partitions}"
 }
 
 create_product_topics() {

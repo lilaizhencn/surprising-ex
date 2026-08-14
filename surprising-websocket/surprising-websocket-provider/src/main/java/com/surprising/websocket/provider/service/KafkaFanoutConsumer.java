@@ -293,6 +293,7 @@ public class KafkaFanoutConsumer {
     @KafkaListener(
             topics = "#{__listener.orderEventsTopic()}",
             groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.legacyPrivateEventsEnabled()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onOrderEvent(ConsumerRecord<String, String> record) {
         try {
@@ -333,6 +334,7 @@ public class KafkaFanoutConsumer {
     @KafkaListener(
             topics = "#{__listener.matchResultsTopic()}",
             groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.legacyPrivateEventsEnabled()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onMatchResult(ConsumerRecord<String, String> record) {
         try {
@@ -390,6 +392,7 @@ public class KafkaFanoutConsumer {
     @KafkaListener(
             topics = "#{__listener.positionEventsTopic()}",
             groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.legacyPrivateEventsEnabled()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPosition(ConsumerRecord<String, String> record) {
         try {
@@ -438,6 +441,10 @@ public class KafkaFanoutConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
+    }
+
+    public boolean legacyPrivateEventsEnabled() {
+        return !properties.getKafka().isCorePrivateEventsEnabled();
     }
 
     public String candleTopic() {

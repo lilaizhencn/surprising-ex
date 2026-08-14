@@ -1,0 +1,6 @@
+instrument: started pid 42035 port 9080 productLine SPOT
+order: started pid 42068 port 9084 productLine SPOT
+matching: started pid 42104 port 9085 productLine SPOT
+account: started pid 42131 port 9086 productLine SPOT
+websocket: started pid 42170 port 9097 productLine SPOT
+gateway: started pid 42255 port 9094 productLine SPOT

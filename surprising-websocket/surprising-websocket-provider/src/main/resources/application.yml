@@ -22,6 +22,7 @@ surprising:
       group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
       concurrency: 2
       max-poll-records: 1000
+      core-private-events-enabled: ${SURPRISING_WS_CORE_PRIVATE_EVENTS_ENABLED:true}
       candle-topic: surprising.perp.candle.events.v1
       trade-topic: surprising.perp.trade.events.v1
       order-book-depth-topic: surprising.perp.orderbook.depth.v1

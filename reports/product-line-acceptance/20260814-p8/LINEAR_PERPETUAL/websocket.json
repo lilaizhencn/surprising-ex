@@ -1,0 +1,441 @@
+{
+  "pass": true,
+  "productLine": "LINEAR_PERPETUAL",
+  "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+  "userId": 30000092021,
+  "otherUserId": 30000092029,
+  "requiredChannels": [
+    "depth",
+    "orders",
+    "executionReports",
+    "positions"
+  ],
+  "observedChannels": [
+    "orders",
+    "executionReports",
+    "positions",
+    "depth"
+  ],
+  "anonymousPrivateSubscription": "private websocket channel requires authenticated user",
+  "actions": [
+    {
+      "action": "connected",
+      "userId": 30000092021
+    },
+    {
+      "action": "connected",
+      "userId": 30000092029
+    },
+    {
+      "action": "connected",
+      "userId": null
+    },
+    {
+      "action": "send",
+      "userId": 30000092021,
+      "command": {
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:44.054627Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092021,
+      "command": {
+        "id": "primary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092021,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:44.064099Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092029,
+      "command": {
+        "id": "secondary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092029,
+      "message": {
+        "op": "subscribed",
+        "id": "secondary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092029,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:44.068297Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092021,
+      "command": {
+        "id": "primary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092021,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:44.071227Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092029,
+      "command": {
+        "id": "secondary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092029,
+      "message": {
+        "op": "subscribed",
+        "id": "secondary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092029,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:44.073239Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092021,
+      "command": {
+        "id": "primary-positions",
+        "channel": "positions",
+        "symbol": "*",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-positions",
+        "channel": "positions",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092021,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:44.074621Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092029,
+      "command": {
+        "id": "secondary-positions",
+        "channel": "positions",
+        "symbol": "*",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092029,
+      "message": {
+        "op": "subscribed",
+        "id": "secondary-positions",
+        "channel": "positions",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092029,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:44.075863Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": null,
+      "command": {
+        "id": "anonymous-private",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": null,
+      "message": {
+        "op": "error",
+        "id": null,
+        "channel": null,
+        "symbol": null,
+        "period": null,
+        "userId": null,
+        "productLine": null,
+        "data": null,
+        "error": "private websocket channel requires authenticated user",
+        "eventTime": "2026-08-14T06:19:44.076805Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092021,
+      "command": {
+        "op": "ping",
+        "id": "primary-ping"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "pong",
+        "id": "primary-ping",
+        "channel": null,
+        "symbol": null,
+        "period": null,
+        "userId": null,
+        "productLine": null,
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:44.077758Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092021,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": {
+          "exportSequence": 7,
+          "order": {
+            "orderId": 7493914243209626000,
+            "productLine": "LINEAR_PERPETUAL",
+            "userId": 30000092021,
+            "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+            "instrumentVersion": 2,
+            "side": "SELL",
+            "priceTicks": 100,
+            "quantitySteps": 10,
+            "executedQuantitySteps": 0,
+            "remainingQuantitySteps": 10,
+            "reduceOnly": false,
+            "marginMode": "CROSS",
+            "positionSide": "NET",
+            "orderType": "LIMIT",
+            "timeInForce": "GTC",
+            "postOnly": false,
+            "clientOrderId": "p8-maker-9202",
+            "commandId": "a8b49f70-69d0-3694-9ab3-3e34a5e09c85",
+            "makerFeeRatePpm": 0,
+            "takerFeeRatePpm": 0,
+            "createdAtEpochMillis": 1786688385777,
+            "updatedAtEpochMillis": 1786688385777,
+            "clusterPosition": 257024,
+            "status": "OPEN",
+            "revision": 1
+          }
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:19:45.775Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092021,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": {
+          "reportType": "CORE_ORDER",
+          "userId": 30000092021,
+          "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+          "orderId": 7493914243209626000,
+          "commandId": null,
+          "tradeId": null,
+          "counterpartyOrderId": null,
+          "counterpartyUserId": null,
+          "instrumentVersion": 2,
+          "orderEventType": null,
+          "commandType": "PLACE_ORDER",
+          "orderStatus": "OPEN",
+          "resultCode": "NONE",
+          "liquidityRole": null,
+          "side": "SELL",
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "priceTicks": 100,
+          "quantitySteps": 10,
+          "filledQuantitySteps": 0,
+          "orderCompleted": false,
+          "reason": null,
+          "traceId": "a8b49f70-69d0-3694-9ab3-3e34a5e09c85",
+          "eventTime": "2026-08-14T06:19:45.775Z"
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:19:45.775Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "positions",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092021,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": {
+          "exportSequence": 7,
+          "productLine": "LINEAR_PERPETUAL",
+          "userId": 30000092021,
+          "revision": 6,
+          "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+          "instrumentVersion": 2,
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "signedQuantitySteps": 0,
+          "entryPriceTicks": 0,
+          "entryValueTicks": 0,
+          "realizedPnlUnits": 0,
+          "marginAsset": "",
+          "marginUnits": 0
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:19:45.775Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "depth",
+        "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": {
+          "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+          "sequence": 7,
+          "previousSequence": 6,
+          "updateType": "SNAPSHOT",
+          "depth": 50,
+          "bids": [],
+          "asks": [
+            {
+              "priceTicks": 100,
+              "quantitySteps": 10,
+              "orderCount": 1
+            }
+          ],
+          "eventTime": "2026-08-14T06:19:45.775Z"
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:19:45.775Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092021,
+      "command": {
+        "op": "unsubscribe",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+        "productLine": "LINEAR_PERPETUAL"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092021,
+      "message": {
+        "op": "unsubscribed",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-LINEAR-PERPETUAL-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "LINEAR_PERPETUAL",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:19:45.843647Z"
+      }
+    }
+  ]
+}

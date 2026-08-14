@@ -1,0 +1,1 @@
+apiAcceptance=PASS mode=verify productLine=SPOT symbol=P8-SPOT-BTC-USDT seller=30000092011 buyer=30000092012 fundsDiff=0 seed=9201

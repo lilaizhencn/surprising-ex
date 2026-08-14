@@ -1,0 +1,3 @@
+eventRows=8 minSequence=1 maxSequence=8
+executionRows=1 quantity=10
+orderRows=4

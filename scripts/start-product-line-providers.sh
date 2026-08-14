@@ -460,12 +460,12 @@ start_service() {
     cd "${ROOT_DIR}"
     if [[ "${NATIVE_IMAGE}" == "true" ]]; then
       if ((${#service_java_args[@]} > 0)); then
-        env "${env_values[@]}" "${launch_artifact}" "${service_java_args[@]}"
+        exec env "${env_values[@]}" "${launch_artifact}" "${service_java_args[@]}"
       else
-        env "${env_values[@]}" "${launch_artifact}"
+        exec env "${env_values[@]}" "${launch_artifact}"
       fi
     else
-      env "${env_values[@]}" "${JAVA_BIN}" "${service_java_args[@]}" -jar "${launch_artifact}"
+      exec env "${env_values[@]}" "${JAVA_BIN}" "${service_java_args[@]}" -jar "${launch_artifact}"
     fi
   ) >"${LOG_DIR}/${service}.log" 2>&1 &
   local pid=$!

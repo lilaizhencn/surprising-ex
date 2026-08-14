@@ -1,0 +1,356 @@
+{
+  "pass": true,
+  "productLine": "SPOT",
+  "symbol": "P8-SPOT-BTC-USDT",
+  "userId": 30000092011,
+  "otherUserId": 30000092019,
+  "requiredChannels": [
+    "depth",
+    "orders",
+    "executionReports"
+  ],
+  "observedChannels": [
+    "orders",
+    "executionReports",
+    "depth"
+  ],
+  "anonymousPrivateSubscription": "private websocket channel requires authenticated user",
+  "actions": [
+    {
+      "action": "connected",
+      "userId": 30000092011
+    },
+    {
+      "action": "connected",
+      "userId": 30000092019
+    },
+    {
+      "action": "connected",
+      "userId": null
+    },
+    {
+      "action": "send",
+      "userId": 30000092011,
+      "command": {
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-SPOT-BTC-USDT",
+        "productLine": "SPOT"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092011,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-SPOT-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "SPOT",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:12:10.351023Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092011,
+      "command": {
+        "id": "primary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "SPOT"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092011,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092011,
+        "productLine": "SPOT",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:12:10.359488Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092019,
+      "command": {
+        "id": "secondary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "SPOT"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092019,
+      "message": {
+        "op": "subscribed",
+        "id": "secondary-orders",
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092019,
+        "productLine": "SPOT",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:12:10.363165Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092011,
+      "command": {
+        "id": "primary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "productLine": "SPOT"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092011,
+      "message": {
+        "op": "subscribed",
+        "id": "primary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092011,
+        "productLine": "SPOT",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:12:10.365088Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092019,
+      "command": {
+        "id": "secondary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "productLine": "SPOT"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092019,
+      "message": {
+        "op": "subscribed",
+        "id": "secondary-executionReports",
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092019,
+        "productLine": "SPOT",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:12:10.366143Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": null,
+      "command": {
+        "id": "anonymous-private",
+        "channel": "orders",
+        "symbol": "*",
+        "productLine": "SPOT"
+      }
+    },
+    {
+      "action": "message",
+      "userId": null,
+      "message": {
+        "op": "error",
+        "id": null,
+        "channel": null,
+        "symbol": null,
+        "period": null,
+        "userId": null,
+        "productLine": null,
+        "data": null,
+        "error": "private websocket channel requires authenticated user",
+        "eventTime": "2026-08-14T06:12:10.367167Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092011,
+      "command": {
+        "op": "ping",
+        "id": "primary-ping"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092011,
+      "message": {
+        "op": "pong",
+        "id": "primary-ping",
+        "channel": null,
+        "symbol": null,
+        "period": null,
+        "userId": null,
+        "productLine": null,
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:12:10.368117Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092011,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "orders",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092011,
+        "productLine": "SPOT",
+        "data": {
+          "exportSequence": 7,
+          "order": {
+            "orderId": 7493912340769800000,
+            "productLine": "SPOT",
+            "userId": 30000092011,
+            "symbol": "P8-SPOT-BTC-USDT",
+            "instrumentVersion": 5,
+            "side": "SELL",
+            "priceTicks": 100,
+            "quantitySteps": 10,
+            "executedQuantitySteps": 0,
+            "remainingQuantitySteps": 10,
+            "reduceOnly": false,
+            "marginMode": "CROSS",
+            "positionSide": "NET",
+            "orderType": "LIMIT",
+            "timeInForce": "GTC",
+            "postOnly": false,
+            "clientOrderId": "p8-maker-9201",
+            "commandId": "fa028969-dfc3-35ce-a948-bb0f12e9a2c7",
+            "makerFeeRatePpm": 0,
+            "takerFeeRatePpm": 0,
+            "createdAtEpochMillis": 1786687932200,
+            "updatedAtEpochMillis": 1786687932200,
+            "clusterPosition": 256224,
+            "status": "OPEN",
+            "revision": 1
+          }
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:12:12.198Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092011,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "executionReports",
+        "symbol": "*",
+        "period": null,
+        "userId": 30000092011,
+        "productLine": "SPOT",
+        "data": {
+          "reportType": "CORE_ORDER",
+          "userId": 30000092011,
+          "symbol": "P8-SPOT-BTC-USDT",
+          "orderId": 7493912340769800000,
+          "commandId": null,
+          "tradeId": null,
+          "counterpartyOrderId": null,
+          "counterpartyUserId": null,
+          "instrumentVersion": 5,
+          "orderEventType": null,
+          "commandType": "PLACE_ORDER",
+          "orderStatus": "OPEN",
+          "resultCode": "NONE",
+          "liquidityRole": null,
+          "side": "SELL",
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "priceTicks": 100,
+          "quantitySteps": 10,
+          "filledQuantitySteps": 0,
+          "orderCompleted": false,
+          "reason": null,
+          "traceId": "fa028969-dfc3-35ce-a948-bb0f12e9a2c7",
+          "eventTime": "2026-08-14T06:12:12.198Z"
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:12:12.198Z"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092011,
+      "message": {
+        "op": "event",
+        "id": null,
+        "channel": "depth",
+        "symbol": "P8-SPOT-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "SPOT",
+        "data": {
+          "symbol": "P8-SPOT-BTC-USDT",
+          "sequence": 7,
+          "previousSequence": 6,
+          "updateType": "SNAPSHOT",
+          "depth": 50,
+          "bids": [],
+          "asks": [
+            {
+              "priceTicks": 100,
+              "quantitySteps": 10,
+              "orderCount": 1
+            }
+          ],
+          "eventTime": "2026-08-14T06:12:12.198Z"
+        },
+        "error": null,
+        "eventTime": "2026-08-14T06:12:12.198Z"
+      }
+    },
+    {
+      "action": "send",
+      "userId": 30000092011,
+      "command": {
+        "op": "unsubscribe",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-SPOT-BTC-USDT",
+        "productLine": "SPOT"
+      }
+    },
+    {
+      "action": "message",
+      "userId": 30000092011,
+      "message": {
+        "op": "unsubscribed",
+        "id": "primary-depth",
+        "channel": "depth",
+        "symbol": "P8-SPOT-BTC-USDT",
+        "period": null,
+        "userId": null,
+        "productLine": "SPOT",
+        "data": null,
+        "error": null,
+        "eventTime": "2026-08-14T06:12:12.285174Z"
+      }
+    }
+  ]
+}

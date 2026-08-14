@@ -1,0 +1,7 @@
+instrument: started pid 46315 port 9080 productLine INVERSE_PERPETUAL
+instrument: already ready on port 9080; reusing existing provider
+order: started pid 46377 port 9084 productLine INVERSE_PERPETUAL
+matching: started pid 46416 port 9085 productLine INVERSE_PERPETUAL
+account: started pid 46457 port 9086 productLine INVERSE_PERPETUAL
+websocket: started pid 46492 port 9097 productLine INVERSE_PERPETUAL
+gateway: started pid 46572 port 9094 productLine INVERSE_PERPETUAL

@@ -6,6 +6,7 @@ import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
@@ -37,6 +38,14 @@ class WebSocketKafkaConfigurationTest {
                 ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                 CooperativeStickyAssignor.class.getName());
         assertThat(listenerFactory.getContainerProperties().getAckMode())
+                .isEqualTo(ContainerProperties.AckMode.RECORD);
+
+        var coreConsumerFactory = (DefaultKafkaConsumerFactory<String, byte[]>)
+                configuration.webSocketCoreEventsConsumerFactory(properties);
+        var coreListenerFactory = configuration.webSocketCoreEventsKafkaListenerContainerFactory(coreConsumerFactory);
+        assertThat(coreConsumerFactory.getConfigurationProperties())
+                .containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
+        assertThat(coreListenerFactory.getContainerProperties().getAckMode())
                 .isEqualTo(ContainerProperties.AckMode.RECORD);
     }
 }

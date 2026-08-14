@@ -8,6 +8,7 @@ import java.net.URI;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
+import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -85,7 +86,32 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         return registry.connection(session.getId());
     }
 
-    private Long authenticatedUserId(WebSocketSession session) {
-        return null;
+    Long authenticatedUserId(WebSocketSession session) {
+        HttpHeaders headers = session.getHandshakeHeaders();
+        String headerValue = headers.getFirst(properties.getSecurity().getUserIdHeader());
+        if (headerValue != null && !headerValue.isBlank()) {
+            return requirePositiveUserId(headerValue);
+        }
+        if (!properties.getSecurity().isAllowQueryUserIdFallback()) {
+            return null;
+        }
+        URI uri = session.getUri();
+        if (uri == null) {
+            return null;
+        }
+        String queryValue = UriComponentsBuilder.fromUri(uri).build().getQueryParams().getFirst("userId");
+        return queryValue == null || queryValue.isBlank() ? null : requirePositiveUserId(queryValue);
+    }
+
+    private static long requirePositiveUserId(String value) {
+        try {
+            long userId = Long.parseLong(value.trim());
+            if (userId <= 0L) {
+                throw new IllegalArgumentException("websocket userId must be positive");
+            }
+            return userId;
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("websocket userId must be a positive integer", ex);
+        }
     }
 }

@@ -69,4 +69,16 @@ class WebSocketPropertiesTest {
         assertThat(properties.getKafka().getFundingRateTopic())
                 .isEqualTo("surprising.inverse-perp.funding.rate.v1");
     }
+
+    @Test
+    void resolvesSixAuthoritativeCoreEventTopics() {
+        WebSocketProperties properties = new WebSocketProperties();
+
+        for (ProductLine productLine : ProductLine.values()) {
+            properties.getKafka().setProductLine(productLine);
+            assertThat(properties.getKafka().getCoreEventsTopic())
+                    .isEqualTo("surprising." + productLine.topicSegment() + ".core.events.v1");
+        }
+        assertThat(properties.getKafka().isCorePrivateEventsEnabled()).isTrue();
+    }
 }
