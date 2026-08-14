@@ -1,11 +1,6 @@
 package com.surprising.trading.order.service;
 
-import com.surprising.account.api.model.PositionUpdatedEvent;
-import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.OrderReservationKind;
-import com.surprising.account.api.model.OrderReserveAccountCommand;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AmendOrderBatchItemResponse;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -48,16 +43,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
 public class OrderService {
 
-    private static final String REDUCE_ONLY_PRUNE_REASON = "REDUCE_ONLY_POSITION_REDUCED";
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
     private final ReduceOnlyValidator reduceOnlyValidator;
@@ -65,8 +57,6 @@ public class OrderService {
     private final OrderMarginCalculator orderMarginCalculator;
     private final SpotReservationCalculator spotReservationCalculator;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
-    private final OrderUserStateService orderUserStateService;
-    private final OrderUserCommandGateway orderUserCommandGateway;
     private final AeronOrderCommandService aeronOrders;
     private final AeronOrderProjectionRepository aeronOrderProjection;
 
@@ -78,8 +68,6 @@ public class OrderService {
                         OrderMarginCalculator orderMarginCalculator,
                         SpotReservationCalculator spotReservationCalculator,
                         OrderFeeSnapshotLookup feeSnapshotLookup,
-                        OrderUserStateService orderUserStateService,
-                        OrderUserCommandGateway orderUserCommandGateway,
                         AeronOrderCommandService aeronOrders,
                         AeronOrderProjectionRepository aeronOrderProjection) {
         this.properties = properties;
@@ -89,8 +77,6 @@ public class OrderService {
         this.orderMarginCalculator = orderMarginCalculator;
         this.spotReservationCalculator = spotReservationCalculator;
         this.feeSnapshotLookup = feeSnapshotLookup;
-        this.orderUserStateService = orderUserStateService;
-        this.orderUserCommandGateway = orderUserCommandGateway;
         this.aeronOrders = aeronOrders;
         this.aeronOrderProjection = aeronOrderProjection;
     }
@@ -101,11 +87,9 @@ public class OrderService {
                         OrderPlacementStateService placementStateService,
                         OrderMarginCalculator orderMarginCalculator,
                         SpotReservationCalculator spotReservationCalculator,
-                        OrderFeeSnapshotLookup feeSnapshotLookup,
-                        OrderUserStateService orderUserStateService,
-                        OrderUserCommandGateway orderUserCommandGateway) {
+                        OrderFeeSnapshotLookup feeSnapshotLookup) {
         this(properties, orderValidator, reduceOnlyValidator, placementStateService, orderMarginCalculator,
-                spotReservationCalculator, feeSnapshotLookup, orderUserStateService, orderUserCommandGateway, null, null);
+                spotReservationCalculator, feeSnapshotLookup, null, null);
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
@@ -129,9 +113,8 @@ public class OrderService {
 
     private PreparedAeronOrder prepareAeronOrder(PlaceOrderRequest normalized) {
         ProductLine productLine = currentProductLine();
-        requireLocalAccountProductLine(productLine);
         PositionMode positionMode = productLine == ProductLine.SPOT
-                ? PositionMode.ONE_WAY : placementStateService.localPositionMode(productLine, normalized.userId());
+                ? PositionMode.ONE_WAY : placementStateService.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
         ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
         if (validation.accepted()) validation = orderValidator.validate(normalized);
@@ -169,89 +152,7 @@ public class OrderService {
         return new ReservationInput(value.asset(), Math.max(1, value.initialMarginUnits()));
     }
 
-    /**
-     * 批量下单使用同一用户的账户修订号序列；普通单笔下单仍严格读取当前 JVM 快照。
-     */
-    private OrderResponse place(PlaceOrderRequest request, BatchReservationSequence sequence) {
-        return placeAeron(request);
-    }
-
-    /** 生产下单入口：只构造订单事实和账户预占命令，不写订单数据库。 */
-    private OrderResponse placeWal(PlaceOrderRequest request, BatchReservationSequence sequence) {
-        PlaceOrderRequest normalized = normalize(request);
-        ProductLine productLine = currentProductLine();
-        requireLocalAccountProductLine(productLine);
-        if (hasClientOrderId(normalized)) {
-            var existing = orderUserStateService.findByClientOrderId(
-                    normalized.userId(), normalized.clientOrderId());
-            if (existing.isPresent()) {
-                requireSameClientOrderIntent(normalized, existing.get());
-                return existing.get();
-            }
-        }
-        PositionMode positionMode = productLine == ProductLine.SPOT
-                ? PositionMode.ONE_WAY
-                : placementStateService.localPositionMode(productLine, normalized.userId());
-        normalized = normalizePositionMode(normalized, positionMode);
-        Instant now = Instant.now();
-        ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
-        if (validation.accepted()) {
-            validation = orderValidator.validate(normalized);
-        }
-        if (validation.accepted() && normalized.reduceOnly()) {
-            ValidationResult reduceOnlyValidation = reduceOnlyValidator.validate(normalized);
-            if (!reduceOnlyValidation.accepted()) {
-                validation = ValidationResult.reject(reduceOnlyValidation.rejectReason(), validation.instrumentVersion());
-            } else {
-                validation = ValidationResult.ok(reduceOnlyValidation.instrumentVersion(),
-                        validation.instrumentType(), validation.contractType());
-            }
-        }
-        OrderFeeSnapshot feeSnapshot = rejectedFeeSnapshot();
-        if (validation.accepted()) {
-            var resolved = feeSnapshotLookup == null ? java.util.Optional.<OrderFeeSnapshot>empty()
-                    : feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
-                    validation.instrumentVersion(), now);
-            if (resolved.isEmpty()) {
-                validation = ValidationResult.reject("fee schedule unavailable", validation.instrumentVersion());
-            } else {
-                feeSnapshot = resolved.get();
-            }
-        }
-        long orderId = orderUserStateService.nextOrderId();
-        ReservationPlan reservationPlan = ReservationPlan.none();
-        if (validation.accepted() && (!normalized.reduceOnly() || requiresReduceOnlyFunds(normalized, validation))) {
-            reservationPlan = planOpeningFunds(normalized, orderId, validation, feeSnapshot, sequence);
-            if (!reservationPlan.accepted()) {
-                validation = ValidationResult.reject(reservationPlan.rejectReason(), validation.instrumentVersion(),
-                        validation.instrumentType(), validation.contractType());
-            }
-        }
-        OrderStatus status = !validation.accepted() ? OrderStatus.REJECTED
-                : reservationPlan.command() == null ? OrderStatus.ACCEPTED : OrderStatus.PENDING_RESERVE;
-        OrderReserveAccountCommand reservation = reservationPlan.command();
-        OrderRecord order = new OrderRecord(orderId, productLine, normalized.userId(),
-                emptyToNull(normalized.clientOrderId()), normalized.symbol(), validation.instrumentVersion(),
-                normalized.side(), normalized.orderType(), normalized.timeInForce(), normalized.priceTicks(),
-                normalized.quantitySteps(), 0L, validation.accepted() ? normalized.quantitySteps() : 0L,
-                normalized.marginMode(), normalized.positionSide(), feeSnapshot.makerFeeRatePpm(),
-                feeSnapshot.takerFeeRatePpm(), normalized.reduceOnly(), normalized.postOnly(),
-                reservation == null ? null : reservation.accountType().name(),
-                reservation == null ? null : reservation.asset(), reservation == null ? 0L : reservation.reservedUnits(),
-                status, validation.rejectReason(), now, now, 1L, TraceContext.currentOrCreate());
-        return orderUserCommandGateway.place(order);
-    }
-
-    /** 订单事实流只开放已接入本地账户 reducer 的产品线，未接入的产品线必须失败关闭。 */
-    private void requireLocalAccountProductLine(ProductLine productLine) {
-        // 现货没有持仓保证金流，但同样由账户 reducer 维护资产余额和冻结事实，不能误判为未接入。
-        if (productLine == null
-                || (!productLine.supportsUserPositionMarginFlow() && productLine != ProductLine.SPOT)) {
-            throw new IllegalStateException("产品线尚未接入本地账户事实流: " + productLine);
-        }
-    }
-
-    /** 本地订单事实流使用账户快照和用户分区状态完成保证金模式校验，不打开数据库事务。 */
+    /** Aeron User State 提供仓位模式预校验，最终裁决仍在同一 Core 命令中完成。 */
     private ValidationResult validateMarginModeForLocalState(ProductLine productLine,
                                                              PlaceOrderRequest request) {
         if (productLine == ProductLine.SPOT) {
@@ -261,12 +162,8 @@ public class OrderService {
             // 只减仓不会新增保证金模式状态；仓位模式和仓位快照由只减仓校验统一确认。
             return ValidationResult.ok();
         }
-        if (placementStateService.cachedPositionMarginModeConflict(productLine, request.userId(),
+        if (placementStateService.positionMarginModeConflict(productLine, request.userId(),
                 request.symbol(), request.marginMode())) {
-            return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
-        }
-        if (orderUserStateService.hasActiveMarginModeConflict(request.userId(), request.symbol(),
-                request.marginMode())) {
             return ValidationResult.reject("margin mode switch requires closing positions and open orders first");
         }
         return ValidationResult.ok();
@@ -276,10 +173,9 @@ public class OrderService {
         List<PlaceOrderRequest> orders = request == null ? List.of() : request.orders();
         requireBatchSize(orders.size(), 20, "orders");
         List<OrderBatchItemResponse> results = new ArrayList<>();
-        BatchReservationSequence sequence = new BatchReservationSequence();
         for (int i = 0; i < orders.size(); i++) {
             try {
-                OrderResponse order = place(orders.get(i), sequence);
+                OrderResponse order = place(orders.get(i));
                 results.add(new OrderBatchItemResponse(i, true, "completed", order));
             } catch (IllegalArgumentException | IllegalStateException ex) {
                 results.add(new OrderBatchItemResponse(i, false, ex.getMessage(), null));
@@ -296,10 +192,9 @@ public class OrderService {
     private TestOrderResponse testLocal(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
-        requireLocalAccountProductLine(productLine);
         PositionMode positionMode = productLine == ProductLine.SPOT
                 ? PositionMode.ONE_WAY
-                : placementStateService.localPositionMode(productLine, normalized.userId());
+                : placementStateService.positionMode(productLine, normalized.userId());
         normalized = normalizePositionMode(normalized, positionMode);
         ValidationResult validation = validateMarginModeForLocalState(productLine, normalized);
         if (!validation.accepted()) {
@@ -364,53 +259,6 @@ public class OrderService {
                 prepared.reservation().asset(), prepared.reservation().units());
     }
 
-    /** 生产改单只追加同一用户分区的撤单事实，再提交替代订单事实。 */
-    private AmendOrderResponse amendWal(AmendOrderRequest request) {
-        AmendOrderRequest normalized = normalizeAmend(request);
-        OrderResponse original = orderUserStateService.get(normalized.userId(), normalized.orderId());
-        if (original.userId() != normalized.userId()) {
-            throw new IllegalArgumentException("order does not belong to user");
-        }
-        if (original.orderType() != OrderType.LIMIT) {
-            throw new IllegalArgumentException("only LIMIT orders can be amended");
-        }
-        if (original.status() != OrderStatus.ACCEPTED && original.status() != OrderStatus.PARTIALLY_FILLED) {
-            throw new IllegalStateException("order is not amendable: " + original.status().name());
-        }
-        if (original.remainingQuantitySteps() <= 0L) {
-            throw new IllegalStateException("order has no open quantity to amend");
-        }
-        long replacementPriceTicks = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
-        long replacementQuantitySteps = normalized.quantitySteps() == null
-                ? original.remainingQuantitySteps() : normalized.quantitySteps();
-        TimeInForce replacementTif = normalized.timeInForce() == null
-                ? original.timeInForce() : normalized.timeInForce();
-        boolean replacementPostOnly = normalized.postOnly() == null
-                ? original.postOnly() : normalized.postOnly();
-        PlaceOrderRequest replacement = new PlaceOrderRequest(
-                original.userId(), normalized.newClientOrderId(), original.symbol(), original.side(),
-                original.orderType(), replacementTif, replacementPriceTicks, replacementQuantitySteps,
-                original.marginMode(), original.positionSide(), original.reduceOnly(), replacementPostOnly);
-        if (replacement.clientOrderId() != null && !replacement.clientOrderId().isBlank()) {
-            var existing = orderUserStateService.findByClientOrderId(normalized.userId(),
-                    replacement.clientOrderId());
-            if (existing.isPresent()) {
-                requireSameClientOrderIntent(replacement, existing.get());
-                return new AmendOrderResponse(original, existing.get(), false, "replacement order already exists");
-            }
-        }
-        OrderResponse canceled = orderUserCommandGateway.cancel(currentProductLine(), original.userId(), original.orderId(),
-                "order amend replace");
-        if (canceled.status() != OrderStatus.CANCEL_REQUESTED && canceled.status() != OrderStatus.CANCELED) {
-            throw new IllegalStateException("cancel requested failed for amend: " + canceled.status());
-        }
-        OrderResponse replacementOrder = place(replacement);
-        String message = replacementOrder.status() == OrderStatus.REJECTED
-                ? "cancel requested; replacement rejected: " + replacementOrder.rejectReason()
-                : "cancel requested; replacement submitted";
-        return new AmendOrderResponse(canceled, replacementOrder, true, message);
-    }
-
     public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
         List<AmendOrderRequest> orders = request == null ? List.of() : request.orders();
         requireBatchSize(orders.size(), 20, "orders");
@@ -427,11 +275,6 @@ public class OrderService {
     }
 
     public OrderResponse closePosition(ClosePositionRequest request) {
-        return closePositionWal(request);
-    }
-
-    /** 永续平仓从账户 JVM 快照读取仓位，再通过订单用户事实流提交只减仓单。 */
-    private OrderResponse closePositionWal(ClosePositionRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("close position request is required");
         }
@@ -442,12 +285,11 @@ public class OrderService {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         ProductLine productLine = currentProductLine();
-        // 平仓读取账户用户分区快照；不再为一次校验打开数据库锁事务。
-        PositionMode positionMode = placementStateService.localPositionMode(productLine, request.userId());
+        PositionMode positionMode = placementStateService.positionMode(productLine, request.userId());
         if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
             throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
         }
-        ReduceOnlyPosition position = placementStateService.localPosition(productLine, request.userId(), symbol, marginMode,
+        ReduceOnlyPosition position = placementStateService.position(productLine, request.userId(), symbol, marginMode,
                         positionSide)
                 .orElseThrow(() -> new IllegalStateException("open position not found"));
         if (position.signedQuantitySteps() == 0L) {
@@ -468,75 +310,6 @@ public class OrderService {
                 true,
                 false);
         return place(closeOrder);
-    }
-
-    private ReservationPlan planOpeningFunds(PlaceOrderRequest request,
-                                             long orderId,
-                                             ValidationResult validation,
-                                             OrderFeeSnapshot feeSnapshot,
-                                             BatchReservationSequence sequence) {
-        if (validation.instrumentType() == InstrumentType.SPOT) {
-            return planSpotReservation(request, orderId, validation.instrumentVersion(), feeSnapshot);
-        }
-        return planDerivativeReservation(request, orderId, validation.instrumentVersion(), sequence);
-    }
-
-    private ReservationPlan planSpotReservation(PlaceOrderRequest request,
-                                                long orderId,
-                                                long instrumentVersion,
-                                                OrderFeeSnapshot feeSnapshot) {
-        var requirement = spotReservationCalculator.requirement(
-                request.symbol(), instrumentVersion, request.side(), request.orderType(), request.priceTicks(),
-                request.quantitySteps(), feeSnapshot);
-        if (requirement.isEmpty()) {
-            return ReservationPlan.reject("spot reservation requirement unavailable");
-        }
-        if (!requirement.get().accepted()) {
-            return ReservationPlan.reject(requirement.get().rejectReason());
-        }
-        return ReservationPlan.accept(new OrderReserveAccountCommand(
-                orderId, request.symbol(), request.side(), OrderReservationKind.SPOT_ASSET, AccountType.SPOT,
-                requirement.get().asset(), request.marginMode(), request.positionSide(),
-                request.quantitySteps(), request.reduceOnly(),
-                requirement.get().reservedUnits()));
-    }
-
-    private ReservationPlan planDerivativeReservation(PlaceOrderRequest request,
-                                                      long orderId,
-                                                      long instrumentVersion,
-                                                      BatchReservationSequence sequence) {
-        var requirement = orderMarginCalculator.requirement(
-                request.symbol(), instrumentVersion, request.userId(), request.marginMode(), request.positionSide(), request.side(),
-                request.orderType(), request.priceTicks(), request.quantitySteps(),
-                properties.getRisk().getMarketMaxSlippagePpm(),
-                properties.getRisk().getMarketMaxMarkAgeMs());
-        if (requirement.isEmpty()) {
-            return ReservationPlan.reject("margin requirement unavailable");
-        }
-        if (!requirement.get().accepted()) {
-            return ReservationPlan.reject(requirement.get().rejectReason());
-        }
-        if (requirement.get().initialMarginUnits() <= 0) {
-            return ReservationPlan.reject("invalid margin requirement");
-        }
-        AccountType accountType;
-        try {
-            accountType = AccountType.valueOf(requirement.get().accountType());
-        } catch (IllegalArgumentException ex) {
-            return ReservationPlan.reject("unsupported margin account type " + requirement.get().accountType());
-        }
-        ReservationSequenceSlot slot = sequence == null
-                // 单笔订单通过 Kafka 异步到达账户用户分区，期间同一用户可能已经完成
-                // 另一笔预占并推进账户修订号。这里不携带下单时读取到的旧修订号，
-                // 由账户单写入 reducer 按 WAL 顺序裁决资金；只有批量请求内部显式建立
-                // 依赖链时，才用前一条命令约束批内顺序。
-                ? new ReservationSequenceSlot(0L, null)
-                : sequence.next(currentProductLine(), request.userId(), orderId);
-        return ReservationPlan.accept(new OrderReserveAccountCommand(
-                orderId, request.symbol(), request.side(), OrderReservationKind.DERIVATIVE_MARGIN, accountType,
-                requirement.get().asset(), request.marginMode(), request.positionSide(),
-                request.quantitySteps(), request.reduceOnly(),
-                requirement.get().initialMarginUnits(), slot.expectedAccountRevision()), slot.dependsOnCommandId());
     }
 
     private TestOrderResponse dryRunOpeningFunds(PlaceOrderRequest request,
@@ -584,10 +357,6 @@ public class OrderService {
         return request.reduceOnly()
                 && validation.contractType() == ContractType.VANILLA_OPTION
                 && request.side() == OrderSide.BUY;
-    }
-
-    private OrderFeeSnapshot rejectedFeeSnapshot() {
-        return new OrderFeeSnapshot(properties.getKafka().getProductLine(), 0L, 0L, "REJECTED");
     }
 
     public OrderResponse cancel(CancelOrderRequest request) {
@@ -638,10 +407,6 @@ public class OrderService {
             }
         }
         return orderBatchResponse(results);
-    }
-
-    public OrderResponse get(long orderId) {
-        return orderUserStateService.get(orderId);
     }
 
     public OrderResponse get(long userId, long orderId) {
@@ -875,19 +640,6 @@ public class OrderService {
         return aeronOrders;
     }
 
-    /**
-     * 账户单写者发布持久化仓位快照后，由订单侧负责清理只减仓订单。
-     *
-     * <p>撤单更新带状态条件，并且撮合确认撤单前 {@code CANCEL_REQUESTED} 订单仍参与容量计算，
-     * 因此重复消费仓位事件不会重复生成有效撤单。</p>
-     */
-    public void onPositionUpdated(PositionUpdatedEvent event) {
-        if (event == null || event.productLine() != currentProductLine()) {
-            throw new IllegalArgumentException("position event product line does not match order provider");
-        }
-        orderUserCommandGateway.pruneReduceOnly(event, REDUCE_ONLY_PRUNE_REASON);
-    }
-
     private String adminCancelReason(String reason) {
         if (reason == null || reason.isBlank()) {
             return "admin cancel";
@@ -919,38 +671,9 @@ public class OrderService {
         return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
     }
 
-    private String reservationCommandId(ProductLine productLine, long orderId) {
-        return "ORDER_RESERVE:" + productLine.name() + ":" + orderId;
-    }
-
     private AmendOrderBatchResponse amendBatchResponse(List<AmendOrderBatchItemResponse> results) {
         int completed = (int) results.stream().filter(AmendOrderBatchItemResponse::success).count();
         return new AmendOrderBatchResponse(results.size(), completed, results.size() - completed, results);
-    }
-
-    private record ReservationPlan(OrderReserveAccountCommand command,
-                                   String rejectReason,
-                                   String dependsOnCommandId) {
-
-        private static ReservationPlan none() {
-            return new ReservationPlan(null, null, null);
-        }
-
-        private static ReservationPlan accept(OrderReserveAccountCommand command) {
-            return new ReservationPlan(command, null, null);
-        }
-
-        private static ReservationPlan accept(OrderReserveAccountCommand command, String dependsOnCommandId) {
-            return new ReservationPlan(command, null, dependsOnCommandId);
-        }
-
-        private static ReservationPlan reject(String reason) {
-            return new ReservationPlan(null, reason, null);
-        }
-
-        private boolean accepted() {
-            return rejectReason == null || rejectReason.isBlank();
-        }
     }
 
     private record ReservationInput(String asset, long units) {
@@ -958,24 +681,6 @@ public class OrderService {
 
     private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation,
                                       OrderFeeSnapshot fee, ReservationInput reservation) {
-    }
-
-    private record ReservationSequenceSlot(long expectedAccountRevision, String dependsOnCommandId) {
-    }
-
-    /** 批量请求内按用户建立账户命令依赖链，确保同一批次的预占按顺序执行。 */
-    private final class BatchReservationSequence {
-        private final Map<Long, String> previousCommands = new HashMap<>();
-
-        private ReservationSequenceSlot next(ProductLine productLine,
-                                              long userId,
-                                              long orderId) {
-            String dependency = previousCommands.get(userId);
-            previousCommands.put(userId, reservationCommandId(productLine, orderId));
-            // 账户修订号由异步账户命令推进，批次之外可能在消息到达前变化；
-            // 不把下单时读取的旧值写入命令，最终资金裁决由账户用户分区 reducer 按 WAL 顺序完成。
-            return new ReservationSequenceSlot(0L, dependency);
-        }
     }
 
     private PlaceOrderRequest normalize(PlaceOrderRequest request) {

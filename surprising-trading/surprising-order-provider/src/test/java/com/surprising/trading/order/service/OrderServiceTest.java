@@ -5,8 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -53,9 +51,7 @@ class OrderServiceTest {
     @Mock
     private OrderFeeSnapshotLookup feeSnapshotLookup;
     @Mock
-    private OrderUserStateService userState;
-    @Mock
-    private OrderUserCommandGateway commandGateway;
+    private AeronOrderCommandService aeronOrders;
 
     @Test
     void placeFailsClosedWithoutAeronGateway() {
@@ -63,16 +59,16 @@ class OrderServiceTest {
         PlaceOrderRequest request = request("client-1");
         assertThatThrownBy(() -> service.place(request)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Aeron order gateway");
-        verifyNoInteractions(commandGateway);
+        verifyNoInteractions(aeronOrders);
     }
 
     @Test
     void missingFeeSnapshotFailsClosedBeforeAppendingOrderFact() {
-        OrderService service = service(ProductLine.LINEAR_PERPETUAL);
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        when(aeronOrders.find(1001L, "no-fee")).thenReturn(null);
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.place(request("no-fee"))).isInstanceOf(IllegalStateException.class);
-        verifyNoInteractions(commandGateway);
     }
 
     @Test
@@ -103,16 +99,22 @@ class OrderServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
         properties.getKafka().setProductTopicsEnabled(true);
-        when(placementStateService.localPositionMode(productLine, 1001L)).thenReturn(PositionMode.ONE_WAY);
-        when(placementStateService.cachedPositionMarginModeConflict(productLine, 1001L, "BTC-USDT",
+        return service(productLine, null);
+    }
+
+    private OrderService service(ProductLine productLine, AeronOrderCommandService aeron) {
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(productLine);
+        properties.getKafka().setProductTopicsEnabled(true);
+        when(placementStateService.positionMode(productLine, 1001L)).thenReturn(PositionMode.ONE_WAY);
+        when(placementStateService.positionMarginModeConflict(productLine, 1001L, "BTC-USDT",
                 MarginMode.CROSS)).thenReturn(false);
-        when(userState.hasActiveMarginModeConflict(1001L, "BTC-USDT", MarginMode.CROSS)).thenReturn(false);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(reduceOnlyValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, 100L, 200L, "JVM")));
         return new OrderService(properties, orderValidator, reduceOnlyValidator, placementStateService,
-                orderMarginCalculator, spotReservationCalculator, feeSnapshotLookup, userState, commandGateway);
+                orderMarginCalculator, spotReservationCalculator, feeSnapshotLookup, aeron, null);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

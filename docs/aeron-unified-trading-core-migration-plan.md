@@ -1241,6 +1241,10 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] `RISK_STATE_RESULT` 返回 instrument、仓位、标记价、名义价值、逐仓保证金和 Core 钱包余额；账户与持仓 API 直接映射 Core 结果，无 PG/Redis 计算回退。
 - [x] Core 全仓 Risk 改为按同结算资产组合计算权益、未实现 PnL 和维持保证金；逐仓仍独立，且全仓钱包排除逐仓仓位及挂单占用。多标的回归验证标记价变更会同步更新组合内全部全仓快照和强平计划。
 - [x] Risk 联合 `clean test` 通过：Protocol 14/14、Core 50/50、Risk Provider 5/5；Risk Provider 生产源码中 `RedisRisk|RiskOutbox|RiskLocalProjection|risk-projection-wal|risk_liquidation_candidates|risk_account_snapshots|risk_position_snapshots` 引用为零。
+- [x] 普通订单的仓位模式、保证金模式冲突与平仓仓位读取全部切换到 Aeron `USER_STATE_QUERY`；下单、批量下单、改单和一键平仓不再读取旧 Order User State。
+- [x] 删除旧 Kafka 仓位事件驱动的只减仓订单维护消费者；只减仓最终容量由 Core 在单条下单命令内确定性裁决，不再由外围异步修剪订单。
+- [x] 普通订单入口删除 `placeWal/amendWal`、账户预占命令规划及旧批次 reservation sequence；Order 全依赖 `clean test` 127/127 通过。
+- [ ] 算法单、杠杆设置和旧订单投影/维护任务仍引用 Order WAL，完成 Aeron/PG 边界迁移后再删除 WAL Bean 与 `surprising-event-store` 依赖。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 
