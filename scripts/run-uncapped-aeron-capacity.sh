@@ -35,6 +35,7 @@ SLO_MAX_GC_PAUSE_MS="${SLO_MAX_GC_PAUSE_MS:-100}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
 KEEP_RUNTIME="${KEEP_RUNTIME:-false}"
 RESET_TEST_PIPELINE="${RESET_TEST_PIPELINE:-true}"
+RUN_EXPORT_PIPELINE="${RUN_EXPORT_PIPELINE:-false}"
 TOOLS_JAR="${ROOT_DIR}/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar"
 SERVICE_JAR="${ROOT_DIR}/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar"
 EXPORTER_JAR="${ROOT_DIR}/surprising-aeron-core/surprising-aeron-exporter/target/surprising-aeron-exporter.jar"
@@ -142,11 +143,12 @@ validate() {
   fi
   ((START_OPS <= MAX_OPS)) || { echo "START_OPS must be <= MAX_OPS" >&2; exit 2; }
   ((CONNECTIONS <= 64)) || { echo "CONNECTIONS must be <= 64" >&2; exit 2; }
-  case "${WORKLOAD}" in MATCH|CANCEL) ;; *) echo "WORKLOAD must be MATCH or CANCEL" >&2; exit 2 ;; esac
+  case "${WORKLOAD}" in MATCH|CANCEL|MARK_PRICE) ;; *) echo "WORKLOAD must be MATCH, CANCEL or MARK_PRICE" >&2; exit 2 ;; esac
   case "${ASSESSMENT_MODE}" in strict|observe) ;; *) echo "ASSESSMENT_MODE must be strict or observe" >&2; exit 2 ;; esac
   case "${RECOVERY_GATE}" in true|false) ;; *) echo "RECOVERY_GATE must be true or false" >&2; exit 2 ;; esac
   case "${LIFECYCLE_GATE}" in true|false) ;; *) echo "LIFECYCLE_GATE must be true or false" >&2; exit 2 ;; esac
   case "${RESET_TEST_PIPELINE}" in true|false) ;; *) echo "RESET_TEST_PIPELINE must be true or false" >&2; exit 2 ;; esac
+  case "${RUN_EXPORT_PIPELINE}" in true|false) ;; *) echo "RUN_EXPORT_PIPELINE must be true or false" >&2; exit 2 ;; esac
   [[ "${LIFECYCLE_PAIRS}" =~ ^[1-9][0-9]*$ ]] || { echo "LIFECYCLE_PAIRS must be positive" >&2; exit 2; }
   ((LIFECYCLE_PAIRS <= 128)) || { echo "LIFECYCLE_PAIRS must be <= 128" >&2; exit 2; }
   if [[ "${PRODUCT_LINE}" == SPOT && "${LIFECYCLE_GATE}" == true ]]; then
@@ -159,10 +161,12 @@ validate() {
   fi
   [[ "${SCENARIO}" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "invalid SCENARIO=${SCENARIO}" >&2; exit 2; }
   [[ -x "${JAVA_HOME}/bin/java" ]] || { echo "JDK 25 not found" >&2; exit 1; }
-  for container in rainbo-postgres rainbo-kafka; do
-    [[ "$(docker inspect -f '{{.State.Running}}' "${container}" 2>/dev/null)" == true ]] \
-      || { echo "required container is not running: ${container}" >&2; exit 1; }
-  done
+  if [[ "${RUN_EXPORT_PIPELINE}" == true ]]; then
+    for container in rainbo-postgres rainbo-kafka; do
+      [[ "$(docker inspect -f '{{.State.Running}}' "${container}" 2>/dev/null)" == true ]] \
+        || { echo "required container is not running: ${container}" >&2; exit 1; }
+    done
+  fi
 }
 
 build() {
@@ -584,7 +588,9 @@ write_manifest() {
 validate
 mkdir -p "${OUTPUT_DIR}"
 build
-prepare_topic
+if [[ "${RUN_EXPORT_PIPELINE}" == true ]]; then
+  prepare_topic
+fi
 write_manifest
 {
   echo "# ${PRODUCT_LINE} Aeron local capacity"
@@ -595,7 +601,9 @@ write_manifest
   echo '|---|---|---:|---:|---:|---:|---|---|'
 } >"${OUTPUT_DIR}/index.md"
 start_cluster
-start_export_pipeline
+if [[ "${RUN_EXPORT_PIPELINE}" == true ]]; then
+  start_export_pipeline
+fi
 start_resource_monitor
 
 last_pass=0
@@ -618,5 +626,7 @@ fi
 if [[ "${RECOVERY_GATE}" == true ]]; then
   run_recovery_gate
 fi
-verify_export_pipeline
+  if [[ "${RUN_EXPORT_PIPELINE}" == true ]]; then
+    verify_export_pipeline
+  fi
 write_resource_summary

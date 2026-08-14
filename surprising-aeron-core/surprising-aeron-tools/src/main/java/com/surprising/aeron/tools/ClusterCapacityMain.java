@@ -2,6 +2,7 @@ package com.surprising.aeron.tools;
 
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -49,6 +50,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private final Workload workload;
     private final AeronClientPool clients;
     private final AtomicLong nextOrderId;
+    private final AtomicLong nextPriceSequence = new AtomicLong();
     private final AtomicLong nextPermitNanos = new AtomicLong();
     private final List<Long> latenciesNanos = Collections.synchronizedList(new ArrayList<>());
     private final AtomicLong commands = new AtomicLong();
@@ -191,8 +193,10 @@ public final class ClusterCapacityMain implements AutoCloseable {
                         try {
                             if (workload == Workload.MATCH) {
                                 matchCycle(workerId, cycle++, measured);
-                            } else {
+                            } else if (workload == Workload.CANCEL) {
                                 cancelCycle(workerId, measured);
+                            } else {
+                                markPriceCycle(workerId, cycle++, measured);
                             }
                         } catch (RuntimeException exception) {
                             failures.incrementAndGet();
@@ -265,6 +269,20 @@ public final class ClusterCapacityMain implements AutoCloseable {
         var response = clients.command(CoreMessageType.CANCEL_ORDER, stableId("cancel:" + orderId), userId,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
         record(response.commandStatus(), System.nanoTime() - started, measured);
+    }
+
+    private void markPriceCycle(int worker, long cycle, boolean measured) {
+        String symbol = symbol(worker, cycle);
+        synchronized (symbolLocks[symbols.indexOf(symbol)]) {
+            throttle();
+            long started = System.nanoTime();
+            long sequence = nextPriceSequence.incrementAndGet();
+            var response = clients.command(CoreMessageType.APPLY_MARK_PRICE,
+                    stableId("mark-price:" + worker + ':' + cycle), firstUser(worker),
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
+                            symbol, 1, PRICE_TICKS + (cycle & 1L), sequence)));
+            record(response.commandStatus(), System.nanoTime() - started, measured);
+        }
     }
 
     private void submitOrder(long userId, PlaceOrderCommand command, boolean measured) {
@@ -426,7 +444,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
 
     private enum Workload {
         MATCH,
-        CANCEL
+        CANCEL,
+        MARK_PRICE
     }
 
     @Override
