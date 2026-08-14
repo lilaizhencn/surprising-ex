@@ -28,6 +28,7 @@ import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.model.MarkPriceLookup;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -129,6 +130,12 @@ public class AeronOrderCommandService {
     public OrderResponse find(long userId, String clientOrderId) {
         CoreOrderStateView view = aeron.order(userId, clientOrderId);
         return view == null ? null : requireOrder(view, "order not found");
+    }
+
+    public List<OrderResponse> openOrders(long userId, String symbol, long beforeOrderId, int limit) {
+        return aeron.openOrders(userId, symbol, beforeOrderId, limit).stream()
+                .map(view -> requireOrder(view, "open order missing"))
+                .toList();
     }
 
     private long matchingPriceTicks(com.surprising.trading.api.model.PlaceOrderRequest request, long version) {

@@ -17,12 +17,14 @@ public record TradingCoreState(
         Map<CoreLeverageKey, Long> leverages,
         Map<Long, CoreAlgoOrderState> algoOrders,
         Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
-        Map<ClientOrderKey, Long> clientOrderIndex) {
+        Map<ClientOrderKey, Long> clientOrderIndex,
+        Map<Long, CoreTriggerOrderState> triggerOrders) {
 
     public TradingCoreState {
         if (productLine == null || revision < 0 || users == null || orders == null || bookState == null
                 || instruments == null || riskState == null || treasuryState == null || leverages == null
-                || algoOrders == null || cancelAllAfterTimers == null || clientOrderIndex == null) {
+                || algoOrders == null || cancelAllAfterTimers == null || clientOrderIndex == null
+                || triggerOrders == null) {
             throw new IllegalArgumentException("invalid trading core state");
         }
         Map<Long, CoreUserState> sortedUsers = Collections.unmodifiableMap(new TreeMap<>(users));
@@ -70,6 +72,14 @@ public record TradingCoreState(
         });
         cancelAllAfterTimers = Collections.unmodifiableMap(sortedTimers);
         clientOrderIndex = Collections.unmodifiableMap(derivedIndex);
+        Map<Long, CoreTriggerOrderState> sortedTriggers = new TreeMap<>(triggerOrders);
+        sortedTriggers.forEach((id, trigger) -> {
+            if (id != trigger.triggerOrderId() || trigger.productLine() != productLine
+                    || !sortedUsers.containsKey(trigger.userId())) {
+                throw new IllegalArgumentException("trigger order state belongs to another partition");
+            }
+        });
+        triggerOrders = Collections.unmodifiableMap(sortedTriggers);
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -77,7 +87,7 @@ public record TradingCoreState(
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                Map.of(), Map.of(), Map.of(), deriveClientOrderIndex(orders));
+                Map.of(), Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -85,7 +95,7 @@ public record TradingCoreState(
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, Map.of(), Map.of(), deriveClientOrderIndex(orders));
+                leverages, Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -94,7 +104,7 @@ public record TradingCoreState(
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, algoOrders, Map.of(), deriveClientOrderIndex(orders));
+                leverages, algoOrders, Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -104,7 +114,18 @@ public record TradingCoreState(
                             Map<Long, CoreAlgoOrderState> algoOrders,
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders));
+                leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), Map.of());
+    }
+
+    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
+                            Map<Long, CoreOrderState> orders, CoreBookState bookState,
+                            Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
+                            CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
+                            Map<Long, CoreAlgoOrderState> algoOrders,
+                            Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
+                            Map<Long, CoreTriggerOrderState> triggerOrders) {
+        this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
+                leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), triggerOrders);
     }
 
     public static TradingCoreState empty(ProductLine productLine) {
@@ -207,6 +228,23 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, timer.canceledOrders());
             hash = CoreStateHash.mix(hash, timer.canceledTriggerOrders());
             hash = CoreStateHash.mix(hash, timer.revision());
+        }
+        for (CoreTriggerOrderState trigger : triggerOrders.values()) {
+            hash = CoreStateHash.mix(hash, trigger.triggerOrderId());
+            hash = CoreStateHash.mix(hash, trigger.userId());
+            hash = CoreStateHash.mix(hash, trigger.symbol());
+            hash = CoreStateHash.mix(hash, trigger.side().wireCode());
+            hash = CoreStateHash.mix(hash, trigger.triggerType().ordinal());
+            hash = CoreStateHash.mix(hash, trigger.triggerCondition().ordinal());
+            hash = CoreStateHash.mix(hash, trigger.triggerPriceTicks());
+            hash = CoreStateHash.mix(hash, trigger.highestPriceTicks());
+            hash = CoreStateHash.mix(hash, trigger.lowestPriceTicks());
+            hash = CoreStateHash.mix(hash, trigger.status().ordinal());
+            hash = CoreStateHash.mix(hash, trigger.placedOrderId());
+            hash = CoreStateHash.mix(hash, trigger.triggerSequence());
+            hash = CoreStateHash.mix(hash, trigger.triggeredPriceTicks());
+            hash = CoreStateHash.mix(hash, trigger.updatedAtEpochMillis());
+            hash = CoreStateHash.mix(hash, trigger.revision());
         }
         for (CoreMarkPriceState mark : riskState.markPrices().values()) {
             hash = CoreStateHash.mix(hash, mark.symbol());

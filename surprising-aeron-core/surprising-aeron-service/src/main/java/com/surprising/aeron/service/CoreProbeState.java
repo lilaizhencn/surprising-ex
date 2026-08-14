@@ -139,6 +139,52 @@ public final class CoreProbeState implements AutoCloseable {
             }
         }
         if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.USER_OPEN_ORDERS_QUERY) {
+            try {
+                var query = CoreStateQueryCodec.decodeOpenOrdersQuery(message.payload());
+                long beforeOrderId = query.beforeOrderId() == 0 ? Long.MAX_VALUE : query.beforeOrderId();
+                long requestedUserId = message.header().userId();
+                var orders = tradingState.orders().values().stream()
+                        .filter(order -> requestedUserId == 0 || order.userId() == requestedUserId)
+                        .filter(order -> order.status().name().equals("OPEN"))
+                        .filter(order -> query.symbol().isEmpty() || order.symbol().equals(query.symbol()))
+                        .filter(order -> order.orderId() < beforeOrderId)
+                        .sorted(java.util.Comparator.comparingLong(
+                                com.surprising.aeron.service.state.CoreOrderState::orderId).reversed())
+                        .limit(query.limit())
+                        .map(CoreProbeState::orderView)
+                        .toList();
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                        CoreStateQueryCodec.encodeOpenOrders(
+                                new com.surprising.aeron.protocol.CoreOpenOrdersView(orders)));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && (message.header().messageType() == CoreMessageType.TRIGGER_ORDER_QUERY
+                || message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY)) {
+            try {
+                var query = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeQuery(message.payload());
+                long before = query.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : query.beforeTriggerOrderId();
+                var values = tradingState.triggerOrders().values().stream()
+                        .filter(order -> message.header().userId() == 0 || order.userId() == message.header().userId())
+                        .filter(order -> query.triggerOrderId() == 0 || order.triggerOrderId() == query.triggerOrderId())
+                        .filter(order -> query.symbol().isEmpty() || order.symbol().equals(query.symbol()))
+                        .filter(order -> query.triggerOrderId() != 0 || order.triggerOrderId() < before)
+                        .filter(order -> message.header().messageType() == CoreMessageType.TRIGGER_ORDER_QUERY
+                                || order.status().open())
+                        .sorted(java.util.Comparator.comparingLong(
+                                com.surprising.aeron.service.state.CoreTriggerOrderState::triggerOrderId).reversed())
+                        .limit(query.limit())
+                        .map(com.surprising.aeron.service.state.CoreTriggerOrderState::view).toList();
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.businessStateHash(),
+                        com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(values));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.BOOK_STATE_QUERY) {
             java.util.Map<BookLevelKey, long[]> aggregated = new java.util.HashMap<>();
             tradingState.bookState().openOrders().values().forEach(order -> {
@@ -370,7 +416,8 @@ public final class CoreProbeState implements AutoCloseable {
                         tradingState.businessStateHash(), changedUsers(beforeTradingState, tradingState),
                         changedOrders(beforeTradingState, tradingState), commandExecutions, commandFundingPayments,
                         changedLiquidations(beforeTradingState, tradingState),
-                        changedTreasuryAssets(beforeTradingState, tradingState));
+                        changedTreasuryAssets(beforeTradingState, tradingState),
+                        changedTriggerOrders(beforeTradingState, tradingState));
             } catch (CoreStateRejectedException exception) {
                 tradingState = beforeTradingState;
                 matchingAdapter.rebuild(beforeTradingState.bookState());
@@ -510,6 +557,23 @@ public final class CoreProbeState implements AutoCloseable {
             case UPDATE_CANCEL_ALL_AFTER -> tradingState = tradingReducer.updateCancelAllAfter(tradingState,
                     message.header().userId(),
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payload()));
+            case PLACE_TRIGGER_ORDER -> tradingState = tradingReducer.upsertTriggerOrder(tradingState,
+                    message.header().userId(), com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payload()));
+            case CANCEL_TRIGGER_ORDER -> tradingState = tradingReducer.cancelTriggerOrder(tradingState,
+                    message.header().userId(), com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payload()));
+            case CLAIM_TRIGGER_ORDER -> {
+                long[] claim = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeClaim(message.payload());
+                tradingState = tradingReducer.claimTriggerOrder(tradingState, claim[0], claim[1], claim[2], claim[3]);
+            }
+            case COMPLETE_TRIGGER_ORDER -> {
+                long[] complete = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeComplete(message.payload());
+                tradingState = tradingReducer.completeTriggerOrder(tradingState, complete[0], complete[1] == 1,
+                        complete[2], "", complete[3]);
+            }
+            case UPDATE_TRIGGER_TRAILING -> {
+                long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payload());
+                tradingState = tradingReducer.updateTriggerTrailing(tradingState, trailing[0], trailing[1], trailing[2], trailing[3]);
+            }
             default -> {
                 return null;
             }
@@ -726,6 +790,13 @@ public final class CoreProbeState implements AutoCloseable {
                             value.executionPriceTicks(), value.liquidationFeeRatePpm(),
                             value.liquidationFeeUnits(), value.status().name());
                 }).toList();
+    }
+
+    private static List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> changedTriggerOrders(
+            TradingCoreState before, TradingCoreState after) {
+        return after.triggerOrders().values().stream()
+                .filter(value -> !value.equals(before.triggerOrders().get(value.triggerOrderId())))
+                .map(com.surprising.aeron.service.state.CoreTriggerOrderState::view).toList();
     }
 
     private static List<com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasuryAssets(

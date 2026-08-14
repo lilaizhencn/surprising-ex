@@ -28,6 +28,7 @@ fi
 
 exporter_pid=""
 projection_pid=""
+input_bridge_pid=""
 current_log_dir=""
 current_product_line=""
 cluster_data_dir=""
@@ -103,7 +104,7 @@ cleanup_runtime() {
       SERVICES="${SERVICES}" LOG_DIR="${current_log_dir}" \
       bash "${ROOT_DIR}/scripts/start-product-line-providers.sh" >/dev/null 2>&1
   fi
-  for pid in "${exporter_pid}" "${projection_pid}"; do
+  for pid in "${input_bridge_pid}" "${exporter_pid}" "${projection_pid}"; do
     if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
       kill "${pid}" >/dev/null 2>&1
       wait "${pid}" >/dev/null 2>&1
@@ -111,6 +112,7 @@ cleanup_runtime() {
   done
   exporter_pid=""
   projection_pid=""
+  input_bridge_pid=""
   if [[ "${KEEP_RUNTIME}" != true ]]; then
     for pid in ${cluster_pids}; do
       if kill -0 "${pid}" >/dev/null 2>&1; then
@@ -233,8 +235,25 @@ start_cluster() {
 }
 
 reset_core_topic() {
-  local segment="$1" topic="surprising.${1}.core.events.v1"
-  local partition_count latest_offset earliest_offset
+  local segment="$1" topic="surprising.${1}.core.events.v1" input_topic="surprising.${1}.core.inputs.v1"
+  local partition_count latest_offset earliest_offset attempt input_deleted=false
+  docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+    --create --if-not-exists --topic "${topic}" --partitions 1 --replication-factor 1 >/dev/null
+  docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+    --create --if-not-exists --topic "${input_topic}" --partitions 1 --replication-factor 1 >/dev/null
+  docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+    --delete --if-exists --topic "${input_topic}" >/dev/null 2>&1 || true
+  for attempt in {1..30}; do
+    if ! docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+        --describe --topic "${input_topic}" >/dev/null 2>&1; then
+      input_deleted=true
+      break
+    fi
+    sleep 1
+  done
+  [[ "${input_deleted}" == true ]] || { echo "failed to reset ${input_topic}" >&2; return 1; }
+  docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+    --create --if-not-exists --topic "${input_topic}" --partitions 1 --replication-factor 1 >/dev/null
   partition_count="$(docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
     --describe --topic "${topic}" | sed -n 's/.*PartitionCount: \([0-9][0-9]*\).*/\1/p' | head -n 1)"
   [[ "${partition_count}" == 1 ]] || { echo "${topic} must have exactly one partition" >&2; return 1; }
@@ -252,6 +271,8 @@ reset_core_topic() {
     || { echo "failed to truncate ${topic}: earliest=${earliest_offset} latest=${latest_offset}" >&2; return 1; }
   docker exec rainbo-kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
     --delete --group "surprising-core-projection-${segment}" >/dev/null 2>&1 || true
+  docker exec rainbo-kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+    --delete --group "surprising-core-input-${segment}" >/dev/null 2>&1 || true
   docker exec rainbo-postgres psql -v ON_ERROR_STOP=1 -U "${DATABASE_USER}" -d postgres -c \
     "DELETE FROM core_execution_projection WHERE product_line='${current_product_line}';
      DELETE FROM core_order_projection WHERE product_line='${current_product_line}';
@@ -264,7 +285,16 @@ reset_core_topic() {
 }
 
 start_export_pipeline() {
-  local evidence="$1"
+  local evidence="$1" segment input_topic
+  segment="$(topic_segment "${current_product_line}")"
+  input_topic="surprising.${segment}.core.inputs.v1"
+  PRODUCT_LINE="${current_product_line}" CORE_INPUT_TOPICS="${input_topic}" \
+    KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS}" \
+    AERON_HOSTNAMES=localhost,localhost,localhost AERON_EGRESS_HOSTNAME=localhost \
+    "${JAVA_HOME}/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+      -cp "${EXPORTER_JAR}" com.surprising.aeron.exporter.InputBridgeMain \
+      >"${evidence}/input-bridge.log" 2>&1 &
+  input_bridge_pid=$!
   PRODUCT_LINE="${current_product_line}" KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS}" \
     DATABASE_URL="${DATABASE_URL}" DATABASE_USER="${DATABASE_USER}" DATABASE_PASSWORD="${DATABASE_PASSWORD}" \
     "${JAVA_HOME}/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
@@ -277,6 +307,7 @@ start_export_pipeline() {
       >"${evidence}/projection.log" 2>&1 &
   projection_pid=$!
   sleep 1
+  kill -0 "${input_bridge_pid}"
   kill -0 "${exporter_pid}"
   kill -0 "${projection_pid}"
 }

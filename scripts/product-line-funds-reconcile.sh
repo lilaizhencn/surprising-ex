@@ -103,7 +103,8 @@ psql_exec() {
     -q -v ON_ERROR_STOP=1 -P pager=off "$@"
 }
 
-echo "[funds-reconcile] database=${DB_NAME} product_lines=${PRODUCT_LINES}"
+echo "[projection-audit] role=POSTGRES_COMPATIBILITY_PROJECTION database=${DB_NAME} product_lines=${PRODUCT_LINES}"
+echo "[projection-audit] Aeron User State and Treasury remain the only funds authority"
 
 psql_exec <<SQL
 CREATE TEMP TABLE target_product_lines (
@@ -1082,7 +1083,7 @@ SELECT 'spot_locked_projection_mismatch',
  WHERE EXISTS (SELECT 1 FROM target_product_lines WHERE product_line = 'SPOT')
    AND COALESCE(b.locked_units, 0) <> COALESCE(r.expected_locked_units, 0);
 
-\\echo '[funds-reconcile] Scope'
+\\echo '[projection-audit] Scope'
 SELECT product_line,
        account_type,
        contract_type,
@@ -1090,7 +1091,7 @@ SELECT product_line,
   FROM target_product_lines
  ORDER BY product_line;
 
-\\echo '[funds-reconcile] Per account conservation report (limited by MAX_REPORT_ROWS)'
+\\echo '[projection-audit] Per account conservation report (limited by MAX_REPORT_ROWS)'
 WITH ordered AS (
     SELECT l.*,
            FIRST_VALUE(balance_after_units - amount_units) OVER (
@@ -1176,7 +1177,7 @@ SELECT k.ledger_scope,
  ORDER BY k.product_line, k.account_type, k.user_id, k.asset
  LIMIT ${MAX_REPORT_ROWS};
 
-\\echo '[funds-reconcile] Product-line totals'
+\\echo '[projection-audit] Product-line totals'
 SELECT product_line,
        account_type,
        asset,
@@ -1203,7 +1204,7 @@ SELECT product_line,
  GROUP BY product_line, account_type, asset
  ORDER BY product_line, account_type, asset;
 
-\\echo '[funds-reconcile] Violations'
+\\echo '[projection-audit] Violations'
 SELECT area, detail
   FROM reconcile_violations
  ORDER BY area, detail
@@ -1221,4 +1222,4 @@ END
 \$\$;
 SQL
 
-echo "[funds-reconcile] OK"
+echo "[projection-audit] OK"

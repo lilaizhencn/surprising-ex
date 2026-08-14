@@ -14,6 +14,7 @@ public class TriggerProperties {
     private Execution execution = new Execution();
     private RedisIndex redisIndex = new RedisIndex();
     private Outbox outbox = new Outbox();
+    private Aeron aeron = new Aeron();
 
     /** 启动时拒绝未隔离的条件单 Topic 配置。 */
     @PostConstruct
@@ -47,6 +48,27 @@ public class TriggerProperties {
 
     public Outbox getOutbox() {
         return outbox;
+    }
+
+    public Aeron getAeron() { return aeron; }
+    public void setAeron(Aeron aeron) { this.aeron = aeron == null ? new Aeron() : aeron; }
+
+    public static class Aeron {
+        private java.util.List<String> hostnames = java.util.List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private java.time.Duration responseTimeout = java.time.Duration.ofSeconds(5);
+        private int clientConnections = 4;
+        private int nodeId;
+        public java.util.List<String> getHostnames() { return hostnames; }
+        public void setHostnames(java.util.List<String> hostnames) { this.hostnames = java.util.List.copyOf(hostnames); }
+        public String getEgressHostname() { return egressHostname; }
+        public void setEgressHostname(String value) { this.egressHostname = value; }
+        public java.time.Duration getResponseTimeout() { return responseTimeout; }
+        public void setResponseTimeout(java.time.Duration value) { this.responseTimeout = value; }
+        public int getClientConnections() { return clientConnections; }
+        public void setClientConnections(int value) { this.clientConnections = value; }
+        public int getNodeId() { return nodeId; }
+        public void setNodeId(int value) { this.nodeId = value; }
     }
 
     public void setOutbox(Outbox outbox) {

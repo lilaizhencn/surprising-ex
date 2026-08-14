@@ -50,6 +50,10 @@ public final class SurprisingClusterNode {
                 .aeronDirectoryName(aeronDirectoryName);
 
         File clusterDirectory = new File(nodeDirectory, "cluster");
+        int maxConcurrentSessions = Integer.getInteger("surprising.aeron.max-concurrent-sessions", 64);
+        if (maxConcurrentSessions < 1 || maxConcurrentSessions > 1_024) {
+            throw new IllegalArgumentException("surprising.aeron.max-concurrent-sessions must be in [1,1024]");
+        }
         ConsensusModule.Context consensusContext = new ConsensusModule.Context()
                 .clusterId(topology.clusterId())
                 .clusterMemberId(topology.nodeId())
@@ -57,6 +61,7 @@ public final class SurprisingClusterNode {
                 .clusterDir(clusterDirectory)
                 .ingressChannel("aeron:udp?term-length=64k")
                 .replicationChannel(topology.replicationChannel())
+                .maxConcurrentSessions(maxConcurrentSessions)
                 .archiveContext(localArchiveClient.clone())
                 .errorHandler(errorHandler("consensus-module"));
 

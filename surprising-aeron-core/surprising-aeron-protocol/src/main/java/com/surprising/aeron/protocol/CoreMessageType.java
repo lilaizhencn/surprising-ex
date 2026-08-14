@@ -24,6 +24,11 @@ public enum CoreMessageType {
     UPDATE_LEVERAGE(32, WireMessageKind.COMMAND),
     UPSERT_ALGO_ORDER(33, WireMessageKind.COMMAND),
     UPDATE_CANCEL_ALL_AFTER(34, WireMessageKind.COMMAND),
+    PLACE_TRIGGER_ORDER(35, WireMessageKind.COMMAND),
+    CANCEL_TRIGGER_ORDER(36, WireMessageKind.COMMAND),
+    CLAIM_TRIGGER_ORDER(37, WireMessageKind.COMMAND),
+    COMPLETE_TRIGGER_ORDER(38, WireMessageKind.COMMAND),
+    UPDATE_TRIGGER_TRAILING(39, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),
@@ -42,6 +47,9 @@ public enum CoreMessageType {
     ORDER_PREFLIGHT_QUERY(115, WireMessageKind.QUERY),
     BOOK_STATE_QUERY(116, WireMessageKind.QUERY),
     LIQUIDATION_WORK_QUERY(117, WireMessageKind.QUERY),
+    USER_OPEN_ORDERS_QUERY(118, WireMessageKind.QUERY),
+    TRIGGER_ORDER_QUERY(119, WireMessageKind.QUERY),
+    USER_OPEN_TRIGGER_ORDERS_QUERY(120, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -55,6 +63,9 @@ public enum CoreMessageType {
     ORDER_PREFLIGHT_RESULT(210, WireMessageKind.RESPONSE),
     BOOK_STATE_RESULT(211, WireMessageKind.RESPONSE),
     LIQUIDATION_WORK_RESULT(212, WireMessageKind.RESPONSE),
+    USER_OPEN_ORDERS_RESULT(213, WireMessageKind.RESPONSE),
+    TRIGGER_ORDER_RESULT(214, WireMessageKind.RESPONSE),
+    USER_OPEN_TRIGGER_ORDERS_RESULT(215, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

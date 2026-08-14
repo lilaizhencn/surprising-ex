@@ -253,7 +253,8 @@ PY
 gate_output() {
   local report="$1" log="$2" resource_summary="$3"
   rg -q "Product line .*multi-symbol stress passed|Product line .* passed" "${log}" || fail "business smoke did not pass"
-  rg -q "\[funds-reconcile\] OK" "${log}" || fail "fund reconciliation did not pass"
+  rg -q "fundsReconcile=PASS.*fundsDiff=0|\[projection-audit\] OK" "${log}" \
+    || fail "Aeron funds reconciliation did not pass"
   if rg -q "API 请求失败|funds reconciliation failed|PERFORMANCE_GATE_FAIL" "${log}"; then
     fail "failure marker found in run log"
   fi

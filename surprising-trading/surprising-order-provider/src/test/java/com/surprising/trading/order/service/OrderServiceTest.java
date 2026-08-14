@@ -6,10 +6,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
+import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
@@ -86,6 +89,35 @@ class OrderServiceTest {
                 MarginMode.CROSS, PositionSide.NET, false, false);
 
         assertThatThrownBy(() -> service.place(optionRequest)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void userOpenOrdersReadFromAeronAndNotProjection() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
+        when(aeronOrders.openOrders(1001L, "BTC-USDT", Long.MAX_VALUE, 11)).thenReturn(java.util.List.of(open));
+
+        OrderQueryResponse result = service.openOrders(1001L, "BTC-USDT", 10);
+
+        assertThat(result.orders()).containsExactly(open);
+        assertThat(result.hasMore()).isFalse();
+        verify(aeronOrders).openOrders(1001L, "BTC-USDT", Long.MAX_VALUE, 11);
+    }
+
+    @Test
+    void cancelOpenOrdersSelectsFromAeron() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
+        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
+        when(aeronOrders.openOrders(1001L, "BTC-USDT", 0, 1000)).thenReturn(java.util.List.of(open));
+        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+
+        OrderBatchResponse result = service.cancelOpenOrders(
+                new com.surprising.trading.api.model.CancelOpenOrdersRequest(1001L, "BTC-USDT", 1000));
+
+        assertThat(result.completed()).isEqualTo(1);
+        verify(aeronOrders).openOrders(1001L, "BTC-USDT", 0, 1000);
+        verify(aeronOrders).cancel(1001L, 91L);
     }
 
     private OrderService service(ProductLine productLine) {

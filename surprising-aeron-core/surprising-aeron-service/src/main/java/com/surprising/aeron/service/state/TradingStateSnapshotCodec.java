@@ -21,7 +21,8 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 12;
+    private static final int VERSION = 13;
+    private static final int VERSION_12 = 12;
     private static final int VERSION_11 = 11;
     private static final int VERSION_10 = 10;
     private static final int VERSION_9 = 9;
@@ -234,13 +235,19 @@ public final class TradingStateSnapshotCodec {
             writer.intValue(timer.canceledTriggerOrders());
             writer.longValue(timer.revision());
         });
+        writer.intValue(state.triggerOrders().size());
+        state.triggerOrders().values().forEach(trigger -> {
+            byte[] payload = com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger.view());
+            writer.intValue(payload.length);
+            writer.bytes(payload);
+        });
         return writer.toByteArray();
     }
 
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_11 && version != VERSION_10 && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
+        if (version != VERSION && version != VERSION_12 && version != VERSION_11 && version != VERSION_10 && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
                 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
@@ -560,9 +567,19 @@ public final class TradingStateSnapshotCodec {
                 putUnique(cancelAllAfterTimers, timer.key(), timer);
             }
         }
+        Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
+        if (version >= VERSION) {
+            int triggerCount = reader.count("trigger orders");
+            for (int index = 0; index < triggerCount; index++) {
+                int length = reader.count("trigger payload bytes");
+                CoreTriggerOrderState trigger = CoreTriggerOrderState.from(
+                        com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(reader.bytes(length)));
+                putUnique(triggerOrders, trigger.triggerOrderId(), trigger);
+            }
+        }
         reader.requireConsumed();
         return new TradingCoreState(productLine, revision, users, orders, bookState, instruments, riskState,
-                treasuryState, leverages, algoOrders, cancelAllAfterTimers);
+                treasuryState, leverages, algoOrders, cancelAllAfterTimers, triggerOrders);
     }
 
     private static long leverageFromRate(long ratePpm) {

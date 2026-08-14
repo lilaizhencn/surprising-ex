@@ -150,6 +150,11 @@ public final class CoreStateQueryCodec {
 
     public static byte[] encodeOrderState(CoreOrderStateView state) {
         Writer writer = new Writer();
+        writeOrderState(writer, state);
+        return writer.toByteArray();
+    }
+
+    private static void writeOrderState(Writer writer, CoreOrderStateView state) {
         writer.intValue(VERSION);
         writer.longValue(state.orderId());
         writer.intValue(ProductLineWireCode.encode(state.productLine()));
@@ -177,11 +182,16 @@ public final class CoreStateQueryCodec {
         writer.longValue(state.clusterPosition());
         writer.text(state.status());
         writer.longValue(state.revision());
-        return writer.toByteArray();
     }
 
     public static CoreOrderStateView decodeOrderState(byte[] encoded) {
         Reader reader = new Reader(encoded);
+        CoreOrderStateView state = readOrderState(reader);
+        reader.requireConsumed();
+        return state;
+    }
+
+    private static CoreOrderStateView readOrderState(Reader reader) {
         int version = reader.version(VERSION, VERSION_2, VERSION_1);
         long orderId = reader.positiveLong("orderId");
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
@@ -207,12 +217,47 @@ public final class CoreStateQueryCodec {
         long createdAt = version == VERSION ? reader.nonNegativeLong("createdAt") : 0;
         long updatedAt = version == VERSION ? reader.nonNegativeLong("updatedAt") : 0;
         long clusterPosition = version == VERSION ? reader.nonNegativeLong("clusterPosition") : 0;
-        CoreOrderStateView state = new CoreOrderStateView(orderId, productLine, userId, symbol,
+        return new CoreOrderStateView(orderId, productLine, userId, symbol,
                 instrumentVersion, side, priceTicks, quantitySteps, executed, remaining, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
                 makerFee, takerFee, createdAt, updatedAt, clusterPosition, reader.text(), reader.positiveLong("revision"));
+    }
+
+    public static byte[] encodeOpenOrdersQuery(CoreOpenOrdersQuery query) {
+        Writer writer = new Writer();
+        writer.intValue(1);
+        writer.optionalText(query.symbol());
+        writer.longValue(query.beforeOrderId());
+        writer.intValue(query.limit());
+        return writer.toByteArray();
+    }
+
+    public static CoreOpenOrdersQuery decodeOpenOrdersQuery(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        reader.version(1);
+        CoreOpenOrdersQuery query = new CoreOpenOrdersQuery(reader.optionalText(),
+                reader.nonNegativeLong("beforeOrderId"), reader.intValue());
         reader.requireConsumed();
-        return state;
+        return query;
+    }
+
+    public static byte[] encodeOpenOrders(CoreOpenOrdersView view) {
+        Writer writer = new Writer();
+        writer.intValue(1);
+        writer.intValue(view.orders().size());
+        view.orders().forEach(order -> writeOrderState(writer, order));
+        return writer.toByteArray();
+    }
+
+    public static CoreOpenOrdersView decodeOpenOrders(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        reader.version(1);
+        List<CoreOrderStateView> orders = new ArrayList<>();
+        for (int index = 0, count = reader.count("open orders"); index < count; index++) {
+            orders.add(readOrderState(reader));
+        }
+        reader.requireConsumed();
+        return new CoreOpenOrdersView(orders);
     }
 
     public static byte[] encodeBookState(CoreBookStateView state) {

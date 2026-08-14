@@ -12,6 +12,7 @@ public final class CoreExportCodec {
     private static final int EVENT_V3_MARKER = 0xC0E3_0003;
     private static final int EVENT_V4_MARKER = 0xC0E4_0004;
     private static final int EVENT_V5_MARKER = 0xC0E5_0005;
+    private static final int EVENT_V6_MARKER = 0xC0E6_0006;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
             CoreMessageCodec.MAX_PAYLOAD_LENGTH - EVENT_FIXED_LENGTH;
@@ -49,7 +50,7 @@ public final class CoreExportCodec {
         byte[] payload = event.commandPayload();
         List<byte[]> users = event.changedUsers().stream().map(CoreStateQueryCodec::encodeUserState).toList();
         List<byte[]> orders = event.changedOrders().stream().map(CoreStateQueryCodec::encodeOrderState).toList();
-        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 6L + payload.length;
+        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 7L + payload.length;
         for (byte[] user : users) length = Math.addExact(length, Integer.BYTES + user.length);
         for (byte[] order : orders) length = Math.addExact(length, Integer.BYTES + order.length);
         length = Math.addExact(length, Math.multiplyExact(event.executions().size(), Long.BYTES * 6L));
@@ -62,11 +63,15 @@ public final class CoreExportCodec {
         for (CoreTreasuryAssetView treasury : event.changedTreasuryAssets()) {
             length = Math.addExact(length, treasuryLength(treasury));
         }
+        for (CoreTriggerOrderStateView trigger : event.changedTriggerOrders()) {
+            byte[] encoded = CoreTriggerOrderCodec.encodeState(trigger);
+            length = Math.addExact(length, Integer.BYTES + encoded.length);
+        }
         if (payload.length > MAX_COMMAND_PAYLOAD || length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("export event payload is too large");
         }
         ByteBuffer output = littleEndian(Math.toIntExact(length));
-        output.putInt(EVENT_V5_MARKER);
+        output.putInt(EVENT_V6_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
         output.putLong(event.businessStateHash());
@@ -91,6 +96,11 @@ public final class CoreExportCodec {
         event.changedLiquidations().forEach(liquidation -> putLiquidation(output, liquidation));
         output.putInt(event.changedTreasuryAssets().size());
         event.changedTreasuryAssets().forEach(treasury -> putTreasury(output, treasury));
+        output.putInt(event.changedTriggerOrders().size());
+        event.changedTriggerOrders().forEach(trigger -> {
+            byte[] encoded = CoreTriggerOrderCodec.encodeState(trigger);
+            output.putInt(encoded.length).put(encoded);
+        });
         return output.array();
     }
 
@@ -104,7 +114,8 @@ public final class CoreExportCodec {
         boolean version3 = marker == EVENT_V3_MARKER;
         boolean version4 = marker == EVENT_V4_MARKER;
         boolean version5 = marker == EVENT_V5_MARKER;
-        if (version2 || version3 || version4 || version5) input.getInt();
+        boolean version6 = marker == EVENT_V6_MARKER;
+        if (version2 || version3 || version4 || version5 || version6) input.getInt();
         long sequence = input.getLong();
         long appliedCount = input.getLong();
         long businessHash = input.getLong();
@@ -120,7 +131,7 @@ public final class CoreExportCodec {
         }
         byte[] payload = new byte[payloadLength];
         input.get(payload);
-        if (!version2 && !version3 && !version4 && !version5) {
+        if (!version2 && !version3 && !version4 && !version5 && !version6) {
             if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
             return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                     commandType, status, resultCode, userId, payload);
@@ -153,15 +164,30 @@ public final class CoreExportCodec {
         int liquidationCount = readCount(input);
         List<CoreLiquidationView> liquidations = new ArrayList<>(liquidationCount);
         for (int index = 0; index < liquidationCount; index++) {
-            liquidations.add(readLiquidation(input, version5));
+            liquidations.add(readLiquidation(input, version5 || version6));
         }
         int treasuryCount = readCount(input);
         List<CoreTreasuryAssetView> treasuryAssets = new ArrayList<>(treasuryCount);
         for (int index = 0; index < treasuryCount; index++) treasuryAssets.add(readTreasury(input));
+        List<CoreTriggerOrderStateView> triggerOrders = new ArrayList<>();
+        if (version6) {
+            int triggerCount = readCount(input);
+            for (int index = 0; index < triggerCount; index++) {
+                int length = readCount(input);
+                if (input.remaining() < length) throw new ProtocolException("invalid trigger state length");
+                byte[] triggerPayload = new byte[length]; input.get(triggerPayload);
+                triggerOrders.add(CoreTriggerOrderCodec.decodeState(triggerPayload));
+            }
+        }
         if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
+        if (version6) {
+            return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
+                    commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
+                    liquidations, treasuryAssets, triggerOrders);
+        }
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                 commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
-                liquidations, treasuryAssets);
+                liquidations, treasuryAssets, List.of());
     }
 
     private static int liquidationLength(CoreLiquidationView liquidation) {

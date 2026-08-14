@@ -164,6 +164,7 @@ create_compacted_topic_with_partitions() {
 create_product_topics() {
   local product_line="$1"
   local prefix="surprising.${product_line}"
+  create_topic_with_partitions "${prefix}.core.inputs.v1" 1
   create_topic_with_partitions "${prefix}.core.events.v1" 1
   create_topic "${prefix}.trade.events.v1"
   create_topic "${prefix}.candle.events.v1"

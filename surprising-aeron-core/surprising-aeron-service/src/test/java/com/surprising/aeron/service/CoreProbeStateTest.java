@@ -113,6 +113,23 @@ class CoreProbeStateTest {
         assertThat(original.apply(place).status()).isEqualTo(ResponseStatus.DUPLICATE);
         assertThat(original.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(7_999);
 
+        var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(501,
+                ProductLine.SPOT, 1001, "tp-501", "", "BTC-USDT", CoreOrderSide.SELL,
+                com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                CoreMarginMode.CROSS, CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                "", "trace", 0, 0, 1_000, 1_000, 1);
+        CoreMessage triggerPlace = tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), 3,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger));
+        assertThat(original.apply(triggerPlace).status()).isEqualTo(ResponseStatus.APPLIED);
+        CoreMessage triggerQuery = query(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, 1001,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeQuery(
+                        new com.surprising.aeron.protocol.CoreTriggerOrderQuery(0, "BTC-USDT", 0, 10)));
+        assertThat(com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(original.apply(triggerQuery).data()))
+                .extracting(value -> value.triggerOrderId()).containsExactly(501L);
+
         CoreMessage userQuery = query(CoreMessageType.USER_STATE_QUERY, 1001, new byte[0]);
         CoreMessage orderQuery = query(CoreMessageType.ORDER_STATE_QUERY, 1001,
                 TradingCommandCodec.encodeOrderStateQuery(91));
@@ -133,9 +150,14 @@ class CoreProbeStateTest {
         assertThat(byClientId.takerFeeRatePpm()).isEqualTo(20);
         assertThat(byClientId.createdAtEpochMillis()).isPositive();
         assertThat(byClientId.clusterPosition()).isPositive();
+        CoreMessage openOrdersQuery = query(CoreMessageType.USER_OPEN_ORDERS_QUERY, 1001,
+                CoreStateQueryCodec.encodeOpenOrdersQuery(
+                        new com.surprising.aeron.protocol.CoreOpenOrdersQuery("BTC-USDT", 0, 10)));
+        var openOrders = CoreStateQueryCodec.decodeOpenOrders(original.apply(openOrdersQuery).data());
+        assertThat(openOrders.orders()).extracting(order -> order.orderId()).containsExactly(91L);
         var book = CoreStateQueryCodec.decodeBookState(
                 original.apply(query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0])).data());
-        assertThat(book.exportSequence()).isEqualTo(3);
+        assertThat(book.exportSequence()).isEqualTo(4);
         assertThat(book.levels()).singleElement().satisfies(value -> {
             assertThat(value.priceTicks()).isEqualTo(1_000);
             assertThat(value.quantitySteps()).isEqualTo(2);
@@ -143,7 +165,7 @@ class CoreProbeStateTest {
         });
 
         UUID duplicateId = UUID.randomUUID();
-        CoreMessage duplicateClientOrder = tradingCommand(CoreMessageType.PLACE_ORDER, duplicateId, 3,
+        CoreMessage duplicateClientOrder = tradingCommand(CoreMessageType.PLACE_ORDER, duplicateId, 4,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(92, "BTC-USDT", 1,
                         "BTC", "USDT", "USDT", CoreOrderSide.BUY, 900, 1, false,
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
@@ -160,11 +182,16 @@ class CoreProbeStateTest {
         CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, original.snapshot());
         assertThat(restored.stateHash()).isEqualTo(original.stateHash());
         assertThat(restored.tradingState()).isEqualTo(original.tradingState());
+        assertThat(com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(restored.apply(triggerQuery).data()))
+                .extracting(value -> value.triggerOrderId()).containsExactly(501L);
+        assertThat(CoreStateQueryCodec.decodeOpenOrders(restored.apply(openOrdersQuery).data()).orders())
+                .extracting(order -> order.orderId()).containsExactly(91L);
 
-        CoreMessage cancel = tradingCommand(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 4,
+        CoreMessage cancel = tradingCommand(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(91)));
         assertThat(restored.apply(cancel).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+        assertThat(CoreStateQueryCodec.decodeOpenOrders(restored.apply(openOrdersQuery).data()).orders()).isEmpty();
     }
 
     @Test

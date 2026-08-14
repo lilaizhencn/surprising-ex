@@ -14,6 +14,16 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
+import com.surprising.trading.api.model.TriggerOrderResponse;
+import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
+import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.TriggerCondition;
+import com.surprising.trading.api.model.TriggerOrderStatus;
+import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.websocket.provider.config.WebSocketProperties;
 import java.time.Instant;
 import java.util.HashMap;
@@ -81,6 +91,13 @@ public class CoreEventFanoutConsumer {
             publishOrderReport(event, order, eventTime);
         }
         publishExecutions(event, orders, eventTime);
+        for (int index = 0; index < event.changedTriggerOrders().size(); index++) {
+            var trigger = event.changedTriggerOrders().get(index);
+            TriggerOrderResponse response = triggerResponse(trigger);
+            registry.publish(topic(WsChannel.TRIGGER_ORDERS, trigger.symbol(), trigger.userId()),
+                    new TriggerOrderUpdatedEvent(Math.addExact(Math.multiplyExact(event.exportSequence(), 1_000_000L), index),
+                            productLine, response, eventTime, trigger.traceId()), eventTime);
+        }
         if (productLine != ProductLine.SPOT) {
             publishPositions(event, orders, productLine, eventTime);
         }
@@ -154,6 +171,22 @@ public class CoreEventFanoutConsumer {
                         execution.priceTicks(), execution.quantitySteps(), order.executedQuantitySteps(),
                         !"OPEN".equals(order.status()), null, event.commandId().toString(), eventTime), eventTime);
     }
+
+    private static TriggerOrderResponse triggerResponse(com.surprising.aeron.protocol.CoreTriggerOrderStateView value) {
+        return new TriggerOrderResponse(value.triggerOrderId(), value.userId(), empty(value.clientTriggerOrderId()),
+                empty(value.ocoGroupId()), value.symbol(), OrderSide.valueOf(value.side().name()),
+                TriggerOrderType.valueOf(value.triggerType().name()), TriggerCondition.valueOf(value.triggerCondition().name()),
+                value.triggerPriceTicks(), nullable(value.activationPriceTicks()), nullable(value.callbackRatePpm()),
+                nullable(value.highestPriceTicks()), nullable(value.lowestPriceTicks()), instant(value.activatedAtEpochMillis()),
+                OrderType.valueOf(value.orderType().name()), TimeInForce.valueOf(value.timeInForce().name()), value.priceTicks(),
+                value.quantitySteps(), MarginMode.valueOf(value.marginMode().name()), PositionSide.valueOf(value.positionSide().name()),
+                TriggerOrderStatus.valueOf(value.status().name()), nullable(value.placedOrderId()), nullable(value.triggerSequence()),
+                nullable(value.triggeredPriceTicks()), empty(value.rejectReason()), empty(value.traceId()), instant(value.expiresAtEpochMillis()),
+                instant(value.triggeredAtEpochMillis()), instant(value.createdAtEpochMillis()), instant(value.updatedAtEpochMillis()));
+    }
+    private static Long nullable(long value) { return value == 0 ? null : value; }
+    private static Instant instant(long value) { return value == 0 ? null : Instant.ofEpochMilli(value); }
+    private static String empty(String value) { return value == null || value.isEmpty() ? null : value; }
 
     private SubscriptionTopic topic(WsChannel channel, String symbol, long userId) {
         return new SubscriptionTopic(channel, symbol, null, userId, properties.getKafka().getProductLine());

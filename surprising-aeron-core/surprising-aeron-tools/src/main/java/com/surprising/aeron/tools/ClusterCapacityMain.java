@@ -1,0 +1,436 @@
+package com.surprising.aeron.tools;
+
+import com.surprising.aeron.client.AeronClientPool;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.CancelOrderCommand;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreStateQueryCodec;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+
+public final class ClusterCapacityMain implements AutoCloseable {
+
+    private static final long FUNDING_UNITS = 1_000_000_000_000L;
+    private static final long PRICE_TICKS = 100;
+    private static final long QUANTITY_STEPS = 1;
+
+    private final ProductLine productLine;
+    private final List<String> symbols;
+    private final long seed;
+    private final int workers;
+    private final int connections;
+    private final int warmupSeconds;
+    private final int durationSeconds;
+    private final long offeredCommandsPerSecond;
+    private final Workload workload;
+    private final AeronClientPool clients;
+    private final AtomicLong nextOrderId;
+    private final AtomicLong nextPermitNanos = new AtomicLong();
+    private final List<Long> latenciesNanos = Collections.synchronizedList(new ArrayList<>());
+    private final AtomicLong commands = new AtomicLong();
+    private final AtomicLong matches = new AtomicLong();
+    private final AtomicLong failures = new AtomicLong();
+    private final AtomicReference<RuntimeException> firstFailure = new AtomicReference<>();
+    private final Object[] symbolLocks;
+
+    private ClusterCapacityMain(
+            ProductLine productLine,
+            List<String> hosts,
+            String egress,
+            List<String> symbols,
+            long seed,
+            int workers,
+            int connections,
+            int warmupSeconds,
+            int durationSeconds,
+            long offeredCommandsPerSecond,
+            Workload workload) {
+        this.productLine = productLine;
+        this.symbols = List.copyOf(symbols);
+        this.seed = seed;
+        this.workers = workers;
+        this.connections = connections;
+        this.warmupSeconds = warmupSeconds;
+        this.durationSeconds = durationSeconds;
+        this.offeredCommandsPerSecond = offeredCommandsPerSecond;
+        this.workload = workload;
+        this.symbolLocks = java.util.stream.IntStream.range(0, symbols.size())
+                .mapToObj(ignored -> new Object()).toArray(Object[]::new);
+        this.clients = new AeronClientPool("capacity", productLine, hosts, egress, Duration.ofSeconds(10), connections);
+        this.nextOrderId = new AtomicLong(40_000_000_000L + seed * 1_000_000L);
+    }
+
+    public static void main(String[] args) throws Exception {
+        ProductLine productLine = ProductLine.requireExternalCode(
+                System.getProperty("surprising.aeron.product-line", "LINEAR_PERPETUAL"));
+        List<String> hosts = Arrays.stream(System.getProperty(
+                        "surprising.aeron.hostnames", "localhost,localhost,localhost").split(","))
+                .map(String::trim).toList();
+        String egress = System.getProperty("surprising.aeron.egress-hostname", "localhost");
+        String symbolPrefix = System.getProperty("surprising.aeron.symbol", "P9-CAPACITY-BTC-USDT")
+                .trim().toUpperCase();
+        int symbolCount = positiveInt("surprising.aeron.capacity-symbol-count", 1);
+        List<String> symbols = java.util.stream.IntStream.range(0, symbolCount)
+                .mapToObj(index -> symbolCount == 1 ? symbolPrefix : symbolPrefix + '-' + (index + 1))
+                .toList();
+        long seed = positiveLong("surprising.aeron.capacity-seed", 9901);
+        int workers = positiveInt("surprising.aeron.capacity-workers", 4);
+        int connections = positiveInt("surprising.aeron.capacity-connections", workers);
+        int warmupSeconds = nonNegativeInt("surprising.aeron.capacity-warmup-seconds", 5);
+        int durationSeconds = positiveInt("surprising.aeron.capacity-duration-seconds", 15);
+        long offered = nonNegativeLong("surprising.aeron.capacity-offered-commands-per-second", 0);
+        Workload workload = Workload.valueOf(System.getProperty(
+                "surprising.aeron.capacity-workload", "MATCH").trim().toUpperCase());
+        String mode = System.getProperty("surprising.aeron.capacity-mode", "run").trim().toLowerCase();
+        try (ClusterCapacityMain benchmark = new ClusterCapacityMain(productLine, hosts, egress, symbols, seed,
+                workers, connections, warmupSeconds, durationSeconds, offered, workload)) {
+            if ("verify".equals(mode)) {
+                benchmark.cancelOrders(System.getProperty("surprising.aeron.capacity-cancel-orders", ""));
+                benchmark.verifyFundsAndBook();
+                System.out.printf("capacityVerify=PASS productLine=%s workers=%d symbols=%d "
+                                + "fundsDiff=0 bookLevels=0%n",
+                        productLine, workers, symbols.size());
+            } else if ("run".equals(mode)) {
+                benchmark.run();
+            } else {
+                throw new IllegalArgumentException("surprising.aeron.capacity-mode must be run or verify");
+            }
+        }
+    }
+
+    private void run() throws Exception {
+        setup();
+        if (warmupSeconds > 0) {
+            execute(warmupSeconds, false);
+        }
+        latenciesNanos.clear();
+        commands.set(0);
+        matches.set(0);
+        failures.set(0);
+        firstFailure.set(null);
+        nextPermitNanos.set(System.nanoTime());
+        long started = System.nanoTime();
+        execute(durationSeconds, true);
+        long elapsedNanos = System.nanoTime() - started;
+        verifyFundsAndBook();
+        List<Long> sorted;
+        synchronized (latenciesNanos) {
+            sorted = new ArrayList<>(latenciesNanos);
+        }
+        Collections.sort(sorted);
+        long commandCount = commands.get();
+        long matchCount = matches.get();
+        double elapsedSeconds = elapsedNanos / 1_000_000_000.0;
+        System.out.printf("capacity=PASS scope=LOCAL_CAPACITY productLine=%s workload=%s symbols=%d workers=%d connections=%d "
+                        + "offeredCommandsPerSec=%d commands=%d matches=%d failures=%d elapsedSeconds=%.3f "
+                        + "coreCommittedOpsPerSec=%.3f coreMatchEventsPerSec=%.3f p50Micros=%d p95Micros=%d "
+                        + "p99Micros=%d p999Micros=%d maxMicros=%d fundsDiff=0 bookLevels=0%n",
+                productLine, workload, symbols.size(), workers, connections, offeredCommandsPerSecond, commandCount, matchCount,
+                failures.get(), elapsedSeconds, commandCount / elapsedSeconds, matchCount / elapsedSeconds,
+                percentileMicros(sorted, 0.50), percentileMicros(sorted, 0.95), percentileMicros(sorted, 0.99),
+                percentileMicros(sorted, 0.999), percentileMicros(sorted, 1.0));
+    }
+
+    private void setup() {
+        for (String symbol : symbols) {
+            applied(CoreMessageType.UPSERT_INSTRUMENT, 1,
+                    TradingCommandCodec.encodeUpsertInstrument(instrument(symbol)), stableId("instrument:" + symbol));
+        }
+        for (int worker = 0; worker < workers; worker++) {
+            long first = firstUser(worker);
+            long second = secondUser(worker);
+            if (productLine == ProductLine.SPOT) {
+                adjust(first, "BTC", FUNDING_UNITS);
+                adjust(first, "USDT", FUNDING_UNITS);
+                adjust(second, "BTC", FUNDING_UNITS);
+                adjust(second, "USDT", FUNDING_UNITS);
+            } else {
+                adjust(first, settleAsset(), FUNDING_UNITS);
+                adjust(second, settleAsset(), FUNDING_UNITS);
+            }
+        }
+    }
+
+    private void execute(int seconds, boolean measured) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
+        CountDownLatch ready = new CountDownLatch(workers);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicBoolean stop = new AtomicBoolean();
+        try (var executor = Executors.newFixedThreadPool(workers)) {
+            for (int worker = 0; worker < workers; worker++) {
+                int workerId = worker;
+                executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    long cycle = 0;
+                    while (!stop.get() && System.nanoTime() < deadline) {
+                        try {
+                            if (workload == Workload.MATCH) {
+                                matchCycle(workerId, cycle++, measured);
+                            } else {
+                                cancelCycle(workerId, measured);
+                            }
+                        } catch (RuntimeException exception) {
+                            failures.incrementAndGet();
+                            firstFailure.compareAndSet(null, exception);
+                            stop.set(true);
+                        }
+                    }
+                    return null;
+                });
+            }
+            ready.await();
+            start.countDown();
+            executor.shutdown();
+            if (!executor.awaitTermination(seconds + 30L, TimeUnit.SECONDS)) {
+                stop.set(true);
+                executor.shutdownNow();
+                throw new IllegalStateException("capacity workers did not terminate");
+            }
+        }
+        if (failures.get() != 0) {
+            throw new IllegalStateException("capacity workload failed count=" + failures.get(), firstFailure.get());
+        }
+    }
+
+    private void matchCycle(int worker, long cycle, boolean measured) {
+        String symbol = symbol(worker, cycle);
+        synchronized (symbolLocks[symbols.indexOf(symbol)]) {
+            boolean reverse = (cycle & 1L) != 0;
+            long makerUser = firstUser(worker);
+            long takerUser = secondUser(worker);
+            CoreOrderSide makerSide = reverse ? CoreOrderSide.BUY : CoreOrderSide.SELL;
+            CoreOrderSide takerSide = reverse ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+            long makerOrder = nextOrderId.incrementAndGet();
+            long takerOrder = nextOrderId.incrementAndGet();
+            submitOrder(makerUser, order(symbol, makerOrder, makerSide, CoreTimeInForce.GTC), measured);
+            submitOrder(takerUser, order(symbol, takerOrder, takerSide, CoreTimeInForce.IOC), measured);
+            if (measured) {
+                matches.incrementAndGet();
+            }
+        }
+    }
+
+    private void cancelOrders(String encodedOrders) {
+        if (encodedOrders == null || encodedOrders.isBlank()) {
+            return;
+        }
+        for (String encodedOrder : encodedOrders.split(",")) {
+            String[] fields = encodedOrder.trim().split(":");
+            if (fields.length != 2) {
+                throw new IllegalArgumentException("invalid capacity cleanup order: " + encodedOrder);
+            }
+            long userId = Long.parseLong(fields[0]);
+            long orderId = Long.parseLong(fields[1]);
+            var response = clients.command(CoreMessageType.CANCEL_ORDER, stableId("cleanup:" + orderId), userId,
+                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
+            if (response.commandStatus() != ResponseStatus.APPLIED) {
+                throw new IllegalStateException("capacity cleanup cancel rejected orderId=" + orderId
+                        + " status=" + response.commandStatus());
+            }
+        }
+    }
+
+    private void cancelCycle(int worker, boolean measured) {
+        long userId = firstUser(worker);
+        long orderId = nextOrderId.incrementAndGet();
+        String symbol = symbol(worker, orderId);
+        submitOrder(userId, order(symbol, orderId, CoreOrderSide.SELL, CoreTimeInForce.GTC, 110), measured);
+        throttle();
+        long started = System.nanoTime();
+        var response = clients.command(CoreMessageType.CANCEL_ORDER, stableId("cancel:" + orderId), userId,
+                TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
+        record(response.commandStatus(), System.nanoTime() - started, measured);
+    }
+
+    private void submitOrder(long userId, PlaceOrderCommand command, boolean measured) {
+        throttle();
+        long started = System.nanoTime();
+        var response = clients.command(CoreMessageType.PLACE_ORDER, stableId("order:" + command.orderId()), userId,
+                TradingCommandCodec.encodePlaceOrder(command));
+        record(response.commandStatus(), System.nanoTime() - started, measured);
+    }
+
+    private void record(ResponseStatus status, long latencyNanos, boolean measured) {
+        if (status != ResponseStatus.APPLIED) {
+            throw new IllegalStateException("capacity command rejected status=" + status);
+        }
+        if (measured) {
+            commands.incrementAndGet();
+            latenciesNanos.add(latencyNanos);
+        }
+    }
+
+    private void throttle() {
+        if (offeredCommandsPerSecond == 0) {
+            return;
+        }
+        long interval = Math.max(1, 1_000_000_000L / offeredCommandsPerSecond);
+        long permit = nextPermitNanos.getAndAdd(interval);
+        long remaining = permit - System.nanoTime();
+        if (remaining > 0) {
+            LockSupport.parkNanos(remaining);
+        }
+    }
+
+    private void verifyFundsAndBook() {
+        var book = CoreStateQueryCodec.decodeBookState(clients.query(CoreMessageType.BOOK_STATE_QUERY,
+                stableId("book-query"), 0, new byte[0]).data());
+        if (!book.levels().isEmpty()) {
+            throw new IllegalStateException("capacity book is not empty levels=" + book.levels().size());
+        }
+        long actual = 0;
+        for (int worker = 0; worker < workers; worker++) {
+            actual = Math.addExact(actual, economicFunds(firstUser(worker)));
+            actual = Math.addExact(actual, economicFunds(secondUser(worker)));
+        }
+        long expectedMultiplier = productLine == ProductLine.SPOT ? 4L : 2L;
+        long expected = Math.multiplyExact(Math.multiplyExact(FUNDING_UNITS, workers), expectedMultiplier);
+        if (actual != expected) {
+            throw new IllegalStateException("capacity funds mismatch expected=" + expected + " actual=" + actual);
+        }
+    }
+
+    private long economicFunds(long userId) {
+        var response = clients.query(CoreMessageType.USER_STATE_QUERY, stableId("user-query:" + userId), userId,
+                new byte[0]);
+        var user = CoreStateQueryCodec.decodeUserState(response.data());
+        if (productLine == ProductLine.SPOT) {
+            return user.balances().stream().mapToLong(value -> Math.addExact(
+                    value.availableUnits(), value.lockedUnits())).sum();
+        }
+        return user.balances().stream().filter(value -> value.asset().equals(settleAsset()))
+                .mapToLong(value -> Math.addExact(value.availableUnits(), value.lockedUnits())).sum();
+    }
+
+    private String symbol(int worker, long cycle) {
+        return symbols.get(Math.floorMod(worker + cycle, symbols.size()));
+    }
+
+    private PlaceOrderCommand order(
+            String symbol, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce) {
+        return order(symbol, orderId, side, timeInForce, PRICE_TICKS);
+    }
+
+    private PlaceOrderCommand order(
+            String symbol, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce, long price) {
+        String reservationAsset = productLine == ProductLine.SPOT
+                ? (side == CoreOrderSide.BUY ? "USDT" : "BTC") : settleAsset();
+        return new PlaceOrderCommand(orderId, symbol, 1, "BTC", "USDT", settleAsset(), side, price,
+                QUANTITY_STEPS, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                productLine == ProductLine.SPOT ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
+                reservationAsset, 0, CoreOrderType.LIMIT, timeInForce, price, false, "", 0, 0);
+    }
+
+    private UpsertInstrumentCommand instrument(String symbol) {
+        ContractType type = ContractType.valueOf(productLine.contractTypeCode());
+        long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
+        return new UpsertInstrumentCommand(symbol, 1, type.ordinal(), "BTC", "USDT", settleAsset(), 1, 1,
+                type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0, expiry,
+                type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
+    }
+
+    private void adjust(long userId, String asset, long units) {
+        applied(CoreMessageType.ADJUST_BALANCE, userId,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units)),
+                stableId("fund:" + userId + ':' + asset));
+    }
+
+    private void applied(CoreMessageType type, long userId, byte[] payload, UUID commandId) {
+        var response = clients.command(type, commandId, userId, payload);
+        if (response.commandStatus() != ResponseStatus.APPLIED) {
+            throw new IllegalStateException(type + " rejected status=" + response.commandStatus());
+        }
+    }
+
+    private long firstUser(int worker) {
+        return 50_000_000_000L + seed * 1_000L + worker * 2L;
+    }
+
+    private long secondUser(int worker) {
+        return firstUser(worker) + 1;
+    }
+
+    private String settleAsset() {
+        return productLine == ProductLine.INVERSE_PERPETUAL || productLine == ProductLine.INVERSE_DELIVERY
+                ? "BTC" : "USDT";
+    }
+
+    private static long percentileMicros(List<Long> sorted, double percentile) {
+        if (sorted.isEmpty()) {
+            return 0;
+        }
+        int index = (int) Math.ceil(percentile * sorted.size()) - 1;
+        return TimeUnit.NANOSECONDS.toMicros(sorted.get(Math.max(0, Math.min(index, sorted.size() - 1))));
+    }
+
+    private static UUID stableId(String value) {
+        return UUID.nameUUIDFromBytes(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static int positiveInt(String name, int defaultValue) {
+        int value = Integer.parseInt(System.getProperty(name, Integer.toString(defaultValue)));
+        if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return value;
+    }
+
+    private static int nonNegativeInt(String name, int defaultValue) {
+        int value = Integer.parseInt(System.getProperty(name, Integer.toString(defaultValue)));
+        if (value < 0) {
+            throw new IllegalArgumentException(name + " must be non-negative");
+        }
+        return value;
+    }
+
+    private static long positiveLong(String name, long defaultValue) {
+        long value = Long.parseLong(System.getProperty(name, Long.toString(defaultValue)));
+        if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return value;
+    }
+
+    private static long nonNegativeLong(String name, long defaultValue) {
+        long value = Long.parseLong(System.getProperty(name, Long.toString(defaultValue)));
+        if (value < 0) {
+            throw new IllegalArgumentException(name + " must be non-negative");
+        }
+        return value;
+    }
+
+    private enum Workload {
+        MATCH,
+        CANCEL
+    }
+
+    @Override
+    public void close() {
+        clients.close();
+    }
+}

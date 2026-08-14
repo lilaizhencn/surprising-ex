@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRODUCT_LINES_EXPLICIT="${PRODUCT_LINES+x}"
 TEST_PROFILE="${TEST_PROFILE:-auto}"
 source "${ROOT_DIR}/scripts/test-environment-profile.sh"
+source "${ROOT_DIR}/scripts/aeron-product-line-runtime.sh"
 test_profile_detect
 DB_USER="${DB_USER:-surprising}"
 DB_PASSWORD="${DB_PASSWORD:-surprising}"
@@ -96,6 +97,7 @@ RECOVERY_PROVIDER="${RECOVERY_PROVIDER:-}"
 RECOVERY_MODE="${RECOVERY_MODE:-kill}"
 RECOVERY_TIMELINE_FILE="${RECOVERY_TIMELINE_FILE:-}"
 RUN_WEBSOCKET_SMOKE="${RUN_WEBSOCKET_SMOKE:-false}"
+MANAGE_AERON_RUNTIME="${MANAGE_AERON_RUNTIME:-true}"
 WS_TIMEOUT_MS="${WS_TIMEOUT_MS:-300000}"
 STRESS_PG_STAT_STATEMENTS_AVAILABLE=false
 STRESS_KAFKA_LAG_FILE=""
@@ -146,6 +148,7 @@ cleanup() {
       kill "${pid}" >/dev/null 2>&1 || true
     fi
   done
+  aeron_runtime_stop || true
   for ((i = 0; i < ${#provider_pids[@]}; i++)); do
     pid="${provider_pids[$i]}"
     [[ -n "${pid}" ]] && wait "${pid}" >/dev/null 2>&1 || true
@@ -487,7 +490,9 @@ symbol_for() {
   case "$1" in
     SPOT) echo "BTC-USDT-SPOT" ;;
     LINEAR_PERPETUAL) echo "BTC-USDT" ;;
+    INVERSE_PERPETUAL) echo "BTC-USD-PERP" ;;
     LINEAR_DELIVERY) echo "BTC-USDT-260925" ;;
+    INVERSE_DELIVERY) echo "BTC-USD-260925" ;;
     OPTION) echo "BTC-USDT-260925-59000-C" ;;
     *) echo "Unsupported product line: $1" >&2; exit 1 ;;
   esac
@@ -496,8 +501,8 @@ symbol_for() {
 instrument_type_for() {
   case "$1" in
     SPOT) echo "SPOT" ;;
-    LINEAR_PERPETUAL) echo "PERPETUAL" ;;
-    LINEAR_DELIVERY) echo "DELIVERY" ;;
+    LINEAR_PERPETUAL|INVERSE_PERPETUAL) echo "PERPETUAL" ;;
+    LINEAR_DELIVERY|INVERSE_DELIVERY) echo "DELIVERY" ;;
     OPTION) echo "OPTION" ;;
     *) echo "Unsupported product line: $1" >&2; exit 1 ;;
   esac
@@ -617,6 +622,10 @@ DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
 SQL
   psql_exec -f "${ROOT_DIR}/init.sql" >/dev/null
+  local core_migration
+  for core_migration in "${ROOT_DIR}"/surprising-aeron-core/surprising-aeron-exporter/src/main/resources/db/migration/V*.sql; do
+    psql_exec -f "${core_migration}" >/dev/null
+  done
   reset_runtime_sequences
   seed_product_instruments
   if [[ "${MULTI_SYMBOL_STRESS}" == "true" && -n "${product_line}" ]]; then
@@ -655,6 +664,20 @@ INSERT INTO instruments (
     expiry_time, delivery_time, underlying_symbol, strike_price_units, option_type, option_exercise_style,
     settlement_method, status, effective_time, created_at, updated_at
 ) VALUES
+('BTC-USD-PERP', 1, 'PERPETUAL', 'INVERSE_PERPETUAL', 'BTC', 'USD', 'BTC',
+ 1000000, 'BTC', 10000000, 100000, 1, 100000, 1, 1000000000000000,
+ 10000, 1, 3, 'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, TRUE, TRUE,
+ 100000000, 10000, 5000, 200, 500, 1000000000000000000, 1000000, 1000000000000000000,
+ 8, 0, 0, 0, 1000000000000, 1,
+ NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+ 'TRADING', now(), now(), now()),
+('BTC-USD-260925', 1, 'DELIVERY', 'INVERSE_DELIVERY', 'BTC', 'USD', 'BTC',
+ 1000000, 'BTC', 10000000, 100000, 1, 100000, 1, 1000000000000000,
+ 10000, 1, 3, 'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, TRUE, TRUE,
+ 100000000, 10000, 5000, 200, 500, 1000000000000000000, 1000000, 1000000000000000000,
+ 0, 0, 0, 0, 1000000000000, 1,
+ now() + interval '30 days', now() + interval '30 days', NULL, NULL, NULL, NULL,
+ 'CASH', 'TRADING', now(), now(), now()),
 ('BTC-USDT-260925', 1, 'DELIVERY', 'LINEAR_DELIVERY', 'BTC', 'USDT', 'USDT',
  1000000, 'USDT', 10000000, 100000, 1, 100000, 1, 1000000000000000,
  10000, 1, 3, 'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, TRUE, TRUE,
@@ -687,6 +710,8 @@ ON CONFLICT (symbol, version) DO UPDATE SET
 
 INSERT INTO instrument_current_versions (symbol, version, updated_at)
 VALUES
+('BTC-USD-PERP', 1, now()),
+('BTC-USD-260925', 1, now()),
 ('BTC-USDT-260925', 1, now()),
 ('BTC-USDT-260925-59000-C', 1, now()),
 ('BTC-USDT-SPOT', 1, now())
@@ -696,13 +721,17 @@ INSERT INTO instrument_product_current_versions (product_line, symbol, version, 
 VALUES
 ('LINEAR_PERPETUAL', 'BTC-USDT', 1, now()),
 ('LINEAR_PERPETUAL', 'ETH-USDT', 1, now()),
+('INVERSE_PERPETUAL', 'BTC-USD-PERP', 1, now()),
 ('LINEAR_DELIVERY', 'BTC-USDT-260925', 1, now()),
+('INVERSE_DELIVERY', 'BTC-USD-260925', 1, now()),
 ('OPTION', 'BTC-USDT-260925-59000-C', 1, now()),
 ('SPOT', 'BTC-USDT-SPOT', 1, now())
 ON CONFLICT (product_line, symbol) DO UPDATE SET version = EXCLUDED.version, updated_at = EXCLUDED.updated_at;
 
 INSERT INTO instrument_symbol_sequences (symbol, version, updated_at)
 VALUES
+('BTC-USD-PERP', 1, now()),
+('BTC-USD-260925', 1, now()),
 ('BTC-USDT-260925', 1, now()),
 ('BTC-USDT-260925-59000-C', 1, now()),
 ('BTC-USDT-SPOT', 1, now())
@@ -713,6 +742,8 @@ INSERT INTO instrument_risk_brackets (
     symbol, version, bracket_no, notional_floor_units, notional_cap_units,
     max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
 ) VALUES
+('BTC-USD-PERP', 1, 1, 0, 1000000000000000000, 100000000, 10000, 5000),
+('BTC-USD-260925', 1, 1, 0, 1000000000000000000, 100000000, 10000, 5000),
 ('BTC-USDT-260925', 1, 1, 0, 1000000000000000000, 100000000, 10000, 5000),
 ('BTC-USDT-260925-59000-C', 1, 1, 0, 1000000000000000000, 100000000, 10000, 5000),
 ('BTC-USDT-SPOT', 1, 1, 0, 1000000000000000000, 1000000, 1000000, 1000000)
@@ -724,6 +755,12 @@ INSERT INTO instrument_index_sources (
     conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm,
     websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm
 ) VALUES
+('BTC-USD-PERP', 1, 'SYNTHETIC', TRUE, 'http://localhost:9082', '/api/v1/index', 'BTC-USD', 'SYNTHETIC',
+ 'USD', 'USD', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
+ FALSE, NULL, NULL, NULL, 1000000),
+('BTC-USD-260925', 1, 'SYNTHETIC', TRUE, 'http://localhost:9082', '/api/v1/index', 'BTC-USD', 'SYNTHETIC',
+ 'USD', 'USD', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
+ FALSE, NULL, NULL, NULL, 1000000),
 ('BTC-USDT-260925', 1, 'SYNTHETIC', TRUE, 'http://localhost:9082', '/api/v1/index', 'BTC-USDT', 'SYNTHETIC',
  'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
  FALSE, NULL, NULL, NULL, 1000000),
@@ -754,8 +791,12 @@ if product_line == "SPOT":
     print(f"{base}-USDT-SPOT")
 elif product_line == "LINEAR_PERPETUAL":
     print(f"{base}-USDT")
+elif product_line == "INVERSE_PERPETUAL":
+    print(f"{base}-USD-PERP")
 elif product_line == "LINEAR_DELIVERY":
     print(f"{base}-USDT-260925")
+elif product_line == "INVERSE_DELIVERY":
+    print(f"{base}-USD-260925")
 elif product_line == "OPTION":
     strike = 59000 + i * 500
     option_type = "C" if i % 2 == 0 else "P"
@@ -849,6 +890,26 @@ def instrument(product_line, i):
             "exercise": None,
             "settlement": "NULL",
         }
+    if product_line == "INVERSE_PERPETUAL":
+        return {
+            "symbol": f"{base}-USD-PERP",
+            "instrument_type": "PERPETUAL",
+            "contract_type": "INVERSE_PERPETUAL",
+            "base": base,
+            "quote": "USD",
+            "settle": base,
+            "price_ticks": underlying_ticks,
+            "price_tick_units": 10000000,
+            "reduce_only": "TRUE",
+            "market_order": "TRUE",
+            "expiry": "NULL",
+            "delivery": "NULL",
+            "underlying": None,
+            "strike": "NULL",
+            "option_type": None,
+            "exercise": None,
+            "settlement": "NULL",
+        }
     if product_line == "LINEAR_DELIVERY":
         return {
             "symbol": f"{base}-USDT-260925",
@@ -857,6 +918,26 @@ def instrument(product_line, i):
             "base": base,
             "quote": "USDT",
             "settle": "USDT",
+            "price_ticks": underlying_ticks,
+            "price_tick_units": 10000000,
+            "reduce_only": "TRUE",
+            "market_order": "TRUE",
+            "expiry": "now() + interval '30 days'",
+            "delivery": "now() + interval '30 days'",
+            "underlying": None,
+            "strike": "NULL",
+            "option_type": None,
+            "exercise": None,
+            "settlement": "'CASH'",
+        }
+    if product_line == "INVERSE_DELIVERY":
+        return {
+            "symbol": f"{base}-USD-260925",
+            "instrument_type": "DELIVERY",
+            "contract_type": "INVERSE_DELIVERY",
+            "base": base,
+            "quote": "USD",
+            "settle": base,
             "price_ticks": underlying_ticks,
             "price_tick_units": 10000000,
             "reduce_only": "TRUE",
@@ -915,7 +996,7 @@ for r in rows:
         "("
         f"{quote(r['symbol'])}, 1, {quote(r['instrument_type'])}, {quote(r['contract_type'])}, "
         f"{quote(r['base'])}, {quote(r['quote'])}, {quote(r['settle'])}, "
-        "1000000, 'USDT', "
+        f"1000000, {quote(r['settle'])}, "
         f"{r['price_tick_units']}, 100000, 1, 1000000, 1, 1000000000000000, "
         "10000, 1, 3, 'LIMIT,MARKET', 'GTC,IOC,FOK,GTX', TRUE, "
         f"{r['reduce_only']}, {r['market_order']}, "
@@ -1061,8 +1142,12 @@ def symbol_and_price(i):
         return f"{base}-USDT-SPOT", underlying_ticks, None, None
     if product_line == "LINEAR_PERPETUAL":
         return f"{base}-USDT", underlying_ticks, None, None
+    if product_line == "INVERSE_PERPETUAL":
+        return f"{base}-USD-PERP", underlying_ticks, None, None
     if product_line == "LINEAR_DELIVERY":
         return f"{base}-USDT-260925", underlying_ticks, None, None
+    if product_line == "INVERSE_DELIVERY":
+        return f"{base}-USD-260925", underlying_ticks, None, None
     if product_line == "OPTION":
         strike = 59000 + i * 500
         option_type = "C" if i % 2 == 0 else "P"
@@ -1317,6 +1402,8 @@ wait_product_topics_ready() {
   # 启动前检查当前产品线全部会被 provider 使用的 Topic；确认 leader 已选出后再启动，
   # 避免刚建 Topic 时 Producer 把短暂的 metadata 未就绪误判为业务失败。
   topics=(
+    "${prefix}.core.inputs.v1"
+    "${prefix}.core.events.v1"
     "${prefix}.trade.events.v1"
     "${prefix}.candle.events.v1"
     "${prefix}.order.commands.v1"
@@ -1502,13 +1589,29 @@ package_services() {
       stale=true
     fi
   done
+  local core_artifact
+  for core_artifact in \
+      "${ROOT_DIR}/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar" \
+      "${ROOT_DIR}/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar" \
+      "${ROOT_DIR}/surprising-aeron-core/surprising-aeron-exporter/target/surprising-aeron-exporter.jar"; do
+    if [[ ! -s "${core_artifact}" ]]; then
+      case "${core_artifact}" in
+        *aeron-service*) missing+=(":surprising-aeron-service") ;;
+        *aeron-tools*) missing+=(":surprising-aeron-tools") ;;
+        *aeron-exporter*) missing+=(":surprising-aeron-exporter") ;;
+      esac
+    elif find "${ROOT_DIR}/surprising-aeron-core" -type f \( -path '*/src/main/*' -o -name 'pom.xml' \) \
+        -newer "${core_artifact}" -print -quit | grep -q .; then
+      stale=true
+    fi
+  done
   if [[ "${BUILD_SERVICES}" == "auto" && ${#missing[@]} -eq 0 && "${stale}" == "false" ]]; then
     echo "Provider jars are current; skipping Maven package (BUILD_SERVICES=auto)"
     return
   fi
   local selectors
   if [[ "${BUILD_SERVICES}" == "true" || "${stale}" == "true" ]]; then
-    selectors=":surprising-instrument-provider,:surprising-index-price-provider,:surprising-mark-price-provider,:surprising-matching-provider,:surprising-account-provider,:surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-insurance-provider,:surprising-adl-provider,:surprising-order-provider,:surprising-trigger-provider,:surprising-gateway,:surprising-websocket-provider,:surprising-market-maker-provider"
+    selectors=":surprising-aeron-service,:surprising-aeron-tools,:surprising-aeron-exporter,:surprising-instrument-provider,:surprising-index-price-provider,:surprising-mark-price-provider,:surprising-matching-provider,:surprising-account-provider,:surprising-risk-provider,:surprising-liquidation-provider,:surprising-funding-provider,:surprising-insurance-provider,:surprising-adl-provider,:surprising-order-provider,:surprising-trigger-provider,:surprising-gateway,:surprising-websocket-provider,:surprising-market-maker-provider"
   else
     local IFS=,
     selectors="${missing[*]}"
@@ -1830,7 +1933,7 @@ start_provider() {
   artifact="$(provider_artifact "${name}")"
   jar="$(boot_jar "${module}" "${artifact}")"
   log_file="${TMP_DIR}/${product_line}-${name}.log"
-  local java_args=()
+  local java_args=(--add-opens java.base/jdk.internal.misc=ALL-UNNAMED)
   local profile_java_args=()
   local arg
   if [[ -n "${TEST_JAVA_OPTS:-}" ]]; then
@@ -2142,26 +2245,11 @@ adjust_product_balance() {
   fi
 }
 
-initialize_account_snapshot() {
-  local product_line="$1"
-  local user_id="$2"
-  # 只有这个内部入口允许在 JVM 快照缺失时读取一次数据库基线；下单和资金热路径不会回退查库。
-  psql_exec <<SQL >/dev/null
-INSERT INTO account_risk_state_revisions (product_line, user_id, revision, updated_at)
-VALUES ('${product_line}', ${user_id}, 1, now())
-ON CONFLICT (product_line, user_id) DO NOTHING;
-SQL
-  curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS \
-    "http://localhost:9086/internal/v1/accounts/perpetual-state/snapshot?productLine=${product_line}&userId=${user_id}" \
-    >/dev/null
-}
-
 fund_user_for_line() {
   local product_line="$1"
   local user_id="$2"
   local asset amount type
   type="$(account_type "${product_line}")"
-  initialize_account_snapshot "${product_line}" "${user_id}"
   if is_spot "${product_line}"; then
     adjust_product_balance "${user_id}" "${type}" "USDT" 200000000000000 "smoke-${RUN_ID}-${product_line}-${user_id}-usdt"
     adjust_product_balance "${user_id}" "${type}" "BTC" 100000000000 "smoke-${RUN_ID}-${product_line}-${user_id}-btc"
@@ -2170,9 +2258,6 @@ fund_user_for_line() {
     amount="$(settle_funding_amount "${asset}")"
     adjust_product_balance "${user_id}" "${type}" "${asset}" "${amount}" "smoke-${RUN_ID}-${product_line}-${user_id}-${asset}"
   fi
-  # 资金调整命令会产生新的账户状态版本；再次调用显式初始化入口，确保下游
-  # 做市、下单和风控在启动前已经拿到包含最新余额的 JVM 快照。
-  initialize_account_snapshot "${product_line}" "${user_id}"
 }
 
 fund_liquidation_user_for_line() {
@@ -2180,7 +2265,6 @@ fund_liquidation_user_for_line() {
   local user_id="$2"
   local asset amount type
   type="$(account_type "${product_line}")"
-  initialize_account_snapshot "${product_line}" "${user_id}"
   asset="$(settle_asset_for "${product_line}")"
   amount="$(liquidation_test_margin_amount "${asset}")"
   adjust_product_balance "${user_id}" "${type}" "${asset}" "${amount}" "smoke-${RUN_ID}-${product_line}-${user_id}-${asset}-liq-margin"
@@ -2494,355 +2578,75 @@ stress_user_scope_predicate() {
 
 fund_stress_accounts_for_line() {
   local product_line="$1"
-  local type
+  local type settle_asset funding_amount user_id symbol_index base_asset
+  local commands=()
   type="$(account_type "${product_line}")"
-  if [[ "${product_line}" == "LINEAR_PERPETUAL" ]]; then
-    psql_exec <<SQL >/dev/null
-WITH stress_prices(symbol_index, symbol, base_price_ticks) AS (
-    VALUES
-      (0, 'BTC-USDT', 600000::bigint), (1, 'ETH-USDT', 30000::bigint),
-      (2, 'SOL-USDT', 1500::bigint), (3, 'XRP-USDT', 1000::bigint),
-      (4, 'BNB-USDT', 6000::bigint), (5, 'DOGE-USDT', 1000::bigint),
-      (6, 'ADA-USDT', 1200::bigint), (7, 'TRX-USDT', 1000::bigint),
-      (8, 'TON-USDT', 3000::bigint), (9, 'AVAX-USDT', 3000::bigint),
-      (10, 'LINK-USDT', 1500::bigint), (11, 'BCH-USDT', 4500::bigint),
-      (12, 'DOT-USDT', 1000::bigint), (13, 'LTC-USDT', 8500::bigint),
-      (14, 'NEAR-USDT', 1000::bigint), (15, 'UNI-USDT', 1000::bigint),
-      (16, 'AAVE-USDT', 9000::bigint), (17, 'ETC-USDT', 2000::bigint),
-      (18, 'FIL-USDT', 1000::bigint), (19, 'OP-USDT', 1000::bigint)
-),
-taker_funding AS MATERIALIZED (
-    SELECT gs,
-           CASE
-             WHEN '${STRESS_SCENARIO}' = 'liquidation' THEN
-               CEIL(
-                 GREATEST(
-                   ${STRESS_TAKER_QUANTITY_STEPS}::numeric,
-                   i.min_quantity_steps::numeric,
-                   CEIL(i.min_notional_units::numeric /
-                     GREATEST(1, sp.base_price_ticks - $((STRESS_MAKER_DEPTH_LEVELS + STRESS_MAKER_REFRESH_CYCLES * STRESS_MAKER_REFRESH_LEVELS + 20)))::numeric
-                     / i.notional_multiplier_units::numeric)
-                 )
-                 * (sp.base_price_ticks + 1)::numeric
-                 * i.notional_multiplier_units::numeric
-                 * (${STRESS_LIQUIDATION_WALLET_RATE_PPM} + i.taker_fee_rate_ppm)::numeric
-                 / 1000000::numeric
-               )::bigint
-             ELSE 200000000000000::bigint
-           END AS amount_units
-      FROM generate_series(0, ${STRESS_USER_COUNT} - 1) AS gs
-      LEFT JOIN stress_prices sp ON sp.symbol_index = (gs % ${STRESS_SYMBOL_COUNT})
-      LEFT JOIN instruments i ON i.symbol = sp.symbol AND i.version = 1
-),
-requested AS (
-    SELECT (${STRESS_MM_USER_START} + gs)::bigint AS user_id,
-           'USDT'::text AS asset,
-           200000000000000::bigint AS amount_units,
-           ('stress-${RUN_ID}-${product_line}-mm-' || gs || '-USDT')::text AS reference_id
-      FROM generate_series(0, ${STRESS_SYMBOL_COUNT} - 1) AS gs
-    UNION ALL
-    SELECT (${STRESS_BOOK_USER_START} + gs)::bigint AS user_id,
-           'USDT'::text AS asset,
-           200000000000000::bigint AS amount_units,
-           ('stress-${RUN_ID}-${product_line}-book-' || gs || '-USDT')::text AS reference_id
-      FROM generate_series(0, ${STRESS_SYMBOL_COUNT} - 1) AS gs
-    UNION ALL
-    SELECT (${STRESS_TAKER_USER_START} + gs)::bigint AS user_id,
-           'USDT'::text AS asset,
-           amount_units,
-           ('stress-${RUN_ID}-${product_line}-user-' || gs || '-USDT')::text AS reference_id
-      FROM taker_funding
-),
-numbered AS (
-    SELECT r.*, row_number() OVER (ORDER BY r.user_id, r.asset) AS rn
-      FROM requested r
-),
-block_requests AS (
-    SELECT ((rn - 1) / 10000)::bigint AS block_index
-      FROM numbered
-     GROUP BY ((rn - 1) / 10000)::bigint
-),
-allocated_blocks AS MATERIALIZED (
-    SELECT block_index,
-           nextval('account_product_ledger_entry_seq') AS high
-      FROM block_requests
-),
-ledger_rows AS (
-    INSERT INTO account_product_ledger_entries (
-        entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-        reference_type, reference_id, reason, created_at
-    )
-    SELECT ((allocated_blocks.high - 1) * 10000
-              + numbered.rn - allocated_blocks.block_index * 10000)::bigint,
-           numbered.user_id,
-           'USDT_PERPETUAL',
-           numbered.asset,
-           numbered.amount_units,
-           numbered.amount_units,
-           'PRODUCT_BALANCE_ADJUSTMENT',
-           numbered.reference_id,
-           'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
-           now()
-      FROM numbered
-      JOIN allocated_blocks
-        ON allocated_blocks.block_index = ((numbered.rn - 1) / 10000)::bigint
-    ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-    RETURNING user_id, account_type, asset, amount_units, reference_id
-),
-balance_rows AS (
-    INSERT INTO account_product_balances (account_type, user_id, asset, available_units, locked_units, updated_at)
-    SELECT account_type, user_id, asset, amount_units, 0, now()
-      FROM ledger_rows
-    ON CONFLICT (account_type, user_id, asset) DO UPDATE SET
-        available_units = account_product_balances.available_units + EXCLUDED.available_units,
-        updated_at = EXCLUDED.updated_at
-    RETURNING account_type, user_id, asset
-)
-INSERT INTO account_admin_balance_adjustments (
-    reference_key, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
-    asset, amount_units, balance_after_units, reference_id, reason, created_at
-)
-SELECT 'PRODUCT|' || user_id || '|' || account_type || '|' || asset || '|' || reference_id,
-       'PRODUCT',
-       1,
-       'product-line-stress',
-       user_id,
-       account_type,
-       asset,
-       amount_units,
-       amount_units,
-       reference_id,
-       'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
-       now()
-  FROM ledger_rows
-ON CONFLICT (reference_key) DO NOTHING;
-SQL
-    psql_exec <<SQL >/dev/null
-INSERT INTO account_risk_state_revisions (product_line, user_id, revision, updated_at)
-SELECT 'LINEAR_PERPETUAL', user_id, 1, now()
-  FROM (
-    SELECT generate_series(${STRESS_MM_USER_START}, $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))) AS user_id
-    UNION ALL
-    SELECT generate_series(${STRESS_BOOK_USER_START}, $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT - 1))) AS user_id
-    UNION ALL
-    SELECT generate_series(${STRESS_TAKER_USER_START}, $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))) AS user_id
-  ) users
-ON CONFLICT (product_line, user_id) DO NOTHING;
-SQL
-    # 直接写入余额表只适合资金数值准备，不能产生账户修订号和完整账户快照。
-    # 永续订单入口严格依赖 JVM 账户快照，因此补一笔真实的账户调整命令，
-    # 让账户单写者发布修订事件；后续下单仍只读取快照，不允许回退查库。
-    local snapshot_commands=()
-    local snapshot_user_id snapshot_reference
-    for ((snapshot_user_id = STRESS_MM_USER_START;
-          snapshot_user_id < STRESS_MM_USER_START + STRESS_SYMBOL_COUNT;
-          snapshot_user_id++)); do
-      snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
-      snapshot_commands+=(
-        "curl -fsS 'http://localhost:9086/internal/v1/accounts/perpetual-state/snapshot?productLine=${product_line}&userId=${snapshot_user_id}' >/dev/null && curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
-      )
-    done
-    for ((snapshot_user_id = STRESS_BOOK_USER_START;
-          snapshot_user_id < STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT;
-          snapshot_user_id++)); do
-      snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
-      snapshot_commands+=(
-        "curl -fsS 'http://localhost:9086/internal/v1/accounts/perpetual-state/snapshot?productLine=${product_line}&userId=${snapshot_user_id}' >/dev/null && curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
-      )
-    done
-    for ((snapshot_user_id = STRESS_TAKER_USER_START;
-          snapshot_user_id < STRESS_TAKER_USER_START + STRESS_USER_COUNT;
-          snapshot_user_id++)); do
-      snapshot_reference="stress-${RUN_ID}-${product_line}-snapshot-${snapshot_user_id}"
-      snapshot_commands+=(
-        "curl -fsS 'http://localhost:9086/internal/v1/accounts/perpetual-state/snapshot?productLine=${product_line}&userId=${snapshot_user_id}' >/dev/null && curl -fsS -X POST 'http://localhost:9086/api/v1/accounts/admin/product-balance-adjustments' -H 'Content-Type: application/json' -d '{\"userId\":${snapshot_user_id},\"accountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\",\"amountUnits\":1,\"referenceId\":\"${snapshot_reference}\",\"reason\":\"PRODUCT_LINE_STRESS_SNAPSHOT_INIT\"}' >/dev/null"
-      )
-    done
-    run_with_concurrency 16 "${snapshot_commands[@]}"
-    if ((RUN_FAILURES > 0)); then
-      echo "永续压测账户快照初始化失败: ${RUN_FAILURES}" >&2
-      exit 1
-    fi
-    return
+  settle_asset="$(settle_asset_for "${product_line}")"
+  funding_amount="$(settle_funding_amount "${settle_asset}")"
+  if [[ "${STRESS_SCENARIO}" == liquidation ]]; then
+    funding_amount="$(liquidation_test_margin_amount "${settle_asset}")"
   fi
 
-  python3 - "${product_line}" "${type}" "${STRESS_SYMBOL_COUNT}" "${STRESS_USER_COUNT}" \
-    "${STRESS_BOOK_USER_START}" "${STRESS_TAKER_USER_START}" "${RUN_ID}" <<'PY' | psql_exec >/dev/null
-import sys
-
-product_line, account_type = sys.argv[1], sys.argv[2]
-symbol_count, user_count = int(sys.argv[3]), int(sys.argv[4])
-mm_start, taker_start = int(sys.argv[5]), int(sys.argv[6])
-run_id = sys.argv[7]
-bases = [
-    "BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "TON", "AVAX",
-    "LINK", "BCH", "DOT", "LTC", "NEAR", "UNI", "AAVE", "ETC", "FIL", "OP",
-]
-
-rows = []
-for i in range(symbol_count):
-    user_id = mm_start + i
-    rows.append((user_id, "USDT", 200000000000000, f"stress-{run_id}-{product_line}-mm-{i}-USDT"))
-    if product_line == "SPOT":
-        base = bases[i % len(bases)]
-        rows.append((user_id, base, 100000000000, f"stress-{run_id}-{product_line}-mm-{i}-{base}"))
-for i in range(user_count):
-    rows.append((taker_start + i, "USDT", 200000000000000, f"stress-{run_id}-{product_line}-user-{i}-USDT"))
-
-def quote(value):
-    return "'" + str(value).replace("'", "''") + "'"
-
-values = ",\n".join(
-    f"({user_id}, {quote(asset)}, {amount}, {quote(reference_id)})"
-    for user_id, asset, amount, reference_id in rows
-)
-print(f"""
-WITH requested(user_id, asset, amount_units, reference_id) AS (
-    VALUES
-{values}
-),
-numbered AS (
-    SELECT r.*, row_number() OVER (ORDER BY r.user_id, r.asset) AS rn
-      FROM requested r
-),
-block_requests AS (
-    SELECT ((rn - 1) / 10000)::bigint AS block_index
-      FROM numbered
-     GROUP BY ((rn - 1) / 10000)::bigint
-),
-allocated_blocks AS MATERIALIZED (
-    SELECT block_index,
-           nextval('account_product_ledger_entry_seq') AS high
-      FROM block_requests
-),
-ledger_rows AS (
-    INSERT INTO account_product_ledger_entries (
-        entry_id, user_id, account_type, asset, amount_units, balance_after_units,
-        reference_type, reference_id, reason, created_at
-    )
-    SELECT ((allocated_blocks.high - 1) * 10000
-              + numbered.rn - allocated_blocks.block_index * 10000)::bigint,
-           numbered.user_id,
-           {quote(account_type)},
-           numbered.asset,
-           numbered.amount_units,
-           numbered.amount_units,
-           'PRODUCT_BALANCE_ADJUSTMENT',
-           numbered.reference_id,
-           'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
-           now()
-      FROM numbered
-      JOIN allocated_blocks
-        ON allocated_blocks.block_index = ((numbered.rn - 1) / 10000)::bigint
-    ON CONFLICT (reference_type, reference_id, user_id, account_type, asset) DO NOTHING
-    RETURNING user_id, account_type, asset, amount_units, reference_id
-),
-balance_rows AS (
-    INSERT INTO account_product_balances (account_type, user_id, asset, available_units, locked_units, updated_at)
-    SELECT account_type, user_id, asset, amount_units, 0, now()
-      FROM ledger_rows
-    ON CONFLICT (account_type, user_id, asset) DO UPDATE SET
-        available_units = account_product_balances.available_units + EXCLUDED.available_units,
-        updated_at = EXCLUDED.updated_at
-    RETURNING account_type, user_id, asset
-)
-INSERT INTO account_admin_balance_adjustments (
-    reference_key, adjustment_kind, admin_user_id, admin_username, user_id, account_type,
-    asset, amount_units, balance_after_units, reference_id, reason, created_at
-)
-SELECT 'PRODUCT|' || user_id || '|' || account_type || '|' || asset || '|' || reference_id,
-       'PRODUCT',
-       1,
-       'product-line-stress',
-       user_id,
-       account_type,
-       asset,
-       amount_units,
-       amount_units,
-       reference_id,
-       'PRODUCT_LINE_MULTI_SYMBOL_STRESS',
-       now()
-  FROM ledger_rows
-ON CONFLICT (reference_key) DO NOTHING;
-""")
-PY
-
-  psql_exec <<SQL >/dev/null
-INSERT INTO account_risk_state_revisions (product_line, user_id, revision, updated_at)
-SELECT '${product_line}', user_id, 1, now()
-  FROM (
-    SELECT generate_series(${STRESS_MM_USER_START}, $((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT - 1))) AS user_id
-    UNION ALL
-    SELECT generate_series(${STRESS_BOOK_USER_START}, $((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT - 1))) AS user_id
-    UNION ALL
-    SELECT generate_series(${STRESS_TAKER_USER_START}, $((STRESS_TAKER_USER_START + STRESS_USER_COUNT - 1))) AS user_id
-  ) users
-ON CONFLICT (product_line, user_id) DO NOTHING;
-SQL
-
-  local snapshot_commands=()
-  local snapshot_user_id
-  for ((snapshot_user_id = STRESS_MM_USER_START;
-        snapshot_user_id < STRESS_MM_USER_START + STRESS_SYMBOL_COUNT;
-        snapshot_user_id++)); do
-    snapshot_commands+=("initialize_account_snapshot '${product_line}' '${snapshot_user_id}'")
+  for ((symbol_index = 0; symbol_index < STRESS_SYMBOL_COUNT; symbol_index++)); do
+    for user_id in $((STRESS_MM_USER_START + symbol_index)) $((STRESS_BOOK_USER_START + symbol_index)); do
+      commands+=("${ROOT_DIR}/scripts/aeron-seed-balance.sh '${product_line}' '${user_id}' '${type}' '${settle_asset}' '${funding_amount}' 'stress-${RUN_ID}-${product_line}-liquidity-${user_id}-${settle_asset}'")
+      if is_spot "${product_line}"; then
+        base_asset="$(stress_symbol_for_index "${product_line}" "${symbol_index}")"
+        base_asset="${base_asset%%-*}"
+        commands+=("${ROOT_DIR}/scripts/aeron-seed-balance.sh '${product_line}' '${user_id}' '${type}' '${base_asset}' '100000000000' 'stress-${RUN_ID}-${product_line}-liquidity-${user_id}-${base_asset}'")
+      fi
+    done
   done
-  for ((snapshot_user_id = STRESS_BOOK_USER_START;
-        snapshot_user_id < STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT;
-        snapshot_user_id++)); do
-    snapshot_commands+=("initialize_account_snapshot '${product_line}' '${snapshot_user_id}'")
+
+  for ((user_id = STRESS_TAKER_USER_START;
+        user_id < STRESS_TAKER_USER_START + STRESS_USER_COUNT;
+        user_id++)); do
+    commands+=("${ROOT_DIR}/scripts/aeron-seed-balance.sh '${product_line}' '${user_id}' '${type}' '${settle_asset}' '${funding_amount}' 'stress-${RUN_ID}-${product_line}-taker-${user_id}-${settle_asset}'")
   done
-  for ((snapshot_user_id = STRESS_TAKER_USER_START;
-        snapshot_user_id < STRESS_TAKER_USER_START + STRESS_USER_COUNT;
-        snapshot_user_id++)); do
-    snapshot_commands+=("initialize_account_snapshot '${product_line}' '${snapshot_user_id}'")
-  done
-  run_with_concurrency 32 "${snapshot_commands[@]}"
+
+  ACCOUNT_INTERNAL_SERVICE_SECRET="${ACCOUNT_INTERNAL_SERVICE_SECRET}" \
+    BALANCE_SEED_REASON=PRODUCT_LINE_MULTI_SYMBOL_STRESS \
+    run_with_concurrency "${STRESS_LOAD_CONCURRENCY}" "${commands[@]}"
   if ((RUN_FAILURES > 0)); then
-    echo "${product_line} 压测账户 JVM 快照初始化失败: ${RUN_FAILURES}" >&2
+    echo "${product_line} Aeron 压测账户初始化失败: ${RUN_FAILURES}" >&2
     exit 1
   fi
+  local expected_users=$((STRESS_SYMBOL_COUNT * 2 + STRESS_USER_COUNT))
+  aeron_runtime_wait_projection_lag_zero
+  wait_sql_equals "${product_line} Aeron 用户资金投影" \
+    "SELECT count(DISTINCT user_id) FROM core_user_fact_projection WHERE product_line='${product_line}' AND $(stress_user_scope_predicate)" \
+    "${expected_users}" 180
 }
 
-stress_order_payload() {
-  local user_id="$1"
-  local client_order_id="$2"
-  local symbol="$3"
-  local side="$4"
-  local tif="$5"
-  local price_ticks="$6"
-  local quantity_steps="$7"
-  local reduce_only="$8"
-  printf '{"userId":%s,"clientOrderId":"%s","symbol":"%s","side":"%s","orderType":"LIMIT","timeInForce":"%s","priceTicks":%s,"quantitySteps":%s,"marginMode":"CROSS","positionSide":"NET","reduceOnly":%s,"postOnly":false}' \
-    "${user_id}" "${client_order_id}" "${symbol}" "${side}" "${tif}" "${price_ticks}" "${quantity_steps}" "${reduce_only}"
+reconcile_aeron_stress_funds() {
+  local product_line="$1" output_file="$2" settle_asset funding_amount funded_users asset_totals
+  local symbol_index base_asset base_total
+  settle_asset="$(settle_asset_for "${product_line}")"
+  funding_amount="$(settle_funding_amount "${settle_asset}")"
+  if [[ "${STRESS_SCENARIO}" == liquidation ]]; then
+    funding_amount="$(liquidation_test_margin_amount "${settle_asset}")"
+  fi
+  funded_users=$((STRESS_SYMBOL_COUNT * 2 + STRESS_USER_COUNT))
+  asset_totals="${settle_asset}:$((funding_amount * funded_users))"
+  if is_spot "${product_line}"; then
+    for ((symbol_index = 0; symbol_index < STRESS_SYMBOL_COUNT; symbol_index++)); do
+      base_asset="$(stress_symbol_for_index "${product_line}" "${symbol_index}")"
+      base_asset="${base_asset%%-*}"
+      base_total=200000000000
+      asset_totals+=",${base_asset}:${base_total}"
+    done
+  fi
+  aeron_runtime_wait_projection_lag_zero
+  PRODUCT_LINE="${product_line}" \
+    RECONCILE_USER_RANGES="${STRESS_MM_USER_START}:$((STRESS_MM_USER_START + STRESS_SYMBOL_COUNT)),${STRESS_BOOK_USER_START}:$((STRESS_BOOK_USER_START + STRESS_SYMBOL_COUNT)),${STRESS_TAKER_USER_START}:$((STRESS_TAKER_USER_START + STRESS_USER_COUNT))" \
+    RECONCILE_ASSET_TOTALS="${asset_totals}" AERON_HOSTNAMES=localhost,localhost,localhost \
+    AERON_EGRESS_HOSTNAME=localhost "${JAVA_HOME}/bin/java" \
+    --add-opens java.base/jdk.internal.misc=ALL-UNNAMED -cp "${AERON_RUNTIME_TOOLS_JAR}" \
+    com.surprising.aeron.tools.ClusterFundsReconcileMain | tee "${output_file}"
+  wait_sql_equals "${product_line} Core Projection 用户覆盖" \
+    "SELECT count(DISTINCT user_id) FROM core_user_fact_projection WHERE product_line='${product_line}' AND $(stress_user_scope_predicate)" \
+    "${funded_users}" 180
 }
-
-stress_order_command() {
-  local product_line="$1"
-  local user_id="$2"
-  local client_order_id="$3"
-  local symbol="$4"
-  local side="$5"
-  local tif="$6"
-  local price_ticks="$7"
-  local quantity_steps="$8"
-  local reduce_only="$9"
-  local trace="${10}"
-  local payload
-  payload="$(stress_order_payload "${user_id}" "${client_order_id}" "${symbol}" "${side}" "${tif}" "${price_ticks}" "${quantity_steps}" "${reduce_only}")"
-  printf "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS -X POST 'http://localhost:9094/api/v1/gateway/trading' -H 'Content-Type: application/json' -H 'X-User-Id: %s' -H 'X-Product-Line: %s' -H 'X-Trace-Id: %s' -d '%s' >/dev/null\n" \
-    "${user_id}" "${product_line}" "${trace}" "${payload}"
-}
-
-stress_batch_command() {
-  local product_line="$1"
-  local user_id="$2"
-  local trace="$3"
-  local items="$4"
-  printf "curl --retry 3 --retry-delay 1 --retry-max-time 45 --retry-all-errors -fsS -X POST 'http://localhost:9094/api/v1/gateway/trading/batch' -H 'Content-Type: application/json' -H 'X-User-Id: %s' -H 'X-Product-Line: %s' -H 'X-Trace-Id: %s' -d '{\"orders\":[%s]}' >/dev/null\n" \
-    "${user_id}" "${product_line}" "${trace}" "${items}"
-}
-
 emit_stress_maker_commands() {
   local product_line="$1"
   local phase="$2"
@@ -4123,7 +3927,6 @@ run_multi_symbol_liquidation_stress_flow() {
   slug="$(stress_product_slug "${product_line}")"
   echo "Scenario ${product_line}: simultaneous liquidation stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT}"
   seed_stress_prices "${product_line}"
-  fund_stress_accounts_for_line "${product_line}"
   wait_sql_equals "market-maker price coverage ${product_line}" \
     "SELECT count(DISTINCT strategy_id) FROM market_maker_strategy_run_events WHERE product_line = '${product_line}' AND strategy_id LIKE 'stress-mm-%' AND event_type = 'CYCLE_SUCCESS'" \
     "${STRESS_SYMBOL_COUNT}" 180
@@ -4270,7 +4073,6 @@ run_multi_symbol_stress_flow() {
   fi
   echo "Scenario ${product_line}: multi-symbol high-frequency stress symbols=${STRESS_SYMBOL_COUNT} users=${STRESS_USER_COUNT} traffic=${traffic_model} target=${target_rate}"
   seed_stress_prices "${product_line}"
-  fund_stress_accounts_for_line "${product_line}"
   wait_sql_equals "market-maker price coverage ${product_line}" \
     "SELECT count(DISTINCT strategy_id) FROM market_maker_strategy_run_events WHERE product_line = '${product_line}' AND strategy_id LIKE 'stress-mm-%' AND event_type = 'CYCLE_SUCCESS'" \
     "${STRESS_SYMBOL_COUNT}" \
@@ -5110,6 +4912,14 @@ run_line() {
   echo "========== Product line ${product_line} =========="
   reset_database "${product_line}"
   reset_kafka_topics "${product_line}"
+  if [[ "${MANAGE_AERON_RUNTIME}" == true ]]; then
+    aeron_runtime_start "${product_line}" "${TMP_DIR}/${product_line}-runtime"
+    aeron_runtime_seed_instruments
+  else
+    AERON_RUNTIME_PRODUCT_LINE="${product_line}"
+    AERON_RUNTIME_SEGMENT="$(aeron_runtime_segment "${product_line}")"
+    aeron_runtime_probe >/dev/null
+  fi
   rm -rf "${ROOT_DIR}/data/kafka-streams/$(product_slug "${product_line}")"
   if [[ "${MULTI_SYMBOL_STRESS}" == "true" ]]; then
     seed_stress_prices "${product_line}"
@@ -5142,13 +4952,7 @@ run_line() {
     stop_all_providers
     local reconcile_file="${TMP_DIR}/${product_line}-funds-reconcile.txt"
     if [[ "${RECONCILE_FUNDS}" == "true" ]]; then
-      PRODUCT_LINES="${product_line}" \
-        DB_HOST=localhost \
-        DB_USER="${DB_USER}" \
-        DB_PASSWORD="${DB_PASSWORD}" \
-        DB_NAME="${DB_NAME}" \
-        POSTGRES_PORT="${POSTGRES_PORT}" \
-        "${ROOT_DIR}/scripts/product-line-funds-reconcile.sh" | tee "${reconcile_file}"
+      reconcile_aeron_stress_funds "${product_line}" "${reconcile_file}"
     fi
     cat "${STRESS_LAST_SUMMARY_FILE}" >>"${STRESS_REPORT_FILE}"
     {
@@ -5162,6 +4966,7 @@ run_line() {
       echo
     } >>"${STRESS_REPORT_FILE}"
     echo "Product line ${product_line} multi-symbol stress passed"
+    aeron_runtime_stop
     return
   fi
   fund_user_for_line "${product_line}" "${MM_USER_A}"
@@ -5189,6 +4994,7 @@ run_line() {
   stop_all_providers
   reconcile_funds "${product_line}"
   echo "Product line ${product_line} passed"
+  aeron_runtime_stop
 }
 
 main() {
@@ -5242,7 +5048,7 @@ main() {
       echo "- Account outbox：batchSize=${STRESS_ACCOUNT_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_ACCOUNT_OUTBOX_PUBLISH_DELAY_MS}，maxInFlight=${STRESS_ACCOUNT_OUTBOX_MAX_IN_FLIGHT}，maxRowsPerKey=${STRESS_ACCOUNT_OUTBOX_MAX_ROWS_PER_KEY}。"
       echo "- Trading outbox：batchSize=${STRESS_ORDER_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_ORDER_OUTBOX_PUBLISH_DELAY_MS}，maxInFlight=${STRESS_ORDER_OUTBOX_MAX_IN_FLIGHT}，maxRowsPerKey=${STRESS_ORDER_OUTBOX_MAX_ROWS_PER_KEY}；财务指令优先 claim。"
       echo "- Risk outbox：batchSize=${STRESS_RISK_OUTBOX_BATCH_SIZE}，publishDelayMs=${STRESS_RISK_OUTBOX_PUBLISH_DELAY_MS}，maxRowsPerKey=${STRESS_RISK_OUTBOX_MAX_ROWS_PER_KEY}。"
-      echo "- 资金准备：批量 fixture 写入 balance、ledger 和 admin adjustment；下单、撮合、Kafka、account 结算全部走真实 provider 链路。"
+      echo "- 资金准备：全部通过 Account API 向 Aeron User State 写入；PostgreSQL 只验证 Exporter/Projection 投影。"
       echo "- 临时日志目录：\`${TMP_DIR}\`"
       echo
     } >"${STRESS_REPORT_FILE}"

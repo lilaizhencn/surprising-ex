@@ -12,3 +12,5 @@ logs/
 .local-logs/
 data/
 .codegraph/
+reports/capacity/**/resources.tsv
+reports/capacity/**/resource-monitor.stop

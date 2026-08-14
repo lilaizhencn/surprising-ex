@@ -64,7 +64,8 @@ final class CoreExportState {
                 List<com.surprising.aeron.protocol.CoreExecutionView> executions,
                 List<com.surprising.aeron.protocol.CoreFundingPaymentView> fundingPayments,
                 List<com.surprising.aeron.protocol.CoreLiquidationView> changedLiquidations,
-                List<com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasuryAssets) {
+                List<com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasuryAssets,
+                List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> changedTriggerOrders) {
         if (pending.size() >= MAX_PENDING_EVENTS) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached hard limit");
         }
@@ -72,7 +73,7 @@ final class CoreExportState {
         CoreExportEvent event = new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
                 command.header().commandId(), command.header().messageType(), status, resultCode,
                 command.header().userId(), command.payload(), changedUsers, changedOrders, executions,
-                fundingPayments, changedLiquidations, changedTreasuryAssets);
+                fundingPayments, changedLiquidations, changedTreasuryAssets, changedTriggerOrders);
         CoreMessage message;
         try {
             message = new CoreMessage(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));

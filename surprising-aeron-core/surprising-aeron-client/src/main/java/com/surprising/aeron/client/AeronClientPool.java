@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public final class AeronClientPool implements AutoCloseable {
 
+    private static final int MAX_SUBMIT_ATTEMPTS = 3;
+
     private final ProductLine productLine;
     private final List<String> hostnames;
     private final String egressHostname;
@@ -124,16 +126,24 @@ public final class AeronClientPool implements AutoCloseable {
     }
 
     private CoreResponse submit(ClientSlot slot, CoreMessage message) {
-        try {
-            return client(slot).submit(message);
-        } catch (RuntimeException exception) {
+        RuntimeException firstFailure = null;
+        for (int attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
             try {
-                closeClient(slot);
-            } catch (RuntimeException closeFailure) {
-                exception.addSuppressed(closeFailure);
+                return client(slot).submit(message);
+            } catch (RuntimeException exception) {
+                if (firstFailure == null) {
+                    firstFailure = exception;
+                } else {
+                    firstFailure.addSuppressed(exception);
+                }
+                try {
+                    closeClient(slot);
+                } catch (RuntimeException closeFailure) {
+                    firstFailure.addSuppressed(closeFailure);
+                }
             }
-            throw exception;
         }
+        throw firstFailure;
     }
 
     private static void closeClient(ClientSlot slot) {

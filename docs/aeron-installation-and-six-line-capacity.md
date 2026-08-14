@@ -47,12 +47,41 @@ Kafka/Exporter backlog、资源、恢复或资金差异，不是“进程还没�
 
 ```bash
 PRODUCT_LINE=LINEAR_PERPETUAL \
-  START_TPS=100 STEP_TPS=100 MAX_TPS=1000000 \
+  START_OPS=40 STEP_OPS=20 MAX_OPS=1000000 \
   ./scripts/run-uncapped-aeron-capacity.sh
 ```
 
 每条线单独运行并保存环境 manifest、命令行、资源采样、延迟分位数、核心提交 OPS、撮合事件 OPS、
 端到端结算 OPS、资金差异和恢复时间。不要并行压测六条线，以免无法归因。
+
+P9 的正式本机执行使用可恢复的逐线编排器；每条线先分别确定单 symbol MATCH、三 symbol MATCH 和
+CANCEL 的连续通过档位，取三者最低值作为 soak 负载，再执行两倍 burst、5 分钟本机 soak、Leader kill、
+Snapshot、冷恢复和 Projection lag 清零。永续额外执行 Aeron Risk/Liquidation 风暴；交割与期权执行
+批量生命周期门禁。中断后再次使用同一个输出目录会跳过已有 `PASS.env` 的产品线。
+
+脚本不会等待运行后再逐个发现旧架构问题。`check-aeron-test-architecture.sh` 在任何构建和服务启动前
+检查六线映射、Bash 语法、Input Bridge/Exporter/Projection、Topic 和资金单写者边界。每条产品线的
+实际顺序固定为：
+
+1. 重置当前产品线的 Core Input/Export Topic 和 consumer group，不触碰其他五条线。
+2. 启动三 Member Cluster、Input Bridge、Exporter、Projection。
+3. 将 PostgreSQL Instrument 配置以幂等命令写入 Aeron Instrument State。
+4. 资金全部经 Account API 写入 Aeron User State；等待 Projection lag=0 并核对账户覆盖。
+5. 先完成 API、WebSocket、生命周期和 Aeron User State + Treasury 资金守恒。
+6. 只有前述门禁通过，才执行容量阶梯、burst 和 5 分钟故障注入。
+
+可单独执行不启动服务的静态门禁：
+
+```bash
+./scripts/check-aeron-test-architecture.sh
+```
+
+Leader 故障不是空载演练：本机 5 分钟 soak 默认在第 60 秒对当前 Leader 执行 `SIGKILL`，负载进程必须跨选主继续，
+随后才让原节点重新加入。soak 完成后还会执行一次 Snapshot 和三 Member 全停冷恢复。
+
+```bash
+P9_RUN_ID=20260814-p9-final ./scripts/run-p9-six-line-capacity.sh
+```
 
 ## 4. 部署拓扑
 

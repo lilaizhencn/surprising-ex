@@ -277,8 +277,7 @@ public class OrderService {
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null : normalizeSymbol(request.symbol());
         requireAeron();
-        List<OrderResponse> open = projectionOpenOrders(currentProductLine(), request.userId(), symbol, limit,
-                Long.MAX_VALUE);
+        List<OrderResponse> open = aeronOrders.openOrders(request.userId(), symbol, 0, limit);
         List<OrderBatchItemResponse> results = new ArrayList<>();
         for (int index = 0; index < open.size(); index++) {
             try {
@@ -316,8 +315,8 @@ public class OrderService {
         }
         long beforeOrderId = decodeOpenOrderCursor(cursor);
         requireAeron();
-        List<OrderResponse> values = projectionOpenOrders(currentProductLine(), userId,
-                symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol), limit + 1, beforeOrderId);
+        List<OrderResponse> values = aeronOrders.openOrders(userId,
+                symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol), beforeOrderId, limit + 1);
         boolean hasMore = values.size() > limit;
         List<OrderResponse> page = hasMore ? values.subList(0, limit) : values;
         String next = hasMore && !page.isEmpty() ? encodeOpenOrderCursor(page.getLast().orderId()) : null;
@@ -500,7 +499,7 @@ public class OrderService {
         String normalizedSymbol = normalizeSymbol(symbol);
         ProductLine line = currentProductLine();
         requireAeron();
-        List<OrderResponse> selected = projectionOpenOrders(line, null, normalizedSymbol, limit, Long.MAX_VALUE);
+        List<OrderResponse> selected = aeronOrders.openOrders(0, normalizedSymbol, 0, limit);
         int completed = 0;
         for (OrderResponse order : selected) {
             try {
@@ -513,8 +512,7 @@ public class OrderService {
 
     public boolean hasLifecycleActiveOrders(String symbol) {
         requireAeron();
-        return !projectionOpenOrders(currentProductLine(), null, normalizeSymbol(symbol), 1,
-                Long.MAX_VALUE).isEmpty();
+        return !aeronOrders.openOrders(0, normalizeSymbol(symbol), 0, 1).isEmpty();
     }
 
     private AeronOrderCommandService requireAeron() {

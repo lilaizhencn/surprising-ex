@@ -138,6 +138,9 @@ public final class SurprisingClusteredService implements ClusteredService {
             case ORDER_STATE_QUERY, CLIENT_ORDER_STATE_QUERY -> CoreMessageType.ORDER_STATE_RESULT;
             case BOOK_STATE_QUERY -> CoreMessageType.BOOK_STATE_RESULT;
             case LIQUIDATION_WORK_QUERY -> CoreMessageType.LIQUIDATION_WORK_RESULT;
+            case USER_OPEN_ORDERS_QUERY -> CoreMessageType.USER_OPEN_ORDERS_RESULT;
+            case TRIGGER_ORDER_QUERY -> CoreMessageType.TRIGGER_ORDER_RESULT;
+            case USER_OPEN_TRIGGER_ORDERS_QUERY -> CoreMessageType.USER_OPEN_TRIGGER_ORDERS_RESULT;
             default -> request.header().kind() == WireMessageKind.QUERY
                     ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
         };

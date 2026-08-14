@@ -51,4 +51,33 @@ class CoreStateQueryCodecTest {
         assertThat(CoreStateQueryCodec.decodeBookState(CoreStateQueryCodec.encodeBookState(state)))
                 .isEqualTo(state);
     }
+
+    @Test
+    void roundTripsOpenOrdersQueryAndView() {
+        CoreOpenOrdersQuery query = new CoreOpenOrdersQuery(" btc-usdt ", 71, 25);
+        assertThat(CoreStateQueryCodec.decodeOpenOrdersQuery(
+                CoreStateQueryCodec.encodeOpenOrdersQuery(query))).isEqualTo(query);
+
+        CoreOrderStateView first = new CoreOrderStateView(71, ProductLine.SPOT, 7, "BTC-USDT", 3,
+                CoreOrderSide.BUY, 60_000, 2, 0, 2, false, CoreMarginMode.ISOLATED,
+                CorePositionSide.LONG, CoreOrderType.LIMIT, CoreTimeInForce.GTX, true,
+                "client-71", UUID.randomUUID(), -10, 20, 1_000, 1_001, 99, "OPEN", 1);
+        CoreOrderStateView second = new CoreOrderStateView(70, ProductLine.SPOT, 7, "BTC-USDT", 3,
+                CoreOrderSide.SELL, 61_000, 1, 0, 1, false, CoreMarginMode.ISOLATED,
+                CorePositionSide.LONG, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
+                "client-70", UUID.randomUUID(), -10, 20, 1_000, 1_001, 98, "OPEN", 1);
+        CoreOpenOrdersView view = new CoreOpenOrdersView(List.of(first, second));
+        assertThat(CoreStateQueryCodec.decodeOpenOrders(CoreStateQueryCodec.encodeOpenOrders(view)))
+                .isEqualTo(view);
+    }
+
+    @Test
+    void rejectsTruncatedOpenOrdersView() {
+        CoreOrderStateView order = new CoreOrderStateView(71, ProductLine.SPOT, 7, "BTC-USDT", 3,
+                CoreOrderSide.BUY, 60_000, 2, 0, 2, false, "OPEN", 1);
+        byte[] encoded = CoreStateQueryCodec.encodeOpenOrders(new CoreOpenOrdersView(List.of(order)));
+        assertThatThrownBy(() -> CoreStateQueryCodec.decodeOpenOrders(
+                java.util.Arrays.copyOf(encoded, encoded.length - 1)))
+                .isInstanceOf(ProtocolException.class);
+    }
 }

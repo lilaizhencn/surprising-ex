@@ -8,7 +8,7 @@
 | 基线分支 | `master` |
 | 基线提交 | `dc46edabcd606fea85517974391739942d5f51e2` |
 | 目标实施分支 | `codex/aeron-unified-core` |
-| 当前阶段 | `P8 DONE；P9 等待用户确认` |
+| 当前阶段 | `P9 IN_PROGRESS` |
 | 最后更新日期 | `2026-08-14` |
 | 上线状态 | 项目尚未上线，无生产历史数据和兼容包袱 |
 | 架构决策 | [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md) |
@@ -386,13 +386,19 @@ P5 实现使用 `1,000,000` 条和 `64 MiB` 双重硬上限，任一达到即在
 
 PostgreSQL 保留：
 
-- 订单、成交、余额、持仓、账务、风险和强平审计投影。
-- 后台查询和历史报表。
+- 订单、成交、余额、持仓、账务、风险和强平历史/审计投影。
+- 历史订单、后台管理列表、后台分页和报表查询。
 - 资金守恒与账账核对。
 - 跨产品线划转、wallet 和外围 Saga 审计。
 
 PostgreSQL 不得参与正常下单、撮合、结算、风险和强平同步裁决。投影故障允许查询延迟，但不允许
 核心状态回退到数据库版本。
+
+用户实时状态边界进一步固定如下：用户持仓、单订单、未成交/未完成订单列表、批量撤销选择和生命周期
+订单选择，全部通过 Aeron User State、Order State 与 Book State 强查询完成；`core_order_projection`
+只承接历史和后台分页/管理选集。开放订单随 Cluster Log、Archive 和 Snapshot 持久化，Leader 切换、
+单节点重启及三节点冷恢复后必须仍能查询并撤销；只有三节点持久盘及其备份同时不可恢复才属于灾难性
+数据丢失场景。
 
 ### 9.5 Valkey
 
@@ -742,7 +748,7 @@ service 与 client 不得循环依赖。任何合并都要记录在第 19 节。
 7. `match-heavy`：高可成交比例。
 8. `cancel-heavy`：高撤单和改单比例。
 9. `burst`：目标两倍短时冲击。
-10. `soak`：目标负载持续至少 60 分钟。
+10. `soak`：本机目标负载持续 5 分钟；生产环境仍至少持续 60 分钟。
 11. 衍生品执行 `liquidation-storm`；交割/期权执行生命周期批处理压力。
 12. 压测后 Snapshot、冷恢复和最终资金核对。
 
@@ -891,7 +897,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 | P6 | `DONE` | 删除旧 WAL、Redis Risk 和旧强平链 | Aeron 强平接管、旧生产链引用清零、联合门禁全绿 | `本 P6 阶段提交` |
 | P7 | `DONE` | 补齐六条产品线 | 六线三节点 smoke、恢复、Exporter/PG 和资金差异为零 | `本 P7 阶段提交` |
 | P8 | `DONE` | 单产品线功能和资金正式验收 | 六线 Gateway/API/WebSocket、资金、Exporter/PG 正式报告 | `本 P8 阶段提交` |
-| P9 | `NOT_STARTED` | 单产品线性能和故障容量测试 | 六份独立容量报告 | `scripts/run-uncapped-aeron-capacity.sh` |
+| P9 | `IN_PROGRESS` | 单产品线性能和故障容量测试 | 六份独立容量报告 | 待填写 |
 | P10 | `NOT_STARTED` | 生产部署与 Runbook 冻结 | 三机演练、Backup 恢复、值班手册 | 待填写 |
 
 ### 18.1 P0：方案冻结与基线固化
@@ -1285,7 +1291,7 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 
-P8 已获得用户确认并完成；P9 未开始，必须等待用户再次明确确认后才能继续。
+P8 已获得用户确认并完成；用户随后已明确确认开始 P9，当前执行进度见 18.10 节。
 
 ### 18.8 P7：六线补齐
 
@@ -1317,7 +1323,7 @@ P8 已获得用户确认并完成；P9 未开始，必须等待用户再次明�
 
 阶段出口：六条线逐线功能、恢复和资金差异均为零。
 
-P8 已完成；P9 未开始，按用户要求等待下一次明确确认。
+P8 已完成；用户随后已明确确认开始 P9，当前执行进度见 18.10 节。
 
 ### 18.9 P8：压测前正式门禁
 
@@ -1351,12 +1357,80 @@ P8 已完成；P9 未开始，按用户要求等待下一次明确确认。
 
 阶段出口：当前产品线 `functional-gate=PASS`、`funds-diff=0`，方可进入 P9 对应压测。
 
-阶段出口已满足：六条产品线均 `functional-gate=PASS`、`funds-diff=0`。P9 等待用户明确确认。
+阶段出口已满足：六条产品线均 `functional-gate=PASS`、`funds-diff=0`；用户已明确确认并开始 P9。
 
 ### 18.10 P9：单产品线压测
 
 按第 16 节顺序逐线执行。每完成一条线，立即更新本节状态、填写报告 URI 和最终稳定 OPS，不等待六线
 全部结束才记录。
+
+执行状态（2026-08-14）：
+
+- [x] 用户确认开始 P9；P8 六线正式功能与资金证据作为压测前置门禁，不重复执行全仓测试。
+- [ ] `LINEAR_PERPETUAL` 本地容量、故障和资金报告。
+- [ ] `SPOT` 本地容量、故障和资金报告。
+- [ ] `INVERSE_PERPETUAL` 本地容量、故障和资金报告。
+- [ ] `LINEAR_DELIVERY` 本地容量、生命周期和资金报告。
+- [ ] `INVERSE_DELIVERY` 本地容量、生命周期和资金报告。
+- [ ] `OPTION` 本地容量、行权和资金报告。
+
+环境边界：当前 Apple M1 Pro、16GB、单机三 Member 与 Kafka/PostgreSQL/Provider 混部结果只标记为
+`LOCAL_CAPACITY`，用于发现瓶颈、验证压测工具和给出本机稳定 OPS；不得写成生产容量。生产 OPS 必须在
+第 17 节三机独立 NVMe 和隔离网络拓扑上重新执行相同报告。
+
+当前进度（2026-08-14）：
+
+- 用户未成交/未完成订单实时链路已切换为 Aeron 强查询：新增 `USER_OPEN_ORDERS_QUERY/RESULT`、
+  `CoreOpenOrdersQuery/View` 及分页游标；用户列表、用户批量撤单和生命周期选单不再读取 PostgreSQL。
+  协议 round-trip、截断保护、下单后查询、Snapshot 恢复后查询以及撤单后为空均已有定向测试覆盖。
+- 定向验证已通过：`CoreStateQueryCodecTest`、`CoreProbeStateTest`、`OrderServiceTest`、
+  `AeronOrderCommandServiceTest`；JDK 25 多模块编译和 `git diff --check` 通过。尚未执行 P9 压测。
+- 新增 `ClusterCapacityMain`，每个 worker 使用隔离双用户；MATCH 交替方向，CANCEL 创建后立即撤销；
+  每档结束强制验证空 Book、无失败和经济资金差异为零。
+- 容量结果同时报告 committed commands/s、matches/s、p50/p95/p99/p99.9/max；支持单 symbol、三 symbol、
+  严格 SLO 与 burst 观察模式。节点并发 Session 上限配置化，默认 64、合法范围 `[1,1024]`。
+- `LINEAR_PERPETUAL` 单 symbol MATCH 连续通过档位为 150 offered commands/s；200 档在不同连接数下因
+  吞吐不足或 p99 超过 150 ms 失败。三 symbol MATCH 与 CANCEL 的共同保守稳定档已降至 80 ops/s。
+- 80 ops/s CANCEL 30 秒结果：79.997 committed commands/s、p99 73.161 ms、`fundsDiff=0`；三 symbol
+  MATCH 30 秒结果：79.999 committed commands/s、p99 38.526 ms、`fundsDiff=0`。
+- 160 offered commands/s 的 2 倍 burst 无错误、`fundsDiff=0`，实际提交 146.952 commands/s；该结果只标记
+  `OBSERVED`，不算持续容量 PASS。用户将本机 soak 调整为 5 分钟；生产环境仍至少执行
+  60 分钟。`LINEAR_PERPETUAL` 5 分钟 soak 完成前不勾选该产品线。
+- `run-p9-six-line-capacity.sh` 按单产品线顺序自动取 MATCH/hot3/CANCEL 最低稳定档，随后执行 burst、
+  5 分钟本机 soak（第 60 秒对 Leader 执行 `SIGKILL`）、Snapshot、三节点冷恢复、状态 hash 与
+  Projection lag 门禁，并支持按
+  `PASS.env` 恢复执行。
+- P9 端到端门禁现在由 `aeron-product-line-runtime.sh` 在 provider 启动前拉起当前产品线的三 Member、
+  Kafka Input Bridge、Reliable Exporter 和 PostgreSQL Projection，并在门禁结束后精确清理；
+  Docker Kafka CLI 适配器复用 `rainbo-kafka` 容器，只有 console producer 保留 stdin，管理命令不会再
+  吞掉批量 Topic 删除循环。宿主机 PostgreSQL 客户端使用 Homebrew `libpq`。
+- 端到端启动门禁已修复 risk/liquidation 缺少 Spring Cloud Context、ADL YAML 重复顶层键，以及所有
+  Aeron provider 在 JDK 25 下缺少 `--add-opens java.base/jdk.internal.misc=ALL-UNNAMED` 的问题；
+  LINEAR_PERPETUAL 的 instrument、price、matching、account、risk、liquidation、funding、insurance、
+  ADL、order、trigger、gateway 和 websocket 均能依次启动。
+- 已删除压力账户直接写 PostgreSQL 的 fixture。maker、book 和 taker 账户全部经带内部签名的 Account API
+  提交 `ADJUST_BALANCE` 到 Aeron；每条线在下单前必须等待 Projection lag=0，并验证
+  `core_user_fact_projection` 覆盖全部压力账户。币本位使用 BTC 结算资产，SPOT 同时建立 quote/base 双资产。
+- 新增 `ClusterInstrumentSeedMain`：测试数据库中的 Instrument 配置只作为配置输入，启动后以幂等
+  `UPSERT_INSTRUMENT` 命令写入当前 Aeron Instrument State；下单不允许把 PostgreSQL Instrument 行当作
+  Core 权威状态。`ClusterFundsReconcileMain` 直接汇总 Aeron User State 与 Treasury，PostgreSQL 仅校验
+  Exporter/Projection 覆盖，旧 `product-line-funds-reconcile.sh` 明确降级为 compatibility projection audit。
+- `product-line-api-flow-smoke.sh` 已补齐币本位永续和币本位交割的单 symbol、20 symbol、行情和资金映射；
+  压力资金同时覆盖后台 maker 与显式 book 两组账户，不再在运行到第三条线时才发现缺失分支。
+- `check-aeron-test-architecture.sh` 在 P9 任何构建或服务启动前执行：检查 Bash 语法、六线映射、三段管线、
+  Input Topic、5 分钟/60 秒故障参数，并禁止 P9/API 执行脚本出现 PostgreSQL 账户权威写入。
+- P9 每条产品线的冻结顺序调整为：P8 功能/资金门禁 → 低档端到端 API/资金门禁 → 单 symbol MATCH →
+  hot3 MATCH → CANCEL → 2x burst → 5 分钟 soak/Leader kill → Snapshot/冷恢复/投影追平。功能或资金失败时
+  不会先产生任何容量数字。
+- 旧 liquidation stress 仍引用已删除的 `risk_liquidation_candidates`，P9 不复用该链路；新增
+  `ClusterLifecycleCapacityMain` 直接压 Aeron 权威状态。线性/币本位永续批量触发 Risk scan 并执行 100 个
+  Liquidation Action；线性/币本位交割和期权对 100 对持仓执行一次原子批量交割/行权，均强制校验
+  空 Book、持仓终态和“用户余额 + Treasury”资金差异为零。
+- 每个容量场景都只重建当前产品线的测试 `core.events.v1` Topic、删除对应 Projection consumer group，并
+  清理当前产品线八张 `core_*_projection` 表；否则新 Cluster 从 Export Sequence 1 重新开始时会与旧
+  Topic/PG 主键碰撞，产生“Core 正确但投影把新事件当重复”的假通过。其他五条产品线数据不受影响。
+- macOS `ps` 的进程 CPU 以单核 `100%` 计；本机 Aeron 多线程进程门禁为 `400%`（最多约 4 个逻辑核），
+  不是传统单线程服务的 `90%`。报告保留实际峰值，生产环境在 P10 按绑核和整机 CPU 重新冻结阈值。
 
 阶段出口：六份可复现容量报告，无资金差异，恢复和资源 SLO 同时满足。
 
@@ -1379,6 +1453,8 @@ P8 已完成；P9 未开始，按用户要求等待下一次明确确认。
 
 | 日期 | 阶段 | 类型 | 决策或偏差 | 原因 | 证据/提交 | 影响 |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-14 | P9 | 脚本架构 | P9 执行前统一 Cluster/Input Bridge/Exporter/Projection，资金只经 Aeron 命令初始化，功能与资金门禁先于容量阶梯 | 避免执行中才暴露空 User State、旧 Topic 重放、Projection 主键碰撞、币本位分支缺失和 PG/Aeron 双权威 | `aeron-product-line-runtime.sh`、`aeron-seed-balance.sh`、`check-aeron-test-architecture.sh`、`ClusterInstrumentSeedMain`、`ClusterFundsReconcileMain` | 尚未重新执行 P9；本次只完成静态检查和 JDK 25 编译门禁 |
+| 2026-08-14 | P9 | 容量口径 | 本机稳定档取单 symbol MATCH、三 symbol MATCH、CANCEL 三者最低连续通过值；2 倍 burst 仅作生存性观察 | 只用单 symbol 撮合峰值会高估可持续综合命令能力，burst 输入也不等于持续可承诺容量 | `ClusterCapacityMain`、`run-uncapped-aeron-capacity.sh`、`run-p9-six-line-capacity.sh` | 结果只能标记 `LOCAL_CAPACITY`；生产值仍需 P10 独立三机重测 |
 | 2026-08-13 | P0 | 决策 | 未上线项目不做长期影子集群和双权威 | 无生产历史数据；降低复杂度 | ADR-0001 | 使用离线重放替代影子验证 |
 | 2026-08-13 | P0 | 决策 | P6 删除旧链路早于性能压测 | 性能必须测唯一最终架构 | 本文第 13、16 节 | 不保留运行时回退开关 |
 | 2026-08-13 | P0 | 决策 | 每次只压一条产品线 | 隔离容量和资金结论 | 本文第 16 节 | 形成六份独立报告 |
@@ -1471,3 +1547,10 @@ P8 已完成；P9 未开始，按用户要求等待下一次明确确认。
 - 六条产品线分别完成单线容量测试。
 - 生产部署、Backup、监控、告警和 Runbook 演练通过。
 - 本文档、ADR、术语表、部署文档和产品线 Runbook 与最终代码一致。
+# Trigger Order Aeron Boundary
+
+止盈止损单已纳入 Aeron Cluster 的 Core 状态机，六条产品线使用相同协议和快照版本。实时创建、幂等、查询开放单、撤销、批量撤销、标记价抢占、触发后只减仓下单及完成状态均以 Aeron 为权威；Core Export 通过 V6 事件把变更推送给 WebSocket，并由 Kafka 异步投影。
+
+PostgreSQL 不再参与用户实时止盈止损单路径，仅保留历史记录、后台筛选分页、审计和异步投影。触发执行失败会保留 Core 的触发状态和拒绝原因，客户端编号保持稳定以支持重试；恢复时先从 Aeron Snapshot/日志恢复，再由维护任务扫描开放状态。OCO、到期和生命周期清理必须通过 Core 命令完成，不能直接修改历史表。
+
+验证顺序：先执行协议/Core/触发服务定向测试，再执行单产品线功能与资金门禁，最后执行五分钟容量压测；未通过功能或资金门禁不得开始压测，也不得删除 Kafka Export/PG 历史投影链路。
