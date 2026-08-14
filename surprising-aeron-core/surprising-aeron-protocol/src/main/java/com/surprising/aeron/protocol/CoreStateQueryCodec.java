@@ -8,7 +8,8 @@ import java.util.List;
 
 public final class CoreStateQueryCodec {
 
-    private static final int VERSION = 3;
+    private static final int VERSION = 4;
+    private static final int VERSION_3 = 3;
     private static final int VERSION_2 = 2;
     private static final int VERSION_1 = 1;
     private static final int MAX_TEXT_BYTES = 64;
@@ -92,16 +93,22 @@ public final class CoreStateQueryCodec {
             writer.longValue(position.realizedPnlUnits());
             writer.longValue(position.positionMarginUnits());
         });
+        writer.intValue(state.leverages().size());
+        state.leverages().forEach(leverage -> {
+            writer.text(leverage.symbol());
+            writer.intValue(leverage.marginMode().wireCode());
+            writer.longValue(leverage.leveragePpm());
+        });
         return writer.toByteArray();
     }
 
     public static CoreUserStateView decodeUserState(byte[] encoded) {
         Reader reader = new Reader(encoded);
-        int version = reader.version(VERSION, VERSION_1);
+        int version = reader.version(VERSION, VERSION_3, VERSION_2, VERSION_1);
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
         long userId = reader.positiveLong("userId");
         long revision = reader.nonNegativeLong("revision");
-        CorePositionMode positionMode = version == VERSION
+        CorePositionMode positionMode = version >= VERSION_3
                 ? CorePositionMode.fromWireCode(reader.intValue()) : CorePositionMode.ONE_WAY;
         List<CoreBalanceView> balances = new ArrayList<>();
         for (int index = 0, count = reader.count("balances"); index < count; index++) {
@@ -129,8 +136,16 @@ public final class CoreStateQueryCodec {
                     reader.nonNegativeLong("entryPriceTicks"), reader.nonNegativeLong("entryValueTicks"),
                     reader.longValue(), reader.nonNegativeLong("positionMarginUnits")));
         }
+        List<CoreLeverageView> leverages = new ArrayList<>();
+        if (version >= VERSION) {
+            for (int index = 0, count = reader.count("leverages"); index < count; index++) {
+                leverages.add(new CoreLeverageView(reader.text(), CoreMarginMode.fromWireCode(reader.intValue()),
+                        reader.positiveLong("leveragePpm")));
+            }
+        }
         reader.requireConsumed();
-        return new CoreUserStateView(productLine, userId, revision, positionMode, balances, reservations, positions);
+        return new CoreUserStateView(productLine, userId, revision, positionMode, balances, reservations, positions,
+                leverages);
     }
 
     public static byte[] encodeOrderState(CoreOrderStateView state) {

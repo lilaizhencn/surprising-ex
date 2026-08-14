@@ -83,6 +83,25 @@ public final class TradingCommandCodec {
         return command;
     }
 
+    public static byte[] encodeUpdateLeverage(UpdateLeverageCommand command) {
+        byte[] symbol = text(command.symbol());
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Integer.BYTES + Long.BYTES)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putShort((short) symbol.length).put(symbol)
+                .putInt(command.marginMode().wireCode())
+                .putLong(command.leveragePpm()).array();
+    }
+
+    public static UpdateLeverageCommand decodeUpdateLeverage(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        String symbol = readText(buffer);
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES);
+        UpdateLeverageCommand command = new UpdateLeverageCommand(symbol,
+                CoreMarginMode.fromWireCode(buffer.getInt()), buffer.getLong());
+        requireConsumed(buffer);
+        return command;
+    }
+
     public static byte[] encodePlaceOrder(PlaceOrderCommand command) {
         byte[] symbol = text(command.symbol());
         byte[] baseAsset = text(command.baseAsset());

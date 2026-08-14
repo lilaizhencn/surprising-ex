@@ -13,6 +13,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
+import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
@@ -192,6 +193,29 @@ class TradingCoreReducerTest {
         assertThat(removed.user(101).positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(1_200);
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(removed),
                 ProductLine.LINEAR_PERPETUAL)).isEqualTo(removed);
+    }
+
+    @Test
+    void leverageIsAuthoritativeForReservationAndSurvivesSnapshot() {
+        TradingCoreState funded = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 10_000);
+        assertThatThrownBy(() -> reducer.updateLeverage(funded, 101,
+                new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 20_000_000L)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT"));
+
+        TradingCoreState leveraged = reducer.updateLeverage(funded, 101,
+                new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000L));
+        PlaceOrderCommand underReserved = new PlaceOrderCommand(301, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+                CoreOrderSide.BUY, 10, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 19);
+
+        assertThatThrownBy(() -> reducer.placeOrder(leveraged, 101, underReserved))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("INSUFFICIENT_ORDER_RESERVATION"));
+        assertThat(leveraged.leverages()).containsEntry(
+                new CoreLeverageKey(101, "BTC-USDT", CoreMarginMode.CROSS), 5_000_000L);
+        assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(leveraged),
+                ProductLine.LINEAR_PERPETUAL)).isEqualTo(leveraged);
     }
 
     private TradingCoreState funded(ProductLine productLine, String asset, long units) {

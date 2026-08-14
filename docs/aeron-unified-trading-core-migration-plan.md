@@ -1250,6 +1250,10 @@ Server C: spot-2, linear-perp-2, inverse-perp-2, linear-delivery-2, inverse-deli
 - [x] 删除 Account 用户命令 WAL、command/result waiter、本地 reducer、RocksDB 状态/变更日志、Redis Position、旧账户投影 worker、旧强平/结算协调器及其运行配置；模块移除 `surprising-event-store`、Redis 和 RocksDB 原生构建依赖。
 - [x] Account 生产源码中 `UserPartitionWal|surprising.eventstore|RedisPosition|PositionCache|AccountUserStateReducer|AccountUserCommandWalIngress|AccountCommandSubmissionService|account-wal` 引用清零；联合 `clean test` 通过：Protocol 16/16、Core 51/51、Account Provider 49/49。
 - [ ] Account 数据库旧表 migration 暂不执行破坏性 drop；它们不再被生产权威链路引用，最终 schema 清理归入部署前独立可回滚 migration。
+- [x] 用户杠杆新增 `UPDATE_LEVERAGE` 并进入 Aeron Trading State；键按 `(userId,symbol,marginMode)` 隔离，存在开放订单或持仓时禁止改变有效杠杆。
+- [x] Core 使用权威用户杠杆推导下单最低保证金率，并与 Instrument 最低保证金率取更严格值；高于合约上限的杠杆和低于权威最低锁资的订单均失败关闭。
+- [x] User State 强查询返回杠杆配置，Snapshot 升级 v8 并兼容 v1–v7；业务 hash、用户 hash和恢复状态均覆盖杠杆，不会在 Leader 切换或冷恢复后退回默认值。
+- [x] Leverage REST 写入/读取和新订单保证金预览直接使用 Aeron；不再由 Kafka 杠杆事件、PG 设置表或 JVM 杠杆快照参与交易裁决。Order provider 全依赖 `clean test` 128/128 通过。
 
 阶段出口：只有 Aeron Log/Archive/Snapshot 是核心权威恢复链，全仓测试通过。
 

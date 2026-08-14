@@ -4,6 +4,7 @@ import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreUserStateView;
+import com.surprising.aeron.protocol.CoreLeverageView;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
@@ -52,6 +53,14 @@ public class OrderAeronGateway implements AutoCloseable {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron user query failed");
         }
         return CoreStateQueryCodec.decodeUserState(response.data());
+    }
+
+    public CoreLeverageView leverage(long userId, String symbol, com.surprising.aeron.protocol.CoreMarginMode mode) {
+        CoreUserStateView user = userState(userId);
+        if (user == null) return null;
+        return user.leverages().stream()
+                .filter(value -> value.symbol().equalsIgnoreCase(symbol) && value.marginMode() == mode)
+                .findFirst().orElse(null);
     }
 
     private CoreOrderStateView query(CoreMessageType type, long userId, byte[] payload) {

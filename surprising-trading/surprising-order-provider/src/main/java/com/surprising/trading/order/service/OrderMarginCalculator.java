@@ -30,18 +30,21 @@ public class OrderMarginCalculator {
     private final InstrumentSnapshotCache snapshotCache;
     private final OrderMarginSnapshotCache marginSnapshotCache;
     private final OpenInterestSnapshotCache openInterestSnapshotCache;
+    private final OrderAeronGateway aeron;
 
     @Autowired
     public OrderMarginCalculator(MarkPriceLookup markPriceLookup,
                                   TradingOrderProperties properties,
                                   @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache,
                                   OrderMarginSnapshotCache marginSnapshotCache,
-                                  OpenInterestSnapshotCache openInterestSnapshotCache) {
+                                  OpenInterestSnapshotCache openInterestSnapshotCache,
+                                  OrderAeronGateway aeron) {
         this.markPriceLookup = markPriceLookup;
         this.properties = properties;
         this.snapshotCache = snapshotCache;
         this.marginSnapshotCache = marginSnapshotCache;
         this.openInterestSnapshotCache = openInterestSnapshotCache;
+        this.aeron = aeron;
     }
 
     public Optional<MarginRequirement> requirement(String symbol,
@@ -107,10 +110,16 @@ public class OrderMarginCalculator {
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), settleScaleUnits,
                 instrument.initialMarginRatePpm(), instrument.maxLeveragePpm(), instrument.maxPositionNotionalUnits(),
                 instrument.userOpenInterestLimitRatePpm(), instrument.userOpenInterestLimitFloorUnits(),
-                cached.get().configuredLeveragePpm(), cached.get().currentSignedQuantitySteps(),
+                configuredLeverage(userId, symbol, normalizedMarginMode), cached.get().currentSignedQuantitySteps(),
                 cached.get().pendingSameSideSteps(), openInterest, markPriceTicks);
         return Optional.of(calculate(input, instrument, side, orderType, priceTicks, quantitySteps,
                 marketMaxSlippagePpm));
+    }
+
+    private Long configuredLeverage(long userId, String symbol, MarginMode marginMode) {
+        var value = aeron.leverage(userId, symbol,
+                com.surprising.aeron.protocol.CoreMarginMode.valueOf(marginMode.name()));
+        return value == null ? null : value.leveragePpm();
     }
 
     public Optional<MarginRequirement> requirement(String symbol,

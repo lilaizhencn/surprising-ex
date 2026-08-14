@@ -20,7 +20,8 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 7;
+    private static final int VERSION = 8;
+    private static final int VERSION_7 = 7;
     private static final int VERSION_6 = 6;
     private static final int VERSION_5 = 5;
     private static final int VERSION_4 = 4;
@@ -174,13 +175,20 @@ public final class TradingStateSnapshotCodec {
         writeUnits(writer, state.treasuryState().insuranceDeficits());
         writeUnits(writer, state.treasuryState().fundingSettlements());
         writeUnits(writer, state.treasuryState().lifecycleSettlements());
+        writer.intValue(state.leverages().size());
+        state.leverages().forEach((key, leverage) -> {
+            writer.longValue(key.userId());
+            writer.text(key.symbol());
+            writer.intValue(key.marginMode().wireCode());
+            writer.longValue(leverage);
+        });
         return writer.toByteArray();
     }
 
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
+        if (version != VERSION && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
                 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
@@ -306,7 +314,7 @@ public final class TradingStateSnapshotCodec {
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         CoreRiskState riskState = CoreRiskState.empty();
         CoreTreasuryState treasuryState = CoreTreasuryState.empty();
-        if (version == VERSION || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
+        if (version == VERSION || version == VERSION_7 || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
             int instrumentCount = reader.count("instruments");
             for (int index = 0; index < instrumentCount; index++) {
                 String symbol = reader.text();
@@ -405,9 +413,18 @@ public final class TradingStateSnapshotCodec {
                     readUnits(reader, "insurance balances"), readUnits(reader, "insurance deficits"),
                     readUnits(reader, "funding settlements"), readUnits(reader, "lifecycle settlements"));
         }
+        Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
+        if (version >= VERSION) {
+            int leverageCount = reader.count("leverages");
+            for (int index = 0; index < leverageCount; index++) {
+                CoreLeverageKey key = new CoreLeverageKey(reader.positiveLong("leverage userId"), reader.text(),
+                        CoreMarginMode.fromWireCode(reader.intValue()));
+                putUnique(leverages, key, reader.positiveLong("leveragePpm"));
+            }
+        }
         reader.requireConsumed();
         return new TradingCoreState(productLine, revision, users, orders, bookState, instruments, riskState,
-                treasuryState);
+                treasuryState, leverages);
     }
 
     private static void writeUnits(Writer writer, Map<String, Long> values) {

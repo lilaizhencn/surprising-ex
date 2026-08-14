@@ -14,11 +14,13 @@ public record TradingCoreState(
         Map<String, CoreInstrumentState> instruments,
         CoreRiskState riskState,
         CoreTreasuryState treasuryState,
+        Map<CoreLeverageKey, Long> leverages,
         Map<ClientOrderKey, Long> clientOrderIndex) {
 
     public TradingCoreState {
         if (productLine == null || revision < 0 || users == null || orders == null || bookState == null
-                || instruments == null || riskState == null || treasuryState == null || clientOrderIndex == null) {
+                || instruments == null || riskState == null || treasuryState == null || leverages == null
+                || clientOrderIndex == null) {
             throw new IllegalArgumentException("invalid trading core state");
         }
         Map<Long, CoreUserState> sortedUsers = Collections.unmodifiableMap(new TreeMap<>(users));
@@ -56,6 +58,7 @@ public record TradingCoreState(
         users = sortedUsers;
         orders = sortedOrders;
         instruments = Collections.unmodifiableMap(new TreeMap<>(instruments));
+        leverages = Collections.unmodifiableMap(new TreeMap<>(leverages));
         clientOrderIndex = Collections.unmodifiableMap(derivedIndex);
     }
 
@@ -64,7 +67,15 @@ public record TradingCoreState(
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                deriveClientOrderIndex(orders));
+                Map.of(), deriveClientOrderIndex(orders));
+    }
+
+    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
+                            Map<Long, CoreOrderState> orders, CoreBookState bookState,
+                            Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
+                            CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages) {
+        this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
+                leverages, deriveClientOrderIndex(orders));
     }
 
     public static TradingCoreState empty(ProductLine productLine) {
@@ -102,7 +113,7 @@ public record TradingCoreState(
             }
         }
         return changed ? new TradingCoreState(productLine, revision, users, stamped, bookState,
-                instruments, riskState, treasuryState) : this;
+                instruments, riskState, treasuryState, leverages) : this;
     }
 
     public long businessStateHash() {
@@ -132,6 +143,12 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, instrument.expiryEpochMillis());
             hash = CoreStateHash.mix(hash, instrument.optionType() == null ? -1 : instrument.optionType().ordinal());
             hash = CoreStateHash.mix(hash, instrument.strikePriceTicks());
+        }
+        for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey().userId());
+            hash = CoreStateHash.mix(hash, entry.getKey().symbol());
+            hash = CoreStateHash.mix(hash, entry.getKey().marginMode().wireCode());
+            hash = CoreStateHash.mix(hash, entry.getValue());
         }
         for (CoreMarkPriceState mark : riskState.markPrices().values()) {
             hash = CoreStateHash.mix(hash, mark.symbol());
@@ -196,7 +213,15 @@ public record TradingCoreState(
 
     public long userStateHash(long userId) {
         CoreUserState user = users.get(userId);
-        return user == null ? 0 : hashUser(CoreStateHash.start(), user);
+        if (user == null) return 0;
+        long hash = hashUser(CoreStateHash.start(), user);
+        for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
+            if (entry.getKey().userId() != userId) continue;
+            hash = CoreStateHash.mix(hash, entry.getKey().symbol());
+            hash = CoreStateHash.mix(hash, entry.getKey().marginMode().wireCode());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        return hash;
     }
 
     public long orderStateHash(long orderId) {

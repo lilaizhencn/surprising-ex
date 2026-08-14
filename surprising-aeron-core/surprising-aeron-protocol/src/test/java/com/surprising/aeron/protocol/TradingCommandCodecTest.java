@@ -33,6 +33,7 @@ class TradingCommandCodecTest {
         AdjustPositionMarginCommand margin = new AdjustPositionMarginCommand("BTC-USDT",
                 CoreMarginMode.ISOLATED, CorePositionSide.LONG, 500);
         AdjustInsuranceFundCommand insuranceFund = new AdjustInsuranceFundCommand("USDT", 500);
+        UpdateLeverageCommand leverage = new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000L);
 
         assertThat(TradingCommandCodec.decodeBalanceAdjustment(
                 TradingCommandCodec.encodeBalanceAdjustment(adjustment))).isEqualTo(adjustment);
@@ -64,6 +65,8 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeAdjustPositionMargin(margin))).isEqualTo(margin);
         assertThat(TradingCommandCodec.decodeAdjustInsuranceFund(
                 TradingCommandCodec.encodeAdjustInsuranceFund(insuranceFund))).isEqualTo(insuranceFund);
+        assertThat(TradingCommandCodec.decodeUpdateLeverage(
+                TradingCommandCodec.encodeUpdateLeverage(leverage))).isEqualTo(leverage);
     }
 
     @Test

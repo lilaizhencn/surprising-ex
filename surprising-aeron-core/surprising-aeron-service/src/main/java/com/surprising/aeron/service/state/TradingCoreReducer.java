@@ -15,6 +15,7 @@ import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
+import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.util.List;
@@ -51,6 +52,40 @@ public final class TradingCoreReducer {
     }
 
     private static final long PPM = 1_000_000L;
+
+    public TradingCoreState updateLeverage(TradingCoreState state, long userId, UpdateLeverageCommand command) {
+        requireUserId(userId);
+        if (!state.productLine().isDerivative()) {
+            throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
+                    "leverage requires derivative product line");
+        }
+        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(command.symbol()));
+        if (instrument == null) {
+            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
+        }
+        long requestedRate = initialMarginRateFromLeverage(command.leveragePpm());
+        if (requestedRate < instrument.initialMarginRatePpm()) {
+            throw new CoreStateRejectedException("LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT",
+                    "leverage exceeds instrument maximum");
+        }
+        boolean openState = state.orders().values().stream().anyMatch(order -> order.userId() == userId
+                        && order.symbol().equals(instrument.symbol()) && order.marginMode() == command.marginMode()
+                        && order.status() == CoreOrderStatus.OPEN)
+                || state.users().getOrDefault(userId, CoreUserState.empty(state.productLine(), userId))
+                .positions().values().stream().anyMatch(position -> position.symbol().equals(instrument.symbol())
+                        && position.marginMode() == command.marginMode() && position.signedQuantitySteps() != 0);
+        CoreLeverageKey key = new CoreLeverageKey(userId, instrument.symbol(), command.marginMode());
+        Long current = state.leverages().get(key);
+        if (openState && (current == null || current.longValue() != command.leveragePpm())) {
+            throw new CoreStateRejectedException("LEVERAGE_UPDATE_BLOCKED", "open orders or positions exist");
+        }
+        if (current != null && current.longValue() == command.leveragePpm()) return state;
+        Map<CoreLeverageKey, Long> leverages = new TreeMap<>(state.leverages());
+        leverages.put(key, command.leveragePpm());
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
+                state.orders(), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                leverages);
+    }
 
     public TradingCoreState updatePositionMode(
             TradingCoreState state, long userId, UpdatePositionModeCommand command) {
@@ -176,7 +211,7 @@ public final class TradingCoreReducer {
                 CoreUserState.empty(state.productLine(), userId));
         validatePositionIdentity(currentUser, command);
         validateReduceOnlyCapacity(state, currentUser, command);
-        long requiredReservation = requiredReservationUnits(instrument, currentUser, command);
+        long requiredReservation = requiredReservationUnits(state, instrument, currentUser, command);
         if (command.reservedUnits() < requiredReservation) {
             throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
                     "order reservation is below deterministic margin and fee requirement");
@@ -324,7 +359,7 @@ public final class TradingCoreReducer {
         }
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
                 new CoreBookState(nextPrioritySequence, bookOrders), state.instruments(), state.riskState(),
-                treasury);
+                treasury, state.leverages());
     }
 
     public TradingCoreState upsertInstrument(TradingCoreState state, UpsertInstrumentCommand command) {
@@ -347,7 +382,7 @@ public final class TradingCoreReducer {
         instruments.put(instrument.symbol(), instrument);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(), state.bookState(), instruments, state.riskState(),
-                state.treasuryState());
+                state.treasuryState(), state.leverages());
     }
 
     public TradingCoreState applyMarkPrice(TradingCoreState state, ApplyMarkPriceCommand command) {
@@ -364,7 +399,8 @@ public final class TradingCoreReducer {
                 new CoreRiskState.RiskScan(instrument.symbol(), command.priceSequence(), 0, false),
                 state.riskState().nextLiquidationId());
         TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                state.users(), state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState());
+                state.users(), state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState(),
+                state.leverages());
         return continueRiskScan(withMark, 256);
     }
 
@@ -416,7 +452,8 @@ public final class TradingCoreReducer {
                 new CoreRiskState.RiskScan(scan.symbol(), scan.priceSequence(), lastUserId, complete),
                 nextLiquidationId);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
-                state.orders(), state.bookState(), state.instruments(), nextRisk, state.treasuryState());
+                state.orders(), state.bookState(), state.instruments(), nextRisk, state.treasuryState(),
+                state.leverages());
     }
 
     private long updateIsolatedRisk(TradingCoreState state, CoreUserState user, CorePositionState position,
@@ -590,7 +627,8 @@ public final class TradingCoreReducer {
         }
         treasury = treasury.recordFunding(instrument.symbol(), command.settlementId());
         return new FundingApplication(new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury), payments);
+                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury,
+                state.leverages()), payments);
     }
 
     public record FundingApplication(TradingCoreState state,
@@ -644,7 +682,8 @@ public final class TradingCoreReducer {
         }
         treasury = treasury.recordLifecycle(instrument.symbol(), command.settlementId());
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
-                canceled.orders(), canceled.bookState(), canceled.instruments(), canceled.riskState(), treasury);
+                canceled.orders(), canceled.bookState(), canceled.instruments(), canceled.riskState(), treasury,
+                canceled.leverages());
     }
 
     public TradingCoreState executeLiquidation(TradingCoreState state, ExecuteLiquidationCommand command) {
@@ -693,7 +732,8 @@ public final class TradingCoreReducer {
         CoreRiskState risk = new CoreRiskState(canceled.riskState().markPrices(), canceled.riskState().snapshots(),
                 liquidations, canceled.riskState().scan(), canceled.riskState().nextLiquidationId());
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
-                canceled.orders(), canceled.bookState(), canceled.instruments(), risk, treasury);
+                canceled.orders(), canceled.bookState(), canceled.instruments(), risk, treasury,
+                canceled.leverages());
     }
 
     public TradingCoreState resolveLiquidation(TradingCoreState state, ResolveLiquidationCommand command) {
@@ -744,7 +784,7 @@ public final class TradingCoreReducer {
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scan(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
-                state.orders(), state.bookState(), state.instruments(), risk, treasury);
+                state.orders(), state.bookState(), state.instruments(), risk, treasury, state.leverages());
     }
 
     public TradingCoreState adjustInsuranceFund(TradingCoreState state,
@@ -756,7 +796,8 @@ public final class TradingCoreReducer {
         }
         CoreTreasuryState treasury = state.treasuryState().adjustInsurance(command.asset(), command.deltaUnits());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
-                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury);
+                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury,
+                state.leverages());
     }
 
     public TradingCoreState executeAdl(TradingCoreState state,
@@ -825,7 +866,8 @@ public final class TradingCoreReducer {
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scan(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState());
+                state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState(),
+                state.leverages());
     }
 
     public java.util.List<com.surprising.aeron.protocol.CoreAdlCandidateView> adlCandidates(
@@ -1096,7 +1138,7 @@ public final class TradingCoreReducer {
         Map<Long, CoreUserState> users = new TreeMap<>(state.users());
         users.put(user.userId(), user);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
-                bookState, state.instruments(), state.riskState(), state.treasuryState());
+                bookState, state.instruments(), state.riskState(), state.treasuryState(), state.leverages());
     }
 
     private static void validateReservationRule(TradingCoreState state, PlaceOrderCommand command) {
@@ -1138,6 +1180,7 @@ public final class TradingCoreReducer {
     }
 
     private static long requiredReservationUnits(
+            TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
             PlaceOrderCommand command) {
@@ -1153,12 +1196,29 @@ public final class TradingCoreReducer {
         long closeSteps = currentQuantity != 0 && Long.signum(currentQuantity) != Long.signum(signedOrder)
                 ? Math.min(Math.absExact(currentQuantity), command.quantitySteps()) : 0;
         long openSteps = command.reduceOnly() ? 0 : Math.subtractExact(command.quantitySteps(), closeSteps);
+        long leverage = state.leverages().getOrDefault(
+                new CoreLeverageKey(user.userId(), instrument.symbol(), command.marginMode()),
+                leverageFromInitialMarginRate(instrument.initialMarginRatePpm()));
+        long effectiveRate = Math.max(instrument.initialMarginRatePpm(), initialMarginRateFromLeverage(leverage));
         long margin = CoreContractMath.openingMarginUnits(instrument, command.side(), command.matchingPriceTicks(),
-                openSteps);
+                openSteps, effectiveRate);
         long premium = instrument.contractType().isOption() && command.side() == CoreOrderSide.BUY
                 ? CoreContractMath.optionPremiumUnits(instrument, command.matchingPriceTicks(), command.quantitySteps()) : 0;
         long fee = CoreContractMath.feeDeltaUnits(instrument, command.matchingPriceTicks(), command.quantitySteps(), true);
         return Math.max(1, Math.addExact(Math.addExact(margin, premium), Math.max(0, Math.negateExact(fee))));
+    }
+
+    private static long initialMarginRateFromLeverage(long leveragePpm) {
+        if (leveragePpm < PPM) throw new IllegalArgumentException("leverage must be at least 1x");
+        java.math.BigInteger numerator = java.math.BigInteger.valueOf(PPM).multiply(java.math.BigInteger.valueOf(PPM));
+        java.math.BigInteger denominator = java.math.BigInteger.valueOf(leveragePpm);
+        java.math.BigInteger[] quotient = numerator.divideAndRemainder(denominator);
+        return (quotient[1].signum() == 0 ? quotient[0] : quotient[0].add(java.math.BigInteger.ONE)).longValueExact();
+    }
+
+    private static long leverageFromInitialMarginRate(long ratePpm) {
+        return java.math.BigInteger.valueOf(PPM).multiply(java.math.BigInteger.valueOf(PPM))
+                .divide(java.math.BigInteger.valueOf(ratePpm)).longValueExact();
     }
 
     private static void validateReduceOnlyCapacity(

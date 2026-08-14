@@ -385,6 +385,9 @@ public final class CoreProbeState implements AutoCloseable {
                     TradingCommandCodec.decodeAdjustPositionMargin(message.payload()));
             case ADJUST_INSURANCE_FUND -> tradingState = tradingReducer.adjustInsuranceFund(
                     tradingState, TradingCommandCodec.decodeAdjustInsuranceFund(message.payload()));
+            case UPDATE_LEVERAGE -> tradingState = tradingReducer.updateLeverage(
+                    tradingState, message.header().userId(),
+                    TradingCommandCodec.decodeUpdateLeverage(message.payload()));
             default -> {
                 return null;
             }
@@ -535,7 +538,11 @@ public final class CoreProbeState implements AutoCloseable {
                         value.symbol(), value.marginAsset(), value.marginMode(), value.positionSide(),
                         value.instrumentVersion(), value.signedQuantitySteps(),
                         value.entryPriceTicks(), value.entryValueTicks(), value.realizedPnlUnits(),
-                        value.positionMarginUnits())).toList());
+                        value.positionMarginUnits())).toList(),
+                tradingState.leverages().entrySet().stream()
+                        .filter(entry -> entry.getKey().userId() == userId)
+                        .map(entry -> new com.surprising.aeron.protocol.CoreLeverageView(entry.getKey().symbol(),
+                                entry.getKey().marginMode(), entry.getValue())).toList());
         return new CoreResponse(ResponseStatus.OK, appliedCommandCount, tradingState.userStateHash(userId),
                 CoreStateQueryCodec.encodeUserState(view));
     }

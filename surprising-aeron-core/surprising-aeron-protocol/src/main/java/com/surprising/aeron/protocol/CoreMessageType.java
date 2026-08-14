@@ -21,6 +21,7 @@ public enum CoreMessageType {
     ADJUST_POSITION_MARGIN(29, WireMessageKind.COMMAND),
     ADJUST_INSURANCE_FUND(30, WireMessageKind.COMMAND),
     EXECUTE_ADL(31, WireMessageKind.COMMAND),
+    UPDATE_LEVERAGE(32, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),

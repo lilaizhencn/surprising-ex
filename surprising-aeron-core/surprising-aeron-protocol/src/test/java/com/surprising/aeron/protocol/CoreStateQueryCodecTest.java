@@ -18,7 +18,8 @@ class CoreStateQueryCodecTest {
                 List.of(new CoreReservationView(71, "BTC-USDT", 3, ReservationKind.DERIVATIVE_MARGIN,
                         "USDT", 100, 0, 0, 2)),
                 List.of(new CorePositionView("BTC-USDT", "USDT", CoreMarginMode.ISOLATED,
-                        CorePositionSide.LONG, 3, 2, 60_000, 120_000, 0, 100)));
+                        CorePositionSide.LONG, 3, 2, 60_000, 120_000, 0, 100)),
+                List.of(new CoreLeverageView("BTC-USDT", CoreMarginMode.ISOLATED, 5_000_000L)));
         CoreOrderStateView order = new CoreOrderStateView(71, ProductLine.SPOT, 7, "BTC-USDT", 3,
                 CoreOrderSide.BUY, 60_000, 2, 0, 2, false, CoreMarginMode.ISOLATED,
                 CorePositionSide.LONG, CoreOrderType.LIMIT, CoreTimeInForce.GTX, true,

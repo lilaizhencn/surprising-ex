@@ -109,8 +109,7 @@ public class OrderMarginSnapshotCache {
 
     public boolean ready(ProductLine productLine) {
         return productLine != null && accountReadyLines.contains(productLine)
-                && orderReadyLines.contains(productLine)
-                && leverageReadyLines.contains(productLine);
+                && orderReadyLines.contains(productLine);
     }
 
     /**
@@ -318,14 +317,12 @@ public class OrderMarginSnapshotCache {
         }
         PositionKey positionKey = new PositionKey(productLine, userId, symbol, marginMode, positionSide);
         PositionValue position = positions.get(positionKey);
-        LeverageValue leverage = leverages.get(new LeverageKey(productLine, userId,
-                symbol, marginMode));
-        if (position == null || leverage == null) {
+        if (position == null) {
             return Optional.empty();
         }
         OrderScope scope = new OrderScope(productLine, userId, symbol, marginMode, positionSide, side);
         return Optional.of(new MarginSnapshot(position.instrumentVersion(), position.signedQuantitySteps(),
-                pending.getOrDefault(scope, 0L), leverage.leveragePpm()));
+                pending.getOrDefault(scope, 0L), null));
     }
 
     private void adjustPending(OrderValue order, long multiplier) {

@@ -16,6 +16,16 @@ final class CoreContractMath {
             CoreOrderSide side,
             long priceTicks,
             long quantitySteps) {
+        return openingMarginUnits(instrument, side, priceTicks, quantitySteps,
+                instrument.initialMarginRatePpm());
+    }
+
+    static long openingMarginUnits(
+            CoreInstrumentState instrument,
+            CoreOrderSide side,
+            long priceTicks,
+            long quantitySteps,
+            long initialMarginRatePpm) {
         if (quantitySteps <= 0) {
             return 0;
         }
@@ -27,12 +37,12 @@ final class CoreContractMath {
             BigInteger riskNumerator = big(instrument.strikePriceTicks())
                     .multiply(big(quantitySteps))
                     .multiply(big(instrument.notionalMultiplierUnits()))
-                    .multiply(big(instrument.initialMarginRatePpm()));
+                    .multiply(big(initialMarginRatePpm));
             return Math.addExact(premium, divideCeiling(riskNumerator, PPM));
         }
         return PerpetualContractMath.initialMarginUnits(instrument.contractType(), quantitySteps, priceTicks,
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits(),
-                instrument.initialMarginRatePpm());
+                initialMarginRatePpm);
     }
 
     static long maintenanceMarginUnits(
