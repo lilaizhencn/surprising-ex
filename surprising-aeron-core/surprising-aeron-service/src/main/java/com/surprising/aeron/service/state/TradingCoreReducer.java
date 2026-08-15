@@ -42,6 +42,13 @@ public final class TradingCoreReducer {
         if (view.userId() != userId || view.productLine() != state.productLine()) {
             throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
         }
+        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(view.symbol()));
+        if (instrument == null) {
+            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
+        }
+        if (state.treasuryState().lifecycleSettlements().containsKey(instrument.symbol())) {
+            throw new CoreStateRejectedException("INSTRUMENT_SETTLED", "instrument is already settled");
+        }
         if (state.triggerOrders().containsKey(view.triggerOrderId())) {
             throw new CoreStateRejectedException("DUPLICATE_TRIGGER_ORDER_ID", "trigger order already exists");
         }
@@ -54,7 +61,15 @@ public final class TradingCoreReducer {
                     "client trigger order id already exists");
         }
         Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
-        triggers.put(view.triggerOrderId(), CoreTriggerOrderState.from(view));
+        CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view);
+        if (trigger.instrumentVersion() == 0) {
+            trigger = trigger.withExecutionSnapshot(instrument.version(), instrument.makerFeeRatePpm(),
+                    instrument.takerFeeRatePpm());
+        } else if (trigger.instrumentVersion() != instrument.version()) {
+            throw new CoreStateRejectedException("STALE_INSTRUMENT_VERSION",
+                    "trigger order instrument version is stale");
+        }
+        triggers.put(view.triggerOrderId(), trigger);
         return withTriggers(state, triggers);
     }
 
@@ -105,7 +120,8 @@ public final class TradingCoreReducer {
                 current.priceTicks(), current.quantitySteps(), current.marginMode(), current.positionSide(), current.status(),
                 current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
                 current.traceId(), current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(), current.createdAtEpochMillis(),
-                Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis), Math.incrementExact(current.revision())));
+                Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis), Math.incrementExact(current.revision()),
+                current.instrumentVersion(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
         return withTriggers(state, triggers);
     }
 
@@ -150,7 +166,8 @@ public final class TradingCoreReducer {
                 current.positionSide(), status, placedOrderId, triggerSequence, triggeredPriceTicks, rejectReason,
                 current.traceId(), current.expiresAtEpochMillis(), status == CoreTriggerOrderStatus.TRIGGERED
                         || status == CoreTriggerOrderStatus.TRIGGER_FAILED ? updatedAt : current.triggeredAtEpochMillis(),
-                current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision())));
+                current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
+                current.instrumentVersion(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
         return withTriggers(state, triggers);
     }
 

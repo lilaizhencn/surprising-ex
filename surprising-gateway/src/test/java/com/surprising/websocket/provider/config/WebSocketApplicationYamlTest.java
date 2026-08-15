@@ -18,7 +18,7 @@ class WebSocketApplicationYamlTest {
 
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.group-id"))
-                .contains("surprising-websocket-${HOSTNAME:${random.uuid}}");
+                .contains("${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.max-poll-records"))
                 .contains(1000);
@@ -27,7 +27,7 @@ class WebSocketApplicationYamlTest {
                 .contains("${PRODUCT_LINE:LINEAR_PERPETUAL}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.product-topics-enabled"))
-                .contains("${PRODUCT_TOPICS_ENABLED:false}");
+                .contains("${PRODUCT_TOPICS_ENABLED:true}");
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.account-risk-events-topic"))
                 .contains("surprising.risk.account.events.v1");

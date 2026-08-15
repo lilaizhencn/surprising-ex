@@ -28,7 +28,6 @@
         <module>surprising-liquidation</module>
         <module>surprising-risk</module>
         <module>surprising-gateway</module>
-        <module>surprising-websocket</module>
         <module>surprising-maker</module>
     </modules>
 </project>

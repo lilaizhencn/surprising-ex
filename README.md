@@ -54,8 +54,7 @@ Aeron Cluster、Topic、投影和账户类型。
 | `surprising-insurance` | 保险基金 API 和独立保险基金服务 |
 | `surprising-adl` | ADL API 和独立自动减仓服务 |
 | `surprising-candlestick` | Kafka Streams + RocksDB K 线 |
-| `surprising-gateway` | 独立 REST gateway |
-| `surprising-websocket` | 独立 WebSocket fanout |
+| `surprising-gateway` | REST gateway、WebSocket fanout 和统一对外入口 |
 | `surprising-maker` | 内部做市和交易链路压测 |
 
 Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
@@ -147,7 +146,7 @@ Topic 的精确清单、分区数量和创建后校验命令待部署文档重�
 - [Aeron 核心模块 README](surprising-aeron-core/README.md)；
 - [撮合交易模块 README](surprising-trading/README.md)；
 - [网关模块 README](surprising-gateway/README.md)；
-- [WebSocket 模块 README](surprising-websocket/README.md)；
+- [Gateway WebSocket 说明](surprising-gateway/README-websocket.md)；
 - 其他模块的 README 位于各自模块目录下。
 
 新的部署、产品线、资金模型、撮合和压测文档请按主题补回，并同步更新本文档入口。

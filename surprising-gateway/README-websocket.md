@@ -1,4 +1,4 @@
-# surprising-websocket
+# surprising-gateway WebSocket
 
 
 面向前端的 WebSocket 推送服务。
@@ -7,11 +7,11 @@
 
 ## 模块
 
-`surprising-websocket` 是单一 Spring Boot 模块，同时包含 WebSocket 频道/消息协议模型、连接管理和 Kafka fanout consumer。
+WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用一个 Spring Boot 进程、端口和部署单元。
 
 ## 入口
 
-- HTTP 端口：`9093`
+- HTTP 端口：`9094`
 - WebSocket 路径：`/ws/v1`
 
 公共 K 线订阅示例：
@@ -141,7 +141,7 @@ position event on Kafka
 
 ## 水平扩展
 
-- `surprising-websocket` 始终独立于 REST gateway 部署，让 WebSocket 按连接数单独扩容。
+- WebSocket 与 REST gateway 共用部署单元；扩容时按 Gateway 实例整体扩容。
 - WebSocket 节点至少部署 2 个。
 - 每个 WebSocket 节点必须使用唯一 Kafka consumer group，例如默认值 `surprising-websocket-${HOSTNAME:${random.uuid}}`。
 - 不要让所有 WebSocket 进程共用一个 group。共用 group 会导致每条 Kafka 记录只被一个节点收到，连接在其他节点上的客户端会漏掉公共行情。
@@ -198,6 +198,6 @@ surprising:
 ## 构建和测试
 
 ```bash
-mvn -pl :surprising-websocket -am test
-mvn -pl :surprising-websocket -am spring-boot:run
+mvn -pl :surprising-gateway -am test
+mvn -pl :surprising-gateway -am spring-boot:run
 ```

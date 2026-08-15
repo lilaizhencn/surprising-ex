@@ -62,6 +62,13 @@ class CoreStateQueryCodecTest {
     }
 
     @Test
+    void roundTripsBoundedBookQuery() {
+        CoreBookStateQuery query = new CoreBookStateQuery(" btc-usdt ", 25);
+        assertThat(CoreStateQueryCodec.decodeBookStateQuery(
+                CoreStateQueryCodec.encodeBookStateQuery(query))).isEqualTo(query);
+    }
+
+    @Test
     void roundTripsOpenOrdersQueryAndView() {
         CoreOpenOrdersQuery query = new CoreOpenOrdersQuery(" btc-usdt ", 71, 25);
         assertThat(CoreStateQueryCodec.decodeOpenOrdersQuery(

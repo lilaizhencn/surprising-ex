@@ -55,6 +55,7 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     }
     public void cancel(long userId, long id) { command(CoreMessageType.CANCEL_TRIGGER_ORDER, stable("TRIGGER_CANCEL:" + userId + ':' + id), userId, CoreTriggerOrderCodec.encodeId(id)); }
     public void claim(long id, long sequence, long price, long at) { command(CoreMessageType.CLAIM_TRIGGER_ORDER, stable("TRIGGER_CLAIM:" + id + ':' + sequence), 0, CoreTriggerOrderCodec.encodeClaim(id, sequence, price, at)); }
+    public void execute(long id, long sequence, long price, long at) { command(CoreMessageType.EXECUTE_TRIGGER_ORDER, stable("TRIGGER_EXECUTE:" + id + ':' + sequence), 0, CoreTriggerOrderCodec.encodeExecute(id, sequence, price, at)); }
     public void complete(long id, boolean success, long placedOrderId, String reason, long at) { command(CoreMessageType.COMPLETE_TRIGGER_ORDER, stable("TRIGGER_COMPLETE:" + id + ':' + placedOrderId), 0, CoreTriggerOrderCodec.encodeComplete(id, success, placedOrderId, reason, at)); }
     public void updateTrailing(long id, long highest, long lowest, long activatedAt) {
         command(CoreMessageType.UPDATE_TRIGGER_TRAILING, stable("TRIGGER_TRAILING:" + id + ':' + highest + ':' + lowest),

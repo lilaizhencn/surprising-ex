@@ -261,6 +261,36 @@ class CoreProbeStateTest {
     }
 
     @Test
+    void executesTriggerInsideCoreAndDoesNotCreateASecondLifecycleRoundTrip() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2))));
+        var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(503,
+                ProductLine.SPOT, 1001, "tp-503", "", "BTC-USDT", CoreOrderSide.SELL,
+                com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                CoreMarginMode.CROSS, CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                "", "trace", 0, 0, 1_000, 1_000, 1);
+        state.apply(tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), 2,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger)));
+
+        CoreMessage execute = tradingCommand(CoreMessageType.EXECUTE_TRIGGER_ORDER, UUID.randomUUID(), 3,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeExecute(503, 7, 70_000, 2_000));
+        var response = state.apply(execute);
+
+        assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(state.tradingState().triggerOrders().get(503L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED);
+        long childOrderId = state.tradingState().triggerOrders().get(503L).placedOrderId();
+        assertThat(childOrderId).isPositive();
+        assertThat(state.tradingState().order(childOrderId)).isNotNull();
+        assertThat(state.apply(execute).status()).isEqualTo(ResponseStatus.DUPLICATE);
+    }
+
+    @Test
     void openInterestQueryReturnsAuthoritativePositionTotals() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
 

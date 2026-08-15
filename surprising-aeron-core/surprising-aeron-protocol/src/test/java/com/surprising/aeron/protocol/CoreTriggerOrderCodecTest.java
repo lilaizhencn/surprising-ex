@@ -14,7 +14,8 @@ class CoreTriggerOrderCodecTest {
                 "tp-501", "oco-1", "BTC-USDT", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "trace", 0, 0, 1_000, 1_000, 1);
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "trace", 0, 0, 1_000, 1_000, 1,
+                7, -25, 40);
         assertThat(CoreTriggerOrderCodec.decodeState(CoreTriggerOrderCodec.encodeState(state))).isEqualTo(state);
         assertThat(CoreTriggerOrderCodec.decodeList(CoreTriggerOrderCodec.encodeList(List.of(state))))
                 .containsExactly(state);
@@ -40,5 +41,8 @@ class CoreTriggerOrderCodecTest {
         assertThat(CoreTriggerOrderCodec.decodeLifecycle(
                 CoreTriggerOrderCodec.encodeLifecycle(501, 1_700_000_000_000L)))
                 .containsExactly(501L, 1_700_000_000_000L);
+        assertThat(CoreTriggerOrderCodec.decodeExecute(
+                CoreTriggerOrderCodec.encodeExecute(501, 8, 70_000, 1_700_000_000_001L)))
+                .containsExactly(501L, 8L, 70_000L, 1_700_000_000_001L);
     }
 }

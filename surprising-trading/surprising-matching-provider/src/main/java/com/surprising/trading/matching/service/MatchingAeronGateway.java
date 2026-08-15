@@ -2,6 +2,7 @@ package com.surprising.trading.matching.service;
 
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreBookStateView;
+import com.surprising.aeron.protocol.CoreBookStateQuery;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
@@ -23,7 +24,12 @@ public class MatchingAeronGateway implements AutoCloseable {
     }
 
     public CoreBookStateView bookState() {
-        CoreResponse response = clients.query(CoreMessageType.BOOK_STATE_QUERY, UUID.randomUUID(), 0, new byte[0]);
+        return bookState(new CoreBookStateQuery("", 1_000));
+    }
+
+    public CoreBookStateView bookState(CoreBookStateQuery query) {
+        CoreResponse response = clients.query(CoreMessageType.BOOK_STATE_QUERY, UUID.randomUUID(), 0,
+                CoreStateQueryCodec.encodeBookStateQuery(query));
         if (response.status() != ResponseStatus.OK) {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron book state query failed");
         }

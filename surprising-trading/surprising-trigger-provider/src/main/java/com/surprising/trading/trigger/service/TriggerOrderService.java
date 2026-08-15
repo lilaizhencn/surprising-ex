@@ -5,6 +5,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.client.OrderRpcApi;
+import com.surprising.trading.api.client.TradingFeeRpcApi;
 import com.surprising.trading.api.model.AdminTriggerOrderTimelineEvent;
 import com.surprising.trading.api.model.AdminTriggerOrderTimelineResponse;
 import com.surprising.trading.api.model.BatchCancelTriggerOrdersRequest;
@@ -75,6 +76,7 @@ import org.springframework.transaction.support.TransactionTemplate;
     private final TriggerInstrumentLifecycleFenceService lifecycleFenceService;
     private final TriggerOrderAeronGateway aeronGateway;
     private final AeronTriggerOrderIdGenerator aeronOrderIds;
+    private final TradingFeeRpcApi tradingFeeRpcApi;
 
     public TriggerOrderService(TriggerOrderPersistenceService triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
@@ -110,7 +112,6 @@ import org.springframework.transaction.support.TransactionTemplate;
                 transactionManager, lifecycleFenceService, null, null);
     }
 
-    @Autowired
     public TriggerOrderService(TriggerOrderPersistenceService triggerOrderRepository,
                                OrderRpcApi orderRpcApi,
                                TriggerProperties properties,
@@ -120,6 +121,21 @@ import org.springframework.transaction.support.TransactionTemplate;
                                TriggerInstrumentLifecycleFenceService lifecycleFenceService,
                                TriggerOrderAeronGateway aeronGateway,
                                AeronTriggerOrderIdGenerator aeronOrderIds) {
+        this(triggerOrderRepository, orderRpcApi, properties, triggerOrderIndex, outboxRepository,
+                transactionManager, lifecycleFenceService, aeronGateway, aeronOrderIds, null);
+    }
+
+    @Autowired
+    public TriggerOrderService(TriggerOrderPersistenceService triggerOrderRepository,
+                               OrderRpcApi orderRpcApi,
+                               TriggerProperties properties,
+                               TriggerOrderIndex triggerOrderIndex,
+                               TriggerOrderOutboxRepository outboxRepository,
+                               PlatformTransactionManager transactionManager,
+                               TriggerInstrumentLifecycleFenceService lifecycleFenceService,
+                               TriggerOrderAeronGateway aeronGateway,
+                               AeronTriggerOrderIdGenerator aeronOrderIds,
+                               TradingFeeRpcApi tradingFeeRpcApi) {
         this.triggerOrderRepository = triggerOrderRepository;
         this.orderRpcApi = orderRpcApi;
         this.properties = properties;
@@ -129,6 +145,7 @@ import org.springframework.transaction.support.TransactionTemplate;
         this.lifecycleFenceService = lifecycleFenceService;
         this.aeronGateway = aeronGateway;
         this.aeronOrderIds = aeronOrderIds;
+        this.tradingFeeRpcApi = tradingFeeRpcApi;
     }
 
     @Transactional
@@ -227,6 +244,8 @@ import org.springframework.transaction.support.TransactionTemplate;
         Instant now = Instant.now();
         long id = aeronOrderIds.next();
         long expires = request.expiresAt() == null ? 0 : request.expiresAt().toEpochMilli();
+        var fee = tradingFeeRpcApi == null ? null
+                : tradingFeeRpcApi.effective(request.userId(), request.symbol(), 0, productLine);
         var view = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(id, productLine, request.userId(),
                 emptyToNull(request.clientTriggerOrderId()), emptyToNull(request.ocoGroupId()), request.symbol(),
                 com.surprising.aeron.protocol.CoreOrderSide.valueOf(request.side().name()),
@@ -239,7 +258,9 @@ import org.springframework.transaction.support.TransactionTemplate;
                 request.quantitySteps(), com.surprising.aeron.protocol.CoreMarginMode.valueOf(request.marginMode().name()),
                 com.surprising.aeron.protocol.CorePositionSide.valueOf(request.positionSide().name()),
                 com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", TraceContext.currentOrCreate(),
-                expires, 0, now.toEpochMilli(), now.toEpochMilli(), 1);
+                expires, 0, now.toEpochMilli(), now.toEpochMilli(), 1,
+                fee == null ? 0 : fee.instrumentVersion(), fee == null ? 0 : fee.makerFeeRatePpm(),
+                fee == null ? 0 : fee.takerFeeRatePpm());
         UUID commandId = UUID.nameUUIDFromBytes(("TRIGGER_PLACE:" + request.userId() + ':'
                 + (request.clientTriggerOrderId() == null ? id : request.clientTriggerOrderId()))
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -626,17 +647,10 @@ import org.springframework.transaction.support.TransactionTemplate;
     }
 
     private void claimAndExecuteAeron(CoreTriggerOrderStateView order, MarkPriceEvent markPrice) {
-        aeronGateway.claim(order.triggerOrderId(), markPrice.sequence(), markPrice.markPriceTicks(),
-                markPrice.eventTime().toEpochMilli());
         try {
             TriggerTraceContext.set(order.traceId());
-            OrderResponse placed = orderRpcApi.place(new PlaceOrderRequest(order.userId(),
-                    triggeredClientOrderId(order.triggerOrderId()), order.symbol(), OrderSide.valueOf(order.side().name()),
-                    OrderType.valueOf(order.orderType().name()), TimeInForce.valueOf(order.timeInForce().name()),
-                    order.priceTicks(), order.quantitySteps(), MarginMode.valueOf(order.marginMode().name()),
-                    PositionSide.valueOf(order.positionSide().name()), true, false));
-            aeronGateway.complete(order.triggerOrderId(), placed.status() != OrderStatus.REJECTED, placed.orderId(),
-                    placed.rejectReason(), Instant.now().toEpochMilli());
+            aeronGateway.execute(order.triggerOrderId(), markPrice.sequence(), markPrice.markPriceTicks(),
+                    markPrice.eventTime().toEpochMilli());
         } catch (RuntimeException ex) {
             log.error("Failed to execute Aeron trigger order id={}: {}", order.triggerOrderId(), ex.getMessage(), ex);
         } finally {
@@ -696,16 +710,8 @@ import org.springframework.transaction.support.TransactionTemplate;
                     : triggerPriceTicks <= order.triggerPriceTicks();
             if (!matched) continue;
             try {
-                aeronGateway.claim(order.triggerOrderId(), priceTrigger.sequence(), triggerPriceTicks,
+                aeronGateway.execute(order.triggerOrderId(), priceTrigger.sequence(), triggerPriceTicks,
                         priceTrigger.eventTime().toEpochMilli());
-                OrderResponse placed = orderRpcApi.place(new PlaceOrderRequest(order.userId(),
-                        triggeredClientOrderId(order.triggerOrderId()), order.symbol(), OrderSide.valueOf(order.side().name()),
-                        OrderType.valueOf(order.orderType().name()), TimeInForce.valueOf(order.timeInForce().name()),
-                        order.priceTicks(), order.quantitySteps(), MarginMode.valueOf(order.marginMode().name()),
-                        PositionSide.valueOf(order.positionSide().name()), true, false));
-                boolean success = placed.status() != OrderStatus.REJECTED;
-                aeronGateway.complete(order.triggerOrderId(), success, placed.orderId(), placed.rejectReason(),
-                        System.currentTimeMillis());
             } catch (RuntimeException ex) {
                 log.error("Failed to execute Aeron trigger order id={}: {}", order.triggerOrderId(), ex.getMessage(), ex);
             }

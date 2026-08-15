@@ -8,12 +8,13 @@ import java.util.List;
 
 public final class CoreTriggerOrderCodec {
     private static final int VERSION = 1;
+    private static final int STATE_VERSION = 2;
     private static final int MAX_TEXT_BYTES = 128;
     private CoreTriggerOrderCodec() { }
 
     public static byte[] encodeState(CoreTriggerOrderStateView state) {
         Writer writer = new Writer();
-        writer.intValue(VERSION);
+        writer.intValue(STATE_VERSION);
         writer.longValue(state.triggerOrderId());
         writer.intValue(ProductLineWireCode.encode(state.productLine()));
         writer.longValue(state.userId());
@@ -31,11 +32,13 @@ public final class CoreTriggerOrderCodec {
         writer.longValue(state.expiresAtEpochMillis()); writer.longValue(state.triggeredAtEpochMillis());
         writer.longValue(state.createdAtEpochMillis()); writer.longValue(state.updatedAtEpochMillis());
         writer.longValue(state.revision());
+        writer.longValue(state.instrumentVersion()); writer.longValue(state.makerFeeRatePpm());
+        writer.longValue(state.takerFeeRatePpm());
         return writer.bytes();
     }
 
     public static CoreTriggerOrderStateView decodeState(byte[] encoded) {
-        Reader reader = new Reader(encoded); reader.version();
+        Reader reader = new Reader(encoded); int version = reader.stateVersion();
         CoreTriggerOrderStateView result = new CoreTriggerOrderStateView(
                 reader.positive(), ProductLineWireCode.decode(reader.intValue()), reader.positive(),
                 reader.text(), reader.text(), reader.text(), CoreOrderSide.fromWireCode(reader.intValue()),
@@ -47,7 +50,10 @@ public final class CoreTriggerOrderCodec {
                 CorePositionSide.fromWireCode(reader.intValue()),
                 CoreTriggerOrderStatus.values()[reader.enumIndex(CoreTriggerOrderStatus.values().length)], reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.text(), reader.text(), reader.nonNegative(),
-                reader.nonNegative(), reader.nonNegative(), reader.nonNegative(), reader.nonNegative());
+                reader.nonNegative(), reader.nonNegative(), reader.nonNegative(), reader.nonNegative(),
+                version >= STATE_VERSION ? reader.nonNegative() : 0,
+                version >= STATE_VERSION ? reader.longValue() : 0,
+                version >= STATE_VERSION ? reader.longValue() : 0);
         reader.consumed(); return result;
     }
 
@@ -93,6 +99,15 @@ public final class CoreTriggerOrderCodec {
     public static long[] decodeClaim(byte[] encoded) {
         Reader reader = new Reader(encoded); reader.version(); long[] result = new long[] {
                 reader.positive(), reader.positive(), reader.positive(), reader.positive()}; reader.consumed(); return result;
+    }
+
+    public static byte[] encodeExecute(long triggerOrderId, long triggerSequence, long triggeredPriceTicks,
+                                       long triggeredAtEpochMillis) {
+        return encodeClaim(triggerOrderId, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis);
+    }
+
+    public static long[] decodeExecute(byte[] encoded) {
+        return decodeClaim(encoded);
     }
 
     public static byte[] encodeComplete(long triggerOrderId, boolean success, long placedOrderId, String rejectReason,
@@ -146,7 +161,18 @@ public final class CoreTriggerOrderCodec {
         int intValue() { require(4); int value = 0; for (int i=0;i<4;i++) value |= (bytes[position++] & 0xff) << (i*8); return value; }
         int byteValue() { require(1); return bytes[position++] & 0xff; }
         long longValue() { require(8); long value = 0; for (int i=0;i<8;i++) value |= (long)(bytes[position++] & 0xff) << (i*8); return value; }
-        void version() { if (intValue() != VERSION) throw new ProtocolException("unsupported trigger codec version"); }
+        int version() {
+            int value = intValue();
+            if (value != VERSION) throw new ProtocolException("unsupported trigger codec version");
+            return value;
+        }
+        int stateVersion() {
+            int value = intValue();
+            if (value != VERSION && value != STATE_VERSION) {
+                throw new ProtocolException("unsupported trigger state codec version");
+            }
+            return value;
+        }
         long positive() { long v=longValue(); if(v<=0) throw new ProtocolException("invalid positive trigger value"); return v; }
         long nonNegative() { long v=longValue(); if(v<0) throw new ProtocolException("invalid trigger value"); return v; }
         String text() { int size=intValue(); if(size<0 || size>MAX_TEXT_BYTES) throw new ProtocolException("invalid trigger text"); require(size); String v=new String(bytes, position, size, StandardCharsets.UTF_8); position+=size; return v; }

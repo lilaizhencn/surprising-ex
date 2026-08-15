@@ -7,11 +7,12 @@
 
 ## 模块
 
-- `surprising-gateway`：Spring Boot 白名单代理。
+- `surprising-gateway`：Spring Boot 白名单代理、WebSocket 连接管理和 Kafka fanout。
 
 ## 入口
 
 - HTTP 端口：`9094`
+- WebSocket 路径：`/ws/v1`
 - Gateway 前缀：`/api/v1/gateway/{service}`
 - 后台 Gateway 前缀：`/api/v1/admin/gateway/{service}`
 - 后台本地接口前缀：`/api/v1/admin/...`
@@ -113,7 +114,7 @@ gateway 中实现。后续财务运营模块必须配置独立数据源和独立
 
 不要把内部 provider 端口直接暴露到公网。公共客户端应使用：
 
-- 开发/生产部署：`surprising-gateway` 的 `9094` 提供 REST，`surprising-websocket` 的 `9093` 提供 `/ws/v1` 实时推送。
+- 开发/生产部署：`surprising-gateway` 的 `9094` 同时提供 REST 和 `/ws/v1` 实时推送。
 
 ## 水平扩展
 

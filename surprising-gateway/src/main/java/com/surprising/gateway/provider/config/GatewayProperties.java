@@ -362,7 +362,6 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("adl", new BackendRoute("http://localhost:9091", "/api/v1/adl", true));
         routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/market-maker", true));
         routes.put("wallet", new BackendRoute("http://localhost:8002", "/wallet/v1", true));
-        routes.put("websocket", new BackendRoute("http://localhost:9093", "/ws", false));
         return routes;
     }
 
@@ -392,7 +391,7 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/admin/market-maker", true));
         routes.put("wallet", new BackendRoute("http://localhost:8002", "/wallet/v1", true));
         routes.put("wallet-admin", walletAdminRoute());
-        routes.put("websocket-admin", new BackendRoute("http://localhost:9093", "/api/v1/admin/websocket", true));
+        routes.put("websocket-admin", new BackendRoute("http://localhost:9094", "/api/v1/admin/websocket", true));
         return routes;
     }
 

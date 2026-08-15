@@ -296,6 +296,22 @@ public final class CoreStateQueryCodec {
         return writer.toByteArray();
     }
 
+    public static byte[] encodeBookStateQuery(CoreBookStateQuery query) {
+        Writer writer = new Writer();
+        writer.intValue(1);
+        writer.optionalText(query.symbol());
+        writer.intValue(query.depth());
+        return writer.toByteArray();
+    }
+
+    public static CoreBookStateQuery decodeBookStateQuery(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        reader.version(1);
+        CoreBookStateQuery query = new CoreBookStateQuery(reader.optionalText(), reader.intValue());
+        reader.requireConsumed();
+        return query;
+    }
+
     public static CoreBookStateView decodeBookState(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version(VERSION);

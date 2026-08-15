@@ -148,9 +148,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public List<CoreBookLevelView> orderBookLevels() {
+        return orderBookLevels("", MAX_QUERY_DEPTH);
+    }
+
+    public List<CoreBookLevelView> orderBookLevels(String requestedSymbol, int depth) {
+        String symbolFilter = requestedSymbol == null ? "" : requestedSymbol;
+        int boundedDepth = Math.min(Math.max(depth, 1), MAX_QUERY_DEPTH);
         List<CoreBookLevelView> levels = new ArrayList<>();
-        symbols.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
-            L2MarketData book = api.requestOrderBookAsync(entry.getValue(), MAX_QUERY_DEPTH).join();
+        symbols.entrySet().stream().filter(entry -> symbolFilter.isEmpty() || entry.getKey().equals(symbolFilter))
+                .sorted(Map.Entry.comparingByKey()).forEach(entry -> {
+            L2MarketData book = api.requestOrderBookAsync(entry.getValue(), boundedDepth).join();
             for (int index = 0; index < book.askSize; index++) {
                 levels.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.SELL, book.askPrices[index],
                         book.askVolumes[index], book.askOrders[index]));
@@ -207,7 +214,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private void start() {
         ExchangeConfiguration configuration = ExchangeConfiguration.defaultBuilder()
                 .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
-                        .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.NO_RISK_PROCESSING)
+                        .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.MATCHING_ONLY)
                         .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
                         .build())
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
@@ -244,15 +251,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private static SymbolType symbolType(CoreInstrumentState instrument) {
-        if (instrument == null || instrument.contractType()
-                == com.surprising.instrument.api.model.ContractType.SPOT) {
-            return SymbolType.CURRENCY_EXCHANGE_PAIR;
-        }
-        if (instrument.contractType()
-                == com.surprising.instrument.api.model.ContractType.VANILLA_OPTION) {
-            return SymbolType.OPTION;
-        }
-        return SymbolType.FUTURES_CONTRACT;
+        return SymbolType.CURRENCY_EXCHANGE_PAIR;
     }
 
     private int stableSymbolId(String symbol) {

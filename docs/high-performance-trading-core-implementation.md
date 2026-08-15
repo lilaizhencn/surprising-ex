@@ -506,9 +506,10 @@ load snapshot -> restore exchange-core native state
 7. `TradingCoreRuntime` 作为 CoreProbeState 的单写运行时边界，集中拥有 reducer、matcher、position/open-interest/trigger 索引；状态过渡、索引更新、回滚恢复和资源关闭不再由调用点分别维护。
 8. reducer 的未修改 leverage/algo/timer/trigger map 统一以 delta 传递；TradingCoreState、CoreTreasuryState 的 delta 分支只校验 changed keys，避免无关命令在状态构造器内全量遍历。
 9. matcher 启动恢复先按规范化 instrument registry 注册全部 symbol，再按 FIFO 恢复活动订单；symbol collision 的分配不再依赖“当前是否有挂单”，盘口查询深度固定有界。
+10. `EXECUTE_TRIGGER_ORDER` 已成为单一 Core 命令：Core 内完成 claim、instrument 版本/费率快照门禁、资金预留、exchange-core 撮合、成交应用和 trigger complete；触发命中不再同步往返 `OrderRpcApi`。触发单入 Core 时固化 instrument version 与 maker/taker fee，版本漂移 fail-closed；Aeron placement 可在非热路径通过 `TradingFeeRpcApi` 取得用户费率快照。
+11. `BOOK_STATE_QUERY` 支持 symbol/depth 有界协议查询；空 payload 保留旧行为但深度上限为 1000，adapter 不再请求 `Integer.MAX_VALUE`。
 
 仍未宣称完成的交付物：
 
-- 触发单 claim、实际订单创建和 complete 仍经过 `OrderRpcApi`，尚未变成同一个 Core 原子命令；这仍是 P4 的下一项资金安全改造，不能以当前 DB-free 状态误认为原子执行。
 - `TradingCoreState` 仍是不可变兼容状态壳，delta 深度达到上限时仍会 materialize；当前 `TradingCoreRuntime` 已作为单写边界和索引协调层接入，但 P2 的完全 mutable entity store、P3 的 exchange-core native restore、P5 的一次编码导出和 P6 的 failover/压测门禁尚未完成。
 - 根 Maven `validate` 已在当前 `surprising-maker` 模块布局下通过；完整 root `test` 仍受账户测试发现阶段缺少 `CoreUserStateView` 类路径的既有问题阻塞，本轮未改动该测试/POM。

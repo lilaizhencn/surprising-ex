@@ -399,10 +399,6 @@ surprising:
         base-url: http://localhost:8002
         target-prefix: /wallet/v1
         private-route: true
-      websocket:
-        base-url: http://localhost:9093
-        target-prefix: /ws
-        private-route: false
     admin-routes:
       instrument:
         base-url: http://localhost:9080
@@ -746,7 +742,7 @@ surprising:
         basic-auth-username: ${SW_WALLET_ADMIN_USERNAME:admin}
         basic-auth-password: ${SW_WALLET_ADMIN_PASSWORD:}
       websocket-admin:
-        base-url: http://localhost:9093
+        base-url: ${GATEWAY_SELF_BASE_URL:http://localhost:9094}
         target-prefix: /api/v1/admin/websocket
         private-route: true
     observability:
@@ -790,3 +786,41 @@ surprising:
         enabled: true
         sample-preview-limit: 8
         max-body-bytes: 1000000
+  websocket:
+    kafka:
+      bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:true}
+      # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。
+      group-id: ${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}
+      concurrency: 2
+      max-poll-records: 1000
+      core-private-events-enabled: ${SURPRISING_WS_CORE_PRIVATE_EVENTS_ENABLED:true}
+      candle-topic: surprising.perp.candle.events.v1
+      trade-topic: surprising.perp.trade.events.v1
+      order-book-depth-topic: surprising.perp.orderbook.depth.v1
+      index-price-topic: surprising.perp.index.price.v1
+      mark-price-topic: surprising.perp.mark.price.v1
+      funding-rate-topic: surprising.perp.funding.rate.v1
+      order-events-topic: surprising.perp.order.events.v1
+      trigger-order-events-topic: surprising.perp.trigger-order.events.v1
+      match-results-topic: surprising.perp.match.results.v1
+      match-trades-topic: surprising.perp.match.trades.v1
+      position-events-topic: surprising.account.position.events.v1
+      account-risk-events-topic: surprising.risk.account.events.v1
+      position-risk-events-topic: surprising.risk.position.events.v1
+    session:
+      max-subscriptions: 200
+      outbound-queue-capacity: 1000
+      send-timeout: 5s
+    security:
+      user-id-header: X-User-Id
+      allow-query-user-id-fallback: ${SURPRISING_WS_QUERY_USER_ID:false}
+      issuer: surprising-ex-gateway
+      jwt-secret: ${GATEWAY_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
+      allowed-origins:
+        - ${SURPRISING_WS_ALLOWED_ORIGIN:*}
+    fanout:
+      candle-partial-coalesce-window: 250ms
+      mark-price-max-age: 3s
+      mark-price-allowed-future-skew: 1s

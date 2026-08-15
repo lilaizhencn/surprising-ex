@@ -31,7 +31,7 @@ class AdminSystemObservabilityServiceTest {
         GatewayProperties properties = new GatewayProperties();
         Map<String, GatewayProperties.BackendRoute> adminRoutes = new LinkedHashMap<>();
         adminRoutes.put("websocket-admin", new GatewayProperties.BackendRoute(
-                "http://websocket:9093", "/api/v1/admin/websocket", true));
+                "http://gateway:9094", "/api/v1/admin/websocket", true));
         properties.setAdminRoutes(adminRoutes);
         properties.getObservability().getKafka().setEnabled(false);
 

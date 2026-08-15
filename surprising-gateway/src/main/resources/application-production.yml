@@ -53,3 +53,12 @@ surprising:
       mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY}
       issuer: ${GATEWAY_JWT_ISSUER:surprising-ex-gateway}
       jwt-secret: ${GATEWAY_JWT_SECRET}
+  websocket:
+    kafka:
+      bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS}
+      product-topics-enabled: true
+      group-id: ${SURPRISING_WEBSOCKET_GROUP_ID}
+    security:
+      allow-query-user-id-fallback: false
+      jwt-secret: ${GATEWAY_JWT_SECRET}
+      allowed-origins: ${SURPRISING_WS_ALLOWED_ORIGINS}
