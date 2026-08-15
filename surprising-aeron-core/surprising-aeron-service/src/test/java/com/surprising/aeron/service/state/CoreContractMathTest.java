@@ -28,6 +28,7 @@ class CoreContractMathTest {
         assertThat(CoreContractMath.maintenanceMarginUnits(instrument, 20, 100)).isEqualTo(1_000);
         assertThat(CoreContractMath.openingMarginUnits(instrument, CoreOrderSide.BUY, 100, 20))
                 .isEqualTo(400);
+        assertThat(CoreContractMath.maintenanceMarginUnits(instrument, 200, 100)).isPositive();
         assertThat(CoreContractMath.riskBracket(instrument, 10_000).bracketNo()).isEqualTo(2);
         assertThatThrownBy(() -> CoreContractMath.riskBracket(instrument, 10_001))
                 .isInstanceOf(CoreStateRejectedException.class)

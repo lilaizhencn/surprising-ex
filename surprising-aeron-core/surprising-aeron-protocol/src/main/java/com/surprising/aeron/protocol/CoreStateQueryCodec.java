@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public final class CoreStateQueryCodec {
 
@@ -49,6 +50,23 @@ public final class CoreStateQueryCodec {
 
     public static String decodeSettlementProgressQuery(byte[] encoded) {
         return decodeFundingProgressQuery(encoded);
+    }
+
+    public static byte[] encodeCommandResultQuery(UUID commandId) {
+        if (commandId == null) {
+            throw new IllegalArgumentException("commandId is required");
+        }
+        Writer writer = new Writer();
+        writer.longValue(commandId.getMostSignificantBits());
+        writer.longValue(commandId.getLeastSignificantBits());
+        return writer.toByteArray();
+    }
+
+    public static UUID decodeCommandResultQuery(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        UUID commandId = new UUID(reader.longValue(), reader.longValue());
+        reader.requireConsumed();
+        return commandId;
     }
 
     public static byte[] encodeTreasuryState(List<CoreTreasuryAssetView> assets) {

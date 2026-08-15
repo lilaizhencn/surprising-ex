@@ -54,6 +54,17 @@ class TradingStateSnapshotCodecTest {
     }
 
     @Test
+    void authoritativeConstructorRejectsMissingClientOrderIndex() {
+        TradingCoreState state = TradingCoreState.empty(ProductLine.SPOT);
+
+        assertThatThrownBy(() -> new TradingCoreState(state.productLine(), state.revision(), state.users(),
+                state.orders(), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), null, state.triggerOrders()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("client order index is required");
+    }
+
+    @Test
     void migratesVersionOneOpenOrdersIntoDeterministicBookPriority() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState state = reducer.adjustBalance(

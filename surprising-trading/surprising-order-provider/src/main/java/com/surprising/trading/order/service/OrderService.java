@@ -297,9 +297,10 @@ public class OrderService {
 
     private List<OrderResponse> projectionOpenOrders(ProductLine productLine, Long userId, String symbol,
                                                      int limit, long beforeOrderId) {
-        List<OrderResponse> accepted = aeronOrderProjection.query(productLine, userId, symbol,
-                OrderStatus.ACCEPTED, null, beforeOrderId, null, null, null, limit, false);
-        return accepted;
+        if (productLine != currentProductLine()) {
+            throw new IllegalArgumentException("product line does not match this order core");
+        }
+        return requireAeron().openOrders(userId == null ? 0L : userId, symbol, beforeOrderId, limit);
     }
 
     public OrderQueryResponse historyOrders(long userId,
@@ -380,10 +381,11 @@ public class OrderService {
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
         requireOrderId(orderId);
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-        OrderResponse selected = aeronOrderProjection.query(resolved, null, null, null, orderId, null,
-                null, null, null, 1, false).stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("order not found: " + orderId));
-        OrderResponse canceled = requireAeron().cancel(selected.userId(), orderId);
+        var selected = requireAeron().get(0, orderId);
+        if (selected == null || selected.productLine() != resolved) {
+            throw new IllegalStateException("order not found: " + orderId);
+        }
+        OrderResponse canceled = aeronOrders.cancel(selected.userId(), orderId);
         boolean requested = cancelSucceeded(canceled.status());
         return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.symbol(),
                 canceled.status(), requested, requested ? "cancel requested" : "order is already "

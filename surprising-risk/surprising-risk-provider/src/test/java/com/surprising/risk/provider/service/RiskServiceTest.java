@@ -91,8 +91,8 @@ class RiskServiceTest {
     @Test
     void rejectsRiskProviderOwnedMarginPolicyUpdates() {
         assertThatThrownBy(() -> service.updateRiskRule("GLOBAL_MARGIN_POLICY", "admin",
-                new RiskService.RiskRuleUpdateCommand("override", true, 700_000L, 900_000L,
-                        null, null, "must not be local")))
+                new RiskService.RiskRuleUpdateCommand("override", true, null, null,
+                        "must not be local")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("owned by versioned Aeron Core instrument state");
     }
@@ -100,15 +100,13 @@ class RiskServiceTest {
     @Test
     void doesNotExposePersistedMarginThresholdOverride() {
         when(rules.findAll()).thenReturn(List.of(new RiskRuleOverride("GLOBAL_MARGIN_POLICY", "legacy",
-                "GLOBAL_MARGIN", true, 700_000L, 900_000L, null, null, "admin", "legacy",
+                "GLOBAL_MARGIN", true, null, null, "admin", "legacy",
                 Instant.now(), Instant.now())));
 
         var result = service.riskRules();
 
         assertThat(result.rules()).first().satisfies(value -> {
             assertThat(value.source()).isEqualTo("core");
-            assertThat(value.warningMarginRatioPpm()).isNull();
-            assertThat(value.liquidationMarginRatioPpm()).isNull();
         });
     }
 

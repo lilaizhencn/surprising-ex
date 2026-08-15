@@ -51,6 +51,32 @@ class CoreProbeStateTest {
     }
 
     @Test
+    void queriesCommittedCommandResultAfterResultUnknown() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        UUID commandId = UUID.randomUUID();
+        CoreMessage command = command(commandId, 1, 7);
+
+        var applied = state.apply(command);
+        var result = state.apply(new CoreMessage(CoreMessageHeader.query(
+                CoreMessageType.COMMAND_RESULT_QUERY, UUID.randomUUID(), ProductLine.SPOT,
+                CommandSource.GATEWAY, 7, 0, 1001, 1_000, 2),
+                CoreStateQueryCodec.encodeCommandResultQuery(commandId)));
+
+        assertThat(result.status()).isEqualTo(ResponseStatus.OK);
+        assertThat(result.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(result.resultCode()).isEqualTo(CoreResultCode.NONE);
+        assertThat(result.appliedCommandCount()).isEqualTo(applied.appliedCommandCount());
+        assertThat(result.stateHash()).isEqualTo(applied.stateHash());
+
+        var unknown = state.apply(new CoreMessage(CoreMessageHeader.query(
+                CoreMessageType.COMMAND_RESULT_QUERY, UUID.randomUUID(), ProductLine.SPOT,
+                CommandSource.GATEWAY, 7, 0, 1001, 1_000, 3),
+                CoreStateQueryCodec.encodeCommandResultQuery(UUID.randomUUID())));
+        assertThat(unknown.status()).isEqualTo(ResponseStatus.REJECTED);
+        assertThat(unknown.resultCode()).isEqualTo(CoreResultCode.ENTITY_NOT_FOUND);
+    }
+
+    @Test
     void sourceHighWatermarkSurvivesIdempotencyWindowEviction() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         for (int sequence = 1; sequence <= CoreProbeState.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {

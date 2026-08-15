@@ -7,7 +7,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 
 完整架构、问题追踪、唯一参数来源、阶段台账、脚本矩阵和验收门禁以
 [`docs/high-performance-trading-core-implementation.md`](docs/high-performance-trading-core-implementation.md)
-为唯一实施依据。当前 canonical 验证脚本仍在按该规格恢复，旧业务逻辑脚本不得直接复用。
+为唯一实施依据。canonical 脚本均绑定显式产品线的内存 Core；旧 DB/旧 trigger/旧 matching 业务脚本不得
+直接复用，真实 provider/做市进程仍由部署编排单独管理。
 
 ## 核心边界
 
@@ -20,6 +21,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 - Valkey 只承担限流和非权威缓存，不保存 Risk 状态、强平候选、资金或订单恢复进度。
 - Risk 按 symbol 保存确定性有界扫描游标；强平 Work、触发价格序列、仓位身份、执行、强平费和
   Insurance Treasury 全部由 Aeron 校验并原子提交。
+- 保证金率、risk brackets、杠杆和持仓上限只由 Instrument Provider 版本化下发到 `CoreInstrumentState`；
+  Core 是唯一计算/执行来源，Risk Provider 只查询并展示 Core 风险快照，不再维护本地保证金阈值副本。
 - `surprising-liquidation` 是无状态协调器：查询 Aeron Liquidation Work、续跑 Risk Scan，使用
   稳定 `commandId` 重试强平命令；它不消费强平 Kafka 回环，也不维护 Redis 队列或 PostgreSQL 强平事务。
 - Core Exporter 以连续 Export Sequence 向 Kafka at-least-once 发布并幂等写 PostgreSQL；只有完整批次
@@ -37,8 +40,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | U 本位交割 | `LINEAR_DELIVERY` | `USDT_DELIVERY` | `surprising.linear-delivery` |
 | 欧式期权 | `OPTION` | `OPTION` | `surprising.option` |
 
-`INVERSE_PERPETUAL` 和 `INVERSE_DELIVERY` 已有公共枚举和 Topic 映射，但当前进程级验收主要覆盖上表
-四条产品线。
+`INVERSE_PERPETUAL` 和 `INVERSE_DELIVERY` 已有公共枚举和 Topic 映射；Core recovery/capacity 门禁按六个
+产品枚举逐条执行，业务 API 的四类生命周期仍按产品边界单独验收。
 
 ## 模块
 
@@ -62,7 +65,7 @@ Repository 默认只操作一张物理表，由 Service 在事务内聚合。在
 必须跨表，源码需要逐项写明中文“不可拆原因”。后台订单时间线、资金对账和运营报表不得在交易主库新增
 多表 JOIN；后续财务运营模块应消费领域事件，并使用独立数据库建立查询投影。
 边界约束由对应模块的源码、Maven 测试和主规格维护；canonical 检查脚本按单产品线、资金对账、恢复和
-容量职责重新整理后补充。
+容量职责执行。
 
 Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，不直接访问 Repository，也不承载事务或
 业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。入口层边界由源码审查和
@@ -70,12 +73,17 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 
 ## 构建与本地启动
 
-要求 JDK 25。基础设施启动、数据库初始化和 Topic 创建脚本正在重新整理；当前可以先执行：
+要求 JDK 25。基础设施启动、数据库初始化和 Topic 创建脚本仍由各部署编排管理；Core 本地三节点可以先执行：
 
 ```bash
-mvn -DskipTests package
-mvn test
+PRODUCT_LINE=SPOT scripts/aeron-core-local.sh fresh
+PRODUCT_LINE=SPOT scripts/integration-smoke.sh
+PRODUCT_LINE=SPOT scripts/aeron-core-local.sh down
 ```
+
+恢复与容量门禁分别使用 `scripts/run-product-line-recovery-matrix.sh` 和
+`scripts/run-product-line-capacity.sh`。`fresh` 只删除显式产品线的 Docker volume；`up/down` 默认保留卷。
+脚本不会启动 wallet，也不会把未接入的 HTTP provider、做市进程或 Kafka 集群验证伪装成 Core 已完成能力。
 
 matching 使用 `exchange.core2:exchange-core:0.5.8-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
 以下 JVM 参数：
@@ -114,7 +122,10 @@ mvn test
 mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ```
 
-当前 Maven 测试覆盖构建和核心 Aeron 客户端/工具链；完整产品线验收、压测和资金守恒核对脚本待重新整理。
+当前 Maven 测试覆盖构建和核心 Aeron 客户端/工具链；产品线资金守恒、恢复和容量脚本按主规格的单线门禁执行，
+未通过真实 provider/做市/Kafka 集群验证的场景必须在证据中明确标记。根 `mvn test` 当前仍会在既有
+`surprising-gateway` 的 `BinanceApiControllerTest` 泛型断言编译错误处停止；Core、Risk 和 Trigger 模块的定向
+Maven 测试可独立通过，详见主规格验证证据。
 交易裁决和结算在 Aeron Core 内存状态机完成；PostgreSQL 只用于异步投影、审计和对账。
 
 ## 生产部署

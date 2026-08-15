@@ -52,6 +52,10 @@ final class StateMapSupport {
         return values instanceof FrozenMap<?, ?> frozen && isDelta(((FrozenMap<?, ?>) frozen).raw());
     }
 
+    static boolean isFrozen(Map<?, ?> values) {
+        return values instanceof FrozenMap<?, ?>;
+    }
+
     @SuppressWarnings("unchecked")
     static <K> Set<K> changedKeys(Map<K, ?> values) {
         if (values instanceof DeltaMap<?, ?> delta) return (Set<K>) delta.changedKeys();

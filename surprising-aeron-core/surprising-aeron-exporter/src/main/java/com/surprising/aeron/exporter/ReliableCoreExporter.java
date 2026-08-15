@@ -2,6 +2,7 @@ package com.surprising.aeron.exporter;
 
 import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CoreExportBatch;
 import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreExportStatus;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -39,22 +40,25 @@ public final class ReliableCoreExporter {
     }
 
     public ExportCycleResult exportOnce() throws Exception {
-        CoreExportStatus before = status();
-        return exportOnce(before);
+        return exportOnce(null);
     }
 
     private ExportCycleResult exportOnce(CoreExportStatus before) throws Exception {
-        if (before.pendingCount() == 0) {
-            return new ExportCycleResult(0, before);
-        }
-        CoreResponse batchResponse = core.submit(query(
-                CoreMessageType.EXPORT_BATCH_QUERY, CoreExportCodec.encodeBatchQuery(batchSize)));
+        CoreResponse batchResponse = core.submit(query(CoreMessageType.EXPORT_BATCH_QUERY,
+                CoreExportCodec.encodeBatchQuery(batchSize)));
         requireOk(batchResponse, "export batch query");
-        List<CoreMessage> events = CoreExportCodec.decodeBatch(batchResponse.data());
+        CoreExportBatch batch = CoreExportCodec.decodeBatchResponse(batchResponse.data());
+        List<CoreMessage> events = batch.events();
         if (events.isEmpty()) {
-            throw new IllegalStateException("non-empty export backlog returned an empty batch");
+            if (before != null && before.pendingCount() > 0) {
+                throw new IllegalStateException("non-empty export backlog returned an empty batch");
+            }
+            return new ExportCycleResult(0, before == null ? status() : before);
         }
-        validateContiguous(events, before.acknowledgedSequence() + 1);
+        if (before != null && batch.acknowledgedSequence() != before.acknowledgedSequence()) {
+            throw new IllegalStateException("export acknowledgement moved during batch query");
+        }
+        validateContiguous(events, batch.acknowledgedSequence() + 1);
         sink.publish(productLine, events);
         long throughSequence = CoreExportCodec.decodeEvent(events.getLast().payload()).exportSequence();
         CoreResponse ackResponse = core.submit(ack(throughSequence));

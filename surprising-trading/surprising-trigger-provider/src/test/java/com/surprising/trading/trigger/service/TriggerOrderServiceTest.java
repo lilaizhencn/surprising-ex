@@ -13,6 +13,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.aeron.protocol.CoreTriggerCondition;
+import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
+import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.product.api.ProductLine;
@@ -600,6 +604,27 @@ class TriggerOrderServiceTest {
     }
 
     @Test
+    void aeronMarkPriceContinuesAcrossTriggerPages() {
+        TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
+        TriggerOrderAeronGateway aeron = mock(TriggerOrderAeronGateway.class);
+        TriggerProperties properties = new TriggerProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        properties.getExecution().setTriggerBatchSize(2);
+        properties.getExecution().setMaxTriggerScanPages(2);
+        TriggerOrderService service = new TriggerOrderService(repository, mock(OrderRpcApi.class), properties,
+                TriggerOrderIndex.disabled(), null, null, null, aeron, mock(AeronTriggerOrderIdGenerator.class), null);
+        CoreTriggerOrderStateView first = pendingAeronTrigger(9L, 100_000L);
+        CoreTriggerOrderStateView second = pendingAeronTrigger(8L, 100_000L);
+        CoreTriggerOrderStateView olderMatch = pendingAeronTrigger(7L, 100L);
+        when(aeron.openOrders(0L, "BTC-USDT", 0L, 2)).thenReturn(List.of(first, second));
+        when(aeron.openOrders(0L, "BTC-USDT", 8L, 2)).thenReturn(List.of(olderMatch));
+
+        service.onMarkPrice(mark(ProductLine.LINEAR_PERPETUAL, 42L, 1_000L));
+
+        verify(aeron).execute(eq(7L), eq(42L), eq(1_000L), anyLong());
+    }
+
+    @Test
     void productLineModeClaimsTriggeredOrdersByContractType() {
         TriggerOrderPersistenceService repository = mock(TriggerOrderPersistenceService.class);
         OrderRpcApi orderRpcApi = mock(OrderRpcApi.class);
@@ -884,6 +909,17 @@ class TriggerOrderServiceTest {
                 price, price, price, price, price, price, price, BigDecimal.ZERO,
                 now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L, price, price,
                 sequence, PriceStatus.HEALTHY, now, now);
+    }
+
+    private CoreTriggerOrderStateView pendingAeronTrigger(long triggerOrderId, long triggerPriceTicks) {
+        CoreTriggerOrderStateView order = mock(CoreTriggerOrderStateView.class);
+        when(order.triggerOrderId()).thenReturn(triggerOrderId);
+        when(order.status()).thenReturn(CoreTriggerOrderStatus.PENDING);
+        when(order.triggerType()).thenReturn(CoreTriggerOrderType.STOP_LOSS);
+        when(order.triggerCondition()).thenReturn(CoreTriggerCondition.GREATER_OR_EQUAL);
+        when(order.triggerPriceTicks()).thenReturn(triggerPriceTicks);
+        when(order.expiresAtEpochMillis()).thenReturn(0L);
+        return order;
     }
 
     private void stubCloseCapacity(TriggerOrderPersistenceService repository,

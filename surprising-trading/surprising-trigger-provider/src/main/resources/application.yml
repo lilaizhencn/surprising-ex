@@ -64,8 +64,10 @@ surprising:
         max-poll-records: 500
       execution:
         trigger-batch-size: 200
+        max-trigger-scan-pages: ${TRIGGER_MAX_SCAN_PAGES:16}
         stale-triggering-after: 30s
         maintenance-delay-ms: 1000
+        core-only: ${TRIGGER_CORE_ONLY:true}
       outbox:
         batch-size: 200
         publish-delay-ms: 200

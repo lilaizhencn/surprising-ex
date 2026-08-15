@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
+import com.surprising.trading.api.model.AdminCancelOrdersResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.CancelOrderRequest;
@@ -79,6 +80,22 @@ class OrderServiceTest {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
         assertThatThrownBy(() -> service.adminCancelOrders(new AdminBatchCancelOrdersRequest(
                 1001L, "BTC-USDT", 10, "risk"))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void adminCancelSelectsOpenOrdersFromCoreInsteadOfProjection() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
+        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
+        when(aeronOrders.openOrders(0L, "BTC-USDT", Long.MAX_VALUE, 10)).thenReturn(java.util.List.of(open));
+        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+
+        AdminCancelOrdersResponse result = service.adminCancelOrders(
+                new AdminBatchCancelOrdersRequest(null, "BTC-USDT", 10, "risk"));
+
+        assertThat(result.canceled()).isEqualTo(1);
+        verify(aeronOrders).openOrders(0L, "BTC-USDT", Long.MAX_VALUE, 10);
+        verify(aeronOrders).cancel(1001L, 91L);
     }
 
     @Test

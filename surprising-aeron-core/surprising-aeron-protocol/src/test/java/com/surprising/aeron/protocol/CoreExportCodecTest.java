@@ -34,6 +34,8 @@ class CoreExportCodecTest {
 
         CoreExportEvent restored = CoreExportCodec.decodeEvent(message.payload());
         List<CoreMessage> batch = CoreExportCodec.decodeBatch(CoreExportCodec.encodeBatch(List.of(message)));
+        CoreExportBatch batchWithStatus = CoreExportCodec.decodeBatchResponse(
+                CoreExportCodec.encodeBatchWithStatus(6, List.of(message)));
 
         assertThat(restored.exportSequence()).isEqualTo(7);
         assertThat(restored.commandPayload()).containsExactly(1, 2, 3);
@@ -44,6 +46,8 @@ class CoreExportCodecTest {
         assertThat(restored.changedLiquidations()).containsExactly(liquidation);
         assertThat(restored.changedTreasuryAssets()).containsExactly(treasury);
         assertThat(batch).containsExactly(message);
+        assertThat(batchWithStatus.acknowledgedSequence()).isEqualTo(6);
+        assertThat(batchWithStatus.events()).containsExactly(message);
         assertThat(CoreExportCodec.decodeAck(CoreExportCodec.encodeAck(new AckExportCommand(7))))
                 .isEqualTo(new AckExportCommand(7));
         CoreExportStatus status = new CoreExportStatus(6, 8, 1, 256, 1_000_000, 64L * 1024 * 1024);

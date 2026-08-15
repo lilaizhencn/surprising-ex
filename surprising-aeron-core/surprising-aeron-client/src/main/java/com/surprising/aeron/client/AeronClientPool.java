@@ -168,6 +168,12 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
+    public CoreResponse commandResult(UUID commandId, long userId) {
+        Objects.requireNonNull(commandId, "commandId");
+        return query(CoreMessageType.COMMAND_RESULT_QUERY, UUID.randomUUID(), userId,
+                com.surprising.aeron.protocol.CoreStateQueryCodec.encodeCommandResultQuery(commandId));
+    }
+
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {

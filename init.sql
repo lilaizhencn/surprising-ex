@@ -2539,8 +2539,6 @@ CREATE TABLE IF NOT EXISTS risk_admin_rule_overrides (
     rule_name                    TEXT NOT NULL,
     rule_type                    TEXT NOT NULL,
     enabled                      BOOLEAN NOT NULL DEFAULT TRUE,
-    warning_margin_ratio_ppm     BIGINT,
-    liquidation_margin_ratio_ppm BIGINT,
     scan_delay_ms                BIGINT,
     scan_batch_size              INTEGER,
     admin_user_id                TEXT NOT NULL,
@@ -2551,17 +2549,6 @@ CREATE TABLE IF NOT EXISTS risk_admin_rule_overrides (
     CONSTRAINT risk_admin_rule_overrides_type_check CHECK (
         rule_type IN ('GLOBAL_MARGIN', 'SCAN_CONTROL')
     ),
-    CONSTRAINT risk_admin_rule_overrides_margin_check CHECK (
-        warning_margin_ratio_ppm IS NULL OR warning_margin_ratio_ppm >= 0
-    ),
-    CONSTRAINT risk_admin_rule_overrides_liquidation_check CHECK (
-        liquidation_margin_ratio_ppm IS NULL OR liquidation_margin_ratio_ppm >= 0
-    ),
-    CONSTRAINT risk_admin_rule_overrides_margin_order_check CHECK (
-        warning_margin_ratio_ppm IS NULL
-        OR liquidation_margin_ratio_ppm IS NULL
-        OR warning_margin_ratio_ppm < liquidation_margin_ratio_ppm
-    ),
     CONSTRAINT risk_admin_rule_overrides_scan_delay_check CHECK (
         scan_delay_ms IS NULL OR scan_delay_ms >= 0
     ),
@@ -2571,6 +2558,15 @@ CREATE TABLE IF NOT EXISTS risk_admin_rule_overrides (
     CONSTRAINT risk_admin_rule_overrides_admin_present CHECK (length(admin_user_id) > 0),
     CONSTRAINT risk_admin_rule_overrides_reason_present CHECK (length(reason) BETWEEN 1 AND 500)
 );
+
+ALTER TABLE risk_admin_rule_overrides
+    DROP CONSTRAINT IF EXISTS risk_admin_rule_overrides_margin_check,
+    DROP CONSTRAINT IF EXISTS risk_admin_rule_overrides_liquidation_check,
+    DROP CONSTRAINT IF EXISTS risk_admin_rule_overrides_margin_order_check;
+
+ALTER TABLE risk_admin_rule_overrides
+    DROP COLUMN IF EXISTS warning_margin_ratio_ppm,
+    DROP COLUMN IF EXISTS liquidation_margin_ratio_ppm;
 
 CREATE INDEX IF NOT EXISTS risk_admin_rule_overrides_type_idx
     ON risk_admin_rule_overrides (rule_type, updated_at DESC);

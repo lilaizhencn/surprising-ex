@@ -60,15 +60,11 @@ public record TradingCoreState(
                     }
                 }
             }
+        } else if (clientOrderIndex == null) {
+            throw new IllegalArgumentException("client order index is required for an authoritative state transition");
         } else {
-            derivedIndex = new TreeMap<>();
-            sortedOrders.values().stream().filter(order -> !order.clientOrderId().isEmpty()).forEach(order -> {
-                ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
-                if (derivedIndex.put(key, order.orderId()) != null) {
-                    throw new IllegalArgumentException("duplicate clientOrderId for user");
-                }
-            });
-            if (clientOrderIndex != null && !derivedIndex.equals(clientOrderIndex)) {
+            derivedIndex = StateMapSupport.freezeSorted(clientOrderIndex);
+            if (!derivedIndex.equals(deriveClientOrderIndex(sortedOrders))) {
                 throw new IllegalArgumentException("client order index does not match authoritative orders");
             }
         }
@@ -121,7 +117,7 @@ public record TradingCoreState(
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                Map.of(), Map.of(), Map.of(), null, Map.of());
+                Map.of(), Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -129,7 +125,7 @@ public record TradingCoreState(
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, Map.of(), Map.of(), null, Map.of());
+                leverages, Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -138,7 +134,7 @@ public record TradingCoreState(
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, algoOrders, Map.of(), null, Map.of());
+                leverages, algoOrders, Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -148,7 +144,7 @@ public record TradingCoreState(
                             Map<Long, CoreAlgoOrderState> algoOrders,
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, algoOrders, cancelAllAfterTimers, null, Map.of());
+                leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -159,7 +155,7 @@ public record TradingCoreState(
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
                             Map<Long, CoreTriggerOrderState> triggerOrders) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, algoOrders, cancelAllAfterTimers, null, triggerOrders);
+                leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), triggerOrders);
     }
 
     public static TradingCoreState empty(ProductLine productLine) {
@@ -519,6 +515,49 @@ public record TradingCoreState(
     public Set<String> changedTreasuryAssetsSince(TradingCoreState before) {
         if (before == null) return null;
         return treasuryState.changedAssetsSince(before.treasuryState());
+    }
+
+    public void requireIncrementalLineage(TradingCoreState before) {
+        if (before == null || before == this) return;
+        requireLineage("users", StateMapSupport.changedKeysSince(before.users, users));
+        requireLineage("orders", StateMapSupport.changedKeysSince(before.orders, orders));
+        requireLineage("book", StateMapSupport.changedKeysSince(before.bookState.openOrders(), bookState.openOrders()));
+        requireLineage("instruments", StateMapSupport.changedKeysSince(before.instruments, instruments));
+        requireLineage("leverages", StateMapSupport.changedKeysSince(before.leverages, leverages));
+        requireLineage("algo orders", StateMapSupport.changedKeysSince(before.algoOrders, algoOrders));
+        requireLineage("cancel-all-after timers",
+                StateMapSupport.changedKeysSince(before.cancelAllAfterTimers, cancelAllAfterTimers));
+        requireLineage("client order index",
+                StateMapSupport.changedKeysSince(before.clientOrderIndex, clientOrderIndex));
+        requireLineage("trigger orders", StateMapSupport.changedKeysSince(before.triggerOrders, triggerOrders));
+        requireLineage("mark prices",
+                StateMapSupport.changedKeysSince(before.riskState.markPrices(), riskState.markPrices()));
+        requireLineage("risk snapshots",
+                StateMapSupport.changedKeysSince(before.riskState.snapshots(), riskState.snapshots()));
+        requireLineage("liquidations",
+                StateMapSupport.changedKeysSince(before.riskState.liquidations(), riskState.liquidations()));
+        requireLineage("risk scans",
+                StateMapSupport.changedKeysSince(before.riskState.scans(), riskState.scans()));
+        requireLineage("fee balances",
+                StateMapSupport.changedKeysSince(before.treasuryState.feeBalances(), treasuryState.feeBalances()));
+        requireLineage("insurance balances", StateMapSupport.changedKeysSince(
+                before.treasuryState.insuranceBalances(), treasuryState.insuranceBalances()));
+        requireLineage("insurance deficits", StateMapSupport.changedKeysSince(
+                before.treasuryState.insuranceDeficits(), treasuryState.insuranceDeficits()));
+        requireLineage("funding settlements", StateMapSupport.changedKeysSince(
+                before.treasuryState.fundingSettlements(), treasuryState.fundingSettlements()));
+        requireLineage("lifecycle settlements", StateMapSupport.changedKeysSince(
+                before.treasuryState.lifecycleSettlements(), treasuryState.lifecycleSettlements()));
+        requireLineage("funding progress", StateMapSupport.changedKeysSince(
+                before.treasuryState.fundingProgress(), treasuryState.fundingProgress()));
+        requireLineage("lifecycle progress", StateMapSupport.changedKeysSince(
+                before.treasuryState.lifecycleProgress(), treasuryState.lifecycleProgress()));
+    }
+
+    private static void requireLineage(String name, Set<?> changedKeys) {
+        if (changedKeys == null) {
+            throw new IllegalStateException(name + " lineage is unavailable");
+        }
     }
 
     static long hashUser(long initial, CoreUserState user) {

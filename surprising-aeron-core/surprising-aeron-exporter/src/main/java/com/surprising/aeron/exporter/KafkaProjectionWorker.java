@@ -4,7 +4,8 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.product.api.ProductLine;
 import java.sql.SQLException;
 import java.time.Duration;
-import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -28,12 +29,16 @@ public final class KafkaProjectionWorker {
 
     public int pollOnce(Duration timeout) throws SQLException {
         int processed = 0;
+        Map<TopicPartition, OffsetAndMetadata> offsets = new HashMap<>();
         for (ConsumerRecord<String, byte[]> record : consumer.poll(timeout)) {
             projector.project(productLine, CoreMessageCodec.decode(record.value()));
             TopicPartition partition = new TopicPartition(record.topic(), record.partition());
-            consumer.commitSync(Collections.singletonMap(partition,
-                    new OffsetAndMetadata(Math.incrementExact(record.offset()))));
+            offsets.merge(partition, new OffsetAndMetadata(Math.incrementExact(record.offset())),
+                    (current, candidate) -> current.offset() >= candidate.offset() ? current : candidate);
             processed++;
+        }
+        if (!offsets.isEmpty()) {
+            consumer.commitSync(offsets);
         }
         return processed;
     }

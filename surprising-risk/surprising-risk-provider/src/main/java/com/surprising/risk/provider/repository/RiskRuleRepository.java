@@ -28,8 +28,6 @@ public class RiskRuleRepository {
                                    String ruleName,
                                    String ruleType,
                                    boolean enabled,
-                                   Long warningMarginRatioPpm,
-                                   Long liquidationMarginRatioPpm,
                                    Long scanDelayMs,
                                    Integer scanBatchSize,
                                    String adminUserId,
@@ -37,16 +35,13 @@ public class RiskRuleRepository {
                                    Instant now) {
         return jdbcTemplate.queryForObject("""
                 INSERT INTO risk_admin_rule_overrides (
-                    rule_code, rule_name, rule_type, enabled, warning_margin_ratio_ppm,
-                    liquidation_margin_ratio_ppm, scan_delay_ms, scan_batch_size,
+                    rule_code, rule_name, rule_type, enabled, scan_delay_ms, scan_batch_size,
                     admin_user_id, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (rule_code) DO UPDATE SET
                     rule_name = EXCLUDED.rule_name,
                     rule_type = EXCLUDED.rule_type,
                     enabled = EXCLUDED.enabled,
-                    warning_margin_ratio_ppm = EXCLUDED.warning_margin_ratio_ppm,
-                    liquidation_margin_ratio_ppm = EXCLUDED.liquidation_margin_ratio_ppm,
                     scan_delay_ms = EXCLUDED.scan_delay_ms,
                     scan_batch_size = EXCLUDED.scan_batch_size,
                     admin_user_id = EXCLUDED.admin_user_id,
@@ -54,7 +49,7 @@ public class RiskRuleRepository {
                     updated_at = EXCLUDED.updated_at
                 RETURNING *
                 """, (rs, rowNum) -> toRecord(rs), ruleCode, ruleName, ruleType, enabled,
-                warningMarginRatioPpm, liquidationMarginRatioPpm, scanDelayMs, scanBatchSize,
+                scanDelayMs, scanBatchSize,
                 adminUserId, reason, Timestamp.from(now), Timestamp.from(now));
     }
 
@@ -64,8 +59,6 @@ public class RiskRuleRepository {
                 rs.getString("rule_name"),
                 rs.getString("rule_type"),
                 rs.getBoolean("enabled"),
-                nullableLong(rs, "warning_margin_ratio_ppm"),
-                nullableLong(rs, "liquidation_margin_ratio_ppm"),
                 nullableLong(rs, "scan_delay_ms"),
                 nullableInteger(rs, "scan_batch_size"),
                 rs.getString("admin_user_id"),
@@ -88,8 +81,6 @@ public class RiskRuleRepository {
                                    String ruleName,
                                    String ruleType,
                                    boolean enabled,
-                                   Long warningMarginRatioPpm,
-                                   Long liquidationMarginRatioPpm,
                                    Long scanDelayMs,
                                    Integer scanBatchSize,
                                    String adminUserId,

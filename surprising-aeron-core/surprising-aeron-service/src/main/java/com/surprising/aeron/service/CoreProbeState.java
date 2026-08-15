@@ -107,17 +107,17 @@ public final class CoreProbeState implements AutoCloseable {
         this.lastSourceSequenceDigest = sourceSequenceDigest(lastSourceSequences);
         this.exportState = exportState;
         this.runtime = new TradingCoreRuntime(productLine, tradingState);
-        this.tradingReducer = runtime.reducer();
-        this.matchingAdapter = runtime.matcher();
-        this.positionUserIndex = runtime.positionUsers();
-        this.openInterestIndex = runtime.openInterest();
-        this.triggerOrderIndex = runtime.triggers();
-        this.algoOrderIndex = runtime.algos();
-        this.liquidationIndex = runtime.liquidations();
-        this.cancelAllAfterIndex = runtime.timers();
-        this.activeOrderIndex = runtime.activeOrders();
-        this.adlPositionIndex = runtime.adlPositions();
-        this.riskSnapshotIndex = runtime.riskSnapshots();
+        this.tradingReducer = runtime.reducerForConstruction();
+        this.matchingAdapter = runtime.matcherForConstruction();
+        this.positionUserIndex = runtime.positionUsersForConstruction();
+        this.openInterestIndex = runtime.openInterestForConstruction();
+        this.triggerOrderIndex = runtime.triggersForConstruction();
+        this.algoOrderIndex = runtime.algosForConstruction();
+        this.liquidationIndex = runtime.liquidationsForConstruction();
+        this.cancelAllAfterIndex = runtime.timersForConstruction();
+        this.activeOrderIndex = runtime.activeOrdersForConstruction();
+        this.adlPositionIndex = runtime.adlPositionsForConstruction();
+        this.riskSnapshotIndex = runtime.riskSnapshotsForConstruction();
     }
 
     static CoreProbeState restore(
@@ -159,6 +159,21 @@ public final class CoreProbeState implements AutoCloseable {
                 && message.header().messageType() == CoreMessageType.USER_STATE_HASH_QUERY) {
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount,
                     tradingState.userStateHash(message.header().userId()));
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.COMMAND_RESULT_QUERY) {
+            try {
+                UUID commandId = CoreStateQueryCodec.decodeCommandResultQuery(message.payload());
+                StoredResult result = commandResults.get(commandId);
+                if (result == null) {
+                    return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                            CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount, cachedBusinessStateHash);
+                }
+                return new CoreResponse(ResponseStatus.OK, result.status(), result.resultCode(),
+                        result.appliedCommandCount(), result.stateHash(), result.responseData());
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.ORDER_STATE_HASH_QUERY) {
@@ -260,7 +275,8 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 int maxEvents = CoreExportCodec.decodeBatchQuery(message.payload());
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, stateHash(),
-                        CoreExportCodec.encodeBatch(exportState.batch(maxEvents)));
+                        CoreExportCodec.encodeBatchWithStatus(exportState.acknowledgedSequence(),
+                                exportState.batch(maxEvents)));
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -489,14 +505,29 @@ public final class CoreProbeState implements AutoCloseable {
         boolean tradingStateChanged = status == ResponseStatus.APPLIED && tradingState != beforeTradingState;
         if (status == ResponseStatus.APPLIED) {
             List<Long> changedOrderIds = commandChangedOrderIds == null ? List.of() : commandChangedOrderIds;
-            tradingState = tradingState.stampOrderChanges(beforeTradingState, clusterTimestamp, clusterPosition,
-                    changedOrderIds);
-            runtime.transition(beforeTradingState, tradingState);
+            try {
+                tradingState = tradingState.stampOrderChanges(beforeTradingState, clusterTimestamp, clusterPosition,
+                        changedOrderIds);
+                runtime.transition(beforeTradingState, tradingState);
+            } catch (IllegalStateException exception) {
+                tradingState = beforeTradingState;
+                runtime.restore(beforeTradingState);
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
         }
         if (tradingStateChanged) {
             rollingBusinessStateHash.update(beforeTradingState, tradingState);
         }
-        commandDelta = commandDelta(beforeTradingState, tradingState, exportCommand);
+        try {
+            commandDelta = commandDelta(beforeTradingState, tradingState, exportCommand);
+        } catch (IllegalStateException exception) {
+            if (tradingStateChanged) {
+                rollingBusinessStateHash.update(tradingState, beforeTradingState);
+                tradingState = beforeTradingState;
+                runtime.restore(beforeTradingState);
+            }
+            return rejected(CoreResultCode.INVALID_COMMAND);
+        }
         long businessStateHash = tradingStateChanged
                 ? rollingBusinessStateHash.value() : cachedBusinessStateHash;
         if (exportCommand) {
@@ -647,7 +678,7 @@ public final class CoreProbeState implements AutoCloseable {
                 tradingState = next;
             }
             case APPLY_MARK_PRICE -> tradingState = tradingReducer.applyMarkPrice(tradingState,
-                    TradingCommandCodec.decodeApplyMarkPrice(message.payload()), liquidationIndex);
+                    TradingCommandCodec.decodeApplyMarkPrice(message.payload()), positionUserIndex, liquidationIndex);
             case APPLY_FUNDING -> {
                 var command = TradingCommandCodec.decodeApplyFunding(message.payload());
                 var result = tradingReducer.applyFundingWithFacts(tradingState,
@@ -668,7 +699,8 @@ public final class CoreProbeState implements AutoCloseable {
             case RESOLVE_LIQUIDATION -> tradingState = tradingReducer.resolveLiquidation(tradingState,
                     TradingCommandCodec.decodeResolveLiquidation(message.payload()));
             case CONTINUE_RISK_SCAN -> tradingState = tradingReducer.continueRiskScan(tradingState,
-                    TradingCommandCodec.decodeContinueRiskScan(message.payload()).maxUsers(), liquidationIndex);
+                    TradingCommandCodec.decodeContinueRiskScan(message.payload()).maxUsers(), positionUserIndex,
+                    liquidationIndex);
             case ACK_EXPORT -> {
                 var acknowledgedTerminalOrderIds = exportState.acknowledge(
                         CoreExportCodec.decodeAck(message.payload()));
@@ -1143,7 +1175,11 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private static <T> List<T> explicitOrDerived(List<T> explicit, java.util.Set<T> derived) {
-        return explicit != null ? List.copyOf(explicit) : derived == null ? null : List.copyOf(derived);
+        if (explicit != null) return List.copyOf(explicit);
+        if (derived == null) {
+            throw new IllegalStateException("command changed-entity lineage is unavailable");
+        }
+        return List.copyOf(derived);
     }
 
     private static List<CoreUserStateView> changedUsers(
@@ -1158,9 +1194,7 @@ public final class CoreProbeState implements AutoCloseable {
             }
             return List.copyOf(result);
         }
-        return after.users().values().stream()
-                .filter(user -> !user.equals(before.users().get(user.userId())))
-                .map(user -> userDelta(before.users().get(user.userId()), user)).toList();
+        throw new IllegalStateException("changed user ids are required for export");
     }
 
     private static List<CoreOrderStateView> changedOrders(
@@ -1175,19 +1209,18 @@ public final class CoreProbeState implements AutoCloseable {
             }
             return List.copyOf(result);
         }
-        return after.orders().values().stream()
-                .filter(order -> !order.equals(before.orders().get(order.orderId())))
-                .map(CoreProbeState::orderView).toList();
+        throw new IllegalStateException("changed order ids are required for export");
     }
 
     private static List<com.surprising.aeron.protocol.CoreLiquidationView> changedLiquidations(
             TradingCoreState before, TradingCoreState after, List<Long> changedLiquidationIds) {
+        if (changedLiquidationIds == null) {
+            throw new IllegalStateException("changed liquidation ids are required for export");
+        }
         java.util.stream.Stream<com.surprising.aeron.service.state.CoreLiquidationState> values =
-                changedLiquidationIds == null
-                        ? after.riskState().liquidations().values().stream()
-                        : changedLiquidationIds.stream()
-                                .map(id -> after.riskState().liquidations().get(id))
-                                .filter(java.util.Objects::nonNull);
+                changedLiquidationIds.stream()
+                        .map(id -> after.riskState().liquidations().get(id))
+                        .filter(java.util.Objects::nonNull);
         return values.filter(value -> !value.equals(before.riskState().liquidations().get(value.liquidationId())))
                 .map(value -> {
                     var instrument = after.instruments().get(value.symbol());
@@ -1203,12 +1236,13 @@ public final class CoreProbeState implements AutoCloseable {
 
     private static List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> changedTriggerOrders(
             TradingCoreState before, TradingCoreState after, List<Long> changedTriggerOrderIds) {
+        if (changedTriggerOrderIds == null) {
+            throw new IllegalStateException("changed trigger order ids are required for export");
+        }
         java.util.stream.Stream<com.surprising.aeron.service.state.CoreTriggerOrderState> values =
-                changedTriggerOrderIds == null
-                        ? after.triggerOrders().values().stream()
-                        : changedTriggerOrderIds.stream()
-                                .map(id -> after.triggerOrders().get(id))
-                                .filter(java.util.Objects::nonNull);
+                changedTriggerOrderIds.stream()
+                        .map(id -> after.triggerOrders().get(id))
+                        .filter(java.util.Objects::nonNull);
         return values.filter(value -> !value.equals(before.triggerOrders().get(value.triggerOrderId())))
                 .map(com.surprising.aeron.service.state.CoreTriggerOrderState::view).toList();
     }
@@ -1218,12 +1252,7 @@ public final class CoreProbeState implements AutoCloseable {
         java.util.TreeSet<String> assets = new java.util.TreeSet<>();
         var changedAssets = after.changedTreasuryAssetsSince(before);
         if (changedAssets == null) {
-            assets.addAll(before.treasuryState().feeBalances().keySet());
-            assets.addAll(before.treasuryState().insuranceBalances().keySet());
-            assets.addAll(before.treasuryState().insuranceDeficits().keySet());
-            assets.addAll(after.treasuryState().feeBalances().keySet());
-            assets.addAll(after.treasuryState().insuranceBalances().keySet());
-            assets.addAll(after.treasuryState().insuranceDeficits().keySet());
+            throw new IllegalStateException("changed treasury assets are required for export");
         } else {
             assets.addAll(changedAssets);
         }

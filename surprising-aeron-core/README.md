@@ -4,10 +4,12 @@
 端口空间、Archive 和数据卷，目标是一条产品线三个 Member。当前实现和后续改造的唯一规格是
 [`docs/high-performance-trading-core-implementation.md`](../docs/high-performance-trading-core-implementation.md)。
 
-当前状态不是“P2 已完成”：P1–P5 均有增量实现但仍有明确残留，P6 尚未完成。`TradingCoreRuntime` 已成为
-Core 单写边界，exchange-core 0.5.8-emporia 是唯一可执行盘口，触发/风险/导出已经有 Core 路径；但
-immutable compatibility shell、native matcher snapshot restore、协议级 epoch registry、完整四线
-恢复/容量门禁仍在实施中。任何局部 smoke 或 micro benchmark 都不能替代最终资金和恢复验收。
+当前 P2/P3 已按 O(delta) persistent state、exchange-core 唯一 executable book 和 Core snapshot/受控
+matcher rebuild 通过阶段出口；P4 生产触发路径已由 Core-only 门禁收敛，P5 已具备批量导出/投影故障语义，
+P6 已完成六条产品线恢复和 20 秒容量证据，真实 provider/Kafka/PG 故障与长时容量仍在门禁中。
+`TradingCoreRuntime` 已成为 Core 单写边界，exchange-core 0.5.8-emporia 是唯一可执行盘口，触发/风险/导出
+已经有 Core 路径；native matcher persistence 不作为当前版本生产依赖，局部 smoke 或 micro benchmark
+不能替代生产容量结论。
 
 ## 模块
 
@@ -29,9 +31,10 @@ export PATH="${JAVA_HOME}/bin:${PATH}"
 mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ```
 
-三节点可以通过 `compose.yaml` 启动；canonical `scripts/` 测试脚本正在按主规格重新整理，旧业务逻辑脚本
-不得直接复用。一次只启动一条产品线；删除 Archive 或数据卷前必须先确认目标产品线并使用显式的 Docker
-volume 操作。脚本职责和验收命令以主规格第 18.3 节为准。
+三节点可以通过 `compose.yaml` 启动；仓库根目录的 canonical `scripts/` 已按主规格提供 Core-only 启停、
+探针、export、资金对账、恢复和容量入口，旧 DB/旧 trigger/旧 matching 业务脚本不得直接复用。一次只启动
+一条产品线；删除 Archive 或数据卷前必须先确认目标产品线并使用显式的 Docker volume 操作。脚本职责和验收
+命令以主规格第 18.3 节为准；这些入口不会伪装成已经运行的 HTTP provider、做市进程或 Kafka 集群。
 
 ## 协议约束
 

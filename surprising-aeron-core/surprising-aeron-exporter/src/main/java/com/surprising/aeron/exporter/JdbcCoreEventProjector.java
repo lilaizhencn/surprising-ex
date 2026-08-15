@@ -100,6 +100,10 @@ public final class JdbcCoreEventProjector {
                 export_sequence = ?, updated_at_epoch_ms = ?
             WHERE product_line = ? AND asset = ? AND export_sequence < ?
             """;
+    private static final String EVENT_EXISTS = """
+            SELECT 1 FROM core_event_projection
+            WHERE product_line = ? AND export_sequence = ?
+            """;
 
     private final DataSource dataSource;
 
@@ -122,10 +126,23 @@ public final class JdbcCoreEventProjector {
                 return true;
             } catch (SQLException exception) {
                 connection.rollback();
-                if ("23505".equals(exception.getSQLState())) return false;
+                if ("23505".equals(exception.getSQLState()) && eventExists(connection, productLine, event)) {
+                    return false;
+                }
                 throw exception;
             } finally {
                 connection.setAutoCommit(true);
+            }
+        }
+    }
+
+    private static boolean eventExists(Connection connection, ProductLine productLine,
+                                       CoreExportEvent event) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(EVENT_EXISTS)) {
+            statement.setString(1, productLine.name());
+            statement.setLong(2, event.exportSequence());
+            try (var result = statement.executeQuery()) {
+                return result.next();
             }
         }
     }

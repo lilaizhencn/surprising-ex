@@ -1,7 +1,6 @@
 package com.surprising.risk.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.risk.provider.config.RiskProperties;
 import org.junit.jupiter.api.Test;
@@ -22,11 +21,9 @@ class RiskRuntimeConfigServiceTest {
     }
 
     @Test
-    void rejectsLocalMarginThresholdUpdates() {
+    void runtimeUpdateOnlyChangesScanControls() {
         var service = new RiskRuntimeConfigService(new RiskProperties());
 
-        assertThatThrownBy(() -> service.update(null, null, 800_000L, null, null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("owned by versioned Aeron Core instrument policy");
+        assertThat(service.update(null, 25L, 10)).containsEntry("marginPolicySource", "AERON_CORE_INSTRUMENT");
     }
 }

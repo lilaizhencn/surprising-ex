@@ -39,8 +39,8 @@ class ReliableCoreExporterTest {
         assertThat(second.status().pendingCount()).isZero();
         assertThat(published).hasSize(3);
         assertThat(calls).containsExactly(
-                CoreMessageType.EXPORT_STATUS_QUERY, CoreMessageType.EXPORT_BATCH_QUERY, CoreMessageType.ACK_EXPORT,
-                CoreMessageType.EXPORT_STATUS_QUERY, CoreMessageType.EXPORT_BATCH_QUERY, CoreMessageType.ACK_EXPORT);
+                CoreMessageType.EXPORT_BATCH_QUERY, CoreMessageType.ACK_EXPORT,
+                CoreMessageType.EXPORT_BATCH_QUERY, CoreMessageType.ACK_EXPORT);
         assertThat(exporter.health().healthy()).isTrue();
     }
 

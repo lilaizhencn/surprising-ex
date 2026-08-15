@@ -63,7 +63,7 @@ final class CoreContractMath {
             long signedQuantitySteps,
             long markPriceTicks) {
         long maintenanceMarginRatePpm = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
-                ? riskBracket(instrument, notionalUnits(instrument, Math.absExact(signedQuantitySteps), markPriceTicks))
+                ? maintenanceRiskBracket(instrument, notionalUnits(instrument, Math.absExact(signedQuantitySteps), markPriceTicks))
                 .maintenanceMarginRatePpm()
                 : instrument.maintenanceMarginRatePpm();
         if (instrument.contractType().isOption()) {
@@ -90,19 +90,27 @@ final class CoreContractMath {
     }
 
     static CoreRiskLimitBracket riskBracket(CoreInstrumentState instrument, long notionalUnits) {
-        if (notionalUnits < 0) {
-            throw new IllegalArgumentException("notional must not be negative");
-        }
-        CoreRiskLimitBracket bracket = instrument.riskLimitBrackets().stream()
-                .filter(value -> value.notionalFloorUnits() <= notionalUnits)
-                .max(java.util.Comparator.comparingLong(CoreRiskLimitBracket::notionalFloorUnits))
-                .orElseThrow(() -> new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
-                        "position notional has no risk bracket"));
+        CoreRiskLimitBracket bracket = bracketForNotional(instrument, notionalUnits);
         if (notionalUnits > bracket.notionalCapUnits()) {
             throw new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
                     "position notional exceeds instrument risk brackets");
         }
         return bracket;
+    }
+
+    static CoreRiskLimitBracket maintenanceRiskBracket(CoreInstrumentState instrument, long notionalUnits) {
+        return bracketForNotional(instrument, notionalUnits);
+    }
+
+    private static CoreRiskLimitBracket bracketForNotional(CoreInstrumentState instrument, long notionalUnits) {
+        if (notionalUnits < 0) {
+            throw new IllegalArgumentException("notional must not be negative");
+        }
+        return instrument.riskLimitBrackets().stream()
+                .filter(value -> value.notionalFloorUnits() <= notionalUnits)
+                .max(java.util.Comparator.comparingLong(CoreRiskLimitBracket::notionalFloorUnits))
+                .orElseThrow(() -> new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
+                        "position notional has no risk bracket"));
     }
 
     static long pnlUnits(

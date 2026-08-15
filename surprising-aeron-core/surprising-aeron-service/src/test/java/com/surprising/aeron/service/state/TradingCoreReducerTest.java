@@ -194,6 +194,51 @@ class TradingCoreReducerTest {
     }
 
     @Test
+    void addingIntoHigherRiskBracketFreezesAndAllocatesTheExistingPositionDelta() {
+        TradingCoreState state = derivativeWithBrackets();
+        state = reducer.updateLeverage(state, 101,
+                new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000L));
+        state = reducer.updateLeverage(state, 202,
+                new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000L));
+        state = reducer.adjustBalance(state, 101, new BalanceAdjustmentCommand("USDT", 1_000));
+        state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("USDT", 1_000));
+        state = reducer.placeOrder(state, 202,
+                order(2, CoreOrderSide.SELL, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+        state = reducer.placeOrder(state, 101,
+                order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+        state = reducer.applyMatches(state, 1, "BTC", "USDT",
+                List.of(new CoreMatch(2, 202, 10, 10, true, true)));
+
+        TradingCoreState withMaker = reducer.placeOrder(state, 202,
+                new PlaceOrderCommand(3, "BTC-USDT", 1, "BTC", "USDT", "USDT", CoreOrderSide.SELL,
+                        10, 20, false, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+        TradingCoreState withAdd = reducer.placeOrder(withMaker, 101,
+                new PlaceOrderCommand(4, "BTC-USDT", 1, "BTC", "USDT", "USDT", CoreOrderSide.BUY,
+                        10, 20, false, ReservationKind.DERIVATIVE_MARGIN, "USDT", 50));
+
+        assertThat(withAdd.user(101).balances().get("USDT").lockedUnits()).isEqualTo(60);
+        TradingCoreState matched = reducer.applyMatches(withAdd, 4, "BTC", "USDT",
+                List.of(new CoreMatch(3, 202, 10, 20, true, true)));
+        assertThat(matched.user(101).positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(60);
+        assertThat(matched.user(101).balances().get("USDT").lockedUnits()).isEqualTo(60);
+    }
+
+    @Test
+    void leverageMustMeetTheProjectedRiskBracketMarginRate() {
+        TradingCoreState state = derivativeWithBrackets();
+        TradingCoreState leveraged = reducer.updateLeverage(state, 101,
+                new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 8_000_000L));
+        TradingCoreState funded = reducer.adjustBalance(leveraged, 101,
+                new BalanceAdjustmentCommand("USDT", 1_000));
+
+        assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
+                new PlaceOrderCommand(9, "BTC-USDT", 1, "BTC", "USDT", "USDT", CoreOrderSide.BUY,
+                        10, 30, false, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("LEVERAGE_EXCEEDS_RISK_BRACKET"));
+    }
+
+    @Test
     void projectedSameSideOrdersCannotExceedCoreInstrumentLimit() {
         TradingCoreState state = derivativeWithRiskPolicy(150, 1_000, 10_000_000L, 150, 10_000_000L);
         state = reducer.adjustBalance(state, 101, new BalanceAdjustmentCommand("USDT", 10_000));
@@ -433,6 +478,16 @@ class TradingCoreReducerTest {
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0, 10_000_000L, maxPosition, openInterestRate, openInterestFloor,
                 List.of(new CoreRiskLimitBracket(1, 0, bracketCap, bracketMaxLeverage, 100_000, 50_000)));
+        return reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument);
+    }
+
+    private TradingCoreState derivativeWithBrackets() {
+        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+                com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
+                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
+                0, -1, 0, 10_000_000L, 1_000, 10_000_000L, 1_000,
+                List.of(new CoreRiskLimitBracket(1, 0, 200, 10_000_000L, 100_000, 50_000),
+                        new CoreRiskLimitBracket(2, 200, 1_000, 10_000_000L, 200_000, 100_000)));
         return reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument);
     }
 

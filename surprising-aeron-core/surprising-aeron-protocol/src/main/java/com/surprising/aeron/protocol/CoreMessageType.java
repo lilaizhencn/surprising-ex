@@ -56,6 +56,7 @@ public enum CoreMessageType {
     USER_OPEN_TRIGGER_ORDERS_QUERY(120, WireMessageKind.QUERY),
     FUNDING_PROGRESS_QUERY(121, WireMessageKind.QUERY),
     SETTLEMENT_PROGRESS_QUERY(122, WireMessageKind.QUERY),
+    COMMAND_RESULT_QUERY(123, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -74,6 +75,7 @@ public enum CoreMessageType {
     USER_OPEN_TRIGGER_ORDERS_RESULT(215, WireMessageKind.RESPONSE),
     FUNDING_PROGRESS_RESULT(216, WireMessageKind.RESPONSE),
     SETTLEMENT_PROGRESS_RESULT(217, WireMessageKind.RESPONSE),
+    COMMAND_RESULT_RESULT(218, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

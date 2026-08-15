@@ -42,6 +42,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingEgress.clear();
         idleStrategy = cluster.idleStrategy();
         role.set(cluster.role());
+        System.out.printf("Aeron core role productLine=%s role=%s%n", productLine, cluster.role());
         if (snapshotImage != null) {
             loadSnapshot(snapshotImage);
         }
@@ -89,6 +90,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public void onRoleChange(Cluster.Role newRole) {
         role.set(newRole);
+        System.out.printf("Aeron core role-change productLine=%s role=%s%n", productLine, newRole);
     }
 
     @Override
@@ -201,6 +203,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             case USER_OPEN_TRIGGER_ORDERS_QUERY -> CoreMessageType.USER_OPEN_TRIGGER_ORDERS_RESULT;
             case FUNDING_PROGRESS_QUERY -> CoreMessageType.FUNDING_PROGRESS_RESULT;
             case SETTLEMENT_PROGRESS_QUERY -> CoreMessageType.SETTLEMENT_PROGRESS_RESULT;
+            case COMMAND_RESULT_QUERY -> CoreMessageType.COMMAND_RESULT_RESULT;
             default -> request.header().kind() == WireMessageKind.QUERY
                     ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
         };

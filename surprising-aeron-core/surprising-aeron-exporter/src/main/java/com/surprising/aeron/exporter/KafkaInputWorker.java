@@ -3,7 +3,8 @@ package com.surprising.aeron.exporter;
 import com.surprising.aeron.protocol.CoreInputEventCodec;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
-import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -27,6 +28,7 @@ public final class KafkaInputWorker {
 
     public int pollOnce(Duration timeout) {
         int processed = 0;
+        Map<TopicPartition, OffsetAndMetadata> offsets = new HashMap<>();
         for (ConsumerRecord<String, byte[]> record : consumer.poll(timeout)) {
             var event = CoreInputEventCodec.decode(record.value());
             if (event.productLine() != productLine) {
@@ -39,9 +41,12 @@ public final class KafkaInputWorker {
                 throw new IllegalStateException("core result does not authorize Kafka offset commit");
             }
             TopicPartition partition = new TopicPartition(record.topic(), record.partition());
-            consumer.commitSync(Collections.singletonMap(partition,
-                    new OffsetAndMetadata(Math.incrementExact(record.offset()))));
+            offsets.merge(partition, new OffsetAndMetadata(Math.incrementExact(record.offset())),
+                    (current, candidate) -> current.offset() >= candidate.offset() ? current : candidate);
             processed++;
+        }
+        if (!offsets.isEmpty()) {
+            consumer.commitSync(offsets);
         }
         return processed;
     }

@@ -7,12 +7,14 @@ import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
+import java.util.List;
 import java.util.TreeMap;
 import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -85,6 +87,26 @@ class CoreRiskStateTest {
         assertThat(completed.riskState().scan().complete()).isTrue();
         assertThat(completed.riskState().scan().lastUserId()).isEqualTo(300);
         assertThat(completed.riskState().snapshots()).hasSize(300);
+    }
+
+    @Test
+    void markPriceBeyondHighestRiskBracketStillProducesLiquidationSnapshot() {
+        UpsertInstrumentCommand command = new UpsertInstrumentCommand("BTC-USDT", 1,
+                ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                100_000, 50_000, 0, 0, 0, -1, 0, 10_000_000L, 100,
+                10_000_000L, 100, List.of(new CoreRiskLimitBracket(1, 0, 100,
+                        10_000_000L, 100_000, 50_000)));
+        TradingCoreState state = reducer.upsertInstrument(
+                TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), command);
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
+        state = withPosition(state, new CorePositionState("BTC-USDT", "USDT", 1,
+                10, 10, 100, 0, 100));
+
+        TradingCoreState marked = reducer.applyMarkPrice(state,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1));
+
+        assertThat(marked.riskState().scan().complete()).isTrue();
+        assertThat(marked.riskState().snapshots()).containsKey("7:BTC-USDT");
     }
 
     @Test

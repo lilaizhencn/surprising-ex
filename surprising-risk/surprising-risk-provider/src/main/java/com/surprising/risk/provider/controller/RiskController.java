@@ -70,8 +70,6 @@ public class RiskController {
             return runtimeConfigService.update(
                     request.calculationEnabled(),
                     request.scanDelayMs(),
-                    request.warningMarginRatioPpm(),
-                    request.liquidationMarginRatioPpm(),
                     request.scanBatchSize());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -81,8 +79,6 @@ public class RiskController {
     public record RuntimeConfigUpdate(
             Boolean calculationEnabled,
             Long scanDelayMs,
-            Long warningMarginRatioPpm,
-            Long liquidationMarginRatioPpm,
             Integer scanBatchSize) {
     }
 }

@@ -112,9 +112,9 @@ public class RiskService {
         RiskRuleOverride scan = override(overrides, "RISK_SCAN_CONTROL");
         return new RiskRulesResponse(2, List.of(
                 new RiskRuleResponse("GLOBAL_MARGIN_POLICY", "Core instrument risk policy",
-                        "CORE_INSTRUMENT_RISK_POLICY", true, null, null, null, null, "core", null, null, null),
+                        "CORE_INSTRUMENT_RISK_POLICY", true, null, null, "core", null, null, null),
                 rule("RISK_SCAN_CONTROL", "Aeron risk scan control", "SCAN_CONTROL",
-                        scan == null ? properties.getCalculation().isEnabled() : scan.enabled(), null, null,
+                        scan == null ? properties.getCalculation().isEnabled() : scan.enabled(),
                         properties.getCalculation().getScanDelayMs(), properties.getCalculation().getScanBatchSize(), scan)));
     }
 
@@ -139,7 +139,7 @@ public class RiskService {
             properties.getCalculation().setScanDelayMs(delay);
             properties.getCalculation().setScanBatchSize(batch);
             saved = rules.upsert(code, ruleName(command.ruleName(), "Aeron risk scan control"), "SCAN_CONTROL",
-                    enabled, null, null, delay, batch, admin, reason, now);
+                    enabled, delay, batch, admin, reason, now);
         } else {
             throw new IllegalArgumentException("unsupported risk rule: " + ruleCode);
         }
@@ -239,24 +239,23 @@ public class RiskService {
         return values.stream().filter(value -> value.ruleCode().equals(code)).findFirst().orElse(null);
     }
     private static RiskRuleResponse rule(String code, String name, String type, boolean enabled,
-                                         Long warning, Long liquidation, Long delay, Integer batch,
+                                         Long delay, Integer batch,
                                          RiskRuleOverride override) {
-        return new RiskRuleResponse(code, name, type, enabled, warning, liquidation, delay, batch,
+        return new RiskRuleResponse(code, name, type, enabled, delay, batch,
                 override == null ? "runtime" : "override", override == null ? null : override.adminUserId(),
                 override == null ? null : override.reason(), override == null ? null : override.updatedAt());
     }
     private static RiskRuleResponse ruleFrom(RiskRuleOverride value) {
         return new RiskRuleResponse(value.ruleCode(), value.ruleName(), value.ruleType(), value.enabled(),
-                null, null, value.scanDelayMs(),
+                value.scanDelayMs(),
                 value.scanBatchSize(), "override", value.adminUserId(), value.reason(), value.updatedAt());
     }
 
     public record RiskRulesResponse(int ruleCount, List<RiskRuleResponse> rules) {}
     public record RiskRuleResponse(String ruleCode, String ruleName, String ruleType, boolean enabled,
-                                   Long warningMarginRatioPpm, Long liquidationMarginRatioPpm, Long scanDelayMs,
+                                   Long scanDelayMs,
                                    Integer scanBatchSize, String source, String adminUserId, String reason,
                                    Instant updatedAt) {}
-    public record RiskRuleUpdateCommand(String ruleName, Boolean enabled, Long warningMarginRatioPpm,
-                                        Long liquidationMarginRatioPpm, Long scanDelayMs, Integer scanBatchSize,
+    public record RiskRuleUpdateCommand(String ruleName, Boolean enabled, Long scanDelayMs, Integer scanBatchSize,
                                         String reason) {}
 }

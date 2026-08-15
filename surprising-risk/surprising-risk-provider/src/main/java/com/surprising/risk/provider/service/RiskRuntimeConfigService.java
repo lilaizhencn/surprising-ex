@@ -33,13 +33,7 @@ public class RiskRuntimeConfigService {
 
     public Map<String, Object> update(Boolean calculationEnabled,
                                       Long scanDelayMs,
-                                      Long warningMarginRatioPpm,
-                                      Long liquidationMarginRatioPpm,
                                       Integer scanBatchSize) {
-        if (warningMarginRatioPpm != null || liquidationMarginRatioPpm != null) {
-            throw new IllegalArgumentException(
-                    "margin thresholds are owned by versioned Aeron Core instrument policy");
-        }
         if (calculationEnabled != null) {
             properties.getCalculation().setEnabled(calculationEnabled);
         }

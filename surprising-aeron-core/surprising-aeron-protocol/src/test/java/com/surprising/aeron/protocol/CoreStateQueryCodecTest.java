@@ -42,6 +42,13 @@ class CoreStateQueryCodecTest {
     }
 
     @Test
+    void roundTripsCommandResultQuery() {
+        UUID commandId = UUID.randomUUID();
+        assertThat(CoreStateQueryCodec.decodeCommandResultQuery(
+                CoreStateQueryCodec.encodeCommandResultQuery(commandId))).isEqualTo(commandId);
+    }
+
+    @Test
     void rejectsTruncatedQueryView() {
         byte[] encoded = CoreStateQueryCodec.encodeOrderState(new CoreOrderStateView(
                 1, ProductLine.SPOT, 7, "BTC-USDT", 3, CoreOrderSide.BUY,

@@ -183,8 +183,10 @@ public class TriggerProperties {
 
     public static class Execution {
         private int triggerBatchSize = 200;
+        private int maxTriggerScanPages = 16;
         private Duration staleTriggeringAfter = Duration.ofSeconds(30);
         private long maintenanceDelayMs = 1000L;
+        private boolean coreOnly;
 
         public int getTriggerBatchSize() {
             return triggerBatchSize;
@@ -192,6 +194,14 @@ public class TriggerProperties {
 
         public void setTriggerBatchSize(int triggerBatchSize) {
             this.triggerBatchSize = triggerBatchSize;
+        }
+
+        public int getMaxTriggerScanPages() {
+            return maxTriggerScanPages;
+        }
+
+        public void setMaxTriggerScanPages(int maxTriggerScanPages) {
+            this.maxTriggerScanPages = maxTriggerScanPages;
         }
 
         public Duration getStaleTriggeringAfter() {
@@ -208,6 +218,14 @@ public class TriggerProperties {
 
         public void setMaintenanceDelayMs(long maintenanceDelayMs) {
             this.maintenanceDelayMs = maintenanceDelayMs;
+        }
+
+        public boolean isCoreOnly() {
+            return coreOnly;
+        }
+
+        public void setCoreOnly(boolean coreOnly) {
+            this.coreOnly = coreOnly;
         }
     }
 

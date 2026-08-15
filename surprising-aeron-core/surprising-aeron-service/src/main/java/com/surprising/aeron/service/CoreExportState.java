@@ -139,7 +139,7 @@ final class CoreExportState {
             CoreMessage event = iterator.next();
             int eventLength = encodedLength(event);
             long nextLength = Math.addExact(encodedLength, Math.addExact(Integer.BYTES, eventLength));
-            if (nextLength > CoreExportCodec.MAX_BATCH_ENCODED_LENGTH) {
+            if (nextLength > CoreExportCodec.MAX_BATCH_ENCODED_LENGTH - CoreExportCodec.BATCH_STATUS_FIXED_LENGTH) {
                 break;
             }
             encodedLength = nextLength;

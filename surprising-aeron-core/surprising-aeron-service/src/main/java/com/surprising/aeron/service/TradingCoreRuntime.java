@@ -73,8 +73,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return reducer;
     }
 
+    TradingCoreReducer reducerForConstruction() {
+        return reducer;
+    }
+
     public DeterministicExchangeCoreAdapter matcher() {
         assertOwner();
+        return matcher;
+    }
+
+    DeterministicExchangeCoreAdapter matcherForConstruction() {
         return matcher;
     }
 
@@ -83,8 +91,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return positionUsers;
     }
 
+    PositionUserIndex positionUsersForConstruction() {
+        return positionUsers;
+    }
+
     public OpenInterestIndex openInterest() {
         assertOwner();
+        return openInterest;
+    }
+
+    OpenInterestIndex openInterestForConstruction() {
         return openInterest;
     }
 
@@ -93,8 +109,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return triggers;
     }
 
+    TriggerOrderIndex triggersForConstruction() {
+        return triggers;
+    }
+
     public AlgoOrderIndex algos() {
         assertOwner();
+        return algos;
+    }
+
+    AlgoOrderIndex algosForConstruction() {
         return algos;
     }
 
@@ -103,8 +127,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return liquidations;
     }
 
+    LiquidationIndex liquidationsForConstruction() {
+        return liquidations;
+    }
+
     public CancelAllAfterIndex timers() {
         assertOwner();
+        return timers;
+    }
+
+    CancelAllAfterIndex timersForConstruction() {
         return timers;
     }
 
@@ -113,8 +145,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return activeOrders;
     }
 
+    ActiveOrderIndex activeOrdersForConstruction() {
+        return activeOrders;
+    }
+
     public AdlPositionIndex adlPositions() {
         assertOwner();
+        return adlPositions;
+    }
+
+    AdlPositionIndex adlPositionsForConstruction() {
         return adlPositions;
     }
 
@@ -123,11 +163,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return riskSnapshots;
     }
 
+    RiskSnapshotIndex riskSnapshotsForConstruction() {
+        return riskSnapshots;
+    }
+
     public void transition(TradingCoreState before, TradingCoreState after) {
         assertOwner();
         if (before != state || after == null || after.productLine() != productLine) {
             throw new IllegalStateException("trading runtime transition is out of order");
         }
+        after.requireIncrementalLineage(before);
         positionUsers.update(before, after);
         openInterest.update(before, after);
         triggers.update(before, after);
