@@ -57,9 +57,6 @@ public class LiquidationFeeEventConsumer {
 
     private void requireCurrentProductTopic(String topic) {
         InsuranceProperties.Kafka kafka = properties.getKafka();
-        if (!kafka.isProductTopicsEnabled()) {
-            return;
-        }
         String expectedTopic = kafka.getLiquidationFeeEventsTopic();
         if (!expectedTopic.equals(topic)) {
             throw new ProductTopicMismatchException("liquidation fee topic must match current product line: expected="

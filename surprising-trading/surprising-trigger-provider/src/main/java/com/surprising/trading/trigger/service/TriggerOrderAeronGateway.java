@@ -31,9 +31,9 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     private final AeronClientPool clients;
     public TriggerOrderAeronGateway(TriggerProperties properties) {
         var aeron = properties.getAeron();
-        this.clients = new AeronClientPool("trigger", properties.getKafka().getProductLine(), aeron.getHostnames(),
+        this.clients = new AeronClientPool("trigger", properties.getProductLine(), aeron.getHostnames(),
                 aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
-                "trigger-" + properties.getKafka().getProductLine().name() + "-node-" + aeron.getNodeId());
+                "trigger-" + properties.getProductLine().name() + "-node-" + aeron.getNodeId());
     }
     public CoreResponse command(CoreMessageType type, UUID id, long userId, byte[] payload) {
         CoreResponse response = clients.command(type, id, userId, payload);
@@ -51,10 +51,23 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     }
     public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit,
                                                        CoreTriggerOrderStatus status, long expiresBeforeEpochMillis) {
-        CoreResponse response = clients.query(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, UUID.randomUUID(), userId,
-                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(0, symbol, before, limit, status,
-                        expiresBeforeEpochMillis)));
-        requireOk(response); return CoreTriggerOrderCodec.decodeList(response.data());
+        return query(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, userId, 0, symbol, before, limit, status,
+                expiresBeforeEpochMillis);
+    }
+
+    public List<CoreTriggerOrderStateView> query(long userId, long triggerOrderId, String symbol, long before,
+                                                  int limit, CoreTriggerOrderStatus status) {
+        return query(CoreMessageType.TRIGGER_ORDER_QUERY, userId, triggerOrderId, symbol, before, limit, status, 0);
+    }
+
+    private List<CoreTriggerOrderStateView> query(CoreMessageType messageType, long userId, long triggerOrderId,
+                                                   String symbol, long before, int limit,
+                                                   CoreTriggerOrderStatus status, long expiresBeforeEpochMillis) {
+        CoreResponse response = clients.query(messageType, UUID.randomUUID(), userId,
+                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerOrderId, symbol, before, limit,
+                        status, expiresBeforeEpochMillis)));
+        requireOk(response);
+        return CoreTriggerOrderCodec.decodeList(response.data());
     }
 
     public List<CoreTriggerOrderStateView> expiredOrders(long epochMillis, int limit) {

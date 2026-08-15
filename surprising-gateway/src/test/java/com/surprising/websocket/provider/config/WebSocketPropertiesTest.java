@@ -8,24 +8,24 @@ import org.junit.jupiter.api.Test;
 class WebSocketPropertiesTest {
 
     @Test
-    void defaultsToLegacyTopicsUntilProductTopicsAreEnabled() {
+    void defaultsToLinearPerpetualTopics() {
         WebSocketProperties properties = new WebSocketProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setGroupId("node-a");
 
-        assertThat(properties.getKafka().getGroupId()).isEqualTo("node-a");
-        assertThat(properties.getKafka().getCandleTopic()).isEqualTo("surprising.perp.candle.events.v1");
-        assertThat(properties.getKafka().getMatchTradesTopic()).isEqualTo("surprising.perp.match.trades.v1");
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-linear-perp-websocket-v1-node-a");
+        assertThat(properties.getKafka().getCandleTopic()).isEqualTo("surprising.linear-perp.candle.events.v1");
+        assertThat(properties.getKafka().getMatchTradesTopic()).isEqualTo("surprising.linear-perp.match.trades.v1");
         assertThat(properties.getKafka().getTriggerOrderEventsTopic())
-                .isEqualTo("surprising.perp.trigger-order.events.v1");
+                .isEqualTo("surprising.linear-perp.trigger-order.events.v1");
         assertThat(properties.getKafka().getAccountRiskEventsTopic())
-                .isEqualTo("surprising.risk.account.events.v1");
+                .isEqualTo("surprising.linear-perp.risk.account.events.v1");
     }
 
     @Test
     void canResolveFanoutTopicsAndPerNodeGroupFromProductLine() {
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setGroupId("node-a");
 
         assertThat(properties.getKafka().getGroupId())
@@ -40,7 +40,7 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising.linear-delivery.price.events.v1");
         assertThat(properties.getKafka().isFundingRateTopicEnabled()).isFalse();
         assertThat(properties.getKafka().getFundingRateTopic())
-                .isEqualTo("surprising.perp.funding.rate.v1");
+                .isEqualTo("surprising.linear-delivery.funding.rate.v1");
         assertThat(properties.getKafka().getOrderEventsTopic())
                 .isEqualTo("surprising.linear-delivery.order.events.v1");
         assertThat(properties.getKafka().getTriggerOrderEventsTopic())
@@ -61,7 +61,6 @@ class WebSocketPropertiesTest {
     void canResolveFundingRateTopicForFundingProductLine() {
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        properties.getKafka().setProductTopicsEnabled(true);
 
         assertThat(properties.getKafka().isFundingRateTopicEnabled()).isTrue();
         assertThat(properties.getKafka().getFundingRateTopic())
@@ -77,6 +76,5 @@ class WebSocketPropertiesTest {
             assertThat(properties.getKafka().getCoreEventsTopic())
                     .isEqualTo("surprising." + productLine.topicSegment() + ".core.events.v1");
         }
-        assertThat(properties.getKafka().isCorePrivateEventsEnabled()).isTrue();
     }
 }

@@ -365,7 +365,7 @@ public class AccountService {
 
     private ProductLine currentProductLine() {
         AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
-        if (kafka == null || kafka.getProductLine() == null || !kafka.isProductTopicsEnabled()) {
+        if (kafka == null || kafka.getProductLine() == null) {
             throw new IllegalStateException("account 未配置唯一产品线");
         }
         return kafka.getProductLine();

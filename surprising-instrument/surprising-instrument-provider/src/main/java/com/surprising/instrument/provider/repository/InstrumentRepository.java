@@ -125,7 +125,6 @@ public class InstrumentRepository {
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
-    /** 返回产品线下全部历史版本，供下游处理旧持仓和旧订单的快照恢复。 */
     public List<InstrumentResponse> listByProductLine(ProductLine productLine) {
         if (productLine == null) {
             return List.of();

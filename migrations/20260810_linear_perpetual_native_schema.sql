@@ -123,7 +123,7 @@ ALTER TABLE funding_payments
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 UPDATE funding_payments
-   SET command_id = 'legacy-funding-payment-' || payment_id
+   SET command_id = 'funding-payment:' || payment_id
  WHERE command_id IS NULL;
 
 ALTER TABLE funding_payments
@@ -162,8 +162,8 @@ ALTER TABLE insurance_deficit_coverages
     ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 
 UPDATE insurance_deficit_coverages
-   SET reserve_command_id = COALESCE(reserve_command_id, 'legacy-reserve-' || coverage_id),
-       finalize_command_id = COALESCE(finalize_command_id, 'legacy-finalize-' || coverage_id)
+   SET reserve_command_id = COALESCE(reserve_command_id, 'reserve:' || coverage_id),
+       finalize_command_id = COALESCE(finalize_command_id, 'finalize:' || coverage_id)
  WHERE reserve_command_id IS NULL
     OR finalize_command_id IS NULL;
 

@@ -1,12 +1,10 @@
 package com.surprising.price.mark.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
-import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.price.mark")
@@ -18,12 +16,6 @@ public class MarkPriceProperties {
     private Coordination coordination = new Coordination();
     private Audit audit = new Audit();
     private Aeron aeron = new Aeron();
-
-    /** 启动时拒绝未隔离的标记价格 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "mark-price");
-    }
 
     public Kafka getKafka() {
         return kafka;
@@ -109,25 +101,23 @@ public class MarkPriceProperties {
     }
 
     public String bookTickerTopic() {
-        return kafka.productTopicsEnabled ? productTopics().bookTickerTopic() : topics.getBookTickerTopic();
+        return productTopics().bookTickerTopic();
     }
 
     public String tradeTopic() {
-        return kafka.productTopicsEnabled ? productTopics().publicTradesTopic() : topics.getTradeTopic();
+        return productTopics().publicTradesTopic();
     }
 
     public String fundingRateTopic() {
-        return isFundingRateExpected() && kafka.productTopicsEnabled
-                ? productTopics().fundingRateTopic()
-                : topics.getFundingRateTopic();
+        return productTopics().fundingRateTopic();
     }
 
     public boolean isFundingRateExpected() {
-        return !kafka.productTopicsEnabled || kafka.productLine.isFundingProduct();
+        return kafka.productLine.isFundingProduct();
     }
 
     public String priceEventsTopic() {
-        return kafka.productTopicsEnabled ? productTopics().priceEventsTopic() : topics.getPriceEventsTopic();
+        return productTopics().priceEventsTopic();
     }
 
     private ProductTopicNames productTopics() {
@@ -137,8 +127,6 @@ public class MarkPriceProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private boolean productTopicsEnabled;
-        private String groupId = "surprising-mark-price-v1";
         private int concurrency = 2;
         private int maxPollRecords = 500;
 
@@ -158,20 +146,8 @@ public class MarkPriceProperties {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         }
 
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
         public String getGroupId() {
-            return productTopicsEnabled ? ProductTopicNames.of(productLine).consumerGroup("mark-price") : groupId;
-        }
-
-        public void setGroupId(String groupId) {
-            this.groupId = groupId;
+            return ProductTopicNames.of(productLine).consumerGroup("mark-price");
         }
 
         public int getConcurrency() {

@@ -30,7 +30,6 @@ class IndexPriceServiceTest {
     void publishesCompleteIndexSnapshotToTheProductSpecificTopicWithoutSynchronouslyWritingAuditTables() {
         IndexPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        properties.getKafka().setProductTopicsEnabled(true);
         IndexPriceProperties.SymbolConfig symbol = symbol("BTC-USDT-260925-70000-C");
         IndexInstrumentConfigService configService = mock(IndexInstrumentConfigService.class);
         ExternalSpotPriceClient spotPriceClient = mock(ExternalSpotPriceClient.class);

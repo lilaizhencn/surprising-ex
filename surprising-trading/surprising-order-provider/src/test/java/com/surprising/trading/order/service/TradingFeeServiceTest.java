@@ -149,7 +149,6 @@ class TradingFeeServiceTest {
                                       ProductLine productLine) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
-        properties.getKafka().setProductTopicsEnabled(true);
         return new TradingFeeService(feeRepository, idGenerator, instrumentRuleLookup,
                 feeSnapshotLookup, publisher, new FeeScheduleSnapshotCache(), properties);
     }

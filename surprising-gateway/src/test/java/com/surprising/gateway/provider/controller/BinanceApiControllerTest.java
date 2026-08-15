@@ -72,8 +72,8 @@ class BinanceApiControllerTest {
         ResponseEntity<byte[]> response = controller.handle(request, null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
-        assertThat(new ObjectMapper().readValue(response.getBody(), Map.class))
-                .containsEntry("tranId", 7123);
+        Map<?, ?> transfer = new ObjectMapper().readValue(response.getBody(), Map.class);
+        assertThat(String.valueOf(transfer.get("tranId"))).isEqualTo("7123");
         ArgumentCaptor<byte[]> body = ArgumentCaptor.forClass(byte[].class);
         verify(proxy).proxyCompat(anyString(), eq("/transfers"), isNull(), eq(HttpMethod.POST), any(), body.capture(),
                 eq(1001L));

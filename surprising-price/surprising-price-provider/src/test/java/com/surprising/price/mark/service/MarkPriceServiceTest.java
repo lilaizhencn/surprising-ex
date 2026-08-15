@@ -139,7 +139,6 @@ class MarkPriceServiceTest {
         when(coordinationService.encoding("BTC-USDT")).thenReturn(encoding());
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
                 mock(LatestMarkPriceCache.class));
@@ -163,7 +162,6 @@ class MarkPriceServiceTest {
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        properties.getKafka().setProductTopicsEnabled(true);
         MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
                 mock(LatestMarkPriceCache.class));
@@ -202,7 +200,6 @@ class MarkPriceServiceTest {
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        properties.getKafka().setProductTopicsEnabled(true);
         MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
                 mock(LatestMarkPriceCache.class));

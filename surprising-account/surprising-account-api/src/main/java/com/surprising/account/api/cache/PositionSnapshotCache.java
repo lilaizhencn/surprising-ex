@@ -18,9 +18,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 按产品线隔离的本地持仓快照。
  *
  * <p>该类只负责消费已经提交的持仓事件，不负责资金计算和数据库写入。相同用户的事件由 Kafka
- * 用户键保证顺序；这里按用户串行更新并按精确持仓键校验 revision，既能防止重放旧消息回退状态，
- * 也能兼容启动扫描按 symbol 排序而不是按 revision 排序的恢复页。
- * 数量为零的仓位会保留，避免延迟旧消息把已经平掉的仓位重新打开。</p>
+ * 用户键保证顺序；这里按用户串行更新并按精确持仓键校验 revision，防止重放过期消息回退状态。
+ * 数量为零的仓位会保留，避免延迟消息把已经平掉的仓位重新打开。</p>
  */
 public final class PositionSnapshotCache {
 
@@ -37,7 +36,6 @@ public final class PositionSnapshotCache {
         this.productLine = productLine;
     }
 
-    /** 应用一个完整持仓事件；旧事件只会被忽略，不会覆盖新快照。 */
     public ApplyResult apply(PositionUpdatedEvent event) {
         if (event == null) {
             throw new IllegalArgumentException("position event is required");
@@ -52,7 +50,6 @@ public final class PositionSnapshotCache {
             PositionUpdatedEvent previous = positions.get(key);
             long previousRevision = previous == null ? 0L : previous.revision();
             if (event.revision() < lastUserRevision) {
-                // 同一用户的旧修订不能因为对应持仓键尚未出现而重新创建陈旧仓位。
                 return ApplyResult.STALE;
             }
             if (event.revision() < previousRevision) {

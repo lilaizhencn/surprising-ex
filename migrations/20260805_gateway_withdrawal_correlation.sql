@@ -176,7 +176,7 @@ BEGIN
              ADD COLUMN IF NOT EXISTS external_reference TEXT';
     EXECUTE $sql$
         UPDATE gateway_wallet_withdrawals
-           SET external_reference = 'custody-wallet-withdrawal:legacy:' || withdrawal_id::text
+           SET external_reference = 'custody-wallet-withdrawal:' || withdrawal_id::text
          WHERE external_reference IS NULL
     $sql$;
 

@@ -32,7 +32,7 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ```
 
 三节点可以通过 `compose.yaml` 启动；仓库根目录的 canonical `scripts/` 已按主规格提供 Core-only 启停、
-探针、export、资金对账、恢复和容量入口，旧 DB/旧 trigger/旧 matching 业务脚本不得直接复用。一次只启动
+探针、export、资金对账、恢复和容量入口。一次只启动
 一条产品线；删除 Archive 或数据卷前必须先确认目标产品线并使用显式的 Docker volume 操作。脚本职责和验收
 命令以主规格第 18.3 节为准；这些入口不会伪装成已经运行的 HTTP provider、做市进程或 Kafka 集群。
 

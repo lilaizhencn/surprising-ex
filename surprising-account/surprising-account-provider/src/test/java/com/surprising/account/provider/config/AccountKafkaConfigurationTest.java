@@ -96,7 +96,6 @@ class AccountKafkaConfigurationTest {
     void canResolveSettlementTopicsAndGroupFromProductLine() {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        properties.getKafka().setProductTopicsEnabled(true);
 
         assertThat(properties.getKafka().getGroupId())
                 .isEqualTo("surprising-linear-perp-account-v1");

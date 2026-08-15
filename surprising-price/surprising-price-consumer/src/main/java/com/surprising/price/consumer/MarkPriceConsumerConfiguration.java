@@ -47,7 +47,6 @@ public class MarkPriceConsumerConfiguration {
             @Override
             public void onPartitionsAssigned(Consumer<?, ?> consumer, Collection<TopicPartition> partitions) {
                 if (consumer != null && partitions != null && !partitions.isEmpty()) {
-                    // 即使旧消费组存在已提交位点，也从分区尾部重新开始，等待最新实时消息。
                     consumer.seekToEnd(partitions);
                 }
             }

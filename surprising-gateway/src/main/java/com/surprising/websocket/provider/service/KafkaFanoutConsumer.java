@@ -58,7 +58,7 @@ public class KafkaFanoutConsumer {
     public KafkaFanoutConsumer(ObjectMapper objectMapper,
                                SubscriptionRegistry registry,
                                CandleUpdateCoalescer candleUpdateCoalescer) {
-        this(objectMapper, registry, candleUpdateCoalescer, new WebSocketProperties());
+        this(objectMapper, registry, candleUpdateCoalescer, defaultTestProperties());
     }
 
     @Autowired
@@ -70,6 +70,12 @@ public class KafkaFanoutConsumer {
         this.registry = registry;
         this.candleUpdateCoalescer = candleUpdateCoalescer;
         this.properties = properties;
+    }
+
+    private static WebSocketProperties defaultTestProperties() {
+        WebSocketProperties properties = new WebSocketProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        return properties;
     }
 
     public void onCandle(ConsumerRecord<String, String> record) {

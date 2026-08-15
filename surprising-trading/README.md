@@ -1,7 +1,7 @@
 # surprising-trading
 
 
-Surprising Exchange 现货、永续、交割和期权交易模块。当前已实现独立的 `surprising-order-provider`、`surprising-trigger-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、幂等落库、产品线 Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
+Surprising Exchange 现货、永续、交割和期权交易模块。当前已实现独立的 `surprising-order-provider`、`surprising-trigger-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、Core 幂等状态、产品线 Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
 
 ## 模块
 
@@ -59,10 +59,10 @@ client / internal gateway
 client / internal gateway
   -> POST /api/v1/trading/trigger-orders
   -> surprising-trigger-provider
-  -> PostgreSQL trading_trigger_orders
-  -> consume surprising.<product-segment>.price.events.v1 (MARK_PRICE branch)
-  -> 通过订单入口 API 提交 reduceOnly 平仓单
-  -> 正常订单 / 撮合 / 账户 / WebSocket 链路
+  -> Aeron Core CoreTriggerOrderState
+  -> Core 接收 APPLY_MARK_PRICE 并按增量索引触发
+  -> Core 原子创建 reduce-only 子订单并撮合
+  -> 账户 / WebSocket 链路，状态异步导出投影
 ```
 
 订单 provider 不直接撮合，也不直接承担 WebSocket 推送。订单状态推送由独立服务消费当前产品线的订单和撮合 Topic 后完成 fanout。
@@ -77,8 +77,7 @@ client / internal gateway
 全仓亏损、手续费和资金费可以使用全仓可用余额以及全仓持仓保证金兜底；逐仓只消耗同一 `userId + symbol + asset + marginMode`
 下的逐仓持仓保证金，不会动用其他 symbol 或全仓余额。用户手动追加/减少逐仓保证金由
 `surprising-account-provider` 的 `POST /api/v1/accounts/position-margin-adjustments` 处理。同一用户同一 symbol
-要在 `CROSS` 和 `ISOLATED` 之间切换，必须先关闭该 symbol 已有持仓并取消普通开放订单和待触发条件单；order-provider 和
-trigger-provider 会用 `userId + symbol` 的 PostgreSQL transaction advisory lock 串行化这条检查。
+要在 `CROSS` 和 `ISOLATED` 之间切换，必须先关闭该 symbol 已有持仓并取消普通开放订单和待触发条件单；这项状态检查和裁决统一在 Aeron Core 的单写者状态机内完成。
 
 持仓模式按用户维度配置，默认是 `ONE_WAY`。用户只能在无非零持仓、无活动挂单、无待触发条件单、无未结算撮合/账户状态时通过
 account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSide = NET`；`HEDGE` 下普通订单和条件单必须携带
@@ -89,7 +88,7 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 
 - `init.sql` 默认 `BTC-USDT`、`ETH-USDT` 使用 maker `200 ppm`、taker `500 ppm`，即 `0.02% / 0.05%`。
 - `trading_fee_schedules` 可配置用户全局或单 symbol 覆盖，`source_type` 支持 `USER_OVERRIDE`、`VIP`、`MARKET_MAKER`、`PROMOTION`、`RISK_OVERRIDE`。
-  单 symbol 优先于用户全局，最后回退 instrument 默认费率。
+  单 symbol 优先于用户全局，未匹配时使用当前 Instrument 默认费率。
 - 多个用户全局费率同时 active 时，source 优先级是 `RISK_OVERRIDE`、`USER_OVERRIDE`、`PROMOTION`、`MARKET_MAKER`、`VIP`，防止 VIP 费率覆盖风控、人工、活动或做市商费率。
 - 管理接口：`POST /api/v1/admin/trading/fees/schedules` 新增/更新费率，`POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` 禁用费率，
   `GET /api/v1/admin/trading/fees/schedules` 查询配置。查询支持 `limit/cursor/sort` 游标分页，排序白名单为 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`、`effectiveTime.desc`、`effectiveTime.asc`，响应保留 `schedules/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
@@ -168,25 +167,23 @@ REST 接口：
 
 大型交易所的 TP/SL 通常是活跃订单簿外的条件单。本模块按这个模型实现：
 
-- 条件单先以 `PENDING` 状态写入 Aeron Core 的 `CoreTriggerOrderState`，触发前不进入 exchange-core，也不冻结新增保证金；数据库只接收导出投影。
+- 条件单先以 `PENDING` 状态写入 Aeron Core 的 `CoreTriggerOrderState`，触发前不进入 exchange-core，也不冻结新增保证金。
 - 标记价格由 price-provider 通过单写入 Aeron `APPLY_MARK_PRICE` 命令送入 Core。Core 按 symbol 的价格范围索引只取 crossing candidates，不做全量条件单扫描。
 - 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，采样标记价大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，采样标记价小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
-- `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护每秒采样标记价的最高价，从最高价回撤达到回调比例时触发；BUY 追踪止损维护每秒采样标记价的最低价，反弹达到回调比例时触发。只有追踪止损有这些水位字段；固定 TP/SL 不会更新它们，PostgreSQL 也只在首次激活或采样标记价出现新高/新低时写追踪水位。
-- trigger provider 只消费统一 `price.events` 的 `MARK_PRICE` 分支用于展示和恢复，不再参与 Core 触发裁决；Core 直接校验价格 sequence、过期时间、追踪水位和触发条件。
+- `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护每次标记价更新的最高价，从最高价回撤达到回调比例时触发；BUY 追踪止损维护最低价，反弹达到回调比例时触发。水位和状态只由 Core 维护。
+- trigger provider 不消费价格或持仓 Kafka 事件，也不维护条件单副本；Core 直接校验价格 sequence、过期时间、追踪水位和触发条件。
 - 多个 trigger-provider 节点可以同时运行，用户查询和撤单通过 Aeron Core 按用户边界执行；`TRIGGERING` 的重试和投影由 Core 状态机负责。
 - 静态 `TAKE_PROFIT`/`STOP_LOSS`、追踪止损都进入 Core 的增量 symbol/position/OCO 索引。索引更新随 Core 状态转换完成，标记价命令只访问命中的价格范围，不使用 Redis 或数据库锁抢单。
-- Redis score 只使用 `2^53-1` 以内可精确表示的整数 ticks；已有数据超过范围时索引保持 not-ready 并退回数据库扫描，不能用浮点近似冒漏触发风险。新静态 TP/SL 在 Redis 索引写失败时 fail-closed；Redis 查询不可用时，已经提交的条件单仍走数据库 fallback 触发。
-- readiness marker 使用短 TTL 并在校准后刷新。带 token 的 `SET NX` lease 和 compare-and-delete Lua 解锁只用于防止多节点重复重建，不串行业务触发。终态 DB 更新成功后再幂等删除 Redis member，因此故障最多留下会被 DB 拒绝的陈旧候选，不会制造错误数据库终态。
-- 触发后通过 order-provider 提交 `reduceOnly=true`、`postOnly=false` 的平仓单，`clientOrderId=trigger-<triggerOrderId>`。order-provider 的幂等键会保护重试不会创建重复平仓单。
-- 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。
+- 触发裁决、过期、OCO 和子订单创建都在 Aeron Core 内完成；trigger provider 只负责 API 到 Core 的命令和查询转发。
+- 触发后的真实子订单继续走 Core 撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger provider 不直接修改余额或持仓。
 - `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。静态 TP/SL 也可用 `LIMIT` 执行且要求 `priceTicks > 0`；触发执行不支持 `GTX`。
 - 可选 `ocoGroupId` 支持成对 TP/SL 互撤。Core 在同一个命令状态转换内通过 OCO 索引取消其它 pending sibling，再生成 reduce-only 平仓单。
 - 持仓完全归零时，Core 直接按用户、symbol、margin、position-side 的 position 索引取消 pending 条件单；不会扫描全量条件单，`TRIGGERING` 状态不会被抢撤。
 - `expiresAt` 是可选字段：普通 TP/SL 可以长期有效，策略保护单可指定到期时间。Core 维护按过期时间排序的 pending 索引，维护任务每次只取有界的已到期集合并提交 `EXPIRE_TRIGGER_ORDER`，没有标记价事件也不会长期残留，更不会扫描全量条件单。
-- 批量条件单放置支持 `atomic=true`，用于组合 TP/SL 的全成全撤语义。原子模式下任一条校验失败会拒绝整组、回滚已插入条件单，并返回逐项失败结果；默认批量模式仍保持逐条隔离成功/失败。
-- OCO sibling 在 claim 阶段就会取消；如果后续 order-provider 执行失败，该 OCO 组也已经被消费。这个取舍可以避免多节点 trigger-provider 并发下重复平仓，执行失败后客户端可以重新挂一组 TP/SL。
+- 批量条件单默认逐条提交并保持成功/失败隔离。当前 Aeron Core 命令协议没有批量事务，`atomic=true` 会在不提交任何订单的情况下返回整组拒绝；需要全成全撤语义时必须先增加 Core 原子批命令。
+- OCO sibling 在 Core 执行阶段就会取消；如果子订单被拒绝，该 OCO 组也已经被消费。客户端可以重新挂一组 TP/SL。
 - 每次已提交的条件单状态变化都会进入 Core Export 的 trigger delta；gateway/WebSocket 按 delta 推送私有 `triggerOrders` 频道，客户端按 event id 去重并在重连后重新拉取 `GET /open`。
-- 当前条件单 API 不做原地改单。`GET /open` 在 Core-only 模式下按 `userId + symbol + cursor` 查询 Core，返回 `nextCursor/hasMore`；数据库仅用于后台审计和历史投影。
+- 当前条件单 API 不做原地改单。`GET /open` 按 `userId + symbol + cursor` 查询 Core，返回 `nextCursor/hasMore`；历史审计通过 Core Export 异步投影。
 
 REST 接口：
 
@@ -220,23 +217,18 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 条件单用户接口也可通过 gateway 访问：`/api/v1/gateway/trading-trigger` 对应直连
 `/api/v1/trading/trigger-orders`。
 
-- `POST /api/v1/trading/trigger-orders/batch`：批量提交 TP/SL 条件单，最多 20 条；需要多腿 TP/SL 组合全成全撤时传 `atomic=true`。
+- `POST /api/v1/trading/trigger-orders/batch`：批量提交 TP/SL 条件单，最多 20 条；`atomic=true` 当前会被 Core 命令协议明确拒绝。
 - `POST /api/v1/trading/trigger-orders/batch-cancel`：批量撤销条件单，最多 50 条。
 - `POST /api/v1/trading/trigger-orders/cancel-open`：撤销用户所有 `PENDING` 条件单，可按 `symbol` 过滤，单次最多 1000 条；已经进入 `TRIGGERING` 的条件单不在这里撤销，避免和触发执行抢状态。
 - `GET /api/v1/trading/trigger-orders/open?userId=...&symbol=...&limit=...&cursor=...`：按 Core 游标查询用户待触发条件单，响应包含 `nextCursor` 和 `hasMore`。
 
-触发单持久化按表隔离：`TriggerOrderRepository`、`TriggerPositionRepository`、
-`TriggerPositionModeRepository`、`TriggerOpenOrderRepository` 和
-`TriggerOrderOutboxRepository` 分别只访问触发单、持仓、仓位模式、普通委托和 outbox 表；
-`TriggerSequenceRepository` 与 `TriggerCoordinationRepository` 只使用 PostgreSQL 原生序列和
-advisory lock，不访问业务表。`TriggerOrderPersistenceService` 在业务事务内聚合这些仓储，
-下单校验不再通过多表 Repository 查询。
+触发单事实状态只存在 Aeron Core 的 `CoreTriggerOrderState` 和增量索引中。Provider 不加载数据库、Redis 或 Kafka 触发单仓储，数据库只通过 Core Export 接收异步查询投影。
 
 ## TraceId 链路追踪
 
 - 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。
 - `surprising-order-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；进入异步链路前会显式写入 `OrderEvent` 和 `OrderCommandEvent`。
-- outbox payload 会携带 traceId，所以 outbox 重试和 Kafka 重放仍然保持同一个请求身份。
+- Core command、Core Export 和 WebSocket 事件会携带同一个 traceId，查询投影不参与在线裁决。
 - `surprising-matching-provider` 必须把 `OrderCommandEvent.traceId` 原样复制到每个 `MatchResultEvent` 和撮合产生的 `MatchTradeEvent`，撮合层不要重新生成 traceId。
 - `surprising-account-provider` 会把 `MatchTradeEvent.traceId` 写入 `PositionUpdatedEvent`，这样私有 WebSocket 持仓推送也能和订单入口、撮合审计行关联。
 - PostgreSQL 的 `trading_order_events`、`trading_match_results`、`trading_match_trades` 都保存 `trace_id`。生产日志建议同时输出 `traceId`、`orderId`、`commandId`、`tradeId`、symbol 和 Kafka topic/partition/offset。
@@ -319,7 +311,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `orderId`、`eventId`、`commandId` 等订单事实 ID 在 JVM/WAL 内按节点和时间生成；数据库序列只允许
   用于异步审计或管理配置，不参与订单状态裁决。
 - 订单 Kafka 通知由本地事实状态同步发布；数据库投影不得反向驱动订单状态。
-- `trading_trigger_orders_user_client_uidx` 保证同一用户 `clientTriggerOrderId` 的止盈止损下单幂等。
+- Core 的用户级 clientTriggerOrderId 索引保证同一用户条件单幂等。
 - `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + symbol + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
 - 订单事实事件由用户分区 WAL/RocksDB 提交后直接发送 Kafka；数据库投影只按用户修订号异步替换，数据库不可用不会回滚订单状态。
 - HTTP、账户结果、撮合结果和只减仓清理都必须先写入 `order.user.commands.v1`；订单节点之间不能直接
@@ -358,6 +350,7 @@ symbol，并为 exchange-core 建立稳定的 `symbolId`、asset/currency id：
 - 撮合结果、成交、订单状态由 Aeron Core 同一条命令原子更新；matching provider 只消费 Core
   Event 做行情和查询投影。合约正文、当前版本和可交易状态统一从本地 JVM 快照读取，运行中由
   Instrument Kafka 增量事件更新。
+- exchange-core 是唯一可执行和可查询的实时订单簿；Aeron Core 中的 `CoreBookState` 只作为快照恢复和一致性校验清单，不作为第二撮合或盘口查询实现。
 - 启动订单簿从 Aeron `BOOK_STATE_QUERY`/Cluster snapshot 恢复，不读取订单表拼装在线订单簿。
 
 撮合资产和交易对编号不再持久化到数据库，由 `MatchingSymbolService` 按产品线和标准化名称稳定哈希派生，
@@ -517,7 +510,6 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 - `trading_order_seq`、`trading_event_seq`、`trading_command_seq`、`trading_outbox_seq`
 - `trading_orders`
 - `trading_order_events`
-- `trading_trigger_orders`
 - `trading_outbox_events`
 - `account_position_margins`
 - `trading_match_results`
@@ -529,13 +521,6 @@ curl 'http://localhost:9084/api/v1/trading/orders/open?userId=1001&symbol=BTC-US
 - `trading_orders_open_query_idx`
 - `trading_orders_stp_open_idx`
 - `trading_orders_recovery_idx`
-- `trading_trigger_orders_user_client_uidx`
-- `trading_trigger_orders_user_oco_idx`
-- `trading_trigger_orders_user_status_idx`
-- `trading_trigger_orders_symbol_gte_idx`
-- `trading_trigger_orders_symbol_lte_idx`
-- `trading_trigger_orders_expiry_idx`
-- `trading_trigger_orders_triggering_idx`
 - `trading_order_events_order_idx`
 - `trading_order_events_trace_idx`
 - `trading_outbox_pending_idx`
@@ -567,9 +552,7 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 
 ## 生产注意事项
 
-- `surprising-order-provider` 和 `surprising-trigger-provider` 独立部署。普通订单/撮合/账户结算热路径只依赖
-  Aeron、Kafka 和内存状态；trigger provider 当前仍以 PostgreSQL 管理条件单生命周期，这属于独立的
-  条件单边界，不能把它误当成普通订单撮合核心已移除数据库依赖。不要做每个 symbol 一个 worker。
+- `surprising-order-provider` 和 `surprising-trigger-provider` 独立部署。普通订单、撮合、账户结算和条件单热路径只依赖 Aeron Core 与内存状态；trigger provider 不连接 PostgreSQL、Redis 或价格/持仓 Kafka，也不保留数据库回退链路。不要做每个 symbol 一个 worker。
 - `surprising-matching-provider` 独立于 order/trigger；它持有 exchange-core 订单簿，应该单独扩缩容和重启恢复。
 - matching provider 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.8-emporia` 传递依赖 Chronicle/OpenHFT，父 POM 通过 BOM 统一到 JDK 25 可用的 2026.x 版本，生产进程仍需使用本地运行示例里的 `JAVA_TOOL_OPTIONS`。升级后 GTX 由 exchange-core 原生处理，必须通过撮合模块全量测试再发布。
 - 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。

@@ -80,7 +80,6 @@ class CoreEventFanoutConsumerTest {
     private static WebSocketProperties properties(ProductLine productLine) {
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(productLine);
-        properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setGroupId("p8-node");
         return properties;
     }

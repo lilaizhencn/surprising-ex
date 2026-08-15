@@ -36,7 +36,6 @@ surprising:
     kafka:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       group-id: surprising-insurance-v1
       liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
       concurrency: 2

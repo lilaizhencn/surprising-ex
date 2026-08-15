@@ -13,18 +13,17 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
 class FundingKafkaConfigurationTest {
 
     @Test
-    void defaultsToLegacyPerpTopicUntilProductTopicsAreEnabled() {
+    void defaultsToLinearPerpetualTopic() {
         FundingProperties properties = new FundingProperties();
 
         assertThat(properties.getKafka().getFundingRateTopic())
-                .isEqualTo("surprising.perp.funding.rate.v1");
+                .isEqualTo("surprising.linear-perp.funding.rate.v1");
     }
 
     @Test
     void canResolveFundingTopicFromProductLine() {
         FundingProperties properties = new FundingProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        properties.getKafka().setProductTopicsEnabled(true);
 
         assertThat(properties.getKafka().isFundingProductLine()).isTrue();
         assertThat(properties.getKafka().getFundingRateTopic())
@@ -35,11 +34,10 @@ class FundingKafkaConfigurationTest {
     void productTopicsDoNotCreateFundingTopicForNonFundingProductLine() {
         FundingProperties properties = new FundingProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
 
         assertThat(properties.getKafka().isFundingProductLine()).isFalse();
         assertThat(properties.getKafka().getFundingRateTopic())
-                .isEqualTo("surprising.perp.funding.rate.v1");
+                .isEqualTo("surprising.linear-delivery.funding.rate.v1");
     }
 
     @Test

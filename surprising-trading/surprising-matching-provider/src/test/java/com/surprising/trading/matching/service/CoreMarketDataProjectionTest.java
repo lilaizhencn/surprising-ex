@@ -37,7 +37,6 @@ class CoreMarketDataProjectionTest {
     void bootstrapsFromAeronAndAppliesContiguousCoreEvents() {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.SPOT);
-        properties.getKafka().setProductTopicsEnabled(true);
         MatchingAeronGateway gateway = mock(MatchingAeronGateway.class);
         when(gateway.bookState()).thenReturn(new CoreBookStateView(1,
                 List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 10, 10, 1))));
@@ -133,7 +132,6 @@ class CoreMarketDataProjectionTest {
     private static ProjectionFixture fixture(CoreBookStateView bootstrap) {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.SPOT);
-        properties.getKafka().setProductTopicsEnabled(true);
         MatchingAeronGateway gateway = mock(MatchingAeronGateway.class);
         when(gateway.bookState()).thenReturn(bootstrap);
         List<OrderBookDepthEvent> depths = new ArrayList<>();

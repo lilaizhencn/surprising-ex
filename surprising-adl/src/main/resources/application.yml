@@ -31,7 +31,6 @@ surprising:
     kafka:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       position-risk-events-topic: surprising.risk.position.events.v1
       group-id: surprising-adl-risk-index-${HOSTNAME:${random.uuid}}
     redis-index:
@@ -53,7 +52,6 @@ surprising:
     consumer:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       topic: surprising.perp.price.events.v1
       group-id: surprising-adl-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 5s

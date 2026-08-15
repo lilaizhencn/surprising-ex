@@ -57,7 +57,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 成交、资金费、余额调整和其他净权益变化由 Core Export 生成不可变事实，账本投影器异步写入 `account_ledger_entries` 或 `account_product_ledger_entries`。
 - 订单预占和释放、可用余额与冻结余额之间的转移属于 Core 状态变化，不要求数据库余额表写入；`balance_after_units` 只能作为账本事实快照。
 - 账本和管理员调整使用业务引用幂等；重复投影内容必须一致，冲突必须停住，不能静默覆盖历史事实。
-- 账户状态快照通过内部 RPC/Kafka 提供给 order、risk、liquidation、trigger 和 WebSocket 等下游；这些 JVM/Redis 快照都是读模型，不是资金权威。
+- 账户状态快照通过内部 RPC/Kafka 提供给 order、risk、liquidation 和 WebSocket 等查询下游；条件单由 Aeron Core 直接读取同一份账户状态，不再由 trigger provider 消费账户快照。任何 JVM/Redis 快照都只是读模型，不是资金权威。
 - `account_trade_settlement_sides`、`account_commands` 等数据库表只用于异步审计、投影和对账。任何数据库投影失败都不能回滚或改写已经提交的 Core 状态。
 
 ## 接口
@@ -132,8 +132,8 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 在线账户命令不得对余额、冻结资金和持仓表执行 DML：
 
 - 原生 PostgreSQL 账户 ID Sequence，覆盖异步账本投影、账户命令审计和恢复元数据
-- `account_balances`（历史/投影兼容表，非在线余额来源）
-- `account_deficits`（历史/投影兼容表，非在线风险裁决来源）
+- `account_balances`（历史/投影表，非在线余额来源）
+- `account_deficits`（历史/投影表，非在线风险裁决来源）
 - `account_ledger_entries`
 - `account_product_ledger_entries`
 - `account_admin_balance_adjustments`
@@ -162,7 +162,6 @@ surprising:
   account:
     kafka:
       product-line: LINEAR_PERPETUAL
-      product-topics-enabled: true
       position-events-topic: surprising.linear-perp.account.position.events.v1
       liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
       account-state-events-topic: surprising.linear-perp.account.state.events.v1

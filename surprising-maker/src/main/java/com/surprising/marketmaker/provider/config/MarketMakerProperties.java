@@ -38,13 +38,13 @@ public class MarketMakerProperties {
     void validateProductLineConfiguration() {
         for (ReferenceMarket.Source source : referenceMarket.sources) {
             if (source.enabled) {
-                ProductLineConfiguration.require(source.productLine, true,
+                ProductLineConfiguration.require(source.productLine,
                         "market-maker.source." + source.name);
             }
         }
         for (Strategy strategy : strategies) {
             if (strategy.enabled) {
-                ProductLineConfiguration.require(strategy.productLine, true,
+                ProductLineConfiguration.require(strategy.productLine,
                         "market-maker.strategy." + strategy.strategyId);
             }
         }

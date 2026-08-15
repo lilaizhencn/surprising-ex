@@ -14,7 +14,6 @@ class KafkaFanoutConsumerTopicTest {
     void exposesResolvedTopicsAndGroupFromProperties() {
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setGroupId("node-b");
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(new ObjectMapper(),
                 mock(SubscriptionRegistry.class), mock(CandleUpdateCoalescer.class), properties);
@@ -25,7 +24,7 @@ class KafkaFanoutConsumerTopicTest {
         assertThat(consumer.orderBookDepthTopic()).isEqualTo("surprising.inverse-delivery.orderbook.depth.v1");
         assertThat(consumer.priceEventsTopic()).isEqualTo("surprising.inverse-delivery.price.events.v1");
         assertThat(consumer.fundingRateListenerEnabled()).isFalse();
-        assertThat(consumer.fundingRateTopic()).isEqualTo("surprising.perp.funding.rate.v1");
+        assertThat(consumer.fundingRateTopic()).isEqualTo("surprising.inverse-delivery.funding.rate.v1");
         assertThat(consumer.orderEventsTopic()).isEqualTo("surprising.inverse-delivery.order.events.v1");
         assertThat(consumer.triggerOrderEventsTopic())
                 .isEqualTo("surprising.inverse-delivery.trigger-order.events.v1");
@@ -43,7 +42,6 @@ class KafkaFanoutConsumerTopicTest {
     void enablesFundingRateFanoutForFundingProductLine() {
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        properties.getKafka().setProductTopicsEnabled(true);
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(new ObjectMapper(),
                 mock(SubscriptionRegistry.class), mock(CandleUpdateCoalescer.class), properties);
 

@@ -116,7 +116,6 @@ public class InstrumentStorageService {
         return enrich(instrumentRepository.list(productCurrentVersionRepository.findAll(productLine), type, status));
     }
 
-    /** 返回产品线全部版本，确保旧持仓、旧订单重启后仍能命中同一规格。 */
     public List<InstrumentResponse> listAllVersions(ProductLine productLine) {
         return productLine == null ? List.of() : enrich(instrumentRepository.listByProductLine(productLine));
     }

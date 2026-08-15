@@ -140,14 +140,12 @@ class OrderServiceTest {
     private OrderService service(ProductLine productLine) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
-        properties.getKafka().setProductTopicsEnabled(true);
         return service(productLine, null);
     }
 
     private OrderService service(ProductLine productLine, AeronOrderCommandService aeron) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
-        properties.getKafka().setProductTopicsEnabled(true);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, 100L, 200L, "JVM")));

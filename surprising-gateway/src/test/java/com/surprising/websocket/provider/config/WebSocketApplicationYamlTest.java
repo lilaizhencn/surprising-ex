@@ -12,7 +12,7 @@ import org.springframework.core.io.ClassPathResource;
 class WebSocketApplicationYamlTest {
 
     @Test
-    void defaultConsumerGroupUsesStableNodeNameBeforeRandomFallback() throws IOException {
+    void defaultConsumerGroupUsesStableNodeName() throws IOException {
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
         List<PropertySource<?>> sources = loader.load("application", new ClassPathResource("application.yml"));
 
@@ -24,15 +24,6 @@ class WebSocketApplicationYamlTest {
                 .contains(1000);
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.product-line"))
-                .contains("${PRODUCT_LINE:LINEAR_PERPETUAL}");
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.websocket.kafka.product-topics-enabled"))
-                .contains("${PRODUCT_TOPICS_ENABLED:true}");
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.websocket.kafka.account-risk-events-topic"))
-                .contains("surprising.risk.account.events.v1");
-        assertThat(sources)
-                .extracting(source -> source.getProperty("surprising.websocket.kafka.position-risk-events-topic"))
-                .contains("surprising.risk.position.events.v1");
+                .contains("${PRODUCT_LINE}");
     }
 }

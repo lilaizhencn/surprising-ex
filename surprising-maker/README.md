@@ -28,7 +28,7 @@
 
 Provider 端口：`9096`
 
-普通内网 API 保持兼容：
+普通内网 API：
 
 ```bash
 curl 'http://localhost:9096/api/v1/market-maker/strategies'

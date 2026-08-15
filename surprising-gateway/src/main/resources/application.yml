@@ -76,7 +76,6 @@ surprising:
     security:
       user-id-header: X-User-Id
       require-identity-for-private-routes: true
-      allow-user-id-header-fallback: ${GATEWAY_ALLOW_USER_ID_HEADER_FALLBACK:false}
       admin-roles:
         - SUPPORT
         - ADMIN
@@ -748,32 +747,17 @@ surprising:
   websocket:
     kafka:
       bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:true}
+      product-line: ${PRODUCT_LINE}
       # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。
       group-id: ${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}
       concurrency: 2
       max-poll-records: 1000
-      core-private-events-enabled: ${SURPRISING_WS_CORE_PRIVATE_EVENTS_ENABLED:true}
-      candle-topic: surprising.perp.candle.events.v1
-      trade-topic: surprising.perp.trade.events.v1
-      order-book-depth-topic: surprising.perp.orderbook.depth.v1
-      price-events-topic: surprising.perp.price.events.v1
-      funding-rate-topic: surprising.perp.funding.rate.v1
-      order-events-topic: surprising.perp.order.events.v1
-      trigger-order-events-topic: surprising.perp.trigger-order.events.v1
-      match-results-topic: surprising.perp.match.results.v1
-      match-trades-topic: surprising.perp.match.trades.v1
-      position-events-topic: surprising.account.position.events.v1
-      account-risk-events-topic: surprising.risk.account.events.v1
-      position-risk-events-topic: surprising.risk.position.events.v1
     session:
       max-subscriptions: 200
       outbound-queue-capacity: 1000
       send-timeout: 5s
     security:
       user-id-header: X-User-Id
-      allow-query-user-id-fallback: ${SURPRISING_WS_QUERY_USER_ID:false}
       issuer: surprising-ex-gateway
       jwt-secret: ${GATEWAY_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
       allowed-origins:

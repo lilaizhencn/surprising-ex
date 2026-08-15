@@ -61,6 +61,7 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
                     "client trigger order id already exists");
         }
+        validateTriggerPlacement(state, view, triggerOrderIndex);
         Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
         CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view);
         if (trigger.instrumentVersion() == 0) {
@@ -72,6 +73,71 @@ public final class TradingCoreReducer {
         }
         triggers.put(view.triggerOrderId(), trigger);
         return withTriggers(state, triggers);
+    }
+
+    private static void validateTriggerPlacement(TradingCoreState state, CoreTriggerOrderStateView view,
+                                                 TriggerOrderIndex triggerOrderIndex) {
+        CoreUserState user = state.user(view.userId());
+        if (user == null) {
+            throw new CoreStateRejectedException("USER_NOT_FOUND", "user does not exist");
+        }
+        if (!state.productLine().isDerivative()) {
+            return;
+        }
+        if (user.positionMode() == CorePositionMode.ONE_WAY && view.positionSide().hedgeSide()
+                || user.positionMode() == CorePositionMode.HEDGE && !view.positionSide().hedgeSide()) {
+            throw new CoreStateRejectedException("POSITION_MODE_MISMATCH",
+                    "trigger position side does not match user position mode");
+        }
+        CorePositionState position = user.positions().get(positionKey(view.symbol(), view.positionSide()));
+        if (position == null || position.signedQuantitySteps() == 0) {
+            throw new CoreStateRejectedException("TRIGGER_POSITION_REQUIRED",
+                    "trigger order requires an open position");
+        }
+        if (position.marginMode() != view.marginMode()) {
+            throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID",
+                    "trigger margin mode does not match position");
+        }
+        CoreOrderSide closeSide = position.signedQuantitySteps() > 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+        if (view.side() != closeSide) {
+            throw new CoreStateRejectedException("TRIGGER_SIDE_NOT_REDUCING",
+                    "trigger order side must reduce the current position");
+        }
+        long openReduceOnly = userOrders(state, user).stream()
+                .filter(order -> order.status() == CoreOrderStatus.OPEN)
+                .filter(CoreOrderState::reduceOnly)
+                .filter(order -> order.symbol().equals(view.symbol())
+                        && order.marginMode() == view.marginMode()
+                        && order.positionSide() == view.positionSide()
+                        && order.side() == closeSide)
+                .mapToLong(CoreOrderState::remainingQuantitySteps)
+                .reduce(0L, Math::addExact);
+        long triggerCapacity = 0;
+        long sameOcoGroupMax = 0;
+        Iterable<Long> triggerIds = triggerOrderIndex == null
+                ? state.triggerOrders().keySet()
+                : triggerOrderIndex.ids(view.userId(), view.symbol(), view.marginMode(), view.positionSide());
+        for (Long triggerId : triggerIds) {
+            CoreTriggerOrderState trigger = state.triggerOrders().get(triggerId);
+            if (trigger == null) continue;
+            if (!trigger.status().open() || trigger.userId() != view.userId()
+                    || !trigger.symbol().equals(view.symbol()) || trigger.marginMode() != view.marginMode()
+                    || trigger.positionSide() != view.positionSide() || trigger.side() != closeSide) {
+                continue;
+            }
+            triggerCapacity = Math.addExact(triggerCapacity, trigger.quantitySteps());
+            if (!view.ocoGroupId().isEmpty() && view.ocoGroupId().equals(trigger.ocoGroupId())) {
+                sameOcoGroupMax = Math.max(sameOcoGroupMax, trigger.quantitySteps());
+            }
+        }
+        long projectedTriggerCapacity = Math.addExact(
+                Math.subtractExact(triggerCapacity, sameOcoGroupMax),
+                Math.max(sameOcoGroupMax, view.quantitySteps()));
+        long projectedClose = Math.addExact(openReduceOnly, projectedTriggerCapacity);
+        if (projectedClose > Math.absExact(position.signedQuantitySteps())) {
+            throw new CoreStateRejectedException("TRIGGER_CLOSE_CAPACITY_EXCEEDED",
+                    "trigger order quantity exceeds available position");
+        }
     }
 
     public TradingCoreState cancelTriggerOrder(TradingCoreState state, long userId, long triggerOrderId) {

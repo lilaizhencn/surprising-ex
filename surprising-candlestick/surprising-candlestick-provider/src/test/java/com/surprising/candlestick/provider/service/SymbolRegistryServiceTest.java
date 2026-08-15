@@ -34,7 +34,6 @@ class SymbolRegistryServiceTest {
     void instrumentSnapshotFiltersByProductLineWhenProductTopicsAreEnabled() {
         CandlestickProperties properties = new CandlestickProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         SymbolRegistryService service = service(properties,
                 cache(ProductLine.LINEAR_DELIVERY,
                         instrument("BTC-USDT-20260925", 7L, ContractType.LINEAR_DELIVERY)));

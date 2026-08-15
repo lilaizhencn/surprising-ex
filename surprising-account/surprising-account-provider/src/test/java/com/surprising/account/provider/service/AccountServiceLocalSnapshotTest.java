@@ -68,7 +68,6 @@ class AccountServiceLocalSnapshotTest {
     private static AccountProperties properties() {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        properties.getKafka().setProductTopicsEnabled(true);
         return properties;
     }
 

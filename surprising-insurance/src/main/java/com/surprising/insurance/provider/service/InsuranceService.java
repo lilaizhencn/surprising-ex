@@ -210,9 +210,6 @@ import java.util.UUID;
     }
 
     private void requireProviderAccountType(String eventAccountType) {
-        if (!properties.getKafka().isProductTopicsEnabled()) {
-            return;
-        }
         String providerAccountType = accountType();
         if (!Objects.equals(eventAccountType, providerAccountType)) {
             throw new IllegalArgumentException("liquidation fee account type " + eventAccountType

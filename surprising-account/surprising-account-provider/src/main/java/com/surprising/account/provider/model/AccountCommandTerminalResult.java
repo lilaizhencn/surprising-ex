@@ -10,14 +10,6 @@ public record AccountCommandTerminalResult(
         String errorMessage,
         List<LedgerDelta> ledgerDeltas) {
 
-    /** 兼容没有账本明细的拒绝结果和历史测试构造方式。 */
-    public AccountCommandTerminalResult(AccountCommandStatus status,
-                                        String resultPayload,
-                                        String errorCode,
-                                        String errorMessage) {
-        this(status, resultPayload, errorCode, errorMessage, List.of());
-    }
-
     public AccountCommandTerminalResult {
         if (status == null) {
             throw new IllegalArgumentException("账户命令终态不能为空");

@@ -50,7 +50,6 @@ class MarkPriceCalculatorTest {
     void nonFundingProductDoesNotRequireFundingRateForHealthyMarkPrice() {
         MarkPriceProperties properties = new MarkPriceProperties();
         properties.getKafka().setProductLine(com.surprising.product.api.ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         MarkPriceCalculator calculator = new MarkPriceCalculator(properties);
         Instant now = Instant.parse("2026-06-30T10:00:00Z");
 

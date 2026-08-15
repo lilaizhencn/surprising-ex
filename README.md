@@ -7,8 +7,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 
 完整架构、问题追踪、唯一参数来源、阶段台账、脚本矩阵和验收门禁以
 [`docs/high-performance-trading-core-implementation.md`](docs/high-performance-trading-core-implementation.md)
-为唯一实施依据。canonical 脚本均绑定显式产品线的内存 Core；旧 DB/旧 trigger/旧 matching 业务脚本不得
-直接复用，真实 provider/做市进程仍由部署编排单独管理。
+为唯一实施依据。canonical 脚本均绑定显式产品线的内存 Core；真实 provider/做市进程仍由部署编排单独管理。
 
 ## 核心边界
 
@@ -136,7 +135,7 @@ Maven 测试可独立通过，详见主规格验证证据。
 - 永续首发把普通 Topic 和账户指令 Topic 都固定为 32 分区，RF=3、`min.insync.replicas=2`；
 - 不在已有 symbol-keyed Topic 上直接增加分区；扩容需要新版本 Topic、维护窗口和状态重建方案；
 - 为每条产品线配置独立 Topic、消费组、client id、协调 node id 和 gateway route；`PRODUCT_LINE`
-  不允许省略，服务启动会拒绝空值或 `product-topics-enabled=false`；
+  不允许省略，服务启动会拒绝空值；
 - Order Provider 的账户指令结果 listener 并发度对齐 32 个分区；同一 `productLine:userId` 保序，
   每个 poll 批量完成订单状态迁移及 ACCEPTED/PLACE Outbox 入库；
 - 撮合指令使用有界 poll 批量事务，批量读取幂等及保护状态；同批同用户/标的的潜在冲突仍逐条复查，

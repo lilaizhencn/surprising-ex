@@ -51,9 +51,6 @@ public class GatewayProperties implements EnvironmentAware {
         if (!configuredSecurity.isRequireIdentityForPrivateRoutes()) {
             failures.add("security.require-identity-for-private-routes must be true");
         }
-        if (configuredSecurity.isAllowUserIdHeaderFallback()) {
-            failures.add("security.allow-user-id-header-fallback must be false");
-        }
         if (!configuredSecurity.isRequireAdminMfa()) {
             failures.add("security.require-admin-mfa must be true");
         }
@@ -187,18 +184,6 @@ public class GatewayProperties implements EnvironmentAware {
             }
         } catch (IllegalArgumentException ex) {
             failures.add(name + " must be an HTTPS URL with a host");
-        }
-    }
-
-    private static void requireServiceUrl(List<String> failures, String name, String value) {
-        try {
-            java.net.URI uri = java.net.URI.create(value);
-            if ((!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())))
-                    || uri.getHost() == null) {
-                failures.add(name + " must be an HTTP(S) URL with a host");
-            }
-        } catch (IllegalArgumentException ex) {
-            failures.add(name + " must be an HTTP(S) URL with a host");
         }
     }
 
@@ -389,7 +374,6 @@ public class GatewayProperties implements EnvironmentAware {
     public static class Security {
         private String userIdHeader = "X-User-Id";
         private boolean requireIdentityForPrivateRoutes = true;
-        private boolean allowUserIdHeaderFallback = true;
         private List<String> adminRoles = List.of("SUPPORT", "ADMIN", "SUPER_ADMIN");
         private List<String> adminIpAllowlist = List.of();
         private List<String> trustedProxyIpAllowlist = List.of();
@@ -424,14 +408,6 @@ public class GatewayProperties implements EnvironmentAware {
 
         public void setRequireIdentityForPrivateRoutes(boolean requireIdentityForPrivateRoutes) {
             this.requireIdentityForPrivateRoutes = requireIdentityForPrivateRoutes;
-        }
-
-        public boolean isAllowUserIdHeaderFallback() {
-            return allowUserIdHeaderFallback;
-        }
-
-        public void setAllowUserIdHeaderFallback(boolean allowUserIdHeaderFallback) {
-            this.allowUserIdHeaderFallback = allowUserIdHeaderFallback;
         }
 
         public List<String> getAdminRoles() {

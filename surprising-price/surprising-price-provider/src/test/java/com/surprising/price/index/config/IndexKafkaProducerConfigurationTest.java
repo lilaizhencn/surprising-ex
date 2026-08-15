@@ -16,17 +16,16 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
 class IndexKafkaProducerConfigurationTest {
 
     @Test
-    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+    void defaultsToLinearPerpetualTopics() {
         IndexPriceProperties properties = new IndexPriceProperties();
 
-        assertThat(properties.getKafka().getPriceEventsTopic()).isEqualTo("surprising.perp.price.events.v1");
+        assertThat(properties.getKafka().getPriceEventsTopic()).isEqualTo("surprising.linear-perp.price.events.v1");
     }
 
     @Test
     void canResolveIndexTopicsFromProductLine() {
         IndexPriceProperties properties = new IndexPriceProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
 
         assertThat(properties.getKafka().getPriceEventsTopic())
                 .isEqualTo("surprising.linear-delivery.price.events.v1");

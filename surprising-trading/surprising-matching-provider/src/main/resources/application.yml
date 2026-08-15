@@ -37,7 +37,6 @@ surprising:
       kafka:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
-        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
         group-id: surprising-matching-market-data-v1
         client-id: surprising-matching-market-data-${HOSTNAME:${random.uuid}}
         core-events-topic: ${CORE_EVENTS_TOPIC:}

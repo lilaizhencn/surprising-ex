@@ -45,10 +45,6 @@ public class RiskService {
         this.rules = rules;
     }
 
-    public RiskAccountSnapshotResponse latestAccount(long userId, String settleAsset) {
-        return latestAccount(userId, null, settleAsset);
-    }
-
     public RiskAccountSnapshotResponse latestAccount(long userId, String accountType, String settleAsset) {
         requireUserId(userId);
         String asset = normalizeAsset(settleAsset);

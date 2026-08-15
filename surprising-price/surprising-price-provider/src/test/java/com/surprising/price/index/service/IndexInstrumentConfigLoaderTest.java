@@ -37,7 +37,6 @@ class IndexInstrumentConfigLoaderTest {
     @Test
     void productSnapshotSelectsConfiguredContractType() {
         IndexPriceProperties properties = new IndexPriceProperties();
-        properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
         cache.replace(ProductLine.LINEAR_DELIVERY, List.of());

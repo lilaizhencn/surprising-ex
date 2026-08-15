@@ -166,7 +166,7 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 - Instrument 是全系统唯一产品配置源，不要在撮合、风控、行情服务里再维护第二套 symbol 规则。
 - 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过 `instrument_symbol_sequences` 保证同 symbol 版本号单调递增。
 - instrument 版本、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
-- 到期版本进入 `SETTLING` 后，order/trigger provider 会先写数据库关闭栅栏再排空订单；account 在订单排空后核对预占、成交消耗和释放。只有相同版本的 `ORDER`、`TRIGGER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
+- 到期版本进入 `SETTLING` 后，order provider 先排空订单；Aeron Core 内的条件单状态随核心状态机一起收敛，account 再核对预占、成交消耗和释放。只有相同版本的 `ORDER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
 - 生命周期清理确认使用共享 topic `surprising.instrument.lifecycle-drain.v1`，以 symbol 为 key；重复确认按 `(symbol, instrument_version, component)` 幂等。
 - Instrument Service 才负责聚合主表、当前版本指针、风险档位、指数源和资产精度；单表 Repository 不执行跨表 JOIN。
 - 下游核心服务启动时加载快照，运行中消费 Kafka 增量事件；不要在每笔请求、撮合或风控计算时查询主库。

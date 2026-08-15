@@ -63,12 +63,7 @@ public class AeronOrderCommandService {
         UUID commandId = placeCommandId(request, orderId);
         var response = aeron.command(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodePlaceOrder(command));
-        CoreOrderStateView responseOrder = commandOrder(response, orderId);
-        if (responseOrder != null) {
-            return requireOrder(responseOrder, "placed order missing");
-        }
-        return requireOrder(fallbackOrder(aeron, request.userId(), orderId, request.clientOrderId()),
-                "placed order missing");
+        return requireOrder(commandOrder(response, orderId), "placed order missing");
     }
 
     public com.surprising.trading.api.model.AmendOrderResponse replace(
@@ -82,24 +77,15 @@ public class AeronOrderCommandService {
                 + placeIntent(replacement, replacementOrderId));
         var response = aeron.command(CoreMessageType.REPLACE_ORDER, commandId, replacement.userId(),
                 TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(original.orderId(), replacementCommand)));
-        CoreCommandResultView result = commandResult(response);
-        if (result != null) {
-            CoreOrderStateView canceledView = result.orders().stream()
-                    .filter(value -> value.orderId() == original.orderId()).findFirst().orElse(null);
-            CoreOrderStateView placedView = result.orders().stream()
-                    .filter(value -> value.orderId() == replacementOrderId).findFirst().orElse(null);
-            return new com.surprising.trading.api.model.AmendOrderResponse(
-                    requireOrder(canceledView, "replaced original order missing"),
-                    requireOrder(placedView, "replacement order missing"), true,
-                    placedView.status().equals("REJECTED") ? "replacement rejected" : "order replaced");
-        }
-        OrderResponse canceled = requireOrder(aeron.order(original.userId(), original.orderId()),
-                "replaced original order missing");
-        OrderResponse placed = requireOrder(fallbackOrder(aeron, replacement.userId(), replacementOrderId,
-                        replacement.clientOrderId()),
-                "replacement order missing");
-        return new com.surprising.trading.api.model.AmendOrderResponse(canceled, placed, true,
-                placed.status() == OrderStatus.REJECTED ? "replacement rejected" : "order replaced");
+        CoreCommandResultView result = requireCommandResult(response);
+        CoreOrderStateView canceledView = result.orders().stream()
+                .filter(value -> value.orderId() == original.orderId()).findFirst().orElse(null);
+        CoreOrderStateView placedView = result.orders().stream()
+                .filter(value -> value.orderId() == replacementOrderId).findFirst().orElse(null);
+        return new com.surprising.trading.api.model.AmendOrderResponse(
+                requireOrder(canceledView, "replaced original order missing"),
+                requireOrder(placedView, "replacement order missing"), true,
+                placedView.status().equals("REJECTED") ? "replacement rejected" : "order replaced");
     }
 
     public com.surprising.trading.api.model.AmendOrderResponse replace(
@@ -112,23 +98,15 @@ public class AeronOrderCommandService {
                 + replacementOrderId + ':' + amendIntent(request));
         var response = aeron.command(CoreMessageType.AMEND_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodeAmendOrder(command));
-        CoreCommandResultView result = commandResult(response);
-        if (result != null) {
-            CoreOrderStateView canceledView = result.orders().stream()
-                    .filter(value -> value.orderId() == request.orderId()).findFirst().orElse(null);
-            CoreOrderStateView placedView = result.orders().stream()
-                    .filter(value -> value.orderId() == replacementOrderId).findFirst().orElse(null);
-            return new com.surprising.trading.api.model.AmendOrderResponse(
-                    requireOrder(canceledView, "amended original order missing"),
-                    requireOrder(placedView, "amended replacement order missing"), true,
-                    placedView.status().equals("REJECTED") ? "replacement rejected" : "order amended");
-        }
-        OrderResponse canceled = requireOrder(aeron.order(request.userId(), request.orderId()),
-                "amended original order missing");
-        OrderResponse placed = requireOrder(fallbackOrder(aeron, request.userId(), replacementOrderId,
-                        request.newClientOrderId()), "amended replacement order missing");
-        return new com.surprising.trading.api.model.AmendOrderResponse(canceled, placed, true,
-                placed.status() == OrderStatus.REJECTED ? "replacement rejected" : "order amended");
+        CoreCommandResultView result = requireCommandResult(response);
+        CoreOrderStateView canceledView = result.orders().stream()
+                .filter(value -> value.orderId() == request.orderId()).findFirst().orElse(null);
+        CoreOrderStateView placedView = result.orders().stream()
+                .filter(value -> value.orderId() == replacementOrderId).findFirst().orElse(null);
+        return new com.surprising.trading.api.model.AmendOrderResponse(
+                requireOrder(canceledView, "amended original order missing"),
+                requireOrder(placedView, "amended replacement order missing"), true,
+                placedView.status().equals("REJECTED") ? "replacement rejected" : "order amended");
     }
 
     private PlaceOrderCommand placeCommand(
@@ -211,17 +189,15 @@ public class AeronOrderCommandService {
     }
 
     private static CoreOrderStateView commandOrder(com.surprising.aeron.protocol.CoreResponse response, long orderId) {
-        CoreCommandResultView result = commandResult(response);
-        if (result == null) {
-            return null;
-        }
+        CoreCommandResultView result = requireCommandResult(response);
         return result.orders().stream().filter(value -> value.orderId() == orderId).findFirst()
                 .orElseThrow(() -> new IllegalStateException("command response is missing order: " + orderId));
     }
 
-    private static CoreCommandResultView commandResult(com.surprising.aeron.protocol.CoreResponse response) {
+    private static CoreCommandResultView requireCommandResult(
+            com.surprising.aeron.protocol.CoreResponse response) {
         if (response == null || response.data().length == 0) {
-            return null;
+            throw new IllegalStateException("command response is missing result payload");
         }
         return CoreCommandResultCodec.decode(response.data());
     }
@@ -267,15 +243,6 @@ public class AeronOrderCommandService {
     private static String field(Object value) {
         String text = String.valueOf(value);
         return text.length() + ":" + text;
-    }
-
-    private static CoreOrderStateView fallbackOrder(
-            OrderAeronGateway aeron, long userId, long orderId, String clientOrderId) {
-        CoreOrderStateView order = aeron.order(userId, orderId);
-        if (order != null || clientOrderId == null || clientOrderId.isBlank()) {
-            return order;
-        }
-        return aeron.order(userId, clientOrderId);
     }
 
     private static String emptyToNull(String value) { return value == null || value.isEmpty() ? null : value; }

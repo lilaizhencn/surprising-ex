@@ -448,11 +448,11 @@ public class GatewayProxyService {
         if (!route.isPrivateRoute() || !properties.getSecurity().isRequireIdentityForPrivateRoutes()) {
             return null;
         }
-        String userHeader = request.getHeader(properties.getSecurity().getUserIdHeader());
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
             if (authService == null) {
-                return userIdentity(normalizeUserHeader(userHeader));
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                        "user auth service is not configured");
             }
             try {
                 JwtPrincipal principal = authService.authenticateBearer(authorization);
@@ -462,15 +462,6 @@ public class GatewayProxyService {
                 throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
             } catch (IllegalStateException ex) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-            }
-        }
-        if (properties.getSecurity().isAllowUserIdHeaderFallback()) {
-            String normalized = normalizeUserHeader(userHeader);
-            if (normalized != null) {
-                return userIdentity(normalized);
-            }
-            if (authorization != null && !authorization.isBlank() && authService == null) {
-                return null;
             }
         }
         throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "private gateway route requires bearer token");
@@ -733,13 +724,6 @@ public class GatewayProxyService {
 
     private String gatewayPrefix(HttpServletRequest request) {
         return isAdminRequest(request) ? ADMIN_GATEWAY_PREFIX : GATEWAY_PREFIX;
-    }
-
-    private String normalizeUserHeader(String userHeader) {
-        if (userHeader == null || userHeader.isBlank()) {
-            return null;
-        }
-        return userHeader.trim();
     }
 
     private String traceId(HttpServletRequest request) {

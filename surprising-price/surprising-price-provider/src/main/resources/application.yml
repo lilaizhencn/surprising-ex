@@ -31,7 +31,6 @@ surprising:
     consumer:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       topic: surprising.perp.price.events.v1
       group-id: surprising-mark-price-query-${HOSTNAME:${random.uuid}}
       max-age: 3s
@@ -42,7 +41,6 @@ surprising:
       kafka:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
-        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
         price-events-topic: surprising.perp.price.events.v1
         group-id: surprising-index-price-v1
         cache-group-id: surprising-index-price-cache-${HOSTNAME:${random.uuid}}
@@ -122,8 +120,6 @@ surprising:
       kafka:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
-        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-        group-id: surprising-mark-price-v1
         concurrency: 2
         max-poll-records: 500
       topics:

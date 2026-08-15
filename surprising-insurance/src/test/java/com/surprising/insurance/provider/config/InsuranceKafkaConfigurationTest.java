@@ -40,7 +40,6 @@ class InsuranceKafkaConfigurationTest {
     void canResolveInsuranceTopicAndGroupFromProductLine() {
         InsuranceProperties properties = new InsuranceProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
 
         assertThat(properties.getKafka().getGroupId())
                 .isEqualTo("surprising-linear-delivery-insurance-v1");

@@ -46,10 +46,7 @@ public class SurprisingPriceApplication {
     @PostConstruct
     void validateProductLineAlignment() {
         if (indexProperties.getKafka().getProductLine() != markProperties.getKafka().getProductLine()
-                || indexProperties.getKafka().isProductTopicsEnabled()
-                != markProperties.getKafka().isProductTopicsEnabled()
-                || consumerProperties.getProductLine() != markProperties.getKafka().getProductLine()
-                || consumerProperties.isProductTopicsEnabled() != markProperties.getKafka().isProductTopicsEnabled()) {
+                || consumerProperties.getProductLine() != markProperties.getKafka().getProductLine()) {
             throw new IllegalStateException("index and mark price product-line configuration must match");
         }
     }

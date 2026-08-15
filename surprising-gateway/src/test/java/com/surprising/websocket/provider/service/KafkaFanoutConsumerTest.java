@@ -71,7 +71,7 @@ class KafkaFanoutConsumerTest {
                 List.of(new OrderBookLevel(99L, 5L, 1L)),
                 List.of(new OrderBookLevel(101L, 8L, 2L)), eventTime);
 
-        consumer.onOrderBookDepth(new ConsumerRecord<>("surprising.perp.orderbook.depth.v1", 0, 0L,
+        consumer.onOrderBookDepth(new ConsumerRecord<>("surprising.linear-perp.orderbook.depth.v1", 0, 0L,
                 "BTC-USDT-SPOT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
@@ -87,7 +87,6 @@ class KafkaFanoutConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
                 properties);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
@@ -109,7 +108,6 @@ class KafkaFanoutConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
                 properties);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
@@ -135,7 +133,6 @@ class KafkaFanoutConsumerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        properties.getKafka().setProductTopicsEnabled(true);
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
                 properties);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
@@ -161,7 +158,7 @@ class KafkaFanoutConsumerTest {
         PerpFundingRateEvent event = new PerpFundingRateEvent("BTC-USDT", new BigDecimal("0.000100"),
                 eventTime.plusSeconds(3600), 8, 9L, eventTime);
 
-        consumer.onFundingRate(new ConsumerRecord<>("surprising.perp.funding.rate.v1", 0, 0L,
+        consumer.onFundingRate(new ConsumerRecord<>("surprising.linear-perp.funding.rate.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
@@ -178,11 +175,12 @@ class KafkaFanoutConsumerTest {
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         MarkPriceEvent event = markPriceEvent(Instant.now());
 
-        consumer.onPriceEvent(new ConsumerRecord<>("surprising.perp.price.events.v1", 0, 0L,
+        consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
 
         ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
-        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "BTC-USDT", null, null)),
+        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "BTC-USDT", null, null,
+                        ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
         assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
     }
@@ -195,11 +193,12 @@ class KafkaFanoutConsumerTest {
         IndexPriceEvent event = new IndexPriceEvent("BTC-USDT", new BigDecimal("50000"), 9L,
                 PriceStatus.HEALTHY, 2, 2, BigDecimal.valueOf(2), eventTime, List.of());
 
-        consumer.onPriceEvent(new ConsumerRecord<>("surprising.perp.price.events.v1", 0, 0L,
+        consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.index(event))));
 
         ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
-        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null)),
+        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null,
+                        ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
         assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
     }
@@ -210,7 +209,7 @@ class KafkaFanoutConsumerTest {
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         MarkPriceEvent event = markPriceEvent(Instant.now().minusSeconds(4));
 
-        consumer.onPriceEvent(new ConsumerRecord<>("surprising.perp.price.events.v1", 0, 0L,
+        consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
 
         verifyNoInteractions(registry);
@@ -224,7 +223,7 @@ class KafkaFanoutConsumerTest {
         PublicTradeEvent event = new PublicTradeEvent("11:1", 11_000_001L, "BTC-USDT", 7L,
                 OrderSide.BUY, 600_000L, 3L, eventTime, "trace-trade-1");
 
-        consumer.onPublicTrade(new ConsumerRecord<>("surprising.perp.match.trades.v1", 0, 0L,
+        consumer.onPublicTrade(new ConsumerRecord<>("surprising.linear-perp.match.trades.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
@@ -247,7 +246,7 @@ class KafkaFanoutConsumerTest {
                 OrderCommandType.PLACE, "SUCCESS", 3L, OrderStatus.FILLED, eventTime, List.of(trade),
                 "trace-trade-1");
 
-        consumer.onMatchResult(new ConsumerRecord<>("surprising.perp.match.results.v1", 0, 0L,
+        consumer.onMatchResult(new ConsumerRecord<>("surprising.linear-perp.match.results.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(result)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
@@ -302,7 +301,7 @@ class KafkaFanoutConsumerTest {
                 OrderEventType.CANCEL_REQUESTED, OrderStatus.CANCEL_REQUESTED, "reduce-only-pruned", eventTime,
                 "trace-1");
 
-        consumer.onOrderEvent(new ConsumerRecord<>("surprising.perp.order.events.v1", 0, 0L,
+        consumer.onOrderEvent(new ConsumerRecord<>("surprising.linear-perp.order.events.v1", 0, 0L,
                 SubscriptionTopic.WILDCARD, objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
@@ -338,7 +337,7 @@ class KafkaFanoutConsumerTest {
         TriggerOrderUpdatedEvent event = new TriggerOrderUpdatedEvent(
                 701L, ProductLine.LINEAR_PERPETUAL, order, eventTime, "trace-trigger");
 
-        consumer.onTriggerOrderEvent(new ConsumerRecord<>("surprising.perp.trigger-order.events.v1", 0, 0L,
+        consumer.onTriggerOrderEvent(new ConsumerRecord<>("surprising.linear-perp.trigger-order.events.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
@@ -359,7 +358,7 @@ class KafkaFanoutConsumerTest {
                 OrderCommandType.PLACE, "SUCCESS", 3L, OrderStatus.FILLED, eventTime, List.of(),
                 "trace-result-1");
 
-        consumer.onMatchResult(new ConsumerRecord<>("surprising.perp.match.results.v1", 0, 0L,
+        consumer.onMatchResult(new ConsumerRecord<>("surprising.linear-perp.match.results.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
@@ -391,8 +390,8 @@ class KafkaFanoutConsumerTest {
         RiskAccountUpdatedEvent event = new RiskAccountUpdatedEvent(1L, 10L, 1001L, "USDT",
                 1_000_000L, 25_000L, 1_025_000L, 100_000L, 97_560L, RiskStatus.NORMAL, eventTime);
 
-        consumer.onAccountRisk(new ConsumerRecord<>("surprising.risk.account.events.v1", 0, 0L,
-                "1001:USDT", objectMapper.writeValueAsString(event)));
+        consumer.onAccountRisk(new ConsumerRecord<>("surprising.linear-perp.risk.account.events.v1", 0, 0L,
+                "1001:USDT_PERPETUAL:USDT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
@@ -412,7 +411,7 @@ class KafkaFanoutConsumerTest {
                 1_000_000L, 25_000L, 1_025_000L, 100_000L, 97_560L, RiskStatus.NORMAL, eventTime,
                 "trace-risk-1");
 
-        assertThatThrownBy(() -> consumer.onAccountRisk(new ConsumerRecord<>("surprising.risk.account.events.v1",
+        assertThatThrownBy(() -> consumer.onAccountRisk(new ConsumerRecord<>("surprising.linear-perp.risk.account.events.v1",
                 0, 0L, "1002:USDT", objectMapper.writeValueAsString(event))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("failed to fanout account risk update");
@@ -430,7 +429,7 @@ class KafkaFanoutConsumerTest {
                 10L, 65_000L, 650_000L, 0L, "USDT", 100_000L,
                 eventTime, eventTime, eventTime, "trace-position-1");
 
-        consumer.onPosition(new ConsumerRecord<>("surprising.account.position.events.v1", 0, 0L,
+        consumer.onPosition(new ConsumerRecord<>("surprising.linear-perp.account.position.events.v1", 0, 0L,
                 event.partitionKey(), objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
@@ -452,7 +451,7 @@ class KafkaFanoutConsumerTest {
                 MarginMode.CROSS, PositionSide.SHORT, 7L, "USDT", -10L, 65_000L, 67_000L, 670_000L,
                 -20_000L, 100_000L, 0L, 95_238L, RiskStatus.NORMAL, eventTime, "trace-risk-position-1");
 
-        consumer.onPositionRisk(new ConsumerRecord<>("surprising.risk.position.events.v1", 0, 0L,
+        consumer.onPositionRisk(new ConsumerRecord<>("surprising.linear-perp.risk.position.events.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(event)));
 
         ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);

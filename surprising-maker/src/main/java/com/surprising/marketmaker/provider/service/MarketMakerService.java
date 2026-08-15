@@ -56,7 +56,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -698,7 +697,6 @@ public class MarketMakerService {
         List<OrderResponse> owned = openOrders.stream()
                 .filter(order -> ownsOrder(accountPrefix, order))
                 // CANCEL_REQUESTED 已不再是可交易订单，不能继续占用本周期撤单/挂单额度。
-                // 旧订单状态可能因服务重启短暂滞留在开放订单查询中；让它们继续消耗额度
                 // 会导致所有报价都被跳过，做市策略进入“运行但无盘口”的假健康状态。
                 .filter(this::isLive)
                 .sorted(Comparator.comparing(OrderResponse::createdAt, Comparator.nullsLast(Comparator.naturalOrder())))
@@ -752,27 +750,9 @@ public class MarketMakerService {
                         Math.min(start + MAX_BATCH_PLACE_ORDERS, requests.size()));
                 try {
                     var batch = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(batchRequests));
-                if (batch == null) {
-                    // 兼容旧的嵌入式调用方；生产 Feign 实现始终返回批量结果。
-                        for (PlaceOrderRequest request : batchRequests) {
-                            OrderResponse response = orderRpcApi.place(request);
-                        if (response == null || response.status() == OrderStatus.REJECTED) {
-                            rejected++;
-                            rejectionReason = firstReason(rejectionReason, response == null
-                                    ? "订单服务未返回报价结果" : response.rejectReason());
-                            continue;
-                        }
-                        rememberOrder(strategy.getProductLine(), accountId, symbol, response);
-                        submitted++;
-                        int placeholder = kept.indexOf(null);
-                        if (placeholder >= 0) {
-                            kept.set(placeholder, response);
-                        } else {
-                            kept.add(response);
-                        }
+                    if (batch == null) {
+                        throw new IllegalStateException("订单服务未返回批量报价结果");
                     }
-                        continue;
-                }
                     for (int i = 0; i < batchRequests.size(); i++) {
                     int resultIndex = i;
                     var item = batch.results().stream()
@@ -791,25 +771,6 @@ public class MarketMakerService {
                     rememberOrder(strategy.getProductLine(), accountId, symbol, response);
                     submitted++;
                     // 占位元素只用于限制本周期的最大报价数，成功后替换为真实订单。
-                    int placeholder = kept.indexOf(null);
-                    if (placeholder >= 0) {
-                        kept.set(placeholder, response);
-                    } else {
-                        kept.add(response);
-                    }
-                }
-                } catch (UnsupportedOperationException ex) {
-                // 兼容尚未实现批量 RPC 的嵌入式调用方；线上订单服务提供批量接口。
-                    for (PlaceOrderRequest request : batchRequests) {
-                        OrderResponse response = orderRpcApi.place(request);
-                    if (response == null || response.status() == OrderStatus.REJECTED) {
-                        rejected++;
-                        rejectionReason = firstReason(rejectionReason, response == null
-                                ? "订单服务未返回报价结果" : response.rejectReason());
-                        continue;
-                    }
-                    rememberOrder(strategy.getProductLine(), accountId, symbol, response);
-                    submitted++;
                     int placeholder = kept.indexOf(null);
                     if (placeholder >= 0) {
                         kept.set(placeholder, response);
@@ -871,14 +832,6 @@ public class MarketMakerService {
         return maxAge != null
                 && order.updatedAt() != null
                 && order.updatedAt().plus(maxAge).isBefore(now);
-    }
-
-    private OrderResponse place(MarketMakerProperties.Strategy strategy,
-                                long accountId,
-                                String symbol,
-                                DesiredQuote quote,
-                                long cycleSequence) {
-        return orderRpcApi.place(quoteRequest(strategy, accountId, symbol, quote, cycleSequence));
     }
 
     private PlaceOrderRequest quoteRequest(MarketMakerProperties.Strategy strategy,

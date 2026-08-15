@@ -65,7 +65,6 @@ public class IndexKafkaProducerConfiguration {
             public void onPartitionsAssigned(Consumer<?, ?> consumer,
                                               Collection<org.apache.kafka.common.TopicPartition> partitions) {
                 if (consumer != null && partitions != null && !partitions.isEmpty()) {
-                    // 指数价缓存只接受重启后的实时数据，不能用旧消息覆盖当前市场状态。
                     consumer.seekToEnd(partitions);
                 }
             }

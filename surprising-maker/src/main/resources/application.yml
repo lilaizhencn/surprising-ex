@@ -39,7 +39,6 @@ surprising:
     consumer:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       topic: surprising.perp.price.events.v1
       group-id: surprising-market-maker-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 3s

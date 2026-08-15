@@ -97,7 +97,6 @@ class ExpiringContractSettlementFanoutServiceTest {
     private static AccountProperties properties(ProductLine productLine) {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(productLine);
-        properties.getKafka().setProductTopicsEnabled(true);
         return properties;
     }
 }

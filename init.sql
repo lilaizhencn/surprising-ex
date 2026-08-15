@@ -369,25 +369,12 @@ CREATE TABLE IF NOT EXISTS instrument_lifecycle_drain_acks (
                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
     ),
     CONSTRAINT instrument_lifecycle_drain_component_check CHECK (
-        component IN ('ORDER', 'TRIGGER', 'ACCOUNT')
+        component IN ('ORDER', 'ACCOUNT')
     )
 );
 
 CREATE INDEX IF NOT EXISTS instrument_lifecycle_drain_ready_idx
     ON instrument_lifecycle_drain_acks (product_line, symbol, instrument_version);
-
-CREATE TABLE IF NOT EXISTS trading_trigger_instrument_lifecycle_fences (
-    product_line        TEXT NOT NULL,
-    symbol              TEXT NOT NULL,
-    instrument_version  BIGINT NOT NULL DEFAULT 0,
-    blocked             BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (product_line, symbol),
-    CONSTRAINT trading_trigger_instrument_lifecycle_fence_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    )
-);
 
 INSERT INTO instruments (
     symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
@@ -801,7 +788,6 @@ CREATE SEQUENCE IF NOT EXISTS trading_command_seq AS BIGINT START WITH 1 INCREME
 CREATE SEQUENCE IF NOT EXISTS trading_outbox_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_fee_schedule_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
-CREATE SEQUENCE IF NOT EXISTS trading_trigger_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_algo_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 
 CREATE TABLE IF NOT EXISTS trading_fee_schedules (
@@ -1075,7 +1061,6 @@ CREATE INDEX IF NOT EXISTS trading_orders_open_query_idx
     ON trading_orders (user_id, symbol, created_at DESC)
     WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED');
 
--- Redis open-order projection rebuilds and PostgreSQL fallback use product-scoped order-id keysets.
 CREATE INDEX IF NOT EXISTS trading_orders_open_view_user_idx
     ON trading_orders (product_line, user_id, order_id DESC)
     WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED');
@@ -1148,192 +1133,6 @@ SELECT product_line,
        MAX(updated_at) AS updated_at
   FROM trading_symbol_open_interest_shards
  GROUP BY product_line, symbol;
-
-CREATE TABLE IF NOT EXISTS trading_trigger_orders (
-    trigger_order_id           BIGINT PRIMARY KEY,
-    product_line               TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    user_id                    BIGINT NOT NULL,
-    client_trigger_order_id    TEXT,
-    oco_group_id               TEXT,
-    symbol                     TEXT NOT NULL,
-    side                       TEXT NOT NULL,
-    trigger_type               TEXT NOT NULL,
-    trigger_condition          TEXT NOT NULL,
-    trigger_price_ticks        BIGINT NOT NULL,
-    activation_price_ticks     BIGINT,
-    callback_rate_ppm          BIGINT,
-    highest_price_ticks        BIGINT,
-    lowest_price_ticks         BIGINT,
-    activated_at               TIMESTAMPTZ,
-    order_type                 TEXT NOT NULL,
-    time_in_force              TEXT NOT NULL,
-    price_ticks                BIGINT NOT NULL,
-    quantity_steps             BIGINT NOT NULL,
-    margin_mode                TEXT NOT NULL DEFAULT 'CROSS',
-    position_side              TEXT NOT NULL DEFAULT 'NET',
-    status                     TEXT NOT NULL,
-    placed_order_id            BIGINT,
-    trigger_sequence           BIGINT,
-    triggered_price_ticks      BIGINT,
-    reject_reason              TEXT,
-    trace_id                   TEXT,
-    expires_at                 TIMESTAMPTZ,
-    triggered_at               TIMESTAMPTZ,
-    created_at                 TIMESTAMPTZ NOT NULL,
-    updated_at                 TIMESTAMPTZ NOT NULL,
-    CONSTRAINT trading_trigger_orders_user_positive CHECK (user_id > 0),
-    CONSTRAINT trading_trigger_orders_product_line_check CHECK (
-        product_line IN (
-            'SPOT',
-            'LINEAR_PERPETUAL',
-            'INVERSE_PERPETUAL',
-            'LINEAR_DELIVERY',
-            'INVERSE_DELIVERY',
-            'OPTION'
-        )
-    ),
-    CONSTRAINT trading_trigger_orders_client_id_length CHECK (
-        client_trigger_order_id IS NULL OR length(client_trigger_order_id) <= 64
-    ),
-    CONSTRAINT trading_trigger_orders_oco_group_length CHECK (
-        oco_group_id IS NULL OR length(oco_group_id) <= 64
-    ),
-    CONSTRAINT trading_trigger_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT trading_trigger_orders_symbol_fk
-        FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
-    CONSTRAINT trading_trigger_orders_side_check CHECK (side IN ('BUY', 'SELL')),
-    CONSTRAINT trading_trigger_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
-    CONSTRAINT trading_trigger_orders_type_check CHECK (
-        trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS', 'TRAILING_STOP')
-    ),
-    CONSTRAINT trading_trigger_orders_condition_check CHECK (
-        trigger_condition IN ('GREATER_OR_EQUAL', 'LESS_OR_EQUAL')
-    ),
-    CONSTRAINT trading_trigger_orders_order_type_check CHECK (order_type IN ('LIMIT', 'MARKET')),
-    CONSTRAINT trading_trigger_orders_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'FOK')),
-    CONSTRAINT trading_trigger_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
-    CONSTRAINT trading_trigger_orders_status_check CHECK (
-        status IN ('PENDING', 'TRIGGERING', 'TRIGGERED', 'TRIGGER_FAILED', 'CANCELED', 'EXPIRED')
-    ),
-    CONSTRAINT trading_trigger_orders_long_values CHECK (
-        (
-            (trigger_type = 'TRAILING_STOP' AND trigger_price_ticks >= 0)
-            OR (trigger_type <> 'TRAILING_STOP' AND trigger_price_ticks > 0)
-        )
-        AND (activation_price_ticks IS NULL OR activation_price_ticks >= 0)
-        AND (callback_rate_ppm IS NULL OR callback_rate_ppm BETWEEN 1000 AND 100000)
-        AND (highest_price_ticks IS NULL OR highest_price_ticks > 0)
-        AND (lowest_price_ticks IS NULL OR lowest_price_ticks > 0)
-        AND price_ticks >= 0
-        AND quantity_steps > 0
-        AND (trigger_sequence IS NULL OR trigger_sequence > 0)
-        AND (triggered_price_ticks IS NULL OR triggered_price_ticks > 0)
-    ),
-    CONSTRAINT trading_trigger_orders_trailing_check CHECK (
-        (
-            trigger_type = 'TRAILING_STOP'
-            AND callback_rate_ppm IS NOT NULL
-            AND order_type = 'MARKET'
-        )
-        OR (
-            trigger_type <> 'TRAILING_STOP'
-            AND activation_price_ticks IS NULL
-            AND callback_rate_ppm IS NULL
-            AND highest_price_ticks IS NULL
-            AND lowest_price_ticks IS NULL
-            AND activated_at IS NULL
-        )
-    ),
-    CONSTRAINT trading_trigger_orders_market_price_zero CHECK (
-        order_type <> 'MARKET' OR price_ticks = 0
-    ),
-    CONSTRAINT trading_trigger_orders_triggered_state_check CHECK (
-        (status IN ('TRIGGERED', 'TRIGGER_FAILED') AND placed_order_id IS NOT NULL)
-        OR (status NOT IN ('TRIGGERED', 'TRIGGER_FAILED'))
-    )
-);
-
-ALTER TABLE trading_trigger_orders
-    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-
-ALTER TABLE trading_trigger_orders
-    DROP CONSTRAINT IF EXISTS trading_trigger_orders_product_line_check;
-
-ALTER TABLE trading_trigger_orders
-    ADD CONSTRAINT trading_trigger_orders_product_line_check CHECK (
-        product_line IN (
-            'SPOT',
-            'LINEAR_PERPETUAL',
-            'INVERSE_PERPETUAL',
-            'LINEAR_DELIVERY',
-            'INVERSE_DELIVERY',
-            'OPTION'
-        )
-    );
-
-UPDATE trading_trigger_orders t
-   SET product_line = CASE i.contract_type
-       WHEN 'SPOT' THEN 'SPOT'
-       WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-       WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-       WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-       WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-       WHEN 'VANILLA_OPTION' THEN 'OPTION'
-       ELSE t.product_line
-   END
-  FROM instrument_current_versions c
-  JOIN instruments i ON i.symbol = c.symbol AND i.version = c.version
- WHERE c.symbol = t.symbol;
-
-DROP INDEX IF EXISTS trading_trigger_orders_user_client_uidx;
-DROP INDEX IF EXISTS trading_trigger_orders_user_status_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_user_oco_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_symbol_gte_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_symbol_lte_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_trailing_pending_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_expiry_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_triggering_idx;
-
-CREATE UNIQUE INDEX IF NOT EXISTS trading_trigger_orders_user_client_uidx
-    ON trading_trigger_orders (product_line, user_id, client_trigger_order_id)
-    WHERE client_trigger_order_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_status_idx
-    ON trading_trigger_orders (product_line, user_id, status, created_at DESC, trigger_order_id DESC);
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_oco_idx
-    ON trading_trigger_orders (product_line, user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
-    WHERE oco_group_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_gte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-      AND trigger_condition = 'GREATER_OR_EQUAL';
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_lte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks DESC, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-      AND trigger_condition = 'LESS_OR_EQUAL';
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_trailing_pending_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type = 'TRAILING_STOP';
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_expiry_idx
-    ON trading_trigger_orders (product_line, expires_at, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND expires_at IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_triggering_idx
-    ON trading_trigger_orders (product_line, updated_at, trigger_order_id)
-    WHERE status = 'TRIGGERING';
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_trace_idx
-    ON trading_trigger_orders (trace_id)
-    WHERE trace_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS trading_order_events (
     event_id            BIGINT PRIMARY KEY,
@@ -1947,8 +1746,6 @@ CREATE INDEX IF NOT EXISTS account_spot_reservations_user_idx
 CREATE INDEX IF NOT EXISTS account_spot_reservations_symbol_idx
     ON account_spot_order_reservations (symbol, status, updated_at DESC);
 
-ALTER TABLE trading_trigger_orders
-    DROP CONSTRAINT IF EXISTS trading_trigger_orders_placed_order_fk;
 ALTER TABLE trading_order_events
     DROP CONSTRAINT IF EXISTS trading_order_events_order_fk;
 ALTER TABLE trading_match_results

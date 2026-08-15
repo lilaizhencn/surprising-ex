@@ -1,26 +1,31 @@
 package com.surprising.trading.trigger.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
+import java.util.List;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.trading.trigger")
 public class TriggerProperties {
 
-    private Kafka kafka = new Kafka();
+    private ProductLine productLine;
     private Execution execution = new Execution();
-    private RedisIndex redisIndex = new RedisIndex();
-    private Outbox outbox = new Outbox();
     private Aeron aeron = new Aeron();
 
-    public Kafka getKafka() {
-        return kafka;
+    @PostConstruct
+    void validate() {
+        if (productLine == null) {
+            throw new IllegalStateException("trigger product line is required");
+        }
     }
 
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
+    public ProductLine getProductLine() {
+        return productLine;
+    }
+
+    public void setProductLine(ProductLine productLine) {
+        this.productLine = productLine;
     }
 
     public Execution getExecution() {
@@ -28,141 +33,15 @@ public class TriggerProperties {
     }
 
     public void setExecution(Execution execution) {
-        this.execution = execution;
+        this.execution = execution == null ? new Execution() : execution;
     }
 
-    public RedisIndex getRedisIndex() {
-        return redisIndex;
+    public Aeron getAeron() {
+        return aeron;
     }
 
-    public void setRedisIndex(RedisIndex redisIndex) {
-        this.redisIndex = redisIndex;
-    }
-
-    public Outbox getOutbox() {
-        return outbox;
-    }
-
-    public Aeron getAeron() { return aeron; }
-    public void setAeron(Aeron aeron) { this.aeron = aeron == null ? new Aeron() : aeron; }
-
-    public static class Aeron {
-        private java.util.List<String> hostnames = java.util.List.of("localhost", "localhost", "localhost");
-        private String egressHostname = "localhost";
-        private java.time.Duration responseTimeout = java.time.Duration.ofSeconds(5);
-        private int clientConnections = 4;
-        private int nodeId;
-        public java.util.List<String> getHostnames() { return hostnames; }
-        public void setHostnames(java.util.List<String> hostnames) { this.hostnames = java.util.List.copyOf(hostnames); }
-        public String getEgressHostname() { return egressHostname; }
-        public void setEgressHostname(String value) { this.egressHostname = value; }
-        public java.time.Duration getResponseTimeout() { return responseTimeout; }
-        public void setResponseTimeout(java.time.Duration value) { this.responseTimeout = value; }
-        public int getClientConnections() { return clientConnections; }
-        public void setClientConnections(int value) { this.clientConnections = value; }
-        public int getNodeId() { return nodeId; }
-        public void setNodeId(int value) { this.nodeId = value; }
-    }
-
-    public void setOutbox(Outbox outbox) {
-        this.outbox = outbox;
-    }
-
-    public static class Kafka {
-        private String bootstrapServers = "localhost:9092";
-        /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
-        private ProductLine productLine;
-        private String groupId = "surprising-trigger-v1";
-        private String priceEventsTopic = "surprising.perp.price.events.v1";
-        private String positionEventsTopic = "surprising.account.position.events.v1";
-        private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
-        private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
-        private int concurrency = 2;
-        private int maxPollRecords = 500;
-
-        public String getBootstrapServers() {
-            return bootstrapServers;
-        }
-
-        public void setBootstrapServers(String bootstrapServers) {
-            this.bootstrapServers = bootstrapServers;
-        }
-
-        public ProductLine getProductLine() {
-            return productLine;
-        }
-
-        public void setProductLine(ProductLine productLine) {
-            this.productLine = productLine;
-        }
-
-        public String getGroupId() {
-            return productTopics().consumerGroup("trigger");
-        }
-
-        public void setGroupId(String groupId) {
-            this.groupId = groupId;
-        }
-
-        public String getPriceEventsTopic() {
-            return productTopics().priceEventsTopic();
-        }
-
-        public void setPriceEventsTopic(String priceEventsTopic) {
-            this.priceEventsTopic = priceEventsTopic;
-        }
-
-        public String getPositionEventsTopic() {
-            return productTopics().accountPositionEventsTopic();
-        }
-
-        public void setPositionEventsTopic(String positionEventsTopic) {
-            this.positionEventsTopic = positionEventsTopic;
-        }
-
-        public String getTriggerOrderEventsTopic() {
-            return productTopics().triggerOrderEventsTopic();
-        }
-
-        public void setTriggerOrderEventsTopic(String triggerOrderEventsTopic) {
-            this.triggerOrderEventsTopic = triggerOrderEventsTopic;
-        }
-
-        public String getInstrumentSnapshotGroupId() {
-            return "surprising-" + productLine.topicSegment() + "-trigger-instrument-snapshot-v1";
-        }
-
-        public String getInstrumentLifecycleDrainTopic() {
-            return instrumentLifecycleDrainTopic;
-        }
-
-        public void setInstrumentLifecycleDrainTopic(String instrumentLifecycleDrainTopic) {
-            this.instrumentLifecycleDrainTopic = instrumentLifecycleDrainTopic;
-        }
-
-        public String getInstrumentLifecycleGroupId() {
-            return productTopics().consumerGroup("trigger-instrument-lifecycle");
-        }
-
-        public int getConcurrency() {
-            return concurrency;
-        }
-
-        public void setConcurrency(int concurrency) {
-            this.concurrency = concurrency;
-        }
-
-        public int getMaxPollRecords() {
-            return maxPollRecords;
-        }
-
-        public void setMaxPollRecords(int maxPollRecords) {
-            this.maxPollRecords = maxPollRecords;
-        }
-
-        private ProductTopicNames productTopics() {
-            return ProductTopicNames.of(productLine);
-        }
+    public void setAeron(Aeron aeron) {
+        this.aeron = aeron == null ? new Aeron() : aeron;
     }
 
     public static class Execution {
@@ -170,13 +49,15 @@ public class TriggerProperties {
         private int maxTriggerScanPages = 16;
         private Duration staleTriggeringAfter = Duration.ofSeconds(30);
         private long maintenanceDelayMs = 1000L;
-        private boolean coreOnly;
 
         public int getTriggerBatchSize() {
             return triggerBatchSize;
         }
 
         public void setTriggerBatchSize(int triggerBatchSize) {
+            if (triggerBatchSize <= 0) {
+                throw new IllegalArgumentException("trigger batch size must be positive");
+            }
             this.triggerBatchSize = triggerBatchSize;
         }
 
@@ -185,6 +66,9 @@ public class TriggerProperties {
         }
 
         public void setMaxTriggerScanPages(int maxTriggerScanPages) {
+            if (maxTriggerScanPages <= 0) {
+                throw new IllegalArgumentException("max trigger scan pages must be positive");
+            }
             this.maxTriggerScanPages = maxTriggerScanPages;
         }
 
@@ -193,6 +77,9 @@ public class TriggerProperties {
         }
 
         public void setStaleTriggeringAfter(Duration staleTriggeringAfter) {
+            if (staleTriggeringAfter == null || staleTriggeringAfter.isNegative() || staleTriggeringAfter.isZero()) {
+                throw new IllegalArgumentException("stale triggering duration must be positive");
+            }
             this.staleTriggeringAfter = staleTriggeringAfter;
         }
 
@@ -201,162 +88,67 @@ public class TriggerProperties {
         }
 
         public void setMaintenanceDelayMs(long maintenanceDelayMs) {
+            if (maintenanceDelayMs <= 0) {
+                throw new IllegalArgumentException("maintenance delay must be positive");
+            }
             this.maintenanceDelayMs = maintenanceDelayMs;
         }
-
-        public boolean isCoreOnly() {
-            return coreOnly;
-        }
-
-        public void setCoreOnly(boolean coreOnly) {
-            this.coreOnly = coreOnly;
-        }
     }
 
-    public static class RedisIndex {
-        private String keyPrefix = "surprising:trigger:v1";
-        private int candidateBatchSize = 400;
-        private int rebuildBatchSize = 1_000;
-        private long reconcileDelayMs = 10_000L;
-        private Duration readyTtl = Duration.ofSeconds(30);
-        private Duration lockTtl = Duration.ofSeconds(30);
+    public static class Aeron {
+        private List<String> hostnames = List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private Duration responseTimeout = Duration.ofSeconds(5);
+        private int clientConnections = 4;
+        private int nodeId;
 
-        public String getKeyPrefix() {
-            return keyPrefix;
+        public List<String> getHostnames() {
+            return hostnames;
         }
 
-        public void setKeyPrefix(String keyPrefix) {
-            this.keyPrefix = keyPrefix;
-        }
-
-        public int getCandidateBatchSize() {
-            return candidateBatchSize;
-        }
-
-        public void setCandidateBatchSize(int candidateBatchSize) {
-            this.candidateBatchSize = candidateBatchSize;
-        }
-
-        public int getRebuildBatchSize() {
-            return rebuildBatchSize;
-        }
-
-        public void setRebuildBatchSize(int rebuildBatchSize) {
-            this.rebuildBatchSize = rebuildBatchSize;
-        }
-
-        public long getReconcileDelayMs() {
-            return reconcileDelayMs;
-        }
-
-        public void setReconcileDelayMs(long reconcileDelayMs) {
-            this.reconcileDelayMs = reconcileDelayMs;
-        }
-
-        public Duration getReadyTtl() {
-            return readyTtl;
-        }
-
-        public void setReadyTtl(Duration readyTtl) {
-            this.readyTtl = readyTtl;
-        }
-
-        public Duration getLockTtl() {
-            return lockTtl;
-        }
-
-        public void setLockTtl(Duration lockTtl) {
-            this.lockTtl = lockTtl;
-        }
-    }
-
-    public static class Outbox {
-        private int batchSize = 200;
-        private long publishDelayMs = 200L;
-        private Duration sendTimeout = Duration.ofSeconds(3);
-        private int maxInFlight = 32;
-        private Duration retention = Duration.ofDays(7);
-        private long cleanupDelayMs = 60_000L;
-        private int cleanupBatchSize = 10_000;
-        private int cleanupMaxBatches = 10;
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public long getPublishDelayMs() {
-            return publishDelayMs;
-        }
-
-        public void setPublishDelayMs(long publishDelayMs) {
-            this.publishDelayMs = publishDelayMs;
-        }
-
-        public Duration getSendTimeout() {
-            return sendTimeout;
-        }
-
-        public void setSendTimeout(Duration sendTimeout) {
-            this.sendTimeout = sendTimeout;
-        }
-
-        public int getMaxInFlight() {
-            return maxInFlight;
-        }
-
-        public void setMaxInFlight(int maxInFlight) {
-            if (maxInFlight <= 0) {
-                throw new IllegalArgumentException("trigger outbox maxInFlight must be positive");
+        public void setHostnames(List<String> hostnames) {
+            if (hostnames == null || hostnames.isEmpty()) {
+                throw new IllegalArgumentException("Aeron hostnames are required");
             }
-            this.maxInFlight = maxInFlight;
+            this.hostnames = List.copyOf(hostnames);
         }
 
-        public Duration getRetention() {
-            return retention;
+        public String getEgressHostname() {
+            return egressHostname;
         }
 
-        public void setRetention(Duration retention) {
-            if (retention == null || retention.isZero() || retention.isNegative()) {
-                throw new IllegalArgumentException("trigger outbox retention must be positive");
+        public void setEgressHostname(String egressHostname) {
+            this.egressHostname = egressHostname;
+        }
+
+        public Duration getResponseTimeout() {
+            return responseTimeout;
+        }
+
+        public void setResponseTimeout(Duration responseTimeout) {
+            if (responseTimeout == null || responseTimeout.isNegative() || responseTimeout.isZero()) {
+                throw new IllegalArgumentException("Aeron response timeout must be positive");
             }
-            this.retention = retention;
+            this.responseTimeout = responseTimeout;
         }
 
-        public long getCleanupDelayMs() {
-            return cleanupDelayMs;
+        public int getClientConnections() {
+            return clientConnections;
         }
 
-        public void setCleanupDelayMs(long cleanupDelayMs) {
-            if (cleanupDelayMs <= 0) {
-                throw new IllegalArgumentException("trigger outbox cleanupDelayMs must be positive");
+        public void setClientConnections(int clientConnections) {
+            if (clientConnections <= 0) {
+                throw new IllegalArgumentException("Aeron client connections must be positive");
             }
-            this.cleanupDelayMs = cleanupDelayMs;
+            this.clientConnections = clientConnections;
         }
 
-        public int getCleanupBatchSize() {
-            return cleanupBatchSize;
+        public int getNodeId() {
+            return nodeId;
         }
 
-        public void setCleanupBatchSize(int cleanupBatchSize) {
-            if (cleanupBatchSize <= 0) {
-                throw new IllegalArgumentException("trigger outbox cleanupBatchSize must be positive");
-            }
-            this.cleanupBatchSize = cleanupBatchSize;
-        }
-
-        public int getCleanupMaxBatches() {
-            return cleanupMaxBatches;
-        }
-
-        public void setCleanupMaxBatches(int cleanupMaxBatches) {
-            if (cleanupMaxBatches <= 0) {
-                throw new IllegalArgumentException("trigger outbox cleanupMaxBatches must be positive");
-            }
-            this.cleanupMaxBatches = cleanupMaxBatches;
+        public void setNodeId(int nodeId) {
+            this.nodeId = nodeId;
         }
     }
 }

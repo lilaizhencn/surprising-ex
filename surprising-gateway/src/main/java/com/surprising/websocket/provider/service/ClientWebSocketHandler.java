@@ -4,11 +4,8 @@ import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsClientCommand;
 import com.surprising.websocket.api.model.WsServerMessage;
 import com.surprising.websocket.provider.config.WebSocketProperties;
-import java.net.URI;
-import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
-import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -92,15 +89,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         if (headerValue != null && !headerValue.isBlank()) {
             return requirePositiveUserId(headerValue);
         }
-        if (!properties.getSecurity().isAllowQueryUserIdFallback()) {
-            return null;
-        }
-        URI uri = session.getUri();
-        if (uri == null) {
-            return null;
-        }
-        String queryValue = UriComponentsBuilder.fromUri(uri).build().getQueryParams().getFirst("userId");
-        return queryValue == null || queryValue.isBlank() ? null : requirePositiveUserId(queryValue);
+        return null;
     }
 
     private static long requirePositiveUserId(String value) {

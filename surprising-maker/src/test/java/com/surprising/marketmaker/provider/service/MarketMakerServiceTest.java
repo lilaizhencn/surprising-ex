@@ -138,7 +138,7 @@ class MarketMakerServiceTest {
         assertThat(fixtures.orderRpc.batchPlaceRequests).hasSize(2);
         assertThat(fixtures.orderRpc.batchPlaceRequests.get(0).orders()).hasSize(20);
         assertThat(fixtures.orderRpc.batchPlaceRequests.get(1).orders()).hasSize(10);
-        assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(30);
     }
 
     @Test
@@ -549,7 +549,7 @@ class MarketMakerServiceTest {
         private final List<ProductLine> productLinesDuringCancel = new ArrayList<>();
         private final List<ProductLine> productLinesDuringOpenOrders = new ArrayList<>();
         private final List<BatchPlaceOrderRequest> batchPlaceRequests = new ArrayList<>();
-        private boolean batchSupported;
+        private boolean batchSupported = true;
         private int openOrdersCalls;
         private int cancelBatchCalls;
 
@@ -574,6 +574,8 @@ class MarketMakerServiceTest {
             List<OrderBatchItemResponse> results = new ArrayList<>();
             for (int i = 0; i < request.orders().size(); i++) {
                 PlaceOrderRequest placeRequest = request.orders().get(i);
+                productLinesDuringPlace.add(MarketMakerProductLineContext.current());
+                placeRequests.add(placeRequest);
                 results.add(new OrderBatchItemResponse(i, true, "completed",
                         orderAt(2_000L + batchPlaceRequests.size() * 100L + i, placeRequest.userId(),
                                 placeRequest.clientOrderId(), placeRequest.side(), placeRequest.priceTicks(),

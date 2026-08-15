@@ -21,15 +21,15 @@ import org.springframework.test.util.ReflectionTestUtils;
 class MarkKafkaConfigurationTest {
 
     @Test
-    void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
+    void defaultsToLinearPerpetualTopics() {
         MarkPriceProperties properties = new MarkPriceProperties();
 
-        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-mark-price-v1");
-        assertThat(properties.bookTickerTopic()).isEqualTo("surprising.perp.book.ticker.v1");
-        assertThat(properties.tradeTopic()).isEqualTo("surprising.perp.trade.events.v1");
+        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-linear-perp-mark-price-v1");
+        assertThat(properties.bookTickerTopic()).isEqualTo("surprising.linear-perp.book.ticker.v1");
+        assertThat(properties.tradeTopic()).isEqualTo("surprising.linear-perp.trade.events.v1");
         assertThat(properties.isFundingRateExpected()).isTrue();
-        assertThat(properties.fundingRateTopic()).isEqualTo("surprising.perp.funding.rate.v1");
-        assertThat(properties.priceEventsTopic()).isEqualTo("surprising.perp.price.events.v1");
+        assertThat(properties.fundingRateTopic()).isEqualTo("surprising.linear-perp.funding.rate.v1");
+        assertThat(properties.priceEventsTopic()).isEqualTo("surprising.linear-perp.price.events.v1");
         assertThat(properties.getCalculation().getPublishIntervalMs()).isEqualTo(1_000L);
         assertThat(properties.getAudit().getRetention()).isEqualTo(Duration.ofDays(3));
         assertThat(properties.getAudit().getCleanupDelayMs()).isEqualTo(60_000L);
@@ -39,13 +39,12 @@ class MarkKafkaConfigurationTest {
     void canResolveMarkTopicsAndGroupFromProductLine() {
         MarkPriceProperties properties = new MarkPriceProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
 
         assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-inverse-delivery-mark-price-v1");
         assertThat(properties.bookTickerTopic()).isEqualTo("surprising.inverse-delivery.book.ticker.v1");
         assertThat(properties.tradeTopic()).isEqualTo("surprising.inverse-delivery.trade.events.v1");
         assertThat(properties.isFundingRateExpected()).isFalse();
-        assertThat(properties.fundingRateTopic()).isEqualTo("surprising.perp.funding.rate.v1");
+        assertThat(properties.fundingRateTopic()).isEqualTo("surprising.inverse-delivery.funding.rate.v1");
         assertThat(properties.priceEventsTopic()).isEqualTo("surprising.inverse-delivery.price.events.v1");
     }
 
@@ -53,7 +52,6 @@ class MarkKafkaConfigurationTest {
     void canResolveFundingTopicForFundingProductLine() {
         MarkPriceProperties properties = new MarkPriceProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        properties.getKafka().setProductTopicsEnabled(true);
 
         assertThat(properties.isFundingRateExpected()).isTrue();
         assertThat(properties.fundingRateTopic()).isEqualTo("surprising.inverse-perp.funding.rate.v1");
@@ -82,7 +80,6 @@ class MarkKafkaConfigurationTest {
     void consumerUsesLiveFeedRecordAckSettings() {
         MarkPriceProperties properties = new MarkPriceProperties();
         properties.getKafka().setBootstrapServers("kafka-price:9092");
-        properties.getKafka().setGroupId("mark-test-group");
         properties.getKafka().setConcurrency(3);
         properties.getKafka().setMaxPollRecords(250);
 
@@ -93,7 +90,7 @@ class MarkKafkaConfigurationTest {
 
         Map<String, Object> config = consumerFactory.getConfigurationProperties();
         assertThat(config).containsEntry(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-price:9092");
-        assertThat(config).containsEntry(ConsumerConfig.GROUP_ID_CONFIG, "mark-test-group");
+        assertThat(config).containsEntry(ConsumerConfig.GROUP_ID_CONFIG, "surprising-linear-perp-mark-price-v1");
         assertThat(config).containsEntry(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
@@ -111,7 +108,6 @@ class MarkKafkaConfigurationTest {
     void auditConsumerReadsTheSameTopicFromTheBeginningAndRetriesUntilPersisted() {
         MarkPriceProperties properties = new MarkPriceProperties();
         properties.getKafka().setBootstrapServers("kafka-price:9092");
-        properties.getKafka().setGroupId("mark-test-group");
 
         MarkKafkaConfiguration configuration = new MarkKafkaConfiguration();
         var consumerFactory = (DefaultKafkaConsumerFactory<String, String>)
@@ -119,7 +115,7 @@ class MarkKafkaConfigurationTest {
         var listenerFactory = configuration.markAuditKafkaListenerContainerFactory(consumerFactory, properties);
 
         assertThat(consumerFactory.getConfigurationProperties())
-                .containsEntry(ConsumerConfig.GROUP_ID_CONFIG, "mark-test-group-audit-writer")
+                .containsEntry(ConsumerConfig.GROUP_ID_CONFIG, "surprising-linear-perp-mark-price-v1-audit-writer")
                 .containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
                 .containsEntry(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         assertThat(listenerFactory.getContainerProperties().getAckMode())

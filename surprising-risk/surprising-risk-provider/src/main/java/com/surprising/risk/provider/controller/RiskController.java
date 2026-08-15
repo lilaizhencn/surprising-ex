@@ -30,8 +30,7 @@ public class RiskController {
 
     @GetMapping(RiskApiPaths.RISK_BASE_PATH + "/account/latest")
     public RiskAccountSnapshotResponse latestAccountRisk(@RequestParam("userId") long userId,
-                                                         @RequestParam(value = "accountType",
-                                                                 defaultValue = "USDT_PERPETUAL") String accountType,
+                                                         @RequestParam("accountType") String accountType,
                                                          @RequestParam("settleAsset") String settleAsset) {
         try {
             return riskService.latestAccount(userId, accountType, settleAsset);

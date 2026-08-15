@@ -9,7 +9,6 @@ import com.surprising.trading.api.model.PlaceTriggerOrderRequest;
 import com.surprising.trading.api.model.TriggerOrderBatchResponse;
 import com.surprising.trading.api.model.TriggerOrderQueryResponse;
 import com.surprising.trading.api.model.TriggerOrderResponse;
-import com.surprising.trading.trigger.service.AtomicTriggerBatchRejectedException;
 import com.surprising.trading.trigger.service.TriggerOrderService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,8 +47,6 @@ public class TriggerOrderController {
     public TriggerOrderBatchResponse placeBatch(@RequestBody BatchPlaceTriggerOrderRequest request) {
         try {
             return triggerOrderService.placeBatch(request);
-        } catch (AtomicTriggerBatchRejectedException ex) {
-            return ex.response();
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

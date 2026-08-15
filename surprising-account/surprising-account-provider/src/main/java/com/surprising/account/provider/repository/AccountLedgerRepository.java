@@ -12,8 +12,8 @@ import org.springframework.stereotype.Repository;
 /**
  * 基础账户账本单表查询仓储。
  *
- * <p>资金命令不再调用该仓储写入。在线 reducer 的终态由产品账本异步投影器处理；该表保留
- * 作为基础账户历史查询和兼容审计数据源，避免旧的逐类写入方法继续形成第二套事实流。</p>
+ * <p>资金命令不再调用该仓储写入。在线 reducer 的终态由产品账本异步投影器处理；该表只提供
+ * 账户历史查询，避免形成第二套事实流。</p>
  */
 @Repository
 public class AccountLedgerRepository {

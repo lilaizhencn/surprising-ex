@@ -21,7 +21,6 @@ class LiquidationFeeEventConsumerTest {
     void processesLiquidationFeeFromCurrentProductTopic() throws Exception {
         InsuranceProperties properties = new InsuranceProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         RecordingInsuranceService service = new RecordingInsuranceService(properties);
         LiquidationFeeEventConsumer consumer = new LiquidationFeeEventConsumer(objectMapper, service, properties);
         LiquidationFeeSettledEvent event = event("USDT_DELIVERY");
@@ -36,7 +35,6 @@ class LiquidationFeeEventConsumerTest {
     void rejectsMismatchedLiquidationFeeTopicBeforeCollecting() throws Exception {
         InsuranceProperties properties = new InsuranceProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        properties.getKafka().setProductTopicsEnabled(true);
         RecordingInsuranceService service = new RecordingInsuranceService(properties);
         LiquidationFeeEventConsumer consumer = new LiquidationFeeEventConsumer(objectMapper, service, properties);
 
@@ -72,7 +70,6 @@ class LiquidationFeeEventConsumerTest {
     void resolvesProductTopicAndGroupId() {
         InsuranceProperties properties = new InsuranceProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         LiquidationFeeEventConsumer consumer = new LiquidationFeeEventConsumer(objectMapper,
                 new RecordingInsuranceService(properties), properties);
 

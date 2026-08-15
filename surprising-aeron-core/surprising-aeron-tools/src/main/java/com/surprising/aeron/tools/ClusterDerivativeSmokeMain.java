@@ -64,7 +64,7 @@ public final class ClusterDerivativeSmokeMain {
                         derivativeOrder(buyOrder, CoreOrderSide.BUY)));
                 applied(client, command(productLine, sourceId, seed + 4, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "BTC-USDT", 1, 100, seed, 1_700_000_000_000L)));
+                                "BTC-USDT", 1, 100, seed, 1_700_000_000_000L))));
                 applied(client, command(productLine, sourceId, seed + 5, 1, CoreMessageType.APPLY_FUNDING,
                         TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
                                 settlementId, "BTC-USDT", 1, 10_000))));

@@ -19,7 +19,6 @@ class MarkPriceEncodingServiceTest {
     @Test
     void readsEncodingFromTheInstrumentSnapshot() {
         MarkPriceProperties properties = new MarkPriceProperties();
-        properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
         InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
         cache.replace(ProductLine.INVERSE_PERPETUAL, List.of(instrument()), Map.of("USD", 100_000_000L));

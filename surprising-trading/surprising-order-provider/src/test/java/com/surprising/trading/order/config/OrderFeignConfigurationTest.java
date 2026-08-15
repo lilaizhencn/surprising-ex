@@ -32,7 +32,6 @@ class OrderFeignConfigurationTest {
     @Test
     void forwardsProductLineWhenProductTopicsAreEnabled() {
         TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(ProductLine.OPTION);
         RequestTemplate template = new RequestTemplate();
 

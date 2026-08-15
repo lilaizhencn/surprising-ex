@@ -3,6 +3,7 @@ package com.surprising.websocket.provider.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Map;
+import com.surprising.product.api.ProductLine;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -16,6 +17,7 @@ class WebSocketKafkaConfigurationTest {
     @Test
     void consumerUsesPerNodeFanoutSettings() {
         WebSocketProperties properties = new WebSocketProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getKafka().setBootstrapServers("kafka-a:9092");
         properties.getKafka().setGroupId("surprising-websocket-node-a");
         properties.getKafka().setConcurrency(4);
@@ -28,7 +30,8 @@ class WebSocketKafkaConfigurationTest {
 
         Map<String, Object> config = consumerFactory.getConfigurationProperties();
         assertThat(config).containsEntry(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-a:9092");
-        assertThat(config).containsEntry(ConsumerConfig.GROUP_ID_CONFIG, "surprising-websocket-node-a");
+        assertThat(config).containsEntry(ConsumerConfig.GROUP_ID_CONFIG,
+                "surprising-linear-perp-websocket-v1-surprising-websocket-node-a");
         assertThat(config).containsEntry(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         assertThat(config).containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");

@@ -39,7 +39,6 @@ class AlgoOrderServiceTest {
 
     private AlgoOrderService service(ProductLine line) {
         TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getKafka().setProductTopicsEnabled(true);
         properties.getKafka().setProductLine(line);
         properties.getAlgo().setMinDurationSeconds(1);
         properties.getAlgo().setMinIntervalSeconds(1);

@@ -214,9 +214,6 @@ import tools.jackson.databind.ObjectMapper;
     }
 
     private void requireCurrentProductTopic(String topic, String expectedTopic, String streamName) {
-        if (!properties.getKafka().isProductTopicsEnabled()) {
-            return;
-        }
         if (!expectedTopic.equals(topic)) {
             throw new ProductTopicMismatchException(streamName + " topic must match current product line: expected="
                     + expectedTopic + " actual=" + topic);
