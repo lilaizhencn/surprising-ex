@@ -54,9 +54,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CoreMatchingResult place(long userId, PlaceOrderCommand command) {
+        return placeAsync(userId, command).join();
+    }
+
+    public CompletableFuture<CoreMatchingResult> placeAsync(long userId, PlaceOrderCommand command) {
         int symbolId = ensureSymbol(command.symbol());
         ensureUser(userId);
-        var response = api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
+        return api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
                 .orderId(command.orderId())
                 .uid(userId)
                 .symbol(symbolId)
@@ -65,7 +69,19 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 .price(command.matchingPriceTicks())
                 .reservePrice(command.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : command.matchingPriceTicks())
                 .size(command.quantitySteps())
-                .build()).join();
+                .build()).thenApply(DeterministicExchangeCoreAdapter::matchingResult);
+    }
+
+    public List<CoreMatchingResult> placeBatch(List<PlaceRequest> requests) {
+        if (requests == null || requests.isEmpty()) return List.of();
+        List<CompletableFuture<CoreMatchingResult>> futures = requests.stream()
+                .map(request -> placeAsync(request.userId(), request.command()))
+                .toList();
+        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+        return futures.stream().map(CompletableFuture::join).toList();
+    }
+
+    private static CoreMatchingResult matchingResult(exchange.core2.core.common.cmd.OrderCommand response) {
         List<CoreMatch> matches = new ArrayList<>();
         response.processMatcherEvents(event -> {
             if (event.eventType == MatcherEventType.TRADE) {
@@ -252,6 +268,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private static SymbolType symbolType(CoreInstrumentState instrument) {
         return SymbolType.CURRENCY_EXCHANGE_PAIR;
+    }
+
+    public record PlaceRequest(long userId, PlaceOrderCommand command) {
+        public PlaceRequest {
+            if (userId <= 0 || command == null) throw new IllegalArgumentException("invalid place request");
+        }
     }
 
     private int stableSymbolId(String symbol) {

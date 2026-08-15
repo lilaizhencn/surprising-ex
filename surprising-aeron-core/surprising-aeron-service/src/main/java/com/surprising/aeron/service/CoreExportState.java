@@ -5,6 +5,7 @@ import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreExportStatus;
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.WireMessageKind;
@@ -20,6 +21,8 @@ final class CoreExportState {
 
     static final int MAX_PENDING_EVENTS = 1_000_000;
     static final long MAX_PENDING_BYTES = 64L * 1024 * 1024;
+    private static final long MAX_EVENT_BYTES = CoreProtocol.HEADER_LENGTH
+            + (long) CoreMessageCodec.MAX_PAYLOAD_LENGTH;
     private long acknowledgedSequence;
     private long nextSequence;
     private final ArrayDeque<CoreMessage> pending;
@@ -95,10 +98,11 @@ final class CoreExportState {
         return pending.size() < MAX_PENDING_EVENTS;
     }
 
-    boolean hasCapacityFor(CoreMessage command) {
-        long eventBytes = Math.addExact(CoreProtocol.HEADER_LENGTH,
-                Math.addExact(80L, command.payloadLength()));
-        return hasCapacity() && pendingBytes + eventBytes <= MAX_PENDING_BYTES;
+    boolean hasCapacityFor() {
+        if (!hasCapacity()) {
+            return false;
+        }
+        return pendingBytes <= MAX_PENDING_BYTES - MAX_EVENT_BYTES;
     }
 
     List<Long> acknowledge(AckExportCommand command) {

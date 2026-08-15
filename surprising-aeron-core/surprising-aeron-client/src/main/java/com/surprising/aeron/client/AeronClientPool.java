@@ -15,7 +15,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -35,7 +35,7 @@ public final class AeronClientPool implements AutoCloseable {
     private final String egressHostname;
     private final Duration responseTimeout;
     private final String sourceIdentity;
-    private final String sourceEpoch = UUID.randomUUID().toString();
+    private final String sourceEpoch;
     private final ClientSlot[] clients;
     private final ExecutorService commandExecutor;
     private final AtomicInteger nextClient = new AtomicInteger();
@@ -60,6 +60,19 @@ public final class AeronClientPool implements AutoCloseable {
             Duration responseTimeout,
             int clientConnections,
             String sourceIdentity) {
+        this(clientName, productLine, hostnames, egressHostname, responseTimeout, clientConnections,
+                sourceIdentity, UUID.randomUUID().toString());
+    }
+
+    public AeronClientPool(
+            String clientName,
+            ProductLine productLine,
+            List<String> hostnames,
+            String egressHostname,
+            Duration responseTimeout,
+            int clientConnections,
+            String sourceIdentity,
+            String sourceEpoch) {
         if (clientName == null || clientName.isBlank()) {
             throw new IllegalArgumentException("clientName is required");
         }
@@ -82,6 +95,10 @@ public final class AeronClientPool implements AutoCloseable {
             throw new IllegalArgumentException("sourceIdentity is required");
         }
         this.sourceIdentity = sourceIdentity.trim();
+        if (sourceEpoch == null || sourceEpoch.isBlank()) {
+            throw new IllegalArgumentException("sourceEpoch is required");
+        }
+        this.sourceEpoch = sourceEpoch.trim();
         if (clientConnections < 1 || clientConnections > 64) {
             throw new IllegalArgumentException("clientConnections must be in [1,64]");
         }
@@ -93,9 +110,13 @@ public final class AeronClientPool implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         };
-        this.commandExecutor = Executors.newFixedThreadPool(clientConnections, commandThreadFactory);
+        int queueCapacity = Math.max(1, Math.min(256, clientConnections * 4));
+        this.commandExecutor = new java.util.concurrent.ThreadPoolExecutor(
+                clientConnections, clientConnections, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(queueCapacity), commandThreadFactory,
+                new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
         for (int index = 0; index < clients.length; index++) {
-            long sourceId = stableLong(this.sourceIdentity + ':' + productLine + ':' + sourceEpoch + ':' + index);
+            long sourceId = stableLong(this.sourceIdentity + ':' + productLine + ':' + this.sourceEpoch + ':' + index);
             clients[index] = new ClientSlot(sourceId);
         }
     }

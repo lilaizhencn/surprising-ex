@@ -61,8 +61,6 @@ public class RiskProperties {
     public static class Calculation {
         private boolean enabled = true;
         private long scanDelayMs = 1000L;
-        private long warningMarginRatioPpm = 800_000L;
-        private long liquidationMarginRatioPpm = 1_000_000L;
         private Duration maxMarkAge = Duration.ofSeconds(10);
         private int scanBatchSize = 500;
 
@@ -72,16 +70,6 @@ public class RiskProperties {
         public void setScanDelayMs(long value) {
             if (value < 0) throw new IllegalArgumentException("scanDelayMs must be non-negative");
             scanDelayMs = value;
-        }
-        public long getWarningMarginRatioPpm() { return warningMarginRatioPpm; }
-        public void setWarningMarginRatioPpm(long value) {
-            if (value < 0) throw new IllegalArgumentException("warningMarginRatioPpm must be non-negative");
-            warningMarginRatioPpm = value;
-        }
-        public long getLiquidationMarginRatioPpm() { return liquidationMarginRatioPpm; }
-        public void setLiquidationMarginRatioPpm(long value) {
-            if (value < 0) throw new IllegalArgumentException("liquidationMarginRatioPpm must be non-negative");
-            liquidationMarginRatioPpm = value;
         }
         public Duration getMaxMarkAge() { return maxMarkAge; }
         public void setMaxMarkAge(Duration value) {

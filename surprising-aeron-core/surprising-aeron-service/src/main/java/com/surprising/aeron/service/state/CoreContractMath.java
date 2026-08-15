@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.math.BigInteger;
 
@@ -16,8 +17,11 @@ final class CoreContractMath {
             CoreOrderSide side,
             long priceTicks,
             long quantitySteps) {
+        long initialMarginRatePpm = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
+                ? riskBracket(instrument, notionalUnits(instrument, quantitySteps, priceTicks)).initialMarginRatePpm()
+                : instrument.initialMarginRatePpm();
         return openingMarginUnits(instrument, side, priceTicks, quantitySteps,
-                instrument.initialMarginRatePpm());
+                initialMarginRatePpm);
     }
 
     static long openingMarginUnits(
@@ -58,6 +62,10 @@ final class CoreContractMath {
             CoreInstrumentState instrument,
             long signedQuantitySteps,
             long markPriceTicks) {
+        long maintenanceMarginRatePpm = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
+                ? riskBracket(instrument, notionalUnits(instrument, Math.absExact(signedQuantitySteps), markPriceTicks))
+                .maintenanceMarginRatePpm()
+                : instrument.maintenanceMarginRatePpm();
         if (instrument.contractType().isOption()) {
             if (signedQuantitySteps > 0) {
                 return 0;
@@ -66,19 +74,35 @@ final class CoreContractMath {
             try {
                 long numerator = Math.multiplyExact(instrument.strikePriceTicks(), quantity);
                 numerator = Math.multiplyExact(numerator, instrument.notionalMultiplierUnits());
-                numerator = Math.multiplyExact(numerator, instrument.maintenanceMarginRatePpm());
+                numerator = Math.multiplyExact(numerator, maintenanceMarginRatePpm);
                 return divideCeiling(numerator, 1_000_000L);
             } catch (ArithmeticException overflow) {
                 BigInteger numerator = big(instrument.strikePriceTicks())
                         .multiply(big(quantity))
                         .multiply(big(instrument.notionalMultiplierUnits()))
-                        .multiply(big(instrument.maintenanceMarginRatePpm()));
+                        .multiply(big(maintenanceMarginRatePpm));
                 return divideCeiling(numerator, PPM);
             }
         }
         return PerpetualContractMath.maintenanceMarginUnits(instrument.contractType(), signedQuantitySteps,
                 markPriceTicks, instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
-                instrument.settleScaleUnits(), instrument.maintenanceMarginRatePpm());
+                instrument.settleScaleUnits(), maintenanceMarginRatePpm);
+    }
+
+    static CoreRiskLimitBracket riskBracket(CoreInstrumentState instrument, long notionalUnits) {
+        if (notionalUnits < 0) {
+            throw new IllegalArgumentException("notional must not be negative");
+        }
+        CoreRiskLimitBracket bracket = instrument.riskLimitBrackets().stream()
+                .filter(value -> value.notionalFloorUnits() <= notionalUnits)
+                .max(java.util.Comparator.comparingLong(CoreRiskLimitBracket::notionalFloorUnits))
+                .orElseThrow(() -> new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
+                        "position notional has no risk bracket"));
+        if (notionalUnits > bracket.notionalCapUnits()) {
+            throw new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
+                    "position notional exceeds instrument risk brackets");
+        }
+        return bracket;
     }
 
     static long pnlUnits(

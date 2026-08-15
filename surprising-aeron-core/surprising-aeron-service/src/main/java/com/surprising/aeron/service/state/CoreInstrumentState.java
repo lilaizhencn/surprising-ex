@@ -43,6 +43,19 @@ public record CoreInstrumentState(
             throw new IllegalArgumentException("invalid instrument state");
         }
         riskLimitBrackets = List.copyOf(riskLimitBrackets);
+        long previousCap = 0;
+        int expectedBracketNo = 1;
+        for (CoreRiskLimitBracket bracket : riskLimitBrackets) {
+            if (bracket.bracketNo() != expectedBracketNo++
+                    || bracket.notionalFloorUnits() != previousCap
+                    || bracket.maxLeveragePpm() > maxLeveragePpm) {
+                throw new IllegalArgumentException("risk limit brackets must be contiguous and bounded");
+            }
+            previousCap = bracket.notionalCapUnits();
+        }
+        if (previousCap < maxPositionNotionalUnits) {
+            throw new IllegalArgumentException("risk limit brackets must cover max position notional");
+        }
         if (contractType.isDelivery() && expiryEpochMillis <= 0) {
             throw new IllegalArgumentException("delivery instrument requires expiry time");
         }

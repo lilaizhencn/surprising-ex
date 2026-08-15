@@ -93,7 +93,7 @@ gateway 本地核心后台列表使用统一游标分页协议：`/api/v1/admin/
 gateway 中实现。后续财务运营模块必须配置独立数据源和独立物理数据库，
 通过领域事件、outbox 或受控 CDC 建立查询投影，禁止对交易主库执行报表 JOIN。
 
-系统监控接口位于 `/api/v1/admin/system`：`/routes` 返回普通和后台路由配置，`/health` 统一巡检后端 `/actuator/health`，`/observability` 聚合 Kafka consumer lag、WebSocket 连接/订阅指标和各后端 `/actuator/prometheus` 抓取状态。这些接口需要 `admin.system.read`。Kafka lag 默认关闭，生产可通过 `ADMIN_KAFKA_LAG_ENABLED=true` 和 `ADMIN_KAFKA_BOOTSTRAP_SERVERS` 开启。依赖业务库聚合的 `/metrics` 与本地告警中心已移除；以后应从独立运营数据库或可观测性平台提供。
+系统管理接口位于 `/api/v1/admin/system`：`/routes` 返回普通和后台路由配置，`/health` 统一巡检后端 `/actuator/health`。这些接口需要 `admin.system.read`。后台 Kafka lag、WebSocket 连接指标和 Prometheus 抓取不在 Gateway 中实现，应由独立可观测性平台提供。
 
 下游 `trading-orders` 和 `trading-trigger` 后台代理仍保留单一领域内、受限分页的客服操作明细。
 跨领域时间线和聚合运营报表统一归属上述独立财务运营数据库。

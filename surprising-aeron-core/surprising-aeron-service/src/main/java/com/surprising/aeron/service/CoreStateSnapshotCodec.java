@@ -36,10 +36,13 @@ final class CoreStateSnapshotCodec {
 
     static byte[] encode(CoreProbeState state) {
         byte[] tradingState = TradingStateSnapshotCodec.encode(state.tradingState());
-        long exportLength = EXPORT_FIXED_LENGTH;
+        java.util.ArrayList<byte[]> pendingEvents = new java.util.ArrayList<>(state.exportState().pendingCount());
         for (CoreMessage event : state.exportState().pendingEvents()) {
-            exportLength = Math.addExact(exportLength,
-                    Math.addExact(Integer.BYTES, CoreMessageCodec.encode(event).length));
+            pendingEvents.add(CoreMessageCodec.encode(event));
+        }
+        long exportLength = EXPORT_FIXED_LENGTH;
+        for (byte[] event : pendingEvents) {
+            exportLength = Math.addExact(exportLength, Math.addExact(Integer.BYTES, event.length));
         }
         int snapshotLength = Math.toIntExact(Math.addExact(Math.addExact(Math.addExact(
                 Math.addExact((long) FIXED_LENGTH,
@@ -74,8 +77,7 @@ final class CoreStateSnapshotCodec {
         buffer.putLong(state.exportState().acknowledgedSequence());
         buffer.putLong(state.exportState().nextSequence());
         buffer.putInt(state.exportState().pendingCount());
-        state.exportState().pendingEvents().forEach(event -> {
-            byte[] encoded = CoreMessageCodec.encode(event);
+        pendingEvents.forEach(encoded -> {
             buffer.putInt(encoded.length);
             buffer.put(encoded);
         });

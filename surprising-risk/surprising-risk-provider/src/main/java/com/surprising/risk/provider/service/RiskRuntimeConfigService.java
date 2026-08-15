@@ -21,13 +21,12 @@ public class RiskRuntimeConfigService {
         Map<String, Object> calculation = new LinkedHashMap<>();
         calculation.put("enabled", properties.getCalculation().isEnabled());
         calculation.put("scanDelayMs", properties.getCalculation().getScanDelayMs());
-        calculation.put("warningMarginRatioPpm", properties.getCalculation().getWarningMarginRatioPpm());
-        calculation.put("liquidationMarginRatioPpm", properties.getCalculation().getLiquidationMarginRatioPpm());
         calculation.put("maxMarkAge", properties.getCalculation().getMaxMarkAge().toString());
         calculation.put("scanBatchSize", properties.getCalculation().getScanBatchSize());
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("scope", "runtime");
+        response.put("marginPolicySource", "AERON_CORE_INSTRUMENT");
         response.put("calculation", calculation);
         return response;
     }
@@ -37,19 +36,15 @@ public class RiskRuntimeConfigService {
                                       Long warningMarginRatioPpm,
                                       Long liquidationMarginRatioPpm,
                                       Integer scanBatchSize) {
+        if (warningMarginRatioPpm != null || liquidationMarginRatioPpm != null) {
+            throw new IllegalArgumentException(
+                    "margin thresholds are owned by versioned Aeron Core instrument policy");
+        }
         if (calculationEnabled != null) {
             properties.getCalculation().setEnabled(calculationEnabled);
         }
         if (scanDelayMs != null) {
             properties.getCalculation().setScanDelayMs(nonNegative(scanDelayMs, "scanDelayMs"));
-        }
-        if (warningMarginRatioPpm != null) {
-            properties.getCalculation().setWarningMarginRatioPpm(
-                    nonNegative(warningMarginRatioPpm, "warningMarginRatioPpm"));
-        }
-        if (liquidationMarginRatioPpm != null) {
-            properties.getCalculation().setLiquidationMarginRatioPpm(
-                    nonNegative(liquidationMarginRatioPpm, "liquidationMarginRatioPpm"));
         }
         if (scanBatchSize != null) {
             properties.getCalculation().setScanBatchSize(

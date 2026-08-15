@@ -75,7 +75,7 @@ public class RiskService {
         Instant now = Instant.now();
         return new RiskAccountSnapshotResponse(snapshotSequence(snapshots, user.revision()), userId,
                 expectedAccountType, asset, wallet, unrealized, equity, maintenance, ratio,
-                status(ratio), now);
+                status(cross), now);
     }
 
     public RiskPositionQueryResponse latestPositions(long userId) {
@@ -109,12 +109,10 @@ public class RiskService {
 
     public RiskRulesResponse riskRules() {
         List<RiskRuleOverride> overrides = rules.findAll();
-        RiskRuleOverride margin = override(overrides, "GLOBAL_MARGIN_POLICY");
         RiskRuleOverride scan = override(overrides, "RISK_SCAN_CONTROL");
         return new RiskRulesResponse(2, List.of(
-                rule("GLOBAL_MARGIN_POLICY", "Global margin thresholds", "GLOBAL_MARGIN",
-                        margin == null || margin.enabled(), properties.getCalculation().getWarningMarginRatioPpm(),
-                        properties.getCalculation().getLiquidationMarginRatioPpm(), null, null, margin),
+                new RiskRuleResponse("GLOBAL_MARGIN_POLICY", "Core instrument risk policy",
+                        "CORE_INSTRUMENT_RISK_POLICY", true, null, null, null, null, "core", null, null, null),
                 rule("RISK_SCAN_CONTROL", "Aeron risk scan control", "SCAN_CONTROL",
                         scan == null ? properties.getCalculation().isEnabled() : scan.enabled(), null, null,
                         properties.getCalculation().getScanDelayMs(), properties.getCalculation().getScanBatchSize(), scan)));
@@ -129,19 +127,8 @@ public class RiskService {
         Instant now = Instant.now();
         RiskRuleOverride saved;
         if ("GLOBAL_MARGIN_POLICY".equals(code)) {
-            long warning = nonNegative(command.warningMarginRatioPpm() == null
-                    ? properties.getCalculation().getWarningMarginRatioPpm() : command.warningMarginRatioPpm(),
-                    "warningMarginRatioPpm");
-            long liquidation = nonNegative(command.liquidationMarginRatioPpm() == null
-                    ? properties.getCalculation().getLiquidationMarginRatioPpm() : command.liquidationMarginRatioPpm(),
-                    "liquidationMarginRatioPpm");
-            if (warning >= liquidation) throw new IllegalArgumentException(
-                    "warningMarginRatioPpm must be less than liquidationMarginRatioPpm");
-            properties.getCalculation().setWarningMarginRatioPpm(warning);
-            properties.getCalculation().setLiquidationMarginRatioPpm(liquidation);
-            saved = rules.upsert(code, ruleName(command.ruleName(), "Global margin thresholds"), "GLOBAL_MARGIN",
-                    command.enabled() == null || command.enabled(), warning, liquidation, null, null,
-                    admin, reason, now);
+            throw new IllegalArgumentException(
+                    "margin policy is owned by versioned Aeron Core instrument state");
         } else if ("RISK_SCAN_CONTROL".equals(code)) {
             boolean enabled = command.enabled() == null ? properties.getCalculation().isEnabled() : command.enabled();
             long delay = nonNegative(command.scanDelayMs() == null ? properties.getCalculation().getScanDelayMs()
@@ -208,9 +195,13 @@ public class RiskService {
         if (maintenance > Long.MAX_VALUE / 1_000_000L) return Long.MAX_VALUE;
         return Math.multiplyExact(maintenance, 1_000_000L) / equity;
     }
-    private RiskStatus status(long ratio) {
-        if (ratio >= properties.getCalculation().getLiquidationMarginRatioPpm()) return RiskStatus.LIQUIDATION;
-        if (ratio >= properties.getCalculation().getWarningMarginRatioPpm()) return RiskStatus.WARNING;
+    private static RiskStatus status(List<CoreRiskSnapshotView> snapshots) {
+        if (snapshots.stream().anyMatch(value -> "LIQUIDATION".equals(value.status()))) {
+            return RiskStatus.LIQUIDATION;
+        }
+        if (snapshots.stream().anyMatch(value -> "WARNING".equals(value.status()))) {
+            return RiskStatus.WARNING;
+        }
         return RiskStatus.NORMAL;
     }
     private static void requireUserId(long value) {
@@ -256,7 +247,7 @@ public class RiskService {
     }
     private static RiskRuleResponse ruleFrom(RiskRuleOverride value) {
         return new RiskRuleResponse(value.ruleCode(), value.ruleName(), value.ruleType(), value.enabled(),
-                value.warningMarginRatioPpm(), value.liquidationMarginRatioPpm(), value.scanDelayMs(),
+                null, null, value.scanDelayMs(),
                 value.scanBatchSize(), "override", value.adminUserId(), value.reason(), value.updatedAt());
     }
 

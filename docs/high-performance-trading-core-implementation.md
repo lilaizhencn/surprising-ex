@@ -1,11 +1,13 @@
 # Surprising-EX 高性能交易核心最终实施规格
 
 > 状态：`IMPLEMENTATION_SOURCE_OF_TRUTH`
-> 
+>
 > 适用范围：Aeron Cluster、交易核心、exchange-core 0.5.8-emporia、账户资金、订单、风险、触发单、导出、查询、Gateway 和四条产品线。
-> 
+>
 > 目标：单写者、无锁热路径、减少复制、减少往返、内存裁决、高吞吐、可恢复、资金守恒。
-> 
+>
+> 基线提交：`221b7f005e75af43f76b19d71abde0b1a053312e`；实施分支：`codex/aeron-unified-core`。
+> 当前文档阶段：`P1-CODE-BASELINE`（P0 文档与基线护栏已冻结，代码按阶段顺序实施）。
 > 更新时间：2026-08-15
 
 本文档是本轮源码审计、前序 Aeron 统一交易核心方案、exchange-core 单一盘口方案和本项目当前实现的合并实施规格。实现、代码审查、压测和上线门禁均以本文档为准。历史文档如果被删除，不代表其中的约束和验收项被删除；它们已经在本文档中合并保留。
@@ -153,7 +155,80 @@ available + locked = accountTotal
 | D07 | 核心结果窗口只有 128，超窗重复请求的语义不够明确 | 客户端可能误把结果未知当失败/新命令 |
 | D08 | Export backlog 达上限后整条产品线拒绝命令 | 正确但需要明确告警、drain 和恢复协议，不能无限膨胀 |
 
+### 3.5 首轮性能热点逐项追踪
+
+下面的表保留最初源码审计中已经确认的每一个热点，不以归并编号替代原始问题。后续实现必须在“状态”列写入证据，不能只把它标记为“已有优化”。
+
+| 原始热点 | 归并问题 | 目标方案 | 当前状态 |
+| --- | --- | --- | --- |
+| `TradingCoreReducer.java:478` 每次下单复制完整 `orders` | S01/S06/S09 | `TradingCoreRuntime` 只修改变更订单，`CommandDelta` 携带 changed order IDs；禁止全量 map 复制 | `PARTIAL`，仍有 immutable compatibility shell |
+| `TradingCoreReducer.java:1492` 修改用户复制完整 `users` | S06 | 单写 runtime 的用户实体/分片 mutable store，余额、持仓只更新 affected user | `PARTIAL` |
+| `TradingCoreState.java:30` 新状态复制并排序全部 users/orders | S02 | canonical constructor 不再负责热路径全量排序；全量排序只允许 snapshot/audit | `PARTIAL` |
+| `TradingCoreState.java:43` 构造时遍历订单重建 `clientOrderIndex` | S03 | index 由命令显式增量维护，缺失时 fail-closed，不隐式扫描 | `PARTIAL` |
+| `TradingCoreReducer.java:534` 无成交的 `applyMatches` 仍复制 users/orders/book | S09 | matcher result 为空时只提交订单状态和 delta，不复制无关实体；业务状态与唯一 matcher 同一 transition | `PARTIAL` |
+| `TradingCoreState.java:156` 已应用订单再次遍历全部 orders 写提交元数据 | S05/H02 | `CommandDelta` 在 mutation 时记录 changed entities，stamp/export/response 复用同一事实 | `PARTIAL` |
+| `CoreProbeState.java:416` Export 前扫描全部 users/orders 计算变更集合 | H02 | export 只消费 `CoreCommandDelta`，未知变更集不得 fallback 全表扫描 | `PARTIAL` |
+| `TradingCoreState.java:169` `businessStateHash()` 全量遍历业务状态 | H01 | 热路径使用增量 rolling hash；全量 hash 改名并限制在 snapshot/replay/audit | `PARTIAL`，已有 rolling hash 但 full hash API 仍存在 |
+| `CoreProbeState.java:441` `stateHash()` 再次调用 business hash | H03 | 状态 hash、业务 hash、命令摘要分离；查询不得污染提交 hash | `PARTIAL` |
+| `DeterministicExchangeCoreAdapter.java:52` `submitCommandAsyncFullResponse(...).join()` | M01 | 使用结构化异步结果和协议级 batch；正常路径不逐条 join | `PARTIAL`，仍保留固定同步等待边界 |
+| `CoreBookState` 与 exchange-core 同时保存活动盘口 | S08/M02 | exchange-core 是唯一可执行 book；外层只保留业务活动订单索引和恢复校验 | `PARTIAL` |
+| Risk Provider 与 Core 各自维护预警/强平阈值 | D05/H01 | Instrument 参数进入 Core；Risk 只展示 Core snapshot；动态阈值必须是版本化 Core RiskPolicy | `IMPLEMENTED`，当前 Core policy version 1 |
+| `RiskLimitBracket.maintenanceMarginRatePpm` 已存储但未用于实时计算 | D05 | 以当前名义价值选择 bracket 的 maintenance rate，边界和超限 fail-closed | `IMPLEMENTED` |
+
+### 3.6 历史迁移方案的不可丢失约束
+
+前序迁移方案中的以下决策仍然有效，并已按当前 `exchange-core:0.5.8-emporia`、四条业务线和内存交易链路更新措辞：
+
+1. Aeron Cluster Log/Archive/Snapshot 是交易核心唯一恢复权威；Kafka 仍承担外围事件和异步输入，不替代 Aeron。
+2. PostgreSQL 不参与下单、撮合、资金预留、成交、风险、强平、交割或行权同步裁决，只做投影、历史、审计和对账。
+3. Redis/Valkey 不保存可裁决的资金、订单、持仓、风险或强平状态；最多做限流、查询缓存和可重建会话索引。
+4. 不做长期影子集群、不做双写、不保留运行时 `legacy.enabled`/`dual-write.enabled` 回退；在正确性和恢复门禁通过后删除旧权威链路，再做性能压测。
+5. 每次只验证一条产品线，做市进程保持运行；开发机和微基准不得推导生产 OPS。
+6. 命令必须使用固定二进制协议和可演进 schema；`commandId` 重试保持不变，超时是结果未知，不是业务拒绝。
+7. Exporter 允许 Kafka 成功而 Aeron ACK 丢失导致的重复事件，消费者必须幂等；不声称跨 Aeron/Kafka/PG exactly-once。
+8. 所有长任务（风险扫描、资金费、交割、行权、强平、ADL）必须有最大工作量、确定性 cursor、可暂停续跑和幂等命令。
+9. 保险基金/ADL 第一版可以保留外围审计模块，但任何用户资金变化必须通过 Core 命令执行；不能由外围数据库或队列直接改资金。
+10. exchange-core 不回退到 0.5.3，也不包装成第二本盘口；`GTX` 必须使用 0.5.8-emporia 的原生 post-only 语义。
+
 ## 4. 目标状态和所有权
+
+### 4.1 Instrument 唯一参数来源
+
+保证金和持仓风险参数只有一个业务来源：Instrument Provider。Instrument Provider 可以使用数据库保存
+配置和版本历史，但数据库中的值必须通过版本化 `UpsertInstrumentCommand` 进入 Core；Core 不在热路径
+读取 Instrument Provider、Risk Provider 或 PostgreSQL。
+
+```text
+Instrument Provider
+  -> versioned UpsertInstrumentCommand(symbol, instrumentVersion, ...)
+  -> Aeron Core CoreInstrumentState
+  -> CoreContractMath / TradingCoreReducer
+       -> order reservation and opening margin
+       -> position maintenance margin and risk ratio
+       -> liquidation / ADL eligibility
+  -> CoreRiskSnapshot / Core query response
+  -> Risk Provider display-only query
+```
+
+Instrument 版本必须完整携带并在 Core snapshot/hash 中保留以下参数：
+
+| 参数 | 唯一来源 | Core 使用位置 | Risk Provider 规则 |
+| --- | --- | --- | --- |
+| `initialMarginRatePpm` | Instrument Provider | 开仓保证金默认值/最低边界 | 不读取后重算 |
+| `maintenanceMarginRatePpm` | Instrument Provider | 无 bracket 或 spot 默认维持保证金 | 不读取后重算 |
+| `riskLimitBrackets.initialMarginRatePpm` | Instrument Provider | 按结果名义价值选择开仓档位 | 只展示 Core 结果 |
+| `riskLimitBrackets.maintenanceMarginRatePpm` | Instrument Provider | 按 mark price 下的当前名义价值选择维持档位 | 只展示 Core 结果 |
+| `maxLeveragePpm` | Instrument Provider | 下单杠杆上限和 bracket 杠杆门禁 | 不维护副本 |
+| `maxPositionNotionalUnits` | Instrument Provider | projected position limit | 不维护副本 |
+| 费率、乘数、tick、settle scale、expiry | Instrument Provider | 成交、手续费、生命周期和数学 | 不维护副本 |
+
+Core 负责参数版本门禁、档位连续性、最大杠杆和最大名义价值覆盖校验。Risk Provider 的账户比例可以
+做跨仓位的展示聚合，但只能使用 Core 返回的 wallet、equity、maintenance 和 `status`；它不得根据
+自己的阈值改变 `NORMAL/WARNING/LIQUIDATION`。当前 `CoreRiskPolicy.VERSION=1` 是 Core 固定代码策略；
+若以后需要动态预警/强平阈值，必须增加版本化 Core `RiskPolicy` 状态和命令，并与快照、hash、重放
+一起原子切换。
+
+### 4.2 运行时所有权
 
 | 状态 | 唯一权威 | 热路径保存内容 |
 | --- | --- | --- |
@@ -434,6 +509,27 @@ load snapshot -> restore exchange-core native state
 | P5 | `CoreExportState.java`、exporter、projection | CommandDelta 一次编码、批量 ACK、查询旁路 |
 | P6 | `scripts/`、product-line fixtures、recovery tests | 单线测试、恢复、资金对账和压测门禁 |
 
+### 14.1 当前代码路径与责任矩阵
+
+以下路径是实施时的最小边界。新增逻辑必须落在对应 owner 内；如果必须跨边界，先在本节和第 19 节
+记录原因，不得在 Gateway、Provider 或 Repository 中偷偷增加第二份裁决状态。
+
+| 责任 | 当前入口/核心文件 | 允许做什么 | 禁止做什么 |
+| --- | --- | --- | --- |
+| 协议 | `surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/` | 固定二进制 command/query/response/export schema、版本和边界校验 | Java serialization、无版本 JSON、把 DB id 当顺序权威 |
+| Core ingress | `.../surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java` | 解码、幂等、命令路由、响应和 Core commit | 成功后再查询全量状态、调用 Provider/DB/HTTP |
+| 单写 runtime | `.../TradingCoreRuntime.java` | 持有 reducer、唯一 matcher、实体/派生索引和 owner 校验 | 后台线程直接改状态、使用全局锁或并发 map 伪装无锁 |
+| 业务 reducer | `.../state/TradingCoreReducer.java` | 资金、订单、成交、风险、生命周期和 bounded continuation | 通过外部 repository 决定交易结果 |
+| 状态容器过渡期 | `.../state/TradingCoreState.java`、`StateMapSupport.java` | 兼容 snapshot/replay、delta lineage 和显式 changed keys | 继续把全量 constructor scan 当最终方案 |
+| Instrument | `.../state/CoreInstrumentState.java`、`protocol/UpsertInstrumentCommand.java` | 接收版本化全量参数、校验档位、提供 Core 数学输入 | Risk Provider/订单 Provider 自己复制保证金参数 |
+| 撮合 | `.../matching/DeterministicExchangeCoreAdapter.java` | 0.5.8-emporia 原生 GTC/IOC/FOK/GTX、结构化 fill、恢复 token | 自建第二本 book、查盘口后模拟 GTX、正常路径 rebuild |
+| 风险 | `.../state/CoreContractMath.java`、`CoreRiskPolicy.java` | bracket margin、风险快照、强平状态和 policy version | 由 Risk Provider 重新判定或覆盖 Core 状态 |
+| 触发/长任务 | `.../state/*Index.java`、`CoreProbeState` command handlers | index 命中、claim token、bounded cursor、幂等续跑 | DB claim/complete 和无界全表扫描 |
+| 导出 | `CoreCommandDelta.java`、`CoreExportState.java`、`surprising-aeron-exporter/` | 一次事实组装、编码、批量读取、连续 ACK 和幂等 projection | 提交后 before/after 全量 diff、超前 ACK |
+| 查询 | Core 有界 query + 异步投影 | limit/cursor/symbol/user 过滤和 read-your-write sequence | 管理查询遍历全 symbol/全订单并阻塞写者 |
+| 外围 provider | instrument/order/risk/gateway/maker | 鉴权、输入桥、展示、投影和非权威协调 | 同步裁决资金、撮合、风险、强平或恢复 |
+| 测试与运行 | `surprising-aeron-core/compose.yaml`、未来 `scripts/`、`surprising-aeron-tools/` | 单产品线 smoke、recovery、funds reconcile、capacity | 并行启动多产品线推导容量、使用旧 DB 流程脚本 |
+
 ## 15. 测试和验收门禁
 
 ### 15.1 纯逻辑和协议
@@ -495,6 +591,54 @@ load snapshot -> restore exchange-core native state
 
 ## 18. 当前代码落地状态
 
+### 18.1 阶段状态总表
+
+状态只允许使用 `NOT_STARTED`、`IN_PROGRESS`、`PARTIAL`、`DONE`、`BLOCKED`。`DONE` 必须同时具备代码、
+测试、运行时证据和本节记录；仅有单元测试不得标记为 `DONE`。
+
+| 阶段 | 当前状态 | 本阶段交付物 | 当前证据 | 尚未满足的出口 |
+| --- | --- | --- | --- | --- |
+| P0 文档/基线 | `COMPLETED` | 规格、问题追踪、所有权、验收/回滚规则、脚本矩阵 | 本文档、README 和基线约束已同步 | canonical scripts 尚未全部恢复；不影响 P1 代码门禁 |
+| P1 正确性/单往返 | `PARTIAL` | 失败回滚、稳定 lane、结果未知、fee/instrument version gate、直接响应 | Core 回滚护栏、bounded client、native GTX 已有测试 | source epoch registry、native matcher token、所有 query/response contract |
+| P2 Runtime/O(delta) | `PARTIAL` | 单写 mutable runtime、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime` 和多类 index 已接入；ActiveOrderIndex/RiskSnapshotIndex 已切换为 Core 事实和增量来源 | immutable state shell、历史实体清理、所有热路径无全量扫描 |
+| P3 唯一盘口/恢复 | `PARTIAL` | exchange-core 唯一 book、结构化 adapter、batch、native restore | 稳定 symbol registry、结构化 async/batch API、bounded book query | `CoreBookState` 彻底降级、native snapshot/token restore、正常路径禁用 rebuild |
+| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | Core trigger execute、风险 bracket 和 Core policy 已落地 | 所有 fallback 脱离 DB、四条业务线生命周期完整门禁 |
+| P5 导出/查询/外围 | `PARTIAL` | 一次编码 outbox、批量 ACK、projection、查询旁路、慢连接隔离 | delta/export preflight、bounded queue 已有 | wire 一次编码闭环、Kafka/PG 故障演练、projection lag 门禁 |
+| P6 HA/压测/扩容 | `NOT_STARTED` | leader/follower/cold recovery、单线容量、manifest、runbook | 既有局部 smoke/benchmark 不能替代本阶段 | 三节点故障矩阵、真实指标、四线稳定容量报告和扩容结论 |
+
+### 18.2 文档、代码和证据同步规则
+
+每个阶段必须按以下顺序落地，不得跳阶段：
+
+1. 在本文档对应阶段增加“实施前检查”和明确的文件/协议边界。
+2. 先补充能锁定资金、顺序、幂等和恢复行为的测试，再改生产代码。
+3. 每个逻辑变更完成后运行该阶段最小测试；阶段出口再跑模块回归和对应人工/集群门禁。
+4. 更新本节状态、实际文件、测试命令、结果、Git SHA、环境 manifest 和残留风险。
+5. 若发现偏差，追加到“决策/偏差记录”，不得覆盖历史设计或静默降低门禁。
+6. 阶段失败时只回滚本阶段新增代码和 snapshot/schema 版本，保留前一阶段可运行证据；不得恢复旧数据库/Redis 权威作为运行时 fallback。
+
+### 18.3 Canonical 测试脚本矩阵
+
+当前工作树已恢复 `scripts/aeron-core-local.sh` 作为本地 Core 启停入口，但完整脚本矩阵仍未交付；这不是“测试已完成”。
+后续必须继续补齐与当前 Aeron tools 和四条业务线一致的 canonical 脚本，并删除/迁移所有基于旧 DB/旧 trigger/旧 matching
+流程的脚本。脚本名称和职责固定如下：
+
+| 脚本 | 作用 | 约束 |
+| --- | --- | --- |
+| `scripts/start-product-line-providers.sh` | 只启动当前产品线的必要 provider | 不启动 wallet；做市进程必须运行 |
+| `scripts/product-line-api-flow-smoke.sh` | 模拟用户 API 覆盖下单、撤单、撮合、持仓、主动平仓、强平/生命周期 | 只走当前内存核心和 Core query |
+| `scripts/product-line-funds-reconcile.sh` | 逐用户、逐资产、逐持仓、逐流水核对资金守恒 | 期初、调整、成交、手续费、资金费、强平、交割/行权、期末全部对平 |
+| `scripts/live-runtime-trading-reconciliation.sh` | 运行时交易与 Core/投影/WebSocket 对账 | 记录 `coreSequence`、export sequence、projection lag |
+| `scripts/integration-smoke.sh` | 单产品线集成 smoke 和恢复前后 hash 对比 | 不隐式启动其他产品线 |
+| `scripts/kafka-trading-smoke.sh` | 仅验证 Kafka input/export bridge 幂等与 offset/ACK 语义 | Kafka 不进入同步交易裁决 |
+| `scripts/aeron-core-local.sh` | 构建镜像、启动/停止三节点和工具容器 | volume/目录必须显式指定，禁止宽泛删除 |
+| `scripts/run-product-line-recovery-matrix.sh` | leader kill、follower rejoin、cold restart、exporter failure | 每次只跑一条产品线并生成 manifest |
+| `scripts/run-product-line-capacity.sh` | warmup、baseline、capacity-step、hot、burst、soak、恢复 | 只报告真实 Core/端到端指标，不把 micro benchmark 当容量 |
+
+旧脚本迁移规则：先列出旧脚本调用的服务、topic、数据库表和命令，逐项映射到当前工具；没有对应行为的
+脚本直接删除，不保留兼容入口。任何脚本改变产品线、source identity、数据目录或 Docker volume 前必须显式
+打印并校验目标。
+
 本轮已经落地的护栏和增量改造：
 
 1. `CoreProbeState.placeOrder/cancelOrder/replaceOrder` 在撮合器成功后业务应用失败时恢复命令前的 exchange-core 状态；撮合调用本身失败也会恢复并 fail-closed。
@@ -508,8 +652,34 @@ load snapshot -> restore exchange-core native state
 9. matcher 启动恢复先按规范化 instrument registry 注册全部 symbol，再按 FIFO 恢复活动订单；symbol collision 的分配不再依赖“当前是否有挂单”，盘口查询深度固定有界。
 10. `EXECUTE_TRIGGER_ORDER` 已成为单一 Core 命令：Core 内完成 claim、instrument 版本/费率快照门禁、资金预留、exchange-core 撮合、成交应用和 trigger complete；触发命中不再同步往返 `OrderRpcApi`。触发单入 Core 时固化 instrument version 与 maker/taker fee，版本漂移 fail-closed；Aeron placement 可在非热路径通过 `TradingFeeRpcApi` 取得用户费率快照。
 11. `BOOK_STATE_QUERY` 支持 symbol/depth 有界协议查询；空 payload 保留旧行为但深度上限为 1000，adapter 不再请求 `Integer.MAX_VALUE`。
+12. 导出队列容量预检按最大协议事件预留字节，在命令改动业务状态前拒绝无法容纳的事件；不会把导出编码失败留到成交后再回滚。
+13. `AeronClientPool.commandAsync` 使用有界队列和 `AbortPolicy`，客户端饱和时显式背压，不再创建无界任务队列。
+14. `TradingCoreRuntime` 现在统一持有 active-order、algo、cancel-all timer、liquidation、ADL position、position/open-interest/trigger 派生索引；`CoreProbeState` 的 algo/timer/open-order/ADL/liquidation 查询和风险清算查重使用这些索引，索引在同一 transition 内增量更新。
+15. `StateMapSupport` 保留 DeltaMap lineage，在达到压缩阈值时只 materialize 内部基线并保留父链，`changedKeysSince` 不因压缩退化为未知全量 diff；正常构造器仍只校验 changed keys。
+16. exchange-core adapter 增加结构化 `placeAsync`/`placeBatch`，取消批量继续使用并发 future 聚合；调用层不再需要逐条同步等待才能形成批量操作。
+17. snapshot 编码预先缓存 pending export event 的编码结果，避免计算长度和写入时重复编码；exporter drain 复用上一次 status，减少无意义的 Core status 往返。
+18. Aeron client 提供显式 `sourceEpoch` 构造入口，默认行为保持兼容；稳定 source identity、epoch 租约/注册协议和跨重启 sequence 语义仍需协议级 v2 完成。
+19. `CoreCommandDelta` 在一次命令收尾阶段生成 changed users/orders/liquidations/treasury/triggers 视图，export 直接消费同一批事实；settlement/liquidation 的活动订单定位使用 `ActiveOrderIndex`，不再扫描 reservation 或整本 open-order map。
+20. matcher 异常恢复统一经过 `TradingCoreRuntime` 的 owner 校验；普通状态回滚仍只重建 matcher，不把失败状态写回 runtime。settlement 的首批撤单也使用 symbol 活动订单索引。
+21. `CoreInstrumentState` 在 Core 状态边界再次校验风险档位连续性、最大杠杆和最大持仓名义价值覆盖；`CoreContractMath` 对衍生品开仓保证金和维持保证金按当前名义价值选择 `riskLimitBrackets`，档位边界和超限均 fail-closed。
+22. `CoreRiskPolicy.VERSION=1` 在 Core 内统一执行预警/强平状态映射；Risk Provider 删除本地保证金阈值配置和裁决，只展示 Core 风险快照，运行时配置明确标识 `marginPolicySource=AERON_CORE_INSTRUMENT`，对旧阈值更新请求直接拒绝；即使旧阈值仍存在于投影表，规则查询也不再回传为可执行参数。
+23. `ActiveOrderIndex` 仅由 Core 订单生命周期状态重建；仪表查询、清算和结算不再把兼容性的 `CoreBookState` 作为活动订单来源，`TradingCoreReducer` 的 instrument/lifecycle 扫描同样以订单状态或增量索引为准。
+24. `RiskSnapshotIndex` 按 userId 增量维护风险快照键，`RISK_STATE_QUERY` 不再为单用户请求遍历全局快照；快照恢复或 lineage 不可用时才全量重建。
+25. 新增 `scripts/aeron-core-local.sh` 作为显式产品线的三节点本地启停入口，支持 build/up/down/status/smoke，拒绝未知产品线且默认不删除 Docker volume。
 
 仍未宣称完成的交付物：
 
-- `TradingCoreState` 仍是不可变兼容状态壳，delta 深度达到上限时仍会 materialize；当前 `TradingCoreRuntime` 已作为单写边界和索引协调层接入，但 P2 的完全 mutable entity store、P3 的 exchange-core native restore、P5 的一次编码导出和 P6 的 failover/压测门禁尚未完成。
+- `TradingCoreState` 仍是不可变兼容状态壳；DeltaMap 已保留压缩父链并避免因压缩触发隐式全量 diff，P2 的完全 mutable entity store 仍未完成。P3 的 exchange-core native snapshot restore、协议级 batch command/epoch registry、P6 的 failover/压测门禁仍未完成。CommandDelta 的 Core 内单次实体事实组装已完成，但 export wire 仍沿用现有事件格式。
+- 当前 Core 风险策略是固定代码版本 1；若预警/强平阈值需要动态调整，仍应新增带版本的 Core `RiskPolicy` 状态和命令，由 Core 原子切换并随快照恢复，不能把参数重新放回 Risk Provider。
 - 根 Maven `validate` 已在当前 `surprising-maker` 模块布局下通过；完整 root `test` 仍受账户测试发现阶段缺少 `CoreUserStateView` 类路径的既有问题阻塞，本轮未改动该测试/POM。
+
+## 19. 本轮验证证据
+
+- `mvn -f surprising-aeron-core/pom.xml -am test`：protocol 31、service 85、client 5、exporter 10、tools 2，全部通过。
+- `bash -n scripts/aeron-core-local.sh`、未知 `PRODUCT_LINE` 拒绝和空集群 `status` 验证通过。
+- `mvn -f surprising-risk/surprising-risk-provider/pom.xml -am test`：Risk Provider 10 个测试全部通过，覆盖 Core 快照状态展示、本地保证金阈值更新拒绝和旧阈值投影不回传。
+- `mvn -f surprising-trading/surprising-trigger-provider/pom.xml -am test`：88 个测试全部通过。
+- 三节点 compose 人工烟测：SPOT `spotMatchSmoke=PASS`；LINEAR_PERPETUAL `derivativeSmoke=PASS`；独立产品线门禁对 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`OPTION` 均报告 `fundsDiff=0 bookLevels=0`。
+- 本轮通过 `PRODUCT_LINE=SPOT scripts/aeron-core-local.sh up` + `smoke` 观察到 `spotMatchSmoke=PASS seller=6000003001 buyer=7000003001 btcTotal=5 usdtTotal=500`，随后用同一入口 `down` 清理容器和网络，未删除 volume。
+- 多个三节点集群并行运行会耗尽 Docker `/dev/shm`，表现为客户端 `ResultUnknown`；停止其他集群后同一 LINEAR_DELIVERY 门禁稳定通过。这是测试环境容量门禁，不能当成业务失败或生产容量结论。
+- `CoreInMemoryBenchmark 200 20`：`PASS`，本轮测得约 18.3 orders/s、p50 6.4ms、p95 301ms；该结果包含 exchange-core ring/future 和 export/hash 成本，不能作为百万级容量结论，后续 P3/P5 仍需基准拆分和真实集群压测。

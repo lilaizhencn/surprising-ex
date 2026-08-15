@@ -481,6 +481,11 @@ public record TradingCoreState(
         return StateMapSupport.changedKeysSince(before.riskState().liquidations(), riskState.liquidations());
     }
 
+    public Set<String> changedRiskSnapshotKeysSince(TradingCoreState before) {
+        if (before == null) return null;
+        return StateMapSupport.changedKeysSince(before.riskState().snapshots(), riskState.snapshots());
+    }
+
     public Set<Long> changedUserIdsSince(TradingCoreState before) {
         if (before == null) return null;
         return StateMapSupport.changedKeysSince(before.users, users);
@@ -494,6 +499,21 @@ public record TradingCoreState(
     public Set<Long> changedTriggerOrderIdsSince(TradingCoreState before) {
         if (before == null) return null;
         return StateMapSupport.changedKeysSince(before.triggerOrders(), triggerOrders);
+    }
+
+    public Set<Long> changedAlgoOrderIdsSince(TradingCoreState before) {
+        if (before == null) return null;
+        return StateMapSupport.changedKeysSince(before.algoOrders(), algoOrders);
+    }
+
+    public Set<ClientOrderKey> changedClientOrderKeysSince(TradingCoreState before) {
+        if (before == null) return null;
+        return StateMapSupport.changedKeysSince(before.clientOrderIndex(), clientOrderIndex);
+    }
+
+    public Set<CoreCancelAllAfterKey> changedCancelAllAfterKeysSince(TradingCoreState before) {
+        if (before == null) return null;
+        return StateMapSupport.changedKeysSince(before.cancelAllAfterTimers(), cancelAllAfterTimers);
     }
 
     public Set<String> changedTreasuryAssetsSince(TradingCoreState before) {

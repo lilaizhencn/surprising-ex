@@ -745,47 +745,6 @@ surprising:
         base-url: ${GATEWAY_SELF_BASE_URL:http://localhost:9094}
         target-prefix: /api/v1/admin/websocket
         private-route: true
-    observability:
-      kafka:
-        enabled: ${ADMIN_KAFKA_LAG_ENABLED:false}
-        bootstrap-servers: ${ADMIN_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-        client-id: surprising-gateway-admin-monitor
-        product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:false}
-        request-timeout: 3s
-        max-partitions-per-group: 200
-        consumer-groups:
-          - group-id: surprising-matching-v1
-            topics:
-              - surprising.perp.order.commands.v1
-          - group-id: surprising-linear-perp-account-user-command-v1
-            topics:
-              - surprising.linear-perp.account.user.commands.v1
-          - group-id: surprising-risk-v1
-            topics:
-              - surprising.account.position.events.v1
-          - group-id: surprising-trigger-v1
-            topics:
-              - surprising.perp.mark.price.v1
-              - surprising.perp.index.price.v1
-              - surprising.perp.match.trades.v1
-              - surprising.account.position.events.v1
-          - group-id: surprising-mark-price-v1
-            topics:
-              - surprising.perp.index.price.v1
-              - surprising.perp.book.ticker.v1
-              - surprising.perp.trade.events.v1
-              - surprising.perp.funding.rate.v1
-          - group-id: surprising-insurance-v1
-            topics:
-              - surprising.account.liquidation-fee.events.v1
-      web-socket:
-        enabled: true
-        admin-route: websocket-admin
-      prometheus:
-        enabled: true
-        sample-preview-limit: 8
-        max-body-bytes: 1000000
   websocket:
     kafka:
       bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}

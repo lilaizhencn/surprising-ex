@@ -1,12 +1,13 @@
 # surprising-ex
 
 
-Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 的六产品线交易所后端。
-仓库覆盖现货、U/币本位永续、U/币本位交割和欧式现金结算期权；每条产品线使用独立的三节点
-Aeron Cluster、Topic、投影和账户类型。
+Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 的交易所后端。
+仓库覆盖现货、永续、交割和欧式现金结算期权四条业务线（含 U/币本位变体）；每条业务线使用独立的
+三节点 Aeron Cluster、Topic、投影和账户类型。
 
-当前分支正在重新整理文档和验证脚本，`docs/` 与 `scripts/` 已移除。本文档和各模块 README
-是当前保留的说明入口；部署、压测和资金对账脚本将在重新设计后补回。
+完整架构、问题追踪、唯一参数来源、阶段台账、脚本矩阵和验收门禁以
+[`docs/high-performance-trading-core-implementation.md`](docs/high-performance-trading-core-implementation.md)
+为唯一实施依据。当前 canonical 验证脚本仍在按该规格恢复，旧业务逻辑脚本不得直接复用。
 
 ## 核心边界
 
@@ -25,7 +26,7 @@ Aeron Cluster、Topic、投影和账户类型。
   成功后才向 Aeron 提交 ACK，不新增数据库 outbox 或应用 WAL。
 - Matching Provider 只做 Market Data Projection：启动从 Aeron 强查询恢复 L2 和 watermark，随后消费
   单分区连续 Core Event 发布公共深度与成交；历史成交和 24h 查询读取 PG 投影。
-- 六条产品线必须隔离部署和验证；压测前每条线都必须达到 `functional-gate=PASS`、`funds-diff=0`。
+- 四条业务线必须隔离部署和验证；压测前当前变体必须达到 `functional-gate=PASS`、`funds-diff=0`。
 
 ## 产品线
 
@@ -46,9 +47,9 @@ Aeron Cluster、Topic、投影和账户类型。
 | `surprising-product-api` | 产品线、账户类型和 Topic 命名 |
 | `surprising-instrument` | symbol、合约规格、风险档位和生命周期 |
 | `surprising-price` | 独立指数价、标记价和汇率服务 |
-| `surprising-trading` | 独立普通订单、条件单、算法单和 exchange-core 撮合服务 |
+| `surprising-trading` | Provider/API 边界；最终订单、条件单、算法单和 exchange-core 裁决由 Aeron Core 完成 |
 | `surprising-account` | 余额、账本、账户指令、结算、持仓和保证金 |
-| `surprising-risk` | 风险 API 和独立风控服务 |
+| `surprising-risk` | Core 风险快照查询和投影 API，不维护保证金/强平裁决副本 |
 | `surprising-liquidation` | 强平 API 和独立强平服务 |
 | `surprising-funding` | 资金费 API 和独立资金费服务 |
 | `surprising-insurance` | 保险基金 API 和独立保险基金服务 |
@@ -60,8 +61,8 @@ Aeron Cluster、Topic、投影和账户类型。
 Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
 必须跨表，源码需要逐项写明中文“不可拆原因”。后台订单时间线、资金对账和运营报表不得在交易主库新增
 多表 JOIN；后续财务运营模块应消费领域事件，并使用独立数据库建立查询投影。
-边界约束由对应模块的源码和 Maven 测试维护；原有独立检查脚本已随 `scripts/` 一起移除，新的检查方式
-将在验证脚本重新整理后补充。
+边界约束由对应模块的源码、Maven 测试和主规格维护；canonical 检查脚本按单产品线、资金对账、恢复和
+容量职责重新整理后补充。
 
 Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，不直接访问 Repository，也不承载事务或
 业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。入口层边界由源码审查和

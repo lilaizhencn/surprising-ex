@@ -2,7 +2,13 @@ package com.surprising.aeron.service;
 
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.state.OpenInterestIndex;
+import com.surprising.aeron.service.state.AlgoOrderIndex;
+import com.surprising.aeron.service.state.LiquidationIndex;
+import com.surprising.aeron.service.state.CancelAllAfterIndex;
+import com.surprising.aeron.service.state.ActiveOrderIndex;
+import com.surprising.aeron.service.state.AdlPositionIndex;
 import com.surprising.aeron.service.state.PositionUserIndex;
+import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
@@ -15,6 +21,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final PositionUserIndex positionUsers;
     private final OpenInterestIndex openInterest;
     private final TriggerOrderIndex triggers;
+    private final AlgoOrderIndex algos;
+    private final LiquidationIndex liquidations;
+    private final CancelAllAfterIndex timers;
+    private final ActiveOrderIndex activeOrders;
+    private final AdlPositionIndex adlPositions;
+    private final RiskSnapshotIndex riskSnapshots;
     private TradingCoreState state;
     private Thread owner;
 
@@ -29,6 +41,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.positionUsers = new PositionUserIndex(initialState);
         this.openInterest = new OpenInterestIndex(initialState);
         this.triggers = new TriggerOrderIndex(initialState);
+        this.algos = new AlgoOrderIndex(initialState);
+        this.liquidations = new LiquidationIndex(initialState);
+        this.timers = new CancelAllAfterIndex(initialState);
+        this.activeOrders = new ActiveOrderIndex(initialState);
+        this.adlPositions = new AdlPositionIndex(initialState);
+        this.riskSnapshots = new RiskSnapshotIndex(initialState);
         this.matcher.rebuild(initialState);
     }
 
@@ -75,6 +93,36 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return triggers;
     }
 
+    public AlgoOrderIndex algos() {
+        assertOwner();
+        return algos;
+    }
+
+    public LiquidationIndex liquidations() {
+        assertOwner();
+        return liquidations;
+    }
+
+    public CancelAllAfterIndex timers() {
+        assertOwner();
+        return timers;
+    }
+
+    public ActiveOrderIndex activeOrders() {
+        assertOwner();
+        return activeOrders;
+    }
+
+    public AdlPositionIndex adlPositions() {
+        assertOwner();
+        return adlPositions;
+    }
+
+    public RiskSnapshotIndex riskSnapshots() {
+        assertOwner();
+        return riskSnapshots;
+    }
+
     public void transition(TradingCoreState before, TradingCoreState after) {
         assertOwner();
         if (before != state || after == null || after.productLine() != productLine) {
@@ -83,6 +131,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         positionUsers.update(before, after);
         openInterest.update(before, after);
         triggers.update(before, after);
+        algos.update(before, after);
+        liquidations.update(before, after);
+        timers.update(before, after);
+        activeOrders.update(before, after);
+        adlPositions.update(before, after);
+        riskSnapshots.update(before, after);
         state = after;
     }
 
@@ -91,10 +145,25 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (restored == null || restored.productLine() != productLine) {
             throw new IllegalArgumentException("invalid restored trading state");
         }
+        matcher.rebuild(restored);
         state = restored;
         positionUsers.rebuild(restored);
         openInterest.rebuild(restored);
         triggers.rebuild(restored);
+        algos.rebuild(restored);
+        liquidations.rebuild(restored);
+        timers.rebuild(restored);
+        activeOrders.rebuild(restored);
+        adlPositions.rebuild(restored);
+        riskSnapshots.rebuild(restored);
+    }
+
+    public void rebuildMatcher(TradingCoreState restored) {
+        assertOwner();
+        if (restored == null || restored.productLine() != productLine) {
+            throw new IllegalArgumentException("invalid matcher state");
+        }
+        matcher.rebuild(restored);
     }
 
     @Override

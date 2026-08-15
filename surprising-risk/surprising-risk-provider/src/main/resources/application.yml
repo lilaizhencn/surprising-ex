@@ -28,7 +28,5 @@ surprising:
       client-connections: ${AERON_CLIENT_CONNECTIONS:2}
     calculation:
       scan-delay-ms: 1000
-      warning-margin-ratio-ppm: 800000
-      liquidation-margin-ratio-ppm: 1000000
       max-mark-age: 10s
       scan-batch-size: 500

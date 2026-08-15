@@ -1,6 +1,7 @@
 package com.surprising.risk.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -17,6 +18,7 @@ import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.repository.CoreRiskLiquidationProjectionRepository;
 import com.surprising.risk.provider.repository.RiskRuleRepository;
+import com.surprising.risk.provider.repository.RiskRuleRepository.RiskRuleOverride;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
@@ -28,6 +30,7 @@ class RiskServiceTest {
 
     private RiskAeronGateway aeron;
     private CoreRiskLiquidationProjectionRepository liquidations;
+    private RiskRuleRepository rules;
     private RiskService service;
 
     @BeforeEach
@@ -35,7 +38,8 @@ class RiskServiceTest {
         RiskProperties properties = new RiskProperties();
         aeron = mock(RiskAeronGateway.class);
         liquidations = mock(CoreRiskLiquidationProjectionRepository.class);
-        service = new RiskService(properties, aeron, liquidations, mock(RiskRuleRepository.class));
+        rules = mock(RiskRuleRepository.class);
+        service = new RiskService(properties, aeron, liquidations, rules);
     }
 
     @Test
@@ -73,6 +77,42 @@ class RiskServiceTest {
     }
 
     @Test
+    void accountStatusUsesCoreSnapshotStatusInsteadOfLocalThresholds() {
+        when(aeron.userState(7)).thenReturn(new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 4,
+                CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 700, 300)), List.of(), List.of()));
+        when(aeron.riskState(7)).thenReturn(List.of(
+                riskWithStatus("BTC-USDT", CoreMarginMode.CROSS, 61, -5, 40, 100, "LIQUIDATION")));
+
+        var account = service.latestAccount(7, "USDT_PERPETUAL", "USDT");
+
+        assertThat(account.status()).isEqualTo(RiskStatus.LIQUIDATION);
+    }
+
+    @Test
+    void rejectsRiskProviderOwnedMarginPolicyUpdates() {
+        assertThatThrownBy(() -> service.updateRiskRule("GLOBAL_MARGIN_POLICY", "admin",
+                new RiskService.RiskRuleUpdateCommand("override", true, 700_000L, 900_000L,
+                        null, null, "must not be local")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("owned by versioned Aeron Core instrument state");
+    }
+
+    @Test
+    void doesNotExposePersistedMarginThresholdOverride() {
+        when(rules.findAll()).thenReturn(List.of(new RiskRuleOverride("GLOBAL_MARGIN_POLICY", "legacy",
+                "GLOBAL_MARGIN", true, 700_000L, 900_000L, null, null, "admin", "legacy",
+                Instant.now(), Instant.now())));
+
+        var result = service.riskRules();
+
+        assertThat(result.rules()).first().satisfies(value -> {
+            assertThat(value.source()).isEqualTo("core");
+            assertThat(value.warningMarginRatioPpm()).isNull();
+            assertThat(value.liquidationMarginRatioPpm()).isNull();
+        });
+    }
+
+    @Test
     void enrichesCoreLiquidationProjectionFromAeronRiskState() {
         var projected = new LiquidationCandidateResponse(9, 9, 7, "BTC-USDT", MarginMode.CROSS,
                 PositionSide.LONG, 3, "USDT_PERPETUAL", "USDT", 10, 0, 0, 0, 0,
@@ -90,9 +130,16 @@ class RiskServiceTest {
 
     private static CoreRiskSnapshotView risk(String symbol, CoreMarginMode mode, long sequence,
                                              long unrealized, long maintenance, long ratio) {
+        return riskWithStatus(symbol, mode, sequence, unrealized, maintenance, ratio,
+                ratio >= 1_000_000 ? "LIQUIDATION" : ratio >= 800_000 ? "WARNING" : "NORMAL");
+    }
+
+    private static CoreRiskSnapshotView riskWithStatus(String symbol, CoreMarginMode mode, long sequence,
+                                                       long unrealized, long maintenance, long ratio,
+                                                       String status) {
         return new CoreRiskSnapshotView(7, symbol, mode, CorePositionSide.LONG, 3, "USDT",
                 10, 50_000, 55_000, 550_000, mode == CoreMarginMode.ISOLATED ? 100 : 0,
                 sequence, 1_000, 900, unrealized, maintenance, ratio,
-                ratio >= 1_000_000 ? "LIQUIDATION" : ratio >= 800_000 ? "WARNING" : "NORMAL");
+                status);
     }
 }

@@ -1,10 +1,13 @@
 # Surprising Aeron 统一交易核心
 
 本目录承载按产品线隔离的 Aeron Cluster 交易核心。每条 `ProductLine` 使用相同代码、独立 `clusterId`、
-端口空间、Archive 和数据卷，生产目标是一条产品线三个 Member。
+端口空间、Archive 和数据卷，目标是一条产品线三个 Member。当前实现和后续改造的唯一规格是
+[`docs/high-performance-trading-core-implementation.md`](../docs/high-performance-trading-core-implementation.md)。
 
-当前 P2 已实现 User/Order、余额调整、下单预占、撤单释放、强一致查询和可恢复 Snapshot。Exchange Core、
-Book、成交结算、Risk、Liquidation 和 Export State 按 P3–P5 接入；P2 smoke 不能替代后续全链路资金验收。
+当前状态不是“P2 已完成”：P1–P5 均有增量实现但仍有明确残留，P6 尚未完成。`TradingCoreRuntime` 已成为
+Core 单写边界，exchange-core 0.5.8-emporia 是唯一可执行盘口，触发/风险/导出已经有 Core 路径；但
+immutable compatibility shell、native matcher snapshot restore、协议级 epoch registry、完整四线
+恢复/容量门禁仍在实施中。任何局部 smoke 或 micro benchmark 都不能替代最终资金和恢复验收。
 
 ## 模块
 
@@ -26,16 +29,23 @@ export PATH="${JAVA_HOME}/bin:${PATH}"
 mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ```
 
-三节点启动、健康检查、资金 smoke 和恢复验证脚本已移除，待验证脚本重新整理后补回。一次只启动一条产品线；
-删除 Archive 或数据卷前必须先确认目标产品线并使用显式的 Docker volume 操作。
+三节点可以通过 `compose.yaml` 启动；canonical `scripts/` 测试脚本正在按主规格重新整理，旧业务逻辑脚本
+不得直接复用。一次只启动一条产品线；删除 Archive 或数据卷前必须先确认目标产品线并使用显式的 Docker
+volume 操作。脚本职责和验收命令以主规格第 18.3 节为准。
 
 ## 协议约束
 
 - Cluster Log 权威消息禁止 Java serialization 和无版本 JSON。
 - v1 header 固定包含 `commandId`、`productLine`、`source`、`sourceId`、`sourceSequence`、`userId`、
   外部提交时间和 `correlationId`。
+- Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
+  最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
+- exchange-core 0.5.8-emporia 是唯一可执行 book；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。
+- 下单、撮合、资金、风险、强平和生命周期热路径不访问 JDBC、Redis、Kafka 或 HTTP；这些系统只做输入桥、
+  异步导出、投影、审计和查询。
 - 幂等结果窗口有界；窗口外仍用 `(source, sourceId)` 的序列高水位阻止旧命令再次执行。
 - 同步调用超时表示结果未知。调用方必须复用同一 `commandId` 查询或重试，不能生成新 ID。
 - `SurprisingAeronClient` 串行提交消息；Gateway 后续通过固定数量的单线程 client agent 扩展吞吐。
 
-完整架构和阶段门禁文档已随 `docs/` 移除，待文档重新整理后补回。
+完整架构、阶段台账、问题追踪、风险参数所有权、脚本矩阵和验收门禁均在 `docs/` 主规格中维护；任何
+代码阶段完成后必须同步更新该文档的状态和证据。

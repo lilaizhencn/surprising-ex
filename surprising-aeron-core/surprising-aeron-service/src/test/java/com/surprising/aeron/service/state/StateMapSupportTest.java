@@ -43,4 +43,18 @@ class StateMapSupportTest {
         assertThat(StateMapSupport.changedKeysSince(base, second)).containsExactlyInAnyOrder(1L, 2L, 3L);
         assertThat(StateMapSupport.changedKeysSince(first, second)).containsExactly(2L, 3L);
     }
+
+    @Test
+    void changedKeysSinceRetainsLineageAcrossCompaction() {
+        NavigableMap<Long, String> base = new TreeMap<>(Map.of(1L, "one"));
+        NavigableMap<Long, String> previous = base;
+        for (int index = 0; index < 300; index++) {
+            NavigableMap<Long, String> next = StateMapSupport.delta(previous);
+            next.put((long) index + 2, "value-" + index);
+            previous = next;
+        }
+
+        assertThat(StateMapSupport.changedKeysSince(base, previous)).hasSize(300);
+        assertThat(previous.get(301L)).isEqualTo("value-299");
+    }
 }

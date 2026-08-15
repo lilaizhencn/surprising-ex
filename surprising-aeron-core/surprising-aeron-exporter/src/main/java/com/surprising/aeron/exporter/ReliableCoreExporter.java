@@ -40,6 +40,10 @@ public final class ReliableCoreExporter {
 
     public ExportCycleResult exportOnce() throws Exception {
         CoreExportStatus before = status();
+        return exportOnce(before);
+    }
+
+    private ExportCycleResult exportOnce(CoreExportStatus before) throws Exception {
         if (before.pendingCount() == 0) {
             return new ExportCycleResult(0, before);
         }
@@ -80,7 +84,7 @@ public final class ReliableCoreExporter {
         }
         CoreExportStatus current = status();
         for (int cycle = 0; cycle < maxCycles && current.pendingCount() > 0; cycle++) {
-            current = exportOnce().status();
+            current = exportOnce(current).status();
         }
         if (current.pendingCount() > 0) {
             throw new IllegalStateException("export drain exceeded max cycles; pending=" + current.pendingCount());

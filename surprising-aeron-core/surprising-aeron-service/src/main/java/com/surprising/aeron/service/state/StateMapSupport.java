@@ -16,7 +16,7 @@ import java.util.TreeSet;
 @SuppressWarnings("unchecked")
 final class StateMapSupport {
 
-    private static final int MAX_DELTA_DEPTH = 32;
+    private static final int MAX_DELTA_DEPTH = 256;
 
     private StateMapSupport() {
     }
@@ -42,7 +42,7 @@ final class StateMapSupport {
             base = new TreeMap<>(values);
         }
         if (base instanceof DeltaMap<?, ?> delta && ((DeltaMap<?, ?>) delta).depth() >= MAX_DELTA_DEPTH) {
-            base = new TreeMap<>(base);
+            return new DeltaMap<>(new TreeMap<>(base), (DeltaMap<K, V>) delta);
         }
         return new DeltaMap<>(base);
     }
@@ -68,12 +68,14 @@ final class StateMapSupport {
         if (!(afterRaw instanceof DeltaMap<?, ?> rawDelta)) return null;
         DeltaMap<K, ?> delta = (DeltaMap<K, ?>) rawDelta;
         TreeSet<K> keys = new TreeSet<>(delta.comparator());
-        keys.addAll(delta.changedKeys());
-        if (beforeRaw == delta.base()) return Collections.unmodifiableSet(keys);
-        Set<K> parentKeys = changedKeysSince(beforeRaw, delta.base());
-        if (parentKeys == null) return null;
-        keys.addAll(parentKeys);
-        return Collections.unmodifiableSet(keys);
+        while (delta != null) {
+            keys.addAll(delta.changedKeys());
+            if (beforeRaw == delta.parent() || beforeRaw == delta.base()) {
+                return Collections.unmodifiableSet(keys);
+            }
+            delta = delta.parent();
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
@@ -196,13 +198,19 @@ final class StateMapSupport {
         private final NavigableMap<K, V> updates;
         private final Set<K> removals;
         private final int depth;
+        private final DeltaMap<K, V> parent;
         private int size;
 
         private DeltaMap(NavigableMap<K, V> base) {
+            this(base, base instanceof DeltaMap<?, ?> delta ? (DeltaMap<K, V>) delta : null);
+        }
+
+        private DeltaMap(NavigableMap<K, V> base, DeltaMap<K, V> parent) {
             this.base = base;
+            this.parent = parent;
             this.updates = new TreeMap<>(base.comparator());
             this.removals = new TreeSet<>(base.comparator());
-            this.depth = base instanceof DeltaMap<?, ?> delta ? ((DeltaMap<?, ?>) delta).depth + 1 : 1;
+            this.depth = parent == null ? 1 : parent.depth + 1;
             this.size = base.size();
         }
 
@@ -212,6 +220,10 @@ final class StateMapSupport {
 
         private NavigableMap<K, V> base() {
             return base;
+        }
+
+        private DeltaMap<K, V> parent() {
+            return parent;
         }
 
         private Set<K> changedKeys() {
