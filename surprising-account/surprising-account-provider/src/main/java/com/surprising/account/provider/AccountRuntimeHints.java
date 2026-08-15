@@ -16,6 +16,8 @@ import com.surprising.price.api.model.IndexComponentSnapshot;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
+import com.surprising.price.api.model.PriceEventType;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
@@ -45,6 +47,8 @@ public final class AccountRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, IndexPriceEvent.class);
         registerRecord(hints, MarkPriceEvent.class);
         registerRecord(hints, MarkPricePublishedEvent.class);
+        registerRecord(hints, PriceEventType.class);
+        registerRecord(hints, PricePublishedEvent.class);
         registerRecord(hints, PerpBookTickerEvent.class);
         registerRecord(hints, PerpFundingRateEvent.class);
         registerRecord(hints, PerpTradeEvent.class);

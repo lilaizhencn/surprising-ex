@@ -6,6 +6,7 @@ import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.price.mark.config.MarkPriceProperties;
@@ -38,6 +39,7 @@ import tools.jackson.databind.ObjectMapper;
     private final MarkPriceCoordinationService coordinationService;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final LatestMarkPriceCache latestMarkPriceCache;
+    private MarkPriceCorePublisher corePublisher = null;
     private final String nodeId;
 
     private final ConcurrentHashMap<String, IndexPriceEvent> indexPrices = new ConcurrentHashMap<>();
@@ -61,6 +63,11 @@ import tools.jackson.databind.ObjectMapper;
         this.kafkaTemplate = kafkaTemplate;
         this.latestMarkPriceCache = latestMarkPriceCache;
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCorePublisher(MarkPriceCorePublisher corePublisher) {
+        this.corePublisher = corePublisher;
     }
 
     public void acceptIndexPrice(IndexPriceEvent event) {
@@ -151,10 +158,13 @@ import tools.jackson.databind.ObjectMapper;
         MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
                 fundingRates.get(symbol), basisAverage, encoding, now);
         latestMarkPriceCache.update(event);
+        if (corePublisher != null) {
+            corePublisher.publish(event);
+        }
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
                 fundingRates.get(symbol), basisAverage,
                 properties.getCalculation().getBasisWindow().toSeconds(), now);
-        kafkaTemplate.send(properties.markPriceTopic(), symbol, publication);
+        kafkaTemplate.send(properties.priceEventsTopic(), symbol, PricePublishedEvent.mark(publication));
         return true;
     }
 

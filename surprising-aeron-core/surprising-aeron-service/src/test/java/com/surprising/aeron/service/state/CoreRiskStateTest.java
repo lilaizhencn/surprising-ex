@@ -71,7 +71,7 @@ class CoreRiskStateTest {
     void riskScanContinuesInBoundedBatches() {
         TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
-        for (long userId = 1; userId <= 300; userId++) {
+        for (long userId = 1; userId <= 1_300; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
             state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
                     1, 100, 100, 0, 10));
@@ -80,13 +80,13 @@ class CoreRiskStateTest {
         TradingCoreState firstBatch = reducer.applyMarkPrice(state,
                 new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1));
         assertThat(firstBatch.riskState().scan().complete()).isFalse();
-        assertThat(firstBatch.riskState().scan().lastUserId()).isEqualTo(256);
-        assertThat(firstBatch.riskState().snapshots()).hasSize(256);
+        assertThat(firstBatch.riskState().scan().lastUserId()).isEqualTo(1_024);
+        assertThat(firstBatch.riskState().snapshots()).hasSize(1_024);
 
-        TradingCoreState completed = reducer.continueRiskScan(firstBatch, 256);
+        TradingCoreState completed = reducer.continueRiskScan(firstBatch, 1_024);
         assertThat(completed.riskState().scan().complete()).isTrue();
-        assertThat(completed.riskState().scan().lastUserId()).isEqualTo(300);
-        assertThat(completed.riskState().snapshots()).hasSize(300);
+        assertThat(completed.riskState().scan().lastUserId()).isEqualTo(1_300);
+        assertThat(completed.riskState().snapshots()).hasSize(1_300);
     }
 
     @Test
@@ -114,7 +114,7 @@ class CoreRiskStateTest {
         TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 instrument("BTC-USDT"));
         state = reducer.upsertInstrument(state, instrument("ETH-USDT"));
-        for (long userId = 1; userId <= 300; userId++) {
+        for (long userId = 1; userId <= 1_300; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 200));
             state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
                     1, 100, 100, 0, 10));
@@ -128,8 +128,8 @@ class CoreRiskStateTest {
         assertThat(state.riskState().scans()).containsOnlyKeys("BTC-USDT", "ETH-USDT");
         assertThat(state.riskState().scans().get("BTC-USDT").complete()).isTrue();
         assertThat(state.riskState().scans().get("ETH-USDT").complete()).isFalse();
-        state = reducer.continueRiskScan(state, 256);
-        state = reducer.continueRiskScan(state, 256);
+        state = reducer.continueRiskScan(state, 1_024);
+        state = reducer.continueRiskScan(state, 1_024);
         assertThat(state.riskState().scans().values()).allMatch(CoreRiskState.RiskScan::complete);
     }
 
@@ -137,7 +137,7 @@ class CoreRiskStateTest {
     void newerPriceDuringScanForcesACompleteSecondPass() {
         TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
-        for (long userId = 1; userId <= 300; userId++) {
+        for (long userId = 1; userId <= 1_300; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
             state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
                     1, 100, 100, 0, 10));

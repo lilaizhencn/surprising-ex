@@ -6,11 +6,11 @@ import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 
 /**
- * 账户单写者发布的完整持仓状态事件。
+ * Aeron Core 提交后的完整持仓状态事件。
  *
- * <p>同一事件驱动风控、触发单清理、WebSocket 推送和 Redis 持仓读模型。账户用户分区单写者
- * 分配 {@code revision}，消费者按修订号幂等应用；PostgreSQL 只作为异步投影。生产者必须使用
- * {@link #partitionKey()} 作为 Kafka key，保证同一用户的持仓更新有序。</p>
+ * <p>Core Export 发布该事件，驱动风控、触发单清理、WebSocket 推送和 Redis 持仓读模型。
+ * {@code revision} 由 Core 状态提交顺序分配，消费者按修订号幂等应用；PostgreSQL 只作为异步
+ * 投影。生产者必须使用 {@link #partitionKey()} 作为 Kafka key，保证同一用户的持仓更新有序。</p>
  */
 public record PositionUpdatedEvent(
         int schemaVersion,

@@ -7,6 +7,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
+import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceAuditRecord;
@@ -36,11 +38,13 @@ class MarkPriceAuditConsumerTest {
                 now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 new BigDecimal("57000"), new BigDecimal("61000"), 1L,
                 PriceStatus.HEALTHY, now, now);
-        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(result, null, null, null, null,
+        IndexPriceEvent indexInput = new IndexPriceEvent("BTC-USDT", price, 1L, PriceStatus.HEALTHY,
+                0, 0, BigDecimal.ZERO, now, List.of());
+        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(result, indexInput, null, null, null,
                 BigDecimal.ZERO, 60L, now);
-        String payload = objectMapper.writeValueAsString(publication);
+        String payload = objectMapper.writeValueAsString(PricePublishedEvent.mark(publication));
 
-        consumer.onAudit(List.of(new ConsumerRecord<>(properties.markPriceTopic(), 0, 0L,
+        consumer.onAudit(List.of(new ConsumerRecord<>(properties.priceEventsTopic(), 0, 0L,
                 result.symbol(), payload)));
 
         @SuppressWarnings("unchecked")
@@ -50,7 +54,7 @@ class MarkPriceAuditConsumerTest {
             assertThat(record.event()).isEqualTo(publication);
             assertThat(record.payloadJson()).isEqualTo(payload);
         });
-        assertThat(consumer.markPriceTopic()).isEqualTo(properties.markPriceTopic());
+        assertThat(consumer.priceEventsTopic()).isEqualTo(properties.priceEventsTopic());
         assertThat(consumer.groupId()).isEqualTo(properties.getKafka().getGroupId() + "-audit-writer");
     }
 
@@ -60,7 +64,7 @@ class MarkPriceAuditConsumerTest {
         MarkPriceProperties properties = new MarkPriceProperties();
         MarkPriceAuditConsumer consumer = new MarkPriceAuditConsumer(new ObjectMapper(), repository, properties);
 
-        consumer.onAudit(List.of(new ConsumerRecord<>(properties.markPriceTopic(), 0, 0L,
+        consumer.onAudit(List.of(new ConsumerRecord<>(properties.priceEventsTopic(), 0, 0L,
                 "BTC-USDT", "{not-json")));
 
         verifyNoInteractions(repository);

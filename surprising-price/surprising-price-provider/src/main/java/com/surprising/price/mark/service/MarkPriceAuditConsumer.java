@@ -1,6 +1,8 @@
 package com.surprising.price.mark.service;
 
 import com.surprising.price.api.model.MarkPricePublishedEvent;
+import com.surprising.price.api.model.PriceEventType;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceAuditRecord;
 import com.surprising.price.mark.repository.MarkPriceTickRepository;
@@ -32,15 +34,20 @@ public class MarkPriceAuditConsumer {
     }
 
     @KafkaListener(
-            topics = "#{__listener.markPriceTopic()}",
+            topics = "#{__listener.priceEventsTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "markAuditKafkaListenerContainerFactory")
     public void onAudit(List<ConsumerRecord<String, String>> records) {
         List<MarkPriceAuditRecord> auditRecords = new ArrayList<>(records.size());
         for (ConsumerRecord<String, String> record : records) {
             try {
-                MarkPricePublishedEvent event = objectMapper.readValue(record.value(), MarkPricePublishedEvent.class);
-                if (event.result() == null || record.key() == null
+                PricePublishedEvent publication = objectMapper.readValue(record.value(), PricePublishedEvent.class);
+                if (publication.eventType() != PriceEventType.MARK_PRICE) {
+                    continue;
+                }
+                MarkPricePublishedEvent event = publication.markPrice();
+                if (event == null || event.result() == null || record.key() == null
+                        || !record.key().equals(publication.symbol())
                         || !record.key().equals(event.result().symbol())) {
                     throw new IllegalArgumentException("mark price audit Kafka key must match payload symbol");
                 }
@@ -57,8 +64,8 @@ public class MarkPriceAuditConsumer {
         }
     }
 
-    public String markPriceTopic() {
-        return properties.markPriceTopic();
+    public String priceEventsTopic() {
+        return properties.priceEventsTopic();
     }
 
     public String groupId() {

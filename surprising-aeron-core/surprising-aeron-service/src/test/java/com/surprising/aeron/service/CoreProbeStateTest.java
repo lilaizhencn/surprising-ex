@@ -23,6 +23,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.protocol.AckExportCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -314,6 +315,63 @@ class CoreProbeStateTest {
         assertThat(childOrderId).isPositive();
         assertThat(state.tradingState().order(childOrderId)).isNotNull();
         assertThat(state.apply(execute).status()).isEqualTo(ResponseStatus.DUPLICATE);
+    }
+
+    @Test
+    void markPriceCommandExecutesOnlyCrossingTriggerCandidatesInsideCore() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2))));
+        var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(504,
+                ProductLine.SPOT, 1001, "tp-504", "oco-504", "BTC-USDT", CoreOrderSide.SELL,
+                com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                CoreMarginMode.CROSS, CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                "", "trace", 0, 0, 1_000, 1_000, 1);
+        state.apply(tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), 2,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger)));
+
+        var mark = new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 2_000);
+        var response = state.apply(tradingCommand(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 3,
+                TradingCommandCodec.encodeApplyMarkPrice(mark)));
+
+        assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(state.tradingState().triggerOrders().get(504L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED);
+        assertThat(state.tradingState().triggerOrders().get(504L).triggerSequence()).isEqualTo(7);
+    }
+
+    @Test
+    void expiryQueryUsesIncrementalIndexAndRemovesExpiredTrigger() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2))));
+        var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(505,
+                ProductLine.SPOT, 1001, "tp-505", "", "BTC-USDT", CoreOrderSide.SELL,
+                com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                CoreMarginMode.CROSS, CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                "", "trace", 1_500, 0, 1_000, 1_000, 1);
+        state.apply(tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), 2,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger)));
+
+        var expiryQuery = query(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, 0,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeQuery(
+                        new com.surprising.aeron.protocol.CoreTriggerOrderQuery(0, "", 0, 10,
+                                com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 2_000)));
+        assertThat(com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(state.apply(expiryQuery).data()))
+                .extracting(value -> value.triggerOrderId()).containsExactly(505L);
+
+        state.apply(tradingCommand(CoreMessageType.EXPIRE_TRIGGER_ORDER, UUID.randomUUID(), 3,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeLifecycle(505, 2_000)));
+        assertThat(com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(state.apply(expiryQuery).data()))
+                .isEmpty();
     }
 
     @Test

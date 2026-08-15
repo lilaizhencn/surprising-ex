@@ -35,7 +35,7 @@ class LiquidationServiceTest {
 
         assertThat(cycle).isEqualTo(new LiquidationService.WorkCycle(true, 1, 1, 0));
         verify(aeron).execute(action, 3_000);
-        verify(aeron).continueRiskScan(1_000);
+        verify(aeron).continueRiskScan(1_024);
     }
 
     @Test

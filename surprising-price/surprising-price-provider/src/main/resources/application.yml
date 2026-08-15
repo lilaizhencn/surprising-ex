@@ -32,7 +32,7 @@ surprising:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
       product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-      topic: surprising.perp.mark.price.v1
+      topic: surprising.perp.price.events.v1
       group-id: surprising-mark-price-query-${HOSTNAME:${random.uuid}}
       max-age: 3s
       allowed-future-skew: 1s
@@ -43,7 +43,7 @@ surprising:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
         product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-        index-price-topic: surprising.perp.index.price.v1
+        price-events-topic: surprising.perp.price.events.v1
         group-id: surprising-index-price-v1
         cache-group-id: surprising-index-price-cache-${HOSTNAME:${random.uuid}}
         concurrency: 2
@@ -71,6 +71,11 @@ surprising:
         enabled: true
         node-id:
         lease-duration: 15s
+      aeron:
+        hostnames: [localhost, localhost, localhost]
+        egress-hostname: localhost
+        response-timeout: 5s
+        client-connections: 1
       audit:
         retention: 3d
         cleanup-delay-ms: 60000
@@ -125,7 +130,7 @@ surprising:
         book-ticker-topic: surprising.perp.book.ticker.v1
         trade-topic: surprising.perp.trade.events.v1
         funding-rate-topic: surprising.perp.funding.rate.v1
-        mark-price-topic: surprising.perp.mark.price.v1
+        price-events-topic: surprising.perp.price.events.v1
       calculation:
         publish-interval-ms: 1000
         basis-window: 60s

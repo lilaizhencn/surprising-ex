@@ -1,6 +1,7 @@
 package com.surprising.price.index.service;
 
 import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.index.client.ExternalSpotPriceClient;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
@@ -32,6 +33,7 @@ import org.springframework.stereotype.Service;
     private final IndexPriceCalculator indexPriceCalculator;
     private final IndexPriceLeaseRepository leaseRepository;
     private final IndexPriceSequenceRepository sequenceRepository;
+    private final LatestIndexPriceCache latestIndexPriceCache;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final MarkPriceService markPriceService;
     private final String nodeId;
@@ -44,6 +46,7 @@ import org.springframework.stereotype.Service;
                              IndexPriceCalculator indexPriceCalculator,
                              IndexPriceLeaseRepository leaseRepository,
                              IndexPriceSequenceRepository sequenceRepository,
+                             LatestIndexPriceCache latestIndexPriceCache,
                              @Qualifier("indexKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                              MarkPriceService markPriceService) {
         this.properties = properties;
@@ -53,6 +56,7 @@ import org.springframework.stereotype.Service;
         this.indexPriceCalculator = indexPriceCalculator;
         this.leaseRepository = leaseRepository;
         this.sequenceRepository = sequenceRepository;
+        this.latestIndexPriceCache = latestIndexPriceCache;
         this.kafkaTemplate = kafkaTemplate;
         this.markPriceService = markPriceService;
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
@@ -85,8 +89,9 @@ import org.springframework.stereotype.Service;
         long sequence = sequenceRepository.next(SEQUENCE_MODULE, symbol);
         IndexPriceEvent event = indexPriceCalculator.calculate(symbol, sequence, symbolConfig.getMinValidSources(),
                 quotes, Instant.now());
+        latestIndexPriceCache.update(event);
         markPriceService.acceptIndexPrice(event);
-        kafkaTemplate.send(properties.getKafka().getIndexPriceTopic(), symbol, event);
+        kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), symbol, PricePublishedEvent.index(event));
     }
 
     private boolean ownsSymbol(String symbol) {

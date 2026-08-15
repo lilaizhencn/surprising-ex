@@ -758,8 +758,7 @@ surprising:
       candle-topic: surprising.perp.candle.events.v1
       trade-topic: surprising.perp.trade.events.v1
       order-book-depth-topic: surprising.perp.orderbook.depth.v1
-      index-price-topic: surprising.perp.index.price.v1
-      mark-price-topic: surprising.perp.mark.price.v1
+      price-events-topic: surprising.perp.price.events.v1
       funding-rate-topic: surprising.perp.funding.rate.v1
       order-events-topic: surprising.perp.order.events.v1
       trigger-order-events-topic: surprising.perp.trigger-order.events.v1

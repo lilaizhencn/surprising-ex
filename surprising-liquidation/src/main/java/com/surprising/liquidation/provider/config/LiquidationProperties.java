@@ -1,5 +1,6 @@
 package com.surprising.liquidation.provider.config;
 
+import com.surprising.aeron.protocol.ContinueRiskScanCommand;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.List;
@@ -66,7 +67,7 @@ public class LiquidationProperties {
     public static class Coordinator {
         private long delayMs = 25;
         private int workBatchSize = 256;
-        private int riskScanBatchSize = 1_000;
+        private int riskScanBatchSize = ContinueRiskScanCommand.DEFAULT_MAX_USERS;
 
         public long getDelayMs() { return delayMs; }
         public void setDelayMs(long value) {

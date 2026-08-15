@@ -21,6 +21,10 @@ class CoreTriggerOrderCodecTest {
                 .containsExactly(state);
         CoreTriggerOrderQuery query = new CoreTriggerOrderQuery(0, "btc-usdt", 501, 10);
         assertThat(CoreTriggerOrderCodec.decodeQuery(CoreTriggerOrderCodec.encodeQuery(query))).isEqualTo(query);
+        CoreTriggerOrderQuery expiryQuery = new CoreTriggerOrderQuery(0, "", 0, 10,
+                CoreTriggerOrderStatus.PENDING, 1_700_000_000_000L);
+        assertThat(CoreTriggerOrderCodec.decodeQuery(CoreTriggerOrderCodec.encodeQuery(expiryQuery)))
+                .isEqualTo(expiryQuery);
     }
 
     @Test

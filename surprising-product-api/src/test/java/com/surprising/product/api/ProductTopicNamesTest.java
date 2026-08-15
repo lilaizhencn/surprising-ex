@@ -17,9 +17,8 @@ class ProductTopicNamesTest {
         assertThat(linear.triggerOrderEventsTopic())
                 .isEqualTo("surprising.linear-perp.trigger-order.events.v1");
         assertThat(inverse.matchTradesTopic()).isEqualTo("surprising.inverse-perp.match.trades.v1");
-        assertThat(linear.indexPriceTopic()).isEqualTo("surprising.linear-perp.index.price.v1");
+        assertThat(linear.priceEventsTopic()).isEqualTo("surprising.linear-perp.price.events.v1");
         assertThat(linear.bookTickerTopic()).isEqualTo("surprising.linear-perp.book.ticker.v1");
-        assertThat(linear.markPriceTopic()).isEqualTo("surprising.linear-perp.mark.price.v1");
         assertThat(linear.feeScheduleEventsTopic())
                 .isEqualTo("surprising.linear-perp.fee.schedule.events.v1");
         assertThat(linear.leverageSettingEventsTopic())

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.SourceStatus;
 import com.surprising.price.index.client.ExternalSpotPriceClient;
 import com.surprising.price.index.config.IndexPriceProperties;
@@ -36,6 +37,7 @@ class IndexPriceServiceTest {
         LatestSourceQuoteStore latestQuoteStore = mock(LatestSourceQuoteStore.class);
         IndexPriceLeaseRepository leaseRepository = mock(IndexPriceLeaseRepository.class);
         IndexPriceSequenceRepository sequenceRepository = mock(IndexPriceSequenceRepository.class);
+        LatestIndexPriceCache latestIndexPriceCache = mock(LatestIndexPriceCache.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceService markPriceService = mock(MarkPriceService.class);
         Instant now = Instant.now();
@@ -50,12 +52,13 @@ class IndexPriceServiceTest {
 
         IndexPriceService service = new IndexPriceService(properties, configService, spotPriceClient,
                 latestQuoteStore, new IndexPriceCalculator(properties), leaseRepository, sequenceRepository,
+                latestIndexPriceCache,
                 kafkaTemplate, markPriceService);
 
         service.pollAndPublish();
 
-        verify(kafkaTemplate).send(eq("surprising.option.index.price.v1"),
-                eq("BTC-USDT-260925-70000-C"), any(IndexPriceEvent.class));
+        verify(kafkaTemplate).send(eq("surprising.option.price.events.v1"),
+                eq("BTC-USDT-260925-70000-C"), any(PricePublishedEvent.class));
         verify(markPriceService).acceptIndexPrice(any(IndexPriceEvent.class));
     }
 

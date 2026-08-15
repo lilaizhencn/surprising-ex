@@ -4,7 +4,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 
-/** 用户分区内执行交割或期权到期行权的结算命令。 */
+/** 提交到 Aeron Core、用于交割或期权到期行权的结算命令载荷。 */
 public record ExpiringPositionSettlementAccountCommand(
         String symbol,
         long instrumentVersion,

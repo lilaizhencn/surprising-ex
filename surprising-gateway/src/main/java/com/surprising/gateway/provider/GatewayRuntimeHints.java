@@ -19,6 +19,12 @@ public final class GatewayRuntimeHints implements RuntimeHintsRegistrar {
                 "com.surprising.account.api.model.PositionUpdatedEvent",
                 "com.surprising.risk.api.model.RiskAccountUpdatedEvent",
                 "com.surprising.risk.api.model.RiskPositionUpdatedEvent",
+                "com.surprising.price.api.model.IndexComponentSnapshot",
+                "com.surprising.price.api.model.IndexPriceEvent",
+                "com.surprising.price.api.model.MarkPriceEvent",
+                "com.surprising.price.api.model.MarkPricePublishedEvent",
+                "com.surprising.price.api.model.PriceEventType",
+                "com.surprising.price.api.model.PricePublishedEvent",
                 "com.surprising.websocket.api.model.WsClientCommand",
                 "com.surprising.websocket.api.model.WsServerMessage"
         };

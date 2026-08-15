@@ -36,10 +36,8 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising.linear-delivery.trade.events.v1");
         assertThat(properties.getKafka().getOrderBookDepthTopic())
                 .isEqualTo("surprising.linear-delivery.orderbook.depth.v1");
-        assertThat(properties.getKafka().getIndexPriceTopic())
-                .isEqualTo("surprising.linear-delivery.index.price.v1");
-        assertThat(properties.getKafka().getMarkPriceTopic())
-                .isEqualTo("surprising.linear-delivery.mark.price.v1");
+        assertThat(properties.getKafka().getPriceEventsTopic())
+                .isEqualTo("surprising.linear-delivery.price.events.v1");
         assertThat(properties.getKafka().isFundingRateTopicEnabled()).isFalse();
         assertThat(properties.getKafka().getFundingRateTopic())
                 .isEqualTo("surprising.perp.funding.rate.v1");

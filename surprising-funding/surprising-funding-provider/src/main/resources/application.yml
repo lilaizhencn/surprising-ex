@@ -32,7 +32,7 @@ surprising:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
       product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-      topic: surprising.perp.mark.price.v1
+      topic: surprising.perp.price.events.v1
       group-id: surprising-funding-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 10s
       allowed-future-skew: 1s

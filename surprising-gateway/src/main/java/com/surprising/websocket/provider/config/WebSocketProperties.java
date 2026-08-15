@@ -67,8 +67,7 @@ public class WebSocketProperties {
         private String candleTopic = "surprising.perp.candle.events.v1";
         private String tradeTopic = "surprising.perp.trade.events.v1";
         private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
-        private String indexPriceTopic = "surprising.perp.index.price.v1";
-        private String markPriceTopic = "surprising.perp.mark.price.v1";
+        private String priceEventsTopic = "surprising.perp.price.events.v1";
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String orderEventsTopic = "surprising.perp.order.events.v1";
         private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
@@ -162,20 +161,12 @@ public class WebSocketProperties {
             this.orderBookDepthTopic = orderBookDepthTopic;
         }
 
-        public String getIndexPriceTopic() {
-            return productTopicsEnabled ? productTopics().indexPriceTopic() : indexPriceTopic;
+        public String getPriceEventsTopic() {
+            return productTopicsEnabled ? productTopics().priceEventsTopic() : priceEventsTopic;
         }
 
-        public void setIndexPriceTopic(String indexPriceTopic) {
-            this.indexPriceTopic = indexPriceTopic;
-        }
-
-        public String getMarkPriceTopic() {
-            return productTopicsEnabled ? productTopics().markPriceTopic() : markPriceTopic;
-        }
-
-        public void setMarkPriceTopic(String markPriceTopic) {
-            this.markPriceTopic = markPriceTopic;
+        public void setPriceEventsTopic(String priceEventsTopic) {
+            this.priceEventsTopic = priceEventsTopic;
         }
 
         public String getFundingRateTopic() {

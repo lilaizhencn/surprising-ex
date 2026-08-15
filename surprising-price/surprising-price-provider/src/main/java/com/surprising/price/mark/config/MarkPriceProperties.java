@@ -5,6 +5,7 @@ import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.List;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -16,6 +17,7 @@ public class MarkPriceProperties {
     private Calculation calculation = new Calculation();
     private Coordination coordination = new Coordination();
     private Audit audit = new Audit();
+    private Aeron aeron = new Aeron();
 
     /** 启动时拒绝未隔离的标记价格 Topic 配置。 */
     @PostConstruct
@@ -63,6 +65,49 @@ public class MarkPriceProperties {
         this.audit = audit;
     }
 
+    public Aeron getAeron() {
+        return aeron;
+    }
+
+    public void setAeron(Aeron aeron) {
+        this.aeron = aeron == null ? new Aeron() : aeron;
+    }
+
+    public static class Aeron {
+        private List<String> hostnames = List.of("localhost", "localhost", "localhost");
+        private String egressHostname = "localhost";
+        private Duration responseTimeout = Duration.ofSeconds(5);
+        private int clientConnections = 1;
+
+        public List<String> getHostnames() { return hostnames; }
+        public void setHostnames(List<String> hostnames) {
+            if (hostnames == null || hostnames.size() != 3
+                    || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
+                throw new IllegalArgumentException("aeron hostnames must contain three non-blank members");
+            }
+            this.hostnames = List.copyOf(hostnames);
+        }
+        public String getEgressHostname() { return egressHostname; }
+        public void setEgressHostname(String egressHostname) {
+            if (egressHostname == null || egressHostname.isBlank()) {
+                throw new IllegalArgumentException("aeron egress hostname is required");
+            }
+            this.egressHostname = egressHostname.trim();
+        }
+        public Duration getResponseTimeout() { return responseTimeout; }
+        public void setResponseTimeout(Duration responseTimeout) {
+            if (responseTimeout == null || responseTimeout.isZero() || responseTimeout.isNegative()) {
+                throw new IllegalArgumentException("aeron response timeout must be positive");
+            }
+            this.responseTimeout = responseTimeout;
+        }
+        public int getClientConnections() { return clientConnections; }
+        public void setClientConnections(int clientConnections) {
+            if (clientConnections != 1) throw new IllegalArgumentException("price Aeron requires one client connection");
+            this.clientConnections = clientConnections;
+        }
+    }
+
     public String bookTickerTopic() {
         return kafka.productTopicsEnabled ? productTopics().bookTickerTopic() : topics.getBookTickerTopic();
     }
@@ -81,8 +126,8 @@ public class MarkPriceProperties {
         return !kafka.productTopicsEnabled || kafka.productLine.isFundingProduct();
     }
 
-    public String markPriceTopic() {
-        return kafka.productTopicsEnabled ? productTopics().markPriceTopic() : topics.getMarkPriceTopic();
+    public String priceEventsTopic() {
+        return kafka.productTopicsEnabled ? productTopics().priceEventsTopic() : topics.getPriceEventsTopic();
     }
 
     private ProductTopicNames productTopics() {
@@ -154,7 +199,7 @@ public class MarkPriceProperties {
         private String bookTickerTopic = "surprising.perp.book.ticker.v1";
         private String tradeTopic = "surprising.perp.trade.events.v1";
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
-        private String markPriceTopic = "surprising.perp.mark.price.v1";
+        private String priceEventsTopic = "surprising.perp.price.events.v1";
 
         public String getBookTickerTopic() {
             return bookTickerTopic;
@@ -180,12 +225,12 @@ public class MarkPriceProperties {
             this.fundingRateTopic = fundingRateTopic;
         }
 
-        public String getMarkPriceTopic() {
-            return markPriceTopic;
+        public String getPriceEventsTopic() {
+            return priceEventsTopic;
         }
 
-        public void setMarkPriceTopic(String markPriceTopic) {
-            this.markPriceTopic = markPriceTopic;
+        public void setPriceEventsTopic(String priceEventsTopic) {
+            this.priceEventsTopic = priceEventsTopic;
         }
 
     }
@@ -245,6 +290,7 @@ public class MarkPriceProperties {
         public void setScale(int scale) {
             this.scale = scale;
         }
+
     }
 
     public static class Coordination {

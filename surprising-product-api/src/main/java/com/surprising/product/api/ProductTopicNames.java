@@ -42,16 +42,12 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("orderbook.depth");
     }
 
-    public String indexPriceTopic() {
-        return topic("index.price");
+    public String priceEventsTopic() {
+        return topic("price.events");
     }
 
     public String bookTickerTopic() {
         return topic("book.ticker");
-    }
-
-    public String markPriceTopic() {
-        return topic("mark.price");
     }
 
     public String fundingRateTopic() {

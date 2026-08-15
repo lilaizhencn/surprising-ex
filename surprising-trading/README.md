@@ -44,7 +44,7 @@ client / internal gateway
   -> 用户分区 WAL/RocksDB 顺序追加订单事实
   -> surprising.<product-segment>.order.state.events.v1（按用户键压缩的完整状态广播）
   -> surprising.<product-segment>.order.user.command.results.v1
-  -> Kafka 订单事件与账户预占命令
+  -> Aeron Core 订单命令（预占由 Core 原子裁决）
   -> surprising.<product-segment>.order.commands.v1
   -> surprising-matching-provider / exchange-core
   -> MatchResultEvent / MatchTradeEvent
@@ -60,7 +60,7 @@ client / internal gateway
   -> POST /api/v1/trading/trigger-orders
   -> surprising-trigger-provider
   -> PostgreSQL trading_trigger_orders
-  -> consume surprising.<product-segment>.mark.price.v1
+  -> consume surprising.<product-segment>.price.events.v1 (MARK_PRICE branch)
   -> 通过订单入口 API 提交 reduceOnly 平仓单
   -> 正常订单 / 撮合 / 账户 / WebSocket 链路
 ```
@@ -168,24 +168,25 @@ REST 接口：
 
 大型交易所的 TP/SL 通常是活跃订单簿外的条件单。本模块按这个模型实现：
 
-- 条件单先以 `PENDING` 状态保存在 `trading_trigger_orders`，触发前不进入 exchange-core，也不冻结新增保证金。
-- 标记价格是止盈止损触发源。每个 symbol 的更高 sequence 会覆盖尚未扫描的旧标记价格，固定每秒只处理最新样本。
+- 条件单先以 `PENDING` 状态写入 Aeron Core 的 `CoreTriggerOrderState`，触发前不进入 exchange-core，也不冻结新增保证金；数据库只接收导出投影。
+- 标记价格由 price-provider 通过单写入 Aeron `APPLY_MARK_PRICE` 命令送入 Core。Core 按 symbol 的价格范围索引只取 crossing candidates，不做全量条件单扫描。
 - 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，采样标记价大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，采样标记价小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
 - `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护每秒采样标记价的最高价，从最高价回撤达到回调比例时触发；BUY 追踪止损维护每秒采样标记价的最低价，反弹达到回调比例时触发。只有追踪止损有这些水位字段；固定 TP/SL 不会更新它们，PostgreSQL 也只在首次激活或采样标记价出现新高/新低时写追踪水位。
-- trigger provider 只消费当前产品线的 mark-price topic 并校验 Kafka key 等于 payload `symbol`。Kafka listener 只更新内存中的 symbol 最新样本；每秒调度器直接使用事件里的定点数 `markPriceTicks`，并用 PostgreSQL `FOR UPDATE SKIP LOCKED` 抢占到期条件单。触发热路径不读取标记价格审计表；一秒内被更高 sequence 覆盖的旧样本不会参与判断。
-- 多个 trigger-provider 节点可以同时运行。每条到期条件单只能被一个节点抢到；如果下游 order-provider 故障，`TRIGGERING` 状态超过 `surprising.trading.trigger.execution.stale-triggering-after` 后会重置，等待后续 mark 事件重试。
-- 静态 `TAKE_PROFIT`/`STOP_LOSS` 默认且始终通过 Spring Data Redis + Lettuce 写入按产品线、symbol 隔离的 Redis ZSET，无需功能开关。一次 Lua 调用同时读取大于等于和小于等于两个范围，PostgreSQL 再对候选 id 复核并执行原有 `FOR UPDATE SKIP LOCKED` 状态迁移；追踪止损的高低水位保留在 PostgreSQL，并使用相同的每秒标记价格样本。
+- trigger provider 只消费统一 `price.events` 的 `MARK_PRICE` 分支用于展示和恢复，不再参与 Core 触发裁决；Core 直接校验价格 sequence、过期时间、追踪水位和触发条件。
+- 多个 trigger-provider 节点可以同时运行，用户查询和撤单通过 Aeron Core 按用户边界执行；`TRIGGERING` 的重试和投影由 Core 状态机负责。
+- 静态 `TAKE_PROFIT`/`STOP_LOSS`、追踪止损都进入 Core 的增量 symbol/position/OCO 索引。索引更新随 Core 状态转换完成，标记价命令只访问命中的价格范围，不使用 Redis 或数据库锁抢单。
 - Redis score 只使用 `2^53-1` 以内可精确表示的整数 ticks；已有数据超过范围时索引保持 not-ready 并退回数据库扫描，不能用浮点近似冒漏触发风险。新静态 TP/SL 在 Redis 索引写失败时 fail-closed；Redis 查询不可用时，已经提交的条件单仍走数据库 fallback 触发。
 - readiness marker 使用短 TTL 并在校准后刷新。带 token 的 `SET NX` lease 和 compare-and-delete Lua 解锁只用于防止多节点重复重建，不串行业务触发。终态 DB 更新成功后再幂等删除 Redis member，因此故障最多留下会被 DB 拒绝的陈旧候选，不会制造错误数据库终态。
 - 触发后通过 order-provider 提交 `reduceOnly=true`、`postOnly=false` 的平仓单，`clientOrderId=trigger-<triggerOrderId>`。order-provider 的幂等键会保护重试不会创建重复平仓单。
 - 触发后的真实订单继续走普通订单、撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger 服务不直接修改余额或持仓。
 - `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。静态 TP/SL 也可用 `LIMIT` 执行且要求 `priceTicks > 0`；触发执行不支持 `GTX`。
-- 可选 `ocoGroupId` 支持成对 TP/SL 互撤。每秒采样的最新标记价抢占同一个 `userId + symbol + marginMode + ocoGroupId` 组里任意一条 pending 条件单时，同一条数据库 claim 语句会先把其它 pending sibling 置为 `CANCELED`，再提交生成的 reduce-only 平仓单。
-- 持仓完全归零时，account 发送按用户分区的持久化持仓事件。trigger-provider 消费后，在自己的事务里按精确的 `productLine + userId + symbol + marginMode + positionSide` 范围取消不晚于关仓事件创建的全部 `PENDING` 条件单，写入 `rejectReason=POSITION_CLOSED` 和状态 outbox，提交后再清理 Redis ZSET。重复事件不会重复更新，新仓位创建的条件单受 `created_at` 边界保护，`TRIGGERING` 行不会被抢撤。
+- 可选 `ocoGroupId` 支持成对 TP/SL 互撤。Core 在同一个命令状态转换内通过 OCO 索引取消其它 pending sibling，再生成 reduce-only 平仓单。
+- 持仓完全归零时，Core 直接按用户、symbol、margin、position-side 的 position 索引取消 pending 条件单；不会扫描全量条件单，`TRIGGERING` 状态不会被抢撤。
+- `expiresAt` 是可选字段：普通 TP/SL 可以长期有效，策略保护单可指定到期时间。Core 维护按过期时间排序的 pending 索引，维护任务每次只取有界的已到期集合并提交 `EXPIRE_TRIGGER_ORDER`，没有标记价事件也不会长期残留，更不会扫描全量条件单。
 - 批量条件单放置支持 `atomic=true`，用于组合 TP/SL 的全成全撤语义。原子模式下任一条校验失败会拒绝整组、回滚已插入条件单，并返回逐项失败结果；默认批量模式仍保持逐条隔离成功/失败。
 - OCO sibling 在 claim 阶段就会取消；如果后续 order-provider 执行失败，该 OCO 组也已经被消费。这个取舍可以避免多节点 trigger-provider 并发下重复平仓，执行失败后客户端可以重新挂一组 TP/SL。
-- 每次已提交的条件单状态变化（`PENDING`、`TRIGGERING`、`TRIGGERED`、`TRIGGER_FAILED`、`CANCELED`、`EXPIRED`）都会在同一数据库事务内向 `trading_outbox_events` 写入完整 `TriggerOrderUpdatedEvent` 快照。trigger outbox publisher 把它发送到当前产品线的 `trigger-order.events` topic，WebSocket 再通过认证私有频道 `triggerOrders` 推送。该链路是至少一次投递，客户端需按 `eventId` 去重，并在重连后重新拉取 `GET /open`。
-- 当前条件单 API 不做原地改单。用户更新触发价或数量时应先撤旧单，再使用新的 `clientTriggerOrderId` 下单，确保重新执行完整校验并避免跨存储 move 竞争。`GET /open` 始终查询 PostgreSQL 的权威 `PENDING`/`TRIGGERING` 状态；私有 `triggerOrders` 频道会立即更新或移除列表行，触发生成的真实平仓单和成交继续走现有私有 WebSocket 频道。
+- 每次已提交的条件单状态变化都会进入 Core Export 的 trigger delta；gateway/WebSocket 按 delta 推送私有 `triggerOrders` 频道，客户端按 event id 去重并在重连后重新拉取 `GET /open`。
+- 当前条件单 API 不做原地改单。`GET /open` 在 Core-only 模式下按 `userId + symbol + cursor` 查询 Core，返回 `nextCursor/hasMore`；数据库仅用于后台审计和历史投影。
 
 REST 接口：
 
@@ -222,6 +223,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 - `POST /api/v1/trading/trigger-orders/batch`：批量提交 TP/SL 条件单，最多 20 条；需要多腿 TP/SL 组合全成全撤时传 `atomic=true`。
 - `POST /api/v1/trading/trigger-orders/batch-cancel`：批量撤销条件单，最多 50 条。
 - `POST /api/v1/trading/trigger-orders/cancel-open`：撤销用户所有 `PENDING` 条件单，可按 `symbol` 过滤，单次最多 1000 条；已经进入 `TRIGGERING` 的条件单不在这里撤销，避免和触发执行抢状态。
+- `GET /api/v1/trading/trigger-orders/open?userId=...&symbol=...&limit=...&cursor=...`：按 Core 游标查询用户待触发条件单，响应包含 `nextCursor` 和 `hasMore`。
 
 触发单持久化按表隔离：`TriggerOrderRepository`、`TriggerPositionRepository`、
 `TriggerPositionModeRepository`、`TriggerOpenOrderRepository` 和
@@ -241,13 +243,13 @@ advisory lock，不访问业务表。`TriggerOrderPersistenceService` 在业务�
 
 ## 保证金冻结
 
-普通开仓/挂单在 `surprising-order-provider` 内完成初始保证金冻结：
+普通开仓/挂单由 `surprising-order-provider` 完成规则校验和保证金计算，再把带不可变预占快照的下单命令提交给 Aeron Core：
 
 - 从 instrument 当前版本读取 `contract_type`、`initial_margin_rate_ppm`、`notional_multiplier_units`、`price_tick_units`、`settle_asset` 和资产 scale。
 - 在 Java `OrderMarginMath` 中换算 `initialMarginUnits`：输入和输出都是 long ticks/steps/asset units，中间乘除使用精确整数计算，溢出会拒绝而不是回绕。
-- 下单事务会先插入 `trading_orders`，确认没有命中 `clientOrderId` 幂等冲突后，再把 `account_balances.available_units` 转入 `locked_units`。
+- Aeron Core 校验用户可用余额和订单预占，并在同一有序命令中把 `availableUnits` 转入 `lockedUnits`；`trading_orders` 只保存订单及预占快照投影，不更新账户余额表。
 - 账户类型、结算资产和初始冻结量作为不可变快照保存在 `trading_orders` 并随 `OrderCommandEvent` 传递；永续不再维护独立的保证金预占记录。
-- 如果订单已插入但保证金不足，订单会在同一事务内改为 `REJECTED`，只发布拒单事件，不发布撮合命令。
+- 如果 Core 判断保证金不足，命令直接返回 `REJECTED`，不会进入撮合；数据库只接收最终订单状态投影。
 
 `reduceOnly=true` 的平仓和强平订单不冻结新增保证金。
 matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。非 reduce-only 订单缺少 `reservedUnits` 快照是会计不变量错误，必须失败，不能静默继续。
@@ -258,24 +260,25 @@ matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。�
 - 空仓只能提交 reduce-only `BUY`。
 - 已存在的未完成 reduce-only 平仓单会占用可平数量，新订单数量加上已有待平数量不能超过当前持仓。
 - 待平数量聚合使用 checked long addition；如果溢出，会拒绝订单或回滚强平事务，不能静默扩大可平容量。
-- 校验使用账户和订单用户分区单写者的 `positionRevision`、订单 revision 和本地未成交索引，多节点
-  通过 Kafka 用户 key 串行更新；快照未就绪时失败关闭，不使用数据库行锁猜测可平数量。
-- 持仓被成交、强平或 ADL 改变后，order-provider 消费按用户分区的持久化持仓事件，并在同一订单用户
+- 校验使用 Aeron Core 用户状态快照中的 `positionRevision`、订单 revision 和本地未成交索引，多节点
+  通过用户 key 串行更新；快照未就绪时失败关闭，不使用数据库行锁猜测可平数量。
+- 持仓被成交、强平或 ADL 改变后，order-provider 消费 Core Export 发布的完整持仓状态事件，并在同一订单用户
   分区 WAL 中撤销事件发生前创建且反向、版本不一致或超过新持仓容量的订单。它忽略事件之后创建的
   订单，避免延迟快照误撤重开仓位的新平仓单。
 
 下单保证金热路径还维护 `OrderMarginSnapshotCache`：持仓事件、订单投影和杠杆设置成功后更新本地快照，
 快照完整时不再做持仓、杠杆和挂单聚合 JOIN；全市场未平仓量从产品线隔离的 JVM 快照读取。进程启动
 时通过账户内部快照 RPC、杠杆配置启动快照和订单本地 WAL 恢复，投影未就绪、事件落后或任一用户状态
-未命中时直接拒绝下单，不在下单线程回查数据库。数据库仅是异步投影、恢复基线和审计来源。
+未命中时直接拒绝下单，不在下单线程回查数据库。数据库仅是订单/杠杆异步投影和审计来源，不能作为账户
+Core 状态的恢复源。
 
 `surprising-matching-provider` 在撮合拒绝时发布释放命令；订单用户分区按未成交比例追加终态事实，
-账户用户分区按实际成交价计算开仓保证金，把这部分从订单预占迁移到持仓保证金，并释放委托价改善
+Aeron Core reducer 按实际成交价计算开仓保证金，把这部分从订单预占迁移到持仓保证金，并释放委托价改善
 或市价风险边界多冻结的差额。数据库只接收账户和订单完整快照投影。线性合约市价单即使是 SELL
 也故意按上边界冻结，因为 SELL 市价单可能吃到高于 mark 的买一挂单。平仓成交释放旧持仓保证金，
 不消耗新的订单保证金。
 
-保证金释放由账户用户分区 reducer 按预占记录和 revision 原子校验：`lockedUnits >= releaseUnits`。
+保证金释放由 Aeron Core reducer 按预占记录和 revision 原子校验：`lockedUnits >= releaseUnits`。
 如果冻结余额不足，命令拒绝并停在当前用户序号，不能静默扣减或把不存在的冻结金额释放成可用余额。
 
 ## Instrument 规则来源
@@ -338,7 +341,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
   每个 HTTP 节点使用独立结果消费组，不能把结果 Topic 当成事实源。
 - `surprising.<product-segment>.match.trades.v1`：供 WebSocket 公共逐笔与 K 线计算使用的可丢失 `PublicTradeEvent`，key = `symbol`。matching 按 symbol 使用独立队列，每 50ms 由专用非阻塞 Kafka producer 批量刷新；逐笔保持 FIFO、不合并，同一 symbol 排队超过 10,000 条时只丢弃该 symbol 最旧的消息。
 - `surprising.<product-segment>.orderbook.depth.v1`：可丢失的 L2 盘口快照，key = `symbol`；每个 symbol 只保留最新一份待发送快照。
-- `surprising.<product-segment>.mark.price.v1`：trigger-provider 消费的标记价格流，key = `symbol`。
+- `surprising.<product-segment>.price.events.v1`：指数价和标记价统一流，`eventType` 区分分支，key = `symbol`。
 
 公共逐笔/盘口链路不读写 matching 数据库，也不能阻塞或回滚资金处理。真实经济成交的完整 `MatchTradeEvent` 仍落在 `trading_match_trades` 用于审计，并包含在可靠的 `MatchResultEvent` 中；maker/taker 结算只通过可靠的账户命令执行。maker 和 taker 都属于内部做市白名单时，成交仍进入公共逐笔和盘口链路，但跳过经济成交表与双方成交结算命令。
 
@@ -484,7 +487,7 @@ curl -X POST 'http://localhost:9084/api/v1/trading/orders' \
 - `POST /api/v1/trading/orders`：提交普通订单。`clientOrderId` 在同一用户内幂等。
 - `POST /api/v1/trading/orders/test`：测单。只执行基础字段、产品规则、reduce-only、手续费快照和开仓冻结需求测算；不写 `trading_orders`，不冻结余额，不发布 Kafka command。
 - `POST /api/v1/trading/orders/batch`：批量下单，最多 20 条。响应逐项返回成功/失败；单项业务拒单仍会返回对应订单响应。
-- `POST /api/v1/trading/orders/close-position`：一键平当前仓位。服务端锁定当前 `account_positions` 行，按仓位方向生成 `reduceOnly=true`、`MARKET + IOC` 平仓单；不会冻结新增保证金。
+- `POST /api/v1/trading/orders/close-position`：一键平当前仓位。服务端读取 Aeron Core 当前用户状态，按仓位方向生成 `reduceOnly=true`、`MARKET + IOC` 平仓单；不会冻结新增保证金，也不锁定 `account_positions` 投影行。
 - `POST /api/v1/trading/orders/cancel`：按 `orderId` 撤单。
 - `POST /api/v1/trading/orders/batch-cancel`：批量撤单，最多 50 条。
 - `POST /api/v1/trading/orders/cancel-open`：撤销用户普通开放订单，可按 `symbol` 过滤，单次最多 1000 条。
@@ -575,7 +578,7 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 - 当前已经实现基于 Aeron snapshot/replay 的开放订单簿恢复；PostgreSQL 只保留异步投影，不参与在线簿恢复。
 - Instrument `max_notional_units` 已同时约束限价单和保护价市价单。真实盘口深度、延迟和强平压力测试证明更大额度安全之前，产品 notional 限额应保持保守。
 - 下单冻结保证金时还会校验投影后的持仓敞口：当前持仓 + 同方向未完成非 reduce-only 委托 + 本次委托，用这个投影值检查 `max_position_notional_units`、动态平台 OI 限额和命中的 `instrument_risk_brackets.notional_cap_units`；纯减仓单按减仓后的投影校验，不会简单用当前敞口加本单 notional 误拒。
-- 动态单用户持仓量限额已实现：account 结算按用户把 OI 写入 64 个 `trading_symbol_open_interest_shards`，`trading_symbol_open_interest` 视图向读端聚合 long/short 和 `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`；order 入口按当前价格折算平台 OI notional，并使用 `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` 作为每个用户的有效持仓上限。默认 BTC/ETH 为 30% 平台 OI，固定下限 250,000 USDT。生产需要定期用 `account_positions` 重建核对分片，尤其在人工修数或灾备恢复之后。
+- 动态单用户持仓量限额已实现：account 根据 Core Export 的结算事实把 OI 投影到 64 个 `trading_symbol_open_interest_shards`，`trading_symbol_open_interest` 视图向读端聚合 long/short 和 `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`；order 入口按当前价格折算平台 OI notional，并使用 `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` 作为每个用户的有效持仓上限。默认 BTC/ETH 为 30% 平台 OI，固定下限 250,000 USDT。生产需要定期用 Core Export/用户状态快照重建核对分片，`account_positions` 只作为对账投影，尤其在人工修数或灾备恢复之后。
 - 用户主动平仓应使用 `reduceOnly=true`；强平订单由 liquidation provider 复核风险后生成，不走用户订单入口校验。
 - 止盈止损触发后一定通过 order-provider 提交 reduce-only 平仓单。WebSocket 客户端会在普通私有订单/成交/持仓频道收到触发后生成的真实订单和成交。
 - outbox 是至少一次投递；下游撮合和推送必须幂等。

@@ -19,7 +19,7 @@ class IndexKafkaProducerConfigurationTest {
     void defaultsToLegacyPerpTopicsUntilProductTopicsAreEnabled() {
         IndexPriceProperties properties = new IndexPriceProperties();
 
-        assertThat(properties.getKafka().getIndexPriceTopic()).isEqualTo("surprising.perp.index.price.v1");
+        assertThat(properties.getKafka().getPriceEventsTopic()).isEqualTo("surprising.perp.price.events.v1");
     }
 
     @Test
@@ -28,8 +28,8 @@ class IndexKafkaProducerConfigurationTest {
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         properties.getKafka().setProductTopicsEnabled(true);
 
-        assertThat(properties.getKafka().getIndexPriceTopic())
-                .isEqualTo("surprising.linear-delivery.index.price.v1");
+        assertThat(properties.getKafka().getPriceEventsTopic())
+                .isEqualTo("surprising.linear-delivery.price.events.v1");
     }
 
     @Test

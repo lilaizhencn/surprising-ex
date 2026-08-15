@@ -16,6 +16,8 @@ import com.surprising.trading.api.model.OrderBookDepthUpdateType;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
+import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
@@ -176,11 +178,30 @@ class KafkaFanoutConsumerTest {
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         MarkPriceEvent event = markPriceEvent(Instant.now());
 
-        consumer.onMarkPrice(new ConsumerRecord<>("surprising.perp.mark.price.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(markPricePublication(event))));
+        consumer.onPriceEvent(new ConsumerRecord<>("surprising.perp.price.events.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
 
-        verify(registry).publish(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "BTC-USDT", null, null)),
-                eq(event), eq(event.eventTime()));
+        ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
+        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "BTC-USDT", null, null)),
+                events.capture());
+        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
+    }
+
+    @Test
+    void fansOutIndexBranchFromUnifiedPriceTopic() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        IndexPriceEvent event = new IndexPriceEvent("BTC-USDT", new BigDecimal("50000"), 9L,
+                PriceStatus.HEALTHY, 2, 2, BigDecimal.valueOf(2), eventTime, List.of());
+
+        consumer.onPriceEvent(new ConsumerRecord<>("surprising.perp.price.events.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.index(event))));
+
+        ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
+        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null)),
+                events.capture());
+        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
     }
 
     @Test
@@ -189,8 +210,8 @@ class KafkaFanoutConsumerTest {
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         MarkPriceEvent event = markPriceEvent(Instant.now().minusSeconds(4));
 
-        consumer.onMarkPrice(new ConsumerRecord<>("surprising.perp.mark.price.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(markPricePublication(event))));
+        consumer.onPriceEvent(new ConsumerRecord<>("surprising.perp.price.events.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
 
         verifyNoInteractions(registry);
     }
@@ -266,7 +287,9 @@ class KafkaFanoutConsumerTest {
     }
 
     private MarkPricePublishedEvent markPricePublication(MarkPriceEvent event) {
-        return new MarkPricePublishedEvent(event, null, null, null, null,
+        IndexPriceEvent indexInput = new IndexPriceEvent(event.symbol(), event.indexPrice(), event.sequence(),
+                PriceStatus.HEALTHY, 0, 0, BigDecimal.ZERO, event.eventTime(), List.of());
+        return new MarkPricePublishedEvent(event, indexInput, null, null, null,
                 event.basisAverage(), event.basisWindowSeconds(), event.eventTime());
     }
 

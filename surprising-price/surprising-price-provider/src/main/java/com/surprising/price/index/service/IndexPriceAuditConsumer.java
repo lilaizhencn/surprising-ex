@@ -1,6 +1,8 @@
 package com.surprising.price.index.service;
 
 import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.PriceEventType;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.index.config.IndexPriceProperties;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,15 +32,20 @@ public class IndexPriceAuditConsumer {
     }
 
     @KafkaListener(
-            topics = "#{__listener.indexPriceTopic()}",
+            topics = "#{__listener.priceEventsTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "indexAuditKafkaListenerContainerFactory")
     public void onAudit(List<ConsumerRecord<String, String>> records) {
         try {
             List<IndexPriceEvent> events = new ArrayList<>(records.size());
             for (ConsumerRecord<String, String> record : records) {
-                IndexPriceEvent event = objectMapper.readValue(record.value(), IndexPriceEvent.class);
-                if (record.key() == null || !record.key().equals(event.symbol())) {
+                PricePublishedEvent publication = objectMapper.readValue(record.value(), PricePublishedEvent.class);
+                if (publication.eventType() != PriceEventType.INDEX_PRICE) {
+                    continue;
+                }
+                IndexPriceEvent event = publication.indexPrice();
+                if (record.key() == null || !record.key().equals(publication.symbol())
+                        || !record.key().equals(event.symbol())) {
                     throw new IllegalArgumentException("index price audit Kafka key must match payload symbol");
                 }
                 events.add(event);
@@ -50,8 +57,8 @@ public class IndexPriceAuditConsumer {
         }
     }
 
-    public String indexPriceTopic() {
-        return properties.getKafka().getIndexPriceTopic();
+    public String priceEventsTopic() {
+        return properties.getKafka().getPriceEventsTopic();
     }
 
     public String groupId() {

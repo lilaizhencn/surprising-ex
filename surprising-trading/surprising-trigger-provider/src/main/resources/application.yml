@@ -40,7 +40,7 @@ surprising:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
       product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-      topic: surprising.perp.mark.price.v1
+      topic: surprising.perp.price.events.v1
       group-id: surprising-trigger-mark-price-v1
       max-age: 3s
       allowed-future-skew: 1s
@@ -56,7 +56,7 @@ surprising:
         product-line: ${PRODUCT_LINE}
         product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
         group-id: surprising-trigger-v1
-        mark-price-topic: surprising.perp.mark.price.v1
+        price-events-topic: surprising.perp.price.events.v1
         position-events-topic: surprising.account.position.events.v1
         trigger-order-events-topic: surprising.perp.trigger-order.events.v1
         instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1

@@ -5,12 +5,16 @@ import com.surprising.price.api.model.IndexComponentSnapshot;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
+import com.surprising.price.api.model.PriceEventType;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
 import com.surprising.price.mark.service.InstrumentSnapshotConsumer;
 import com.surprising.price.mark.service.MarkPriceAuditConsumer;
 import com.surprising.price.mark.service.MarkPriceService;
+import com.surprising.price.mark.service.MarkPriceCorePublisher;
+import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.consumer.MarkPriceConsumerProperties;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
@@ -23,6 +27,8 @@ public final class MarkPriceRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, IndexPriceEvent.class);
         registerRecord(hints, MarkPriceEvent.class);
         registerRecord(hints, MarkPricePublishedEvent.class);
+        registerRecord(hints, PriceEventType.class);
+        registerRecord(hints, PricePublishedEvent.class);
         registerRecord(hints, PerpBookTickerEvent.class);
         registerRecord(hints, PerpFundingRateEvent.class);
         registerRecord(hints, PerpTradeEvent.class);
@@ -30,6 +36,8 @@ public final class MarkPriceRuntimeHints implements RuntimeHintsRegistrar {
         register(hints, InstrumentSnapshotConsumer.class);
         register(hints, MarkPriceAuditConsumer.class);
         register(hints, MarkPriceService.class);
+        register(hints, MarkPriceCorePublisher.class);
+        register(hints, MarkPriceProperties.class);
         register(hints, MarkPriceConsumerProperties.class);
     }
 

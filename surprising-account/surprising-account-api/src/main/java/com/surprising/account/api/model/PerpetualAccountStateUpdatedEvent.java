@@ -8,11 +8,12 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 产品线账户单写者提交后的完整用户状态快照。
+ * Aeron Core 提交后的完整产品线用户状态快照。
  *
- * <p>这是账户用户分区单写者提交后的 canonical 状态事件。事件先由本地 WAL/RocksDB
- * 固化，再发布到 Kafka；其他模块通过该事件建立自己的 JVM 快照，数据库只异步投影该完整
- * 状态。任何列表为空都表示该类状态确实为空，不能把事件缺失解释成零余额或零持仓。</p>
+ * <p>这是 Core Export 从 Aeron Cluster 提交状态发布的 canonical 状态事件。Core 的恢复依据是
+ * Snapshot 加 Snapshot 之后的 Cluster Log Replay；其他模块通过该事件建立自己的 JVM/Redis
+ * 快照，数据库只异步投影该完整状态。任何列表为空都表示该类状态确实为空，不能把事件缺失解释成
+ * 零余额或零持仓。</p>
  */
 public record PerpetualAccountStateUpdatedEvent(
         int schemaVersion,

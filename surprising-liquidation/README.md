@@ -19,6 +19,11 @@ Liquidation Coordinator，不保存候选、不创建交易订单，也不参与
 - 不依赖：Redis/Valkey、强平 Kafka candidate、match-result 回环、Account API、Instrument API、Price
   Consumer、应用 WAL、RocksDB、PG 强平事务或 outbox。
 
+强平 Coordinator 不消费指数价或标记价 Kafka topic，也不维护价格副本。Core 的价格入口是
+`ApplyMarkPriceCommand`，Core 在同一状态机内完成风险扫描、候选生成和强平执行校验；Coordinator
+只领取 Core 的有界强平工作并提交 `EXECUTE_LIQUIDATION`。因此统一的
+`surprising.<product-line>.price.events.v1` 只影响价格发布、审计、网关和共享缓存消费者，不改变强平的唯一裁决路径。
+
 ## 配置
 
 - `surprising.liquidation.product-line`

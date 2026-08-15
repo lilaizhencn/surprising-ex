@@ -296,6 +296,10 @@ import org.springframework.transaction.support.TransactionTemplate;
         if (event == null || event.signedQuantitySteps() != 0L || event.eventTime() == null) {
             return;
         }
+        if (properties.getExecution().isCoreOnly()) {
+            aeronEnabled();
+            return;
+        }
         if (aeronEnabled()) {
             scanAeronOpenOrders(event.userId(), normalizeSymbol(event.symbol()), "position-closed", open -> {
                 for (CoreTriggerOrderStateView order : open) {
@@ -353,6 +357,26 @@ import org.springframework.transaction.support.TransactionTemplate;
 
     public TriggerOrderResponse get(long triggerOrderId) {
         return get(triggerOrderId, currentProductLineFilter());
+    }
+
+    public TriggerOrderResponse get(long userId, long triggerOrderId) {
+        if (userId <= 0 || triggerOrderId <= 0) {
+            throw new IllegalArgumentException("userId and triggerOrderId must be positive");
+        }
+        if (aeronEnabled()) {
+            CoreTriggerOrderStateView value = aeronGateway.get(userId, triggerOrderId);
+            if (value == null || value.userId() != userId) {
+                throw new IllegalStateException("trigger order not found: " + triggerOrderId);
+            }
+            return TriggerOrderAeronGateway.response(value);
+        }
+        TriggerOrderRecord order = triggerOrderRepository.findById(triggerOrderId)
+                .orElseThrow(() -> new IllegalStateException("trigger order not found: " + triggerOrderId));
+        requireTriggerOrderProductLine(order, currentProductLineFilter());
+        if (order.userId() != userId) {
+            throw new IllegalStateException("trigger order not found: " + triggerOrderId);
+        }
+        return toResponse(order);
     }
 
     public TriggerOrderResponse get(long triggerOrderId, ProductLine productLine) {
@@ -505,14 +529,31 @@ import org.springframework.transaction.support.TransactionTemplate;
     }
 
     public TriggerOrderQueryResponse openOrders(long userId, String symbol, int limit) {
+        return openOrders(userId, symbol, limit, null);
+    }
+
+    public TriggerOrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
         if (aeronEnabled()) {
-            List<TriggerOrderResponse> orders = aeronGateway.openOrders(userId, normalizedSymbol, 0, limit).stream()
+            long beforeTriggerOrderId = decodeOpenTriggerCursor(cursor);
+            List<TriggerOrderResponse> values = aeronGateway.openOrders(userId, normalizedSymbol,
+                    beforeTriggerOrderId, limit + 1).stream()
                     .map(TriggerOrderAeronGateway::response).toList();
-            return new TriggerOrderQueryResponse(orders.size(), orders);
+            boolean hasMore = values.size() > limit;
+            List<TriggerOrderResponse> orders = hasMore ? values.subList(0, limit) : values;
+            String next = hasMore && !orders.isEmpty()
+                    ? encodeOpenTriggerCursor(orders.getLast().triggerOrderId()) : null;
+            return new TriggerOrderQueryResponse(orders.size(), List.copyOf(orders), next, hasMore,
+                    "createdAt.desc", limit);
+        }
+        if (cursor != null && !cursor.isBlank()) {
+            throw new IllegalArgumentException("cursor is supported only in Aeron Core mode");
         }
         String contractType = currentProductContractType();
         List<TriggerOrderResponse> orders = triggerOrderRepository.openOrders(
@@ -521,6 +562,28 @@ import org.springframework.transaction.support.TransactionTemplate;
                 .map(this::toResponse)
                 .toList();
         return new TriggerOrderQueryResponse(orders.size(), orders);
+    }
+
+    static String encodeOpenTriggerCursor(long triggerOrderId) {
+        if (triggerOrderId <= 0) {
+            throw new IllegalArgumentException("open-trigger cursor id must be positive");
+        }
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                ("trigger:" + triggerOrderId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    static long decodeOpenTriggerCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) return Long.MAX_VALUE;
+        try {
+            String decoded = new String(java.util.Base64.getUrlDecoder().decode(cursor),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            if (!decoded.startsWith("trigger:")) throw new IllegalArgumentException("invalid open-trigger cursor");
+            long id = Long.parseLong(decoded.substring("trigger:".length()));
+            if (id <= 0) throw new IllegalArgumentException("invalid open-trigger cursor");
+            return id;
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("invalid open-trigger cursor", exception);
+        }
     }
 
     private boolean aeronEnabled() {
@@ -601,6 +664,9 @@ import org.springframework.transaction.support.TransactionTemplate;
     public void onMarkPrice(MarkPriceEvent markPrice) {
         if (markPrice == null || markPrice.markPriceTicks() <= 0 || markPrice.eventTime() == null) {
             throw new IllegalArgumentException("valid fixed-point mark price is required");
+        }
+        if (properties.getExecution().isCoreOnly()) {
+            return;
         }
         if (aeronEnabled()) {
             onAeronMarkPrice(markPrice);
@@ -724,14 +790,20 @@ import org.springframework.transaction.support.TransactionTemplate;
         Instant now = Instant.now();
         if (aeronEnabled()) {
             long nowMillis = now.toEpochMilli();
+            List<CoreTriggerOrderStateView> expired = aeronGateway.expiredOrders(
+                    nowMillis, Math.min(1000, Math.max(1, properties.getExecution().getTriggerBatchSize())));
+            for (CoreTriggerOrderStateView order : expired) {
+                if (order.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING
+                        && order.expiresAtEpochMillis() > 0
+                        && order.expiresAtEpochMillis() <= nowMillis) {
+                    aeronGateway.expire(order.triggerOrderId(), nowMillis);
+                }
+            }
             long staleBefore = now.minus(properties.getExecution().getStaleTriggeringAfter()).toEpochMilli();
-            scanAeronOpenOrders(0, null, "maintenance", open -> {
+            scanAeronOpenOrders(0, null, "maintenance",
+                com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERING, open -> {
                 for (CoreTriggerOrderStateView order : open) {
-                    if (order.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING
-                            && order.expiresAtEpochMillis() > 0 && order.expiresAtEpochMillis() <= nowMillis) {
-                        aeronGateway.expire(order.triggerOrderId(), nowMillis);
-                    } else if (order.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERING
-                            && order.updatedAtEpochMillis() <= staleBefore) {
+                    if (order.updatedAtEpochMillis() <= staleBefore) {
                         aeronGateway.retry(order.triggerOrderId(), staleBefore, nowMillis);
                     }
                 }
@@ -745,11 +817,19 @@ import org.springframework.transaction.support.TransactionTemplate;
 
     private void scanAeronOpenOrders(long userId, String symbol, String operation,
                                      Consumer<List<CoreTriggerOrderStateView>> pageConsumer) {
+        scanAeronOpenOrders(userId, symbol, operation, null, pageConsumer);
+    }
+
+    private void scanAeronOpenOrders(long userId, String symbol, String operation,
+                                     com.surprising.aeron.protocol.CoreTriggerOrderStatus status,
+                                     Consumer<List<CoreTriggerOrderStateView>> pageConsumer) {
         int pageSize = Math.min(1000, Math.max(1, properties.getExecution().getTriggerBatchSize()));
         int maxPages = Math.min(256, Math.max(1, properties.getExecution().getMaxTriggerScanPages()));
         long before = 0;
         for (int pageNumber = 1; pageNumber <= maxPages; pageNumber++) {
-            List<CoreTriggerOrderStateView> page = aeronGateway.openOrders(userId, symbol, before, pageSize);
+            List<CoreTriggerOrderStateView> page = status == null
+                    ? aeronGateway.openOrders(userId, symbol, before, pageSize)
+                    : aeronGateway.openOrders(userId, symbol, before, pageSize, status);
             if (page.isEmpty()) {
                 return;
             }

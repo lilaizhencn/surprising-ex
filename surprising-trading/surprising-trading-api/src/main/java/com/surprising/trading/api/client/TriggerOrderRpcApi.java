@@ -43,11 +43,13 @@ public interface TriggerOrderRpcApi {
     TriggerOrderBatchResponse cancelOpen(@Valid @RequestBody CancelOpenTriggerOrdersRequest request);
 
     @GetMapping("/{triggerOrderId}")
-    TriggerOrderResponse get(@PathVariable("triggerOrderId") @Positive long triggerOrderId);
+    TriggerOrderResponse get(@RequestParam("userId") @Positive long userId,
+                             @PathVariable("triggerOrderId") @Positive long triggerOrderId);
 
     @GetMapping("/open")
     TriggerOrderQueryResponse openOrders(@RequestParam("userId") @Positive long userId,
                                          @RequestParam(value = "symbol", required = false) String symbol,
                                          @RequestParam(value = "limit", defaultValue = "100")
-                                         @Min(1) @Max(1000) int limit);
+                                         @Min(1) @Max(1000) int limit,
+                                         @RequestParam(value = "cursor", required = false) String cursor);
 }

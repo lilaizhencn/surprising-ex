@@ -43,7 +43,7 @@ surprising:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
       product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:true}
-      topic: surprising.perp.mark.price.v1
+      topic: surprising.perp.price.events.v1
       group-id: surprising-account-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 5s
       allowed-future-skew: 1s

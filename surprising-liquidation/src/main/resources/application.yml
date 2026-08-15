@@ -41,7 +41,7 @@ surprising:
     coordinator:
       delay-ms: 25
       work-batch-size: 256
-      risk-scan-batch-size: 1000
+      risk-scan-batch-size: 1024
     execution:
       enabled: true
       liquidation-fee-rate-ppm: 3000

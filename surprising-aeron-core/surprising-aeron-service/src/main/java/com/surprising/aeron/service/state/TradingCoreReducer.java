@@ -9,6 +9,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
+import com.surprising.aeron.protocol.ContinueRiskScanCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
@@ -812,7 +813,8 @@ public final class TradingCoreReducer {
                 StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
                 StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
                 StateMapSupport.delta(state.triggerOrders()));
-        return continueRiskScan(withMark, 256, positionUserIndex, liquidationIndex);
+        return continueRiskScan(withMark, ContinueRiskScanCommand.DEFAULT_MAX_USERS,
+                positionUserIndex, liquidationIndex);
     }
 
     public TradingCoreState continueRiskScan(TradingCoreState state, int maxUsers) {

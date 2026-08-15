@@ -392,10 +392,10 @@ public final class TradingCommandCodec {
 
     public static byte[] encodeApplyMarkPrice(ApplyMarkPriceCommand command) {
         byte[] symbol = text(command.symbol());
-        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 3)
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 4)
                 .order(ByteOrder.LITTLE_ENDIAN).putShort((short) symbol.length).put(symbol)
                 .putLong(command.instrumentVersion()).putLong(command.markPriceTicks())
-                .putLong(command.priceSequence()).array();
+                .putLong(command.priceSequence()).putLong(command.generatedAtEpochMillis()).array();
     }
 
     public static ApplyMarkPriceCommand decodeApplyMarkPrice(byte[] payload) {
@@ -403,7 +403,7 @@ public final class TradingCommandCodec {
         String symbol = readText(buffer);
         requireRemaining(buffer, Long.BYTES * 3);
         ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(symbol, buffer.getLong(), buffer.getLong(),
-                buffer.getLong());
+                buffer.getLong(), buffer.remaining() >= Long.BYTES ? buffer.getLong() : 0);
         requireConsumed(buffer);
         return command;
     }

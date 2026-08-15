@@ -18,6 +18,7 @@ import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
 import com.surprising.price.api.model.PriceStatus;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceEncoding;
@@ -88,8 +89,8 @@ class MarkPriceServiceTest {
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
         verify(kafkaTemplate, never()).send(any(), any(), any());
         service.publishMarkPrices();
-        verify(kafkaTemplate).send(eq(properties().markPriceTopic()), eq("BTC-USDT"),
-                any(MarkPricePublishedEvent.class));
+        verify(kafkaTemplate).send(eq(properties().priceEventsTopic()), eq("BTC-USDT"),
+                any(PricePublishedEvent.class));
 
         reset(coordinationService, kafkaTemplate);
         service.acceptIndexPrice(new IndexPriceEvent("BTC-USDT", null, 2, PriceStatus.INSUFFICIENT_SOURCES, 3, 1,
@@ -118,9 +119,12 @@ class MarkPriceServiceTest {
         service.publishMarkPrices();
 
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(kafkaTemplate).send(eq(properties.markPriceTopic()), eq("BTC-USDT"), eventCaptor.capture());
-        assertThat(eventCaptor.getValue()).isInstanceOf(MarkPricePublishedEvent.class);
-        MarkPriceEvent event = ((MarkPricePublishedEvent) eventCaptor.getValue()).result();
+        verify(kafkaTemplate).send(eq(properties.priceEventsTopic()), eq("BTC-USDT"), eventCaptor.capture());
+        assertThat(eventCaptor.getValue()).isInstanceOf(PricePublishedEvent.class);
+        PricePublishedEvent publication = (PricePublishedEvent) eventCaptor.getValue();
+        assertThat(publication.generatedAt()).isEqualTo(publication.markPrice().calculatedAt());
+        assertThat(publication.markPrice().indexInput().components()).isNotNull();
+        MarkPriceEvent event = publication.markPrice().result();
         assertThat(event.symbol()).isEqualTo("BTC-USDT");
         assertThat(event.sequence()).isEqualTo(11L);
         assertThat(event.markPrice()).isEqualByComparingTo("100.000000000000000000");
@@ -147,9 +151,9 @@ class MarkPriceServiceTest {
         service.publishMarkPrices();
 
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(kafkaTemplate).send(eq("surprising.linear-delivery.mark.price.v1"), eq("BTC-USDT"),
+        verify(kafkaTemplate).send(eq("surprising.linear-delivery.price.events.v1"), eq("BTC-USDT"),
                 eventCaptor.capture());
-        MarkPriceEvent event = ((MarkPricePublishedEvent) eventCaptor.getValue()).result();
+        MarkPriceEvent event = ((PricePublishedEvent) eventCaptor.getValue()).markPrice().result();
         assertThat(event.status()).isEqualTo(PriceStatus.HEALTHY);
     }
 

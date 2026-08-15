@@ -14,6 +14,7 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.ContinueRiskScanCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.WireMessageKind;
@@ -47,6 +48,7 @@ public final class CoreProbeState implements AutoCloseable {
     static final int MAX_IDEMPOTENCY_RESULTS = 128;
     static final int MAX_STORED_RESPONSE_BYTES = 1 * 1024 * 1024;
     static final int MAX_SOURCE_SEQUENCES = 65_536;
+    private static final System.Logger LOG = System.getLogger(CoreProbeState.class.getName());
     private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
     private static final long HASH_PRIME = 0x100000001b3L;
 
@@ -231,22 +233,28 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 var query = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeQuery(message.payload());
                 long before = query.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : query.beforeTriggerOrderId();
-                java.util.stream.Stream<com.surprising.aeron.service.state.CoreTriggerOrderState> source = query.symbol().isEmpty()
-                        ? (message.header().userId() == 0 ? triggerOrderIndex.ids() : triggerOrderIndex.ids(message.header().userId())).stream()
+                java.util.stream.Stream<com.surprising.aeron.service.state.CoreTriggerOrderState> source = query.expiresBeforeEpochMillis() > 0
+                        ? triggerOrderIndex.expired(query.expiresBeforeEpochMillis(), query.limit()).stream()
+                        .map(tradingState.triggerOrders()::get)
+                        .filter(java.util.Objects::nonNull)
+                        : query.symbol().isEmpty()
+                        ? (query.status() != null
+                        ? triggerOrderIndex.ids(query.status())
+                        : message.header().userId() == 0 ? triggerOrderIndex.ids() : triggerOrderIndex.ids(message.header().userId())).stream()
                                 .map(tradingState.triggerOrders()::get)
                                 .filter(java.util.Objects::nonNull)
-                        : triggerOrderIndex.ids(query.symbol()).stream()
+                        : (query.status() == null ? triggerOrderIndex.ids(query.symbol())
+                        : triggerOrderIndex.ids(query.symbol(), query.status())).stream()
                                 .map(tradingState.triggerOrders()::get)
                                 .filter(java.util.Objects::nonNull);
                 var values = source
                         .filter(order -> message.header().userId() == 0 || order.userId() == message.header().userId())
                         .filter(order -> query.triggerOrderId() == 0 || order.triggerOrderId() == query.triggerOrderId())
                         .filter(order -> query.symbol().isEmpty() || order.symbol().equals(query.symbol()))
+                        .filter(order -> query.status() == null || order.status() == query.status())
                         .filter(order -> query.triggerOrderId() != 0 || order.triggerOrderId() < before)
                         .filter(order -> message.header().messageType() == CoreMessageType.TRIGGER_ORDER_QUERY
                                 || order.status().open())
-                        .sorted(java.util.Comparator.comparingLong(
-                                com.surprising.aeron.service.state.CoreTriggerOrderState::triggerOrderId).reversed())
                         .limit(query.limit())
                         .map(com.surprising.aeron.service.state.CoreTriggerOrderState::view).toList();
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
@@ -502,6 +510,9 @@ public final class CoreProbeState implements AutoCloseable {
         if (status == null) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
+        if (status == ResponseStatus.APPLIED) {
+            cancelTriggersForClosedPositions(beforeTradingState);
+        }
         boolean tradingStateChanged = status == ResponseStatus.APPLIED && tradingState != beforeTradingState;
         if (status == ResponseStatus.APPLIED) {
             List<Long> changedOrderIds = commandChangedOrderIds == null ? List.of() : commandChangedOrderIds;
@@ -677,8 +688,15 @@ public final class CoreProbeState implements AutoCloseable {
                         command.symbol().trim().toUpperCase(java.util.Locale.ROOT)));
                 tradingState = next;
             }
-            case APPLY_MARK_PRICE -> tradingState = tradingReducer.applyMarkPrice(tradingState,
-                    TradingCommandCodec.decodeApplyMarkPrice(message.payload()), positionUserIndex, liquidationIndex);
+            case APPLY_MARK_PRICE -> {
+                var command = TradingCommandCodec.decodeApplyMarkPrice(message.payload());
+                int pendingBefore = pendingRiskScanCount();
+                long startedAt = System.nanoTime();
+                tradingState = tradingReducer.applyMarkPrice(tradingState, command, positionUserIndex, liquidationIndex);
+                logRiskScan("mark-price", command.symbol(), ContinueRiskScanCommand.DEFAULT_MAX_USERS,
+                        pendingBefore, startedAt);
+                evaluateMarkPriceTriggers(command, message.header().commandId(), message.header().submittedAtEpochMillis());
+            }
             case APPLY_FUNDING -> {
                 var command = TradingCommandCodec.decodeApplyFunding(message.payload());
                 var result = tradingReducer.applyFundingWithFacts(tradingState,
@@ -698,9 +716,15 @@ public final class CoreProbeState implements AutoCloseable {
             }
             case RESOLVE_LIQUIDATION -> tradingState = tradingReducer.resolveLiquidation(tradingState,
                     TradingCommandCodec.decodeResolveLiquidation(message.payload()));
-            case CONTINUE_RISK_SCAN -> tradingState = tradingReducer.continueRiskScan(tradingState,
-                    TradingCommandCodec.decodeContinueRiskScan(message.payload()).maxUsers(), positionUserIndex,
-                    liquidationIndex);
+            case CONTINUE_RISK_SCAN -> {
+                var command = TradingCommandCodec.decodeContinueRiskScan(message.payload());
+                String symbol = tradingState.riskState().scan().symbol();
+                int pendingBefore = pendingRiskScanCount();
+                long startedAt = System.nanoTime();
+                tradingState = tradingReducer.continueRiskScan(tradingState, command.maxUsers(), positionUserIndex,
+                        liquidationIndex);
+                logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
+            }
             case ACK_EXPORT -> {
                 var acknowledgedTerminalOrderIds = exportState.acknowledge(
                         CoreExportCodec.decodeAck(message.payload()));
@@ -949,9 +973,128 @@ public final class CoreProbeState implements AutoCloseable {
         }
     }
 
+    private void evaluateMarkPriceTriggers(com.surprising.aeron.protocol.ApplyMarkPriceCommand command,
+                                           UUID commandId, long submittedAtEpochMillis) {
+        long triggeredAt = command.generatedAtEpochMillis() > 0
+                ? command.generatedAtEpochMillis() : submittedAtEpochMillis;
+        for (long triggerOrderId : triggerOrderIndex.candidates(command.symbol(), command.markPriceTicks())) {
+            var trigger = tradingState.triggerOrders().get(triggerOrderId);
+            if (trigger == null || trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
+                continue;
+            }
+            if (trigger.expiresAtEpochMillis() > 0 && triggeredAt > 0
+                    && trigger.expiresAtEpochMillis() <= triggeredAt) {
+                tradingState = tradingReducer.expireTriggerOrder(tradingState, triggerOrderId, triggeredAt);
+                markTriggerChanged(triggerOrderId);
+                continue;
+            }
+            boolean triggered;
+            if (trigger.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
+                boolean sell = trigger.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
+                if (trigger.activationPriceTicks() > 0
+                        && ((sell && command.markPriceTicks() < trigger.activationPriceTicks())
+                        || (!sell && command.markPriceTicks() > trigger.activationPriceTicks()))) {
+                    continue;
+                }
+                long highest = sell
+                        ? Math.max(trigger.highestPriceTicks(), command.markPriceTicks())
+                        : trigger.highestPriceTicks();
+                long lowest = sell
+                        ? trigger.lowestPriceTicks()
+                        : trigger.lowestPriceTicks() == 0
+                        ? command.markPriceTicks()
+                        : Math.min(trigger.lowestPriceTicks(), command.markPriceTicks());
+                long activatedAt = trigger.activatedAtEpochMillis() == 0 ? triggeredAt
+                        : trigger.activatedAtEpochMillis();
+                if (highest != trigger.highestPriceTicks() || lowest != trigger.lowestPriceTicks()
+                        || activatedAt != trigger.activatedAtEpochMillis()) {
+                    tradingState = tradingReducer.updateTriggerTrailing(tradingState, triggerOrderId,
+                            highest, lowest, activatedAt);
+                    markTriggerChanged(triggerOrderId);
+                    trigger = tradingState.triggerOrders().get(triggerOrderId);
+                }
+                long base = sell ? trigger.highestPriceTicks() : trigger.lowestPriceTicks();
+                long delta = trailingDelta(base, trigger.callbackRatePpm());
+                long threshold = sell ? Math.subtractExact(base, delta) : Math.addExact(base, delta);
+                triggered = trigger.activatedAtEpochMillis() > 0
+                        && (sell ? command.markPriceTicks() <= threshold : command.markPriceTicks() >= threshold);
+            } else {
+                triggered = trigger.triggerCondition()
+                        == com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL
+                        ? command.markPriceTicks() >= trigger.triggerPriceTicks()
+                        : command.markPriceTicks() <= trigger.triggerPriceTicks();
+            }
+            if (!triggered) continue;
+            cancelOcoSiblings(trigger);
+            executeTriggerOrder(triggerOrderId, command.priceSequence(), command.markPriceTicks(), triggeredAt, commandId);
+        }
+    }
+
+    private void cancelTriggersForClosedPositions(TradingCoreState before) {
+        if (commandChangedUserIds == null || commandChangedUserIds.isEmpty()) return;
+        for (long userId : commandChangedUserIds) {
+            var previousUser = before.user(userId);
+            var currentUser = tradingState.user(userId);
+            if (previousUser == null || currentUser == null) continue;
+            java.util.LinkedHashSet<String> positionKeys = new java.util.LinkedHashSet<>();
+            positionKeys.addAll(previousUser.positions().keySet());
+            positionKeys.addAll(currentUser.positions().keySet());
+            for (String positionKey : positionKeys) {
+                var previous = previousUser.positions().get(positionKey);
+                var current = currentUser.positions().get(positionKey);
+                if (previous == null || previous.signedQuantitySteps() == 0
+                        || (current != null && current.signedQuantitySteps() != 0)) continue;
+                var position = current == null ? previous : current;
+                for (long triggerOrderId : triggerOrderIndex.ids(userId, position.symbol(), position.marginMode(),
+                        position.positionSide())) {
+                    var trigger = tradingState.triggerOrders().get(triggerOrderId);
+                    if (trigger != null && trigger.status()
+                            == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
+                        tradingState = tradingReducer.cancelTriggerOrder(tradingState, userId, triggerOrderId);
+                        markTriggerChanged(triggerOrderId);
+                    }
+                }
+            }
+        }
+    }
+
+    private static long trailingDelta(long base, long callbackRatePpm) {
+        if (base <= 0 || callbackRatePpm <= 0) return 0;
+        return Math.floorDiv(Math.multiplyExact(base, callbackRatePpm), 1_000_000L);
+    }
+
+    private static boolean isTriggerConditionSatisfied(
+            com.surprising.aeron.service.state.CoreTriggerOrderState trigger, long priceTicks) {
+        if (trigger.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
+            boolean sell = trigger.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
+            long base = sell ? trigger.highestPriceTicks() : trigger.lowestPriceTicks();
+            if (base <= 0 || trigger.activatedAtEpochMillis() <= 0) return false;
+            long delta = trailingDelta(base, trigger.callbackRatePpm());
+            long threshold = sell ? Math.subtractExact(base, delta) : Math.addExact(base, delta);
+            return sell ? priceTicks <= threshold : priceTicks >= threshold;
+        }
+        return trigger.triggerCondition() == com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL
+                ? priceTicks >= trigger.triggerPriceTicks() : priceTicks <= trigger.triggerPriceTicks();
+    }
+
+    private void cancelOcoSiblings(com.surprising.aeron.service.state.CoreTriggerOrderState trigger) {
+        for (long siblingId : triggerOrderIndex.ocoSiblings(trigger)) {
+            if (siblingId == trigger.triggerOrderId()) continue;
+            var sibling = tradingState.triggerOrders().get(siblingId);
+            if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
+                tradingState = tradingReducer.cancelTriggerOrder(tradingState, sibling.userId(), siblingId);
+                markTriggerChanged(siblingId);
+            }
+        }
+    }
+
     private void executeTriggerOrder(CoreMessage message) {
         long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payload());
-        long triggerOrderId = execute[0];
+        executeTriggerOrder(execute[0], execute[1], execute[2], execute[3], message.header().commandId());
+    }
+
+    private void executeTriggerOrder(long triggerOrderId, long triggerSequence, long triggeredPriceTicks,
+                                     long triggeredAtEpochMillis, UUID commandId) {
         var trigger = tradingState.triggerOrders().get(triggerOrderId);
         if (trigger == null) {
             throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
@@ -959,14 +1102,22 @@ public final class CoreProbeState implements AutoCloseable {
         if (trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
             return;
         }
+        var mark = tradingState.riskState().markPrices().get(trigger.symbol());
+        if (mark != null && (mark.priceSequence() != triggerSequence
+                || mark.markPriceTicks() != triggeredPriceTicks
+                || !isTriggerConditionSatisfied(trigger, triggeredPriceTicks))) {
+            throw new CoreStateRejectedException("TRIGGER_CONDITION_NOT_MET", "trigger price is not executable");
+        }
+        cancelOcoSiblings(trigger);
         TradingCoreState before = tradingState;
-        TradingCoreState claimed = tradingReducer.claimTriggerOrder(before, triggerOrderId, execute[1], execute[2], execute[3]);
-        commandChangedTriggerOrderIds = List.of(triggerOrderId);
+        TradingCoreState claimed = tradingReducer.claimTriggerOrder(before, triggerOrderId, triggerSequence,
+                triggeredPriceTicks, triggeredAtEpochMillis);
+        markTriggerChanged(triggerOrderId);
         var instrument = claimed.instruments().get(trigger.symbol());
         if (instrument == null || instrument.version() <= 0 || trigger.instrumentVersion() <= 0
                 || instrument.version() != trigger.instrumentVersion()) {
             tradingState = tradingReducer.completeTriggerOrder(claimed, triggerOrderId, false, 0,
-                    instrument == null ? "INSTRUMENT_NOT_FOUND" : "STALE_INSTRUMENT_VERSION", execute[3]);
+                    instrument == null ? "INSTRUMENT_NOT_FOUND" : "STALE_INSTRUMENT_VERSION", triggeredAtEpochMillis);
             return;
         }
         long childOrderId = triggerChildOrderId(triggerOrderId, claimed);
@@ -979,39 +1130,34 @@ public final class CoreProbeState implements AutoCloseable {
                         : com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
                 spot && trigger.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
                         ? instrument.quoteAsset() : spot ? instrument.baseAsset() : instrument.settleAsset(), 0,
-                trigger.orderType(), trigger.timeInForce(), trigger.priceTicks() > 0 ? trigger.priceTicks() : execute[2], false,
+                trigger.orderType(), trigger.timeInForce(), trigger.priceTicks() > 0 ? trigger.priceTicks() : triggeredPriceTicks, false,
                 "TRIGGER:" + triggerOrderId, trigger.makerFeeRatePpm(), trigger.takerFeeRatePpm());
         TradingCoreState reserved;
         try {
-            reserved = tradingReducer.placeOrder(claimed, trigger.userId(), place, message.header().commandId(),
+            reserved = tradingReducer.placeOrder(claimed, trigger.userId(), place, commandId,
                     openInterestIndex.openInterestSteps(trigger.symbol()));
         } catch (CoreStateRejectedException exception) {
             tradingState = tradingReducer.completeTriggerOrder(claimed, triggerOrderId, false, 0,
-                    exception.code(), execute[3]);
+                    exception.code(), triggeredAtEpochMillis);
             return;
         }
         try {
             var matching = placeInMatching(claimed, trigger.userId(), place);
             if (!matching.accepted()) {
                 tradingState = tradingReducer.completeTriggerOrder(claimed, triggerOrderId, false, 0,
-                        matching.resultCode(), execute[3]);
+                        matching.resultCode(), triggeredAtEpochMillis);
                 return;
             }
             TradingCoreState matched = tradingReducer.applyMatches(reserved, childOrderId,
                     instrument.baseAsset(), instrument.quoteAsset(), matching.matches());
             tradingState = tradingReducer.completeTriggerOrder(matched, triggerOrderId, true, childOrderId,
-                    "", execute[3]);
-            commandExecutions = executionViews(childOrderId, trigger.userId(), matching.matches());
-            commandChangedUserIds = java.util.stream.Stream.concat(
-                            java.util.stream.Stream.of(trigger.userId()),
-                            matching.matches().stream()
-                                    .map(com.surprising.aeron.service.matching.CoreMatch::makerUserId))
-                    .distinct().toList();
-            commandChangedOrderIds = java.util.stream.Stream.concat(
-                            java.util.stream.Stream.of(childOrderId),
-                            matching.matches().stream()
-                                    .map(com.surprising.aeron.service.matching.CoreMatch::makerOrderId))
-                    .distinct().toList();
+                    "", triggeredAtEpochMillis);
+            commandExecutions = appendDistinct(commandExecutions,
+                    executionViews(childOrderId, trigger.userId(), matching.matches()));
+            markUserChanged(trigger.userId());
+            matching.matches().forEach(match -> markUserChanged(match.makerUserId()));
+            markOrderChanged(childOrderId);
+            matching.matches().forEach(match -> markOrderChanged(match.makerOrderId()));
             commandOrderViews = commandChangedOrderIds.stream().map(tradingState::order)
                     .filter(java.util.Objects::nonNull).map(CoreProbeState::orderView).toList();
         } catch (RuntimeException exception) {
@@ -1026,6 +1172,41 @@ public final class CoreProbeState implements AutoCloseable {
             candidate = Math.addExact(candidate, 2);
         }
         return candidate;
+    }
+
+    private void markTriggerChanged(long triggerOrderId) {
+        commandChangedTriggerOrderIds = appendDistinct(commandChangedTriggerOrderIds, List.of(triggerOrderId));
+    }
+
+    private void markUserChanged(long userId) {
+        commandChangedUserIds = appendDistinct(commandChangedUserIds, List.of(userId));
+    }
+
+    private void markOrderChanged(long orderId) {
+        commandChangedOrderIds = appendDistinct(commandChangedOrderIds, List.of(orderId));
+    }
+
+    private static <T> List<T> appendDistinct(List<T> existing, List<T> additions) {
+        java.util.LinkedHashSet<T> values = new java.util.LinkedHashSet<>();
+        if (existing != null) values.addAll(existing);
+        if (additions != null) values.addAll(additions);
+        return List.copyOf(values);
+    }
+
+    private int pendingRiskScanCount() {
+        return (int) tradingState.riskState().scans().values().stream()
+                .filter(scan -> !scan.complete())
+                .count();
+    }
+
+    private void logRiskScan(String operation, String symbol, int batchSize, int pendingBefore, long startedAt) {
+        long elapsedMicros = (System.nanoTime() - startedAt) / 1_000L;
+        int pendingAfter = pendingRiskScanCount();
+        System.Logger.Level level = pendingAfter > 0 ? System.Logger.Level.INFO : System.Logger.Level.DEBUG;
+        if (!LOG.isLoggable(level)) return;
+        LOG.log(level, "risk scan operation={0} symbol={1} batchSize={2} elapsedMicros={3} "
+                        + "pendingSymbolsBefore={4} pendingSymbolsAfter={5}",
+                new Object[]{operation, symbol, batchSize, elapsedMicros, pendingBefore, pendingAfter});
     }
 
     private void executeLiquidation(CoreMessage message) {

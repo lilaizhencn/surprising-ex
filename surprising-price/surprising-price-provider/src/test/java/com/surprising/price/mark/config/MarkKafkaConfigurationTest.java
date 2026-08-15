@@ -29,7 +29,7 @@ class MarkKafkaConfigurationTest {
         assertThat(properties.tradeTopic()).isEqualTo("surprising.perp.trade.events.v1");
         assertThat(properties.isFundingRateExpected()).isTrue();
         assertThat(properties.fundingRateTopic()).isEqualTo("surprising.perp.funding.rate.v1");
-        assertThat(properties.markPriceTopic()).isEqualTo("surprising.perp.mark.price.v1");
+        assertThat(properties.priceEventsTopic()).isEqualTo("surprising.perp.price.events.v1");
         assertThat(properties.getCalculation().getPublishIntervalMs()).isEqualTo(1_000L);
         assertThat(properties.getAudit().getRetention()).isEqualTo(Duration.ofDays(3));
         assertThat(properties.getAudit().getCleanupDelayMs()).isEqualTo(60_000L);
@@ -46,7 +46,7 @@ class MarkKafkaConfigurationTest {
         assertThat(properties.tradeTopic()).isEqualTo("surprising.inverse-delivery.trade.events.v1");
         assertThat(properties.isFundingRateExpected()).isFalse();
         assertThat(properties.fundingRateTopic()).isEqualTo("surprising.perp.funding.rate.v1");
-        assertThat(properties.markPriceTopic()).isEqualTo("surprising.inverse-delivery.mark.price.v1");
+        assertThat(properties.priceEventsTopic()).isEqualTo("surprising.inverse-delivery.price.events.v1");
     }
 
     @Test

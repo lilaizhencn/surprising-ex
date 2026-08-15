@@ -17,7 +17,7 @@ public class MarkPriceConsumerProperties {
     private String bootstrapServers = "localhost:9092";
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     private boolean productTopicsEnabled;
-    private String topic = "surprising.perp.mark.price.v1";
+    private String topic = "surprising.perp.price.events.v1";
     private String groupId = "surprising-mark-price-cache-local";
     private Duration maxAge = Duration.ofSeconds(3);
     private Duration allowedFutureSkew = Duration.ofSeconds(1);
@@ -32,7 +32,7 @@ public class MarkPriceConsumerProperties {
     }
 
     public String resolvedTopic() {
-        return productTopicsEnabled ? ProductTopicNames.of(productLine).markPriceTopic() : topic;
+        return productTopicsEnabled ? ProductTopicNames.of(productLine).priceEventsTopic() : topic;
     }
 
     public String getBootstrapServers() {

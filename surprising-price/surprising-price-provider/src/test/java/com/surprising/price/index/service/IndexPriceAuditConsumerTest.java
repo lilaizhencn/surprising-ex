@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.index.config.IndexPriceProperties;
 import java.math.BigDecimal;
@@ -23,9 +24,9 @@ class IndexPriceAuditConsumerTest {
         IndexPriceAuditConsumer consumer = new IndexPriceAuditConsumer(new ObjectMapper(), auditService, properties);
         IndexPriceEvent event = new IndexPriceEvent("BTC-USDT", new BigDecimal("100"), 7,
                 PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), Instant.now(), List.of());
-        String payload = new ObjectMapper().writeValueAsString(event);
+        String payload = new ObjectMapper().writeValueAsString(PricePublishedEvent.index(event));
 
-        consumer.onAudit(List.of(new ConsumerRecord<>(properties.getKafka().getIndexPriceTopic(), 0, 0L,
+        consumer.onAudit(List.of(new ConsumerRecord<>(properties.getKafka().getPriceEventsTopic(), 0, 0L,
                 event.symbol(), payload)));
 
         verify(auditService).saveBatch(eq(List.of(event)));

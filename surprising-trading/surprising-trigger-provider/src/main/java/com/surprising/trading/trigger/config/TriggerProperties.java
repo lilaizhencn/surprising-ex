@@ -81,7 +81,7 @@ public class TriggerProperties {
         private ProductLine productLine;
         private boolean productTopicsEnabled;
         private String groupId = "surprising-trigger-v1";
-        private String markPriceTopic = "surprising.perp.mark.price.v1";
+        private String priceEventsTopic = "surprising.perp.price.events.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
         private String triggerOrderEventsTopic = "surprising.perp.trigger-order.events.v1";
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
@@ -120,12 +120,12 @@ public class TriggerProperties {
             this.groupId = groupId;
         }
 
-        public String getMarkPriceTopic() {
-            return productTopicsEnabled ? productTopics().markPriceTopic() : markPriceTopic;
+        public String getPriceEventsTopic() {
+            return productTopicsEnabled ? productTopics().priceEventsTopic() : priceEventsTopic;
         }
 
-        public void setMarkPriceTopic(String markPriceTopic) {
-            this.markPriceTopic = markPriceTopic;
+        public void setPriceEventsTopic(String priceEventsTopic) {
+            this.priceEventsTopic = priceEventsTopic;
         }
 
         public String getPositionEventsTopic() {

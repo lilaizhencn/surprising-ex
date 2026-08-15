@@ -1,6 +1,8 @@
 package com.surprising.price.consumer;
 
 import com.surprising.price.api.model.MarkPricePublishedEvent;
+import com.surprising.price.api.model.PriceEventType;
+import com.surprising.price.api.model.PricePublishedEvent;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
@@ -43,12 +45,16 @@ public class MarkPriceKafkaConsumer {
             containerFactory = "markPriceCacheKafkaListenerContainerFactory")
     public void onMarkPrice(ConsumerRecord<String, String> record) {
         try {
-            MarkPricePublishedEvent publication = objectMapper.readValue(
-                    record.value(), MarkPricePublishedEvent.class);
+            PricePublishedEvent priceEvent = objectMapper.readValue(record.value(), PricePublishedEvent.class);
+            if (priceEvent.eventType() != PriceEventType.MARK_PRICE) {
+                return;
+            }
+            MarkPricePublishedEvent publication = priceEvent.markPrice();
             if (publication.result() == null) {
                 throw new IllegalArgumentException("mark price publication result is required");
             }
-            if (record.key() == null || !record.key().equals(publication.result().symbol())) {
+            if (record.key() == null || !record.key().equals(priceEvent.symbol())
+                    || !record.key().equals(publication.result().symbol())) {
                 throw new IllegalArgumentException("mark price Kafka key must match payload symbol");
             }
             var current = publication.result();

@@ -43,9 +43,22 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
         return response;
     }
     public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit) {
+        return openOrders(userId, symbol, before, limit, null);
+    }
+    public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit,
+                                                       CoreTriggerOrderStatus status) {
+        return openOrders(userId, symbol, before, limit, status, 0);
+    }
+    public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit,
+                                                       CoreTriggerOrderStatus status, long expiresBeforeEpochMillis) {
         CoreResponse response = clients.query(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, UUID.randomUUID(), userId,
-                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(0, symbol, before, limit)));
+                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(0, symbol, before, limit, status,
+                        expiresBeforeEpochMillis)));
         requireOk(response); return CoreTriggerOrderCodec.decodeList(response.data());
+    }
+
+    public List<CoreTriggerOrderStateView> expiredOrders(long epochMillis, int limit) {
+        return openOrders(0, null, 0, limit, CoreTriggerOrderStatus.PENDING, epochMillis);
     }
     public CoreTriggerOrderStateView get(long userId, long triggerOrderId) {
         CoreResponse response = clients.query(CoreMessageType.TRIGGER_ORDER_QUERY, UUID.randomUUID(), userId,

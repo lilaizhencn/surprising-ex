@@ -85,9 +85,10 @@ public class TriggerOrderController {
     }
 
     @GetMapping(TradingApiPaths.TRIGGER_ORDER_BASE_PATH + "/{triggerOrderId}")
-    public TriggerOrderResponse get(@PathVariable("triggerOrderId") long triggerOrderId) {
+    public TriggerOrderResponse get(@RequestParam("userId") long userId,
+                                    @PathVariable("triggerOrderId") long triggerOrderId) {
         try {
-            return triggerOrderService.get(triggerOrderId);
+            return triggerOrderService.get(userId, triggerOrderId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -98,9 +99,10 @@ public class TriggerOrderController {
     @GetMapping(TradingApiPaths.TRIGGER_ORDER_BASE_PATH + "/open")
     public TriggerOrderQueryResponse openOrders(@RequestParam("userId") long userId,
                                                 @RequestParam(value = "symbol", required = false) String symbol,
-                                                @RequestParam(value = "limit", defaultValue = "100") int limit) {
+                                                @RequestParam(value = "limit", defaultValue = "100") int limit,
+                                                @RequestParam(value = "cursor", required = false) String cursor) {
         try {
-            return triggerOrderService.openOrders(userId, symbol, limit);
+            return triggerOrderService.openOrders(userId, symbol, limit, cursor);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

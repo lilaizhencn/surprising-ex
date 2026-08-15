@@ -14,10 +14,10 @@ Surprising Exchange 合约指数价格和标记价格模块。
 ```text
 外部现货交易所
   -> surprising-price-provider/index
-  -> surprising.linear-perp.index.price.v1
+  -> surprising.linear-perp.price.events.v1 (INDEX_PRICE)
   -> 同一进程内直接交给 surprising-price-provider/mark
-  -> surprising.linear-perp.mark.price.v1
-  -> risk / liquidation / account / websocket
+  -> surprising.linear-perp.price.events.v1 (MARK_PRICE)
+  -> account / order / trigger / funding / maker / ADL / websocket
 
 法币汇率源 + USDT/USD 稳定币行情
   -> surprising-price-provider/index
@@ -25,13 +25,16 @@ Surprising Exchange 合约指数价格和标记价格模块。
   -> app / api-gateway 展示本地法币价格
 ```
 
-指数价与标记价在同一 JVM 内通过 `IndexPriceService -> MarkPriceService.acceptIndexPrice` 直接传递，标记价不再消费本进程刚发布的指数价 Kafka topic。指数价 topic 仍保留给外部消费者和审计，标记价 topic 仍保留给风控、强平、账户和 WebSocket 等下游；provider 自身的最新标记价查询缓存由发布路径直接更新。
+指数价与标记价在同一 JVM 内通过 `IndexPriceService -> MarkPriceService.acceptIndexPrice` 直接传递，标记价不再消费本进程刚发布的指数价 Kafka topic。两类事件统一发布到当前产品线唯一的
+`surprising.<product-line>.price.events.v1`，用 `eventType=INDEX_PRICE|MARK_PRICE` 区分分支。provider 自身的最新指数、标记价缓存由发布路径直接更新；外部消费者按分支过滤。
+
+风控和强平不直接消费这个 Kafka topic，也不在各自进程重算价格。它们通过 Aeron Core 的 mark-price 状态、风险快照和强平工作队列执行最终裁决；统一价格事件供订单入口、触发单、资金费、做市、ADL、网关和审计使用。
 
 这个模块刻意和 K 线服务分开。指数价格和标记价格是风控输入，K 线是行情历史聚合。分开部署可以避免风控价格被 K 线查询或 WebSocket 推送压力影响。
 
-外部行情采集和展示 API 保留 decimal 价格。交易、风控、强平、资金费结算和 ADL 的实时边界是已提交的
-Kafka `MarkPriceEvent`；事件直接携带产品线、instrument 版本、quote asset units、可比较 ticks、sequence
-和时间戳。`price_mark_ticks` 只是异步写入、保留 3 天的审计表，不能作为实时业务输入。
+外部行情采集和展示 API 保留 decimal 价格。订单入口、触发单、资金费结算、做市和 ADL 的实时边界是已提交的
+Kafka `MARK_PRICE` 分支；事件直接携带产品线、instrument 版本、quote asset units、可比较 ticks、sequence
+和时间戳。风控和强平的实时边界是 Core 已应用的 `ApplyMarkPriceCommand`。`price_mark_ticks` 只是异步写入、保留 3 天的审计表，不能作为实时业务输入。
 
 合约清单和交易规则来自 `surprising-instrument`。指数价格 provider 启动时通过内部聚合 RPC 加载本产品线
 完整 JVM 快照，运行中消费 `surprising.instrument.events.v1` 增量更新；`IndexInstrumentConfigLoader`
@@ -70,8 +73,7 @@ indexPrice = Σ(sourceMid_i * normalizedWeight_i)
 - 默认 `outlier-threshold` 是 `0.01`，也就是 1%。
 - 默认至少需要 `3` 个有效源。
 
-唯一的 `surprising.linear-perp.index.price.v1` 消息同时携带计算结果和全部外部源 component 快照。它既是
-标记价格的实时输入，也是唯一审计流：独立 consumer group 批量把同一条消息写入
+`INDEX_PRICE` 分支同时携带计算结果和全部外部源 component 快照。它既是标记价格的实时输入，也是唯一审计流：独立 consumer group 批量把同一条消息写入
 `price_index_ticks` 和 `price_index_components`。生产端不会同步写这些审计表。不可用快照也会发布，
 这样本地消费者会立即让旧的可用指数价格失效，而不会静默继续使用旧价。
 
@@ -90,7 +92,7 @@ requests_per_second = symbol_count * source_count / poll_interval_seconds
 - 如果缓存超过 `max-source-age`，才临时走 REST 兜底。
 - 握手失败、连接关闭、连接报错、超过 `idle-timeout` 没有收到任何帧，都会触发重连。
 - 重连使用指数退避加随机抖动，默认从 `1s` 到 `30s`，避免集中重连打爆外部交易所。
-- WebSocket 只负责采集外部现货源；内部业务 WebSocket 推送仍然消费 Kafka 的指数价格和标记价格 topic，不和计算服务耦合。
+- WebSocket 只负责采集外部现货源；内部业务 WebSocket 推送消费统一的 price events topic，并按 `eventType` 分发指数价和标记价，不和计算服务耦合。
 
 ## USD/USDT 和法币汇率
 
@@ -132,20 +134,16 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=100&fromCurrency=USDT
 标记价格服务消费：
 
 ```text
-surprising.linear-perp.index.price.v1
+surprising.linear-perp.price.events.v1 (INDEX_PRICE branch)
 surprising.linear-perp.book.ticker.v1
 surprising.linear-perp.trade.events.v1
 surprising.linear-perp.funding.rate.v1
 ```
 
-只发布一个完整事件：
-
-```text
-surprising.linear-perp.mark.price.v1
-```
-
+只发布一个统一价格事件：`surprising.linear-perp.price.events.v1`，其中 `eventType=MARK_PRICE`。
 消息中的 `result` 供实时消费者使用，同时携带本次计算实际使用的指数、盘口、成交、资金费和 basis
-输入。独立审计 consumer group 异步持久化同一条消息，不再维护第二个审计 topic。
+输入。`generatedAt` 是本次发布生成时间，`markPrice.indexInput.components` 是该时刻参与指数计算的全部
+外部标的快照，因此可以完整重放和审计标记价格。独立审计 consumer group 异步持久化同一条消息，不再维护第二个输出 topic。
 各输入 listener 只替换内存中的最新样本；只有固定的一秒调度器能够计算和发布标记价格，输入事件
 到达本身不会触发发布。
 
@@ -233,15 +231,16 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 - 每个 provider 至少部署 2 个实例。
 - 所有价格输入和输出 topic 都用 `symbol` 作为 Kafka key。
 - 优先使用一个共享 topic + 足够多 partition，不要按每个 symbol 建 topic。
-- 风控和强平服务必须消费 `surprising.linear-perp.mark.price.v1`，不要各节点自己计算标记价格。
-- 唯一的 `surprising.linear-perp.mark.price.v1` 消息已经包含完整审计信封；审计 consumer 按
+- 风控和强平服务不消费 Kafka 价格流，也不要各节点自己计算标记价格；它们只通过 Aeron Core 的
+  `ApplyMarkPriceCommand`、风险快照和强平工作队列读取 Core 的权威结果。
+- 唯一的 `surprising.linear-perp.price.events.v1` 消息已经包含完整审计信封；审计 consumer 按
   `symbol + sequence` 幂等重试数据库失败，不影响其它 consumer group。
 - `price_mark_ticks` 使用普通非分区表和紧凑的时间 BRIN 索引，每分钟分批删除，只保留 3 天。
 - 指数价格和标记价格 producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`。
 - 标记价格输入 consumer 有意使用 `auto.offset.reset=latest`，因为新启动的 live mark calculator 不应该把旧输入快照重新计算成当前标记价格；但它仍然关闭 auto commit，使用 record ack 和 cooperative-sticky rebalance。
 - 外部源不足时，指数服务会发布不可用快照；消费者必须拒绝该价格。
 - `price_index_ticks` 和 `price_index_components` 是异步写入、保留三天的审计表，不能作为实时业务输入；
-  `/latest` 读取本地 Kafka 缓存，`/history` 才读取审计库。
+  `/latest` 读取本地内存缓存，`/history` 才读取审计库。
 - USD 源必须声明 `quote-currency`、`target-quote-currency`、稳定币换算源和换算方向。
 - App 法币展示必须走本地 `price_exchange_rates` 缓存，不能每个用户请求实时打第三方 FX API。
 - 标记价格输入 topic 必须使用相同的 `symbol` key；建议相关 topic 使用相同 partition 数，降低跨节点输入错位概率。

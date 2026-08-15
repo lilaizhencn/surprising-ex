@@ -6,8 +6,9 @@ import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
-import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.price.api.model.PriceEventType;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
@@ -157,85 +158,58 @@ public class KafkaFanoutConsumer {
         }
     }
 
-    public void onIndexPrice(ConsumerRecord<String, String> record) {
+    public void onPriceEvent(ConsumerRecord<String, String> record) {
         try {
-            requireCurrentProductTopic(record.topic(), indexPriceTopic(), "index price");
-            IndexPriceEvent event = objectMapper.readValue(record.value(), IndexPriceEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "index price");
-            registry.publish(topic(WsChannel.INDEX_PRICE, event.symbol(), null), event, event.eventTime());
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            dispatchPriceEvent(record, grouped);
+            publishBatches(grouped);
         } catch (Exception ex) {
-            log.error("Failed to fanout index price: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout index price", ex);
+            log.error("Failed to fanout price event: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout price event", ex);
         }
     }
 
     @KafkaListener(
-            topics = "#{__listener.indexPriceTopic()}",
+            topics = "#{__listener.priceEventsTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaBatchListenerContainerFactory")
-    public void onIndexPriceBatch(List<ConsumerRecord<String, String>> records) {
-        try {
-            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
-            for (ConsumerRecord<String, String> record : records) {
-                requireCurrentProductTopic(record.topic(), indexPriceTopic(), "index price");
-                IndexPriceEvent event = objectMapper.readValue(record.value(), IndexPriceEvent.class);
-                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "index price");
-                addBatch(grouped, topic(WsChannel.INDEX_PRICE, event.symbol(), null), event, event.eventTime());
+    public void onPriceEventBatch(List<ConsumerRecord<String, String>> records) {
+        Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+        for (ConsumerRecord<String, String> record : records) {
+            try {
+                dispatchPriceEvent(record, grouped);
+            } catch (Exception ex) {
+                log.warn("Dropped invalid price event topic={} partition={} offset={}: {}",
+                        record.topic(), record.partition(), record.offset(), ex.getMessage());
             }
-            publishBatches(grouped);
-        } catch (Exception ex) {
-            log.error("Failed to batch fanout index price: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to batch fanout index price", ex);
         }
+        publishBatches(grouped);
     }
 
-    public void onMarkPrice(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), markPriceTopic(), "mark price");
-            MarkPricePublishedEvent publication = objectMapper.readValue(
-                    record.value(), MarkPricePublishedEvent.class);
-            MarkPriceEvent event = publication.result();
+    private void dispatchPriceEvent(ConsumerRecord<String, String> record,
+                                    Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped)
+            throws Exception {
+        requireCurrentProductTopic(record.topic(), priceEventsTopic(), "price event");
+        PricePublishedEvent publication = objectMapper.readValue(record.value(), PricePublishedEvent.class);
+        KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), publication.symbol(), "price event");
+        if (publication.eventType() == PriceEventType.INDEX_PRICE) {
+            IndexPriceEvent event = publication.indexPrice();
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "index price");
+            addBatch(grouped, topic(WsChannel.INDEX_PRICE, event.symbol(), null), event, event.eventTime());
+            return;
+        }
+        if (publication.eventType() == PriceEventType.MARK_PRICE) {
+            MarkPriceEvent event = publication.markPrice() == null ? null : publication.markPrice().result();
             if (event == null) {
                 throw new IllegalArgumentException("mark price publication result is required");
             }
             KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "mark price");
-            if (!isFreshMarkPrice(event)) {
-                log.warn("Dropped unusable mark price symbol={} status={} eventTime={} publishedAt={}",
-                        event.symbol(), event.status(), event.eventTime(), event.publishedAt());
-                return;
+            if (isFreshMarkPrice(event)) {
+                addBatch(grouped, topic(WsChannel.MARK_PRICE, event.symbol(), null), event, event.eventTime());
             }
-            registry.publish(topic(WsChannel.MARK_PRICE, event.symbol(), null), event, event.eventTime());
-        } catch (Exception ex) {
-            log.error("Failed to fanout mark price: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout mark price", ex);
+            return;
         }
-    }
-
-    @KafkaListener(
-            topics = "#{__listener.markPriceTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
-    public void onMarkPriceBatch(List<ConsumerRecord<String, String>> records) {
-        try {
-            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
-            for (ConsumerRecord<String, String> record : records) {
-                requireCurrentProductTopic(record.topic(), markPriceTopic(), "mark price");
-                MarkPricePublishedEvent publication = objectMapper.readValue(
-                        record.value(), MarkPricePublishedEvent.class);
-                MarkPriceEvent event = publication.result();
-                if (event == null) {
-                    throw new IllegalArgumentException("mark price publication result is required");
-                }
-                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "mark price");
-                if (isFreshMarkPrice(event)) {
-                    addBatch(grouped, topic(WsChannel.MARK_PRICE, event.symbol(), null), event, event.eventTime());
-                }
-            }
-            publishBatches(grouped);
-        } catch (Exception ex) {
-            log.error("Failed to batch fanout mark price: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to batch fanout mark price", ex);
-        }
+        throw new IllegalArgumentException("unsupported price event type: " + publication.eventType());
     }
 
     private boolean isFreshMarkPrice(MarkPriceEvent event) {
@@ -459,12 +433,8 @@ public class KafkaFanoutConsumer {
         return properties.getKafka().getOrderBookDepthTopic();
     }
 
-    public String indexPriceTopic() {
-        return properties.getKafka().getIndexPriceTopic();
-    }
-
-    public String markPriceTopic() {
-        return properties.getKafka().getMarkPriceTopic();
+    public String priceEventsTopic() {
+        return properties.getKafka().getPriceEventsTopic();
     }
 
     public String fundingRateTopic() {

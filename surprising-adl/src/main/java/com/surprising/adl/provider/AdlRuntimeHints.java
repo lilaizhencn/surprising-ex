@@ -9,6 +9,12 @@ public final class AdlRuntimeHints implements RuntimeHintsRegistrar {
     @Override
     public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
         registerRecord(hints, classLoader, "com.surprising.instrument.api.model.InstrumentEvent");
+        registerRecord(hints, classLoader, "com.surprising.price.api.model.IndexComponentSnapshot");
+        registerRecord(hints, classLoader, "com.surprising.price.api.model.IndexPriceEvent");
+        registerRecord(hints, classLoader, "com.surprising.price.api.model.MarkPriceEvent");
+        registerRecord(hints, classLoader, "com.surprising.price.api.model.MarkPricePublishedEvent");
+        registerRecord(hints, classLoader, "com.surprising.price.api.model.PriceEventType");
+        registerRecord(hints, classLoader, "com.surprising.price.api.model.PricePublishedEvent");
     }
 
     private void registerRecord(RuntimeHints hints, ClassLoader classLoader, String className) {

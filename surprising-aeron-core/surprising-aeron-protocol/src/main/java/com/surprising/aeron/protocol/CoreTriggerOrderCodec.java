@@ -8,6 +8,7 @@ import java.util.List;
 
 public final class CoreTriggerOrderCodec {
     private static final int VERSION = 1;
+    private static final int QUERY_VERSION = 3;
     private static final int STATE_VERSION = 2;
     private static final int MAX_TEXT_BYTES = 128;
     private CoreTriggerOrderCodec() { }
@@ -70,14 +71,17 @@ public final class CoreTriggerOrderCodec {
     }
 
     public static byte[] encodeQuery(CoreTriggerOrderQuery query) {
-        Writer writer = new Writer(); writer.intValue(VERSION); writer.longValue(query.triggerOrderId());
+        Writer writer = new Writer(); writer.intValue(QUERY_VERSION); writer.longValue(query.triggerOrderId());
         writer.text(query.symbol()); writer.longValue(query.beforeTriggerOrderId()); writer.intValue(query.limit());
+        writer.intValue(query.status() == null ? 0 : query.status().ordinal() + 1);
+        writer.longValue(query.expiresBeforeEpochMillis());
         return writer.bytes();
     }
 
     public static CoreTriggerOrderQuery decodeQuery(byte[] encoded) {
-        Reader reader = new Reader(encoded); reader.version();
-        CoreTriggerOrderQuery result = new CoreTriggerOrderQuery(reader.nonNegative(), reader.text(), reader.nonNegative(), reader.intValue());
+        Reader reader = new Reader(encoded); int version = reader.queryVersion();
+        CoreTriggerOrderQuery result = new CoreTriggerOrderQuery(reader.nonNegative(), reader.text(), reader.nonNegative(), reader.intValue(),
+                version == 1 ? null : reader.status(), version < QUERY_VERSION ? 0 : reader.nonNegative());
         reader.consumed(); return result;
     }
 
@@ -166,6 +170,11 @@ public final class CoreTriggerOrderCodec {
             if (value != VERSION) throw new ProtocolException("unsupported trigger codec version");
             return value;
         }
+        int queryVersion() {
+            int value = intValue();
+            if (value < VERSION || value > QUERY_VERSION) throw new ProtocolException("unsupported trigger query codec version");
+            return value;
+        }
         int stateVersion() {
             int value = intValue();
             if (value != VERSION && value != STATE_VERSION) {
@@ -177,6 +186,7 @@ public final class CoreTriggerOrderCodec {
         long nonNegative() { long v=longValue(); if(v<0) throw new ProtocolException("invalid trigger value"); return v; }
         String text() { int size=intValue(); if(size<0 || size>MAX_TEXT_BYTES) throw new ProtocolException("invalid trigger text"); require(size); String v=new String(bytes, position, size, StandardCharsets.UTF_8); position+=size; return v; }
         int enumIndex(int max) { int v=intValue(); if(v<0 || v>=max) throw new ProtocolException("invalid trigger enum"); return v; }
+        CoreTriggerOrderStatus status() { int v = intValue(); if (v == 0) return null; if (v > CoreTriggerOrderStatus.values().length) throw new ProtocolException("invalid trigger status"); return CoreTriggerOrderStatus.values()[v - 1]; }
         int count() { int v=intValue(); if(v<0 || v>1001) throw new ProtocolException("invalid trigger count"); return v; }
         byte[] bytes() { int size=intValue(); if(size<0 || size>1_000_000) throw new ProtocolException("invalid trigger payload"); require(size); byte[] result=java.util.Arrays.copyOfRange(bytes, position, position+size); position+=size; return result; }
         void consumed() { if(position != bytes.length) throw new ProtocolException("trailing trigger bytes"); }
