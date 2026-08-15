@@ -1,4 +1,4 @@
-# surprising-market-maker
+# surprising-maker
 
 
 内网做市商服务，用于控制盘口流动性、稳定报价中心、长期运行压测和完整交易链路验证。
@@ -7,8 +7,7 @@
 
 ## 模块
 
-- `surprising-market-maker-api`：内网 RPC 契约。
-- `surprising-market-maker-provider`：定时报价策略和订单对账执行器。
+`surprising-maker` 是单模块 Spring Boot 服务，内部同时包含做市 REST/RPC 契约、定时报价策略和订单对账执行器。
 
 ## 运行安全
 
@@ -188,6 +187,6 @@ surprising:
 ## 构建和测试
 
 ```bash
-mvn -pl :surprising-market-maker-provider -am test
-mvn -pl :surprising-market-maker-provider -am spring-boot:run
+mvn -pl :surprising-maker -am test
+mvn -pl :surprising-maker -am spring-boot:run
 ```

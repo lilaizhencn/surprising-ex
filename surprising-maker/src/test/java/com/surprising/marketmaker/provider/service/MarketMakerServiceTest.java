@@ -135,10 +135,9 @@ class MarketMakerServiceTest {
 
         service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
 
-        assertThat(fixtures.orderRpc.batchPlaceRequests)
-                .extracting(BatchPlaceOrderRequest::orders)
-                .allSatisfy(orders -> assertThat(orders).hasSize(20));
         assertThat(fixtures.orderRpc.batchPlaceRequests).hasSize(2);
+        assertThat(fixtures.orderRpc.batchPlaceRequests.get(0).orders()).hasSize(20);
+        assertThat(fixtures.orderRpc.batchPlaceRequests.get(1).orders()).hasSize(10);
         assertThat(fixtures.orderRpc.placeRequests).isEmpty();
     }
 

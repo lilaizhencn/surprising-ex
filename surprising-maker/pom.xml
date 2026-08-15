@@ -6,34 +6,35 @@
 
     <parent>
         <groupId>com.surprising</groupId>
-        <artifactId>surprising-market-maker</artifactId>
+        <artifactId>surprising-parent</artifactId>
         <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../surprising-parent/pom.xml</relativePath>
     </parent>
 
-    <artifactId>surprising-market-maker-provider</artifactId>
-    <name>surprising-market-maker-provider</name>
-    <description>Internal market-maker quoting provider</description>
+    <artifactId>surprising-maker</artifactId>
+    <name>surprising-maker</name>
+    <description>Internal market-maker quoting and stress strategy service</description>
 
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-market-maker-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
             <artifactId>surprising-product-api</artifactId>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-trading-api</artifactId>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-instrument-api</artifactId>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-account-api</artifactId>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>

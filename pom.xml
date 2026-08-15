@@ -29,7 +29,7 @@
         <module>surprising-risk</module>
         <module>surprising-gateway</module>
         <module>surprising-websocket</module>
-        <module>surprising-market-maker</module>
+        <module>surprising-maker</module>
         <module>surprising-finance-ops</module>
     </modules>
 </project>

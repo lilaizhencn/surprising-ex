@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
 @FeignClient(
-        name = "surprising-market-maker-provider",
+        name = "surprising-maker",
         contextId = "marketMakerRpcApi",
         path = MarketMakerApiPaths.BASE_PATH,
         url = "${surprising.clients.market-maker.base-url:http://localhost:9096}")

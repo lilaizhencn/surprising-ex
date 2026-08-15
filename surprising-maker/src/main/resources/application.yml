@@ -3,7 +3,7 @@ server:
 
 spring:
   application:
-    name: surprising-market-maker-provider
+    name: surprising-maker
   cloud:
     openfeign:
       client:

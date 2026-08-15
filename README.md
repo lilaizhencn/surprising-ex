@@ -56,7 +56,7 @@ Aeron Cluster、Topic、投影和账户类型。
 | `surprising-candlestick` | Kafka Streams + RocksDB K 线 |
 | `surprising-gateway` | 独立 REST gateway |
 | `surprising-websocket` | 独立 WebSocket fanout |
-| `surprising-market-maker` | 内部做市和交易链路压测 |
+| `surprising-maker` | 内部做市和交易链路压测 |
 
 Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
 必须跨表，源码需要逐项写明中文“不可拆原因”。后台订单时间线、资金对账和运营报表不得在交易主库新增
