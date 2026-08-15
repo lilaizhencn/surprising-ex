@@ -1,12 +1,10 @@
 package com.surprising.price.consumer;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
-import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -16,7 +14,6 @@ public class MarkPriceConsumerProperties {
 
     private String bootstrapServers = "localhost:9092";
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-    private boolean productTopicsEnabled;
     private String topic = "surprising.perp.price.events.v1";
     private String groupId = "surprising-mark-price-cache-local";
     private Duration maxAge = Duration.ofSeconds(3);
@@ -25,14 +22,8 @@ public class MarkPriceConsumerProperties {
     private int maxPollRecords = 500;
     private List<String> requiredSymbols = List.of();
 
-    /** 启动时拒绝未隔离的标记价格消费配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(productLine, productTopicsEnabled, "price-consumer");
-    }
-
     public String resolvedTopic() {
-        return productTopicsEnabled ? ProductTopicNames.of(productLine).priceEventsTopic() : topic;
+        return ProductTopicNames.of(productLine).priceEventsTopic();
     }
 
     public String getBootstrapServers() {
@@ -49,14 +40,6 @@ public class MarkPriceConsumerProperties {
 
     public void setProductLine(ProductLine productLine) {
         this.productLine = productLine;
-    }
-
-    public boolean isProductTopicsEnabled() {
-        return productTopicsEnabled;
-    }
-
-    public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-        this.productTopicsEnabled = productTopicsEnabled;
     }
 
     public String getTopic() {

@@ -975,8 +975,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private void evaluateMarkPriceTriggers(com.surprising.aeron.protocol.ApplyMarkPriceCommand command,
                                            UUID commandId, long submittedAtEpochMillis) {
-        long triggeredAt = command.generatedAtEpochMillis() > 0
-                ? command.generatedAtEpochMillis() : submittedAtEpochMillis;
+        long triggeredAt = command.generatedAtEpochMillis();
         for (long triggerOrderId : triggerOrderIndex.candidates(command.symbol(), command.markPriceTicks())) {
             var trigger = tradingState.triggerOrders().get(triggerOrderId);
             if (trigger == null || trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {

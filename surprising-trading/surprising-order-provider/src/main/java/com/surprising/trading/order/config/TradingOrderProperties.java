@@ -1,7 +1,6 @@
 package com.surprising.trading.order.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -15,12 +14,6 @@ public class TradingOrderProperties {
     private Risk risk = new Risk();
     private Algo algo = new Algo();
     private Aeron aeron = new Aeron();
-
-    /** 启动时拒绝未隔离的订单 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "order");
-    }
 
     public Kafka getKafka() {
         return kafka;
@@ -107,7 +100,6 @@ public class TradingOrderProperties {
         private String clientId = "order-provider-" + java.util.UUID.randomUUID();
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
-        private boolean productTopicsEnabled;
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         private String feeScheduleEventsTopic = "surprising.perp.fee.schedule.events.v1";
 
@@ -132,14 +124,6 @@ public class TradingOrderProperties {
 
         public void setProductLine(ProductLine productLine) {
             this.productLine = productLine;
-        }
-
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
         }
 
         public String getInstrumentLifecycleDrainTopic() { return instrumentLifecycleDrainTopic; }

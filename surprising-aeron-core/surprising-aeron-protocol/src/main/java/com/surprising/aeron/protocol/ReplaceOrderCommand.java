@@ -10,10 +10,4 @@ public record ReplaceOrderCommand(
         }
     }
 
-    public ReplaceOrderCommand(long orderId, String baseAsset, String quoteAsset,
-                               long newPriceTicks, long newReservedUnits) {
-        this(orderId, new PlaceOrderCommand(Math.addExact(orderId, 1), "LEGACY", 1,
-                baseAsset, quoteAsset, quoteAsset, CoreOrderSide.BUY, newPriceTicks, 1,
-                false, ReservationKind.SPOT_ASSET, quoteAsset, newReservedUnits));
-    }
 }

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 class ActiveOrderIndexTest {
 
     @Test
-    void rebuildUsesOpenOrderLifecycleWhenCompatibilityBookIsEmpty() {
+    void rebuildUsesOpenOrderLifecycle() {
         CoreOrderState order = new CoreOrderState(7, ProductLine.SPOT, 11, "BTC-USDT", 1,
                 CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreOrderStatus.OPEN, 1);
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,

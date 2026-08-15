@@ -1,7 +1,6 @@
 package com.surprising.trading.trigger.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import jakarta.annotation.PostConstruct;
@@ -15,12 +14,6 @@ public class TriggerProperties {
     private RedisIndex redisIndex = new RedisIndex();
     private Outbox outbox = new Outbox();
     private Aeron aeron = new Aeron();
-
-    /** 启动时拒绝未隔离的条件单 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "trigger");
-    }
 
     public Kafka getKafka() {
         return kafka;
@@ -79,7 +72,6 @@ public class TriggerProperties {
         private String bootstrapServers = "localhost:9092";
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
-        private boolean productTopicsEnabled;
         private String groupId = "surprising-trigger-v1";
         private String priceEventsTopic = "surprising.perp.price.events.v1";
         private String positionEventsTopic = "surprising.account.position.events.v1";
@@ -104,16 +96,8 @@ public class TriggerProperties {
             this.productLine = productLine;
         }
 
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
         public String getGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("trigger") : groupId;
+            return productTopics().consumerGroup("trigger");
         }
 
         public void setGroupId(String groupId) {
@@ -121,7 +105,7 @@ public class TriggerProperties {
         }
 
         public String getPriceEventsTopic() {
-            return productTopicsEnabled ? productTopics().priceEventsTopic() : priceEventsTopic;
+            return productTopics().priceEventsTopic();
         }
 
         public void setPriceEventsTopic(String priceEventsTopic) {
@@ -129,7 +113,7 @@ public class TriggerProperties {
         }
 
         public String getPositionEventsTopic() {
-            return productTopicsEnabled ? productTopics().accountPositionEventsTopic() : positionEventsTopic;
+            return productTopics().accountPositionEventsTopic();
         }
 
         public void setPositionEventsTopic(String positionEventsTopic) {
@@ -137,7 +121,7 @@ public class TriggerProperties {
         }
 
         public String getTriggerOrderEventsTopic() {
-            return productTopicsEnabled ? productTopics().triggerOrderEventsTopic() : triggerOrderEventsTopic;
+            return productTopics().triggerOrderEventsTopic();
         }
 
         public void setTriggerOrderEventsTopic(String triggerOrderEventsTopic) {

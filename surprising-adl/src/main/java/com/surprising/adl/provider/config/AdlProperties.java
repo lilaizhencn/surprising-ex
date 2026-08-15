@@ -1,9 +1,7 @@
 package com.surprising.adl.provider.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
-import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -13,12 +11,6 @@ public class AdlProperties {
     private Kafka kafka = new Kafka();
     private Scanner scanner = new Scanner();
     private Aeron aeron = new Aeron();
-
-    /** 启动时拒绝未隔离的 ADL 风控 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "adl");
-    }
 
     public Kafka getKafka() {
         return kafka;
@@ -40,7 +32,6 @@ public class AdlProperties {
 
     public static class Kafka {
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private boolean productTopicsEnabled;
         private String bootstrapServers = "localhost:9092";
         private String positionRiskEventsTopic = "surprising.risk.position.events.v1";
         private String groupId = "surprising-adl-risk-index-v1";
@@ -53,27 +44,19 @@ public class AdlProperties {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         }
 
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
         public String getAccountType() {
             return productLine.accountTypeCode();
         }
         public String getBootstrapServers() { return bootstrapServers; }
         public void setBootstrapServers(String bootstrapServers) { this.bootstrapServers = bootstrapServers; }
         public String getPositionRiskEventsTopic() {
-            return productTopicsEnabled ? productTopics().positionRiskEventsTopic() : positionRiskEventsTopic;
+            return productTopics().positionRiskEventsTopic();
         }
         public void setPositionRiskEventsTopic(String positionRiskEventsTopic) { this.positionRiskEventsTopic = positionRiskEventsTopic; }
         public String getInstrumentSnapshotGroupId() {
             return "surprising-" + productLine.topicSegment() + "-adl-instrument-snapshot-v1";
         }
-        public String getGroupId() { return productTopicsEnabled ? productTopics().consumerGroup("adl-risk-index") : groupId; }
+        public String getGroupId() { return productTopics().consumerGroup("adl-risk-index"); }
         public void setGroupId(String groupId) { this.groupId = groupId; }
         public String getUserCommandsTopic() {
             return productTopics().accountUserCommandsTopic();

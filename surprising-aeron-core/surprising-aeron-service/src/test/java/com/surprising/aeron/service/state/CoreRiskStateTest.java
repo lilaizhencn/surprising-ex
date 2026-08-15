@@ -41,7 +41,7 @@ class CoreRiskStateTest {
                 10, entryPrice, Math.multiplyExact(entryPrice, 10), 0, 100));
 
         TradingCoreState marked = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-USDT", 1, markPrice, 11));
+                new ApplyMarkPriceCommand("BTC-USDT", 1, markPrice, 11, 1_700_000_000_000L));
 
         CoreRiskSnapshot risk = marked.riskState().snapshots().get("7:BTC-USDT");
         assertThat(risk.status()).isEqualTo(CoreRiskStatus.LIQUIDATION);
@@ -78,7 +78,7 @@ class CoreRiskStateTest {
         }
 
         TradingCoreState firstBatch = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1));
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1, 1_700_000_000_000L));
         assertThat(firstBatch.riskState().scan().complete()).isFalse();
         assertThat(firstBatch.riskState().scan().lastUserId()).isEqualTo(1_024);
         assertThat(firstBatch.riskState().snapshots()).hasSize(1_024);
@@ -103,7 +103,7 @@ class CoreRiskStateTest {
                 10, 10, 100, 0, 100));
 
         TradingCoreState marked = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1));
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, 1_700_000_000_000L));
 
         assertThat(marked.riskState().scan().complete()).isTrue();
         assertThat(marked.riskState().snapshots()).containsKey("7:BTC-USDT");
@@ -122,8 +122,10 @@ class CoreRiskStateTest {
                     1, 100, 100, 0, 10));
         }
 
-        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1));
-        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("ETH-USDT", 1, 80, 1));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1,
+                1_700_000_000_000L));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("ETH-USDT", 1, 80, 1,
+                1_700_000_000_000L));
 
         assertThat(state.riskState().scans()).containsOnlyKeys("BTC-USDT", "ETH-USDT");
         assertThat(state.riskState().scans().get("BTC-USDT").complete()).isTrue();
@@ -142,9 +144,11 @@ class CoreRiskStateTest {
             state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
                     1, 100, 100, 0, 10));
         }
-        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 1));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 1,
+                1_700_000_000_000L));
 
-        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2,
+                1_700_000_000_000L));
 
         CoreRiskState.RiskScan restarted = state.riskState().scans().get("BTC-USDT");
         assertThat(restarted.priceSequence()).isEqualTo(2);
@@ -166,8 +170,10 @@ class CoreRiskStateTest {
                 CorePositionSide.NET, 1, 10, 100, 1_000, 0, 0));
         state = withPosition(state, new CorePositionState("ETH-USDT", "USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, 1, 10, 100, 1_000, 0, 0));
-        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("ETH-USDT", 1, 120, 1));
-        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("ETH-USDT", 1, 120, 1,
+                1_700_000_000_000L));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2,
+                1_700_000_000_000L));
 
         CoreRiskSnapshot btc = state.riskState().snapshots().get("7:BTC-USDT");
         CoreRiskSnapshot eth = state.riskState().snapshots().get("7:ETH-USDT");
@@ -178,7 +184,7 @@ class CoreRiskStateTest {
         assertThat(state.riskState().liquidations()).isEmpty();
 
         TradingCoreState moved = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("ETH-USDT", 1, 20, 3));
+                new ApplyMarkPriceCommand("ETH-USDT", 1, 20, 3, 1_700_000_000_000L));
         assertThat(moved.riskState().snapshots().get("7:BTC-USDT").equityUnits()).isEqualTo(0);
         assertThat(moved.riskState().snapshots().get("7:BTC-USDT").status())
                 .isEqualTo(CoreRiskStatus.LIQUIDATION);

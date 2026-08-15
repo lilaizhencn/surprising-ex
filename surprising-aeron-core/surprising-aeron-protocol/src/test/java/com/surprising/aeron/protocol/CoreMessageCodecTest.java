@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String V1_GOLDEN = "5845585301000102010001004c000000"
+    private static final String CURRENT_GOLDEN = "5845585301000102010001004c000000"
             + "7766554433221100ffeeddccbbaa9988"
             + "0800000000000000"
             + "2a00000000000000e903000000000000"
@@ -18,17 +18,17 @@ class CoreMessageCodecTest {
             + "080000000700000000000000";
 
     @Test
-    void matchesSchemaVersionOneGoldenMessage() {
+    void matchesCurrentSchemaGoldenMessage() {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
 
         byte[] encoded = CoreMessageCodec.encode(message);
 
-        assertThat(HexFormat.of().formatHex(encoded)).isEqualTo(V1_GOLDEN);
+        assertThat(HexFormat.of().formatHex(encoded)).isEqualTo(CURRENT_GOLDEN);
         assertThat(CoreMessageCodec.decode(encoded)).isEqualTo(message);
     }
 
     @Test
-    void ignoresKnownHeaderExtensionForBackwardCompatibility() {
+    void rejectsNonCurrentHeaderLength() {
         byte[] encoded = CoreMessageCodec.encode(command(UUID.randomUUID(), 1, 2, 3));
         byte[] extended = new byte[encoded.length + 4];
         System.arraycopy(encoded, 0, extended, 0, CoreProtocol.HEADER_LENGTH);
@@ -41,19 +41,19 @@ class CoreMessageCodecTest {
         System.arraycopy(encoded, CoreProtocol.HEADER_LENGTH, extended, CoreProtocol.HEADER_LENGTH + 4,
                 encoded.length - CoreProtocol.HEADER_LENGTH);
 
-        CoreMessage decoded = CoreMessageCodec.decode(extended);
-
-        assertThat(decoded.payload()).isEqualTo(CoreProtocol.probePayload(3));
+        assertThatThrownBy(() -> CoreMessageCodec.decode(extended))
+                .isInstanceOf(ProtocolException.class)
+                .hasMessageContaining("header length");
     }
 
     @Test
-    void rejectsUnknownFutureSchema() {
+    void rejectsNonCurrentSchema() {
         byte[] encoded = CoreMessageCodec.encode(command(UUID.randomUUID(), 1, 2, 3));
         encoded[4] = 2;
 
         assertThatThrownBy(() -> CoreMessageCodec.decode(encoded))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("future schema");
+                .hasMessageContaining("unsupported schema");
     }
 
     private static CoreMessage command(UUID commandId, long sourceSequence, long correlationId, long delta) {

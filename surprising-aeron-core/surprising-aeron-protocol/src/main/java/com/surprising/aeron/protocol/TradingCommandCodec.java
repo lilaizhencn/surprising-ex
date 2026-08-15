@@ -151,9 +151,10 @@ public final class TradingCommandCodec {
 
     public static PlaceOrderCommand decodePlaceOrder(byte[] payload) {
         ByteBuffer buffer = readable(payload);
-        requireRemaining(buffer, Long.BYTES * 2);
-        boolean version2 = buffer.remaining() >= Integer.BYTES && buffer.getInt(buffer.position()) == PLACE_ORDER_V2_MARKER;
-        if (version2) buffer.getInt();
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 2);
+        if (buffer.getInt() != PLACE_ORDER_V2_MARKER) {
+            throw new ProtocolException("invalid place order marker");
+        }
         long orderId = buffer.getLong();
         long instrumentVersion = buffer.getLong();
         String symbol = readText(buffer);
@@ -168,44 +169,25 @@ public final class TradingCommandCodec {
         if (reduceOnlyCode != 0 && reduceOnlyCode != 1) {
             throw new ProtocolException("invalid reduceOnly flag: " + reduceOnlyCode);
         }
-        CoreMarginMode marginMode = CoreMarginMode.CROSS;
-        CorePositionSide positionSide = CorePositionSide.NET;
-        int firstCode = buffer.getInt();
-        ReservationKind reservationKind;
-        if (firstCode >= 0 && firstCode <= 1 && buffer.remaining() >= Integer.BYTES * 2 + Short.BYTES + Long.BYTES) {
-            marginMode = CoreMarginMode.fromWireCode(firstCode);
-            positionSide = CorePositionSide.fromWireCode(buffer.getInt());
-            reservationKind = ReservationKind.fromWireCode(buffer.getInt());
-        } else {
-            reservationKind = ReservationKind.fromWireCode(firstCode);
-        }
+        CoreMarginMode marginMode = CoreMarginMode.fromWireCode(buffer.getInt());
+        CorePositionSide positionSide = CorePositionSide.fromWireCode(buffer.getInt());
+        ReservationKind reservationKind = ReservationKind.fromWireCode(buffer.getInt());
         String asset = readText(buffer);
         requireRemaining(buffer, Long.BYTES);
         long reservedUnits = buffer.getLong();
-        CoreOrderType orderType = CoreOrderType.LIMIT;
-        CoreTimeInForce timeInForce = CoreTimeInForce.GTC;
-        long matchingPriceTicks = priceTicks;
-        boolean postOnly = false;
-        if (version2) {
-            requireRemaining(buffer, Integer.BYTES * 2 + Long.BYTES + Byte.BYTES);
-            orderType = CoreOrderType.fromWireCode(buffer.getInt());
-            timeInForce = CoreTimeInForce.fromWireCode(buffer.getInt());
-            matchingPriceTicks = buffer.getLong();
-            byte postOnlyCode = buffer.get();
-            if (postOnlyCode != 0 && postOnlyCode != 1) {
-                throw new ProtocolException("invalid postOnly flag: " + postOnlyCode);
-            }
-            postOnly = postOnlyCode == 1;
+        requireRemaining(buffer, Integer.BYTES * 2 + Long.BYTES + Byte.BYTES);
+        CoreOrderType orderType = CoreOrderType.fromWireCode(buffer.getInt());
+        CoreTimeInForce timeInForce = CoreTimeInForce.fromWireCode(buffer.getInt());
+        long matchingPriceTicks = buffer.getLong();
+        byte postOnlyCode = buffer.get();
+        if (postOnlyCode != 0 && postOnlyCode != 1) {
+            throw new ProtocolException("invalid postOnly flag: " + postOnlyCode);
         }
-        String clientOrderId = "";
-        long makerFeeRatePpm = 0;
-        long takerFeeRatePpm = 0;
-        if (version2 && buffer.hasRemaining()) {
-            clientOrderId = readOptionalText(buffer);
-            requireRemaining(buffer, Long.BYTES * 2);
-            makerFeeRatePpm = buffer.getLong();
-            takerFeeRatePpm = buffer.getLong();
-        }
+        boolean postOnly = postOnlyCode == 1;
+        String clientOrderId = readOptionalText(buffer);
+        requireRemaining(buffer, Long.BYTES * 2);
+        long makerFeeRatePpm = buffer.getLong();
+        long takerFeeRatePpm = buffer.getLong();
         requireConsumed(buffer);
         return new PlaceOrderCommand(orderId, symbol, instrumentVersion, baseAsset, quoteAsset, settleAsset,
                 side, priceTicks, quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
@@ -359,11 +341,6 @@ public final class TradingCommandCodec {
         long expiry = buffer.getLong();
         int optionType = buffer.getInt();
         long strike = buffer.getLong();
-        if (!buffer.hasRemaining()) {
-            return new UpsertInstrumentCommand(symbol, version, contractTypeCode, base, quote, settle,
-                    multiplier, priceTick, settleScale, initialMargin, maintenanceMargin, makerFee, takerFee,
-                    expiry, optionType, strike);
-        }
         requireRemaining(buffer, Integer.BYTES + Long.BYTES * 4 + Integer.BYTES);
         if (buffer.getInt() != INSTRUMENT_RISK_V2_MARKER) {
             throw new ProtocolException("invalid instrument risk policy marker");
@@ -401,9 +378,9 @@ public final class TradingCommandCodec {
     public static ApplyMarkPriceCommand decodeApplyMarkPrice(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String symbol = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 3);
+        requireRemaining(buffer, Long.BYTES * 4);
         ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(symbol, buffer.getLong(), buffer.getLong(),
-                buffer.getLong(), buffer.remaining() >= Long.BYTES ? buffer.getLong() : 0);
+                buffer.getLong(), buffer.getLong());
         requireConsumed(buffer);
         return command;
     }
@@ -424,13 +401,9 @@ public final class TradingCommandCodec {
         long settlementId = buffer.getLong();
         long instrumentVersion = buffer.getLong();
         long fundingRatePpm = buffer.getLong();
-        long cursorUserId = 0;
-        int maxUsers = ApplyFundingCommand.DEFAULT_MAX_USERS;
-        if (buffer.hasRemaining()) {
-            requireRemaining(buffer, Long.BYTES + Integer.BYTES);
-            cursorUserId = buffer.getLong();
-            maxUsers = buffer.getInt();
-        }
+        requireRemaining(buffer, Long.BYTES + Integer.BYTES);
+        long cursorUserId = buffer.getLong();
+        int maxUsers = buffer.getInt();
         ApplyFundingCommand command = new ApplyFundingCommand(settlementId, symbol, instrumentVersion,
                 fundingRatePpm, cursorUserId, maxUsers);
         requireConsumed(buffer);
@@ -449,15 +422,9 @@ public final class TradingCommandCodec {
     public static SettleInstrumentCommand decodeSettleInstrument(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String symbol = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 4);
+        requireRemaining(buffer, Long.BYTES * 5 + Integer.BYTES);
         SettleInstrumentCommand command = new SettleInstrumentCommand(buffer.getLong(), symbol, buffer.getLong(),
-                buffer.getLong(), buffer.getLong(), 0, SettleInstrumentCommand.DEFAULT_MAX_USERS);
-        if (buffer.hasRemaining()) {
-            requireRemaining(buffer, Long.BYTES + Integer.BYTES);
-            command = new SettleInstrumentCommand(command.settlementId(), command.symbol(),
-                    command.instrumentVersion(), command.settlementPriceTicks(), command.optionCashUnitsPerContract(),
-                    buffer.getLong(), buffer.getInt());
-        }
+                buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getInt());
         requireConsumed(buffer);
         return command;
     }
@@ -470,15 +437,8 @@ public final class TradingCommandCodec {
 
     public static ExecuteLiquidationCommand decodeExecuteLiquidation(byte[] payload) {
         ByteBuffer buffer = readable(payload);
-        requireRemaining(buffer, Long.BYTES * 2);
-        long liquidationId = buffer.getLong();
-        if (buffer.remaining() == Long.BYTES) {
-            ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(liquidationId, buffer.getLong());
-            requireConsumed(buffer);
-            return command;
-        }
-        requireRemaining(buffer, Long.BYTES * 3);
-        ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(liquidationId, buffer.getLong(),
+        requireRemaining(buffer, Long.BYTES * 4);
+        ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(buffer.getLong(), buffer.getLong(),
                 buffer.getLong(), buffer.getLong());
         requireConsumed(buffer);
         return command;

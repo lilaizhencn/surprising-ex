@@ -1,11 +1,9 @@
 package com.surprising.account.provider.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.UUID;
-import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.account")
@@ -14,12 +12,6 @@ public class AccountProperties {
     private Kafka kafka = new Kafka();
     private Aeron aeron = new Aeron();
     private String internalServiceSecret = "";
-
-    /** 启动时拒绝未隔离的旧版 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "account");
-    }
 
     public Kafka getKafka() {
         return kafka;
@@ -50,7 +42,6 @@ public class AccountProperties {
         private String bootstrapServers = "localhost:9092";
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
-        private boolean productTopicsEnabled;
         private String groupId = "surprising-account-v1";
         /** 每个账户 JVM 的实例标识；快照广播消费组必须按实例隔离。 */
         private String clientId = "account-provider-" + UUID.randomUUID();
@@ -81,14 +72,6 @@ public class AccountProperties {
 
         public void setProductLine(ProductLine productLine) {
             this.productLine = productLine;
-        }
-
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
         }
 
         public String getGroupId() {

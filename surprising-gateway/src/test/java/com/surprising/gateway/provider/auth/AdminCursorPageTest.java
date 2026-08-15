@@ -3,9 +3,7 @@ package com.surprising.gateway.provider.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -32,11 +30,11 @@ class AdminCursorPageTest {
         assertThat(decoded.timestamp()).isEqualTo(rows.get(0).createdAt());
         assertThat(decoded.id()).isEqualTo(rows.get(0).id());
 
-        String legacy = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString("1783081845123:99".getBytes(StandardCharsets.UTF_8));
-        AdminCursorPage.Cursor legacyDecoded = AdminCursorPage.decodeCursor(legacy);
-        assertThat(legacyDecoded.timestamp()).isEqualTo(Instant.ofEpochMilli(1_783_081_845_123L));
-        assertThat(legacyDecoded.id()).isEqualTo(99L);
+        String oldFormat = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("1783081845123:99".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> AdminCursorPage.decodeCursor(oldFormat))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("invalid cursor");
     }
 
     @Test

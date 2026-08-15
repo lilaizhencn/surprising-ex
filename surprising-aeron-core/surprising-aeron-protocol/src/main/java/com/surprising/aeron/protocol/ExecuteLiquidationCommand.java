@@ -13,7 +13,4 @@ public record ExecuteLiquidationCommand(
         }
     }
 
-    public ExecuteLiquidationCommand(long liquidationId, long executionPriceTicks) {
-        this(liquidationId, 0, executionPriceTicks, 0);
-    }
 }

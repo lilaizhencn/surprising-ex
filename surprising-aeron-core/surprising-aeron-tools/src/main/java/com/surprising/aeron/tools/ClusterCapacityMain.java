@@ -347,7 +347,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             var response = clients.command(CoreMessageType.APPLY_MARK_PRICE,
                     stableId("mark-price:" + worker + ':' + cycle), firstUser(Math.floorMod(worker, pairCount)),
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            symbol, 1, PRICE_TICKS + (cycle & 1L), sequence)));
+                            symbol, 1, PRICE_TICKS + (cycle & 1L), sequence, 1_700_000_000_000L)));
             record(response.commandStatus(), System.nanoTime() - started, measured);
         }
     }

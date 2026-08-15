@@ -1,9 +1,7 @@
 package com.surprising.funding.provider.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
-import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -25,12 +23,6 @@ public class FundingProperties {
     private Coordination coordination = new Coordination();
     @Valid
     private Aeron aeron = new Aeron();
-
-    /** 启动时拒绝未隔离的资金费 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "funding");
-    }
 
     public Kafka getKafka() {
         return kafka;
@@ -112,7 +104,6 @@ public class FundingProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private boolean productTopicsEnabled;
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String cacheGroupId = "surprising-funding-rate-cache-local";
         private int concurrency = 1;
@@ -134,22 +125,12 @@ public class FundingProperties {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         }
 
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
         public String getFundingRateTopic() {
-            return isFundingProductLine() && productTopicsEnabled
-                    ? ProductTopicNames.of(productLine).fundingRateTopic()
-                    : fundingRateTopic;
+            return ProductTopicNames.of(productLine).fundingRateTopic();
         }
 
         public boolean isFundingProductLine() {
-            return !productTopicsEnabled || productLine.isFundingProduct();
+            return productLine.isFundingProduct();
         }
 
         public void setFundingRateTopic(String fundingRateTopic) {

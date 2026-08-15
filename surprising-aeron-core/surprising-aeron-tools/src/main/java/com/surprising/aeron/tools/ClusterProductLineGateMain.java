@@ -103,7 +103,8 @@ public final class ClusterProductLineGateMain {
 
         if (isPerpetual()) {
             applied(1, CoreMessageType.APPLY_MARK_PRICE,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(SYMBOL, 1, 100, 1)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
+                            SYMBOL, 1, 100, 1, 1_700_000_000_000L)));
             applied(1, CoreMessageType.APPLY_FUNDING,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
                             9_000_000_000L + seed, SYMBOL, 1, 10_000)));
@@ -130,7 +131,7 @@ public final class ClusterProductLineGateMain {
         long priceSequence = 2;
         applied(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        SYMBOL, 1, markPrice, priceSequence)));
+                        SYMBOL, 1, markPrice, priceSequence, 1_700_000_000_000L)));
         var work = CoreLiquidationWorkCodec.decodeWork(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
                 CoreLiquidationWorkCodec.encodeQuery(100)));
         var action = work.actions().stream().filter(value -> value.userId() == longUser).findFirst()

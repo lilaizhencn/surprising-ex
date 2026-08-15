@@ -29,8 +29,6 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.Map;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import org.junit.jupiter.api.Test;
 
 class CoreProbeStateTest {
@@ -156,8 +154,8 @@ class CoreProbeStateTest {
         assertThat(placeResult.orders()).extracting(value -> value.orderId()).containsExactly(91L);
         assertThat(placeResult.orders().getFirst().clusterPosition()).isPositive();
         assertThat(placeResult.executions()).isEmpty();
-        var placeEvent = CoreExportCodec.decodeBatch(original.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
-                        CoreExportCodec.encodeBatchQuery(10))).data()).stream()
+        var placeEvent = CoreExportCodec.decodeBatchResponse(original.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
+                        CoreExportCodec.encodeBatchQuery(10))).data()).events().stream()
                 .map(message -> CoreExportCodec.decodeEvent(message.payload()))
                 .filter(event -> event.commandId().equals(placeId))
                 .findFirst().orElseThrow();
@@ -180,8 +178,8 @@ class CoreProbeStateTest {
         CoreMessage triggerPlace = tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), 3,
                 com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger));
         assertThat(original.apply(triggerPlace).status()).isEqualTo(ResponseStatus.APPLIED);
-        var triggerEvent = CoreExportCodec.decodeBatch(original.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
-                        CoreExportCodec.encodeBatchQuery(10))).data()).stream()
+        var triggerEvent = CoreExportCodec.decodeBatchResponse(original.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
+                        CoreExportCodec.encodeBatchQuery(10))).data()).events().stream()
                 .map(message -> CoreExportCodec.decodeEvent(message.payload()))
                 .filter(event -> event.commandId().equals(triggerPlace.header().commandId()))
                 .findFirst().orElseThrow();
@@ -457,7 +455,7 @@ class CoreProbeStateTest {
 
         var batchResult = state.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
                 CoreExportCodec.encodeBatchQuery(10)));
-        var batch = CoreExportCodec.decodeBatch(batchResult.data());
+        var batch = CoreExportCodec.decodeBatchResponse(batchResult.data()).events();
 
         assertThat(batch).hasSize(2);
         assertThat(batch).extracting(message -> CoreExportCodec.decodeEvent(message.payload()).exportSequence())
@@ -473,8 +471,8 @@ class CoreProbeStateTest {
         CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot());
         var status = CoreExportCodec.decodeStatus(restored.apply(query(
                 CoreMessageType.EXPORT_STATUS_QUERY, 0, new byte[0])).data());
-        var remaining = CoreExportCodec.decodeBatch(restored.apply(query(
-                CoreMessageType.EXPORT_BATCH_QUERY, 0, CoreExportCodec.encodeBatchQuery(10))).data());
+        var remaining = CoreExportCodec.decodeBatchResponse(restored.apply(query(
+                CoreMessageType.EXPORT_BATCH_QUERY, 0, CoreExportCodec.encodeBatchQuery(10))).data()).events();
 
         assertThat(status.acknowledgedSequence()).isEqualTo(1);
         assertThat(status.nextSequence()).isEqualTo(3);
@@ -499,23 +497,15 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void readsLegacyVersionOneAndTwoSnapshots() {
-        CoreProbeState empty = new CoreProbeState(ProductLine.SPOT);
-        byte[] versionOne = java.util.Arrays.copyOf(empty.snapshot(), 32);
-        ByteBuffer.wrap(versionOne).order(ByteOrder.LITTLE_ENDIAN).putShort(4, (short) 1);
-        CoreProbeState restoredV1 = CoreProbeState.fromSnapshot(ProductLine.SPOT, versionOne);
+    void rejectsUnsupportedSnapshotVersion() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        byte[] snapshot = state.snapshot();
+        snapshot[4] = 2;
+        snapshot[5] = 0;
 
-        CoreProbeState populated = new CoreProbeState(ProductLine.SPOT);
-        populated.apply(command(UUID.randomUUID(), 1, 7));
-        byte[] versionTwo = downgradeToVersionTwo(populated.snapshot());
-        CoreProbeState restoredV2 = CoreProbeState.fromSnapshot(ProductLine.SPOT, versionTwo);
-
-        assertThat(restoredV1.appliedCommandCount()).isZero();
-        assertThat(restoredV1.tradingState().businessStateHash())
-                .isEqualTo(empty.tradingState().businessStateHash());
-        assertThat(restoredV2.appliedCommandCount()).isEqualTo(1);
-        assertThat(restoredV2.probeValue()).isEqualTo(7);
-        assertThat(restoredV2.exportState().pending()).isEmpty();
+        assertThatThrownBy(() -> CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot))
+                .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)
+                .hasMessageContaining("unsupported snapshot version");
     }
 
     @Test
@@ -608,25 +598,6 @@ class CoreProbeStateTest {
 
     private static CoreMessage command(UUID commandId, long sourceSequence, long delta) {
         return command(ProductLine.SPOT, commandId, sourceSequence, delta);
-    }
-
-    private static byte[] downgradeToVersionTwo(byte[] versionThree) {
-        ByteBuffer input = ByteBuffer.wrap(versionThree).order(ByteOrder.LITTLE_ENDIAN);
-        int resultCount = input.getInt(24);
-        int sourceCount = input.getInt(28);
-        int tradingLength = input.getInt(32);
-        int exportOffset = 36 + sourceCount * 24 + resultCount * 40;
-        input.position(exportOffset + Long.BYTES * 2);
-        int eventCount = input.getInt();
-        for (int index = 0; index < eventCount; index++) {
-            input.position(input.position() + Integer.BYTES + input.getInt(input.position()));
-        }
-        int tradingOffset = input.position();
-        byte[] versionTwo = new byte[exportOffset + tradingLength];
-        System.arraycopy(versionThree, 0, versionTwo, 0, exportOffset);
-        System.arraycopy(versionThree, tradingOffset, versionTwo, exportOffset, tradingLength);
-        ByteBuffer.wrap(versionTwo).order(ByteOrder.LITTLE_ENDIAN).putShort(4, (short) 2);
-        return versionTwo;
     }
 
     private static CoreMessage command(

@@ -21,13 +21,15 @@ class TradingCommandCodecTest {
                 4L, CoreTimeInForce.GTC, true);
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 3, 1,
                 "BTC", "USDT", "USDT", 1, 1, 100_000_000, 100_000, 50_000, -10, 20,
-                0, -1, 0);
-        ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("BTC-USDT", 3, 60_500, 9);
-        ApplyFundingCommand funding = new ApplyFundingCommand(11, "BTC-USDT", 3, 100);
+                0, -1, 0, 10_000_000, Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
+        ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("BTC-USDT", 3, 60_500, 9,
+                1_700_000_000_000L);
+        ApplyFundingCommand funding = new ApplyFundingCommand(11, "BTC-USDT", 3, 100, 0, 128);
         ApplyFundingCommand chunkedFunding = new ApplyFundingCommand(12, "BTC-USDT", 3, -100,
                 42, 128);
-        SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "BTC-USDT", 3, 61_000, 0);
-        ExecuteLiquidationCommand liquidation = new ExecuteLiquidationCommand(13, 59_000);
+        SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "BTC-USDT", 3, 61_000, 0, 0, 128);
+        ExecuteLiquidationCommand liquidation = new ExecuteLiquidationCommand(13, 9, 59_000, 25_000);
         ExecuteAdlCommand adl = new ExecuteAdlCommand(13, 18, "BTC-USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, -3, 58_000, 9, 2, 7);
         ResolveLiquidationCommand resolution = new ResolveLiquidationCommand(13,
@@ -91,15 +93,16 @@ class TradingCommandCodecTest {
     }
 
     @Test
-    void decodesLegacyInstrumentPayloadWithEquivalentUnlimitedRiskPolicy() {
+    void rejectsInstrumentPayloadWithoutRiskPolicy() {
         UpsertInstrumentCommand command = new UpsertInstrumentCommand("BTC-USDT", 1, 1,
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0);
         byte[] current = TradingCommandCodec.encodeUpsertInstrument(command);
         int appendedRiskPolicyBytes = Integer.BYTES * 3 + Long.BYTES * 9;
-        byte[] legacy = java.util.Arrays.copyOf(current, current.length - appendedRiskPolicyBytes);
+        byte[] withoutRiskPolicy = java.util.Arrays.copyOf(current, current.length - appendedRiskPolicyBytes);
 
-        assertThat(TradingCommandCodec.decodeUpsertInstrument(legacy)).isEqualTo(command);
+        assertThatThrownBy(() -> TradingCommandCodec.decodeUpsertInstrument(withoutRiskPolicy))
+                .isInstanceOf(ProtocolException.class);
     }
 
     @Test

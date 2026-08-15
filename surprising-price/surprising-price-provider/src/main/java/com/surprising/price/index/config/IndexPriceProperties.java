@@ -1,13 +1,11 @@
 package com.surprising.price.index.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.price.index")
@@ -20,12 +18,6 @@ public class IndexPriceProperties {
     private Fiat fiat = new Fiat();
     private Coordination coordination = new Coordination();
     private Audit audit = new Audit();
-
-    /** 启动时拒绝未隔离的指数价格 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "index-price");
-    }
 
     public Kafka getKafka() {
         return kafka;
@@ -86,7 +78,6 @@ public class IndexPriceProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private boolean productTopicsEnabled;
         private String priceEventsTopic = "surprising.perp.price.events.v1";
         private String groupId = "surprising-index-price-v1";
         private String cacheGroupId = "surprising-index-price-cache-local";
@@ -109,16 +100,8 @@ public class IndexPriceProperties {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         }
 
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
         public String getPriceEventsTopic() {
-            return productTopicsEnabled ? productTopics().priceEventsTopic() : priceEventsTopic;
+            return productTopics().priceEventsTopic();
         }
 
         public void setPriceEventsTopic(String priceEventsTopic) {

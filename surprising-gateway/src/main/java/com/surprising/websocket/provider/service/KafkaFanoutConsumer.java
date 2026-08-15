@@ -267,7 +267,6 @@ public class KafkaFanoutConsumer {
     @KafkaListener(
             topics = "#{__listener.orderEventsTopic()}",
             groupId = "#{__listener.groupId()}",
-            autoStartup = "#{__listener.legacyPrivateEventsEnabled()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onOrderEvent(ConsumerRecord<String, String> record) {
         try {
@@ -292,8 +291,7 @@ public class KafkaFanoutConsumer {
             TriggerOrderUpdatedEvent event = objectMapper.readValue(record.value(), TriggerOrderUpdatedEvent.class);
             KafkaSymbolKeyValidator.requireMatchingSymbol(
                     record.key(), event.order().symbol(), "trigger order event");
-            if (properties.getKafka().isProductTopicsEnabled()
-                    && event.productLine() != properties.getKafka().getProductLine()) {
+            if (event.productLine() != properties.getKafka().getProductLine()) {
                 throw new ProductTopicMismatchException("trigger order event product line must match websocket node: "
                         + "expected=" + properties.getKafka().getProductLine() + " actual=" + event.productLine());
             }
@@ -308,7 +306,6 @@ public class KafkaFanoutConsumer {
     @KafkaListener(
             topics = "#{__listener.matchResultsTopic()}",
             groupId = "#{__listener.groupId()}",
-            autoStartup = "#{__listener.legacyPrivateEventsEnabled()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onMatchResult(ConsumerRecord<String, String> record) {
         try {
@@ -366,7 +363,6 @@ public class KafkaFanoutConsumer {
     @KafkaListener(
             topics = "#{__listener.positionEventsTopic()}",
             groupId = "#{__listener.groupId()}",
-            autoStartup = "#{__listener.legacyPrivateEventsEnabled()}",
             containerFactory = "webSocketKafkaListenerContainerFactory")
     public void onPosition(ConsumerRecord<String, String> record) {
         try {
@@ -415,10 +411,6 @@ public class KafkaFanoutConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
-    }
-
-    public boolean legacyPrivateEventsEnabled() {
-        return !properties.getKafka().isCorePrivateEventsEnabled();
     }
 
     public String candleTopic() {
@@ -475,9 +467,8 @@ public class KafkaFanoutConsumer {
 
     private void requireMatchingAccountRiskKey(String recordKey, RiskAccountUpdatedEvent event) {
         String expected = event.userId() + ":" + event.accountType() + ":" + event.settleAsset();
-        String legacyExpected = event.userId() + ":" + event.settleAsset();
         String normalizedKey = recordKey == null ? "" : recordKey.trim();
-        if (!expected.equalsIgnoreCase(normalizedKey) && !legacyExpected.equalsIgnoreCase(normalizedKey)) {
+        if (!expected.equalsIgnoreCase(normalizedKey)) {
             throw new IllegalArgumentException("account risk key mismatch: expected=" + expected
                     + ", actual=" + recordKey);
         }
@@ -493,9 +484,6 @@ public class KafkaFanoutConsumer {
     }
 
     private void requireCurrentProductTopic(String topic, String expectedTopic, String streamName) {
-        if (!properties.getKafka().isProductTopicsEnabled()) {
-            return;
-        }
         if (!expectedTopic.equals(topic)) {
             throw new ProductTopicMismatchException(streamName + " topic must match current product line: expected="
                     + expectedTopic + " actual=" + topic);
@@ -512,7 +500,7 @@ public class KafkaFanoutConsumer {
     }
 
     private ProductLine fanoutProductLine() {
-        return properties.getKafka().isProductTopicsEnabled() ? properties.getKafka().getProductLine() : null;
+        return properties.getKafka().getProductLine();
     }
 
     static final class ProductTopicMismatchException extends RuntimeException {

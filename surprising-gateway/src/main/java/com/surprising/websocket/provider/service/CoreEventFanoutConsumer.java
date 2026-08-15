@@ -51,7 +51,6 @@ public class CoreEventFanoutConsumer {
     @KafkaListener(
             topics = "#{__listener.coreEventsTopic()}",
             groupId = "#{__listener.groupId()}",
-            autoStartup = "#{__listener.corePrivateEventsEnabled()}",
             containerFactory = "webSocketCoreEventsKafkaListenerContainerFactory")
     public synchronized void onCoreEvent(ConsumerRecord<String, byte[]> record) {
         if (record.partition() != 0) {
@@ -212,10 +211,6 @@ public class CoreEventFanoutConsumer {
 
     public String groupId() {
         return properties.getKafka().getGroupId();
-    }
-
-    public boolean corePrivateEventsEnabled() {
-        return properties.getKafka().isCorePrivateEventsEnabled();
     }
 
     public record CoreOrderWebSocketEvent(long exportSequence, CoreOrderStateView order) {

@@ -1,12 +1,10 @@
 package com.surprising.candlestick.provider.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import jakarta.annotation.PostConstruct;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 
@@ -19,12 +17,6 @@ public class CandlestickProperties {
     private Flush flush = new Flush();
     private Query query = new Query();
     private Rocksdb rocksdb = new Rocksdb();
-
-    /** 启动时拒绝未隔离的旧版行情 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "candlestick");
-    }
 
     public List<String> getPeriods() {
         return periods;
@@ -77,7 +69,6 @@ public class CandlestickProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private boolean productTopicsEnabled;
         private String tradeTopic = "surprising.perp.match.trades.v1";
         private String candleTopic = "surprising.perp.candle.events.v1";
         private String applicationId = "surprising-candlestick-v1";
@@ -99,16 +90,8 @@ public class CandlestickProperties {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         }
 
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
         public String getTradeTopic() {
-            return productTopicsEnabled ? productTopics().matchTradesTopic() : tradeTopic;
+            return productTopics().matchTradesTopic();
         }
 
         public void setTradeTopic(String tradeTopic) {
@@ -116,7 +99,7 @@ public class CandlestickProperties {
         }
 
         public String getCandleTopic() {
-            return productTopicsEnabled ? productTopics().candleEventsTopic() : candleTopic;
+            return productTopics().candleEventsTopic();
         }
 
         public void setCandleTopic(String candleTopic) {
@@ -131,7 +114,7 @@ public class CandlestickProperties {
             if (applicationIdOverride != null && !applicationIdOverride.isBlank()) {
                 return applicationIdOverride.trim();
             }
-            return productTopicsEnabled ? productTopics().consumerGroup("candlestick") : applicationId;
+            return productTopics().consumerGroup("candlestick");
         }
 
         public void setApplicationId(String applicationId) {

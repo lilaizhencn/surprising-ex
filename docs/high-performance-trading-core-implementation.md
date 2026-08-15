@@ -182,7 +182,7 @@ available + locked = accountTotal
 1. Aeron Cluster Log/Archive/Snapshot 是交易核心唯一恢复权威；Kafka 仍承担外围事件和异步输入，不替代 Aeron。
 2. PostgreSQL 不参与下单、撮合、资金预留、成交、风险、强平、交割或行权同步裁决，只做投影、历史、审计和对账。
 3. Redis/Valkey 不保存可裁决的资金、订单、持仓、风险或强平状态；最多做限流、查询缓存和可重建会话索引。
-4. 不做长期影子集群、不做双写、不保留运行时 `legacy.enabled`/`dual-write.enabled` 回退；在正确性和恢复门禁通过后删除旧权威链路，再做性能压测。
+4. 不做长期影子集群、不做双写；正确性和恢复门禁通过后直接以当前权威链路做性能压测。
 5. 每次只验证一条产品线，做市进程保持运行；开发机和微基准不得推导生产 OPS。
 6. 命令必须使用固定二进制协议和可演进 schema；`commandId` 重试保持不变，超时是结果未知，不是业务拒绝。
 7. Exporter 允许 Kafka 成功而 Aeron ACK 丢失导致的重复事件，消费者必须幂等；不声称跨 Aeron/Kafka/PG exactly-once。

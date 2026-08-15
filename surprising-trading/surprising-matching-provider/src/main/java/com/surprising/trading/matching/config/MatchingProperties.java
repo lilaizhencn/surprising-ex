@@ -1,7 +1,6 @@
 package com.surprising.trading.matching.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
@@ -17,7 +16,9 @@ public class MatchingProperties {
 
     @PostConstruct
     void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "matching-market-data");
+        if (kafka.productLine == null) {
+            throw new IllegalStateException("matching-market-data 必须显式配置 product-line");
+        }
     }
 
     public Kafka getKafka() {
@@ -47,7 +48,6 @@ public class MatchingProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine;
-        private boolean productTopicsEnabled;
         private String groupId = "surprising-matching-market-data-v1";
         private String clientId = "surprising-matching-market-data";
         private String coreEventsTopic;
@@ -74,16 +74,8 @@ public class MatchingProperties {
             this.productLine = productLine;
         }
 
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
         public String getGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("matching-market-data") : groupId;
+            return productTopics().consumerGroup("matching-market-data");
         }
 
         public void setGroupId(String groupId) {
@@ -113,7 +105,7 @@ public class MatchingProperties {
         }
 
         public String getMatchTradesTopic() {
-            return productTopicsEnabled ? productTopics().matchTradesTopic() : matchTradesTopic;
+            return productTopics().matchTradesTopic();
         }
 
         public void setMatchTradesTopic(String matchTradesTopic) {
@@ -121,7 +113,7 @@ public class MatchingProperties {
         }
 
         public String getOrderBookDepthTopic() {
-            return productTopicsEnabled ? productTopics().orderBookDepthTopic() : orderBookDepthTopic;
+            return productTopics().orderBookDepthTopic();
         }
 
         public void setOrderBookDepthTopic(String orderBookDepthTopic) {

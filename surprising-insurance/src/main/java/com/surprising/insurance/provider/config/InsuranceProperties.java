@@ -1,9 +1,7 @@
 package com.surprising.insurance.provider.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.product.api.ProductTopicNames;
-import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -13,12 +11,6 @@ public class InsuranceProperties {
     private Kafka kafka = new Kafka();
     private Coverage coverage = new Coverage();
     private Aeron aeron = new Aeron();
-
-    /** 启动时拒绝未隔离的保险基金 Topic 配置。 */
-    @PostConstruct
-    void validateProductLineConfiguration() {
-        ProductLineConfiguration.require(kafka.productLine, kafka.productTopicsEnabled, "insurance");
-    }
 
     public Kafka getKafka() {
         return kafka;
@@ -74,7 +66,6 @@ public class InsuranceProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private boolean productTopicsEnabled;
         private String groupId = "surprising-insurance-v1";
         private String liquidationFeeEventsTopic = "surprising.account.liquidation-fee.events.v1";
         private int concurrency = 2;
@@ -96,16 +87,8 @@ public class InsuranceProperties {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         }
 
-        public boolean isProductTopicsEnabled() {
-            return productTopicsEnabled;
-        }
-
-        public void setProductTopicsEnabled(boolean productTopicsEnabled) {
-            this.productTopicsEnabled = productTopicsEnabled;
-        }
-
         public String getGroupId() {
-            return productTopicsEnabled ? productTopics().consumerGroup("insurance") : groupId;
+            return productTopics().consumerGroup("insurance");
         }
 
         public void setGroupId(String groupId) {
@@ -113,9 +96,7 @@ public class InsuranceProperties {
         }
 
         public String getLiquidationFeeEventsTopic() {
-            return productTopicsEnabled
-                    ? productTopics().accountLiquidationFeeEventsTopic()
-                    : liquidationFeeEventsTopic;
+            return productTopics().accountLiquidationFeeEventsTopic();
         }
 
         public void setLiquidationFeeEventsTopic(String liquidationFeeEventsTopic) {

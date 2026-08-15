@@ -99,8 +99,8 @@ class RiskServiceTest {
 
     @Test
     void doesNotExposePersistedMarginThresholdOverride() {
-        when(rules.findAll()).thenReturn(List.of(new RiskRuleOverride("GLOBAL_MARGIN_POLICY", "legacy",
-                "GLOBAL_MARGIN", true, null, null, "admin", "legacy",
+        when(rules.findAll()).thenReturn(List.of(new RiskRuleOverride("GLOBAL_MARGIN_POLICY", "bootstrap",
+                "GLOBAL_MARGIN", true, null, null, "admin", "bootstrap",
                 Instant.now(), Instant.now())));
 
         var result = service.riskRules();

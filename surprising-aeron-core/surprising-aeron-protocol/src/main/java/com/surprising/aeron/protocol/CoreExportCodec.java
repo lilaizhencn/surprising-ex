@@ -8,10 +8,6 @@ import java.util.UUID;
 
 public final class CoreExportCodec {
 
-    private static final int EVENT_V2_MARKER = 0xC0E2_0002;
-    private static final int EVENT_V3_MARKER = 0xC0E3_0003;
-    private static final int EVENT_V4_MARKER = 0xC0E4_0004;
-    private static final int EVENT_V5_MARKER = 0xC0E5_0005;
     private static final int EVENT_V6_MARKER = 0xC0E6_0006;
     private static final int BATCH_V2_MARKER = 0xC0B2_0002;
     private static final int EVENT_FIXED_LENGTH = 64;
@@ -111,13 +107,9 @@ public final class CoreExportCodec {
             throw new ProtocolException("export event is truncated");
         }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
-        int marker = input.remaining() >= Integer.BYTES ? input.getInt(input.position()) : 0;
-        boolean version2 = marker == EVENT_V2_MARKER;
-        boolean version3 = marker == EVENT_V3_MARKER;
-        boolean version4 = marker == EVENT_V4_MARKER;
-        boolean version5 = marker == EVENT_V5_MARKER;
-        boolean version6 = marker == EVENT_V6_MARKER;
-        if (version2 || version3 || version4 || version5 || version6) input.getInt();
+        if (input.getInt() != EVENT_V6_MARKER) {
+            throw new ProtocolException("unsupported export event version");
+        }
         long sequence = input.getLong();
         long appliedCount = input.getLong();
         long businessHash = input.getLong();
@@ -133,11 +125,6 @@ public final class CoreExportCodec {
         }
         byte[] payload = new byte[payloadLength];
         input.get(payload);
-        if (!version2 && !version3 && !version4 && !version5 && !version6) {
-            if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
-            return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
-                    commandType, status, resultCode, userId, payload);
-        }
         List<CoreUserStateView> users = readItems(input, CoreStateQueryCodec::decodeUserState);
         List<CoreOrderStateView> orders = readItems(input, CoreStateQueryCodec::decodeOrderState);
         int executionCount = readCount(input);
@@ -150,46 +137,29 @@ public final class CoreExportCodec {
             executions.add(new CoreExecutionView(input.getLong(), input.getLong(), input.getLong(), input.getLong(),
                     input.getLong(), input.getLong()));
         }
-        if (version2) {
-            if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
-            return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
-                    commandType, status, resultCode, userId, payload, users, orders, executions, List.of());
-        }
         int fundingCount = readCount(input);
         List<CoreFundingPaymentView> fundingPayments = new ArrayList<>(fundingCount);
         for (int index = 0; index < fundingCount; index++) fundingPayments.add(readFundingPayment(input));
-        if (version3) {
-            if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
-            return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
-                    commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments);
-        }
         int liquidationCount = readCount(input);
         List<CoreLiquidationView> liquidations = new ArrayList<>(liquidationCount);
         for (int index = 0; index < liquidationCount; index++) {
-            liquidations.add(readLiquidation(input, version5 || version6));
+            liquidations.add(readLiquidation(input));
         }
         int treasuryCount = readCount(input);
         List<CoreTreasuryAssetView> treasuryAssets = new ArrayList<>(treasuryCount);
         for (int index = 0; index < treasuryCount; index++) treasuryAssets.add(readTreasury(input));
-        List<CoreTriggerOrderStateView> triggerOrders = new ArrayList<>();
-        if (version6) {
-            int triggerCount = readCount(input);
-            for (int index = 0; index < triggerCount; index++) {
-                int length = readCount(input);
-                if (input.remaining() < length) throw new ProtocolException("invalid trigger state length");
-                byte[] triggerPayload = new byte[length]; input.get(triggerPayload);
-                triggerOrders.add(CoreTriggerOrderCodec.decodeState(triggerPayload));
-            }
+        int triggerCount = readCount(input);
+        List<CoreTriggerOrderStateView> triggerOrders = new ArrayList<>(triggerCount);
+        for (int index = 0; index < triggerCount; index++) {
+            int length = readCount(input);
+            if (input.remaining() < length) throw new ProtocolException("invalid trigger state length");
+            byte[] triggerPayload = new byte[length]; input.get(triggerPayload);
+            triggerOrders.add(CoreTriggerOrderCodec.decodeState(triggerPayload));
         }
         if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
-        if (version6) {
-            return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
-                    commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
-                    liquidations, treasuryAssets, triggerOrders);
-        }
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                 commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
-                liquidations, treasuryAssets, List.of());
+                liquidations, treasuryAssets, triggerOrders);
     }
 
     private static int liquidationLength(CoreLiquidationView liquidation) {
@@ -211,7 +181,7 @@ public final class CoreExportCodec {
         putString(output, liquidation.status());
     }
 
-    private static CoreLiquidationView readLiquidation(ByteBuffer input, boolean enriched) {
+    private static CoreLiquidationView readLiquidation(ByteBuffer input) {
         if (input.remaining() < Long.BYTES * 7 + Integer.BYTES * 4) {
             throw new ProtocolException("liquidation fact is truncated");
         }
@@ -219,20 +189,20 @@ public final class CoreExportCodec {
         long userId = input.getLong();
         String symbol = readString(input);
         String asset = readString(input);
-        int remainingFixedLength = Integer.BYTES * (enriched ? 2 : 1) + Long.BYTES * (enriched ? 8 : 5);
+        int remainingFixedLength = Integer.BYTES * 2 + Long.BYTES * 8;
         if (input.remaining() < remainingFixedLength) {
             throw new ProtocolException("liquidation fact is truncated");
         }
-        int marginMode = enriched ? input.getInt() : CoreMarginMode.CROSS.ordinal();
+        int marginMode = input.getInt();
         int positionSide = input.getInt();
         long instrumentVersion = input.getLong();
         long triggerPriceSequence = input.getLong();
         long closeQuantitySteps = input.getLong();
         long signedQuantitySteps = input.getLong();
         long deficitUnits = input.getLong();
-        long executionPriceTicks = enriched ? input.getLong() : 0;
-        long liquidationFeeRatePpm = enriched ? input.getLong() : 0;
-        long liquidationFeeUnits = enriched ? input.getLong() : 0;
+        long executionPriceTicks = input.getLong();
+        long liquidationFeeRatePpm = input.getLong();
+        long liquidationFeeUnits = input.getLong();
         String status = readString(input);
         if (marginMode < 0 || marginMode >= CoreMarginMode.values().length
                 || positionSide < 0 || positionSide >= CorePositionSide.values().length) {
@@ -386,17 +356,10 @@ public final class CoreExportCodec {
             throw new ProtocolException("invalid export batch length");
         }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
-        if (input.remaining() >= BATCH_STATUS_FIXED_LENGTH && input.getInt(input.position()) == BATCH_V2_MARKER) {
-            input.position(input.position() + BATCH_STATUS_FIXED_LENGTH);
-            byte[] batch = new byte[input.remaining()];
-            input.get(batch);
-            return decodeBatch(batch);
-        }
-        return decodeLegacyBatch(encoded);
+        return decodeBatchPayload(input);
     }
 
-    private static List<CoreMessage> decodeLegacyBatch(byte[] encoded) {
-        ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
+    private static List<CoreMessage> decodeBatchPayload(ByteBuffer input) {
         if (input.remaining() < Integer.BYTES) {
             throw new ProtocolException("export batch is truncated");
         }

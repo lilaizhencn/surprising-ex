@@ -50,8 +50,8 @@ public final class CoreMessageCodec {
             throw new ProtocolException("invalid protocol magic");
         }
         int schemaVersion = Short.toUnsignedInt(buffer.getShort());
-        if (schemaVersion > CoreProtocol.SCHEMA_VERSION) {
-            throw new ProtocolException("unsupported future schema version: " + schemaVersion);
+        if (schemaVersion != CoreProtocol.SCHEMA_VERSION) {
+            throw new ProtocolException("unsupported schema version: " + schemaVersion);
         }
         WireMessageKind kind = WireMessageKind.fromWireCode(Byte.toUnsignedInt(buffer.get()));
         var productLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.get()));
@@ -60,7 +60,7 @@ public final class CoreMessageCodec {
         buffer.get();
         int headerLength = Short.toUnsignedInt(buffer.getShort());
         buffer.getShort();
-        if (headerLength < CoreProtocol.HEADER_LENGTH || headerLength > encoded.length) {
+        if (headerLength != CoreProtocol.HEADER_LENGTH) {
             throw new ProtocolException("invalid header length: " + headerLength);
         }
         UUID commandId = new UUID(buffer.getLong(), buffer.getLong());

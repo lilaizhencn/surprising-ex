@@ -74,15 +74,12 @@ class ProductLineTest {
     }
 
     @Test
-    void requiresExplicitIsolatedProductLineConfiguration() {
-        assertThat(ProductLineConfiguration.require(ProductLine.SPOT, true, "account"))
+    void requiresExplicitProductLineConfiguration() {
+        assertThat(ProductLineConfiguration.require(ProductLine.SPOT, "account"))
                 .isEqualTo(ProductLine.SPOT);
-        assertThatThrownBy(() -> ProductLineConfiguration.require(null, true, "account"))
+        assertThatThrownBy(() -> ProductLineConfiguration.require(null, "account"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("必须显式配置 product-line");
-        assertThatThrownBy(() -> ProductLineConfiguration.require(ProductLine.SPOT, false, "account"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("product-topics-enabled=true");
     }
 
     @Test

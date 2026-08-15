@@ -10,9 +10,6 @@ import java.util.UUID;
 public final class CoreStateQueryCodec {
 
     private static final int VERSION = 4;
-    private static final int VERSION_3 = 3;
-    private static final int VERSION_2 = 2;
-    private static final int VERSION_1 = 1;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreStateQueryCodec() {
@@ -143,12 +140,11 @@ public final class CoreStateQueryCodec {
 
     public static CoreUserStateView decodeUserState(byte[] encoded) {
         Reader reader = new Reader(encoded);
-        int version = reader.version(VERSION, VERSION_3, VERSION_2, VERSION_1);
+        reader.version(VERSION);
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
         long userId = reader.positiveLong("userId");
         long revision = reader.nonNegativeLong("revision");
-        CorePositionMode positionMode = version >= VERSION_3
-                ? CorePositionMode.fromWireCode(reader.intValue()) : CorePositionMode.ONE_WAY;
+        CorePositionMode positionMode = CorePositionMode.fromWireCode(reader.intValue());
         List<CoreBalanceView> balances = new ArrayList<>();
         for (int index = 0, count = reader.count("balances"); index < count; index++) {
             balances.add(new CoreBalanceView(reader.text(), reader.nonNegativeLong("availableUnits"),
@@ -166,21 +162,17 @@ public final class CoreStateQueryCodec {
         for (int index = 0, count = reader.count("positions"); index < count; index++) {
             String symbol = reader.text();
             String marginAsset = reader.text();
-            CoreMarginMode marginMode = version == VERSION
-                    ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
-            CorePositionSide positionSide = version == VERSION
-                    ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
+            CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
+            CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
             positions.add(new CorePositionView(symbol, marginAsset, marginMode, positionSide,
                     reader.nonNegativeLong("instrumentVersion"), reader.longValue(),
                     reader.nonNegativeLong("entryPriceTicks"), reader.nonNegativeLong("entryValueTicks"),
                     reader.longValue(), reader.nonNegativeLong("positionMarginUnits")));
         }
         List<CoreLeverageView> leverages = new ArrayList<>();
-        if (version >= VERSION) {
-            for (int index = 0, count = reader.count("leverages"); index < count; index++) {
-                leverages.add(new CoreLeverageView(reader.text(), CoreMarginMode.fromWireCode(reader.intValue()),
-                        reader.positiveLong("leveragePpm")));
-            }
+        for (int index = 0, count = reader.count("leverages"); index < count; index++) {
+            leverages.add(new CoreLeverageView(reader.text(), CoreMarginMode.fromWireCode(reader.intValue()),
+                    reader.positiveLong("leveragePpm")));
         }
         reader.requireConsumed();
         return new CoreUserStateView(productLine, userId, revision, positionMode, balances, reservations, positions,
@@ -231,7 +223,7 @@ public final class CoreStateQueryCodec {
     }
 
     private static CoreOrderStateView readOrderState(Reader reader) {
-        int version = reader.version(VERSION, VERSION_2, VERSION_1);
+        reader.version(VERSION);
         long orderId = reader.positiveLong("orderId");
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
         long userId = reader.positiveLong("userId");
@@ -243,19 +235,18 @@ public final class CoreStateQueryCodec {
         long executed = reader.nonNegativeLong("executedQuantitySteps");
         long remaining = reader.nonNegativeLong("remainingQuantitySteps");
         boolean reduceOnly = reader.booleanValue();
-        CoreMarginMode marginMode = version == VERSION ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
-        CorePositionSide positionSide = version == VERSION ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
-        CoreOrderType orderType = version == VERSION ? CoreOrderType.fromWireCode(reader.intValue()) : CoreOrderType.LIMIT;
-        CoreTimeInForce timeInForce = version == VERSION ? CoreTimeInForce.fromWireCode(reader.intValue()) : CoreTimeInForce.GTC;
-        boolean postOnly = version == VERSION && reader.booleanValue();
-        String clientOrderId = version == VERSION ? reader.optionalText() : "";
-        java.util.UUID commandId = version == VERSION
-                ? new java.util.UUID(reader.longValue(), reader.longValue()) : new java.util.UUID(0, orderId);
-        long makerFee = version == VERSION ? reader.longValue() : 0;
-        long takerFee = version == VERSION ? reader.longValue() : 0;
-        long createdAt = version == VERSION ? reader.nonNegativeLong("createdAt") : 0;
-        long updatedAt = version == VERSION ? reader.nonNegativeLong("updatedAt") : 0;
-        long clusterPosition = version == VERSION ? reader.nonNegativeLong("clusterPosition") : 0;
+        CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
+        CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
+        CoreOrderType orderType = CoreOrderType.fromWireCode(reader.intValue());
+        CoreTimeInForce timeInForce = CoreTimeInForce.fromWireCode(reader.intValue());
+        boolean postOnly = reader.booleanValue();
+        String clientOrderId = reader.optionalText();
+        java.util.UUID commandId = new java.util.UUID(reader.longValue(), reader.longValue());
+        long makerFee = reader.longValue();
+        long takerFee = reader.longValue();
+        long createdAt = reader.nonNegativeLong("createdAt");
+        long updatedAt = reader.nonNegativeLong("updatedAt");
+        long clusterPosition = reader.nonNegativeLong("clusterPosition");
         return new CoreOrderStateView(orderId, productLine, userId, symbol,
                 instrumentVersion, side, priceTicks, quantitySteps, executed, remaining, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,

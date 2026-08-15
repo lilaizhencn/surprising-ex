@@ -1,6 +1,5 @@
 package com.surprising.websocket.provider.service;
 
-import com.surprising.product.api.ProductLine;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.api.model.WsServerMessage;
@@ -108,9 +107,9 @@ public class SubscriptionRegistry {
         }
         fanoutBatches.increment();
         fanoutMessages.add(payloads.size());
-        sendBatchIncludingLegacyProductSubscribers(topic, payloads, eventTime);
+        sendBatch(topic, payloads, eventTime);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
-            sendBatchIncludingLegacyProductSubscribers(topic.withSymbol(SubscriptionTopic.WILDCARD), payloads, eventTime);
+            sendBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), payloads, eventTime);
         }
     }
 
@@ -121,9 +120,9 @@ public class SubscriptionRegistry {
         }
         fanoutBatches.increment();
         fanoutMessages.add(events.size());
-        sendTimedBatchIncludingLegacyProductSubscribers(topic, events);
+        sendTimedBatch(topic, events);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
-            sendTimedBatchIncludingLegacyProductSubscribers(topic.withSymbol(SubscriptionTopic.WILDCARD), events);
+            sendTimedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), events);
         }
     }
 
@@ -200,10 +199,6 @@ public class SubscriptionRegistry {
                 .register(meterRegistry);
     }
 
-    private void send(SubscriptionTopic topic, Object payload, Instant eventTime) {
-        sendBatch(topic, List.of(payload), eventTime);
-    }
-
     private void sendBatch(SubscriptionTopic topic, List<?> payloads, Instant eventTime) {
         Set<ClientConnection> connections = subscribers.get(topic);
         if (connections == null || connections.isEmpty()) {
@@ -219,16 +214,6 @@ public class SubscriptionRegistry {
             if (!accepted) {
                 backpressureRejections.increment();
                 remove(connection.id());
-            }
-        }
-    }
-
-    private void sendTimedBatchIncludingLegacyProductSubscribers(SubscriptionTopic topic,
-                                                                  List<TimedPayload> events) {
-        sendTimedBatch(topic, events);
-        if (topic.productLine() == null) {
-            for (ProductLine productLine : ProductLine.values()) {
-                sendTimedBatch(topic.withProductLine(productLine), events);
             }
         }
     }
@@ -252,27 +237,6 @@ public class SubscriptionRegistry {
 
     public SubscriptionTopic publicTopic(WsChannel channel, String symbol) {
         return new SubscriptionTopic(channel, symbol, null, null);
-    }
-
-    private void sendIncludingLegacyProductSubscribers(SubscriptionTopic topic, Object payload, Instant eventTime) {
-        send(topic, payload, eventTime);
-        if (topic.productLine() != null) {
-            return;
-        }
-        for (ProductLine productLine : ProductLine.values()) {
-            send(topic.withProductLine(productLine), payload, eventTime);
-        }
-    }
-
-    private void sendBatchIncludingLegacyProductSubscribers(SubscriptionTopic topic,
-                                                             List<?> payloads,
-                                                             Instant eventTime) {
-        sendBatch(topic, payloads, eventTime);
-        if (topic.productLine() == null) {
-            for (ProductLine productLine : ProductLine.values()) {
-                sendBatch(topic.withProductLine(productLine), payloads, eventTime);
-            }
-        }
     }
 
     private static final class ChannelAccumulator {

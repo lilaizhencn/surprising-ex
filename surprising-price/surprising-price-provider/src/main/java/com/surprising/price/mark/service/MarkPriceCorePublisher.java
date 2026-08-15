@@ -70,8 +70,8 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
     private void publishWithRetry(MarkPriceEvent event) {
         byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                 event.symbol(), event.instrumentVersion(), event.markPriceTicks(), event.sequence(),
-                event.publishedAt() == null ? event.eventTime() == null ? 0 : event.eventTime().toEpochMilli()
-                        : event.publishedAt().toEpochMilli()));
+                java.util.Objects.requireNonNull(event.publishedAt(), "mark price publishedAt is required")
+                        .toEpochMilli()));
         UUID commandId = UUID.nameUUIDFromBytes(("MARK_PRICE:" + event.symbol() + ':' + event.sequence())
                 .getBytes(StandardCharsets.UTF_8));
         for (int attempt = 1; attempt <= 3; attempt++) {

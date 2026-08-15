@@ -54,9 +54,9 @@ class JdbcCoreEventProjectorTest {
         state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 1, 1, 0, 1, 1),
                 CoreProtocol.probePayload(1)));
-        CoreMessage event = CoreExportCodec.decodeBatch(state.apply(new CoreMessage(CoreMessageHeader.query(
+        CoreMessage event = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(CoreMessageHeader.query(
                 CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
-                CommandSource.OPERATIONS, 1, 0, 0, 1, 2), CoreExportCodec.encodeBatchQuery(1))).data()).getFirst();
+                CommandSource.OPERATIONS, 1, 0, 0, 1, 2), CoreExportCodec.encodeBatchQuery(1))).data()).events().getFirst();
         JdbcCoreEventProjector projector = new JdbcCoreEventProjector(dataSource);
 
         assertThat(projector.project(ProductLine.SPOT, event)).isTrue();
@@ -156,7 +156,7 @@ class JdbcCoreEventProjectorTest {
         var event = new CoreExportEvent(4, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17,
                 TradingCommandCodec.encodeExecuteLiquidation(
-                        new com.surprising.aeron.protocol.ExecuteLiquidationCommand(9, 60_000)),
+                        new com.surprising.aeron.protocol.ExecuteLiquidationCommand(9, 1, 60_000, 25_000)),
                 java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(),
                 java.util.List.of(liquidation), java.util.List.of(treasury));
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.EXECUTE_LIQUIDATION, commandId,

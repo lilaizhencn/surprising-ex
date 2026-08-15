@@ -96,7 +96,7 @@ public final class ClusterApiAcceptanceMain {
         if (isPerpetual()) {
             applied(1, CoreMessageType.APPLY_MARK_PRICE,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            symbol, instrumentVersion, 100, 19_000_000_000L + seed)));
+                            symbol, instrumentVersion, 100, 19_000_000_000L + seed, 1_700_000_000_000L)));
             applied(1, CoreMessageType.APPLY_FUNDING,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
                             19_000_000_000L + seed, symbol, instrumentVersion, 10_000)));
