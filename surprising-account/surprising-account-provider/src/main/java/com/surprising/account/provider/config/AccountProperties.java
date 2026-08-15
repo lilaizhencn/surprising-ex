@@ -229,6 +229,18 @@ public class AccountProperties {
     }
 
     public static class Aeron {
+        private String sourceIdentity = "account-provider-node";
+
+        public String getSourceIdentity() {
+            return sourceIdentity;
+        }
+
+        public void setSourceIdentity(String sourceIdentity) {
+            if (sourceIdentity == null || sourceIdentity.isBlank()) {
+                throw new IllegalArgumentException("账户 Aeron sourceIdentity 不能为空");
+            }
+            this.sourceIdentity = sourceIdentity.trim();
+        }
         private java.util.List<String> hostnames = java.util.List.of("localhost", "localhost", "localhost");
         private String egressHostname = "localhost";
         private Duration responseTimeout = Duration.ofSeconds(5);

@@ -25,6 +25,7 @@ import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
 import com.surprising.aeron.service.state.OpenInterestIndex;
 import com.surprising.aeron.service.state.PositionUserIndex;
+import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
@@ -50,6 +51,7 @@ public final class CoreProbeState implements AutoCloseable {
     private final DeterministicExchangeCoreAdapter matchingAdapter;
     private final PositionUserIndex positionUserIndex;
     private final OpenInterestIndex openInterestIndex;
+    private final TriggerOrderIndex triggerOrderIndex;
     private final CoreExportState exportState;
     private final com.surprising.aeron.service.state.RollingBusinessStateHash rollingBusinessStateHash;
     private long appliedCommandCount;
@@ -94,6 +96,7 @@ public final class CoreProbeState implements AutoCloseable {
         this.matchingAdapter = new DeterministicExchangeCoreAdapter();
         this.positionUserIndex = new PositionUserIndex(tradingState);
         this.openInterestIndex = new OpenInterestIndex(tradingState);
+        this.triggerOrderIndex = new TriggerOrderIndex(tradingState);
         this.matchingAdapter.rebuild(tradingState);
     }
 
@@ -194,7 +197,12 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 var query = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeQuery(message.payload());
                 long before = query.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : query.beforeTriggerOrderId();
-                var values = tradingState.triggerOrders().values().stream()
+                java.util.stream.Stream<com.surprising.aeron.service.state.CoreTriggerOrderState> source = query.symbol().isEmpty()
+                        ? tradingState.triggerOrders().values().stream()
+                        : triggerOrderIndex.ids(query.symbol()).stream()
+                                .map(tradingState.triggerOrders()::get)
+                                .filter(java.util.Objects::nonNull);
+                var values = source
                         .filter(order -> message.header().userId() == 0 || order.userId() == message.header().userId())
                         .filter(order -> query.triggerOrderId() == 0 || order.triggerOrderId() == query.triggerOrderId())
                         .filter(order -> query.symbol().isEmpty() || order.symbol().equals(query.symbol()))
@@ -452,12 +460,12 @@ public final class CoreProbeState implements AutoCloseable {
         }
         boolean tradingStateChanged = status == ResponseStatus.APPLIED && tradingState != beforeTradingState;
         if (status == ResponseStatus.APPLIED) {
-            tradingState = commandOrderViews.isEmpty()
-                    ? tradingState.stampOrderChanges(beforeTradingState, clusterTimestamp, clusterPosition)
-                    : tradingState.stampOrderChanges(beforeTradingState, clusterTimestamp, clusterPosition,
-                    commandOrderViews.stream().map(CoreOrderStateView::orderId).toList());
-            positionUserIndex.update(beforeTradingState, tradingState);
-            openInterestIndex.update(beforeTradingState, tradingState);
+            List<Long> changedOrderIds = commandChangedOrderIds == null ? List.of() : commandChangedOrderIds;
+            tradingState = tradingState.stampOrderChanges(beforeTradingState, clusterTimestamp, clusterPosition,
+                    changedOrderIds);
+                positionUserIndex.update(beforeTradingState, tradingState);
+                openInterestIndex.update(beforeTradingState, tradingState);
+                triggerOrderIndex.update(beforeTradingState, tradingState);
         }
         if (tradingStateChanged) {
             rollingBusinessStateHash.update(beforeTradingState, tradingState);
@@ -499,6 +507,7 @@ public final class CoreProbeState implements AutoCloseable {
                 tradingState = beforeTradingState;
                 positionUserIndex.rebuild(beforeTradingState);
                 openInterestIndex.rebuild(beforeTradingState);
+                triggerOrderIndex.rebuild(beforeTradingState);
                 if (matchingCommand(message.header().messageType())) matchingAdapter.rebuild(beforeTradingState);
                 return rejected(CoreResultCode.EXPORT_BACKLOG_FULL);
             }
@@ -608,7 +617,7 @@ public final class CoreProbeState implements AutoCloseable {
             case SETTLE_INSTRUMENT, EXECUTE_LIQUIDATION, EXECUTE_ADL, RESOLVE_LIQUIDATION,
                     CONTINUE_RISK_SCAN -> commandChangedLiquidationIds = null;
             case PLACE_TRIGGER_ORDER, CANCEL_TRIGGER_ORDER, CLAIM_TRIGGER_ORDER, COMPLETE_TRIGGER_ORDER,
-                    UPDATE_TRIGGER_TRAILING -> commandChangedTriggerOrderIds = null;
+                    UPDATE_TRIGGER_TRAILING, EXPIRE_TRIGGER_ORDER, RETRY_TRIGGER_ORDER -> commandChangedTriggerOrderIds = null;
             default -> {
             }
         }
@@ -617,9 +626,12 @@ public final class CoreProbeState implements AutoCloseable {
                     probeValue, CoreProtocol.decodeProbeDelta(message.payload()));
             case VERIFY_STATE_HASH -> {
             }
-            case ADJUST_BALANCE -> tradingState = tradingReducer.adjustBalance(
-                    tradingState, message.header().userId(),
-                    TradingCommandCodec.decodeBalanceAdjustment(message.payload()));
+            case ADJUST_BALANCE -> {
+                commandChangedUserIds = List.of(message.header().userId());
+                tradingState = tradingReducer.adjustBalance(
+                        tradingState, message.header().userId(),
+                        TradingCommandCodec.decodeBalanceAdjustment(message.payload()));
+            }
             case PLACE_ORDER -> placeOrder(message);
             case CANCEL_ORDER -> cancelOrder(message);
             case REPLACE_ORDER -> replaceOrder(message);
@@ -635,11 +647,16 @@ public final class CoreProbeState implements AutoCloseable {
                 tradingState = result.state();
                 commandFundingPayments = result.payments();
                 commandFundingProgress = result.progress();
+                commandChangedUserIds = commandFundingPayments.stream()
+                        .map(com.surprising.aeron.protocol.CoreFundingPaymentView::userId).distinct().toList();
             }
             case SETTLE_INSTRUMENT -> settleInstrument(message);
             case EXECUTE_LIQUIDATION -> executeLiquidation(message);
-            case EXECUTE_ADL -> tradingState = tradingReducer.executeAdl(tradingState,
-                    TradingCommandCodec.decodeExecuteAdl(message.payload()));
+            case EXECUTE_ADL -> {
+                var command = TradingCommandCodec.decodeExecuteAdl(message.payload());
+                commandChangedUserIds = List.of(command.targetUserId());
+                tradingState = tradingReducer.executeAdl(tradingState, command);
+            }
             case RESOLVE_LIQUIDATION -> tradingState = tradingReducer.resolveLiquidation(tradingState,
                     TradingCommandCodec.decodeResolveLiquidation(message.payload()));
             case CONTINUE_RISK_SCAN -> tradingState = tradingReducer.continueRiskScan(tradingState,
@@ -647,27 +664,42 @@ public final class CoreProbeState implements AutoCloseable {
             case ACK_EXPORT -> {
                 var acknowledgedTerminalOrderIds = exportState.acknowledge(
                         CoreExportCodec.decodeAck(message.payload()));
+                commandChangedUserIds = acknowledgedTerminalOrderIds.stream()
+                        .map(tradingState::order)
+                        .filter(java.util.Objects::nonNull)
+                        .map(com.surprising.aeron.service.state.CoreOrderState::userId)
+                        .distinct().toList();
                 tradingState = tradingReducer.pruneAcknowledgedTerminalReservations(
                         tradingState, acknowledgedTerminalOrderIds);
             }
-            case UPDATE_POSITION_MODE -> tradingState = tradingReducer.updatePositionMode(
-                    tradingState, message.header().userId(),
-                    TradingCommandCodec.decodeUpdatePositionMode(message.payload()));
-            case ADJUST_POSITION_MARGIN -> tradingState = tradingReducer.adjustPositionMargin(
-                    tradingState, message.header().userId(),
-                    TradingCommandCodec.decodeAdjustPositionMargin(message.payload()));
+            case UPDATE_POSITION_MODE -> {
+                commandChangedUserIds = List.of(message.header().userId());
+                tradingState = tradingReducer.updatePositionMode(
+                        tradingState, message.header().userId(),
+                        TradingCommandCodec.decodeUpdatePositionMode(message.payload()));
+            }
+            case ADJUST_POSITION_MARGIN -> {
+                commandChangedUserIds = List.of(message.header().userId());
+                tradingState = tradingReducer.adjustPositionMargin(
+                        tradingState, message.header().userId(),
+                        TradingCommandCodec.decodeAdjustPositionMargin(message.payload()));
+            }
             case ADJUST_INSURANCE_FUND -> tradingState = tradingReducer.adjustInsuranceFund(
                     tradingState, TradingCommandCodec.decodeAdjustInsuranceFund(message.payload()));
-            case UPDATE_LEVERAGE -> tradingState = tradingReducer.updateLeverage(
-                    tradingState, message.header().userId(),
-                    TradingCommandCodec.decodeUpdateLeverage(message.payload()));
+            case UPDATE_LEVERAGE -> {
+                commandChangedUserIds = List.of(message.header().userId());
+                tradingState = tradingReducer.updateLeverage(
+                        tradingState, message.header().userId(),
+                        TradingCommandCodec.decodeUpdateLeverage(message.payload()));
+            }
             case UPSERT_ALGO_ORDER -> tradingState = tradingReducer.upsertAlgoOrder(tradingState,
                     message.header().userId(), com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(message.payload()));
             case UPDATE_CANCEL_ALL_AFTER -> tradingState = tradingReducer.updateCancelAllAfter(tradingState,
                     message.header().userId(),
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payload()));
             case PLACE_TRIGGER_ORDER -> tradingState = tradingReducer.upsertTriggerOrder(tradingState,
-                    message.header().userId(), com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payload()));
+                    message.header().userId(), com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payload()),
+                    triggerOrderIndex);
             case CANCEL_TRIGGER_ORDER -> tradingState = tradingReducer.cancelTriggerOrder(tradingState,
                     message.header().userId(), com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payload()));
             case CLAIM_TRIGGER_ORDER -> {
@@ -682,6 +714,15 @@ public final class CoreProbeState implements AutoCloseable {
             case UPDATE_TRIGGER_TRAILING -> {
                 long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payload());
                 tradingState = tradingReducer.updateTriggerTrailing(tradingState, trailing[0], trailing[1], trailing[2], trailing[3]);
+            }
+            case EXPIRE_TRIGGER_ORDER -> {
+                long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payload());
+                tradingState = tradingReducer.expireTriggerOrder(tradingState, lifecycle[0], lifecycle[1]);
+            }
+            case RETRY_TRIGGER_ORDER -> {
+                long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payload());
+                tradingState = tradingReducer.retryTriggerOrder(tradingState, lifecycle[0], lifecycle[1],
+                        message.header().submittedAtEpochMillis());
             }
             default -> {
                 return null;
@@ -712,28 +753,43 @@ public final class CoreProbeState implements AutoCloseable {
         TradingCoreState before = tradingState;
         TradingCoreState reserved = tradingReducer.placeOrder(before, message.header().userId(), command,
                 message.header().commandId(), openInterestIndex.openInterestSteps(command.symbol()));
-        var matchingResult = matchingAdapter.place(message.header().userId(), command);
+        var matchingResult = placeInMatching(before, message.header().userId(), command);
         if (!matchingResult.accepted()) {
             throw new CoreStateRejectedException("MATCHING_REJECTED", matchingResult.resultCode());
         }
-        tradingState = tradingReducer.applyMatches(reserved, command.orderId(),
-                command.baseAsset(), command.quoteAsset(), matchingResult.matches());
-        commandExecutions = executionViews(command.orderId(), message.header().userId(), matchingResult.matches());
-        commandChangedUserIds = java.util.stream.Stream.concat(
-                        java.util.stream.Stream.of(message.header().userId()),
-                        matchingResult.matches().stream()
-                                .map(com.surprising.aeron.service.matching.CoreMatch::makerUserId))
-                .distinct().toList();
-        commandChangedOrderIds = java.util.stream.Stream.concat(
-                        java.util.stream.Stream.of(command.orderId()),
-                        matchingResult.matches().stream()
-                                .map(com.surprising.aeron.service.matching.CoreMatch::makerOrderId))
-                .distinct().toList();
-        commandOrderViews = java.util.stream.Stream.concat(
-                        java.util.stream.Stream.of(command.orderId()),
-                        matchingResult.matches().stream()
-                                .map(com.surprising.aeron.service.matching.CoreMatch::makerOrderId))
-                .distinct().map(orderId -> orderView(tradingState.order(orderId))).toList();
+        try {
+            tradingState = tradingReducer.applyMatches(reserved, command.orderId(),
+                    command.baseAsset(), command.quoteAsset(), matchingResult.matches());
+            commandExecutions = executionViews(command.orderId(), message.header().userId(), matchingResult.matches());
+            commandChangedUserIds = java.util.stream.Stream.concat(
+                            java.util.stream.Stream.of(message.header().userId()),
+                            matchingResult.matches().stream()
+                                    .map(com.surprising.aeron.service.matching.CoreMatch::makerUserId))
+                    .distinct().toList();
+            commandChangedOrderIds = java.util.stream.Stream.concat(
+                            java.util.stream.Stream.of(command.orderId()),
+                            matchingResult.matches().stream()
+                                    .map(com.surprising.aeron.service.matching.CoreMatch::makerOrderId))
+                    .distinct().toList();
+            commandOrderViews = java.util.stream.Stream.concat(
+                            java.util.stream.Stream.of(command.orderId()),
+                            matchingResult.matches().stream()
+                                    .map(com.surprising.aeron.service.matching.CoreMatch::makerOrderId))
+                    .distinct().map(orderId -> orderView(tradingState.order(orderId))).toList();
+        } catch (RuntimeException exception) {
+            matchingAdapter.rebuild(before);
+            throw exception;
+        }
+    }
+
+    private com.surprising.aeron.service.matching.CoreMatchingResult placeInMatching(
+            TradingCoreState before, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command) {
+        try {
+            return matchingAdapter.place(userId, command);
+        } catch (RuntimeException exception) {
+            matchingAdapter.rebuild(before);
+            throw exception;
+        }
     }
 
     private void cancelOrder(CoreMessage message) {
@@ -749,12 +805,22 @@ public final class CoreProbeState implements AutoCloseable {
         var order = before.order(command.orderId());
         commandChangedUserIds = List.of(message.header().userId());
         commandChangedOrderIds = List.of(command.orderId());
-        var matchingResult = matchingAdapter.cancel(message.header().userId(), command.orderId(), order.symbol());
+        var matchingResult = cancelInMatching(before, message.header().userId(), command.orderId(), order.symbol());
         if (!matchingResult.accepted()) {
             throw new CoreStateRejectedException("MATCHING_REJECTED", matchingResult.resultCode());
         }
         tradingState = canceled;
         commandOrderViews = List.of(orderView(tradingState.order(command.orderId())));
+    }
+
+    private com.surprising.aeron.service.matching.CoreMatchingResult cancelInMatching(
+            TradingCoreState before, long userId, long orderId, String symbol) {
+        try {
+            return matchingAdapter.cancel(userId, orderId, symbol);
+        } catch (RuntimeException exception) {
+            matchingAdapter.rebuild(before);
+            throw exception;
+        }
     }
 
     private void replaceOrder(CoreMessage message) {
@@ -869,6 +935,9 @@ public final class CoreProbeState implements AutoCloseable {
                         && order.symbol().equals(liquidation.symbol())
                         && order.status() == com.surprising.aeron.service.state.CoreOrderStatus.OPEN)
                 .toList();
+        commandChangedUserIds = List.of(liquidation.userId());
+        commandChangedOrderIds = openOrders.stream()
+                .map(com.surprising.aeron.service.state.CoreOrderState::orderId).toList();
         try {
             for (var result : matchingAdapter.cancelBatch(openOrders)) {
                 if (!result.accepted()) {
@@ -892,6 +961,9 @@ public final class CoreProbeState implements AutoCloseable {
                 .filter(order -> order.symbol().equalsIgnoreCase(command.symbol())
                         && order.status() == com.surprising.aeron.service.state.CoreOrderStatus.OPEN)
                 .toList();
+        commandChangedUserIds = positionUserIndex.users(command.symbol()).stream().toList();
+        commandChangedOrderIds = openOrders.stream()
+                .map(com.surprising.aeron.service.state.CoreOrderState::orderId).toList();
         try {
             if (!continuation) {
                 for (var result : matchingAdapter.cancelBatch(openOrders)) {

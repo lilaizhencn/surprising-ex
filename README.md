@@ -19,7 +19,7 @@ Aeron Cluster、Topic、投影和账户类型。
 - Valkey 只承担限流和非权威缓存，不保存 Risk 状态、强平候选、资金或订单恢复进度。
 - Risk 按 symbol 保存确定性有界扫描游标；强平 Work、触发价格序列、仓位身份、执行、强平费和
   Insurance Treasury 全部由 Aeron 校验并原子提交。
-- `surprising-liquidation-provider` 是无状态协调器：查询 Aeron Liquidation Work、续跑 Risk Scan，使用
+- `surprising-liquidation` 是无状态协调器：查询 Aeron Liquidation Work、续跑 Risk Scan，使用
   稳定 `commandId` 重试强平命令；它不消费强平 Kafka 回环，也不维护 Redis 队列或 PostgreSQL 强平事务。
 - Core Exporter 以连续 Export Sequence 向 Kafka at-least-once 发布并幂等写 PostgreSQL；只有完整批次
   成功后才向 Aeron 提交 ACK，不新增数据库 outbox 或应用 WAL。

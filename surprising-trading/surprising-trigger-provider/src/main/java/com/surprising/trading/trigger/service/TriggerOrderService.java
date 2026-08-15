@@ -277,6 +277,17 @@ import org.springframework.transaction.support.TransactionTemplate;
         if (event == null || event.signedQuantitySteps() != 0L || event.eventTime() == null) {
             return;
         }
+        if (aeronEnabled()) {
+            List<CoreTriggerOrderStateView> open = aeronGateway.openOrders(event.userId(),
+                    normalizeSymbol(event.symbol()), 0, 1000);
+            for (CoreTriggerOrderStateView order : open) {
+                if (order.marginMode().name().equals(event.marginMode().name())
+                        && order.positionSide().name().equals(event.positionSide().name())) {
+                    aeronGateway.cancel(event.userId(), order.triggerOrderId());
+                }
+            }
+            return;
+        }
         List<TriggerOrderRecord> canceled = triggerOrderRepository.positionClosedCancellations(
                 currentProductLine(), event.userId(), normalizeSymbol(event.symbol()), event.marginMode(),
                 event.positionSide(), event.eventTime());
@@ -351,6 +362,17 @@ import org.springframework.transaction.support.TransactionTemplate;
     @Transactional
     public int cancelLifecycleOrders(String symbol, int limit) {
         String normalizedSymbol = normalizeSymbol(symbol);
+        if (aeronEnabled()) {
+            List<CoreTriggerOrderStateView> open = aeronGateway.openOrders(0, normalizedSymbol, 0,
+                    Math.min(1000, Math.max(1, limit)));
+            int canceled = 0;
+            for (CoreTriggerOrderStateView order : open) {
+                if (canceled >= limit) break;
+                aeronGateway.cancel(order.userId(), order.triggerOrderId());
+                canceled++;
+            }
+            return canceled;
+        }
         List<TriggerOrderRecord> canceled = triggerOrderRepository.cancelForLifecycle(
                 currentProductLine(), normalizedSymbol, limit, Instant.now());
         for (TriggerOrderRecord order : canceled) {
@@ -361,6 +383,9 @@ import org.springframework.transaction.support.TransactionTemplate;
     }
 
     public boolean hasLifecycleActiveOrders(String symbol) {
+        if (aeronEnabled()) {
+            return !aeronGateway.openOrders(0, normalizeSymbol(symbol), 0, 1).isEmpty();
+        }
         return triggerOrderRepository.hasLifecycleActiveOrders(
                 currentProductLine(), normalizeSymbol(symbol));
     }
@@ -566,6 +591,11 @@ import org.springframework.transaction.support.TransactionTemplate;
                 Math.min(1000, Math.max(1, properties.getExecution().getTriggerBatchSize())));
         for (CoreTriggerOrderStateView order : open) {
             if (order.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) continue;
+            if (order.expiresAtEpochMillis() > 0
+                    && order.expiresAtEpochMillis() <= markPrice.eventTime().toEpochMilli()) {
+                aeronGateway.expire(order.triggerOrderId(), markPrice.eventTime().toEpochMilli());
+                continue;
+            }
             if (order.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
                 processAeronTrailing(markPrice, order);
             } else if (triggered(order.triggerCondition(), markPrice.markPriceTicks(), order.triggerPriceTicks())) {
@@ -653,8 +683,12 @@ import org.springframework.transaction.support.TransactionTemplate;
         int limit = properties.getExecution().getTriggerBatchSize();
         List<CoreTriggerOrderStateView> candidates = aeronGateway.openOrders(0, priceTrigger.symbol(), 0, limit);
         for (CoreTriggerOrderStateView order : candidates) {
-            if (order.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING
-                    || (order.expiresAtEpochMillis() > 0 && order.expiresAtEpochMillis() <= System.currentTimeMillis())) {
+            if (order.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
+                continue;
+            }
+            if (order.expiresAtEpochMillis() > 0
+                    && order.expiresAtEpochMillis() <= priceTrigger.eventTime().toEpochMilli()) {
+                aeronGateway.expire(order.triggerOrderId(), priceTrigger.eventTime().toEpochMilli());
                 continue;
             }
             boolean matched = order.triggerCondition() == com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL
@@ -680,6 +714,22 @@ import org.springframework.transaction.support.TransactionTemplate;
 
     public void maintenance() {
         Instant now = Instant.now();
+        if (aeronEnabled()) {
+            long nowMillis = now.toEpochMilli();
+            long staleBefore = now.minus(properties.getExecution().getStaleTriggeringAfter()).toEpochMilli();
+            List<CoreTriggerOrderStateView> open = aeronGateway.openOrders(0, null, 0,
+                    Math.min(1000, Math.max(1, properties.getExecution().getTriggerBatchSize())));
+            for (CoreTriggerOrderStateView order : open) {
+                if (order.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING
+                        && order.expiresAtEpochMillis() > 0 && order.expiresAtEpochMillis() <= nowMillis) {
+                    aeronGateway.expire(order.triggerOrderId(), nowMillis);
+                } else if (order.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERING
+                        && order.updatedAtEpochMillis() <= staleBefore) {
+                    aeronGateway.retry(order.triggerOrderId(), staleBefore, nowMillis);
+                }
+            }
+            return;
+        }
         expirePending(now, properties.getExecution().getTriggerBatchSize());
         Instant staleBefore = now.minus(properties.getExecution().getStaleTriggeringAfter());
         resetStaleTriggering(staleBefore, now, properties.getExecution().getTriggerBatchSize());

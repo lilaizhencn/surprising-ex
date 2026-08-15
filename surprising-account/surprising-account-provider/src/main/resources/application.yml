@@ -52,6 +52,7 @@ surprising:
   account:
     internal-service-secret: ${ACCOUNT_INTERNAL_SERVICE_SECRET:}
     aeron:
+      source-identity: account-${HOSTNAME:node}
       hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
       egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
       response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}

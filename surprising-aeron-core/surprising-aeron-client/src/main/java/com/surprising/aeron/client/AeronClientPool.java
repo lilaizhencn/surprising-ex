@@ -34,6 +34,8 @@ public final class AeronClientPool implements AutoCloseable {
     private final List<String> hostnames;
     private final String egressHostname;
     private final Duration responseTimeout;
+    private final String sourceIdentity;
+    private final String sourceEpoch = UUID.randomUUID().toString();
     private final ClientSlot[] clients;
     private final ExecutorService commandExecutor;
     private final AtomicInteger nextClient = new AtomicInteger();
@@ -47,6 +49,17 @@ public final class AeronClientPool implements AutoCloseable {
             String egressHostname,
             Duration responseTimeout,
             int clientConnections) {
+        this(clientName, productLine, hostnames, egressHostname, responseTimeout, clientConnections, clientName);
+    }
+
+    public AeronClientPool(
+            String clientName,
+            ProductLine productLine,
+            List<String> hostnames,
+            String egressHostname,
+            Duration responseTimeout,
+            int clientConnections,
+            String sourceIdentity) {
         if (clientName == null || clientName.isBlank()) {
             throw new IllegalArgumentException("clientName is required");
         }
@@ -65,6 +78,10 @@ public final class AeronClientPool implements AutoCloseable {
             throw new IllegalArgumentException("responseTimeout must be positive");
         }
         this.responseTimeout = responseTimeout;
+        if (sourceIdentity == null || sourceIdentity.isBlank()) {
+            throw new IllegalArgumentException("sourceIdentity is required");
+        }
+        this.sourceIdentity = sourceIdentity.trim();
         if (clientConnections < 1 || clientConnections > 64) {
             throw new IllegalArgumentException("clientConnections must be in [1,64]");
         }
@@ -77,10 +94,8 @@ public final class AeronClientPool implements AutoCloseable {
             return thread;
         };
         this.commandExecutor = Executors.newFixedThreadPool(clientConnections, commandThreadFactory);
-        long processId = ProcessHandle.current().pid();
-        long epoch = System.currentTimeMillis();
         for (int index = 0; index < clients.length; index++) {
-            long sourceId = stableLong(this.clientName + ':' + productLine + ':' + processId + ':' + epoch + ':' + index);
+            long sourceId = stableLong(this.sourceIdentity + ':' + productLine + ':' + sourceEpoch + ':' + index);
             clients[index] = new ClientSlot(sourceId);
         }
     }

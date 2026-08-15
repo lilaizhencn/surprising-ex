@@ -121,6 +121,16 @@ public final class CoreTriggerOrderCodec {
                 reader.positive(), reader.nonNegative(), reader.nonNegative(), reader.nonNegative()}; reader.consumed(); return result;
     }
 
+    public static byte[] encodeLifecycle(long triggerOrderId, long timestampEpochMillis) {
+        Writer writer = new Writer(); writer.intValue(VERSION); writer.longValue(triggerOrderId);
+        writer.longValue(timestampEpochMillis); return writer.bytes();
+    }
+
+    public static long[] decodeLifecycle(byte[] encoded) {
+        Reader reader = new Reader(encoded); reader.version(); long[] result = new long[] {
+                reader.positive(), reader.positive()}; reader.consumed(); return result;
+    }
+
     private static final class Writer {
         private final ByteArrayOutputStream out = new ByteArrayOutputStream();
         void intValue(int value) { for (int i = 0; i < 4; i++) out.write(value >>> (i * 8)); }

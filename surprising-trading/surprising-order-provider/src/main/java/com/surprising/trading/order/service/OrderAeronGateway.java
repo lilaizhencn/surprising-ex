@@ -24,7 +24,8 @@ public class OrderAeronGateway implements AutoCloseable {
     public OrderAeronGateway(TradingOrderProperties properties) {
         TradingOrderProperties.Aeron aeron = properties.getAeron();
         this.clients = new AeronClientPool("order", properties.getKafka().getProductLine(), aeron.getHostnames(),
-                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections());
+                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
+                "order-" + properties.getKafka().getProductLine().name() + "-node-" + aeron.getNodeId());
     }
 
     public CoreResponse command(CoreMessageType type, UUID commandId, long userId, byte[] payload) {

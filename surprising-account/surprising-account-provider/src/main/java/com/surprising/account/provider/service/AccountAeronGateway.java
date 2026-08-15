@@ -24,7 +24,8 @@ public class AccountAeronGateway implements AutoCloseable {
         ProductLine productLine = properties.getKafka().getProductLine();
         AccountProperties.Aeron aeron = properties.getAeron();
         this.clients = new AeronClientPool("account", productLine, aeron.getHostnames(),
-                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections());
+                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
+                aeron.getSourceIdentity());
     }
 
     public CoreResponse command(CoreMessageType type, UUID commandId, long userId, byte[] payload) {

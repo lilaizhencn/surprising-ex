@@ -32,7 +32,8 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     public TriggerOrderAeronGateway(TriggerProperties properties) {
         var aeron = properties.getAeron();
         this.clients = new AeronClientPool("trigger", properties.getKafka().getProductLine(), aeron.getHostnames(),
-                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections());
+                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
+                "trigger-" + properties.getKafka().getProductLine().name() + "-node-" + aeron.getNodeId());
     }
     public CoreResponse command(CoreMessageType type, UUID id, long userId, byte[] payload) {
         CoreResponse response = clients.command(type, id, userId, payload);
@@ -58,6 +59,14 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     public void updateTrailing(long id, long highest, long lowest, long activatedAt) {
         command(CoreMessageType.UPDATE_TRIGGER_TRAILING, stable("TRIGGER_TRAILING:" + id + ':' + highest + ':' + lowest),
                 0, CoreTriggerOrderCodec.encodeTrailing(id, highest, lowest, activatedAt));
+    }
+    public void expire(long id, long expiredAt) {
+        command(CoreMessageType.EXPIRE_TRIGGER_ORDER, stable("TRIGGER_EXPIRE:" + id + ':' + expiredAt), 0,
+                CoreTriggerOrderCodec.encodeLifecycle(id, expiredAt));
+    }
+    public void retry(long id, long staleBefore, long retryAt) {
+        command(CoreMessageType.RETRY_TRIGGER_ORDER, stable("TRIGGER_RETRY:" + id + ':' + retryAt), 0,
+                CoreTriggerOrderCodec.encodeLifecycle(id, staleBefore));
     }
     private void requireOk(CoreResponse response) { if (response.status() != ResponseStatus.OK) throw new IllegalStateException(response.resultCode().name() + ": Aeron trigger query failed"); }
     private static UUID stable(String value) { return UUID.nameUUIDFromBytes(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }

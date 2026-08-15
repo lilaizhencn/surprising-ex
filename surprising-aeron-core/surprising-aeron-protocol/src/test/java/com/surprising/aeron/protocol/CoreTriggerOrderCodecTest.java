@@ -34,4 +34,11 @@ class CoreTriggerOrderCodecTest {
                 java.util.Arrays.copyOf(encoded, encoded.length - 1)))
                 .isInstanceOf(ProtocolException.class);
     }
+
+    @Test
+    void roundTripsLifecycleCommand() {
+        assertThat(CoreTriggerOrderCodec.decodeLifecycle(
+                CoreTriggerOrderCodec.encodeLifecycle(501, 1_700_000_000_000L)))
+                .containsExactly(501L, 1_700_000_000_000L);
+    }
 }

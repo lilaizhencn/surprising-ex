@@ -1,6 +1,6 @@
 # Surprising Liquidation
 
-强平权威状态和资金结算位于每条产品线的 Aeron Cluster。`surprising-liquidation-provider` 是无状态
+强平权威状态和资金结算位于每条产品线的 Aeron Cluster。`surprising-liquidation` 是无状态
 Liquidation Coordinator，不保存候选、不创建交易订单，也不参与资金裁决。
 
 ## 运行流程
