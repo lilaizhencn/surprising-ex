@@ -158,7 +158,7 @@ surprising:
         target-prefix: /api/v1/price/fx
         private-route: false
       price-mark:
-        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9083}
+        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9082}
         target-prefix: /api/v1/price/mark
         private-route: false
         product-routes:
@@ -460,7 +460,7 @@ surprising:
         target-prefix: /api/v1/price/fx
         private-route: true
       price-mark:
-        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9083}
+        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9082}
         target-prefix: /api/v1/price/mark
         private-route: true
         product-routes:

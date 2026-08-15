@@ -100,8 +100,7 @@ Chronicle 版本由父 POM 的 BOM 统一管理，避免旧版在 JDK 25 中触�
 |---|---:|
 | instrument | 9080 |
 | candlestick | 9081 |
-| index-price | 9082 |
-| mark-price | 9083 |
+| price-provider（index/mark/fx） | 9082 |
 | order | 9084 |
 | trigger | 9095 |
 | matching | 9085 |

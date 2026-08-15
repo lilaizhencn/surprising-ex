@@ -19,8 +19,7 @@
     <modules>
         <module>surprising-price-api</module>
         <module>surprising-price-consumer</module>
-        <module>surprising-index-price-provider</module>
-        <module>surprising-mark-price-provider</module>
+        <module>surprising-price-provider</module>
     </modules>
 
     <dependencyManagement>

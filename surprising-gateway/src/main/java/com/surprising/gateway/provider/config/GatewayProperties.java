@@ -332,7 +332,7 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("candlestick", new BackendRoute("http://localhost:9081", "/api/v1/candlestick", false));
         routes.put("price-index", new BackendRoute("http://localhost:9082", "/api/v1/price/index", false));
         routes.put("price-fx", new BackendRoute("http://localhost:9082", "/api/v1/price/fx", false));
-        routes.put("price-mark", new BackendRoute("http://localhost:9083", "/api/v1/price/mark", false));
+        routes.put("price-mark", new BackendRoute("http://localhost:9082", "/api/v1/price/mark", false));
         routes.put("trading", new BackendRoute("http://localhost:9084", "/api/v1/trading/orders", true));
         routes.put("trading-leverage", new BackendRoute("http://localhost:9084", "/api/v1/trading/leverage", true));
         routes.put("trading-market", new BackendRoute("http://localhost:9085", "/api/v1/trading/market", false));
@@ -356,7 +356,7 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("candlestick", new BackendRoute("http://localhost:9081", "/api/v1/candlestick", true));
         routes.put("price-index", new BackendRoute("http://localhost:9082", "/api/v1/price/index", true));
         routes.put("price-fx", new BackendRoute("http://localhost:9082", "/api/v1/price/fx", true));
-        routes.put("price-mark", new BackendRoute("http://localhost:9083", "/api/v1/price/mark", true));
+        routes.put("price-mark", new BackendRoute("http://localhost:9082", "/api/v1/price/mark", true));
         routes.put("trading", new BackendRoute("http://localhost:9084", "/api/v1/admin/trading/orders", true));
         routes.put("trading-orders", new BackendRoute("http://localhost:9084", "/api/v1/admin/trading/orders", true));
         routes.put("trading-fees", new BackendRoute("http://localhost:9084", "/api/v1/admin/trading/fees", true));

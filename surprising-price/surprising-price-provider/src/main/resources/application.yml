@@ -1,0 +1,144 @@
+server:
+  port: 9082
+
+spring:
+  application:
+    name: surprising-price-provider
+  task:
+    scheduling:
+      pool:
+        size: 9
+      thread-name-prefix: price-scheduler-
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  price:
+    consumer:
+      bootstrap-servers: localhost:9092
+      product-line: ${PRODUCT_LINE}
+      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
+      topic: surprising.perp.mark.price.v1
+      group-id: surprising-mark-price-query-${HOSTNAME:${random.uuid}}
+      max-age: 3s
+      allowed-future-skew: 1s
+      concurrency: 1
+      max-poll-records: 500
+    index:
+      kafka:
+        bootstrap-servers: localhost:9092
+        product-line: ${PRODUCT_LINE}
+        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
+        index-price-topic: surprising.perp.index.price.v1
+        group-id: surprising-index-price-v1
+        cache-group-id: surprising-index-price-cache-${HOSTNAME:${random.uuid}}
+        concurrency: 2
+        max-poll-records: 500
+      calculation:
+        poll-delay-ms: 1000
+        max-source-age: 5s
+        outlier-threshold: 0.01
+        min-valid-sources: 3
+        scale: 18
+        conversion-cache-ttl: 30s
+      http:
+        connect-timeout: 2s
+        request-timeout: 3s
+        max-concurrent-requests: 32
+        user-agent: surprising-price/1.0
+      web-socket:
+        enabled: true
+        refresh-delay-ms: 30000
+        idle-timeout: 20s
+        reconnect-initial-delay: 1s
+        reconnect-max-delay: 30s
+        health-check-interval: 5s
+      coordination:
+        enabled: true
+        node-id:
+        lease-duration: 15s
+      audit:
+        retention: 3d
+        cleanup-delay-ms: 60000
+        cleanup-batch-size: 10000
+        max-batches-per-run: 10
+      fiat:
+        enabled: true
+        refresh-delay-ms: 3600000
+        stale-after: 30h
+        provider: OPEN_ER_API
+        base-url: https://open.er-api.com
+        path: /v6/latest/{base}
+        base-currency: USD
+        quote-currencies:
+          - CNY
+          - EUR
+          - JPY
+          - KRW
+          - GBP
+          - AUD
+          - CAD
+          - HKD
+          - TWD
+          - SGD
+          - INR
+          - BRL
+          - TRY
+          - VND
+          - THB
+          - PHP
+          - IDR
+          - MYR
+        stable-coin:
+          enabled: true
+          refresh-delay-ms: 10000
+          stale-after: 5m
+          currency: USDT
+          fiat-currency: USD
+          base-url: https://api.exchange.coinbase.com
+          path: /products/USDT-USD/ticker
+          parser: COINBASE_TICKER
+          fallback-rate: 1
+    mark:
+      kafka:
+        bootstrap-servers: localhost:9092
+        product-line: ${PRODUCT_LINE}
+        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
+        group-id: surprising-mark-price-v1
+        concurrency: 2
+        max-poll-records: 500
+      topics:
+        book-ticker-topic: surprising.perp.book.ticker.v1
+        trade-topic: surprising.perp.trade.events.v1
+        funding-rate-topic: surprising.perp.funding.rate.v1
+        mark-price-topic: surprising.perp.mark.price.v1
+      calculation:
+        publish-interval-ms: 1000
+        basis-window: 60s
+        max-input-age: 15s
+        clamp-ratio: 0.03
+        default-funding-interval-hours: 8
+        scale: 18
+      coordination:
+        enabled: true
+        node-id:
+        lease-duration: 15s
+      audit:
+        retention: 3d
+        cleanup-delay-ms: 60000
+        cleanup-batch-size: 10000
+        max-batches-per-run: 10

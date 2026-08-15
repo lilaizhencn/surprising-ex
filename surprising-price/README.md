@@ -6,24 +6,26 @@ Surprising Exchange 合约指数价格和标记价格模块。
 ## 模块
 
 - `surprising-price-api`：RPC 合约和 Kafka 事件模型。
-- `surprising-index-price-provider`：外部现货源采集和指数价格计算。
-- `surprising-mark-price-provider`：用于风控、强平、账户权益和 WebSocket 展示的标记价格计算。
+- `surprising-price-provider`：在同一进程内完成外部现货源采集、指数价格、标记价格和法币汇率服务。
+- `surprising-price-consumer`：供 account/order/trigger/funding/maker/ADL 等下游消费标记价格的共享缓存适配层。
 
 ## 架构
 
 ```text
 外部现货交易所
-  -> surprising-index-price-provider
+  -> surprising-price-provider/index
   -> surprising.linear-perp.index.price.v1
-  -> surprising-mark-price-provider
+  -> 同一进程内直接交给 surprising-price-provider/mark
   -> surprising.linear-perp.mark.price.v1
   -> risk / liquidation / account / websocket
 
 法币汇率源 + USDT/USD 稳定币行情
-  -> surprising-index-price-provider
+  -> surprising-price-provider/index
   -> PostgreSQL price_exchange_rates
   -> app / api-gateway 展示本地法币价格
 ```
+
+指数价与标记价在同一 JVM 内通过 `IndexPriceService -> MarkPriceService.acceptIndexPrice` 直接传递，标记价不再消费本进程刚发布的指数价 Kafka topic。指数价 topic 仍保留给外部消费者和审计，标记价 topic 仍保留给风控、强平、账户和 WebSocket 等下游；provider 自身的最新标记价查询缓存由发布路径直接更新。
 
 这个模块刻意和 K 线服务分开。指数价格和标记价格是风控输入，K 线是行情历史聚合。分开部署可以避免风控价格被 K 线查询或 WebSocket 推送压力影响。
 
@@ -279,15 +281,14 @@ brew services start postgresql@18
 brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 # Topic 初始化命令待验证脚本重新整理后补回
-mvn -pl :surprising-index-price-provider -am spring-boot:run
-mvn -pl :surprising-mark-price-provider -am spring-boot:run
+mvn -pl :surprising-price-provider -am spring-boot:run
 ```
 
 查询最新价格：
 
 ```bash
 curl 'http://localhost:9082/api/v1/price/index/latest?symbol=BTC-USDT'
-curl 'http://localhost:9083/api/v1/price/mark/latest?symbol=BTC-USDT'
+curl 'http://localhost:9082/api/v1/price/mark/latest?symbol=BTC-USDT'
 curl 'http://localhost:9082/api/v1/price/fx/convert?amount=1&fromCurrency=USDT&toCurrency=CNY'
 ```
 

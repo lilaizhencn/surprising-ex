@@ -83,7 +83,7 @@ surprising:
     instrument:
       base-url: http://localhost:9080
     mark-price:
-      base-url: http://localhost:9083
+      base-url: http://localhost:9082
     matching:
       base-url: http://localhost:9085
     order:
