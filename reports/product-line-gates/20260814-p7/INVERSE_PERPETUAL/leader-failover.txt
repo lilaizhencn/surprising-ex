@@ -1,2 +1,0 @@
-leader_before_kill=node1
-productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=80200

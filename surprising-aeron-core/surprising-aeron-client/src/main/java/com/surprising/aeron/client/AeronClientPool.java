@@ -13,6 +13,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -29,6 +35,7 @@ public final class AeronClientPool implements AutoCloseable {
     private final String egressHostname;
     private final Duration responseTimeout;
     private final ClientSlot[] clients;
+    private final ExecutorService commandExecutor;
     private final AtomicInteger nextClient = new AtomicInteger();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicReference<MediaDriver> mediaDriver = new AtomicReference<>();
@@ -62,6 +69,14 @@ public final class AeronClientPool implements AutoCloseable {
             throw new IllegalArgumentException("clientConnections must be in [1,64]");
         }
         this.clients = new ClientSlot[clientConnections];
+        AtomicInteger commandThreadSequence = new AtomicInteger();
+        ThreadFactory commandThreadFactory = runnable -> {
+            Thread thread = new Thread(runnable, this.clientName + "-command-"
+                    + commandThreadSequence.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+        this.commandExecutor = Executors.newFixedThreadPool(clientConnections, commandThreadFactory);
         long processId = ProcessHandle.current().pid();
         long epoch = System.currentTimeMillis();
         for (int index = 0; index < clients.length; index++) {
@@ -88,6 +103,18 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
+    public CompletableFuture<CoreResponse> commandAsync(
+            CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+        if (closed.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Aeron client pool is closed"));
+        }
+        try {
+            return CompletableFuture.supplyAsync(() -> command(type, commandId, userId, payload), commandExecutor);
+        } catch (RejectedExecutionException exception) {
+            return CompletableFuture.failedFuture(exception);
+        }
+    }
+
     public CoreResponse query(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
         if (type == null || type.kind() != com.surprising.aeron.protocol.WireMessageKind.QUERY) {
             throw new IllegalArgumentException("query message type is required");
@@ -111,6 +138,20 @@ public final class AeronClientPool implements AutoCloseable {
             return;
         }
         RuntimeException failure = null;
+        commandExecutor.shutdown();
+        try {
+            long timeoutMillis = Math.max(1L, responseTimeout.toMillis());
+            if (!commandExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
+                commandExecutor.shutdownNow();
+                if (!commandExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
+                    failure = new IllegalStateException("Aeron command executor did not terminate");
+                }
+            }
+        } catch (InterruptedException exception) {
+            commandExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+            failure = new IllegalStateException("Interrupted while stopping Aeron command executor", exception);
+        }
         for (ClientSlot slot : clients) {
             acquireSlotForClose(slot);
             try {

@@ -1,1 +1,0 @@
-apiAcceptance=PASS mode=finalize productLine=INVERSE_DELIVERY symbol=P8-INVERSE-DELIVERY-BTC-USDT seller=30000092051 buyer=30000092052 fundsDiff=0 seed=9205

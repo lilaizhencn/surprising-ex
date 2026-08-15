@@ -1,7 +1,0 @@
-instrument: started pid 48618 port 9080 productLine OPTION
-instrument: already ready on port 9080; reusing existing provider
-order: started pid 48684 port 9084 productLine OPTION
-matching: started pid 48718 port 9085 productLine OPTION
-account: started pid 48749 port 9086 productLine OPTION
-websocket: started pid 48792 port 9097 productLine OPTION
-gateway: started pid 48866 port 9094 productLine OPTION

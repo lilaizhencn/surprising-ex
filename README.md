@@ -5,6 +5,9 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 仓库覆盖现货、U/币本位永续、U/币本位交割和欧式现金结算期权；每条产品线使用独立的三节点
 Aeron Cluster、Topic、投影和账户类型。
 
+当前分支正在重新整理文档和验证脚本，`docs/` 与 `scripts/` 已移除。本文档和各模块 README
+是当前保留的说明入口；部署、压测和资金对账脚本将在重新设计后补回。
+
 ## 核心边界
 
 - Aeron Cluster 中的 Unified Core State 是资金、订单、订单簿、持仓、Risk、强平和 Treasury 的唯一
@@ -58,28 +61,32 @@ Aeron Cluster、Topic、投影和账户类型。
 Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
 必须跨表，源码需要逐项写明中文“不可拆原因”。后台订单时间线、资金对账和运营报表不得在交易主库新增
 多表 JOIN；后续财务运营模块应消费领域事件，并使用独立数据库建立查询投影。
-CI 可运行 `./scripts/check-persistence-boundaries.sh`，拦截 Repository 之外的生产 JDBC 访问，
-以及未写中文“不可拆原因”的多表 Repository。
+边界约束由对应模块的源码和 Maven 测试维护；原有独立检查脚本已随 `scripts/` 一起移除，新的检查方式
+将在验证脚本重新整理后补充。
 
 Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，不直接访问 Repository，也不承载事务或
-业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。CI 可运行
-`./scripts/check-entry-layer-boundaries.sh`，阻止 Controller 越过 Service，以及 `@Scheduled`
-回流到 Service、Repository 或客户端实现。
+业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。入口层边界由源码审查和
+对应 Maven 测试维护。
 
 ## 构建与本地启动
 
-要求 JDK 25。先启动 PostgreSQL、Kafka 和 Redis，再初始化数据库与 Topic：
+要求 JDK 25。基础设施启动、数据库初始化和 Topic 创建脚本正在重新整理；当前可以先执行：
 
 ```bash
 mvn -DskipTests package
-psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
-PRODUCT_LINES=LINEAR_PERPETUAL PARTITIONS=32 ACCOUNT_COMMAND_PARTITIONS=32 ./scripts/create-topics.sh
-PRODUCT_LINE=LINEAR_PERPETUAL PORT_OFFSET=100 ORDER_WAL_NODE_ID=101 BUILD_SERVICES=false ./scripts/start-product-line-providers.sh
+mvn test
 ```
 
-matching 使用 `exchange.core2:exchange-core:0.5.3` 及其 Chronicle/OpenHFT 传递依赖，必须使用
-[部署文档](docs/deployment.md) 中列出的 `--add-opens/--add-exports` JVM 参数。Chronicle 版本由
-父 POM 的 BOM 统一管理，避免旧版在 JDK 25 中触发 `unmap0`/`Bytes` 初始化错误。默认合并进程和端口：
+matching 使用 `exchange.core2:exchange-core:0.5.8-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
+以下 JVM 参数：
+
+```text
+--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
+--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
+```
+
+Chronicle 版本由父 POM 的 BOM 统一管理，避免旧版在 JDK 25 中触发 `unmap0`/`Bytes` 初始化错误。
+默认合并进程和端口：
 
 | Provider | 端口 |
 |---|---:|
@@ -104,32 +111,18 @@ matching 使用 `exchange.core2:exchange-core:0.5.3` 及其 Chronicle/OpenHFT �
 
 ```bash
 mvn test
-./scripts/integration-smoke.sh
-
-PRODUCT_LINES=LINEAR_PERPETUAL \
-BUILD_SERVICES=auto \
-CREATE_KAFKA_TOPICS=true \
-RECONCILE_FUNDS=true \
-./scripts/product-line-api-flow-smoke.sh
+mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ```
 
-产品线 smoke 覆盖真实 API 下单、做市、撮合、账户结算、主动平仓、强平和适用的资金费/
-交割/行权，最后执行资金守恒核对。压测报告默认写入临时目录；只有稳定、可复现的长期结论才应整理进文档。
+当前 Maven 测试覆盖构建和核心 Aeron 客户端/工具链；完整产品线验收、压测和资金守恒核对脚本待重新整理。
+交易裁决和结算在 Aeron Core 内存状态机完成；PostgreSQL 只用于异步投影、审计和对账。
 
 ## 生产部署
 
-四条产品线必须按独立 Runbook 部署：
+生产部署 Runbook、基础设施初始化和容量基线正在重新整理，当前不提供可直接执行的部署命令。
+即使部署文档尚未恢复，四条产品线仍必须独立配置和验证：
 
-- [SPOT 现货 Runbook](docs/runbook-spot.md)
-- [LINEAR_PERPETUAL U 本位永续 Runbook](docs/runbook-linear-perpetual.md)
-- [LINEAR_DELIVERY U 本位交割 Runbook](docs/runbook-linear-delivery.md)
-- [OPTION 欧式期权 Runbook](docs/runbook-option.md)
-
-永续首发的 EC2、JVM、RDS、MSK、Valkey 和容量基线见
-[LINEAR_PERPETUAL AWS 生产部署基线](docs/linear-perpetual-aws-production-deployment.md)。
-部署前必须：
-
-- 关闭 Kafka 自动建 Topic，使用 [create-topics.sh](scripts/create-topics.sh) 显式创建；
+- 关闭 Kafka 自动建 Topic，使用经过审查的 Topic 初始化配置显式创建；
 - 永续首发把普通 Topic 和账户指令 Topic 都固定为 32 分区，RF=3、`min.insync.replicas=2`；
 - 不在已有 symbol-keyed Topic 上直接增加分区；扩容需要新版本 Topic、维护窗口和状态重建方案；
 - 为每条产品线配置独立 Topic、消费组、client id、协调 node id 和 gateway route；`PRODUCT_LINE`
@@ -143,16 +136,18 @@ RECONCILE_FUNDS=true \
 - 保持 PostgreSQL durability，监控 Kafka lag、Outbox pending/最老年龄、数据库锁与慢 SQL、Redis
   readiness、JVM GC，并在上线前完成故障切换和资金零差异核对。
 
-Topic 的精确清单、分区数量和创建后校验命令见 [部署文档](docs/deployment.md)。
+Topic 的精确清单、分区数量和创建后校验命令待部署文档重新整理后补充。
 
 ## 文档
 
-- [文档索引](docs/README.md)
-- [部署与 Topic 规划](docs/deployment.md)
-- [数据库设计](docs/database.md)
-- [产品线架构](docs/product-line-architecture.md)
-- [账户单写者和单用户串行](docs/account-single-writer-command-lane.md)
-- [高并发与资金安全改造执行计划](docs/high-concurrency-stability-execution-plan.md)
-- [持仓 Redis 读模型](docs/position-redis-cache.md)
-- [未完成订单 Redis 投影](docs/open-order-redis-cache.md)
-- [测试与资金守恒](docs/product-line-testing-and-funds-reconciliation.md)
+当前保留的文档入口：
+
+- 根目录架构、构建和测试说明：本文档；
+- [账户模块 README](surprising-account/README.md)；
+- [Aeron 核心模块 README](surprising-aeron-core/README.md)；
+- [撮合交易模块 README](surprising-trading/README.md)；
+- [网关模块 README](surprising-gateway/README.md)；
+- [WebSocket 模块 README](surprising-websocket/README.md)；
+- 其他模块的 README 位于各自模块目录下。
+
+新的部署、产品线、资金模型、撮合和压测文档请按主题补回，并同步更新本文档入口。

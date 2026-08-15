@@ -278,7 +278,7 @@ curl 'https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT'
 brew services start postgresql@18
 brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
-./scripts/create-topics.sh
+# Topic 初始化命令待验证脚本重新整理后补回
 mvn -pl :surprising-index-price-provider -am spring-boot:run
 mvn -pl :surprising-mark-price-provider -am spring-boot:run
 ```

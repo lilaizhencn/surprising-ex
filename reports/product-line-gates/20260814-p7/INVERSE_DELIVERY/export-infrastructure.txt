@@ -1,1 +1,0 @@
-exportInfrastructure=PASS productLine=INVERSE_DELIVERY sequence=1786682043091 kafkaTopic=surprising.inverse-delivery.core.events.v1 pgRows=1

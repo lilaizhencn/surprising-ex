@@ -157,7 +157,7 @@ producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.con
 brew services start postgresql@18
 brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
-./scripts/create-topics.sh
+# Topic 初始化命令待验证脚本重新整理后补回
 mvn -pl :surprising-instrument-provider -am spring-boot:run
 ```
 

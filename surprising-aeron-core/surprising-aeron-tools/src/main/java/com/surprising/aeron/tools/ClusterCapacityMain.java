@@ -270,8 +270,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 CoreOrderSide takerSide = CoreOrderSide.BUY;
                 long started = System.nanoTime();
                 throttle();
-                CompletableFuture<CoreResponse> maker = clients.commandAsync(CoreMessageType.PLACE_ORDER,
-                        stableId("async-maker:" + makerOrder), firstUser(pair),
+                CompletableFuture<CoreResponse> maker = clients.commandAsync(
+                        CoreMessageType.PLACE_ORDER, stableId("async-maker:" + makerOrder), firstUser(pair),
                         TradingCommandCodec.encodePlaceOrder(order(symbol, makerOrder, makerSide, CoreTimeInForce.GTC)));
                 throttle();
                 CompletableFuture<CoreResponse> pairResult = maker.thenCompose(response -> {

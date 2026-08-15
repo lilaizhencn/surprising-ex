@@ -33,8 +33,8 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
   `AccountStateProjectionConsumer` 使用独立消费组把完整状态异步投影到余额、负债、持仓、逐仓保证金、
   仓位模式和订单锁定汇总表，重复或过期修订号幂等忽略。
 - 账户持仓事件同时进入按产品线隔离的 `PositionSnapshotCache`，按精确持仓键进行 revision 防回退。
-  该 JVM 快照是订单、风控和强平实时计算输入；数据库只接受异步投影，正式部署仍必须遵循
-  [账户单写者与单用户串行通道](../docs/account-single-writer-command-lane.md)。
+  该 JVM 快照是订单、风控和强平实时计算输入；数据库只接受异步投影，正式部署仍必须遵循账户单写者
+  与单用户串行原则。详细设计文档待重新整理后补回。
 - 账户用户分区执行器只保留命令幂等、顺序、资金守恒和崩溃恢复编排，不在生产热路径构造 JDBC Repository；
   数据库写入由独立异步投影器完成。
 - `account_commands` 审计和 `account_product_ledger_entries` 账本使用独立的 WAL 投影水位；账本投影
@@ -105,8 +105,7 @@ account-provider 使用独立的批量 listener factory、32 个 listener lane �
 事务回滚。`account_trade_settlement_completions` 只暴露双边均已完成的成交。监控通过仅包含
 待核对记录的部分索引分批核对完成记录；单侧长时间未完成时 `accountTradeSettlement` health
 会变为 `DOWN`。命令依赖持久化为
-`depends_on_command_id`，正确性不依赖生产顺序或结果 Topic 顺序。完整设计见
-[账户资金单写者与单用户串行通道](../docs/account-single-writer-command-lane.md)。
+`depends_on_command_id`，正确性不依赖生产顺序或结果 Topic 顺序。完整设计文档待重新整理后补回。
 
 ## 接口
 
@@ -267,7 +266,7 @@ account-provider 进程使用稳定且唯一的 client id，同产品线副本�
 brew services start postgresql@18
 brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
-./scripts/create-topics.sh
+# Topic 初始化命令待验证脚本重新整理后补回
 mvn -pl :surprising-account-provider -am spring-boot:run
 ```
 
@@ -278,8 +277,8 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 ## 生产注意事项
 
 - 余额调整必须携带全局唯一 `referenceId`，防止充值/冲正重复入账。同一 reference 的重放只有在 `amountUnits` 和 `reason` 与原流水一致时才会幂等返回；payload 不一致会在改余额前失败。
-- 除 `AccountCommandGateway` 和 `AccountUserStateCommandWorker` 外不能调用账户写服务。CI 运行
-  `scripts/check-account-single-writer.sh`，防止其他模块重新引入账户资金表 DML。
+- 除 `AccountCommandGateway` 和 `AccountUserStateCommandWorker` 外不能调用账户写服务。单写者边界检查方式
+  待验证脚本重新整理后补回，不能重新引入账户资金表 DML。
 - 账户命令 Kafka key 不能从 `<PRODUCT_LINE>:<userId>` 改掉；并发数超过 32 个 Topic 分区不会增加吞吐。
 - HTTP 超时表示结果未知，不代表失败。调用方必须使用原 `referenceId` 重试；新 reference 表示一笔新资金意图。
 - 订单入口会在发布撮合命令前冻结初始保证金。账户 provider 消费成交后，按实际成交价计算开仓保证金并迁移为持仓保证金，委托价或市价保护价多冻结的部分释放回可用余额。

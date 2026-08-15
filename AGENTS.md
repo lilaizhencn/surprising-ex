@@ -6,7 +6,7 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 - 这是 Java / Maven 多模块项目，业务包括现货、永续、交割、期权。
 - 保持现有架构统一：ProductLine、instrument、Kafka topic、账户、撮合、风控、WebSocket、结算等边界不要随意重构。
-- 新逻辑优先沿用现有模块、事件模型、repository、outbox、Kafka topic 和测试脚本。
+- 新逻辑优先沿用现有模块、事件模型、repository、outbox、Kafka topic 和 Maven 测试。
 - 除非任务明确需要，交易后端测试不要启动 wallet 服务。
 
 ## 四产品线规则
@@ -24,22 +24,18 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 - 用模拟用户 API 下单覆盖完整流程：下单、撤单、撮合、成交、持仓形成、主动平仓、强平、风控事件、WebSocket 私有/公共推送。
 - 必须验证用户账号和做市账号资金正确，持仓正确，业务流程按设计执行。
 - 资金守恒/账账核对必须逐项对平：期初、充值/调整、成交、手续费、资金费、强平费、交割/行权流水、期末余额。
-- 优先使用现有脚本：
-  - `scripts/start-product-line-providers.sh`
-  - `scripts/product-line-api-flow-smoke.sh`
-  - `scripts/product-line-funds-reconcile.sh`
-  - `scripts/live-runtime-trading-reconciliation.sh`
-  - `scripts/integration-smoke.sh`
-  - `scripts/kafka-trading-smoke.sh`
+- 端到端验证优先使用对应 Maven 模块测试；产品线服务、数据库和 Kafka 的启动方式待脚本重新整理后补充，
+  不要引用已经删除的 `scripts/` 路径。
 
 ## 验证命令
 
 - 局部改动优先跑相关 Maven 模块测试：`mvn -pl <module> -am test`。
-- 跨账户、撮合、风控、WebSocket 的改动要跑对应集成脚本。
-- Kafka topic 或产品线 topic 改动后检查 `ProductTopicNames`、`scripts/create-topics.sh`、consumer group、key 校验和 WebSocket fanout。
+- 跨账户、撮合、风控、WebSocket 的改动要跑对应 Maven 集成测试；集成环境尚未恢复时，必须明确记录未验证项。
+- Kafka topic 或产品线 topic 改动后检查 `ProductTopicNames`、Topic 初始化配置、consumer group、key 校验和 WebSocket fanout。
 
 ## 文档
 
+- 当前分支已移除 `docs/` 和 `scripts/`，正在重新整理文档与验证脚本；新增说明应先同步根目录 `README.md` 或对应模块 README，不能链接到不存在的路径。
 - 新增或调整产品线、资金模型、撮合、风控、交割、期权、WebSocket、Kafka Topic 后，要同步中文 README 和相关文档。
 - 说明要结合源码路径和关键类，避免只写概念。
 

@@ -1,1 +1,0 @@
-apiAcceptance=PASS mode=setup productLine=LINEAR_DELIVERY symbol=P8-LINEAR-DELIVERY-BTC-USDT seller=30000092041 buyer=30000092042 fundsDiff=0 seed=9204

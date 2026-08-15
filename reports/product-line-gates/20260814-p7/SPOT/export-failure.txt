@@ -1,1 +1,0 @@
-exportFailure=PASS productLine=SPOT published=5 ack=0 pending=5

@@ -1,6 +1,0 @@
-instrument: started pid 45150 port 9080 productLine LINEAR_PERPETUAL
-order: started pid 45186 port 9084 productLine LINEAR_PERPETUAL
-matching: started pid 45226 port 9085 productLine LINEAR_PERPETUAL
-account: started pid 45262 port 9086 productLine LINEAR_PERPETUAL
-websocket: started pid 45291 port 9097 productLine LINEAR_PERPETUAL
-gateway: started pid 45377 port 9094 productLine LINEAR_PERPETUAL

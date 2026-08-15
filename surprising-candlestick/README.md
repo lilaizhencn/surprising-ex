@@ -115,18 +115,17 @@ surprising.candlestick.rocksdb.write-buffer-manager-size=512MB
 
 不要按每个 symbol 创建 Topic。永续首发部署中输入和输出 Topic 都固定为 32 分区：
 
-```bash
-PRODUCT_LINES=LINEAR_PERPETUAL \
-PARTITIONS=32 \
-ACCOUNT_COMMAND_PARTITIONS=32 \
-REPLICATION_FACTOR=3 \
-./scripts/create-topics.sh
-```
+Topic 创建脚本已移除。永续首发的规划参数仍为：
+
+- `PRODUCT_LINES=LINEAR_PERPETUAL`
+- `PARTITIONS=32`
+- `ACCOUNT_COMMAND_PARTITIONS=32`
+- `REPLICATION_FACTOR=3`
 
 生产流量开始后不能原地增加分区，否则 symbol 到 partition 的映射和 Kafka Streams 状态归属都会改变。
 未来容量需要超过 32 分区时，应创建新版本 Topic/application-id 并从成交记录重放状态。
 
-`create-topics.sh` 保留下面的动态公式，供尚未上线的新 Topic 做容量预估：
+Topic 分区规划使用下面的动态公式，供尚未上线的新 Topic 做容量预估：
 
 ```text
 partitions = roundUp(
@@ -236,7 +235,7 @@ Kafka 消息示例：
 brew services start postgresql@18
 brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
-./scripts/create-topics.sh
+# Topic 初始化命令待验证脚本重新整理后补回
 mvn -pl :surprising-candlestick-provider -am spring-boot:run
 ```
 
@@ -257,4 +256,4 @@ mvn -pl :surprising-candlestick-provider -am test
 
 当前模拟测试覆盖 UTC 时间桶取整、OHLCV 聚合、乱序成交处理和重复成交抑制。
 
-生产部署说明见 [deployment.md](../docs/deployment.md)。
+生产部署说明已随 `docs/` 移除，待部署文档重新整理后补回。

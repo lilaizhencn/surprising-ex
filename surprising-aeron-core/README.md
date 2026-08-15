@@ -16,26 +16,18 @@ Book、成交结算、Risk、Liquidation 和 Export State 按 P3–P5 接入；P
 | `surprising-aeron-exporter` | P5 可靠 Exporter 的最小 sink 边界。 |
 | `surprising-aeron-tools` | Cluster 探针、状态 hash 查询和离线 replay 骨架。 |
 
-## 本地三节点
+## 本地构建与三节点运行
 
 使用 JDK 25 构建：
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
 export PATH="${JAVA_HOME}/bin:${PATH}"
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh build
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh up
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh wait-ready
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh probe
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh hash
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh funds-smoke
-# 重启后用同一 FUNDS_SMOKE_SEED 只读验证已恢复资金
-PRODUCT_LINE=SPOT FUNDS_SMOKE_SEED=1 scripts/aeron-core-local.sh funds-verify
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh down
+mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ```
 
-一次只启动一条产品线。`down` 默认保留三个命名卷，不会删除 Archive；需要删除数据时必须先确认目标
-产品线且使用显式 Docker volume 操作，脚本不提供自动清库命令。
+三节点启动、健康检查、资金 smoke 和恢复验证脚本已移除，待验证脚本重新整理后补回。一次只启动一条产品线；
+删除 Archive 或数据卷前必须先确认目标产品线并使用显式的 Docker volume 操作。
 
 ## 协议约束
 
@@ -46,5 +38,4 @@ PRODUCT_LINE=SPOT scripts/aeron-core-local.sh down
 - 同步调用超时表示结果未知。调用方必须复用同一 `commandId` 查询或重试，不能生成新 ID。
 - `SurprisingAeronClient` 串行提交消息；Gateway 后续通过固定数量的单线程 client agent 扩展吞吐。
 
-完整架构和阶段门禁见
-[Aeron 统一交易核心迁移实施方案](../docs/aeron-unified-trading-core-migration-plan.md)。
+完整架构和阶段门禁文档已随 `docs/` 移除，待文档重新整理后补回。
