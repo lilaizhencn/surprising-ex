@@ -21,7 +21,10 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 13;
+    private static final int VERSION = 16;
+    private static final int VERSION_15 = 15;
+    private static final int VERSION_14 = 14;
+    private static final int VERSION_13 = 13;
     private static final int VERSION_12 = 12;
     private static final int VERSION_11 = 11;
     private static final int VERSION_10 = 10;
@@ -111,14 +114,10 @@ public final class TradingStateSnapshotCodec {
         });
         writer.longValue(state.bookState().nextPrioritySequence());
         writer.intValue(state.bookState().openOrders().size());
-        state.bookState().recoveryOrder().forEach(order -> {
-            writer.longValue(order.orderId());
-            writer.longValue(order.userId());
-            writer.text(order.symbol());
-            writer.intValue(order.side().wireCode());
-            writer.longValue(order.priceTicks());
-            writer.longValue(order.remainingQuantitySteps());
-            writer.longValue(order.prioritySequence());
+        state.bookState().priorityOrder().forEach(orderId -> {
+            long prioritySequence = state.bookState().prioritySequence(orderId);
+            writer.longValue(orderId);
+            writer.longValue(prioritySequence);
         });
         writer.intValue(state.instruments().size());
         state.instruments().values().forEach(instrument -> {
@@ -202,6 +201,27 @@ public final class TradingStateSnapshotCodec {
         writeUnits(writer, state.treasuryState().insuranceDeficits());
         writeUnits(writer, state.treasuryState().fundingSettlements());
         writeUnits(writer, state.treasuryState().lifecycleSettlements());
+        writer.intValue(state.treasuryState().fundingProgress().size());
+        state.treasuryState().fundingProgress().forEach((symbol, progress) -> {
+            writer.text(symbol);
+            writer.longValue(progress.settlementId());
+            writer.longValue(progress.instrumentVersion());
+            writer.longValue(progress.fundingRatePpm());
+            writer.longValue(progress.nextCursorUserId());
+            writer.longValue(progress.commandId().getMostSignificantBits());
+            writer.longValue(progress.commandId().getLeastSignificantBits());
+        });
+        writer.intValue(state.treasuryState().lifecycleProgress().size());
+        state.treasuryState().lifecycleProgress().forEach((symbol, progress) -> {
+            writer.text(symbol);
+            writer.longValue(progress.settlementId());
+            writer.longValue(progress.instrumentVersion());
+            writer.longValue(progress.settlementPriceTicks());
+            writer.longValue(progress.optionCashUnitsPerContract());
+            writer.longValue(progress.nextCursorUserId());
+            writer.longValue(progress.commandId().getMostSignificantBits());
+            writer.longValue(progress.commandId().getLeastSignificantBits());
+        });
         writer.intValue(state.leverages().size());
         state.leverages().forEach((key, leverage) -> {
             writer.longValue(key.userId());
@@ -247,7 +267,7 @@ public final class TradingStateSnapshotCodec {
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         Reader reader = new Reader(encoded);
         int version = reader.intValue();
-        if (version != VERSION && version != VERSION_12 && version != VERSION_11 && version != VERSION_10 && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
+        if (version != VERSION && version != VERSION_15 && version != VERSION_14 && version != VERSION_13 && version != VERSION_12 && version != VERSION_11 && version != VERSION_10 && version != VERSION_9 && version != VERSION_8 && version != VERSION_7 && version != VERSION_6 && version != VERSION_5 && version != VERSION_4 && version != VERSION_3
                 && version != VERSION_2 && version != VERSION_1) {
             throw new ProtocolException("unsupported trading snapshot version: " + version);
         }
@@ -344,13 +364,11 @@ public final class TradingStateSnapshotCodec {
         }
         CoreBookState bookState;
         if (version == VERSION_1) {
-            Map<Long, CoreBookOrder> migratedOrders = new TreeMap<>();
+            Map<Long, Long> migratedOrders = new TreeMap<>();
             long prioritySequence = 1;
             for (CoreOrderState order : orders.values()) {
                 if (order.status() == CoreOrderStatus.OPEN) {
-                    migratedOrders.put(order.orderId(), new CoreBookOrder(order.orderId(), order.userId(),
-                            order.symbol(), order.side(), order.priceTicks(), order.remainingQuantitySteps(),
-                            prioritySequence));
+                    migratedOrders.put(order.orderId(), prioritySequence);
                     prioritySequence = Math.incrementExact(prioritySequence);
                 }
             }
@@ -358,22 +376,28 @@ public final class TradingStateSnapshotCodec {
         } else {
             long nextPrioritySequence = reader.positiveLong("next book priority sequence");
             int bookOrderCount = reader.count("book orders");
-            Map<Long, CoreBookOrder> bookOrders = new TreeMap<>();
+            Map<Long, Long> bookOrders = new TreeMap<>();
             for (int index = 0; index < bookOrderCount; index++) {
                 long orderId = reader.positiveLong("book orderId");
-                CoreBookOrder bookOrder = new CoreBookOrder(orderId,
-                        reader.positiveLong("book userId"), reader.text(),
-                        CoreOrderSide.fromWireCode(reader.intValue()),
-                        reader.positiveLong("book price"), reader.positiveLong("book remaining quantity"),
-                        reader.positiveLong("book priority sequence"));
-                putUnique(bookOrders, orderId, bookOrder);
+                long prioritySequence;
+                if (version >= VERSION_14) {
+                    prioritySequence = reader.positiveLong("book priority sequence");
+                } else {
+                    CoreBookOrder bookOrder = new CoreBookOrder(orderId,
+                            reader.positiveLong("book userId"), reader.text(),
+                            CoreOrderSide.fromWireCode(reader.intValue()),
+                            reader.positiveLong("book price"), reader.positiveLong("book remaining quantity"),
+                            reader.positiveLong("book priority sequence"));
+                    prioritySequence = bookOrder.prioritySequence();
+                }
+                putUnique(bookOrders, orderId, prioritySequence);
             }
             bookState = new CoreBookState(nextPrioritySequence, bookOrders);
         }
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         CoreRiskState riskState = CoreRiskState.empty();
         CoreTreasuryState treasuryState = CoreTreasuryState.empty();
-        if (version == VERSION || version == VERSION_10 || version == VERSION_9 || version == VERSION_8 || version == VERSION_7 || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
+        if (version == VERSION || version == VERSION_15 || version == VERSION_14 || version == VERSION_13 || version == VERSION_10 || version == VERSION_9 || version == VERSION_8 || version == VERSION_7 || version == VERSION_6 || version == VERSION_5 || version == VERSION_4 || version == VERSION_3) {
             int instrumentCount = reader.count("instruments");
             for (int index = 0; index < instrumentCount; index++) {
                 String symbol = reader.text();
@@ -404,7 +428,7 @@ public final class TradingStateSnapshotCodec {
                 long openInterestRate;
                 long openInterestFloor;
                 java.util.List<CoreRiskLimitBracket> brackets;
-                if (version >= VERSION) {
+                if (version >= VERSION_13) {
                     maxLeverage = reader.positiveLong("max leverage");
                     maxPosition = reader.positiveLong("max position notional");
                     openInterestRate = reader.nonNegativeLong("open interest limit rate");
@@ -472,7 +496,7 @@ public final class TradingStateSnapshotCodec {
                 long liquidationId = reader.positiveLong("liquidationId");
                 long userId = reader.positiveLong("liquidation userId");
                 String symbol = reader.text();
-                CoreMarginMode marginMode = version >= VERSION
+                CoreMarginMode marginMode = version >= VERSION_13
                         ? CoreMarginMode.fromWireCode(reader.intValue()) : CoreMarginMode.CROSS;
                 CorePositionSide positionSide = version >= VERSION_6
                         ? CorePositionSide.fromWireCode(reader.intValue()) : CorePositionSide.NET;
@@ -485,11 +509,11 @@ public final class TradingStateSnapshotCodec {
                             ? Math.negateExact(closeQuantity) : closeQuantity;
                 }
                 long deficitUnits = reader.nonNegativeLong("liquidation deficit");
-                long executionPriceTicks = version >= VERSION
+                long executionPriceTicks = version >= VERSION_13
                         ? reader.nonNegativeLong("liquidation execution price") : 0;
-                long liquidationFeeRatePpm = version >= VERSION
+                long liquidationFeeRatePpm = version >= VERSION_13
                         ? reader.nonNegativeLong("liquidation fee rate") : 0;
-                long liquidationFeeUnits = version >= VERSION
+                long liquidationFeeUnits = version >= VERSION_13
                         ? reader.nonNegativeLong("liquidation fee units") : 0;
                 int status = reader.intValue();
                 if (status < 0 || status >= CoreLiquidationState.Status.values().length) {
@@ -503,7 +527,7 @@ public final class TradingStateSnapshotCodec {
                 putUnique(liquidations, liquidationId, liquidation);
             }
             Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>();
-            if (version >= VERSION) {
+            if (version >= VERSION_13) {
                 int scanCount = reader.count("risk scans");
                 for (int index = 0; index < scanCount; index++) {
                     String scanSymbol = reader.text();
@@ -522,9 +546,41 @@ public final class TradingStateSnapshotCodec {
             }
             riskState = new CoreRiskState(marks, risks, liquidations, scans,
                     reader.positiveLong("next liquidation id"));
-            treasuryState = new CoreTreasuryState(readUnits(reader, "fee balances"),
-                    readUnits(reader, "insurance balances"), readUnits(reader, "insurance deficits"),
-                    readUnits(reader, "funding settlements"), readUnits(reader, "lifecycle settlements"));
+            Map<String, Long> feeBalances = readUnits(reader, "fee balances");
+            Map<String, Long> insuranceBalances = readUnits(reader, "insurance balances");
+            Map<String, Long> insuranceDeficits = readUnits(reader, "insurance deficits");
+            Map<String, Long> fundingSettlements = readUnits(reader, "funding settlements");
+            Map<String, Long> lifecycleSettlements = readUnits(reader, "lifecycle settlements");
+            Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
+            if (version >= VERSION_15) {
+                int progressCount = reader.count("funding progress");
+                for (int index = 0; index < progressCount; index++) {
+                    String symbol = reader.text();
+                    CoreTreasuryState.FundingProgress progress = new CoreTreasuryState.FundingProgress(
+                            reader.positiveLong("funding progress settlement id"),
+                            reader.positiveLong("funding progress instrument version"),
+                            reader.longValue(), reader.nonNegativeLong("funding progress cursor"),
+                            new UUID(reader.longValue(), reader.longValue()));
+                    putUnique(fundingProgress, symbol, progress);
+                }
+            }
+            Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
+            if (version >= VERSION) {
+                int progressCount = reader.count("lifecycle progress");
+                for (int index = 0; index < progressCount; index++) {
+                    String symbol = reader.text();
+                    CoreTreasuryState.LifecycleProgress progress = new CoreTreasuryState.LifecycleProgress(
+                            reader.positiveLong("lifecycle progress settlement id"),
+                            reader.positiveLong("lifecycle progress instrument version"),
+                            reader.nonNegativeLong("lifecycle progress settlement price"),
+                            reader.nonNegativeLong("lifecycle progress option cash"),
+                            reader.nonNegativeLong("lifecycle progress cursor"),
+                            new UUID(reader.longValue(), reader.longValue()));
+                    putUnique(lifecycleProgress, symbol, progress);
+                }
+            }
+            treasuryState = new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
+                    fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
         }
         Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
         if (version >= VERSION_8) {
@@ -568,7 +624,7 @@ public final class TradingStateSnapshotCodec {
             }
         }
         Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
-        if (version >= VERSION) {
+        if (version >= VERSION_13) {
             int triggerCount = reader.count("trigger orders");
             for (int index = 0; index < triggerCount; index++) {
                 int length = reader.count("trigger payload bytes");

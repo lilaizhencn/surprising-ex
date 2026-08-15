@@ -54,6 +54,15 @@ public final class JdbcCoreEventProjector {
                  total_short_payment_units, position_count, occurred_at_epoch_ms)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
+    private static final String UPDATE_FUNDING_SETTLEMENT = """
+            UPDATE core_funding_settlement_projection SET
+                export_sequence = ?, instrument_version = ?, funding_rate_ppm = ?,
+                command_status = ?, result_code = ?,
+                total_long_payment_units = total_long_payment_units + ?,
+                total_short_payment_units = total_short_payment_units + ?,
+                position_count = position_count + ?, occurred_at_epoch_ms = ?
+            WHERE product_line = ? AND symbol = ? AND settlement_id = ?
+            """;
     private static final String INSERT_FUNDING_PAYMENT = """
             INSERT INTO core_funding_payment_projection
                 (product_line, export_sequence, payment_index, settlement_id, user_id, symbol,
@@ -310,6 +319,25 @@ public final class JdbcCoreEventProjector {
             if (payment.signedQuantitySteps() > 0) totalLong = Math.addExact(totalLong, payment.amountUnits());
             else totalShort = Math.addExact(totalShort, payment.amountUnits());
         }
+        if (event.commandStatus() != com.surprising.aeron.protocol.ResponseStatus.APPLIED) return;
+        try (PreparedStatement update = connection.prepareStatement(UPDATE_FUNDING_SETTLEMENT)) {
+            update.setLong(1, event.exportSequence());
+            update.setLong(2, command.instrumentVersion());
+            update.setLong(3, command.fundingRatePpm());
+            update.setString(4, event.commandStatus().name());
+            update.setString(5, event.resultCode().name());
+            update.setLong(6, totalLong);
+            update.setLong(7, totalShort);
+            update.setInt(8, event.fundingPayments().size());
+            update.setLong(9, message.header().submittedAtEpochMillis());
+            update.setString(10, productLine.name());
+            update.setString(11, command.symbol());
+            update.setLong(12, command.settlementId());
+            if (update.executeUpdate() != 0) {
+                insertFundingPayments(connection, productLine, message, event);
+                return;
+            }
+        }
         try (PreparedStatement settlement = connection.prepareStatement(INSERT_FUNDING_SETTLEMENT)) {
             settlement.setString(1, productLine.name());
             settlement.setLong(2, command.settlementId());
@@ -325,6 +353,11 @@ public final class JdbcCoreEventProjector {
             settlement.setLong(12, message.header().submittedAtEpochMillis());
             settlement.executeUpdate();
         }
+        insertFundingPayments(connection, productLine, message, event);
+    }
+
+    private static void insertFundingPayments(Connection connection, ProductLine productLine,
+                                              CoreMessage message, CoreExportEvent event) throws SQLException {
         try (PreparedStatement payments = connection.prepareStatement(INSERT_FUNDING_PAYMENT)) {
             for (int index = 0; index < event.fundingPayments().size(); index++) {
                 var payment = event.fundingPayments().get(index);

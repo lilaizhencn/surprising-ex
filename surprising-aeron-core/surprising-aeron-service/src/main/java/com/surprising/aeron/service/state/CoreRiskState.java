@@ -1,8 +1,6 @@
 package com.surprising.aeron.service.state;
 
-import java.util.Collections;
 import java.util.Map;
-import java.util.TreeMap;
 
 public record CoreRiskState(
         Map<String, CoreMarkPriceState> markPrices,
@@ -16,10 +14,10 @@ public record CoreRiskState(
                 || nextLiquidationId <= 0) {
             throw new IllegalArgumentException("invalid risk state");
         }
-        markPrices = Collections.unmodifiableMap(new TreeMap<>(markPrices));
-        snapshots = Collections.unmodifiableMap(new TreeMap<>(snapshots));
-        liquidations = Collections.unmodifiableMap(new TreeMap<>(liquidations));
-        scans = Collections.unmodifiableMap(new TreeMap<>(scans));
+        markPrices = immutableSorted(markPrices);
+        snapshots = immutableSorted(snapshots);
+        liquidations = immutableSorted(liquidations);
+        scans = immutableSorted(scans);
     }
 
     public static CoreRiskState empty() {
@@ -43,6 +41,11 @@ public record CoreRiskState(
 
     public boolean hasPendingScans() {
         return scans.values().stream().anyMatch(value -> !value.complete());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <K, V> Map<K, V> immutableSorted(Map<K, V> values) {
+        return StateMapSupport.freezeSorted(values);
     }
 
     public record RiskScan(

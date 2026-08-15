@@ -83,13 +83,6 @@ public class OrderService {
     private OrderResponse placeAeron(PlaceOrderRequest request) {
         requireAeron();
         PlaceOrderRequest normalized = normalize(request);
-        if (hasClientOrderId(normalized)) {
-            OrderResponse existing = aeronOrders.find(normalized.userId(), normalized.clientOrderId());
-            if (existing != null) {
-                requireSameClientOrderIntent(normalized, existing);
-                return existing;
-            }
-        }
         PreparedAeronOrder prepared = prepareAeronOrder(normalized);
         return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee());
     }
@@ -149,30 +142,9 @@ public class OrderService {
     }
 
     private AmendOrderResponse amendAeron(AmendOrderRequest request) {
+        requireAeron();
         AmendOrderRequest normalized = normalizeAmend(request);
-        OrderResponse original = aeronOrders.get(normalized.userId(), normalized.orderId());
-        if (original.orderType() != OrderType.LIMIT) {
-            throw new IllegalArgumentException("only LIMIT orders can be amended");
-        }
-        if (original.status() != OrderStatus.ACCEPTED && original.status() != OrderStatus.PARTIALLY_FILLED) {
-            throw new IllegalStateException("order is not amendable: " + original.status().name());
-        }
-        long price = normalized.priceTicks() == null ? original.priceTicks() : normalized.priceTicks();
-        long quantity = normalized.quantitySteps() == null ? original.remainingQuantitySteps() : normalized.quantitySteps();
-        TimeInForce timeInForce = normalized.timeInForce() == null ? original.timeInForce() : normalized.timeInForce();
-        boolean postOnly = normalized.postOnly() == null ? original.postOnly() : normalized.postOnly();
-        PlaceOrderRequest replacement = new PlaceOrderRequest(original.userId(), normalized.newClientOrderId(),
-                original.symbol(), original.side(), OrderType.LIMIT, timeInForce, price, quantity,
-                original.marginMode(), original.positionSide(), original.reduceOnly(), postOnly);
-        if (hasClientOrderId(replacement)) {
-            OrderResponse existing = aeronOrders.find(replacement.userId(), replacement.clientOrderId());
-            if (existing != null) {
-                requireSameClientOrderIntent(replacement, existing);
-                return new AmendOrderResponse(original, existing, false, "replacement order already exists");
-            }
-        }
-        PreparedAeronOrder prepared = prepareAeronOrder(normalize(replacement));
-        return aeronOrders.replace(original, prepared.request(), prepared.validation(), prepared.fee());
+        return aeronOrders.replace(normalized);
     }
 
     public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
@@ -663,53 +635,6 @@ public class OrderService {
             throw new IllegalArgumentException("clientOrderId length must be <= 64");
         }
         return normalized;
-    }
-
-    private boolean hasClientOrderId(PlaceOrderRequest request) {
-        return request.clientOrderId() != null && !request.clientOrderId().isBlank();
-    }
-
-    /**
-     * 幂等键只能重放完全相同的业务意图；同一个键携带不同参数必须拒绝，
-     * 否则客户端重试拼写错误会被误当成成功并造成资金预期与实际订单不一致。
-     */
-    private void requireSameClientOrderIntent(PlaceOrderRequest request, OrderRecord existing) {
-        boolean same = existing.userId() == request.userId()
-                && existing.productLine() == currentProductLine()
-                && existing.clientOrderId() != null
-                && existing.clientOrderId().equals(request.clientOrderId())
-                && existing.symbol().equals(request.symbol())
-                && existing.side() == request.side()
-                && existing.orderType() == request.orderType()
-                && existing.timeInForce() == request.timeInForce()
-                && existing.priceTicks() == request.priceTicks()
-                && existing.quantitySteps() == request.quantitySteps()
-                && existing.marginMode() == request.marginMode()
-                && existing.positionSide() == request.positionSide()
-                && existing.reduceOnly() == request.reduceOnly()
-                && existing.postOnly() == request.postOnly();
-        if (!same) {
-            throw new IllegalArgumentException("clientOrderId already used with different order parameters");
-        }
-    }
-
-    private void requireSameClientOrderIntent(PlaceOrderRequest request, OrderResponse existing) {
-        boolean same = existing.userId() == request.userId()
-                && existing.clientOrderId() != null
-                && existing.clientOrderId().equals(request.clientOrderId())
-                && existing.symbol().equals(request.symbol())
-                && existing.side() == request.side()
-                && existing.orderType() == request.orderType()
-                && existing.timeInForce() == request.timeInForce()
-                && existing.priceTicks() == request.priceTicks()
-                && existing.quantitySteps() == request.quantitySteps()
-                && existing.marginMode() == request.marginMode()
-                && existing.positionSide() == request.positionSide()
-                && existing.reduceOnly() == request.reduceOnly()
-                && existing.postOnly() == request.postOnly();
-        if (!same) {
-            throw new IllegalArgumentException("clientOrderId already used with different order parameters");
-        }
     }
 
     private void requireOrderId(long orderId) {

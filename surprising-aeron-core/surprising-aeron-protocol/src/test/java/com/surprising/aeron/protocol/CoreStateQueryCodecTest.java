@@ -33,6 +33,15 @@ class CoreStateQueryCodecTest {
     }
 
     @Test
+    void roundTripsFundingProgressQueryAndResponse() {
+        assertThat(CoreStateQueryCodec.decodeFundingProgressQuery(
+                CoreStateQueryCodec.encodeFundingProgressQuery("btc-usdt"))).isEqualTo("btc-usdt");
+        CoreFundingProgressView progress = new CoreFundingProgressView(91, false, 42, 128);
+        assertThat(CoreFundingProgressCodec.decode(CoreFundingProgressCodec.encode(progress)))
+                .isEqualTo(progress);
+    }
+
+    @Test
     void rejectsTruncatedQueryView() {
         byte[] encoded = CoreStateQueryCodec.encodeOrderState(new CoreOrderStateView(
                 1, ProductLine.SPOT, 7, "BTC-USDT", 3, CoreOrderSide.BUY,
@@ -77,6 +86,28 @@ class CoreStateQueryCodecTest {
                 CoreOrderSide.BUY, 60_000, 2, 0, 2, false, "OPEN", 1);
         byte[] encoded = CoreStateQueryCodec.encodeOpenOrders(new CoreOpenOrdersView(List.of(order)));
         assertThatThrownBy(() -> CoreStateQueryCodec.decodeOpenOrders(
+                java.util.Arrays.copyOf(encoded, encoded.length - 1)))
+                .isInstanceOf(ProtocolException.class);
+    }
+
+    @Test
+    void roundTripsCommandResultOrdersAndExecutions() {
+        CoreOrderStateView order = new CoreOrderStateView(71, ProductLine.SPOT, 7, "BTC-USDT", 3,
+                CoreOrderSide.BUY, 60_000, 2, 1, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-71", UUID.randomUUID(),
+                -10, 20, 1_000, 1_001, 99, "OPEN", 1);
+        CoreExecutionView execution = new CoreExecutionView(71, 70, 7, 8, 60_000, 1);
+        CoreCommandResultView result = new CoreCommandResultView(List.of(order), List.of(execution));
+
+        assertThat(CoreCommandResultCodec.decode(CoreCommandResultCodec.encode(result))).isEqualTo(result);
+    }
+
+    @Test
+    void rejectsTruncatedCommandResult() {
+        CoreCommandResultView result = new CoreCommandResultView(List.of(), List.of());
+        byte[] encoded = CoreCommandResultCodec.encode(result);
+
+        assertThatThrownBy(() -> CoreCommandResultCodec.decode(
                 java.util.Arrays.copyOf(encoded, encoded.length - 1)))
                 .isInstanceOf(ProtocolException.class);
     }

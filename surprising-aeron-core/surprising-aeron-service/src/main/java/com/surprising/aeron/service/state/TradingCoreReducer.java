@@ -21,9 +21,11 @@ import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.instrument.api.math.PerpetualContractMath;
+import com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
+import java.util.NavigableMap;
 import java.util.UUID;
 
 public final class TradingCoreReducer {
@@ -42,7 +44,7 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
                     "client trigger order id already exists");
         }
-        Map<Long, CoreTriggerOrderState> triggers = new TreeMap<>(state.triggerOrders());
+        Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
         triggers.put(view.triggerOrderId(), CoreTriggerOrderState.from(view));
         return withTriggers(state, triggers);
     }
@@ -86,7 +88,7 @@ public final class TradingCoreReducer {
         if (!current.status().open() || current.triggerType() != com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
             return state;
         }
-        Map<Long, CoreTriggerOrderState> triggers = new TreeMap<>(state.triggerOrders());
+        Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
         triggers.put(triggerOrderId, new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(), current.userId(),
                 current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(), current.triggerType(),
                 current.triggerCondition(), current.triggerPriceTicks(), current.activationPriceTicks(), current.callbackRatePpm(),
@@ -101,7 +103,7 @@ public final class TradingCoreReducer {
     private TradingCoreState updateTrigger(TradingCoreState state, CoreTriggerOrderState current,
                                             CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
                                             long triggeredPriceTicks, String rejectReason, long updatedAt) {
-        Map<Long, CoreTriggerOrderState> triggers = new TreeMap<>(state.triggerOrders());
+        Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
         triggers.put(current.triggerOrderId(), new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
                 current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(), current.activationPriceTicks(),
@@ -180,7 +182,7 @@ public final class TradingCoreReducer {
             }
             default -> throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_ACTION", "unsupported action");
         }
-        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = new TreeMap<>(state.cancelAllAfterTimers());
+        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = StateMapSupport.delta(state.cancelAllAfterTimers());
         timers.put(key, next);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
                 state.orders(), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
@@ -235,7 +237,7 @@ public final class TradingCoreReducer {
                 }
             }
         }
-        Map<Long, CoreAlgoOrderState> values = new TreeMap<>(state.algoOrders());
+        Map<Long, CoreAlgoOrderState> values = StateMapSupport.delta(state.algoOrders());
         values.put(next.algoOrderId(), next);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
                 state.orders(), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
@@ -305,11 +307,11 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT",
                     "leverage exceeds instrument maximum");
         }
-        boolean openState = state.orders().values().stream().anyMatch(order -> order.userId() == userId
-                        && order.symbol().equals(instrument.symbol()) && order.marginMode() == command.marginMode()
-                        && order.status() == CoreOrderStatus.OPEN)
-                || state.users().getOrDefault(userId, CoreUserState.empty(state.productLine(), userId))
-                .positions().values().stream().anyMatch(position -> position.symbol().equals(instrument.symbol())
+        CoreUserState user = state.users().getOrDefault(userId, CoreUserState.empty(state.productLine(), userId));
+        boolean openState = userOrders(state, user).stream().anyMatch(order ->
+                        order.symbol().equals(instrument.symbol()) && order.marginMode() == command.marginMode()
+                                && order.status() == CoreOrderStatus.OPEN)
+                || user.positions().values().stream().anyMatch(position -> position.symbol().equals(instrument.symbol())
                         && position.marginMode() == command.marginMode() && position.signedQuantitySteps() != 0);
         CoreLeverageKey key = new CoreLeverageKey(userId, instrument.symbol(), command.marginMode());
         Long current = state.leverages().get(key);
@@ -317,7 +319,7 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("LEVERAGE_UPDATE_BLOCKED", "open orders or positions exist");
         }
         if (current != null && current.longValue() == command.leveragePpm()) return state;
-        Map<CoreLeverageKey, Long> leverages = new TreeMap<>(state.leverages());
+        Map<CoreLeverageKey, Long> leverages = StateMapSupport.delta(state.leverages());
         leverages.put(key, command.leveragePpm());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
                 state.orders(), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
@@ -337,8 +339,8 @@ public final class TradingCoreReducer {
         }
         boolean openPosition = user.positions().values().stream()
                 .anyMatch(position -> position.signedQuantitySteps() != 0);
-        boolean openOrder = state.orders().values().stream()
-                .anyMatch(order -> order.userId() == userId && order.status() == CoreOrderStatus.OPEN);
+        boolean openOrder = userOrders(state, user).stream()
+                .anyMatch(order -> order.status() == CoreOrderStatus.OPEN);
         if (openPosition || openOrder || user.reservations().values().stream()
                 .anyMatch(reservation -> reservation.remainingUnits() != 0)) {
             throw new CoreStateRejectedException("POSITION_MODE_SWITCH_BLOCKED",
@@ -384,9 +386,9 @@ public final class TradingCoreReducer {
             nextBalance = balance.release(units);
             nextMargin = Math.subtractExact(position.positionMarginUnits(), units);
         }
-        Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
         balances.put(nextBalance.asset(), nextBalance);
-        Map<String, CorePositionState> positions = new TreeMap<>(user.positions());
+        Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
         positions.put(key, new CorePositionState(position.symbol(), position.marginAsset(), position.marginMode(),
                 position.positionSide(), position.instrumentVersion(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin));
@@ -406,7 +408,7 @@ public final class TradingCoreReducer {
         AssetBalance currentBalance = currentUser.balances().getOrDefault(asset, new AssetBalance(asset, 0, 0));
         AssetBalance nextBalance = currentBalance.adjustAvailable(command.deltaUnits());
 
-        Map<String, AssetBalance> balances = new TreeMap<>(currentUser.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(currentUser.balances());
         balances.put(asset, nextBalance);
         CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
                 Math.incrementExact(currentUser.revision()), balances,
@@ -423,6 +425,15 @@ public final class TradingCoreReducer {
             long userId,
             PlaceOrderCommand command,
             UUID commandId) {
+        return placeOrder(state, userId, command, commandId, -1);
+    }
+
+    public TradingCoreState placeOrder(
+            TradingCoreState state,
+            long userId,
+            PlaceOrderCommand command,
+            UUID commandId,
+            long indexedOpenInterestSteps) {
         requireUserId(userId);
         if (state.orders().containsKey(command.orderId())) {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "orderId already exists");
@@ -436,19 +447,13 @@ public final class TradingCoreReducer {
         }
         validateReservationRule(state, command);
         validateInstrumentOrder(instrument, command);
-        boolean versionConflict = state.bookState().openOrders().values().stream()
-                .filter(order -> order.symbol().equals(OrderReservation.normalizeSymbol(command.symbol())))
-                .map(order -> state.order(order.orderId()))
-                .anyMatch(order -> order.instrumentVersion() != command.instrumentVersion());
-        if (versionConflict) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_OPEN_BOOK_MISMATCH",
-                    "open book contains another instrument version");
-        }
         CoreUserState currentUser = state.users().getOrDefault(userId,
                 CoreUserState.empty(state.productLine(), userId));
         validatePositionIdentity(state, currentUser, command);
         validateReduceOnlyCapacity(state, currentUser, command);
-        validateDerivativeRiskLimits(state, instrument, currentUser, command);
+        validateDerivativeRiskLimits(state, instrument, currentUser, command,
+                indexedOpenInterestSteps < 0 ? symbolOpenInterestSteps(state, instrument.symbol())
+                        : indexedOpenInterestSteps);
         long requiredReservation = requiredReservationUnits(state, instrument, currentUser, command);
         if (command.reservedUnits() > 0 && command.reservedUnits() < requiredReservation) {
             throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
@@ -468,16 +473,20 @@ public final class TradingCoreReducer {
                 command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
                 CoreOrderStatus.OPEN, 1);
 
-        Map<String, AssetBalance> balances = new TreeMap<>(currentUser.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(currentUser.balances());
         balances.put(asset, nextBalance);
-        Map<Long, OrderReservation> reservations = new TreeMap<>(currentUser.reservations());
+        Map<Long, OrderReservation> reservations = StateMapSupport.delta(currentUser.reservations());
         reservations.put(command.orderId(), reservation);
         CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
                 Math.incrementExact(currentUser.revision()), balances, reservations, currentUser.positions(),
                 currentUser.positionMode());
-        Map<Long, CoreOrderState> orders = new TreeMap<>(state.orders());
+        Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         orders.put(order.orderId(), order);
-        return replaceUser(state, nextUser, orders, state.bookState());
+        Map<ClientOrderKey, Long> clientOrderIndex = StateMapSupport.delta(state.clientOrderIndex());
+        if (!order.clientOrderId().isEmpty()) {
+            clientOrderIndex.put(new ClientOrderKey(order.userId(), order.clientOrderId()), order.orderId());
+        }
+        return replaceUser(state, nextUser, orders, state.bookState(), clientOrderIndex);
     }
 
     public TradingCoreState cancelOrder(TradingCoreState state, long userId, CancelOrderCommand command) {
@@ -507,19 +516,51 @@ public final class TradingCoreReducer {
         OrderReservation nextReservation = releaseUnits == 0
                 ? currentReservation : currentReservation.releaseAll();
 
-        Map<String, AssetBalance> balances = new TreeMap<>(currentUser.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(currentUser.balances());
         balances.put(nextBalance.asset(), nextBalance);
-        Map<Long, OrderReservation> reservations = new TreeMap<>(currentUser.reservations());
+        Map<Long, OrderReservation> reservations = StateMapSupport.delta(currentUser.reservations());
         reservations.put(command.orderId(), nextReservation);
         CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
                 Math.incrementExact(currentUser.revision()), balances, reservations, currentUser.positions(),
                 currentUser.positionMode());
-        Map<Long, CoreOrderState> orders = new TreeMap<>(state.orders());
+        Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         orders.put(command.orderId(), currentOrder.cancel());
-        Map<Long, CoreBookOrder> bookOrders = new TreeMap<>(state.bookState().openOrders());
+        Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
         bookOrders.remove(command.orderId());
         CoreBookState bookState = new CoreBookState(state.bookState().nextPrioritySequence(), bookOrders);
-        return replaceUser(state, nextUser, orders, bookState);
+        return replaceUser(state, nextUser, orders, bookState, StateMapSupport.delta(state.clientOrderIndex()));
+    }
+
+    public TradingCoreState pruneAcknowledgedTerminalReservations(
+            TradingCoreState state, Collection<Long> acknowledgedOrderIds) {
+        if (acknowledgedOrderIds == null || acknowledgedOrderIds.isEmpty()) {
+            return state;
+        }
+        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
+        boolean changed = false;
+        for (Long orderId : acknowledgedOrderIds) {
+            if (orderId == null) continue;
+            CoreOrderState order = state.orders().get(orderId);
+            if (order == null || !order.status().terminal()) continue;
+            CoreUserState user = users.get(order.userId());
+            if (user == null) continue;
+            OrderReservation reservation = user.reservations().get(orderId);
+            if (reservation == null) continue;
+            if (reservation.remainingUnits() != 0) {
+                continue;
+            }
+            Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
+            reservations.remove(orderId);
+            users.put(order.userId(), new CoreUserState(user.productLine(), user.userId(),
+                    Math.incrementExact(user.revision()), user.balances(), reservations, user.positions(),
+                    user.positionMode()));
+            changed = true;
+        }
+        if (!changed) return state;
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
+                state.orders(), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
+                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
     }
 
     public TradingCoreState applyMatches(
@@ -531,9 +572,22 @@ public final class TradingCoreReducer {
         if (matches == null) {
             throw new IllegalArgumentException("matches are required");
         }
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
-        Map<Long, CoreOrderState> orders = new TreeMap<>(state.orders());
-        Map<Long, CoreBookOrder> bookOrders = new TreeMap<>(state.bookState().openOrders());
+        if (matches.isEmpty()) {
+            CoreOrderState taker = requireOpenOrder(state.orders(), takerOrderId);
+            if (!taker.timeInForce().immediate()
+                    && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
+                Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
+                bookOrders.put(taker.orderId(), state.bookState().nextPrioritySequence());
+                return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
+                        state.orders(), new CoreBookState(Math.incrementExact(state.bookState().nextPrioritySequence()),
+                                bookOrders), state.instruments(), state.riskState(), state.treasuryState(),
+                        state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
+                        StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+            }
+        }
+        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
+        Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
+        Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
         long nextPrioritySequence = state.bookState().nextPrioritySequence();
         CoreTreasuryState treasury = state.treasuryState();
         CoreOrderState taker = requireOpenOrder(orders, takerOrderId);
@@ -579,12 +633,11 @@ public final class TradingCoreReducer {
             orders.put(taker.orderId(), taker);
             orders.put(maker.orderId(), maker);
             if (maker.status() == CoreOrderStatus.OPEN) {
-                CoreBookOrder previous = bookOrders.get(maker.orderId());
-                if (previous == null) {
+                Long previousPrioritySequence = bookOrders.get(maker.orderId());
+                if (previousPrioritySequence == null) {
                     throw new IllegalStateException("maker order missing from book state");
                 }
-                bookOrders.put(maker.orderId(), new CoreBookOrder(maker.orderId(), maker.userId(), maker.symbol(),
-                        maker.side(), maker.priceTicks(), maker.remainingQuantitySteps(), previous.prioritySequence()));
+                bookOrders.put(maker.orderId(), previousPrioritySequence);
             } else {
                 bookOrders.remove(maker.orderId());
                 users.put(maker.userId(), releaseTerminalReservation(users.get(maker.userId()), maker.orderId()));
@@ -592,8 +645,7 @@ public final class TradingCoreReducer {
         }
         if (taker.status() == CoreOrderStatus.OPEN && !taker.timeInForce().immediate()
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
-            bookOrders.put(taker.orderId(), new CoreBookOrder(taker.orderId(), taker.userId(), taker.symbol(),
-                    taker.side(), taker.priceTicks(), taker.remainingQuantitySteps(), nextPrioritySequence));
+            bookOrders.put(taker.orderId(), nextPrioritySequence);
             nextPrioritySequence = Math.incrementExact(nextPrioritySequence);
         } else {
             if (taker.status() == CoreOrderStatus.OPEN) {
@@ -604,7 +656,8 @@ public final class TradingCoreReducer {
         }
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
                 new CoreBookState(nextPrioritySequence, bookOrders), state.instruments(), state.riskState(),
-                treasury, state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.triggerOrders());
+                treasury, state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
+                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
     }
 
     public TradingCoreState upsertInstrument(TradingCoreState state, UpsertInstrumentCommand command) {
@@ -613,7 +666,9 @@ public final class TradingCoreReducer {
         if (current != null && instrument.version() <= current.version()) {
             throw new CoreStateRejectedException("STALE_INSTRUMENT_VERSION", "instrument version must increase");
         }
-        boolean openOrder = state.bookState().openOrders().values().stream()
+        boolean openOrder = state.bookState().openOrders().keySet().stream()
+                .map(state::order)
+                .filter(java.util.Objects::nonNull)
                 .anyMatch(order -> order.symbol().equals(instrument.symbol()));
         boolean openPosition = state.users().values().stream()
                 .flatMap(user -> user.positions().values().stream())
@@ -623,7 +678,7 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_IN_USE",
                     "cannot replace instrument version with open state");
         }
-        Map<String, CoreInstrumentState> instruments = new TreeMap<>(state.instruments());
+        Map<String, CoreInstrumentState> instruments = StateMapSupport.delta(state.instruments());
         instruments.put(instrument.symbol(), instrument);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(), state.bookState(), instruments, state.riskState(),
@@ -636,10 +691,10 @@ public final class TradingCoreReducer {
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
         }
-        Map<String, CoreMarkPriceState> marks = new TreeMap<>(state.riskState().markPrices());
+        Map<String, CoreMarkPriceState> marks = StateMapSupport.delta(state.riskState().markPrices());
         marks.put(instrument.symbol(), new CoreMarkPriceState(instrument.symbol(), instrument.version(),
                 command.markPriceTicks(), command.priceSequence()));
-        Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>(state.riskState().scans());
+        Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(state.riskState().scans());
         CoreRiskState.RiskScan currentScan = scans.get(instrument.symbol());
         long scanStart = currentScan != null && !currentScan.complete()
                 ? currentScan.scanStartPriceSequence() : command.priceSequence();
@@ -667,16 +722,13 @@ public final class TradingCoreReducer {
         if (instrument == null || mark == null || mark.priceSequence() != scan.priceSequence()) {
             throw new IllegalStateException("risk scan input is missing");
         }
-        Map<String, CoreRiskSnapshot> snapshots = new TreeMap<>(state.riskState().snapshots());
-        Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(state.riskState().liquidations());
+        Map<String, CoreRiskSnapshot> snapshots = StateMapSupport.delta(state.riskState().snapshots());
+        Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(state.riskState().liquidations());
         long nextLiquidationId = state.riskState().nextLiquidationId();
         long lastUserId = scan.lastUserId();
         int processed = 0;
         boolean complete = true;
-        for (CoreUserState user : state.users().values()) {
-            if (user.userId() <= scan.lastUserId()) {
-                continue;
-            }
+        for (CoreUserState user : usersAfter(state.users(), scan.lastUserId())) {
             if (processed >= maxUsers) {
                 complete = false;
                 break;
@@ -698,7 +750,7 @@ public final class TradingCoreReducer {
                         liquidations, nextLiquidationId);
             }
         }
-        Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>(state.riskState().scans());
+        Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(state.riskState().scans());
         CoreRiskState.RiskScan nextScan = complete && scan.scanStartPriceSequence() != scan.priceSequence()
                 ? new CoreRiskState.RiskScan(scan.symbol(), scan.priceSequence(), scan.priceSequence(), 0, false)
                 : new CoreRiskState.RiskScan(scan.symbol(), scan.priceSequence(), scan.scanStartPriceSequence(),
@@ -836,6 +888,16 @@ public final class TradingCoreReducer {
     }
 
     public FundingApplication applyFundingWithFacts(TradingCoreState state, ApplyFundingCommand command) {
+        return applyFundingWithFacts(state, command, null);
+    }
+
+    public FundingApplication applyFundingWithFacts(TradingCoreState state, ApplyFundingCommand command,
+                                                    Iterable<Long> indexedUserIds) {
+        return applyFundingWithFacts(state, command, indexedUserIds, null);
+    }
+
+    public FundingApplication applyFundingWithFacts(TradingCoreState state, ApplyFundingCommand command,
+                                                    Iterable<Long> indexedUserIds, UUID chunkCommandId) {
         if (!state.productLine().isFundingProduct()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
@@ -849,10 +911,42 @@ public final class TradingCoreReducer {
         if (mark == null) {
             throw new CoreStateRejectedException("MARK_PRICE_NOT_FOUND", "funding requires mark price");
         }
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        CoreTreasuryState.FundingProgress previousProgress = state.treasuryState()
+                .fundingProgress(instrument.symbol());
+        boolean chunked = indexedUserIds != null && chunkCommandId != null;
+        if (chunked) {
+            if (previousProgress == null && command.cursorUserId() != 0) {
+                throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
+            }
+            if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
+                    || previousProgress.instrumentVersion() != command.instrumentVersion()
+                    || previousProgress.fundingRatePpm() != command.fundingRatePpm()
+                    || previousProgress.nextCursorUserId() != command.cursorUserId())) {
+                throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor does not match progress");
+            }
+        }
+        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
         CoreTreasuryState treasury = state.treasuryState();
         java.util.ArrayList<com.surprising.aeron.protocol.CoreFundingPaymentView> payments = new java.util.ArrayList<>();
-        for (CoreUserState user : state.users().values()) {
+        java.util.ArrayList<Long> selectedUserIds = new java.util.ArrayList<>();
+        boolean moreUsers = false;
+        if (!chunked) {
+            state.users().keySet().forEach(selectedUserIds::add);
+        } else {
+            for (Long userId : indexedUserIds) {
+                if (userId == null || userId <= command.cursorUserId()) continue;
+                if (selectedUserIds.size() < command.maxUsers()) {
+                    selectedUserIds.add(userId);
+                } else {
+                    moreUsers = true;
+                    break;
+                }
+            }
+        }
+        Iterable<Long> userIds = selectedUserIds;
+        for (Long userId : userIds) {
+            CoreUserState user = state.user(userId);
+            if (user == null) continue;
             long delta = 0;
             java.util.List<CorePositionState> positions = positionsForSymbol(user, instrument.symbol());
             java.util.ArrayList<Long> positionDeltas = new java.util.ArrayList<>(positions.size());
@@ -865,7 +959,7 @@ public final class TradingCoreReducer {
             if (positions.isEmpty()) continue;
             CashResult result = applyCash(requireBalance(user, instrument.settleAsset()), delta);
             if (result.appliedDelta() != 0) {
-                Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
+                Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
                 balances.put(instrument.settleAsset(), result.balance());
                 users.put(user.userId(), new CoreUserState(user.productLine(), user.userId(),
                         Math.incrementExact(user.revision()), balances, user.reservations(), user.positions(),
@@ -894,20 +988,46 @@ public final class TradingCoreReducer {
             }
             if (debitRelief != 0) throw new IllegalStateException("funding debit relief was not fully allocated");
         }
-        treasury = treasury.recordFunding(instrument.symbol(), command.settlementId());
+        boolean complete = !chunked || !moreUsers;
+        long nextCursorUserId = complete ? 0 : selectedUserIds.getLast();
+        if (complete) {
+            treasury = treasury.recordFunding(instrument.symbol(), command.settlementId());
+        } else {
+            UUID progressCommandId = chunkCommandId == null ? new UUID(0, 0) : chunkCommandId;
+            treasury = treasury.withFundingProgress(instrument.symbol(), new CoreTreasuryState.FundingProgress(
+                    command.settlementId(), command.instrumentVersion(), command.fundingRatePpm(),
+                    nextCursorUserId, progressCommandId));
+        }
+        var progress = new com.surprising.aeron.protocol.CoreFundingProgressView(
+                command.settlementId(), complete, nextCursorUserId, selectedUserIds.size());
         return new FundingApplication(new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury,
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.triggerOrders()), payments);
+                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.triggerOrders()), payments,
+                progress);
     }
 
     public record FundingApplication(TradingCoreState state,
-                                     java.util.List<com.surprising.aeron.protocol.CoreFundingPaymentView> payments) {
+                                     java.util.List<com.surprising.aeron.protocol.CoreFundingPaymentView> payments,
+                                     com.surprising.aeron.protocol.CoreFundingProgressView progress) {
         public FundingApplication {
             payments = java.util.List.copyOf(payments);
+            if (progress == null) throw new IllegalArgumentException("funding progress is required");
         }
     }
 
     public TradingCoreState settleInstrument(TradingCoreState state, SettleInstrumentCommand command) {
+        return settleInstrument(state, command, null);
+    }
+
+    public TradingCoreState settleInstrument(TradingCoreState state, SettleInstrumentCommand command,
+                                             Iterable<Long> indexedUserIds) {
+        return settleInstrumentWithProgress(state, command, indexedUserIds, null).state();
+    }
+
+    public SettlementApplication settleInstrumentWithProgress(TradingCoreState state,
+                                                              SettleInstrumentCommand command,
+                                                              Iterable<Long> indexedUserIds,
+                                                              UUID chunkCommandId) {
         CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
         long previousSettlement = state.treasuryState().lifecycleSettlements()
                 .getOrDefault(instrument.symbol(), 0L);
@@ -921,15 +1041,48 @@ public final class TradingCoreReducer {
         if (instrument.contractType().isDelivery() && command.settlementPriceTicks() <= 0) {
             throw new CoreStateRejectedException("INVALID_SETTLEMENT_PRICE", "delivery price must be positive");
         }
-        TradingCoreState canceled = cancelSymbolOrders(state, instrument.symbol());
-        Map<Long, CoreUserState> users = new TreeMap<>(canceled.users());
+        CoreTreasuryState.LifecycleProgress previousProgress = state.treasuryState()
+                .lifecycleProgress(instrument.symbol());
+        boolean chunked = indexedUserIds != null && chunkCommandId != null;
+        if (chunked) {
+            if (previousProgress == null && command.cursorUserId() != 0) {
+                throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
+            }
+            if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
+                    || previousProgress.instrumentVersion() != command.instrumentVersion()
+                    || previousProgress.settlementPriceTicks() != command.settlementPriceTicks()
+                    || previousProgress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
+                    || previousProgress.nextCursorUserId() != command.cursorUserId())) {
+                throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
+            }
+        }
+        TradingCoreState canceled = !chunked || previousProgress == null
+                ? cancelSymbolOrders(state, instrument.symbol()) : state;
+        Map<Long, CoreUserState> users = StateMapSupport.delta(canceled.users());
         CoreTreasuryState treasury = canceled.treasuryState();
-        for (CoreUserState user : canceled.users().values()) {
+        java.util.ArrayList<Long> selectedUserIds = new java.util.ArrayList<>();
+        boolean moreUsers = false;
+        if (!chunked) {
+            if (indexedUserIds == null) canceled.users().keySet().forEach(selectedUserIds::add);
+            else indexedUserIds.forEach(selectedUserIds::add);
+        } else {
+            for (Long userId : indexedUserIds) {
+                if (userId == null || userId <= command.cursorUserId()) continue;
+                if (selectedUserIds.size() < command.maxUsers()) selectedUserIds.add(userId);
+                else {
+                    moreUsers = true;
+                    break;
+                }
+            }
+        }
+        for (Long userId : selectedUserIds) {
+            CoreUserState user = canceled.user(userId);
+            if (user == null) continue;
             List<CorePositionState> settling = positionsForSymbol(user, instrument.symbol());
             if (settling.isEmpty()) continue;
             AssetBalance balance = requireBalance(user, instrument.settleAsset());
-            Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
-            Map<String, CorePositionState> positions = new TreeMap<>(user.positions());
+            Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
+            Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
             for (CorePositionState position : settling) {
                 if (position.positionMarginUnits() > 0) balance = balance.release(position.positionMarginUnits());
                 long cashDelta = instrument.contractType().isOption()
@@ -949,10 +1102,27 @@ public final class TradingCoreReducer {
                     Math.incrementExact(user.revision()), balances, user.reservations(), positions,
                     user.positionMode()));
         }
-        treasury = treasury.recordLifecycle(instrument.symbol(), command.settlementId());
-        return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
+        boolean complete = !chunked || !moreUsers;
+        long nextCursorUserId = complete ? 0 : selectedUserIds.getLast();
+        if (complete) {
+            treasury = treasury.recordLifecycle(instrument.symbol(), command.settlementId());
+        } else {
+            treasury = treasury.withLifecycleProgress(instrument.symbol(), new CoreTreasuryState.LifecycleProgress(
+                    command.settlementId(), command.instrumentVersion(), command.settlementPriceTicks(),
+                    command.optionCashUnitsPerContract(), nextCursorUserId, chunkCommandId));
+        }
+        TradingCoreState next = new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
                 canceled.orders(), canceled.bookState(), canceled.instruments(), canceled.riskState(), treasury,
                 canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(), canceled.triggerOrders());
+        return new SettlementApplication(next, new com.surprising.aeron.protocol.CoreSettlementProgressView(
+                command.settlementId(), complete, nextCursorUserId, selectedUserIds.size()));
+    }
+
+    public record SettlementApplication(TradingCoreState state,
+                                         com.surprising.aeron.protocol.CoreSettlementProgressView progress) {
+        public SettlementApplication {
+            if (progress == null) throw new IllegalArgumentException("settlement progress is required");
+        }
     }
 
     public TradingCoreState executeLiquidation(TradingCoreState state, ExecuteLiquidationCommand command) {
@@ -992,17 +1162,17 @@ public final class TradingCoreReducer {
         CoreTreasuryState treasury = canceled.treasuryState()
                 .adjustInsurance(instrument.settleAsset(),
                         Math.addExact(Math.negateExact(cash.appliedDelta()), collectedFee));
-        Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
         balances.put(instrument.settleAsset(), feeCash.balance());
-        Map<String, CorePositionState> positions = new TreeMap<>(user.positions());
+        Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
         positions.put(positionKey, new CorePositionState(instrument.symbol(), instrument.settleAsset(),
                 position.marginMode(), position.positionSide(), 0, 0, 0, 0,
                 Math.addExact(position.realizedPnlUnits(), pnl), 0));
         CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
                 Math.incrementExact(user.revision()), balances, user.reservations(), positions, user.positionMode());
-        Map<Long, CoreUserState> users = new TreeMap<>(canceled.users());
+        Map<Long, CoreUserState> users = StateMapSupport.delta(canceled.users());
         users.put(nextUser.userId(), nextUser);
-        Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(canceled.riskState().liquidations());
+        Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(canceled.riskState().liquidations());
         liquidations.put(liquidation.liquidationId(), liquidation.executed(uncovered,
                 command.executionPriceTicks(), command.liquidationFeeRatePpm(), collectedFee));
         CoreRiskState risk = new CoreRiskState(canceled.riskState().markPrices(), canceled.riskState().snapshots(),
@@ -1044,7 +1214,7 @@ public final class TradingCoreReducer {
     }
 
     private static TradingCoreState cancelLiquidation(TradingCoreState state, CoreLiquidationState liquidation) {
-        Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(state.riskState().liquidations());
+        Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(state.riskState().liquidations());
         liquidations.put(liquidation.liquidationId(), liquidation.canceled());
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
@@ -1099,7 +1269,7 @@ public final class TradingCoreReducer {
             }
             default -> throw new IllegalStateException("unknown liquidation resolution");
         }
-        Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(state.riskState().liquidations());
+        Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(state.riskState().liquidations());
         CoreLiquidationState nextLiquidation = command.resolution() == ResolveLiquidationCommand.Resolution.COMPLETED
                 ? liquidation.withStatus(nextStatus) : liquidation.covered(command.coveredUnits(), nextStatus);
         liquidations.put(liquidation.liquidationId(), nextLiquidation);
@@ -1167,11 +1337,11 @@ public final class TradingCoreReducer {
         if (releasedMargin > 0) balance = balance.release(releasedMargin);
         long targetCashDelta = Math.subtractExact(coverCapacity, command.coveredUnits());
         if (targetCashDelta > 0) balance = balance.credit(targetCashDelta);
-        Map<String, AssetBalance> balances = new TreeMap<>(target.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(target.balances());
         balances.put(instrument.settleAsset(), balance);
         long nextEntryValue = remainingAbs == 0 ? 0
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
-        Map<String, CorePositionState> positions = new TreeMap<>(target.positions());
+        Map<String, CorePositionState> positions = StateMapSupport.delta(target.positions());
         positions.put(positionKey, new CorePositionState(position.symbol(), position.marginAsset(),
                 position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
@@ -1180,11 +1350,11 @@ public final class TradingCoreReducer {
         CoreUserState nextTarget = new CoreUserState(target.productLine(), target.userId(),
                 Math.incrementExact(target.revision()), balances, target.reservations(), positions,
                 target.positionMode());
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
         users.put(nextTarget.userId(), nextTarget);
         CoreLiquidationState.Status nextStatus = command.coveredUnits() == liquidation.deficitUnits()
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
-        Map<Long, CoreLiquidationState> liquidations = new TreeMap<>(state.riskState().liquidations());
+        Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(state.riskState().liquidations());
         liquidations.put(liquidation.liquidationId(), liquidation.covered(command.coveredUnits(), nextStatus));
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
@@ -1245,26 +1415,56 @@ public final class TradingCoreReducer {
     }
 
     private TradingCoreState cancelUserSymbolOrders(TradingCoreState state, long userId, String symbol) {
-        TradingCoreState current = state;
-        List<Long> orderIds = state.orders().values().stream()
-                .filter(order -> order.userId() == userId && order.status() == CoreOrderStatus.OPEN
+        CoreUserState user = state.user(userId);
+        if (user == null) return state;
+        List<CoreOrderState> orders = userOrders(state, user).stream()
+                .filter(order -> order.status() == CoreOrderStatus.OPEN
                         && order.symbol().equals(symbol))
-                .map(CoreOrderState::orderId).toList();
-        for (long orderId : orderIds) {
-            current = cancelOrder(current, userId, new CancelOrderCommand(orderId));
-        }
-        return current;
+                .toList();
+        return cancelOrders(state, orders);
     }
 
     private TradingCoreState cancelSymbolOrders(TradingCoreState state, String symbol) {
-        TradingCoreState current = state;
-        List<CoreOrderState> openOrders = state.orders().values().stream()
-                .filter(order -> order.status() == CoreOrderStatus.OPEN && order.symbol().equals(symbol))
+        List<CoreOrderState> openOrders = state.bookState().openOrders().keySet().stream()
+                .map(state::order)
+                .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN)
+                .filter(order -> order.symbol().equals(symbol))
                 .toList();
+        return cancelOrders(state, openOrders);
+    }
+
+    private TradingCoreState cancelOrders(TradingCoreState state, List<CoreOrderState> openOrders) {
+        if (openOrders == null || openOrders.isEmpty()) return state;
+        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
+        Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
+        Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
+        boolean changed = false;
         for (CoreOrderState order : openOrders) {
-            current = cancelOrder(current, order.userId(), new CancelOrderCommand(order.orderId()));
+            CoreOrderState currentOrder = orders.get(order.orderId());
+            if (currentOrder == null || currentOrder.status() != CoreOrderStatus.OPEN) continue;
+            CoreUserState currentUser = users.get(currentOrder.userId());
+            if (currentUser == null) {
+                throw new IllegalStateException("order owner is missing orderId=" + currentOrder.orderId());
+            }
+            OrderReservation reservation = requireReservation(currentUser, currentOrder.orderId());
+            long releaseUnits = reservation.remainingUnits();
+            AssetBalance balance = requireBalance(currentUser, reservation.asset());
+            Map<String, AssetBalance> balances = StateMapSupport.delta(currentUser.balances());
+            if (releaseUnits != 0) balances.put(reservation.asset(), balance.release(releaseUnits));
+            Map<Long, OrderReservation> reservations = StateMapSupport.delta(currentUser.reservations());
+            reservations.put(currentOrder.orderId(), reservation.releaseAll());
+            users.put(currentUser.userId(), new CoreUserState(currentUser.productLine(), currentUser.userId(),
+                    Math.incrementExact(currentUser.revision()), balances, reservations, currentUser.positions(),
+                    currentUser.positionMode()));
+            orders.put(currentOrder.orderId(), currentOrder.cancel());
+            bookOrders.remove(currentOrder.orderId());
+            changed = true;
         }
-        return current;
+        if (!changed) return state;
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
+                new CoreBookState(state.bookState().nextPrioritySequence(), bookOrders), state.instruments(),
+                state.riskState(), state.treasuryState(), state.leverages(), state.algoOrders(),
+                state.cancelAllAfterTimers(), StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
     }
 
     private static long safeRatio(long maintenance, long equity) {
@@ -1311,7 +1511,7 @@ public final class TradingCoreReducer {
         }
         long quoteUnits = Math.multiplyExact(fillPriceTicks, fillQuantitySteps);
         long feeDelta = CoreContractMath.feeDeltaUnits(instrument, fillPriceTicks, fillQuantitySteps, feeRatePpm);
-        Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
         long reservationDebit;
         if (order.side() == CoreOrderSide.BUY) {
             reservationDebit = Math.addExact(quoteUnits, Math.max(0, Math.negateExact(feeDelta)));
@@ -1327,7 +1527,7 @@ public final class TradingCoreReducer {
                     .credit(quoteUnits);
             balances.put(quoteAsset, applySpotFee(quoteBalance, feeDelta, false));
         }
-        Map<Long, OrderReservation> reservations = new TreeMap<>(user.reservations());
+        Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
         reservations.put(order.orderId(), reservation.consume(reservationDebit));
         CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
                 Math.incrementExact(user.revision()), balances, reservations, user.positions(), user.positionMode());
@@ -1375,7 +1575,7 @@ public final class TradingCoreReducer {
         long reservationDebit = Math.addExact(openingMargin,
                 Math.addExact(Math.max(0, Math.negateExact(premiumDelta)), Math.max(0, Math.negateExact(feeDelta))));
         OrderReservation nextReservation = reservationDebit == 0 ? reservation : reservation.consume(reservationDebit);
-        Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
         AssetBalance balance = requireBalance(user, instrument.settleAsset());
         if (releasedMargin > 0) {
             balance = balance.release(releasedMargin);
@@ -1424,9 +1624,9 @@ public final class TradingCoreReducer {
                 order.positionSide(), nextQuantity == 0 ? 0 : order.instrumentVersion(), nextQuantity,
                 nextEntryPrice, nextEntryValue,
                 Math.addExact(current == null ? 0 : current.realizedPnlUnits(), realizedPnl), nextMargin);
-        Map<Long, OrderReservation> reservations = new TreeMap<>(user.reservations());
+        Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
         reservations.put(order.orderId(), nextReservation);
-        Map<String, CorePositionState> positions = new TreeMap<>(user.positions());
+        Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
         positions.put(positionKey, position);
         return new DerivativeFillResult(new CoreUserState(user.productLine(), user.userId(),
                 Math.incrementExact(user.revision()), balances, reservations, positions, user.positionMode()), treasury);
@@ -1460,9 +1660,9 @@ public final class TradingCoreReducer {
         if (releaseUnits == 0) {
             return user;
         }
-        Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
+        Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
         balances.put(reservation.asset(), requireBalance(user, reservation.asset()).release(releaseUnits));
-        Map<Long, OrderReservation> reservations = new TreeMap<>(user.reservations());
+        Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
         reservations.put(orderId, reservation.releaseAll());
         return new CoreUserState(user.productLine(), user.userId(), Math.incrementExact(user.revision()),
                 balances, reservations, user.positions(), user.positionMode());
@@ -1489,8 +1689,22 @@ public final class TradingCoreReducer {
             CoreUserState user,
             Map<Long, CoreOrderState> orders,
             CoreBookState bookState) {
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        return replaceUser(state, user, orders, bookState, null);
+    }
+
+    private static TradingCoreState replaceUser(
+            TradingCoreState state,
+            CoreUserState user,
+            Map<Long, CoreOrderState> orders,
+            CoreBookState bookState,
+            Map<ClientOrderKey, Long> clientOrderIndex) {
+        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
         users.put(user.userId(), user);
+        if (clientOrderIndex != null) {
+            return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
+                    bookState, state.instruments(), state.riskState(), state.treasuryState(), state.leverages(),
+                    state.algoOrders(), state.cancelAllAfterTimers(), clientOrderIndex, state.triggerOrders());
+        }
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
                 bookState, state.instruments(), state.riskState(), state.treasuryState(), state.leverages(),
                 state.algoOrders(), state.cancelAllAfterTimers(), state.triggerOrders());
@@ -1573,14 +1787,15 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
-            PlaceOrderCommand command) {
+            PlaceOrderCommand command,
+            long indexedOpenInterestSteps) {
         if (!state.productLine().isDerivative() || command.reduceOnly()) return;
         long projectedNotional = projectedPositionNotionalUnits(state, instrument, user, command);
         if (projectedNotional > instrument.maxPositionNotionalUnits()) {
             throw new CoreStateRejectedException("POSITION_NOTIONAL_LIMIT_EXCEEDED",
                     "projected position exceeds instrument notional limit");
         }
-        long openInterestSteps = symbolOpenInterestSteps(state, instrument.symbol());
+        long openInterestSteps = indexedOpenInterestSteps;
         long openInterestNotional = openInterestSteps == 0 ? 0
                 : CoreContractMath.notionalUnits(instrument, openInterestSteps, command.matchingPriceTicks());
         long scaledLimit = java.math.BigInteger.valueOf(openInterestNotional)
@@ -1613,10 +1828,10 @@ public final class TradingCoreReducer {
             PlaceOrderCommand command) {
         CorePositionState position = user.positions().get(positionKey(instrument.symbol(), command.positionSide()));
         long current = position == null ? 0 : position.signedQuantitySteps();
-        long pendingSameSide = state.orders().values().stream()
-                .filter(order -> order.userId() == user.userId() && order.status() == CoreOrderStatus.OPEN
-                        && !order.reduceOnly() && order.symbol().equals(instrument.symbol())
-                        && order.positionSide() == command.positionSide() && order.side() == command.side())
+        long pendingSameSide = userOrders(state, user).stream()
+                .filter(order -> order.status() == CoreOrderStatus.OPEN && !order.reduceOnly()
+                        && order.symbol().equals(instrument.symbol()) && order.positionSide() == command.positionSide()
+                        && order.side() == command.side())
                 .mapToLong(CoreOrderState::remainingQuantitySteps).reduce(0L, Math::addExact);
         long totalOrderSteps = Math.addExact(pendingSameSide, command.quantitySteps());
         long signedOrderSteps = command.side() == CoreOrderSide.BUY
@@ -1659,11 +1874,6 @@ public final class TradingCoreReducer {
         return (quotient[1].signum() == 0 ? quotient[0] : quotient[0].add(java.math.BigInteger.ONE)).longValueExact();
     }
 
-    private static long leverageFromInitialMarginRate(long ratePpm) {
-        return java.math.BigInteger.valueOf(PPM).multiply(java.math.BigInteger.valueOf(PPM))
-                .divide(java.math.BigInteger.valueOf(ratePpm)).longValueExact();
-    }
-
     private static void validateReduceOnlyCapacity(
             TradingCoreState state,
             CoreUserState user,
@@ -1680,9 +1890,9 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("REDUCE_ONLY_REQUIRES_POSITION_STATE",
                     "reduce-only side must close an existing position");
         }
-        long alreadyOpen = state.orders().values().stream()
-                .filter(order -> order.userId() == user.userId() && order.reduceOnly()
-                        && order.status() == CoreOrderStatus.OPEN && order.symbol().equals(position.symbol())
+        long alreadyOpen = userOrders(state, user).stream()
+                .filter(order -> order.reduceOnly() && order.status() == CoreOrderStatus.OPEN
+                        && order.symbol().equals(position.symbol())
                         && order.side() == command.side())
                 .mapToLong(CoreOrderState::remainingQuantitySteps)
                 .reduce(0L, Math::addExact);
@@ -1708,8 +1918,8 @@ public final class TradingCoreReducer {
         CorePositionState position = user.positions().get(positionKey(command.symbol(), command.positionSide()));
         boolean positionConflict = position != null && position.signedQuantitySteps() != 0
                 && position.marginMode() != command.marginMode();
-        boolean orderConflict = state.orders().values().stream().anyMatch(order -> order.userId() == user.userId()
-                && order.status() == CoreOrderStatus.OPEN && order.symbol().equalsIgnoreCase(command.symbol())
+        boolean orderConflict = userOrders(state, user).stream().anyMatch(order -> order.status() == CoreOrderStatus.OPEN
+                && order.symbol().equalsIgnoreCase(command.symbol())
                 && order.positionSide() == command.positionSide() && order.marginMode() != command.marginMode());
         if (positionConflict || orderConflict) {
             throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID",
@@ -1728,6 +1938,21 @@ public final class TradingCoreReducer {
         if (userId <= 0) {
             throw new CoreStateRejectedException("INVALID_USER_ID", "userId must be positive");
         }
+    }
+
+    private static List<CoreOrderState> userOrders(TradingCoreState state, CoreUserState user) {
+        return user.reservations().keySet().stream()
+                .map(state.orders()::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Iterable<CoreUserState> usersAfter(Map<Long, CoreUserState> users, long lastUserId) {
+        if (users instanceof NavigableMap<?, ?> navigable) {
+            return ((NavigableMap<Long, CoreUserState>) navigable).tailMap(lastUserId, false).values();
+        }
+        return users.values().stream().filter(user -> user.userId() > lastUserId).toList();
     }
 
     private static String positionKey(String symbol, com.surprising.aeron.protocol.CorePositionSide side) {

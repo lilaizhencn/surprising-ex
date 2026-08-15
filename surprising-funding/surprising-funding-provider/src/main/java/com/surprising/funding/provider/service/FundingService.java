@@ -1,7 +1,10 @@
 package com.surprising.funding.provider.service;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
+import com.surprising.aeron.protocol.CoreFundingProgressCodec;
+import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.funding.api.model.FundingPaymentQueryResponse;
 import com.surprising.funding.api.model.FundingRateQueryResponse;
@@ -90,12 +93,33 @@ public class FundingService {
             if (!ownsSymbol(rate.symbol())) continue;
             try {
                 FundingSettlementRepository.CoreSettlement settlement = settlementRepository.reserveCore(rate);
-                UUID commandId = UUID.nameUUIDFromBytes((properties.getKafka().getProductLine() + ":funding:"
-                        + rate.symbol() + ':' + settlement.settlementId()).getBytes(StandardCharsets.UTF_8));
-                aeron.command(CoreMessageType.APPLY_FUNDING, commandId,
-                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                settlement.settlementId(), rate.symbol(), settlement.instrumentVersion(),
-                                rate.fundingRatePpm())));
+                String commandPrefix = properties.getKafka().getProductLine() + ":funding:"
+                        + rate.symbol() + ':' + settlement.settlementId();
+                long cursor = 0;
+                CoreFundingProgressView persisted = decodeProgressOrQuery(rate.symbol(), settlement, null);
+                if (persisted != null && persisted.complete()
+                        && persisted.settlementId() == settlement.settlementId()) {
+                    rateRepository.saveFinal(rate);
+                    latestFundingRateCache.removeIfCurrent(rate);
+                    continue;
+                }
+                if (persisted != null && !persisted.complete()) {
+                    cursor = persisted.nextCursorUserId();
+                }
+                for (;;) {
+                    UUID commandId = UUID.nameUUIDFromBytes((commandPrefix + ':' + cursor)
+                            .getBytes(StandardCharsets.UTF_8));
+                    CoreResponse response = aeron.commandWithResponse(CoreMessageType.APPLY_FUNDING, commandId,
+                            TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
+                                    settlement.settlementId(), rate.symbol(), settlement.instrumentVersion(),
+                                    rate.fundingRatePpm(), cursor, ApplyFundingCommand.DEFAULT_MAX_USERS)));
+                    CoreFundingProgressView progress = decodeProgressOrQuery(rate.symbol(), settlement, response);
+                    if (progress == null || progress.complete()) break;
+                    if (progress.nextCursorUserId() <= cursor) {
+                        throw new IllegalStateException("Aeron funding cursor did not advance");
+                    }
+                    cursor = progress.nextCursorUserId();
+                }
                 rateRepository.saveFinal(rate);
                 latestFundingRateCache.removeIfCurrent(rate);
             } catch (Exception exception) {
@@ -103,6 +127,31 @@ public class FundingService {
                         rate.symbol(), rate.fundingTime(), exception.getMessage(), exception);
             }
         }
+    }
+
+    private CoreFundingProgressView decodeProgressOrQuery(
+            String symbol,
+            FundingSettlementRepository.CoreSettlement settlement,
+            CoreResponse response) {
+        CoreResponse effective = response;
+        if (effective == null || effective.data().length == 0) {
+            try {
+                effective = aeron.query(CoreMessageType.FUNDING_PROGRESS_QUERY, UUID.randomUUID(),
+                        com.surprising.aeron.protocol.CoreStateQueryCodec.encodeFundingProgressQuery(symbol));
+            } catch (RuntimeException exception) {
+                return null;
+            }
+        }
+        if (effective == null || (effective.status() != com.surprising.aeron.protocol.ResponseStatus.OK
+                && effective.commandStatus() != com.surprising.aeron.protocol.ResponseStatus.APPLIED)
+                || effective.data().length == 0) {
+            return null;
+        }
+        CoreFundingProgressView progress = CoreFundingProgressCodec.decode(effective.data());
+        if (progress.settlementId() != 0 && progress.settlementId() != settlement.settlementId()) {
+            throw new IllegalStateException("Aeron funding settlement progress mismatch");
+        }
+        return progress;
     }
 
     public FundingRateResponse latestRate(String symbol) {

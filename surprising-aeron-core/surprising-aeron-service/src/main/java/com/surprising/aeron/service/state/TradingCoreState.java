@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.product.api.ProductLine;
-import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 public record TradingCoreState(
@@ -23,63 +23,92 @@ public record TradingCoreState(
     public TradingCoreState {
         if (productLine == null || revision < 0 || users == null || orders == null || bookState == null
                 || instruments == null || riskState == null || treasuryState == null || leverages == null
-                || algoOrders == null || cancelAllAfterTimers == null || clientOrderIndex == null
+                || algoOrders == null || cancelAllAfterTimers == null
                 || triggerOrders == null) {
             throw new IllegalArgumentException("invalid trading core state");
         }
-        Map<Long, CoreUserState> sortedUsers = Collections.unmodifiableMap(new TreeMap<>(users));
-        Map<Long, CoreOrderState> sortedOrders = Collections.unmodifiableMap(new TreeMap<>(orders));
-        sortedUsers.forEach((userId, user) -> {
-            if (userId != user.userId() || user.productLine() != productLine) {
-                throw new IllegalArgumentException("user state belongs to another partition");
+        boolean usersDelta = StateMapSupport.isDelta(users);
+        boolean ordersDelta = StateMapSupport.isDelta(orders);
+        Map<Long, CoreUserState> sortedUsers = StateMapSupport.freezeSorted(users);
+        Map<Long, CoreOrderState> sortedOrders = StateMapSupport.freezeSorted(orders);
+        if (!usersDelta) {
+            sortedUsers.forEach((userId, user) -> validateUser(productLine, userId, user));
+        } else {
+            for (Object key : StateMapSupport.changedKeys(users)) {
+                CoreUserState user = sortedUsers.get(key);
+                if (user != null) validateUser(productLine, (Long) key, user);
             }
-        });
-        sortedOrders.forEach((orderId, order) -> {
-            if (orderId != order.orderId() || order.productLine() != productLine
-                    || !sortedUsers.containsKey(order.userId())) {
-                throw new IllegalArgumentException("order state belongs to another partition");
-            }
-        });
-        Map<ClientOrderKey, Long> derivedIndex = new TreeMap<>();
-        sortedOrders.values().stream().filter(order -> !order.clientOrderId().isEmpty()).forEach(order -> {
-            ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
-            if (derivedIndex.put(key, order.orderId()) != null) {
-                throw new IllegalArgumentException("duplicate clientOrderId for user");
-            }
-        });
-        if (!derivedIndex.equals(clientOrderIndex)) {
-            throw new IllegalArgumentException("client order index does not match authoritative orders");
         }
-        bookState.openOrders().forEach((orderId, bookOrder) -> {
-            CoreOrderState order = sortedOrders.get(orderId);
-            if (order == null || order.status() != CoreOrderStatus.OPEN
-                    || order.userId() != bookOrder.userId() || !order.symbol().equals(bookOrder.symbol())
-                    || order.side() != bookOrder.side() || order.priceTicks() != bookOrder.priceTicks()
-                    || order.remainingQuantitySteps() != bookOrder.remainingQuantitySteps()) {
-                throw new IllegalArgumentException("book order does not match authoritative order state");
+        if (!ordersDelta) {
+            sortedOrders.forEach((orderId, order) -> validateOrder(productLine, sortedUsers, orderId, order));
+        } else {
+            for (Object key : StateMapSupport.changedKeys(orders)) {
+                CoreOrderState order = sortedOrders.get(key);
+                if (order != null) validateOrder(productLine, sortedUsers, (Long) key, order);
             }
-        });
+        }
+        Map<ClientOrderKey, Long> derivedIndex;
+        if (clientOrderIndex != null && StateMapSupport.isDelta(clientOrderIndex)) {
+            derivedIndex = StateMapSupport.freezeSorted(clientOrderIndex);
+            for (Object key : StateMapSupport.changedKeys(clientOrderIndex)) {
+                Long orderId = derivedIndex.get(key);
+                if (orderId != null) {
+                    CoreOrderState order = sortedOrders.get(orderId);
+                    if (order == null || order.clientOrderId().isEmpty()
+                            || !new ClientOrderKey(order.userId(), order.clientOrderId()).equals(key)) {
+                        throw new IllegalArgumentException("client order index does not match authoritative orders");
+                    }
+                }
+            }
+        } else {
+            derivedIndex = new TreeMap<>();
+            sortedOrders.values().stream().filter(order -> !order.clientOrderId().isEmpty()).forEach(order -> {
+                ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
+                if (derivedIndex.put(key, order.orderId()) != null) {
+                    throw new IllegalArgumentException("duplicate clientOrderId for user");
+                }
+            });
+            if (clientOrderIndex != null && !derivedIndex.equals(clientOrderIndex)) {
+                throw new IllegalArgumentException("client order index does not match authoritative orders");
+            }
+        }
+        boolean bookDelta = StateMapSupport.isDelta(bookState.openOrders());
+        Map<String, CoreInstrumentState> sourceInstruments = instruments;
+        boolean validateInstrumentVersion = !sourceInstruments.isEmpty();
+        if (!bookDelta) {
+            bookState.openOrders().forEach((orderId, prioritySequence) ->
+                    validateBookOrder(sortedOrders, sourceInstruments, bookState.nextPrioritySequence(), orderId,
+                            prioritySequence, validateInstrumentVersion));
+        } else {
+            for (Object key : StateMapSupport.changedKeys(bookState.openOrders())) {
+                Long prioritySequence = bookState.openOrders().get(key);
+                if (prioritySequence != null) {
+                    validateBookOrder(sortedOrders, instruments, bookState.nextPrioritySequence(), (Long) key,
+                            prioritySequence, validateInstrumentVersion);
+                }
+            }
+        }
         users = sortedUsers;
         orders = sortedOrders;
-        instruments = Collections.unmodifiableMap(new TreeMap<>(instruments));
-        leverages = Collections.unmodifiableMap(new TreeMap<>(leverages));
-        algoOrders = Collections.unmodifiableMap(new TreeMap<>(algoOrders));
-        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> sortedTimers = new TreeMap<>(cancelAllAfterTimers);
+        instruments = StateMapSupport.freezeSorted(instruments);
+        leverages = StateMapSupport.freezeSorted(leverages);
+        algoOrders = StateMapSupport.freezeSorted(algoOrders);
+        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> sortedTimers = StateMapSupport.freezeSorted(cancelAllAfterTimers);
         sortedTimers.forEach((key, timer) -> {
             if (!key.equals(timer.key())) {
                 throw new IllegalArgumentException("cancel-all-after key does not match authoritative timer");
             }
         });
-        cancelAllAfterTimers = Collections.unmodifiableMap(sortedTimers);
-        clientOrderIndex = Collections.unmodifiableMap(derivedIndex);
-        Map<Long, CoreTriggerOrderState> sortedTriggers = new TreeMap<>(triggerOrders);
+        cancelAllAfterTimers = sortedTimers;
+        clientOrderIndex = StateMapSupport.freezeSorted(derivedIndex);
+        Map<Long, CoreTriggerOrderState> sortedTriggers = StateMapSupport.freezeSorted(triggerOrders);
         sortedTriggers.forEach((id, trigger) -> {
             if (id != trigger.triggerOrderId() || trigger.productLine() != productLine
                     || !sortedUsers.containsKey(trigger.userId())) {
                 throw new IllegalArgumentException("trigger order state belongs to another partition");
             }
         });
-        triggerOrders = Collections.unmodifiableMap(sortedTriggers);
+        triggerOrders = sortedTriggers;
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -87,7 +116,7 @@ public record TradingCoreState(
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                Map.of(), Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
+                Map.of(), Map.of(), Map.of(), null, Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -95,7 +124,7 @@ public record TradingCoreState(
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
+                leverages, Map.of(), Map.of(), null, Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -104,7 +133,7 @@ public record TradingCoreState(
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, algoOrders, Map.of(), deriveClientOrderIndex(orders), Map.of());
+                leverages, algoOrders, Map.of(), null, Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -114,7 +143,7 @@ public record TradingCoreState(
                             Map<Long, CoreAlgoOrderState> algoOrders,
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), Map.of());
+                leverages, algoOrders, cancelAllAfterTimers, null, Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
@@ -125,7 +154,7 @@ public record TradingCoreState(
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
                             Map<Long, CoreTriggerOrderState> triggerOrders) {
         this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
-                leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), triggerOrders);
+                leverages, algoOrders, cancelAllAfterTimers, null, triggerOrders);
     }
 
     public static TradingCoreState empty(ProductLine productLine) {
@@ -153,20 +182,80 @@ public record TradingCoreState(
             TradingCoreState before,
             long timestamp,
             long clusterPosition) {
-        Map<Long, CoreOrderState> stamped = new TreeMap<>(orders);
+        return stampOrderChanges(before, timestamp, clusterPosition, null);
+    }
+
+    public TradingCoreState stampOrderChanges(
+            TradingCoreState before,
+            long timestamp,
+            long clusterPosition,
+            Iterable<Long> changedOrderIds) {
+        Map<Long, CoreOrderState> stamped = changedOrderIds == null
+                ? new TreeMap<>(orders) : StateMapSupport.delta(orders);
         boolean changed = false;
-        for (CoreOrderState order : orders.values()) {
-            CoreOrderState previous = before.orders().get(order.orderId());
-            if (!order.equals(previous)) {
-                stamped.put(order.orderId(), order.withCommitMetadata(timestamp, clusterPosition));
-                changed = true;
+        if (changedOrderIds == null) {
+            for (CoreOrderState order : orders.values()) {
+                CoreOrderState previous = before.orders().get(order.orderId());
+                if (!order.equals(previous)) {
+                    stamped.put(order.orderId(), order.withCommitMetadata(timestamp, clusterPosition));
+                    changed = true;
+                }
+            }
+        } else {
+            for (Long orderId : changedOrderIds) {
+                if (orderId == null) continue;
+                CoreOrderState order = orders.get(orderId);
+                if (order == null) continue;
+                CoreOrderState previous = before.orders().get(orderId);
+                if (!order.equals(previous)) {
+                    stamped.put(orderId, order.withCommitMetadata(timestamp, clusterPosition));
+                    changed = true;
+                }
             }
         }
-        return changed ? new TradingCoreState(productLine, revision, users, stamped, bookState,
-                instruments, riskState, treasuryState, leverages, algoOrders, cancelAllAfterTimers) : this;
+        if (!changed) return this;
+        if (changedOrderIds == null) {
+            return new TradingCoreState(productLine, revision, users, stamped, bookState,
+                    instruments, riskState, treasuryState, leverages, algoOrders, cancelAllAfterTimers, triggerOrders);
+        }
+        return new TradingCoreState(productLine, revision, users, stamped, bookState,
+                instruments, riskState, treasuryState, leverages, algoOrders, cancelAllAfterTimers,
+                StateMapSupport.delta(clientOrderIndex), triggerOrders);
+    }
+
+    private static void validateUser(ProductLine productLine, long userId, CoreUserState user) {
+        if (userId != user.userId() || user.productLine() != productLine) {
+            throw new IllegalArgumentException("user state belongs to another partition");
+        }
+    }
+
+    private static void validateOrder(ProductLine productLine, Map<Long, CoreUserState> users,
+                                      long orderId, CoreOrderState order) {
+        if (orderId != order.orderId() || order.productLine() != productLine
+                || !users.containsKey(order.userId())) {
+            throw new IllegalArgumentException("order state belongs to another partition");
+        }
+    }
+
+    private static void validateBookOrder(Map<Long, CoreOrderState> orders,
+                                          Map<String, CoreInstrumentState> instruments,
+                                          long nextPrioritySequence, long orderId, long prioritySequence,
+                                          boolean validateInstrumentVersion) {
+        CoreOrderState order = orders.get(orderId);
+        CoreInstrumentState instrument = order == null ? null : instruments.get(order.symbol());
+        if (order == null || (validateInstrumentVersion
+                && (instrument == null || instrument.version() != order.instrumentVersion()))
+                || order.status() != CoreOrderStatus.OPEN
+                || prioritySequence <= 0 || prioritySequence >= nextPrioritySequence) {
+            throw new IllegalArgumentException("book order does not match authoritative order state");
+        }
     }
 
     public long businessStateHash() {
+        return RollingBusinessStateHash.compute(this);
+    }
+
+    long fullBusinessStateHash() {
         long hash = CoreStateHash.mix(CoreStateHash.start(), productLine.ordinal());
         hash = CoreStateHash.mix(hash, revision);
         for (CoreUserState user : users.values()) {
@@ -175,7 +264,7 @@ public record TradingCoreState(
         for (CoreOrderState order : orders.values()) {
             hash = hashOrder(hash, order);
         }
-        hash = CoreStateHash.mix(hash, bookState.stateHash(null));
+        hash = CoreStateHash.mix(hash, bookState.stateHash());
         for (CoreInstrumentState instrument : instruments.values()) {
             hash = CoreStateHash.mix(hash, instrument.symbol());
             hash = CoreStateHash.mix(hash, instrument.version());
@@ -303,15 +392,51 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        for (Map.Entry<String, CoreTreasuryState.FundingProgress> entry : treasuryState.fundingProgress().entrySet()) {
+            CoreTreasuryState.FundingProgress progress = entry.getValue();
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, progress.settlementId());
+            hash = CoreStateHash.mix(hash, progress.instrumentVersion());
+            hash = CoreStateHash.mix(hash, progress.fundingRatePpm());
+            hash = CoreStateHash.mix(hash, progress.nextCursorUserId());
+            hash = CoreStateHash.mix(hash, progress.commandId().getMostSignificantBits());
+            hash = CoreStateHash.mix(hash, progress.commandId().getLeastSignificantBits());
+        }
         for (Map.Entry<String, Long> entry : treasuryState.lifecycleSettlements().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        for (Map.Entry<String, CoreTreasuryState.LifecycleProgress> entry
+                : treasuryState.lifecycleProgress().entrySet()) {
+            CoreTreasuryState.LifecycleProgress progress = entry.getValue();
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, progress.settlementId());
+            hash = CoreStateHash.mix(hash, progress.instrumentVersion());
+            hash = CoreStateHash.mix(hash, progress.settlementPriceTicks());
+            hash = CoreStateHash.mix(hash, progress.optionCashUnitsPerContract());
+            hash = CoreStateHash.mix(hash, progress.nextCursorUserId());
+            hash = CoreStateHash.mix(hash, progress.commandId().getMostSignificantBits());
+            hash = CoreStateHash.mix(hash, progress.commandId().getLeastSignificantBits());
         }
         return hash;
     }
 
     public long bookStateHash(String symbol) {
-        return bookState.stateHash(symbol);
+        String normalized = symbol == null ? null : OrderReservation.normalizeSymbol(symbol);
+        long hash = CoreStateHash.start();
+        hash = CoreStateHash.mix(hash, bookState.nextPrioritySequence());
+        for (Map.Entry<Long, Long> entry : bookState.openOrders().entrySet()) {
+            CoreOrderState order = orders.get(entry.getKey());
+            if (order == null || (normalized != null && !normalized.equals(order.symbol()))) continue;
+            hash = CoreStateHash.mix(hash, order.orderId());
+            hash = CoreStateHash.mix(hash, order.userId());
+            hash = CoreStateHash.mix(hash, order.symbol());
+            hash = CoreStateHash.mix(hash, order.side().wireCode());
+            hash = CoreStateHash.mix(hash, order.priceTicks());
+            hash = CoreStateHash.mix(hash, order.remainingQuantitySteps());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        return hash;
     }
 
     public long userStateHash(long userId) {
@@ -332,7 +457,32 @@ public record TradingCoreState(
         return order == null ? 0 : hashOrder(CoreStateHash.start(), order);
     }
 
-    private static long hashUser(long initial, CoreUserState user) {
+    public Set<Long> changedLiquidationIdsSince(TradingCoreState before) {
+        if (before == null) return null;
+        return StateMapSupport.changedKeysSince(before.riskState().liquidations(), riskState.liquidations());
+    }
+
+    public Set<Long> changedUserIdsSince(TradingCoreState before) {
+        if (before == null) return null;
+        return StateMapSupport.changedKeysSince(before.users, users);
+    }
+
+    public Set<Long> changedOrderIdsSince(TradingCoreState before) {
+        if (before == null) return null;
+        return StateMapSupport.changedKeysSince(before.orders, orders);
+    }
+
+    public Set<Long> changedTriggerOrderIdsSince(TradingCoreState before) {
+        if (before == null) return null;
+        return StateMapSupport.changedKeysSince(before.triggerOrders(), triggerOrders);
+    }
+
+    public Set<String> changedTreasuryAssetsSince(TradingCoreState before) {
+        if (before == null) return null;
+        return treasuryState.changedAssetsSince(before.treasuryState());
+    }
+
+    static long hashUser(long initial, CoreUserState user) {
         long hash = CoreStateHash.mix(initial, user.productLine().ordinal());
         hash = CoreStateHash.mix(hash, user.userId());
         hash = CoreStateHash.mix(hash, user.revision());
@@ -368,7 +518,7 @@ public record TradingCoreState(
         return hash;
     }
 
-    private static long hashOrder(long initial, CoreOrderState order) {
+    static long hashOrder(long initial, CoreOrderState order) {
         long hash = CoreStateHash.mix(initial, order.orderId());
         hash = CoreStateHash.mix(hash, order.productLine().ordinal());
         hash = CoreStateHash.mix(hash, order.userId());

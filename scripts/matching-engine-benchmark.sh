@@ -4,27 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ORDERS="${1:-${BENCHMARK_ORDERS:-100000}}"
 WARMUP_ORDERS="${2:-${BENCHMARK_WARMUP_ORDERS:-10000}}"
-CP_FILE="$(mktemp /tmp/surprising-matching-benchmark-cp.XXXXXX)"
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}"
+if [[ -z "${JAVA_HOME}" || ! -x "${JAVA_HOME}/bin/java" ]]; then
+  echo "JAVA_HOME must point to JDK 25" >&2
+  exit 1
+fi
 
-cleanup() {
-  rm -f "${CP_FILE}"
-}
-trap cleanup EXIT
+JAVA_HOME="${JAVA_HOME}" mvn -q -pl :surprising-aeron-tools -am -DskipTests package
 
-JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}" \
-  mvn -q -pl :surprising-trading-api -am -DskipTests install
-
-JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}" \
-  mvn -q -pl :surprising-matching-provider -am -DskipTests test-compile
-
-JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25 2>/dev/null || true)}" \
-  mvn -q -U -pl :surprising-matching-provider -DincludeScope=test \
-  -Dmdep.outputFile="${CP_FILE}" dependency:build-classpath
-
-CLASSPATH="${ROOT_DIR}/surprising-trading/surprising-matching-provider/target/test-classes"
-CLASSPATH="${CLASSPATH}:${ROOT_DIR}/surprising-trading/surprising-matching-provider/target/classes"
-CLASSPATH="${CLASSPATH}:${ROOT_DIR}/surprising-trading/surprising-trading-api/target/classes"
-CLASSPATH="${CLASSPATH}:$(cat "${CP_FILE}")"
+TOOLS_JAR="${ROOT_DIR}/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar"
+if [[ ! -f "${TOOLS_JAR}" ]]; then
+  echo "missing Aeron tools jar: ${TOOLS_JAR}" >&2
+  exit 1
+fi
 
 exec "${JAVA_HOME}/bin/java" \
   --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED \
@@ -38,6 +30,6 @@ exec "${JAVA_HOME}/bin/java" \
   --add-opens=java.base/java.util=ALL-UNNAMED \
   --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
   --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-  -cp "${CLASSPATH}" \
-  com.surprising.trading.matching.benchmark.ExchangeCoreEngineBenchmark \
+  -cp "${TOOLS_JAR}" \
+  com.surprising.aeron.service.CoreInMemoryBenchmark \
   "${ORDERS}" "${WARMUP_ORDERS}"

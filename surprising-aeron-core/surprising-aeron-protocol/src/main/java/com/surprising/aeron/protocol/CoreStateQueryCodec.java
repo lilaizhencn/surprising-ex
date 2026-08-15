@@ -30,6 +30,27 @@ public final class CoreStateQueryCodec {
         return clientOrderId;
     }
 
+    public static byte[] encodeFundingProgressQuery(String symbol) {
+        Writer writer = new Writer();
+        writer.text(symbol);
+        return writer.toByteArray();
+    }
+
+    public static String decodeFundingProgressQuery(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        String symbol = reader.text();
+        reader.requireConsumed();
+        return symbol;
+    }
+
+    public static byte[] encodeSettlementProgressQuery(String symbol) {
+        return encodeFundingProgressQuery(symbol);
+    }
+
+    public static String decodeSettlementProgressQuery(byte[] encoded) {
+        return decodeFundingProgressQuery(encoded);
+    }
+
     public static byte[] encodeTreasuryState(List<CoreTreasuryAssetView> assets) {
         Writer writer = new Writer();
         writer.intValue(1);

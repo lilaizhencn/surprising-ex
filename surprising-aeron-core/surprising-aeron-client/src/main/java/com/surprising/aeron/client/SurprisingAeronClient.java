@@ -11,6 +11,7 @@ import io.aeron.cluster.client.EgressListener;
 import io.aeron.cluster.codecs.EventCode;
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
+import io.aeron.Publication;
 import io.aeron.logbuffer.Header;
 import java.time.Duration;
 import java.util.HashMap;
@@ -27,6 +28,7 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
     private final ProductLine productLine;
     private final Duration responseTimeout;
     private final MediaDriver mediaDriver;
+    private final boolean closeMediaDriver;
     private final AeronCluster cluster;
     private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
     private final Map<Long, CoreResponse> responses = new HashMap<>();
@@ -36,13 +38,13 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
             ProductLine productLine,
             List<String> hostnames,
             String egressHostname,
-            Duration responseTimeout) {
+            Duration responseTimeout,
+            MediaDriver mediaDriver,
+            boolean closeMediaDriver) {
         this.productLine = Objects.requireNonNull(productLine, "productLine");
         this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
-        mediaDriver = MediaDriver.launchEmbedded(new MediaDriver.Context()
-                .threadingMode(ThreadingMode.SHARED)
-                .dirDeleteOnStart(true)
-                .dirDeleteOnShutdown(true));
+        this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
+        this.closeMediaDriver = closeMediaDriver;
         try {
             cluster = AeronCluster.connect(new AeronCluster.Context()
                     .clientName("surprising-" + productLine.name().toLowerCase())
@@ -54,7 +56,9 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
                     .ingressChannel("aeron:udp")
                     .ingressEndpoints(ProductLineClusterLayout.ingressEndpoints(productLine, hostnames)));
         } catch (RuntimeException exception) {
-            mediaDriver.close();
+            if (closeMediaDriver) {
+                mediaDriver.close();
+            }
             throw exception;
         }
     }
@@ -71,7 +75,37 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
         if (responseTimeout == null || responseTimeout.isNegative() || responseTimeout.isZero()) {
             throw new IllegalArgumentException("responseTimeout must be positive");
         }
-        return new SurprisingAeronClient(productLine, hostnames, egressHostname, responseTimeout);
+        MediaDriver mediaDriver = newMediaDriver();
+        return new SurprisingAeronClient(productLine, hostnames, egressHostname, responseTimeout,
+                mediaDriver, true);
+    }
+
+    static SurprisingAeronClient connect(
+            ProductLine productLine,
+            List<String> hostnames,
+            String egressHostname,
+            Duration responseTimeout,
+            MediaDriver mediaDriver) {
+        if (responseTimeout == null || responseTimeout.isNegative() || responseTimeout.isZero()) {
+            throw new IllegalArgumentException("responseTimeout must be positive");
+        }
+        return new SurprisingAeronClient(productLine, hostnames, egressHostname, responseTimeout,
+                mediaDriver, false);
+    }
+
+    static MediaDriver newMediaDriver() {
+        return newMediaDriver(null);
+    }
+
+    static MediaDriver newMediaDriver(String aeronDirectoryName) {
+        MediaDriver.Context context = new MediaDriver.Context()
+                .threadingMode(ThreadingMode.SHARED)
+                .dirDeleteOnStart(true)
+                .dirDeleteOnShutdown(true);
+        if (aeronDirectoryName != null && !aeronDirectoryName.isBlank()) {
+            context.aeronDirectoryName(aeronDirectoryName);
+        }
+        return MediaDriver.launchEmbedded(context);
     }
 
     public CoreResponse submit(CoreMessage message) {
@@ -82,7 +116,14 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
         UnsafeBuffer buffer = new UnsafeBuffer(encoded);
         long deadline = System.nanoTime() + responseTimeout.toNanos();
         idleStrategy.reset();
-        while (cluster.offer(buffer, 0, encoded.length) < 0) {
+        while (true) {
+            long offerResult = cluster.offer(buffer, 0, encoded.length);
+            if (offerResult >= 0) {
+                break;
+            }
+            if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
+                throw resultUnknown(message, "Aeron Cluster publication is no longer writable: " + offerResult);
+            }
             pollAndCheckSession();
             if (System.nanoTime() >= deadline) {
                 throw resultUnknown(message, "timed out while offering command to Aeron Cluster");
@@ -108,14 +149,18 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
             int offset,
             int length,
             Header header) {
-        byte[] encoded = new byte[length];
-        buffer.getBytes(offset, encoded);
-        CoreMessage message = CoreMessageCodec.decode(encoded);
-        if (message.header().productLine() != productLine) {
-            sessionFailure = new IllegalStateException("received response from another product line");
-            return;
+        try {
+            byte[] encoded = new byte[length];
+            buffer.getBytes(offset, encoded);
+            CoreMessage message = CoreMessageCodec.decode(encoded);
+            if (message.header().productLine() != productLine) {
+                sessionFailure = new IllegalStateException("received response from another product line");
+                return;
+            }
+            responses.put(message.header().correlationId(), CoreProtocol.decodeResponse(message.payload()));
+        } catch (RuntimeException exception) {
+            sessionFailure = new IllegalStateException("failed to decode Aeron Cluster egress response", exception);
         }
-        responses.put(message.header().correlationId(), CoreProtocol.decodeResponse(message.payload()));
     }
 
     @Override
@@ -145,7 +190,9 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
         try {
             cluster.close();
         } finally {
-            mediaDriver.close();
+            if (closeMediaDriver) {
+                mediaDriver.close();
+            }
         }
     }
 

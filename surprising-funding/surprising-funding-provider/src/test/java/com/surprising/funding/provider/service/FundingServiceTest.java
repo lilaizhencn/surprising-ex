@@ -10,7 +10,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
+import com.surprising.aeron.protocol.CoreFundingProgressCodec;
+import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.config.FundingProperties;
@@ -56,13 +60,45 @@ class FundingServiceTest {
         fixture.cache.update(due);
         when(fixture.settlementRepository.reserveCore(due))
                 .thenReturn(new FundingSettlementRepository.CoreSettlement(fundingTime.toEpochMilli(), 7));
+        when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 0,
+                        CoreFundingProgressCodec.encode(new CoreFundingProgressView(
+                                fundingTime.toEpochMilli(), true, 0, 0))));
 
         fixture.service.settleDueRates();
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
-        verify(fixture.aeron).command(eq(CoreMessageType.APPLY_FUNDING), any(), payload.capture());
+        verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), payload.capture());
         assertThat(TradingCommandCodec.decodeApplyFunding(payload.getValue())).isEqualTo(
                 new ApplyFundingCommand(fundingTime.toEpochMilli(), "BTC-USDT", 7, 100));
+        verify(fixture.rateRepository).saveFinal(due);
+    }
+
+    @Test
+    void resumesFundingFromCoreCursorAndSavesAfterFinalChunk() {
+        FundingProperties properties = new FundingProperties();
+        Fixture fixture = new Fixture(properties);
+        Instant fundingTime = Instant.parse("2026-08-13T12:00:00Z");
+        FundingRateResponse due = new FundingRateResponse("BTC-USDT", 11, 100, 90, 10,
+                fundingTime, 8, "PREDICTED", Instant.now());
+        fixture.cache.update(due);
+        long settlementId = fundingTime.toEpochMilli();
+        when(fixture.settlementRepository.reserveCore(due))
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, 7));
+        when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 0, 0,
+                        CoreFundingProgressCodec.encode(new CoreFundingProgressView(
+                                settlementId, false, 42, 0))));
+        when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1, 0,
+                                CoreFundingProgressCodec.encode(new CoreFundingProgressView(
+                                        settlementId, true, 0, 3))));
+
+        fixture.service.settleDueRates();
+
+        ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
+        verify(fixture.aeron).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), payload.capture());
+        assertThat(TradingCommandCodec.decodeApplyFunding(payload.getValue()).cursorUserId()).isEqualTo(42);
         verify(fixture.rateRepository).saveFinal(due);
     }
 
@@ -77,7 +113,7 @@ class FundingServiceTest {
         when(fixture.settlementRepository.reserveCore(due))
                 .thenReturn(new FundingSettlementRepository.CoreSettlement(fundingTime.toEpochMilli(), 7));
         doThrow(new IllegalStateException("cluster unavailable")).when(fixture.aeron)
-                .command(eq(CoreMessageType.APPLY_FUNDING), any(), any());
+                .commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any());
 
         fixture.service.settleDueRates();
 
@@ -93,7 +129,7 @@ class FundingServiceTest {
 
         fixture.service.settleDueRates();
 
-        verify(fixture.aeron, never()).command(any(), any(), any());
+        verify(fixture.aeron, never()).commandWithResponse(any(), any(), any());
     }
 
     private static FundingRateInput rateInput() {

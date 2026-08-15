@@ -43,6 +43,10 @@ class CoreRiskStateTest {
 
         CoreRiskSnapshot risk = marked.riskState().snapshots().get("7:BTC-USDT");
         assertThat(risk.status()).isEqualTo(CoreRiskStatus.LIQUIDATION);
+        assertThat(StateMapSupport.isDelta(marked.riskState().markPrices())).isTrue();
+        assertThat(StateMapSupport.isDelta(marked.riskState().snapshots())).isTrue();
+        assertThat(StateMapSupport.isDelta(marked.riskState().liquidations())).isTrue();
+        assertThat(StateMapSupport.isDelta(marked.riskState().scans())).isTrue();
         assertThat(marked.riskState().liquidations()).hasSize(1);
         assertThat(marked.riskState().liquidations().get(1L).closeQuantitySteps()).isEqualTo(10);
         assertThat(marked.riskState().scan().complete()).isTrue();

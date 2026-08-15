@@ -34,11 +34,20 @@ final class CoreContractMath {
             if (side == CoreOrderSide.BUY) {
                 return 0;
             }
-            BigInteger riskNumerator = big(instrument.strikePriceTicks())
-                    .multiply(big(quantitySteps))
-                    .multiply(big(instrument.notionalMultiplierUnits()))
-                    .multiply(big(initialMarginRatePpm));
-            return Math.addExact(premium, divideCeiling(riskNumerator, PPM));
+            long risk;
+            try {
+                long numerator = Math.multiplyExact(instrument.strikePriceTicks(), quantitySteps);
+                numerator = Math.multiplyExact(numerator, instrument.notionalMultiplierUnits());
+                numerator = Math.multiplyExact(numerator, initialMarginRatePpm);
+                risk = divideCeiling(numerator, 1_000_000L);
+            } catch (ArithmeticException overflow) {
+                BigInteger riskNumerator = big(instrument.strikePriceTicks())
+                        .multiply(big(quantitySteps))
+                        .multiply(big(instrument.notionalMultiplierUnits()))
+                        .multiply(big(initialMarginRatePpm));
+                risk = divideCeiling(riskNumerator, PPM);
+            }
+            return Math.addExact(premium, risk);
         }
         return PerpetualContractMath.initialMarginUnits(instrument.contractType(), quantitySteps, priceTicks,
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits(),
@@ -53,11 +62,19 @@ final class CoreContractMath {
             if (signedQuantitySteps > 0) {
                 return 0;
             }
-            BigInteger numerator = big(instrument.strikePriceTicks())
-                    .multiply(big(Math.absExact(signedQuantitySteps)))
-                    .multiply(big(instrument.notionalMultiplierUnits()))
-                    .multiply(big(instrument.maintenanceMarginRatePpm()));
-            return divideCeiling(numerator, PPM);
+            long quantity = Math.absExact(signedQuantitySteps);
+            try {
+                long numerator = Math.multiplyExact(instrument.strikePriceTicks(), quantity);
+                numerator = Math.multiplyExact(numerator, instrument.notionalMultiplierUnits());
+                numerator = Math.multiplyExact(numerator, instrument.maintenanceMarginRatePpm());
+                return divideCeiling(numerator, 1_000_000L);
+            } catch (ArithmeticException overflow) {
+                BigInteger numerator = big(instrument.strikePriceTicks())
+                        .multiply(big(quantity))
+                        .multiply(big(instrument.notionalMultiplierUnits()))
+                        .multiply(big(instrument.maintenanceMarginRatePpm()));
+                return divideCeiling(numerator, PPM);
+            }
         }
         return PerpetualContractMath.maintenanceMarginUnits(instrument.contractType(), signedQuantitySteps,
                 markPriceTicks, instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
@@ -81,8 +98,13 @@ final class CoreContractMath {
         if (!instrument.contractType().isOption() || priceTicks <= 0 || quantitySteps <= 0) {
             throw new IllegalArgumentException("invalid option premium input");
         }
-        return big(priceTicks).multiply(big(quantitySteps))
-                .multiply(big(instrument.notionalMultiplierUnits())).longValueExact();
+        try {
+            return Math.multiplyExact(Math.multiplyExact(priceTicks, quantitySteps),
+                    instrument.notionalMultiplierUnits());
+        } catch (ArithmeticException overflow) {
+            return big(priceTicks).multiply(big(quantitySteps))
+                    .multiply(big(instrument.notionalMultiplierUnits())).longValueExact();
+        }
     }
 
     static long feeDeltaUnits(
@@ -99,15 +121,20 @@ final class CoreContractMath {
                 ? optionPremiumUnits(instrument, priceTicks, quantitySteps)
                 : PerpetualContractMath.notionalUnits(instrument.contractType(), quantitySteps, priceTicks,
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
-        long fee = divideCeiling(big(notional).multiply(big(Math.absExact(feeRatePpm))), PPM);
+        long fee;
+        long absoluteRate = Math.absExact(feeRatePpm);
+        try {
+            fee = divideCeiling(Math.multiplyExact(notional, absoluteRate), 1_000_000L);
+        } catch (ArithmeticException overflow) {
+            fee = divideCeiling(big(notional).multiply(big(absoluteRate)), PPM);
+        }
         return feeRatePpm > 0 ? Math.negateExact(fee) : fee;
     }
 
     static long notionalUnits(CoreInstrumentState instrument, long quantitySteps, long priceTicks) {
         if (quantitySteps <= 0) return 0;
         if (instrument.contractType().isOption()) {
-            return big(priceTicks).multiply(big(quantitySteps))
-                    .multiply(big(instrument.notionalMultiplierUnits())).longValueExact();
+            return optionPremiumUnits(instrument, priceTicks, quantitySteps);
         }
         return PerpetualContractMath.notionalUnits(instrument.contractType(), quantitySteps, priceTicks,
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
@@ -121,9 +148,15 @@ final class CoreContractMath {
         long notional = PerpetualContractMath.notionalUnits(instrument.contractType(), signedQuantitySteps,
                 markPriceTicks, instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
                 instrument.settleScaleUnits());
-        BigInteger signedPayment = big(notional).multiply(big(fundingRatePpm))
-                .multiply(BigInteger.valueOf(Long.signum(signedQuantitySteps))).divide(PPM);
-        return signedPayment.negate().longValueExact();
+        try {
+            long numerator = Math.multiplyExact(notional, fundingRatePpm);
+            numerator = Math.multiplyExact(numerator, Long.signum(signedQuantitySteps));
+            return Math.negateExact(numerator / 1_000_000L);
+        } catch (ArithmeticException overflow) {
+            BigInteger signedPayment = big(notional).multiply(big(fundingRatePpm))
+                    .multiply(BigInteger.valueOf(Long.signum(signedQuantitySteps))).divide(PPM);
+            return signedPayment.negate().longValueExact();
+        }
     }
 
     static long weightedEntryPrice(
@@ -133,15 +166,29 @@ final class CoreContractMath {
             long addedAbs,
             long addedPrice) {
         if (!instrument.contractType().isInverse()) {
-            BigInteger value = big(currentAbs).multiply(big(currentPrice))
-                    .add(big(addedAbs).multiply(big(addedPrice)));
-            return value.divide(big(Math.addExact(currentAbs, addedAbs))).longValueExact();
+            try {
+                long value = Math.addExact(Math.multiplyExact(currentAbs, currentPrice),
+                        Math.multiplyExact(addedAbs, addedPrice));
+                return value / Math.addExact(currentAbs, addedAbs);
+            } catch (ArithmeticException overflow) {
+                BigInteger value = big(currentAbs).multiply(big(currentPrice))
+                        .add(big(addedAbs).multiply(big(addedPrice)));
+                return value.divide(big(Math.addExact(currentAbs, addedAbs))).longValueExact();
+            }
         }
-        BigInteger numerator = big(Math.addExact(currentAbs, addedAbs))
-                .multiply(big(currentPrice)).multiply(big(addedPrice));
-        BigInteger denominator = big(currentAbs).multiply(big(addedPrice))
-                .add(big(addedAbs).multiply(big(currentPrice)));
-        return Math.max(1, divideRounded(numerator, denominator));
+        try {
+            long numerator = Math.multiplyExact(Math.addExact(currentAbs, addedAbs), currentPrice);
+            numerator = Math.multiplyExact(numerator, addedPrice);
+            long denominator = Math.addExact(Math.multiplyExact(currentAbs, addedPrice),
+                    Math.multiplyExact(addedAbs, currentPrice));
+            return Math.max(1, divideRounded(numerator, denominator));
+        } catch (ArithmeticException overflow) {
+            BigInteger numerator = big(Math.addExact(currentAbs, addedAbs))
+                    .multiply(big(currentPrice)).multiply(big(addedPrice));
+            BigInteger denominator = big(currentAbs).multiply(big(addedPrice))
+                    .add(big(addedAbs).multiply(big(currentPrice)));
+            return Math.max(1, divideRounded(numerator, denominator));
+        }
     }
 
     private static long divideCeiling(BigInteger numerator, BigInteger denominator) {
@@ -149,11 +196,24 @@ final class CoreContractMath {
         return (values[1].signum() == 0 ? values[0] : values[0].add(BigInteger.ONE)).longValueExact();
     }
 
+    private static long divideCeiling(long numerator, long denominator) {
+        long quotient = numerator / denominator;
+        return numerator % denominator == 0 ? quotient : Math.addExact(quotient, 1);
+    }
+
     private static long divideRounded(BigInteger numerator, BigInteger denominator) {
         BigInteger[] values = numerator.divideAndRemainder(denominator);
         BigInteger result = values[1].shiftLeft(1).compareTo(denominator) >= 0
                 ? values[0].add(BigInteger.ONE) : values[0];
         return result.longValueExact();
+    }
+
+    private static long divideRounded(long numerator, long denominator) {
+        long quotient = numerator / denominator;
+        long remainder = numerator % denominator;
+        boolean roundsUp = remainder > denominator / 2
+                || (denominator % 2 == 0 && remainder == denominator / 2);
+        return roundsUp ? Math.addExact(quotient, 1) : quotient;
     }
 
     private static BigInteger big(long value) {

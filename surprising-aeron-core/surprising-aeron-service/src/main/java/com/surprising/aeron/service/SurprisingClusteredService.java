@@ -16,15 +16,21 @@ import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.Header;
 import java.util.concurrent.atomic.AtomicReference;
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.Map;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
 
 public final class SurprisingClusteredService implements ClusteredService {
 
+    private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
+
     private final ProductLine productLine;
     private final AtomicReference<Cluster.Role> role = new AtomicReference<>();
     private CoreProbeState state;
     private IdleStrategy idleStrategy;
+    private final Map<Long, PendingEgress> pendingEgress = new HashMap<>();
 
     public SurprisingClusteredService(ProductLine productLine) {
         this.productLine = productLine;
@@ -33,6 +39,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onStart(Cluster cluster, Image snapshotImage) {
+        pendingEgress.clear();
         idleStrategy = cluster.idleStrategy();
         role.set(cluster.role());
         if (snapshotImage != null) {
@@ -85,16 +92,28 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     @Override
+    public int doBackgroundWork(long nowNs) {
+        int work = 0;
+        for (PendingEgress egress : pendingEgress.values()) {
+            work += drain(egress);
+        }
+        return work;
+    }
+
+    @Override
     public void onTerminate(Cluster cluster) {
+        pendingEgress.clear();
         state.close();
     }
 
     @Override
     public void onSessionOpen(ClientSession session, long timestamp) {
+        pendingEgress.put(session.id(), new PendingEgress(session));
     }
 
     @Override
     public void onSessionClose(ClientSession session, long timestamp, CloseReason closeReason) {
+        pendingEgress.remove(session.id());
     }
 
     @Override
@@ -125,10 +144,49 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void offer(ClientSession session, byte[] encoded) {
+        PendingEgress egress = pendingEgress.computeIfAbsent(session.id(), id -> new PendingEgress(session));
+        if (!egress.queue.isEmpty()) {
+            enqueue(egress, encoded);
+            return;
+        }
         org.agrona.concurrent.UnsafeBuffer response = new org.agrona.concurrent.UnsafeBuffer(encoded);
-        idleStrategy.reset();
-        while (session.offer(response, 0, encoded.length) < 0) {
-            idleStrategy.idle();
+        if (session.offer(response, 0, encoded.length) < 0) {
+            enqueue(egress, encoded);
+        }
+    }
+
+    private static int drain(PendingEgress egress) {
+        if (egress.session.isClosing()) {
+            egress.queue.clear();
+            return 0;
+        }
+        int work = 0;
+        while (!egress.queue.isEmpty()) {
+            byte[] encoded = egress.queue.peekFirst();
+            if (egress.session.offer(new org.agrona.concurrent.UnsafeBuffer(encoded), 0, encoded.length) < 0) {
+                break;
+            }
+            egress.queue.removeFirst();
+            work++;
+        }
+        return work;
+    }
+
+    private static void enqueue(PendingEgress egress, byte[] encoded) {
+        if (egress.queue.size() >= MAX_PENDING_EGRESS_PER_SESSION) {
+            egress.queue.clear();
+            egress.session.close();
+            return;
+        }
+        egress.queue.addLast(encoded);
+    }
+
+    private static final class PendingEgress {
+        private final ClientSession session;
+        private final ArrayDeque<byte[]> queue = new ArrayDeque<>();
+
+        private PendingEgress(ClientSession session) {
+            this.session = session;
         }
     }
 
@@ -141,6 +199,8 @@ public final class SurprisingClusteredService implements ClusteredService {
             case USER_OPEN_ORDERS_QUERY -> CoreMessageType.USER_OPEN_ORDERS_RESULT;
             case TRIGGER_ORDER_QUERY -> CoreMessageType.TRIGGER_ORDER_RESULT;
             case USER_OPEN_TRIGGER_ORDERS_QUERY -> CoreMessageType.USER_OPEN_TRIGGER_ORDERS_RESULT;
+            case FUNDING_PROGRESS_QUERY -> CoreMessageType.FUNDING_PROGRESS_RESULT;
+            case SETTLEMENT_PROGRESS_QUERY -> CoreMessageType.SETTLEMENT_PROGRESS_RESULT;
             default -> request.header().kind() == WireMessageKind.QUERY
                     ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
         };

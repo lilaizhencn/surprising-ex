@@ -1,13 +1,18 @@
 package com.surprising.aeron.service.matching;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.service.state.CoreBookOrder;
-import com.surprising.aeron.service.state.CoreBookState;
+import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.CoreOrderState;
+import com.surprising.aeron.service.state.CoreOrderStatus;
+import com.surprising.aeron.service.state.TradingCoreState;
 import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.CoreWaitStrategy;
+import exchange.core2.core.common.L2MarketData;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.OrderAction;
 import exchange.core2.core.common.OrderType;
@@ -25,11 +30,13 @@ import exchange.core2.core.common.config.InitialStateConfiguration;
 import exchange.core2.core.common.config.OrdersProcessingConfiguration;
 import exchange.core2.core.common.config.PerformanceConfiguration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
@@ -91,15 +98,32 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CoreMatchingResult cancel(long userId, long orderId, String symbol) {
+        return cancelAsync(userId, orderId, symbol).join();
+    }
+
+    public List<CoreMatchingResult> cancelBatch(List<CoreOrderState> orders) {
+        if (orders == null || orders.isEmpty()) {
+            return List.of();
+        }
+        List<CompletableFuture<CoreMatchingResult>> futures = new ArrayList<>(orders.size());
+        for (CoreOrderState order : orders) {
+            futures.add(cancelAsync(order.userId(), order.orderId(), order.symbol()));
+        }
+        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+        return futures.stream().map(CompletableFuture::join).toList();
+    }
+
+    private CompletableFuture<CoreMatchingResult> cancelAsync(long userId, long orderId, String symbol) {
         Integer symbolId = symbols.get(symbol);
         if (symbolId == null) {
-            return new CoreMatchingResult(false, "UNKNOWN_SYMBOL", List.of());
+            return CompletableFuture.completedFuture(
+                    new CoreMatchingResult(false, "UNKNOWN_SYMBOL", List.of()));
         }
         ensureUser(userId);
-        var response = api.submitCommandAsyncFullResponse(ApiCancelOrder.builder()
-                .orderId(orderId).uid(userId).symbol(symbolId).build()).join();
-        return new CoreMatchingResult(response.resultCode == CommandResultCode.SUCCESS,
-                response.resultCode.name(), List.of());
+        return api.submitCommandAsync(ApiCancelOrder.builder()
+                        .orderId(orderId).uid(userId).symbol(symbolId).build())
+                .thenApply(resultCode -> new CoreMatchingResult(resultCode == CommandResultCode.SUCCESS,
+                        resultCode.name(), List.of()));
     }
 
     public CoreMatchingResult replace(long userId, long orderId, String symbol, long newPriceTicks) {
@@ -130,22 +154,52 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 .reduce(0, (left, right) -> left * 31 + right);
     }
 
-    public void rebuild(CoreBookState bookState) {
+    public List<CoreBookLevelView> orderBookLevels() {
+        List<CoreBookLevelView> levels = new ArrayList<>();
+        symbols.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
+            L2MarketData book = api.requestOrderBookAsync(entry.getValue(), Integer.MAX_VALUE).join();
+            for (int index = 0; index < book.askSize; index++) {
+                levels.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.SELL, book.askPrices[index],
+                        book.askVolumes[index], book.askOrders[index]));
+            }
+            for (int index = 0; index < book.bidSize; index++) {
+                levels.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.BUY, book.bidPrices[index],
+                        book.bidVolumes[index], book.bidOrders[index]));
+            }
+        });
+        levels.sort(Comparator.comparing(CoreBookLevelView::symbol)
+                .thenComparing(CoreBookLevelView::side)
+                .thenComparingLong(CoreBookLevelView::priceTicks));
+        return List.copyOf(levels);
+    }
+
+    public void rebuild(TradingCoreState state) {
         stop();
         symbols.clear();
         users.clear();
         start();
-        for (CoreBookOrder order : bookState.recoveryOrder()) {
-            PlaceOrderCommand command = new PlaceOrderCommand(order.orderId(), order.symbol(), 1,
-                    "BASE", "QUOTE", "QUOTE", order.side(), order.priceTicks(),
-                    order.remainingQuantitySteps(), false,
-                    com.surprising.aeron.protocol.ReservationKind.SPOT_ASSET,
-                    order.side() == CoreOrderSide.BUY ? "QUOTE" : "BASE", 1);
+        state.bookState().priorityOrder().stream()
+                .map(state::order)
+                .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN)
+                .forEach(order -> {
+            CoreInstrumentState instrument = state.instruments().get(order.symbol());
+            if (instrument == null) {
+                throw new IllegalStateException("book recovery instrument is missing symbol=" + order.symbol());
+            }
+            boolean spot = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT;
+            PlaceOrderCommand command = new PlaceOrderCommand(order.orderId(), order.symbol(), order.instrumentVersion(),
+                    instrument.baseAsset(), instrument.quoteAsset(), instrument.settleAsset(), order.side(),
+                    order.priceTicks(), order.remainingQuantitySteps(), order.reduceOnly(), order.marginMode(),
+                    order.positionSide(), spot ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
+                    spot && order.side() == CoreOrderSide.BUY ? instrument.quoteAsset()
+                            : spot ? instrument.baseAsset() : instrument.settleAsset(), 0,
+                    order.orderType(), order.timeInForce(), order.priceTicks(), order.postOnly(),
+                    order.clientOrderId(), order.makerFeeRatePpm(), order.takerFeeRatePpm());
             CoreMatchingResult result = place(order.userId(), command);
             if (!result.accepted() || !result.matches().isEmpty()) {
                 throw new IllegalStateException("book recovery crossed or rejected orderId=" + order.orderId());
             }
-        }
+                });
     }
 
     private void start() {
@@ -155,7 +209,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
                         .build())
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
-                        .matchingEnginesNum(1).riskEnginesNum(1).waitStrategy(CoreWaitStrategy.BLOCKING).build())
+                        .matchingEnginesNum(1).riskEnginesNum(1).waitStrategy(CoreWaitStrategy.BUSY_SPIN).build())
                 .initStateCfg(InitialStateConfiguration.cleanStart("aeron-authoritative-book"))
                 .build();
         core = ExchangeCore.builder().exchangeConfiguration(configuration).resultsConsumer((command, sequence) -> {

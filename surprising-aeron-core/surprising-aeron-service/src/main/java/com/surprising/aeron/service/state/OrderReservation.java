@@ -76,9 +76,28 @@ public record OrderReservation(
             throw new IllegalArgumentException("symbol is required");
         }
         String normalized = value.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
+        if (!validSymbol(normalized)) {
             throw new IllegalArgumentException("invalid symbol: " + value);
         }
         return normalized;
+    }
+
+    private static boolean validSymbol(String value) {
+        int length = value.length();
+        if (length < 2 || length > 64 || !isAsciiAlphaNumeric(value.charAt(0))) {
+            return false;
+        }
+        for (int index = 1; index < length; index++) {
+            char character = value.charAt(index);
+            if (!isAsciiAlphaNumeric(character) && character != '_' && character != '-') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isAsciiAlphaNumeric(char character) {
+        return character >= 'A' && character <= 'Z'
+                || character >= '0' && character <= '9';
     }
 }

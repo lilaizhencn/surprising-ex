@@ -7,6 +7,7 @@
 
 ## 架构与数据
 
+- [Exchange Core 单一盘口与内存交易核心最终方案](exchange-core-single-book-execution-plan.md)
 - [Aeron 统一交易核心迁移实施方案](aeron-unified-trading-core-migration-plan.md)
 - [ADR-0001：按产品线部署统一 Aeron 复制状态机](adr/0001-aeron-unified-trading-core.md)
 - [Aeron 统一交易核心术语表](aeron-unified-trading-core-glossary.md)

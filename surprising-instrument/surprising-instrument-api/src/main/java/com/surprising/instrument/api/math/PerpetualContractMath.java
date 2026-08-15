@@ -23,13 +23,19 @@ public final class PerpetualContractMath {
         requireLinearOrInverse(contractType);
         validatePositionInputs(signedQuantitySteps, markPriceTicks, markPriceTicks, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits);
-        BigInteger quantity = big(signedQuantitySteps).abs();
         if (contractType.isInverse()) {
+            BigInteger quantity = big(signedQuantitySteps).abs();
             BigInteger numerator = quantity.multiply(big(notionalMultiplierUnits)).multiply(big(settleScaleUnits));
             BigInteger denominator = big(markPriceTicks).multiply(big(priceTickUnits));
             return toLongRounded(numerator, denominator);
         }
-        return quantity.multiply(big(markPriceTicks)).multiply(big(notionalMultiplierUnits)).longValueExact();
+        try {
+            return Math.multiplyExact(Math.multiplyExact(Math.absExact(signedQuantitySteps), markPriceTicks),
+                    notionalMultiplierUnits);
+        } catch (ArithmeticException overflow) {
+            return big(signedQuantitySteps).abs().multiply(big(markPriceTicks))
+                    .multiply(big(notionalMultiplierUnits)).longValueExact();
+        }
     }
 
     public static long notionalPerStepUnits(ContractType contractType,
@@ -47,7 +53,11 @@ public final class PerpetualContractMath {
             BigInteger denominator = big(markPriceTicks).multiply(big(priceTickUnits));
             return toLongRounded(numerator, denominator);
         }
-        return big(markPriceTicks).multiply(big(notionalMultiplierUnits)).longValueExact();
+        try {
+            return Math.multiplyExact(markPriceTicks, notionalMultiplierUnits);
+        } catch (ArithmeticException overflow) {
+            return big(markPriceTicks).multiply(big(notionalMultiplierUnits)).longValueExact();
+        }
     }
 
     public static long unrealizedPnlUnits(ContractType contractType,
@@ -60,21 +70,27 @@ public final class PerpetualContractMath {
         requireLinearOrInverse(contractType);
         validatePositionInputs(signedQuantitySteps, entryPriceTicks, markPriceTicks, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits);
-        BigInteger priceDiff = big(Math.subtractExact(markPriceTicks, entryPriceTicks));
+        long priceDiff = Math.subtractExact(markPriceTicks, entryPriceTicks);
         if (contractType.isInverse()) {
+            BigInteger inversePriceDiff = big(priceDiff);
             BigInteger numerator = big(signedQuantitySteps)
                     .multiply(big(notionalMultiplierUnits))
                     .multiply(big(settleScaleUnits))
-                    .multiply(priceDiff);
+                    .multiply(inversePriceDiff);
             BigInteger denominator = big(entryPriceTicks)
                     .multiply(big(markPriceTicks))
                     .multiply(big(priceTickUnits));
             return toLongRounded(numerator, denominator);
         }
-        return big(signedQuantitySteps)
-                .multiply(priceDiff)
-                .multiply(big(notionalMultiplierUnits))
-                .longValueExact();
+        try {
+            return Math.multiplyExact(Math.multiplyExact(signedQuantitySteps, priceDiff),
+                    notionalMultiplierUnits);
+        } catch (ArithmeticException overflow) {
+            return big(signedQuantitySteps)
+                    .multiply(big(priceDiff))
+                    .multiply(big(notionalMultiplierUnits))
+                    .longValueExact();
+        }
     }
 
     public static long maintenanceMarginUnits(ContractType contractType,
@@ -110,23 +126,28 @@ public final class PerpetualContractMath {
         validatePositionInputs(signedQuantitySteps, markPriceTicks, markPriceTicks, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits);
         requirePositive(marginRatePpm, "marginRatePpm");
-        BigInteger quantity = big(signedQuantitySteps).abs();
-        BigInteger numerator;
-        BigInteger denominator;
         if (contractType.isInverse()) {
-            numerator = quantity
+            BigInteger quantity = big(signedQuantitySteps).abs();
+            BigInteger numerator = quantity
                     .multiply(big(notionalMultiplierUnits))
                     .multiply(big(settleScaleUnits))
                     .multiply(big(marginRatePpm));
-            denominator = big(markPriceTicks).multiply(big(priceTickUnits)).multiply(PPM);
-        } else {
-            numerator = quantity
+            BigInteger denominator = big(markPriceTicks).multiply(big(priceTickUnits)).multiply(PPM);
+            return divideCeiling(numerator, denominator);
+        }
+        try {
+            long linearNumerator = Math.multiplyExact(Math.multiplyExact(Math.absExact(signedQuantitySteps),
+                            markPriceTicks),
+                    notionalMultiplierUnits);
+            linearNumerator = Math.multiplyExact(linearNumerator, marginRatePpm);
+            return divideCeiling(linearNumerator, 1_000_000L);
+        } catch (ArithmeticException overflow) {
+            BigInteger numerator = big(signedQuantitySteps).abs()
                     .multiply(big(markPriceTicks))
                     .multiply(big(notionalMultiplierUnits))
                     .multiply(big(marginRatePpm));
-            denominator = PPM;
+            return divideCeiling(numerator, PPM);
         }
-        return divideCeiling(numerator, denominator);
     }
 
     private static void requireLinearOrInverse(ContractType contractType) {
@@ -160,6 +181,11 @@ public final class PerpetualContractMath {
                 ? quotientAndRemainder[0]
                 : quotientAndRemainder[0].add(BigInteger.ONE);
         return rounded.longValueExact();
+    }
+
+    private static long divideCeiling(long numerator, long denominator) {
+        long quotient = numerator / denominator;
+        return numerator % denominator == 0 ? quotient : Math.addExact(quotient, 1);
     }
 
     private static long toLongRounded(BigInteger numerator, BigInteger denominator) {

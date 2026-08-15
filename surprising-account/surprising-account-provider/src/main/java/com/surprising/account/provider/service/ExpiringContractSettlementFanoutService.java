@@ -2,6 +2,10 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
+import com.surprising.aeron.protocol.CoreSettlementProgressView;
+import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
@@ -39,10 +43,44 @@ public class ExpiringContractSettlementFanoutService {
         long settlementId = settlementTime.toEpochMilli();
         String identity = properties.getKafka().getProductLine() + ":lifecycle:" + symbol.toUpperCase()
                 + ':' + settlementId;
-        aeron.command(CoreMessageType.SETTLE_INSTRUMENT,
-                UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8)), 0,
-                TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                        settlementId, symbol, version, settlementPriceTicks, optionCashUnitsPerContract)));
+        long cursor = 0;
+        CoreSettlementProgressView persisted = decodeProgressOrQuery(symbol, settlementId, null);
+        if (persisted != null && persisted.complete() && persisted.settlementId() == settlementId) return;
+        if (persisted != null && !persisted.complete()) cursor = persisted.nextCursorUserId();
+        for (;;) {
+            UUID commandId = UUID.nameUUIDFromBytes((identity + ':' + cursor).getBytes(StandardCharsets.UTF_8));
+            CoreResponse response = aeron.command(CoreMessageType.SETTLE_INSTRUMENT, commandId, 0,
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
+                            settlementId, symbol, version, settlementPriceTicks, optionCashUnitsPerContract,
+                            cursor, SettleInstrumentCommand.DEFAULT_MAX_USERS)));
+            CoreSettlementProgressView progress = decodeProgressOrQuery(symbol, settlementId, response);
+            if (progress == null || progress.complete()) return;
+            if (progress.nextCursorUserId() <= cursor) {
+                throw new IllegalStateException("Aeron settlement cursor did not advance");
+            }
+            cursor = progress.nextCursorUserId();
+        }
+    }
+
+    private CoreSettlementProgressView decodeProgressOrQuery(String symbol, long settlementId,
+                                                              CoreResponse response) {
+        CoreResponse effective = response;
+        if (effective == null || effective.data().length == 0) {
+            try {
+                effective = aeron.query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, UUID.randomUUID(),
+                        CoreStateQueryCodec.encodeSettlementProgressQuery(symbol));
+            } catch (RuntimeException exception) {
+                return null;
+            }
+        }
+        if (effective == null || (effective.status() != com.surprising.aeron.protocol.ResponseStatus.OK
+                && effective.commandStatus() != com.surprising.aeron.protocol.ResponseStatus.APPLIED)
+                || effective.data().length == 0) return null;
+        CoreSettlementProgressView progress = CoreSettlementProgressCodec.decode(effective.data());
+        if (progress.settlementId() != 0 && progress.settlementId() != settlementId) {
+            throw new IllegalStateException("Aeron settlement progress mismatch");
+        }
+        return progress;
     }
 
     private static Instant settlementTime(Instant deliveryTime, Instant eventTime) {

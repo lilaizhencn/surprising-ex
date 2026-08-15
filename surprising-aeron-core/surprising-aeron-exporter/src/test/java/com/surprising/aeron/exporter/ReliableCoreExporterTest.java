@@ -22,8 +22,12 @@ class ReliableCoreExporterTest {
     void acknowledgesOnlyAfterEntireBatchIsPublished() throws Exception {
         CoreProbeState state = stateWithCommands(3);
         List<CoreMessage> published = new ArrayList<>();
+        List<CoreMessageType> calls = new ArrayList<>();
         ReliableCoreExporter exporter = new ReliableCoreExporter(
-                ProductLine.SPOT, state::apply, (line, events) -> published.addAll(events), 2);
+                ProductLine.SPOT, message -> {
+                    calls.add(message.header().messageType());
+                    return state.apply(message);
+                }, (line, events) -> published.addAll(events), 2);
 
         var first = exporter.exportOnce();
         var second = exporter.exportOnce();
@@ -34,6 +38,9 @@ class ReliableCoreExporterTest {
         assertThat(second.status().acknowledgedSequence()).isEqualTo(3);
         assertThat(second.status().pendingCount()).isZero();
         assertThat(published).hasSize(3);
+        assertThat(calls).containsExactly(
+                CoreMessageType.EXPORT_STATUS_QUERY, CoreMessageType.EXPORT_BATCH_QUERY, CoreMessageType.ACK_EXPORT,
+                CoreMessageType.EXPORT_STATUS_QUERY, CoreMessageType.EXPORT_BATCH_QUERY, CoreMessageType.ACK_EXPORT);
         assertThat(exporter.health().healthy()).isTrue();
     }
 

@@ -18,9 +18,15 @@ public final class ExporterMain {
                         ExporterConfiguration.aeronEgressHost(), ExporterConfiguration.aeronTimeout())) {
                     var exporter = new ReliableCoreExporter(productLine, client::submit, sink,
                             ExporterConfiguration.batchSize());
+                    long idleMillis = ExporterConfiguration.idleMillis();
+                    long baseIdleMillis = idleMillis;
+                    long maxIdleMillis = Math.max(baseIdleMillis, 1_000L);
                     while (!Thread.currentThread().isInterrupted()) {
                         if (exporter.exportOnce().publishedEvents() == 0) {
-                            Thread.sleep(ExporterConfiguration.idleMillis());
+                            Thread.sleep(idleMillis);
+                            idleMillis = nextIdleMillis(idleMillis, maxIdleMillis);
+                        } else {
+                            idleMillis = baseIdleMillis;
                         }
                     }
                 } catch (ResultUnknownException | io.aeron.exceptions.TimeoutException exception) {
@@ -30,5 +36,9 @@ public final class ExporterMain {
                 }
             }
         }
+    }
+
+    private static long nextIdleMillis(long current, long maximum) {
+        return current >= maximum / 2 ? maximum : current * 2;
     }
 }

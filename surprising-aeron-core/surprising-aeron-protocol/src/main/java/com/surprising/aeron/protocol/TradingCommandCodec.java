@@ -8,6 +8,7 @@ public final class TradingCommandCodec {
 
     private static final int PLACE_ORDER_V2_MARKER = 0x504f5632;
     private static final int INSTRUMENT_RISK_V2_MARKER = 0x49525632;
+    private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
 
     private static final int MAX_TEXT_BYTES = 64;
 
@@ -247,6 +248,65 @@ public final class TradingCommandCodec {
         return new ReplaceOrderCommand(originalOrderId, decodePlaceOrder(replacement));
     }
 
+    public static byte[] encodeAmendOrder(AmendOrderCommand command) {
+        byte[] clientOrderId = optionalText(command.newClientOrderId());
+        int mask = 0;
+        if (command.priceTicks() != null) mask |= 1;
+        if (command.quantitySteps() != null) mask |= 1 << 1;
+        if (command.timeInForce() != null) mask |= 1 << 2;
+        if (command.postOnly() != null) mask |= 1 << 3;
+        if (command.newClientOrderId() != null) mask |= 1 << 4;
+        int length = Integer.BYTES + Long.BYTES * 2 + Integer.BYTES;
+        if ((mask & 1) != 0) length += Long.BYTES;
+        if ((mask & (1 << 1)) != 0) length += Long.BYTES;
+        if ((mask & (1 << 2)) != 0) length += Integer.BYTES;
+        if ((mask & (1 << 3)) != 0) length += Byte.BYTES;
+        if ((mask & (1 << 4)) != 0) length += Short.BYTES + clientOrderId.length;
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(AMEND_ORDER_V1_MARKER)
+                .putLong(command.originalOrderId())
+                .putLong(command.replacementOrderId())
+                .putInt(mask);
+        if ((mask & 1) != 0) buffer.putLong(command.priceTicks());
+        if ((mask & (1 << 1)) != 0) buffer.putLong(command.quantitySteps());
+        if ((mask & (1 << 2)) != 0) buffer.putInt(command.timeInForce().wireCode());
+        if ((mask & (1 << 3)) != 0) buffer.put((byte) (command.postOnly() ? 1 : 0));
+        if ((mask & (1 << 4)) != 0) buffer.putShort((short) clientOrderId.length).put(clientOrderId);
+        return buffer.array();
+    }
+
+    public static AmendOrderCommand decodeAmendOrder(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 2 + Integer.BYTES);
+        if (buffer.getInt() != AMEND_ORDER_V1_MARKER) {
+            throw new ProtocolException("invalid amend order marker");
+        }
+        long originalOrderId = buffer.getLong();
+        long replacementOrderId = buffer.getLong();
+        int mask = buffer.getInt();
+        if (mask <= 0 || (mask & ~0x1f) != 0) {
+            throw new ProtocolException("invalid amend order field mask");
+        }
+        Long priceTicks = null;
+        if ((mask & 1) != 0) {
+            requireRemaining(buffer, Long.BYTES);
+            priceTicks = buffer.getLong();
+        }
+        Long quantitySteps = null;
+        if ((mask & (1 << 1)) != 0) {
+            requireRemaining(buffer, Long.BYTES);
+            quantitySteps = buffer.getLong();
+        }
+        CoreTimeInForce timeInForce = (mask & (1 << 2)) == 0 ? null
+                : readTimeInForce(buffer);
+        Boolean postOnly = (mask & (1 << 3)) == 0 ? null
+                : readBoolean(buffer);
+        String clientOrderId = (mask & (1 << 4)) == 0 ? null : readOptionalText(buffer);
+        requireConsumed(buffer);
+        return new AmendOrderCommand(originalOrderId, replacementOrderId, clientOrderId,
+                priceTicks, quantitySteps, timeInForce, postOnly);
+    }
+
     public static byte[] encodeUpsertInstrument(UpsertInstrumentCommand command) {
         byte[] symbol = text(command.symbol());
         byte[] base = text(command.baseAsset());
@@ -350,28 +410,40 @@ public final class TradingCommandCodec {
 
     public static byte[] encodeApplyFunding(ApplyFundingCommand command) {
         byte[] symbol = text(command.symbol());
-        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 3)
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 4 + Integer.BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN).putShort((short) symbol.length).put(symbol)
                 .putLong(command.settlementId()).putLong(command.instrumentVersion())
-                .putLong(command.fundingRatePpm()).array();
+                .putLong(command.fundingRatePpm()).putLong(command.cursorUserId())
+                .putInt(command.maxUsers()).array();
     }
 
     public static ApplyFundingCommand decodeApplyFunding(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String symbol = readText(buffer);
         requireRemaining(buffer, Long.BYTES * 3);
-        ApplyFundingCommand command = new ApplyFundingCommand(buffer.getLong(), symbol, buffer.getLong(),
-                buffer.getLong());
+        long settlementId = buffer.getLong();
+        long instrumentVersion = buffer.getLong();
+        long fundingRatePpm = buffer.getLong();
+        long cursorUserId = 0;
+        int maxUsers = ApplyFundingCommand.DEFAULT_MAX_USERS;
+        if (buffer.hasRemaining()) {
+            requireRemaining(buffer, Long.BYTES + Integer.BYTES);
+            cursorUserId = buffer.getLong();
+            maxUsers = buffer.getInt();
+        }
+        ApplyFundingCommand command = new ApplyFundingCommand(settlementId, symbol, instrumentVersion,
+                fundingRatePpm, cursorUserId, maxUsers);
         requireConsumed(buffer);
         return command;
     }
 
     public static byte[] encodeSettleInstrument(SettleInstrumentCommand command) {
         byte[] symbol = text(command.symbol());
-        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 4)
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 5 + Integer.BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN).putShort((short) symbol.length).put(symbol)
                 .putLong(command.settlementId()).putLong(command.instrumentVersion())
-                .putLong(command.settlementPriceTicks()).putLong(command.optionCashUnitsPerContract()).array();
+                .putLong(command.settlementPriceTicks()).putLong(command.optionCashUnitsPerContract())
+                .putLong(command.cursorUserId()).putInt(command.maxUsers()).array();
     }
 
     public static SettleInstrumentCommand decodeSettleInstrument(byte[] payload) {
@@ -379,7 +451,13 @@ public final class TradingCommandCodec {
         String symbol = readText(buffer);
         requireRemaining(buffer, Long.BYTES * 4);
         SettleInstrumentCommand command = new SettleInstrumentCommand(buffer.getLong(), symbol, buffer.getLong(),
-                buffer.getLong(), buffer.getLong());
+                buffer.getLong(), buffer.getLong(), 0, SettleInstrumentCommand.DEFAULT_MAX_USERS);
+        if (buffer.hasRemaining()) {
+            requireRemaining(buffer, Long.BYTES + Integer.BYTES);
+            command = new SettleInstrumentCommand(command.settlementId(), command.symbol(),
+                    command.instrumentVersion(), command.settlementPriceTicks(), command.optionCashUnitsPerContract(),
+                    buffer.getLong(), buffer.getInt());
+        }
         requireConsumed(buffer);
         return command;
     }
@@ -524,6 +602,20 @@ public final class TradingCommandCodec {
         byte[] encoded = new byte[length];
         buffer.get(encoded);
         return new String(encoded, StandardCharsets.UTF_8);
+    }
+
+    private static CoreTimeInForce readTimeInForce(ByteBuffer buffer) {
+        requireRemaining(buffer, Integer.BYTES);
+        return CoreTimeInForce.fromWireCode(buffer.getInt());
+    }
+
+    private static Boolean readBoolean(ByteBuffer buffer) {
+        requireRemaining(buffer, Byte.BYTES);
+        byte value = buffer.get();
+        if (value != 0 && value != 1) {
+            throw new ProtocolException("invalid boolean value");
+        }
+        return value == 1;
     }
 
     private static void requireRemaining(ByteBuffer buffer, int length) {

@@ -17,11 +17,15 @@ class TradingCommandCodecTest {
                 "client-7", -10, 20);
         CancelOrderCommand cancelOrder = new CancelOrderCommand(7);
         ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(6, placeOrder);
+        AmendOrderCommand amendOrder = new AmendOrderCommand(6, 8, "client-8", 61_000L,
+                4L, CoreTimeInForce.GTC, true);
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 3, 1,
                 "BTC", "USDT", "USDT", 1, 1, 100_000_000, 100_000, 50_000, -10, 20,
                 0, -1, 0);
         ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("BTC-USDT", 3, 60_500, 9);
         ApplyFundingCommand funding = new ApplyFundingCommand(11, "BTC-USDT", 3, 100);
+        ApplyFundingCommand chunkedFunding = new ApplyFundingCommand(12, "BTC-USDT", 3, -100,
+                42, 128);
         SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "BTC-USDT", 3, 61_000, 0);
         ExecuteLiquidationCommand liquidation = new ExecuteLiquidationCommand(13, 59_000);
         ExecuteAdlCommand adl = new ExecuteAdlCommand(13, 18, "BTC-USDT", CoreMarginMode.CROSS,
@@ -43,12 +47,16 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeCancelOrder(cancelOrder))).isEqualTo(cancelOrder);
         assertThat(TradingCommandCodec.decodeReplaceOrder(
                 TradingCommandCodec.encodeReplaceOrder(replaceOrder))).isEqualTo(replaceOrder);
+        assertThat(TradingCommandCodec.decodeAmendOrder(
+                TradingCommandCodec.encodeAmendOrder(amendOrder))).isEqualTo(amendOrder);
         assertThat(TradingCommandCodec.decodeUpsertInstrument(
                 TradingCommandCodec.encodeUpsertInstrument(instrument))).isEqualTo(instrument);
         assertThat(TradingCommandCodec.decodeApplyMarkPrice(
                 TradingCommandCodec.encodeApplyMarkPrice(markPrice))).isEqualTo(markPrice);
         assertThat(TradingCommandCodec.decodeApplyFunding(
                 TradingCommandCodec.encodeApplyFunding(funding))).isEqualTo(funding);
+        assertThat(TradingCommandCodec.decodeApplyFunding(
+                TradingCommandCodec.encodeApplyFunding(chunkedFunding))).isEqualTo(chunkedFunding);
         assertThat(TradingCommandCodec.decodeSettleInstrument(
                 TradingCommandCodec.encodeSettleInstrument(settlement))).isEqualTo(settlement);
         assertThat(TradingCommandCodec.decodeExecuteLiquidation(

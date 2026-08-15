@@ -15,6 +15,10 @@ public record CoreMessage(CoreMessageHeader header, byte[] payload) {
         return Arrays.copyOf(payload, payload.length);
     }
 
+    public int payloadLength() {
+        return payload.length;
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) {

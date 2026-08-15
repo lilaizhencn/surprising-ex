@@ -255,7 +255,7 @@ Kafka、Owner、Outbox 和风险线程池也必须矩阵化：
 - `product-line-api-flow-smoke.sh`：真实 API 交易流程。
 - `product-line-funds-reconcile.sh`：逐用户、逐资产、逐产品线资金核对。
 - `product-line-websocket-smoke.mjs`：公共/私有 WebSocket 隔离和事件验证。
-- `matching-engine-benchmark.sh`：撮合核心基准，不代表全链路性能。
+- `matching-engine-benchmark.sh`：内存核心和 exchange-core 基准，不代表全链路性能；输出只能作为微基线，生产容量仍必须使用单产品线真实 Cluster、Kafka、投影和资金对账门禁。
 
 计划调整或新增：
 

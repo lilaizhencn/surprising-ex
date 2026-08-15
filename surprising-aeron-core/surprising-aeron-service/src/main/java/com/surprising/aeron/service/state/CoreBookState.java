@@ -1,51 +1,57 @@
 package com.surprising.aeron.service.state;
 
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
-public record CoreBookState(long nextPrioritySequence, Map<Long, CoreBookOrder> openOrders) {
+public record CoreBookState(long nextPrioritySequence, Map<Long, Long> openOrders) {
 
     public CoreBookState {
         if (nextPrioritySequence <= 0 || openOrders == null) {
             throw new IllegalArgumentException("invalid book state");
         }
-        Map<Long, CoreBookOrder> sorted = new TreeMap<>(openOrders);
-        sorted.forEach((orderId, order) -> {
-            if (orderId != order.orderId() || order.prioritySequence() >= nextPrioritySequence) {
-                throw new IllegalArgumentException("invalid book order index");
+        Map<Long, Long> sorted = StateMapSupport.freezeSorted(openOrders);
+        if (!StateMapSupport.isDelta(openOrders)) {
+            sorted.forEach((orderId, prioritySequence) ->
+                    validateOrder(nextPrioritySequence, orderId, prioritySequence));
+        } else {
+            for (Object key : StateMapSupport.changedKeys(openOrders)) {
+                Long prioritySequence = sorted.get(key);
+                if (prioritySequence != null) {
+                    validateOrder(nextPrioritySequence, (Long) key, prioritySequence);
+                }
             }
-        });
-        openOrders = Collections.unmodifiableMap(sorted);
+        }
+        openOrders = sorted;
     }
 
     public static CoreBookState empty() {
         return new CoreBookState(1, Map.of());
     }
 
-    public List<CoreBookOrder> recoveryOrder() {
-        return openOrders.values().stream()
-                .sorted(Comparator.comparingLong(CoreBookOrder::prioritySequence))
+    private static void validateOrder(long nextPrioritySequence, long orderId, long prioritySequence) {
+        if (orderId <= 0 || prioritySequence <= 0 || prioritySequence >= nextPrioritySequence) {
+            throw new IllegalArgumentException("invalid book order index");
+        }
+    }
+
+    public long prioritySequence(long orderId) {
+        Long prioritySequence = openOrders.get(orderId);
+        return prioritySequence == null ? 0 : prioritySequence;
+    }
+
+    public List<Long> priorityOrder() {
+        return openOrders.entrySet().stream()
+                .sorted(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
                 .toList();
     }
 
-    public long stateHash(String symbol) {
-        String normalized = symbol == null ? null : OrderReservation.normalizeSymbol(symbol);
+    public long stateHash() {
         long hash = CoreStateHash.start();
         hash = CoreStateHash.mix(hash, nextPrioritySequence);
-        for (CoreBookOrder order : recoveryOrder()) {
-            if (normalized != null && !normalized.equals(order.symbol())) {
-                continue;
-            }
-            hash = CoreStateHash.mix(hash, order.orderId());
-            hash = CoreStateHash.mix(hash, order.userId());
-            hash = CoreStateHash.mix(hash, order.symbol());
-            hash = CoreStateHash.mix(hash, order.side().wireCode());
-            hash = CoreStateHash.mix(hash, order.priceTicks());
-            hash = CoreStateHash.mix(hash, order.remainingQuantitySteps());
-            hash = CoreStateHash.mix(hash, order.prioritySequence());
+        for (Map.Entry<Long, Long> entry : openOrders.entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
         }
         return hash;
     }

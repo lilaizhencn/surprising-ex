@@ -3,6 +3,7 @@ package com.surprising.aeron.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -245,6 +246,57 @@ class CoreMatchingStateTest {
             try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().bookState().openOrders()).isEmpty();
             }
+        }
+    }
+
+    @Test
+    void snapshotRecoveryKeepsOriginalFifoAfterPartialFillUpdatesOrderMetadata() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10)));
+            apply(state, 2, 12, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10)));
+            apply(state, 3, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
+            apply(state, 4, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 5, ReservationKind.SPOT_ASSET, "BTC", 5));
+            apply(state, 5, 12, CoreMessageType.PLACE_ORDER,
+                    place(102, CoreOrderSide.SELL, 100, 5, ReservationKind.SPOT_ASSET, "BTC", 5));
+            apply(state, 6, 22, CoreMessageType.PLACE_ORDER,
+                    place(201, CoreOrderSide.BUY, 100, 1, ReservationKind.SPOT_ASSET, "USDT", 100));
+
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                apply(restored, 7, 22, CoreMessageType.PLACE_ORDER,
+                        place(202, CoreOrderSide.BUY, 100, 4, ReservationKind.SPOT_ASSET, "USDT", 400));
+
+                assertThat(restored.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
+                assertThat(restored.tradingState().order(102).status()).isEqualTo(CoreOrderStatus.OPEN);
+                assertThat(restored.tradingState().order(102).remainingQuantitySteps()).isEqualTo(5);
+            }
+        }
+    }
+
+    @Test
+    void amendPatchReadsOriginalInsideCoreAndReturnsReplacement() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applyInstrument(state);
+            apply(state, 1, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
+            apply(state, 2, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
+
+            CoreMessage amend = message(state, 3, 22, CoreMessageType.AMEND_ORDER,
+                    TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(202, 203, "amended",
+                            110L, 2L, CoreTimeInForce.GTC, null)));
+            var response = state.apply(amend);
+
+            assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(TradingCommandCodec.decodeAmendOrder(amend.payload()).replacementOrderId()).isEqualTo(203);
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().order(203).priceTicks()).isEqualTo(110);
+            assertThat(state.tradingState().order(203).clientOrderId()).isEqualTo("amended");
         }
     }
 

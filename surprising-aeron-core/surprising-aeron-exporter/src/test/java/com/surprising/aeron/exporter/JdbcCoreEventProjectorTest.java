@@ -119,13 +119,25 @@ class JdbcCoreEventProjectorTest {
                 CoreExportCodec.encodeEvent(event));
 
         assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.LINEAR_PERPETUAL, message)).isTrue();
+        var continuationCommand = new ApplyFundingCommand(81, "BTC-USDT", 7, 100, 18, 128);
+        var continuationPayment = new CoreFundingPaymentView(81, 19, "BTC-USDT", CoreMarginMode.CROSS,
+                CorePositionSide.NET, "USDT", 1, 60_000, 100, -6);
+        var continuation = new CoreExportEvent(4, 4, 10, UUID.randomUUID(), CoreMessageType.APPLY_FUNDING,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 0,
+                TradingCommandCodec.encodeApplyFunding(continuationCommand), java.util.List.of(),
+                java.util.List.of(), java.util.List.of(), java.util.List.of(continuationPayment));
+        var continuationMessage = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_FUNDING,
+                continuation.commandId(), ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 4, 0,
+                1234, 1).exportEvent(4), CoreExportCodec.encodeEvent(continuation));
+        assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.LINEAR_PERPETUAL,
+                continuationMessage)).isTrue();
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             assertCount(statement, "core_funding_settlement_projection", 1);
-            assertCount(statement, "core_funding_payment_projection", 2);
+            assertCount(statement, "core_funding_payment_projection", 3);
             try (var result = statement.executeQuery("SELECT total_long_payment_units, total_short_payment_units "
                     + "FROM core_funding_settlement_projection")) {
                 result.next();
-                assertThat(result.getLong(1)).isEqualTo(-12);
+                assertThat(result.getLong(1)).isEqualTo(-18);
                 assertThat(result.getLong(2)).isEqualTo(12);
             }
         }

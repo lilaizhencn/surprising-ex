@@ -13,6 +13,8 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class CoreLifecycleStateTest {
@@ -109,6 +111,34 @@ class CoreLifecycleStateTest {
     }
 
     @Test
+    void fundingCursorPersistsAcrossSnapshotAndCompletesExactlyOnce() {
+        TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 100, 10, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1));
+        ApplyFundingCommand firstCommand = new ApplyFundingCommand(95, "BTC-USDT", 1, 10_000, 0, 1);
+
+        TradingCoreReducer.FundingApplication first = reducer.applyFundingWithFacts(state, firstCommand,
+                List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000095"));
+
+        assertThat(first.progress().complete()).isFalse();
+        assertThat(first.progress().nextCursorUserId()).isEqualTo(1);
+        assertThat(first.state().treasuryState().fundingProgress("BTC-USDT")).isNotNull();
+        assertThat(first.state().treasuryState().fundingSettlements()).doesNotContainKey("BTC-USDT");
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(first.state()), ProductLine.LINEAR_PERPETUAL);
+        assertThat(restored).isEqualTo(first.state());
+
+        TradingCoreReducer.FundingApplication second = reducer.applyFundingWithFacts(restored,
+                new ApplyFundingCommand(95, "BTC-USDT", 1, 10_000, 1, 1), List.of(1L, 2L),
+                UUID.fromString("00000000-0000-0000-0000-000000000096"));
+
+        assertThat(second.progress().complete()).isTrue();
+        assertThat(second.state().treasuryState().fundingProgress("BTC-USDT")).isNull();
+        assertThat(second.state().treasuryState().fundingSettlements()).containsEntry("BTC-USDT", 95L);
+        assertThat(second.payments()).extracting(payment -> payment.userId()).containsExactly(2L);
+    }
+
+    @Test
     void deliveryAndOptionSettlementReleaseMarginFlattenPositionsAndConserveFunds() {
         TradingCoreState delivery = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
                 ContractType.LINEAR_DELIVERY, 100, 10, 100);
@@ -132,6 +162,34 @@ class CoreLifecycleStateTest {
         assertThat(exercised.user(1).totalUnits("USDT")).isEqualTo(1_050);
         assertThat(exercised.user(2).totalUnits("USDT")).isEqualTo(950);
         assertThat(exercised.users().values()).allSatisfy(user ->
+                assertThat(user.positions().get("BTC-USDT").signedQuantitySteps()).isZero());
+    }
+
+    @Test
+    void lifecycleSettlementCursorPersistsAcrossSnapshotAndCompletesExactlyOnce() {
+        TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
+                ContractType.LINEAR_DELIVERY, 100, 10, 100);
+        SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(96, "BTC-USDT", 1,
+                120, 0, 0, 1);
+
+        TradingCoreReducer.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
+                firstCommand, List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000096"));
+
+        assertThat(first.progress().complete()).isFalse();
+        assertThat(first.progress().nextCursorUserId()).isEqualTo(1);
+        assertThat(first.state().treasuryState().lifecycleProgress("BTC-USDT")).isNotNull();
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(first.state()), ProductLine.LINEAR_DELIVERY);
+        assertThat(restored).isEqualTo(first.state());
+
+        TradingCoreReducer.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
+                new SettleInstrumentCommand(96, "BTC-USDT", 1, 120, 0, 1, 1), List.of(1L, 2L),
+                UUID.fromString("00000000-0000-0000-0000-000000000097"));
+
+        assertThat(second.progress().complete()).isTrue();
+        assertThat(second.state().treasuryState().lifecycleProgress("BTC-USDT")).isNull();
+        assertThat(second.state().treasuryState().lifecycleSettlements()).containsEntry("BTC-USDT", 96L);
+        assertThat(second.state().users().values()).allSatisfy(user ->
                 assertThat(user.positions().get("BTC-USDT").signedQuantitySteps()).isZero());
     }
 

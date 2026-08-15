@@ -37,7 +37,7 @@ final class CoreStateSnapshotCodec {
     static byte[] encode(CoreProbeState state) {
         byte[] tradingState = TradingStateSnapshotCodec.encode(state.tradingState());
         long exportLength = EXPORT_FIXED_LENGTH;
-        for (CoreMessage event : state.exportState().pending()) {
+        for (CoreMessage event : state.exportState().pendingEvents()) {
             exportLength = Math.addExact(exportLength,
                     Math.addExact(Integer.BYTES, CoreMessageCodec.encode(event).length));
         }
@@ -73,8 +73,8 @@ final class CoreStateSnapshotCodec {
         });
         buffer.putLong(state.exportState().acknowledgedSequence());
         buffer.putLong(state.exportState().nextSequence());
-        buffer.putInt(state.exportState().pending().size());
-        state.exportState().pending().forEach(event -> {
+        buffer.putInt(state.exportState().pendingCount());
+        state.exportState().pendingEvents().forEach(event -> {
             byte[] encoded = CoreMessageCodec.encode(event);
             buffer.putInt(encoded.length);
             buffer.put(encoded);
@@ -135,6 +135,7 @@ final class CoreStateSnapshotCodec {
         int tradingStateLength = version >= VERSION_2 ? buffer.getInt() : 0;
         int fixedLength = version >= VERSION_2 ? FIXED_LENGTH : FIXED_LENGTH_V1;
         if (resultCount < 0 || sourceSequenceCount < 0
+                || sourceSequenceCount > CoreProbeState.MAX_SOURCE_SEQUENCES
                 || tradingStateLength < 0
                 || fixedLength + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
                         + (long) resultCount * RESULT_LENGTH + tradingStateLength > snapshot.length) {

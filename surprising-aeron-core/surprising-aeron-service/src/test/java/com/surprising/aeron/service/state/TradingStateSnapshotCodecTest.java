@@ -68,7 +68,7 @@ class TradingStateSnapshotCodecTest {
         TradingCoreState restored = TradingStateSnapshotCodec.decode(versionOne, ProductLine.SPOT);
 
         assertThat(restored.bookState().openOrders()).containsKey(71L);
-        assertThat(restored.bookState().openOrders().get(71L).prioritySequence()).isOne();
+        assertThat(restored.bookState().prioritySequence(71L)).isOne();
     }
 
     private static byte[] legacyVersionOne(TradingCoreState state) {

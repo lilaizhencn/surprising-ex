@@ -57,10 +57,25 @@ public record AssetBalance(String asset, long availableUnits, long lockedUnits) 
             throw new IllegalArgumentException("asset is required");
         }
         String normalized = value.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9]{2,20}")) {
+        if (!validAsset(normalized)) {
             throw new IllegalArgumentException("invalid asset: " + value);
         }
         return normalized;
+    }
+
+    private static boolean validAsset(String value) {
+        int length = value.length();
+        if (length < 2 || length > 20) {
+            return false;
+        }
+        for (int index = 0; index < length; index++) {
+            char character = value.charAt(index);
+            if (!(character >= 'A' && character <= 'Z'
+                    || character >= '0' && character <= '9')) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void requirePositive(long units) {

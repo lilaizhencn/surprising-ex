@@ -58,7 +58,9 @@ public final class ReliableCoreExporter {
                 && ackResponse.commandStatus() != ResponseStatus.DUPLICATE) {
             throw new IllegalStateException("export ack rejected: " + ackResponse.resultCode());
         }
-        return new ExportCycleResult(events.size(), status());
+        CoreExportStatus after = ackResponse.data().length == 0
+                ? status() : CoreExportCodec.decodeStatus(ackResponse.data());
+        return new ExportCycleResult(events.size(), after);
     }
 
     public CoreExportStatus status() {

@@ -2,9 +2,8 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.product.api.ProductLine;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.TreeMap;
 
 public record CoreUserState(
         ProductLine productLine,
@@ -21,7 +20,7 @@ public record CoreUserState(
             throw new IllegalArgumentException("invalid user state");
         }
         balances = immutableSorted(balances);
-        reservations = Collections.unmodifiableMap(new TreeMap<>(reservations));
+        reservations = immutableSorted(reservations);
         positions = immutableSorted(positions);
         balances.forEach((asset, balance) -> {
             if (!asset.equals(balance.asset())) {
@@ -61,7 +60,8 @@ public record CoreUserState(
             Map<String, AssetBalance> balances,
             Map<Long, OrderReservation> reservations,
             Map<String, CorePositionState> positions) {
-        Map<String, Long> explainedLocks = new TreeMap<>();
+        if (reservations.isEmpty() && positions.isEmpty()) return;
+        Map<String, Long> explainedLocks = new HashMap<>();
         reservations.values().forEach(reservation -> explainedLocks.merge(
                 reservation.asset(), reservation.remainingUnits(), Math::addExact));
         positions.values().forEach(position -> explainedLocks.merge(
@@ -75,6 +75,6 @@ public record CoreUserState(
     }
 
     private static <K extends Comparable<? super K>, V> Map<K, V> immutableSorted(Map<K, V> values) {
-        return Collections.unmodifiableMap(new TreeMap<>(values));
+        return StateMapSupport.freezeSorted(values);
     }
 }

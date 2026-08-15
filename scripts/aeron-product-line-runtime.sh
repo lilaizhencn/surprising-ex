@@ -16,6 +16,8 @@ AERON_RUNTIME_DATABASE_USER="${DATABASE_USER:-${DB_USER:-postgres}}"
 AERON_RUNTIME_DATABASE_PASSWORD="${DATABASE_PASSWORD:-${DB_PASSWORD:-postgres}}"
 AERON_RUNTIME_DATABASE_NAME="${DATABASE_NAME:-${DB_NAME:-postgres}}"
 AERON_RUNTIME_KEEP="${KEEP_AERON_RUNTIME:-false}"
+AERON_RUNTIME_KAFKA_TOPICS_BIN="${AERON_RUNTIME_KAFKA_TOPICS_BIN:-}"
+AERON_RUNTIME_KAFKA_GROUPS_BIN="${AERON_RUNTIME_KAFKA_GROUPS_BIN:-}"
 AERON_RUNTIME_PRODUCT_LINE=""
 AERON_RUNTIME_SEGMENT=""
 AERON_RUNTIME_EVIDENCE_DIR=""
@@ -24,6 +26,31 @@ AERON_RUNTIME_NODE_PIDS=()
 AERON_RUNTIME_INPUT_BRIDGE_PID=""
 AERON_RUNTIME_EXPORTER_PID=""
 AERON_RUNTIME_PROJECTION_PID=""
+
+aeron_runtime_resolve_kafka_tools() {
+  if [[ -z "${AERON_RUNTIME_KAFKA_TOPICS_BIN}" ]] && command -v kafka-topics >/dev/null 2>&1; then
+    AERON_RUNTIME_KAFKA_TOPICS_BIN="$(command -v kafka-topics)"
+  fi
+  if [[ -z "${AERON_RUNTIME_KAFKA_GROUPS_BIN}" ]] && command -v kafka-consumer-groups >/dev/null 2>&1; then
+    AERON_RUNTIME_KAFKA_GROUPS_BIN="$(command -v kafka-consumer-groups)"
+  fi
+}
+
+aeron_runtime_kafka_topics() {
+  if [[ -n "${AERON_RUNTIME_KAFKA_TOPICS_BIN}" ]]; then
+    "${AERON_RUNTIME_KAFKA_TOPICS_BIN}" "$@"
+  else
+    docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh "$@"
+  fi
+}
+
+aeron_runtime_kafka_groups() {
+  if [[ -n "${AERON_RUNTIME_KAFKA_GROUPS_BIN}" ]]; then
+    "${AERON_RUNTIME_KAFKA_GROUPS_BIN}" "$@"
+  else
+    docker exec rainbo-kafka /opt/kafka/bin/kafka-consumer-groups.sh "$@"
+  fi
+}
 
 aeron_runtime_segment() {
   case "$1" in
@@ -135,11 +162,11 @@ aeron_runtime_prepare_pipeline() {
   input_topic="surprising.${AERON_RUNTIME_SEGMENT}.core.inputs.v1"
   export_topic="surprising.${AERON_RUNTIME_SEGMENT}.core.events.v1"
   for topic in "${input_topic}" "${export_topic}"; do
-    docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+    aeron_runtime_kafka_topics --bootstrap-server "${AERON_RUNTIME_KAFKA}" \
       --delete --if-exists --topic "${topic}" >/dev/null 2>&1 || true
     deleted=false
     for attempt in {1..30}; do
-      if ! docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+      if ! aeron_runtime_kafka_topics --bootstrap-server "${AERON_RUNTIME_KAFKA}" \
           --describe --topic "${topic}" >/dev/null 2>&1; then
         deleted=true
         break
@@ -147,12 +174,12 @@ aeron_runtime_prepare_pipeline() {
       sleep 1
     done
     [[ "${deleted}" == true ]] || { echo "Kafka topic deletion timed out: ${topic}" >&2; return 1; }
-    docker exec rainbo-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
+    aeron_runtime_kafka_topics --bootstrap-server "${AERON_RUNTIME_KAFKA}" \
       --create --if-not-exists --topic "${topic}" --partitions 1 --replication-factor 1 >/dev/null
   done
   for group in "surprising-core-input-${AERON_RUNTIME_SEGMENT}" \
       "surprising-core-projection-${AERON_RUNTIME_SEGMENT}"; do
-    docker exec rainbo-kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+    aeron_runtime_kafka_groups --bootstrap-server "${AERON_RUNTIME_KAFKA}" \
       --delete --group "${group}" >/dev/null 2>&1 || true
   done
 }
@@ -199,8 +226,8 @@ aeron_runtime_wait_projection_lag_zero() {
   local group attempt lag
   group="surprising-core-projection-${AERON_RUNTIME_SEGMENT}"
   for attempt in {1..120}; do
-    lag="$(docker exec rainbo-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
-      --bootstrap-server localhost:9092 --describe --group "${group}" 2>/dev/null \
+    lag="$(aeron_runtime_kafka_groups \
+      --bootstrap-server "${AERON_RUNTIME_KAFKA}" --describe --group "${group}" 2>/dev/null \
       | awk 'NR > 1 && $6 ~ /^[0-9]+$/ {sum += $6; found=1} END {if (found) print sum; else print -1}')"
     [[ "${lag}" == 0 ]] && return 0
     sleep 1
@@ -223,6 +250,7 @@ aeron_runtime_start() {
   AERON_RUNTIME_DATABASE_USER="${DATABASE_USER:-${DB_USER:-postgres}}"
   AERON_RUNTIME_DATABASE_PASSWORD="${DATABASE_PASSWORD:-${DB_PASSWORD:-postgres}}"
   AERON_RUNTIME_DATABASE_NAME="${DATABASE_NAME:-${DB_NAME:-postgres}}"
+  aeron_runtime_resolve_kafka_tools
   mkdir -p "${AERON_RUNTIME_EVIDENCE_DIR}"
   aeron_runtime_assert_artifacts
   aeron_runtime_start_cluster

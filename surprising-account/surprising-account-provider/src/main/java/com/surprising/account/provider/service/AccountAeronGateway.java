@@ -31,6 +31,10 @@ public class AccountAeronGateway implements AutoCloseable {
         return requireApplied(clients.command(type, commandId, userId, payload));
     }
 
+    public CoreResponse query(CoreMessageType type, UUID queryId, byte[] payload) {
+        return clients.query(type, queryId, 0, payload);
+    }
+
     public CoreUserStateView userState(long userId) {
         CoreResponse response = clients.query(CoreMessageType.USER_STATE_QUERY, UUID.randomUUID(), userId, new byte[0]);
         if (response.status() == ResponseStatus.REJECTED

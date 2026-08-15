@@ -9,6 +9,7 @@ public enum CoreMessageType {
     PLACE_ORDER(11, WireMessageKind.COMMAND),
     CANCEL_ORDER(12, WireMessageKind.COMMAND),
     REPLACE_ORDER(13, WireMessageKind.COMMAND),
+    AMEND_ORDER(14, WireMessageKind.COMMAND),
     UPSERT_INSTRUMENT(20, WireMessageKind.COMMAND),
     APPLY_MARK_PRICE(21, WireMessageKind.COMMAND),
     APPLY_FUNDING(22, WireMessageKind.COMMAND),
@@ -50,6 +51,8 @@ public enum CoreMessageType {
     USER_OPEN_ORDERS_QUERY(118, WireMessageKind.QUERY),
     TRIGGER_ORDER_QUERY(119, WireMessageKind.QUERY),
     USER_OPEN_TRIGGER_ORDERS_QUERY(120, WireMessageKind.QUERY),
+    FUNDING_PROGRESS_QUERY(121, WireMessageKind.QUERY),
+    SETTLEMENT_PROGRESS_QUERY(122, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -66,6 +69,8 @@ public enum CoreMessageType {
     USER_OPEN_ORDERS_RESULT(213, WireMessageKind.RESPONSE),
     TRIGGER_ORDER_RESULT(214, WireMessageKind.RESPONSE),
     USER_OPEN_TRIGGER_ORDERS_RESULT(215, WireMessageKind.RESPONSE),
+    FUNDING_PROGRESS_RESULT(216, WireMessageKind.RESPONSE),
+    SETTLEMENT_PROGRESS_RESULT(217, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

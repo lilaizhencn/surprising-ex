@@ -5,15 +5,16 @@ import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreExportStatus;
 import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
+import java.util.LinkedHashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 final class CoreExportState {
 
@@ -96,25 +97,32 @@ final class CoreExportState {
 
     boolean hasCapacityFor(CoreMessage command) {
         long eventBytes = Math.addExact(CoreProtocol.HEADER_LENGTH,
-                Math.addExact(80L, command.payload().length));
+                Math.addExact(80L, command.payloadLength()));
         return hasCapacity() && pendingBytes + eventBytes <= MAX_PENDING_BYTES;
     }
 
-    void acknowledge(AckExportCommand command) {
+    List<Long> acknowledge(AckExportCommand command) {
         if (command.throughSequence() <= acknowledgedSequence) {
-            return;
+            return List.of();
         }
         long highestPending = Math.subtractExact(nextSequence, 1);
         if (command.throughSequence() > highestPending) {
             throw new CoreStateRejectedException("EXPORT_ACK_AHEAD", "export ack exceeds emitted sequence");
         }
         int removeCount = Math.toIntExact(command.throughSequence() - acknowledgedSequence);
+        Set<Long> terminalOrderIds = new LinkedHashSet<>();
         for (int index = 0; index < removeCount; index++) {
             CoreMessage removed = pending.removeFirst();
+            CoreExportEvent event = CoreExportCodec.decodeEvent(removed.payload());
+            event.changedOrders().stream()
+                    .filter(order -> !"OPEN".equals(order.status()))
+                    .map(com.surprising.aeron.protocol.CoreOrderStateView::orderId)
+                    .forEach(terminalOrderIds::add);
             pendingBytes = Math.subtractExact(pendingBytes, encodedLength(removed));
             pendingDigest ^= eventDigest(removed);
         }
         acknowledgedSequence = command.throughSequence();
+        return List.copyOf(terminalOrderIds);
     }
 
     List<CoreMessage> batch(int maxEvents) {
@@ -125,7 +133,7 @@ final class CoreExportState {
         Iterator<CoreMessage> iterator = pending.iterator();
         while (count < limit && iterator.hasNext()) {
             CoreMessage event = iterator.next();
-            int eventLength = CoreMessageCodec.encode(event).length;
+            int eventLength = encodedLength(event);
             long nextLength = Math.addExact(encodedLength, Math.addExact(Integer.BYTES, eventLength));
             if (nextLength > CoreExportCodec.MAX_BATCH_ENCODED_LENGTH) {
                 break;
@@ -154,6 +162,10 @@ final class CoreExportState {
         return List.copyOf(pending);
     }
 
+    Iterable<CoreMessage> pendingEvents() {
+        return pending;
+    }
+
     int pendingCount() {
         return pending.size();
     }
@@ -163,15 +175,37 @@ final class CoreExportState {
     }
 
     private static int encodedLength(CoreMessage message) {
-        return Math.addExact(CoreProtocol.HEADER_LENGTH, message.payload().length);
+        return Math.addExact(CoreProtocol.HEADER_LENGTH, message.payloadLength());
     }
 
     private static long eventDigest(CoreMessage message) {
         long hash = 0xcbf29ce484222325L;
-        for (byte value : CoreMessageCodec.encode(message)) {
+        var header = message.header();
+        hash = digestLong(hash, header.schemaVersion());
+        hash = digestLong(hash, header.kind().wireCode());
+        hash = digestLong(hash, header.messageType().wireCode());
+        hash = digestLong(hash, header.commandId().getMostSignificantBits());
+        hash = digestLong(hash, header.commandId().getLeastSignificantBits());
+        hash = digestLong(hash, header.productLine().ordinal());
+        hash = digestLong(hash, header.source().wireCode());
+        hash = digestLong(hash, header.sourceId());
+        hash = digestLong(hash, header.sourceSequence());
+        hash = digestLong(hash, header.userId());
+        hash = digestLong(hash, header.submittedAtEpochMillis());
+        hash = digestLong(hash, header.correlationId());
+        for (byte value : message.payload()) {
             hash ^= Byte.toUnsignedInt(value);
             hash *= 0x100000001b3L;
         }
         return hash;
+    }
+
+    private static long digestLong(long hash, long value) {
+        long result = hash;
+        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
+            result ^= (value >>> shift) & 0xff;
+            result *= 0x100000001b3L;
+        }
+        return result;
     }
 }
