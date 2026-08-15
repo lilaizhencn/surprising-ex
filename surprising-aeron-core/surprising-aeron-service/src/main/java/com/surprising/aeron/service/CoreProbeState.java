@@ -45,6 +45,7 @@ public final class CoreProbeState implements AutoCloseable {
     private static final long HASH_PRIME = 0x100000001b3L;
 
     private final ProductLine productLine;
+    private final TradingCoreRuntime runtime;
     private final LinkedHashMap<UUID, StoredResult> commandResults;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final TradingCoreReducer tradingReducer;
@@ -92,12 +93,12 @@ public final class CoreProbeState implements AutoCloseable {
         this.cachedBusinessStateHash = rollingBusinessStateHash.value();
         this.lastSourceSequenceDigest = sourceSequenceDigest(lastSourceSequences);
         this.exportState = exportState;
-        this.tradingReducer = new TradingCoreReducer();
-        this.matchingAdapter = new DeterministicExchangeCoreAdapter();
-        this.positionUserIndex = new PositionUserIndex(tradingState);
-        this.openInterestIndex = new OpenInterestIndex(tradingState);
-        this.triggerOrderIndex = new TriggerOrderIndex(tradingState);
-        this.matchingAdapter.rebuild(tradingState);
+        this.runtime = new TradingCoreRuntime(productLine, tradingState);
+        this.tradingReducer = runtime.reducer();
+        this.matchingAdapter = runtime.matcher();
+        this.positionUserIndex = runtime.positionUsers();
+        this.openInterestIndex = runtime.openInterest();
+        this.triggerOrderIndex = runtime.triggers();
     }
 
     static CoreProbeState restore(
@@ -123,6 +124,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
+        runtime.assertOwner();
         if (message.header().productLine() != productLine) {
             return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
         }
@@ -175,12 +177,10 @@ public final class CoreProbeState implements AutoCloseable {
                 var query = CoreStateQueryCodec.decodeOpenOrdersQuery(message.payload());
                 long beforeOrderId = query.beforeOrderId() == 0 ? Long.MAX_VALUE : query.beforeOrderId();
                 long requestedUserId = message.header().userId();
-                var orders = openOrders(requestedUserId).stream()
+                var orders = openOrders(requestedUserId)
                         .filter(order -> order.status().name().equals("OPEN"))
                         .filter(order -> query.symbol().isEmpty() || order.symbol().equals(query.symbol()))
                         .filter(order -> order.orderId() < beforeOrderId)
-                        .sorted(java.util.Comparator.comparingLong(
-                                com.surprising.aeron.service.state.CoreOrderState::orderId).reversed())
                         .limit(query.limit())
                         .map(CoreProbeState::orderView)
                         .toList();
@@ -463,9 +463,7 @@ public final class CoreProbeState implements AutoCloseable {
             List<Long> changedOrderIds = commandChangedOrderIds == null ? List.of() : commandChangedOrderIds;
             tradingState = tradingState.stampOrderChanges(beforeTradingState, clusterTimestamp, clusterPosition,
                     changedOrderIds);
-                positionUserIndex.update(beforeTradingState, tradingState);
-                openInterestIndex.update(beforeTradingState, tradingState);
-                triggerOrderIndex.update(beforeTradingState, tradingState);
+            runtime.transition(beforeTradingState, tradingState);
         }
         if (tradingStateChanged) {
             rollingBusinessStateHash.update(beforeTradingState, tradingState);
@@ -505,9 +503,7 @@ public final class CoreProbeState implements AutoCloseable {
                 if (!"EXPORT_BACKLOG_FULL".equals(exception.code())) throw exception;
                 if (tradingStateChanged) rollingBusinessStateHash.update(tradingState, beforeTradingState);
                 tradingState = beforeTradingState;
-                positionUserIndex.rebuild(beforeTradingState);
-                openInterestIndex.rebuild(beforeTradingState);
-                triggerOrderIndex.rebuild(beforeTradingState);
+                runtime.restore(beforeTradingState);
                 if (matchingCommand(message.header().messageType())) matchingAdapter.rebuild(beforeTradingState);
                 return rejected(CoreResultCode.EXPORT_BACKLOG_FULL);
             }
@@ -738,14 +734,18 @@ public final class CoreProbeState implements AutoCloseable {
         };
     }
 
-    private List<com.surprising.aeron.service.state.CoreOrderState> openOrders(long userId) {
-        if (userId == 0) return tradingState.orders().values().stream().toList();
+    private java.util.stream.Stream<com.surprising.aeron.service.state.CoreOrderState> openOrders(long userId) {
+        if (userId == 0) {
+            return ((java.util.NavigableMap<Long, com.surprising.aeron.service.state.CoreOrderState>) tradingState.orders())
+                    .descendingMap().values().stream();
+        }
         var user = tradingState.user(userId);
-        if (user == null) return List.of();
+        if (user == null) return java.util.stream.Stream.empty();
         return user.reservations().keySet().stream()
                 .map(tradingState::order)
                 .filter(java.util.Objects::nonNull)
-                .toList();
+                .sorted(java.util.Comparator.comparingLong(
+                        com.surprising.aeron.service.state.CoreOrderState::orderId).reversed());
     }
 
     private void placeOrder(CoreMessage message) {
@@ -785,6 +785,7 @@ public final class CoreProbeState implements AutoCloseable {
     private com.surprising.aeron.service.matching.CoreMatchingResult placeInMatching(
             TradingCoreState before, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command) {
         try {
+            matchingAdapter.ensureInstrument(before.instruments().get(command.symbol()));
             return matchingAdapter.place(userId, command);
         } catch (RuntimeException exception) {
             matchingAdapter.rebuild(before);
@@ -887,6 +888,7 @@ public final class CoreProbeState implements AutoCloseable {
             if (!cancelResult.accepted()) {
                 throw new CoreStateRejectedException("MATCHING_REJECTED", cancelResult.resultCode());
             }
+            matchingAdapter.ensureInstrument(before.instruments().get(replacement.symbol()));
             var matchingResult = matchingAdapter.place(message.header().userId(), replacement);
             if (!matchingResult.accepted()) {
                 throw new CoreStateRejectedException("MATCHING_REJECTED", matchingResult.resultCode());
@@ -988,7 +990,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     @Override
     public void close() {
-        matchingAdapter.close();
+        runtime.close();
     }
 
     private CoreResponse userStateResponse(long userId) {

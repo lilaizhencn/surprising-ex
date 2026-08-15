@@ -7,8 +7,7 @@
 
 ## 模块
 
-- `surprising-websocket-api`：WebSocket 频道、客户端命令和服务端消息模型。
-- `surprising-websocket-provider`：Spring Boot WebSocket 服务和 Kafka fanout consumer。
+`surprising-websocket` 是单一 Spring Boot 模块，同时包含 WebSocket 频道/消息协议模型、连接管理和 Kafka fanout consumer。
 
 ## 入口
 
@@ -142,7 +141,7 @@ position event on Kafka
 
 ## 水平扩展
 
-- `surprising-websocket-provider` 始终独立于 REST gateway 部署，让 WebSocket 按连接数单独扩容。
+- `surprising-websocket` 始终独立于 REST gateway 部署，让 WebSocket 按连接数单独扩容。
 - WebSocket 节点至少部署 2 个。
 - 每个 WebSocket 节点必须使用唯一 Kafka consumer group，例如默认值 `surprising-websocket-${HOSTNAME:${random.uuid}}`。
 - 不要让所有 WebSocket 进程共用一个 group。共用 group 会导致每条 Kafka 记录只被一个节点收到，连接在其他节点上的客户端会漏掉公共行情。
@@ -199,6 +198,6 @@ surprising:
 ## 构建和测试
 
 ```bash
-mvn -pl :surprising-websocket-provider -am test
-mvn -pl :surprising-websocket-provider -am spring-boot:run
+mvn -pl :surprising-websocket -am test
+mvn -pl :surprising-websocket -am spring-boot:run
 ```

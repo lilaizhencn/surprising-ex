@@ -103,7 +103,7 @@ available + locked = accountTotal
 
 | 编号 | 当前问题 | 影响 |
 | --- | --- | --- |
-| Q01 | `upsertTriggerOrder` 扫全部 trigger 查 client ID | 触发单规模增大后下单成本线性增长 |
+| Q01 | `upsertTriggerOrder` 扫全部 trigger 查 client ID（基线问题；当前已由 `TriggerOrderIndex` 消除） | 触发单规模增大后下单成本线性增长 |
 | Q02 | `upsertAlgoOrder` 扫全部 algo 查 client ID | 同上 |
 | Q03 | `ensureLiquidation` 扫全部 liquidation 查用户/symbol/side | 强平计划重复检查变慢 |
 | Q04 | `adlCandidates` 扫全部 users/positions 并排序 | ADL 命令阻塞整条产品线 |
@@ -129,10 +129,10 @@ available + locked = accountTotal
 | --- | --- | --- |
 | M01 | place/cancel/replace 调用 `submitCommandAsyncFullResponse(...).join()` | 每命令同步跨 ring 等待，无法形成微批重叠 |
 | M02 | cancel/replace 失败后通过 `matchingAdapter.rebuild(before)` 重启 exchange-core | 失败尾延迟高，且停止/重放整个 book |
-| M03 | place/cancel 在 matcher 已修改后若业务 reducer 抛错，缺少统一的命令前回滚保护 | Aeron 业务状态与 matcher 可能分叉 |
+| M03 | place/cancel 在 matcher 已修改后若业务 reducer 抛错，缺少统一的命令前回滚保护（当前已增加 fail-closed 回滚护栏；native token 仍未完成） | Aeron 业务状态与 matcher 可能分叉 |
 | M04 | `rebuild` 对所有 open orders 逐个 `.join()` 重放 | 恢复时间随盘口线性增长且高分配 |
 | M05 | `orderBookLevels()` 查询所有 symbol、最大深度、逐个 join | 管理查询阻塞 matcher |
-| M06 | `ensureSymbol` 使用哈希但不检查碰撞 | 碰撞会把不同 symbol 混入同一盘口 |
+| M06 | `ensureSymbol` 使用哈希但不检查碰撞（当前已增加稳定 registry 和确定性碰撞探测） | 碰撞会把不同 symbol 混入同一盘口 |
 | M07 | `ensureUser`/symbol 注册在首次交易同步 join | 首次请求有额外固定尾延迟 |
 | M08 | `AeronClientPool.commandAsync` 每命令创建 CompletableFuture 任务；slot 内仍同步等待 | 高频并发分配和线程池竞争 |
 | M09 | `SurprisingAeronClient.submit` offer/egress 是调用线程同步循环 | Gateway 线程被核心背压占用 |
@@ -146,7 +146,7 @@ available + locked = accountTotal
 | --- | --- | --- |
 | D01 | 普通订单已基本 DB-free，但 TriggerOrderService 仍通过 JDBC claim/complete/expire/reset | 触发单并非同一 Core 原子状态机 |
 | D02 | mark price 查询/claim 后再调用 OrderService.place | 触发条件命中和资金/订单执行之间存在竞态、往返和重复风险 |
-| D03 | `maintenance`、`onPositionClosed` 仍依赖 TriggerOrderRepository | DB 故障会改变触发单裁决可用性 |
+| D03 | `maintenance`、`onPositionClosed` 在非 Aeron fallback 仍依赖 TriggerOrderRepository；Aeron 分支已切到 Core | DB 故障会改变旧 fallback 的触发单裁决可用性 |
 | D04 | `OrderFeeSnapshotLookup` 缺失用户费率时回退 instrument default | 可能产生错误手续费和资金对账差异 |
 | D05 | mark price、instrument、fee snapshot 如果陈旧/缺失没有严格版本门禁 | 交易规则不一致 |
 | D06 | 订单号生成器仅内存 AtomicReference，跨重启无持久 epoch/租约 | 节点重启或多实例配置错误可能冲突 |
@@ -502,9 +502,13 @@ load snapshot -> restore exchange-core native state
 3. `CoreProbeState` 为用户、订单和触发单设置显式 changed-id 集合；资金、清算、结算、余额和仓位命令不再依赖全量 diff。触发单按 symbol 建立可恢复的派生索引，clientTriggerOrderId 使用索引做幂等检查。
 4. Aeron gateway source identity 与启动 epoch 分离：同一部署节点使用显式稳定 identity，进程重启获得新 epoch，避免 source sequence 回退后永久被 Core 判为 stale。
 5. Aeron 触发单的到期、陈旧 `TRIGGERING` 重试、持仓归零撤单、instrument lifecycle 撤单和 mark-price 候选查询已经从数据库分支切到 Core 查询/命令；新增 `EXPIRE_TRIGGER_ORDER`、`RETRY_TRIGGER_ORDER`。
+6. exchange-core symbol 注册增加进程内稳定 ID registry 和确定性碰撞探测；同一运行时不会把两个不同 symbol 注册为同一个 matcher symbol ID。
+7. `TradingCoreRuntime` 作为 CoreProbeState 的单写运行时边界，集中拥有 reducer、matcher、position/open-interest/trigger 索引；状态过渡、索引更新、回滚恢复和资源关闭不再由调用点分别维护。
+8. reducer 的未修改 leverage/algo/timer/trigger map 统一以 delta 传递；TradingCoreState、CoreTreasuryState 的 delta 分支只校验 changed keys，避免无关命令在状态构造器内全量遍历。
+9. matcher 启动恢复先按规范化 instrument registry 注册全部 symbol，再按 FIFO 恢复活动订单；symbol collision 的分配不再依赖“当前是否有挂单”，盘口查询深度固定有界。
 
 仍未宣称完成的交付物：
 
 - 触发单 claim、实际订单创建和 complete 仍经过 `OrderRpcApi`，尚未变成同一个 Core 原子命令；这仍是 P4 的下一项资金安全改造，不能以当前 DB-free 状态误认为原子执行。
-- `TradingCoreState` 仍是不可变兼容状态壳，delta 深度达到上限时仍会 materialize；P2 的 single-writer mutable runtime、P3 的 exchange-core native restore、P5 的一次编码导出和 P6 的 failover/压测门禁尚未完成。
-- 根 Maven 构建当前受工作树中用户已进行的 `surprising-market-maker` 到 `surprising-maker` 重命名影响；本轮使用 `surprising-aeron-core` 和各受影响 provider 的独立 reactor 构建验证，未改动该用户变更。
+- `TradingCoreState` 仍是不可变兼容状态壳，delta 深度达到上限时仍会 materialize；当前 `TradingCoreRuntime` 已作为单写边界和索引协调层接入，但 P2 的完全 mutable entity store、P3 的 exchange-core native restore、P5 的一次编码导出和 P6 的 failover/压测门禁尚未完成。
+- 根 Maven `validate` 已在当前 `surprising-maker` 模块布局下通过；完整 root `test` 仍受账户测试发现阶段缺少 `CoreUserStateView` 类路径的既有问题阻塞，本轮未改动该测试/POM。

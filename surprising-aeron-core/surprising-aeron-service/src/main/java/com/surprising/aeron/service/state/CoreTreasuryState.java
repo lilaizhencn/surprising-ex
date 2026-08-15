@@ -156,7 +156,11 @@ public record CoreTreasuryState(
 
     private static Map<String, Long> normalized(Map<String, Long> source, boolean signed) {
         if (StateMapSupport.isDelta(source)) {
-            source.forEach((asset, units) -> validateNormalized(asset, units, signed));
+            for (Object key : StateMapSupport.changedKeys(source)) {
+                if (source.containsKey(key)) {
+                    validateNormalized((String) key, source.get(key), signed);
+                }
+            }
             return StateMapSupport.freezeSorted(source);
         }
         Map<String, Long> result = new TreeMap<>();
@@ -174,12 +178,15 @@ public record CoreTreasuryState(
 
     private static Map<String, Long> markers(Map<String, Long> source) {
         if (StateMapSupport.isDelta(source)) {
-            source.forEach((symbol, settlementId) -> {
-                if (!OrderReservation.normalizeSymbol(symbol).equals(symbol)
-                        || settlementId == null || settlementId <= 0) {
-                    throw new IllegalArgumentException("invalid settlement marker");
+            for (Object key : StateMapSupport.changedKeys(source)) {
+                if (source.containsKey(key)) {
+                    Long settlementId = source.get(key);
+                    if (!OrderReservation.normalizeSymbol((String) key).equals(key)
+                            || settlementId == null || settlementId <= 0) {
+                        throw new IllegalArgumentException("invalid settlement marker");
+                    }
                 }
-            });
+            }
             return StateMapSupport.freezeSorted(source);
         }
         Map<String, Long> result = new TreeMap<>();
@@ -194,7 +201,9 @@ public record CoreTreasuryState(
 
     private static Map<String, FundingProgress> progresses(Map<String, FundingProgress> source) {
         if (StateMapSupport.isDelta(source)) {
-            source.forEach((symbol, progress) -> validateProgress(symbol, progress));
+            for (Object key : StateMapSupport.changedKeys(source)) {
+                if (source.containsKey(key)) validateProgress((String) key, source.get(key));
+            }
             return StateMapSupport.freezeSorted(source);
         }
         Map<String, FundingProgress> result = new TreeMap<>();
@@ -210,7 +219,9 @@ public record CoreTreasuryState(
 
     private static Map<String, LifecycleProgress> lifecycleProgresses(Map<String, LifecycleProgress> source) {
         if (StateMapSupport.isDelta(source)) {
-            source.forEach((symbol, progress) -> validateLifecycleProgress(symbol, progress));
+            for (Object key : StateMapSupport.changedKeys(source)) {
+                if (source.containsKey(key)) validateLifecycleProgress((String) key, source.get(key));
+            }
             return StateMapSupport.freezeSorted(source);
         }
         Map<String, LifecycleProgress> result = new TreeMap<>();

@@ -89,7 +89,7 @@ gateway 本地核心后台列表使用统一游标分页协议：`/api/v1/admin/
 `createdAt.desc`、`createdAt.asc`。
 
 跨表订单时间线、行情/交易运营指标、账户估值、资金对账和日终报表明确不在
-gateway 中实现。后续 `surprising-finance-ops` 模块必须配置独立数据源和独立物理数据库，
+gateway 中实现。后续财务运营模块必须配置独立数据源和独立物理数据库，
 通过领域事件、outbox 或受控 CDC 建立查询投影，禁止对交易主库执行报表 JOIN。
 
 系统监控接口位于 `/api/v1/admin/system`：`/routes` 返回普通和后台路由配置，`/health` 统一巡检后端 `/actuator/health`，`/observability` 聚合 Kafka consumer lag、WebSocket 连接/订阅指标和各后端 `/actuator/prometheus` 抓取状态。这些接口需要 `admin.system.read`。Kafka lag 默认关闭，生产可通过 `ADMIN_KAFKA_LAG_ENABLED=true` 和 `ADMIN_KAFKA_BOOTSTRAP_SERVERS` 开启。依赖业务库聚合的 `/metrics` 与本地告警中心已移除；以后应从独立运营数据库或可观测性平台提供。
@@ -113,7 +113,7 @@ gateway 中实现。后续 `surprising-finance-ops` 模块必须配置独立数�
 
 不要把内部 provider 端口直接暴露到公网。公共客户端应使用：
 
-- 开发/生产部署：`surprising-gateway` 的 `9094` 提供 REST，`surprising-websocket-provider` 的 `9093` 提供 `/ws/v1` 实时推送。
+- 开发/生产部署：`surprising-gateway` 的 `9094` 提供 REST，`surprising-websocket` 的 `9093` 提供 `/ws/v1` 实时推送。
 
 ## 水平扩展
 

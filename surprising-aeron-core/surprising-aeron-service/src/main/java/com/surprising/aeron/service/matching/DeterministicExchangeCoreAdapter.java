@@ -41,9 +41,12 @@ import java.util.concurrent.TimeUnit;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
+    private static final int MAX_QUERY_DEPTH = 1_000;
+
     private ExchangeCore core;
     private ExchangeApi api;
     private final Map<String, Integer> symbols = new HashMap<>();
+    private final Map<Integer, String> symbolNames = new HashMap<>();
     private final Set<Long> users = new HashSet<>();
 
     public DeterministicExchangeCoreAdapter() {
@@ -147,7 +150,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public List<CoreBookLevelView> orderBookLevels() {
         List<CoreBookLevelView> levels = new ArrayList<>();
         symbols.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
-            L2MarketData book = api.requestOrderBookAsync(entry.getValue(), Integer.MAX_VALUE).join();
+            L2MarketData book = api.requestOrderBookAsync(entry.getValue(), MAX_QUERY_DEPTH).join();
             for (int index = 0; index < book.askSize; index++) {
                 levels.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.SELL, book.askPrices[index],
                         book.askVolumes[index], book.askOrders[index]));
@@ -166,8 +169,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public void rebuild(TradingCoreState state) {
         stop();
         symbols.clear();
+        symbolNames.clear();
         users.clear();
         start();
+        state.instruments().values().forEach(this::ensureInstrument);
         state.bookState().priorityOrder().stream()
                 .map(state::order)
                 .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN)
@@ -192,6 +197,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 });
     }
 
+    public void ensureInstrument(CoreInstrumentState instrument) {
+        if (instrument == null) {
+            throw new IllegalArgumentException("instrument is required");
+        }
+        ensureSymbol(instrument.symbol(), instrument);
+    }
+
     private void start() {
         ExchangeConfiguration configuration = ExchangeConfiguration.defaultBuilder()
                 .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
@@ -209,18 +221,46 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private int ensureSymbol(String symbol) {
-        return symbols.computeIfAbsent(symbol, value -> {
-            int symbolId = stableId("SYMBOL:" + value);
-            CoreSymbolSpecification specification = CoreSymbolSpecification.builder()
-                    .symbolId(symbolId).type(SymbolType.CURRENCY_EXCHANGE_PAIR)
-                    .baseCurrency(stableId("BASE:" + value)).quoteCurrency(stableId("QUOTE:" + value))
-                    .baseScaleK(1).quoteScaleK(1).makerFee(0).takerFee(0).marginBuy(0).marginSell(0).build();
-            CommandResultCode result = api.submitBinaryDataAsync(new BatchAddSymbolsCommand(specification)).join();
-            if (result != CommandResultCode.SUCCESS) {
-                throw new IllegalStateException("failed to add exchange-core symbol " + value + ": " + result);
-            }
-            return symbolId;
-        });
+        return ensureSymbol(symbol, null);
+    }
+
+    private int ensureSymbol(String symbol, CoreInstrumentState instrument) {
+        Integer existing = symbols.get(symbol);
+        if (existing != null) {
+            return existing;
+        }
+        int symbolId = stableSymbolId(symbol);
+        CoreSymbolSpecification specification = CoreSymbolSpecification.builder()
+                .symbolId(symbolId).type(symbolType(instrument))
+                .baseCurrency(stableId("BASE:" + symbol)).quoteCurrency(stableId("QUOTE:" + symbol))
+                .baseScaleK(1).quoteScaleK(1).makerFee(0).takerFee(0).marginBuy(0).marginSell(0).build();
+        CommandResultCode result = api.submitBinaryDataAsync(new BatchAddSymbolsCommand(specification)).join();
+        if (result != CommandResultCode.SUCCESS) {
+            throw new IllegalStateException("failed to add exchange-core symbol " + symbol + ": " + result);
+        }
+        symbols.put(symbol, symbolId);
+        symbolNames.put(symbolId, symbol);
+        return symbolId;
+    }
+
+    private static SymbolType symbolType(CoreInstrumentState instrument) {
+        if (instrument == null || instrument.contractType()
+                == com.surprising.instrument.api.model.ContractType.SPOT) {
+            return SymbolType.CURRENCY_EXCHANGE_PAIR;
+        }
+        if (instrument.contractType()
+                == com.surprising.instrument.api.model.ContractType.VANILLA_OPTION) {
+            return SymbolType.OPTION;
+        }
+        return SymbolType.FUTURES_CONTRACT;
+    }
+
+    private int stableSymbolId(String symbol) {
+        int symbolId = stableId("SYMBOL:" + symbol);
+        while (symbolId == 0 || (symbolNames.containsKey(symbolId) && !symbol.equals(symbolNames.get(symbolId)))) {
+            symbolId = symbolId == Integer.MAX_VALUE ? 1 : symbolId + 1;
+        }
+        return symbolId;
     }
 
     private void ensureUser(long userId) {

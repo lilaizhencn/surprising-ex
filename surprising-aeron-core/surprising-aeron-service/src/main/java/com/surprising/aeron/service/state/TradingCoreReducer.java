@@ -157,8 +157,9 @@ public final class TradingCoreReducer {
     private TradingCoreState withTriggers(TradingCoreState state, Map<Long, CoreTriggerOrderState> triggers) {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
-                state.bookState(), state.instruments(), state.riskState(), state.treasuryState(), state.leverages(),
-                state.algoOrders(), state.cancelAllAfterTimers(), StateMapSupport.delta(state.clientOrderIndex()), triggers);
+                state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()), triggers);
     }
 
     public TradingCoreState updateCancelAllAfter(
@@ -226,8 +227,8 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                 state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
-                state.leverages(), state.algoOrders(), timers,
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()), timers,
+                StateMapSupport.delta(state.clientOrderIndex()), StateMapSupport.delta(state.triggerOrders()));
     }
 
     private static void requireTimerRevision(
@@ -283,8 +284,8 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                 state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
-                state.leverages(), values, state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                StateMapSupport.delta(state.leverages()), values, StateMapSupport.delta(state.cancelAllAfterTimers()),
+                StateMapSupport.delta(state.clientOrderIndex()), StateMapSupport.delta(state.triggerOrders()));
     }
 
     private static void requireSameAlgoIntent(CoreAlgoOrderState left, CoreAlgoOrderState right) {
@@ -367,8 +368,8 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                 state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
-                leverages, state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                leverages, StateMapSupport.delta(state.algoOrders()), StateMapSupport.delta(state.cancelAllAfterTimers()),
+                StateMapSupport.delta(state.clientOrderIndex()), StateMapSupport.delta(state.triggerOrders()));
     }
 
     public TradingCoreState updatePositionMode(
@@ -604,8 +605,9 @@ public final class TradingCoreReducer {
         if (!changed) return state;
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 StateMapSupport.delta(state.orders()), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders()));
     }
 
     public TradingCoreState applyMatches(
@@ -627,8 +629,9 @@ public final class TradingCoreReducer {
                         StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                         new CoreBookState(Math.incrementExact(state.bookState().nextPrioritySequence()),
                                 bookOrders), state.instruments(), state.riskState(), state.treasuryState(),
-                        state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                        StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                        StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                        StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                        StateMapSupport.delta(state.triggerOrders()));
             }
         }
         Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
@@ -702,8 +705,9 @@ public final class TradingCoreReducer {
         }
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
                 new CoreBookState(nextPrioritySequence, bookOrders), state.instruments(), state.riskState(),
-                treasury, state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                treasury, StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders()));
     }
 
     public TradingCoreState upsertInstrument(TradingCoreState state, UpsertInstrumentCommand command) {
@@ -729,8 +733,9 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                 state.bookState(), instruments, state.riskState(),
-                state.treasuryState(), state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                state.treasuryState(), StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders()));
     }
 
     public TradingCoreState applyMarkPrice(TradingCoreState state, ApplyMarkPriceCommand command) {
@@ -754,8 +759,9 @@ public final class TradingCoreReducer {
         TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                 state.bookState(), state.instruments(), risk, state.treasuryState(),
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders()));
         return continueRiskScan(withMark, 256);
     }
 
@@ -811,8 +817,9 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                 state.bookState(), state.instruments(), nextRisk, state.treasuryState(),
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders()));
     }
 
     private long updateIsolatedRisk(TradingCoreState state, CoreUserState user, CorePositionState position,
@@ -1054,8 +1061,9 @@ public final class TradingCoreReducer {
                 command.settlementId(), complete, nextCursorUserId, selectedUserIds.size());
         return new FundingApplication(new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 StateMapSupport.delta(state.orders()), state.bookState(), state.instruments(), state.riskState(), treasury,
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders()), payments,
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders())), payments,
                 progress);
     }
 
@@ -1166,7 +1174,8 @@ public final class TradingCoreReducer {
         }
         TradingCoreState next = new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
                 StateMapSupport.delta(canceled.orders()), canceled.bookState(), canceled.instruments(), canceled.riskState(), treasury,
-                canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(), canceled.triggerOrders());
+                StateMapSupport.delta(canceled.leverages()), StateMapSupport.delta(canceled.algoOrders()),
+                StateMapSupport.delta(canceled.cancelAllAfterTimers()), StateMapSupport.delta(canceled.triggerOrders()));
         return new SettlementApplication(next, new com.surprising.aeron.protocol.CoreSettlementProgressView(
                 command.settlementId(), complete, nextCursorUserId, selectedUserIds.size()));
     }
@@ -1232,7 +1241,8 @@ public final class TradingCoreReducer {
                 liquidations, canceled.riskState().scans(), canceled.riskState().nextLiquidationId());
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
                 StateMapSupport.delta(canceled.orders()), canceled.bookState(), canceled.instruments(), risk, treasury,
-                canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(), canceled.triggerOrders());
+                StateMapSupport.delta(canceled.leverages()), StateMapSupport.delta(canceled.algoOrders()),
+                StateMapSupport.delta(canceled.cancelAllAfterTimers()), StateMapSupport.delta(canceled.triggerOrders()));
     }
 
     public boolean isLiquidationExecutable(TradingCoreState state, ExecuteLiquidationCommand command) {
@@ -1274,8 +1284,9 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                 state.bookState(), state.instruments(), risk, state.treasuryState(),
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders()));
     }
 
     private static String riskKey(long userId, String symbol, CorePositionSide positionSide) {
@@ -1332,9 +1343,9 @@ public final class TradingCoreReducer {
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
-                state.bookState(), state.instruments(), risk, treasury, state.leverages(),
-                state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                state.bookState(), state.instruments(), risk, treasury, StateMapSupport.delta(state.leverages()),
+                StateMapSupport.delta(state.algoOrders()), StateMapSupport.delta(state.cancelAllAfterTimers()),
+                StateMapSupport.delta(state.clientOrderIndex()), StateMapSupport.delta(state.triggerOrders()));
     }
 
     public TradingCoreState adjustInsuranceFund(TradingCoreState state,
@@ -1348,8 +1359,9 @@ public final class TradingCoreReducer {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 StateMapSupport.delta(state.users()), StateMapSupport.delta(state.orders()),
                 state.bookState(), state.instruments(), state.riskState(), treasury,
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders()));
     }
 
     public TradingCoreState executeAdl(TradingCoreState state,
@@ -1419,8 +1431,9 @@ public final class TradingCoreReducer {
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 StateMapSupport.delta(state.orders()), state.bookState(), state.instruments(), risk, state.treasuryState(),
-                state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
-                StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), StateMapSupport.delta(state.clientOrderIndex()),
+                StateMapSupport.delta(state.triggerOrders()));
     }
 
     public java.util.List<com.surprising.aeron.protocol.CoreAdlCandidateView> adlCandidates(
@@ -1523,8 +1536,9 @@ public final class TradingCoreReducer {
         if (!changed) return state;
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
                 new CoreBookState(state.bookState().nextPrioritySequence(), bookOrders), state.instruments(),
-                state.riskState(), state.treasuryState(), state.leverages(), state.algoOrders(),
-                state.cancelAllAfterTimers(), StateMapSupport.delta(state.clientOrderIndex()), state.triggerOrders());
+                state.riskState(), state.treasuryState(), StateMapSupport.delta(state.leverages()),
+                StateMapSupport.delta(state.algoOrders()), StateMapSupport.delta(state.cancelAllAfterTimers()),
+                StateMapSupport.delta(state.clientOrderIndex()), StateMapSupport.delta(state.triggerOrders()));
     }
 
     private static long safeRatio(long maintenance, long equity) {
@@ -1766,12 +1780,16 @@ public final class TradingCoreReducer {
                 ? StateMapSupport.delta(state.clientOrderIndex()) : clientOrderIndex;
         if (clientOrderIndex != null) {
             return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, nextOrders,
-                    bookState, state.instruments(), state.riskState(), state.treasuryState(), state.leverages(),
-                    state.algoOrders(), state.cancelAllAfterTimers(), nextClientOrderIndex, state.triggerOrders());
+                    bookState, state.instruments(), state.riskState(), state.treasuryState(),
+                    StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                    StateMapSupport.delta(state.cancelAllAfterTimers()), nextClientOrderIndex,
+                    StateMapSupport.delta(state.triggerOrders()));
         }
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, nextOrders,
-                bookState, state.instruments(), state.riskState(), state.treasuryState(), state.leverages(),
-                state.algoOrders(), state.cancelAllAfterTimers(), nextClientOrderIndex, state.triggerOrders());
+                bookState, state.instruments(), state.riskState(), state.treasuryState(),
+                StateMapSupport.delta(state.leverages()), StateMapSupport.delta(state.algoOrders()),
+                StateMapSupport.delta(state.cancelAllAfterTimers()), nextClientOrderIndex,
+                StateMapSupport.delta(state.triggerOrders()));
     }
 
     private static void validateReservationRule(TradingCoreState state, PlaceOrderCommand command) {

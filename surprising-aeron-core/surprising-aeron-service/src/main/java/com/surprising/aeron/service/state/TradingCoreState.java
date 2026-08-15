@@ -94,20 +94,25 @@ public record TradingCoreState(
         leverages = StateMapSupport.freezeSorted(leverages);
         algoOrders = StateMapSupport.freezeSorted(algoOrders);
         Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> sortedTimers = StateMapSupport.freezeSorted(cancelAllAfterTimers);
-        sortedTimers.forEach((key, timer) -> {
-            if (!key.equals(timer.key())) {
-                throw new IllegalArgumentException("cancel-all-after key does not match authoritative timer");
+        if (!StateMapSupport.isDelta(cancelAllAfterTimers)) {
+            sortedTimers.forEach(TradingCoreState::validateTimer);
+        } else {
+            for (Object key : StateMapSupport.changedKeys(cancelAllAfterTimers)) {
+                CoreCancelAllAfterState timer = sortedTimers.get(key);
+                if (timer != null) validateTimer((CoreCancelAllAfterKey) key, timer);
             }
-        });
+        }
         cancelAllAfterTimers = sortedTimers;
         clientOrderIndex = StateMapSupport.freezeSorted(derivedIndex);
         Map<Long, CoreTriggerOrderState> sortedTriggers = StateMapSupport.freezeSorted(triggerOrders);
-        sortedTriggers.forEach((id, trigger) -> {
-            if (id != trigger.triggerOrderId() || trigger.productLine() != productLine
-                    || !sortedUsers.containsKey(trigger.userId())) {
-                throw new IllegalArgumentException("trigger order state belongs to another partition");
+        if (!StateMapSupport.isDelta(triggerOrders)) {
+            sortedTriggers.forEach((id, trigger) -> validateTrigger(productLine, sortedUsers, id, trigger));
+        } else {
+            for (Object id : StateMapSupport.changedKeys(triggerOrders)) {
+                CoreTriggerOrderState trigger = sortedTriggers.get(id);
+                if (trigger != null) validateTrigger(productLine, sortedUsers, id, trigger);
             }
-        });
+        }
         triggerOrders = sortedTriggers;
     }
 
@@ -234,6 +239,20 @@ public record TradingCoreState(
         if (orderId != order.orderId() || order.productLine() != productLine
                 || !users.containsKey(order.userId())) {
             throw new IllegalArgumentException("order state belongs to another partition");
+        }
+    }
+
+    private static void validateTimer(CoreCancelAllAfterKey key, CoreCancelAllAfterState timer) {
+        if (!key.equals(timer.key())) {
+            throw new IllegalArgumentException("cancel-all-after key does not match authoritative timer");
+        }
+    }
+
+    private static void validateTrigger(ProductLine productLine, Map<Long, CoreUserState> users,
+                                         Object id, CoreTriggerOrderState trigger) {
+        if (!id.equals(trigger.triggerOrderId()) || trigger.productLine() != productLine
+                || !users.containsKey(trigger.userId())) {
+            throw new IllegalArgumentException("trigger order state belongs to another partition");
         }
     }
 

@@ -3,7 +3,7 @@ server:
 
 spring:
   application:
-    name: surprising-websocket-provider
+    name: surprising-websocket
 management:
   endpoints:
     web:
