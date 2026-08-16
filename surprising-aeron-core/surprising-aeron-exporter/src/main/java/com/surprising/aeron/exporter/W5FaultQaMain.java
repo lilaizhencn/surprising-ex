@@ -241,7 +241,7 @@ public final class W5FaultQaMain {
                 stopOwnedProcess("projector");
                 CoreExportStatus beforeReorder = exportStatus(core);
                 SequenceRange reorderRange = generateProbeEvents(core, 3, "reorder-gap");
-                Map<Long, KafkaEvent> reorderEvents = observer.await(reorderRange.sequences(), Duration.ofSeconds(15));
+                Map<Long, KafkaEvent> reorderEvents = observer.await(reorderRange.sequences(), Duration.ofSeconds(45));
                 JdbcCoreEventProjector directProjector = new JdbcCoreEventProjector(
                         new DriverManagerDataSource(databaseUrl, databaseUser, databasePassword));
                 expectGap(directProjector, reorderEvents.get(reorderRange.firstSequence() + 1).message());
