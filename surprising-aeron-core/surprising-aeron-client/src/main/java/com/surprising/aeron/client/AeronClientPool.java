@@ -5,31 +5,28 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.product.api.ProductLine;
 import io.aeron.Publication;
 import io.aeron.driver.MediaDriver;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.LockSupport;
 
 public final class AeronClientPool implements AutoCloseable {
-
-    private static final int MAX_SUBMIT_ATTEMPTS = 3;
 
     public enum TryCommandResult {
         SENT,
@@ -40,6 +37,20 @@ public final class AeronClientPool implements AutoCloseable {
         CLOSED
     }
 
+    interface Session extends AutoCloseable {
+        long offer(CoreMessage message);
+        int pollEgress(int fragmentLimit);
+        CoreResponse takeResponse(long correlationId);
+        RuntimeException sessionFailure();
+        @Override
+        void close();
+    }
+
+    @FunctionalInterface
+    interface SessionFactory {
+        Session open();
+    }
+
     private final String clientName;
     private final ProductLine productLine;
     private final List<String> hostnames;
@@ -47,10 +58,11 @@ public final class AeronClientPool implements AutoCloseable {
     private final Duration responseTimeout;
     private final String sourceIdentity;
     private final String sourceEpoch;
-    private final ClientSlot[] clients;
-    private final ExecutorService commandExecutor;
-    private final ExecutorService connectionExecutor;
-    private final AtomicInteger nextClient = new AtomicInteger();
+    private final AeronClientCapacity capacity;
+    private final SessionFactory sessionFactory;
+    private final AgentLane[] commandAgents;
+    private final AgentLane reservedControlAgent;
+    private final EgressDispatcher egressDispatcher = new EgressDispatcher();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicReference<MediaDriver> mediaDriver = new AtomicReference<>();
 
@@ -85,6 +97,21 @@ public final class AeronClientPool implements AutoCloseable {
             int clientConnections,
             String sourceIdentity,
             String sourceEpoch) {
+        this(clientName, productLine, hostnames, egressHostname, responseTimeout, sourceIdentity, sourceEpoch,
+                AeronClientCapacity.defaults().withCommandSessions(clientConnections), null, true);
+    }
+
+    AeronClientPool(
+            String clientName,
+            ProductLine productLine,
+            List<String> hostnames,
+            String egressHostname,
+            Duration responseTimeout,
+            String sourceIdentity,
+            String sourceEpoch,
+            AeronClientCapacity capacity,
+            SessionFactory sessionFactory,
+            boolean startAgents) {
         if (clientName == null || clientName.isBlank()) {
             throw new IllegalArgumentException("clientName is required");
         }
@@ -111,132 +138,89 @@ public final class AeronClientPool implements AutoCloseable {
             throw new IllegalArgumentException("sourceEpoch is required");
         }
         this.sourceEpoch = sourceEpoch.trim();
-        if (clientConnections < 1 || clientConnections > 64) {
-            throw new IllegalArgumentException("clientConnections must be in [1,64]");
+        this.capacity = Objects.requireNonNull(capacity, "capacity");
+        this.sessionFactory = sessionFactory == null ? this::openSession : sessionFactory;
+        this.commandAgents = new AgentLane[capacity.commandSessions()];
+        for (int index = 0; index < commandAgents.length; index++) {
+            commandAgents[index] = new AgentLane("command-" + (index + 1),
+                    capacity.commandMailboxCapacity(), capacity.maxCommandInFlightPerSession(),
+                    stableLong(this.sourceIdentity + ':' + productLine + ':' + this.sourceEpoch + ':' + index));
         }
-        this.clients = new ClientSlot[clientConnections];
-        AtomicInteger commandThreadSequence = new AtomicInteger();
-        ThreadFactory commandThreadFactory = runnable -> {
-            Thread thread = new Thread(runnable, this.clientName + "-command-"
-                    + commandThreadSequence.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        };
-        AtomicInteger connectionThreadSequence = new AtomicInteger();
-        ThreadFactory connectionThreadFactory = runnable -> {
-            Thread thread = new Thread(runnable, this.clientName + "-connect-"
-                    + connectionThreadSequence.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        };
-        int queueCapacity = Math.max(1, Math.min(256, clientConnections * 4));
-        this.commandExecutor = new java.util.concurrent.ThreadPoolExecutor(
-                clientConnections, clientConnections, 0L, TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(queueCapacity), commandThreadFactory,
-                new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
-        this.connectionExecutor = new java.util.concurrent.ThreadPoolExecutor(
-                clientConnections, clientConnections, 0L, TimeUnit.MILLISECONDS,
-                new SynchronousQueue<>(), connectionThreadFactory,
-                new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
-        for (int index = 0; index < clients.length; index++) {
-            long sourceId = stableLong(this.sourceIdentity + ':' + productLine + ':' + this.sourceEpoch + ':' + index);
-            clients[index] = new ClientSlot(sourceId);
+        this.reservedControlAgent = new AgentLane("control", capacity.queryMailboxCapacity(),
+                capacity.maxReservedInFlight(), stableLong(this.sourceIdentity + ':' + productLine + ':'
+                        + this.sourceEpoch + ":control"));
+        if (startAgents) {
+            for (AgentLane agent : commandAgents) {
+                agent.start();
+            }
+            reservedControlAgent.start();
         }
     }
 
+    public CoreCommandOutcome commandOutcome(
+            CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+        return commandOutcomeAsync(type, commandId, userId, payload).join();
+    }
+
+    public CompletableFuture<CoreCommandOutcome> commandOutcomeAsync(
+            CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+        requireKind(type, WireMessageKind.COMMAND, "command");
+        Objects.requireNonNull(commandId, "commandId");
+        byte[] safePayload = requirePayload(payload);
+        if (closed.get()) {
+            return CompletableFuture.completedFuture(CoreCommandOutcome.notAccepted(Publication.CLOSED));
+        }
+        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        Request request = agent.commandRequest(type, commandId, userId, safePayload);
+        if (!agent.enqueue(request)) {
+            request.commandFuture.complete(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        }
+        return request.commandFuture;
+    }
+
     public CoreResponse command(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
-        if (type == null || type.kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
-            throw new IllegalArgumentException("command message type is required");
-        }
-        ClientSlot slot = acquireCommandSlot(userId);
-        try {
-            long sourceSequence = slot.nextSequence.incrementAndGet();
-            long correlationId = slot.nextCorrelation.incrementAndGet();
-            CoreMessage message = new CoreMessage(CoreMessageHeader.command(type,
-                    Objects.requireNonNull(commandId, "commandId"), productLine,
-                    CommandSource.GATEWAY, slot.sourceId, sourceSequence, userId,
-                    Instant.now().toEpochMilli(), correlationId), requirePayload(payload));
-            return submit(slot, message);
-        } finally {
-            slot.inFlight.set(false);
-        }
+        return requireTerminal(commandOutcome(type, commandId, userId, payload));
     }
 
     public CompletableFuture<CoreResponse> commandAsync(
             CoreMessageType type, UUID commandId, long userId, byte[] payload) {
-        if (closed.get()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("Aeron client pool is closed"));
-        }
-        try {
-            return CompletableFuture.supplyAsync(() -> command(type, commandId, userId, payload), commandExecutor);
-        } catch (RejectedExecutionException exception) {
-            return CompletableFuture.failedFuture(exception);
-        }
+        return commandOutcomeAsync(type, commandId, userId, payload).thenApply(AeronClientPool::requireTerminal);
     }
 
     public TryCommandResult tryCommandOnce(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
-        if (type == null || type.kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
-            throw new IllegalArgumentException("command message type is required");
+        CompletableFuture<CoreCommandOutcome> future = commandOutcomeAsync(type, commandId, userId, payload);
+        CoreCommandOutcome immediate = future.getNow(null);
+        if (immediate == null || immediate instanceof CoreCommandOutcome.Terminal
+                || immediate instanceof CoreCommandOutcome.ResultUnknown) {
+            return TryCommandResult.SENT;
         }
-        Objects.requireNonNull(commandId, "commandId");
-        requirePayload(payload);
+        CoreCommandOutcome.NotAccepted rejected = (CoreCommandOutcome.NotAccepted) immediate;
+        return switch (rejected.reason()) {
+            case CLIENT_BACKPRESSURED -> TryCommandResult.BACK_PRESSURED;
+            case NOT_CONNECTED -> TryCommandResult.NOT_READY;
+            case CLOSED -> TryCommandResult.CLOSED;
+            case ADMIN_ACTION, MAX_POSITION_EXCEEDED, UNKNOWN -> TryCommandResult.UNAVAILABLE;
+        };
+    }
+
+    public CompletableFuture<CoreResponse> controlQueryAsync(
+            CoreMessageType type, UUID queryId, long userId, byte[] payload) {
+        requireReservedControl(type);
+        Objects.requireNonNull(queryId, "queryId");
+        byte[] safePayload = requirePayload(payload);
         if (closed.get()) {
-            return TryCommandResult.CLOSED;
+            return CompletableFuture.failedFuture(new IllegalStateException("CLOSED"));
         }
-        ClientSlot slot = tryAcquireCommandSlot(userId);
-        if (slot == null) {
-            return TryCommandResult.BUSY;
+        Request request = reservedControlAgent.queryRequest(type, queryId, userId, safePayload);
+        if (!reservedControlAgent.enqueue(request)) {
+            request.queryFuture.completeExceptionally(new CoreCommandOutcome.NotAcceptedException(
+                    CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED)));
         }
-        try {
-            SurprisingAeronClient client = slot.client;
-            if (client == null) {
-                scheduleConnection(slot);
-                return TryCommandResult.NOT_READY;
-            }
-            long sourceSequence = slot.nextSequence.get() + 1;
-            long correlationId = -slot.nextCorrelation.incrementAndGet();
-            CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, commandId, productLine,
-                    CommandSource.GATEWAY, slot.sourceId, sourceSequence, userId,
-                    Instant.now().toEpochMilli(), correlationId), payload);
-            long offerResult;
-            try {
-                offerResult = client.trySubmit(message);
-            } catch (RuntimeException exception) {
-                closeClient(slot);
-                return TryCommandResult.UNAVAILABLE;
-            }
-            if (offerResult >= 0) {
-                slot.nextSequence.compareAndSet(sourceSequence - 1, sourceSequence);
-                return TryCommandResult.SENT;
-            }
-            if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
-                closeClient(slot);
-                return TryCommandResult.UNAVAILABLE;
-            }
-            if (offerResult == Publication.NOT_CONNECTED) {
-                return TryCommandResult.NOT_READY;
-            }
-            return TryCommandResult.BACK_PRESSURED;
-        } finally {
-            slot.inFlight.set(false);
-        }
+        return request.queryFuture;
     }
 
     public CoreResponse query(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
-        if (type == null || type.kind() != com.surprising.aeron.protocol.WireMessageKind.QUERY) {
-            throw new IllegalArgumentException("query message type is required");
-        }
-        ClientSlot slot = acquireSlot();
-        try {
-            long correlationId = slot.nextCorrelation.incrementAndGet();
-            CoreMessage message = new CoreMessage(CoreMessageHeader.query(type,
-                    Objects.requireNonNull(queryId, "queryId"), productLine,
-                    CommandSource.GATEWAY, slot.sourceId, 0, userId,
-                    Instant.now().toEpochMilli(), correlationId), requirePayload(payload));
-            return submit(slot, message);
-        } finally {
-            slot.inFlight.set(false);
-        }
+        return controlQueryAsync(type, queryId, userId, payload).join();
     }
 
     public CoreResponse commandResult(UUID commandId, long userId) {
@@ -245,54 +229,20 @@ public final class AeronClientPool implements AutoCloseable {
                 com.surprising.aeron.protocol.CoreStateQueryCodec.encodeCommandResultQuery(commandId));
     }
 
+    int agentThreadCount() {
+        return commandAgents.length + 1;
+    }
+
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
-        RuntimeException failure = closePendingConnections();
-        connectionExecutor.shutdown();
-        commandExecutor.shutdown();
-        try {
-            long timeoutMillis = Math.max(1L, responseTimeout.toMillis());
-            if (!connectionExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
-                connectionExecutor.shutdownNow();
-                if (!connectionExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
-                    if (failure == null) {
-                        failure = new IllegalStateException("Aeron connection executor did not terminate");
-                    }
-                }
-            }
-            if (!commandExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
-                commandExecutor.shutdownNow();
-                if (!commandExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
-                    if (failure == null) {
-                        failure = new IllegalStateException("Aeron command executor did not terminate");
-                    }
-                }
-            }
-        } catch (InterruptedException exception) {
-            connectionExecutor.shutdownNow();
-            commandExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-            failure = new IllegalStateException("Interrupted while stopping Aeron command executor", exception);
+        List<RuntimeException> failures = new ArrayList<>();
+        for (AgentLane agent : commandAgents) {
+            agent.stop(failures);
         }
-        for (ClientSlot slot : clients) {
-            acquireSlotForClose(slot);
-            try {
-                try {
-                    closeClient(slot);
-                } catch (RuntimeException exception) {
-                    if (failure == null) {
-                        failure = exception;
-                    } else {
-                        failure.addSuppressed(exception);
-                    }
-                }
-            } finally {
-                slot.inFlight.set(false);
-            }
-        }
+        reservedControlAgent.stop(failures);
         MediaDriver driver;
         synchronized (mediaDriver) {
             driver = mediaDriver.getAndSet(null);
@@ -301,187 +251,19 @@ public final class AeronClientPool implements AutoCloseable {
             try {
                 driver.close();
             } catch (RuntimeException exception) {
-                if (failure == null) {
-                    failure = exception;
-                } else {
-                    failure.addSuppressed(exception);
-                }
+                failures.add(exception);
             }
         }
-        if (failure != null) {
+        if (!failures.isEmpty()) {
+            RuntimeException failure = failures.removeFirst();
+            failures.forEach(failure::addSuppressed);
             throw failure;
         }
     }
 
-    private RuntimeException closePendingConnections() {
-        RuntimeException failure = null;
-        for (ClientSlot slot : clients) {
-            synchronized (slot) {
-                if (slot.connection == null) {
-                    continue;
-                }
-                try {
-                    slot.connection.close();
-                } catch (RuntimeException exception) {
-                    if (failure == null) {
-                        failure = exception;
-                    } else {
-                        failure.addSuppressed(exception);
-                    }
-                }
-            }
-        }
-        return failure;
-    }
-
-    private ClientSlot acquireSlot() {
-        if (closed.get()) {
-            throw new IllegalStateException("Aeron client pool is closed");
-        }
-        int start = nextClient.getAndIncrement();
-        long deadline = System.nanoTime() + responseTimeout.toNanos();
-        int spins = 0;
-        for (;;) {
-            for (int offset = 0; offset < clients.length; offset++) {
-                ClientSlot slot = clients[Math.floorMod(start + offset, clients.length)];
-                if (slot.inFlight.compareAndSet(false, true)) {
-                    if (closed.get()) {
-                        slot.inFlight.set(false);
-                        throw new IllegalStateException("Aeron client pool is closed");
-                    }
-                    return slot;
-                }
-            }
-            if (System.nanoTime() >= deadline) {
-                throw new IllegalStateException("Aeron client pool is saturated");
-            }
-            if ((spins++ & 63) == 0) {
-                LockSupport.parkNanos(1_000L);
-            } else {
-                Thread.onSpinWait();
-            }
-            start = nextClient.getAndIncrement();
-            if (closed.get()) {
-                throw new IllegalStateException("Aeron client pool is closed");
-            }
-        }
-    }
-
-    private ClientSlot acquireCommandSlot(long userId) {
-        if (closed.get()) {
-            throw new IllegalStateException("Aeron client pool is closed");
-        }
-        int index = Math.floorMod(Long.hashCode(userId), clients.length);
-        ClientSlot slot = clients[index];
-        long deadline = System.nanoTime() + responseTimeout.toNanos();
-        int spins = 0;
-        for (;;) {
-            if (slot.inFlight.compareAndSet(false, true)) {
-                if (closed.get()) {
-                    slot.inFlight.set(false);
-                    throw new IllegalStateException("Aeron client pool is closed");
-                }
-                return slot;
-            }
-            if (System.nanoTime() >= deadline) {
-                throw new IllegalStateException("Aeron command lane is saturated for user " + userId);
-            }
-            if ((spins++ & 63) == 0) {
-                LockSupport.parkNanos(1_000L);
-            } else {
-                Thread.onSpinWait();
-            }
-            if (closed.get()) {
-                throw new IllegalStateException("Aeron client pool is closed");
-            }
-        }
-    }
-
-    private ClientSlot tryAcquireCommandSlot(long userId) {
-        if (closed.get()) {
-            return null;
-        }
-        ClientSlot slot = clients[Math.floorMod(Long.hashCode(userId), clients.length)];
-        return slot.inFlight.compareAndSet(false, true) ? slot : null;
-    }
-
-    private void scheduleConnection(ClientSlot slot) {
-        if (closed.get() || slot.client != null || !slot.connecting.compareAndSet(false, true)) {
-            return;
-        }
-        try {
-            connectionExecutor.execute(() -> {
-                SurprisingAeronClient.AsyncConnection connection = null;
-                try {
-                    synchronized (slot) {
-                        if (!closed.get() && slot.client == null && slot.connection == null) {
-                            connection = SurprisingAeronClient.connectAsync(productLine, hostnames,
-                                    egressHostname, responseTimeout, sharedMediaDriver());
-                            slot.connection = connection;
-                        }
-                    }
-                    while (!closed.get() && connection != null && slot.client == null) {
-                        boolean connected = false;
-                        synchronized (slot) {
-                            if (closed.get() || slot.connection != connection || slot.client != null) {
-                                break;
-                            }
-                            SurprisingAeronClient client = connection.poll();
-                            if (client != null) {
-                                if (closed.get()) {
-                                    client.close();
-                                    slot.connection = null;
-                                    connection = null;
-                                } else {
-                                    slot.client = client;
-                                    slot.connection = null;
-                                    connection = null;
-                                }
-                                connected = true;
-                            }
-                        }
-                        if (connected || connection == null) {
-                            break;
-                        }
-                        LockSupport.parkNanos(1_000_000L);
-                    }
-                } catch (Exception ignored) {
-                } finally {
-                    if (connection != null) {
-                        synchronized (slot) {
-                            if (slot.connection == connection) {
-                                slot.connection = null;
-                            }
-                        }
-                        if (slot.client == null) {
-                            try {
-                                connection.close();
-                            } catch (RuntimeException ignored) {
-                            }
-                        }
-                    }
-                    slot.connecting.set(false);
-                }
-            });
-        } catch (RejectedExecutionException exception) {
-            slot.connecting.set(false);
-        }
-    }
-
-    private static void acquireSlotForClose(ClientSlot slot) {
-        while (!slot.inFlight.compareAndSet(false, true)) {
-            Thread.onSpinWait();
-        }
-    }
-
-    private SurprisingAeronClient client(ClientSlot slot) {
-        synchronized (slot) {
-            if (slot.client == null) {
-                slot.client = SurprisingAeronClient.connect(productLine, hostnames, egressHostname, responseTimeout,
-                        sharedMediaDriver());
-            }
-            return slot.client;
-        }
+    private Session openSession() {
+        return SurprisingAeronClient.connectAsync(productLine, hostnames, egressHostname, responseTimeout,
+                sharedMediaDriver());
     }
 
     private MediaDriver sharedMediaDriver() {
@@ -501,39 +283,33 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
-    private CoreResponse submit(ClientSlot slot, CoreMessage message) {
-        RuntimeException firstFailure = null;
-        for (int attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
-            try {
-                return client(slot).submit(message);
-            } catch (RuntimeException exception) {
-                if (firstFailure == null) {
-                    firstFailure = exception;
-                } else {
-                    firstFailure.addSuppressed(exception);
-                }
-                try {
-                    closeClient(slot);
-                } catch (RuntimeException closeFailure) {
-                    firstFailure.addSuppressed(closeFailure);
-                }
-            }
+    private static CoreResponse requireTerminal(CoreCommandOutcome outcome) {
+        if (outcome instanceof CoreCommandOutcome.Terminal terminal) {
+            return terminal.response();
         }
-        throw firstFailure;
+        if (outcome instanceof CoreCommandOutcome.ResultUnknown unknown) {
+            throw new ResultUnknownException(unknown.originalCommandId(),
+                    "Aeron command was admitted but its result is unknown; query with the same commandId="
+                            + unknown.originalCommandId());
+        }
+        CoreCommandOutcome.NotAccepted rejected = (CoreCommandOutcome.NotAccepted) outcome;
+        throw new CoreCommandOutcome.NotAcceptedException(rejected);
     }
 
-    private static void closeClient(ClientSlot slot) {
-        if (slot.client != null) {
-            try {
-                slot.client.close();
-            } finally {
-                slot.client = null;
-            }
+    private static void requireReservedControl(CoreMessageType type) {
+        if (CoreQueryClass.classify(type) != CoreQueryClass.RESERVED_CONTROL) {
+            throw new IllegalArgumentException("ordinary Core reads cannot use reserved control capacity: " + type);
+        }
+    }
+
+    private static void requireKind(CoreMessageType type, WireMessageKind kind, String label) {
+        if (type == null || type.kind() != kind) {
+            throw new IllegalArgumentException(label + " message type is required");
         }
     }
 
     private static byte[] requirePayload(byte[] payload) {
-        return Objects.requireNonNull(payload, "payload");
+        return Objects.requireNonNull(payload, "payload").clone();
     }
 
     private static long stableLong(String value) {
@@ -542,17 +318,244 @@ public final class AeronClientPool implements AutoCloseable {
         return result == 0 ? 1 : result;
     }
 
-    private static final class ClientSlot {
-        private volatile SurprisingAeronClient client;
-        private volatile SurprisingAeronClient.AsyncConnection connection;
+    private final class AgentLane implements Runnable {
+        private final ArrayBlockingQueue<Request> mailbox;
+        private final int maxInFlight;
         private final long sourceId;
-        private final AtomicBoolean inFlight = new AtomicBoolean();
-        private final AtomicBoolean connecting = new AtomicBoolean();
         private final AtomicLong nextSequence = new AtomicLong();
         private final AtomicLong nextCorrelation = new AtomicLong();
+        private final Map<Long, Request> pending = new LinkedHashMap<>();
+        private final Thread thread;
+        private volatile Session session;
 
-        private ClientSlot(long sourceId) {
+        private AgentLane(String laneName, int mailboxCapacity, int maxInFlight, long sourceId) {
+            this.mailbox = new ArrayBlockingQueue<>(mailboxCapacity);
+            this.maxInFlight = maxInFlight;
             this.sourceId = sourceId;
+            this.thread = new Thread(this, clientName + '-' + laneName + "-agent");
+            this.thread.setDaemon(true);
+        }
+
+        private Request commandRequest(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+            long correlationId = nextCorrelation.incrementAndGet();
+            CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, commandId, productLine,
+                    CommandSource.GATEWAY, sourceId, nextSequence.incrementAndGet(), userId,
+                    Instant.now().toEpochMilli(), correlationId), payload);
+            return Request.command(message, commandId);
+        }
+
+        private Request queryRequest(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
+            long correlationId = nextCorrelation.incrementAndGet();
+            CoreMessage message = new CoreMessage(CoreMessageHeader.query(type, queryId, productLine,
+                    CommandSource.GATEWAY, sourceId, 0, userId, Instant.now().toEpochMilli(), correlationId), payload);
+            return Request.query(message, queryId);
+        }
+
+        private boolean enqueue(Request request) {
+            return mailbox.offer(request);
+        }
+
+        private void start() {
+            thread.start();
+        }
+
+        @Override
+        public void run() {
+            openInitialSession();
+            while (!closed.get()) {
+                boolean worked = pollSession();
+                while (pending.size() < maxInFlight) {
+                    Request request = mailbox.poll();
+                    if (request == null) {
+                        break;
+                    }
+                    worked = true;
+                    admit(request);
+                }
+                expireAdmitted();
+                if (!worked) {
+                    try {
+                        TimeUnit.MILLISECONDS.sleep(1);
+                    } catch (InterruptedException exception) {
+                        if (!closed.get()) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
+            }
+            rejectQueuedAsClosed();
+            completeAdmittedAsUnknown();
+            closeSession();
+        }
+
+        private void openInitialSession() {
+            try {
+                session = Objects.requireNonNull(sessionFactory.open(), "sessionFactory returned null");
+            } catch (RuntimeException exception) {
+                session = null;
+            }
+        }
+
+        private boolean pollSession() {
+            Session current = session;
+            if (current == null) {
+                return false;
+            }
+            try {
+                int fragments = current.pollEgress(capacity.egressFragmentLimit());
+                egressDispatcher.dispatch(current, pending);
+                RuntimeException failure = current.sessionFailure();
+                if (failure != null) {
+                    completeAdmittedAsUnknown();
+                    closeSession();
+                }
+                return fragments > 0;
+            } catch (RuntimeException exception) {
+                completeAdmittedAsUnknown();
+                closeSession();
+                return true;
+            }
+        }
+
+        private void admit(Request request) {
+            Session current = session;
+            if (current == null) {
+                request.notAccepted(CoreCommandOutcome.notAccepted(Publication.NOT_CONNECTED));
+                return;
+            }
+            long offerResult;
+            try {
+                offerResult = current.offer(request.message);
+            } catch (RuntimeException exception) {
+                request.notAccepted(CoreCommandOutcome.notAccepted(Long.MIN_VALUE));
+                closeSession();
+                return;
+            }
+            if (offerResult > 0) {
+                request.deadlineNanos = System.nanoTime() + responseTimeout.toNanos();
+                pending.put(request.message.header().correlationId(), request);
+            } else {
+                request.notAccepted(CoreCommandOutcome.notAccepted(offerResult));
+                if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
+                    closeSession();
+                }
+            }
+        }
+
+        private void expireAdmitted() {
+            long now = System.nanoTime();
+            var iterator = pending.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Request request = iterator.next().getValue();
+                if (now >= request.deadlineNanos) {
+                    iterator.remove();
+                    request.resultUnknown();
+                }
+            }
+        }
+
+        private void rejectQueuedAsClosed() {
+            Request request;
+            while ((request = mailbox.poll()) != null) {
+                request.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
+            }
+        }
+
+        private void completeAdmittedAsUnknown() {
+            pending.values().forEach(Request::resultUnknown);
+            pending.clear();
+        }
+
+        private void stop(List<RuntimeException> failures) {
+            thread.interrupt();
+            if (thread.isAlive()) {
+                try {
+                    thread.join(Math.max(1L, responseTimeout.toMillis()));
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    failures.add(new IllegalStateException("Interrupted while stopping Aeron agent", exception));
+                }
+                if (thread.isAlive()) {
+                    failures.add(new IllegalStateException("Aeron agent did not terminate: " + thread.getName()));
+                }
+            } else {
+                rejectQueuedAsClosed();
+                completeAdmittedAsUnknown();
+                closeSession();
+            }
+        }
+
+        private void closeSession() {
+            Session current = session;
+            session = null;
+            if (current != null) {
+                current.close();
+            }
+        }
+    }
+
+    private static final class EgressDispatcher {
+        private void dispatch(Session session, Map<Long, Request> pending) {
+            var iterator = pending.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<Long, Request> entry = iterator.next();
+                CoreResponse response = session.takeResponse(entry.getKey());
+                if (response != null) {
+                    iterator.remove();
+                    entry.getValue().terminal(response);
+                }
+            }
+        }
+    }
+
+    private static final class Request {
+        private final CoreMessage message;
+        private final UUID operationId;
+        private final CompletableFuture<CoreCommandOutcome> commandFuture;
+        private final CompletableFuture<CoreResponse> queryFuture;
+        private long deadlineNanos;
+
+        private Request(CoreMessage message, UUID operationId,
+                        CompletableFuture<CoreCommandOutcome> commandFuture,
+                        CompletableFuture<CoreResponse> queryFuture) {
+            this.message = message;
+            this.operationId = operationId;
+            this.commandFuture = commandFuture;
+            this.queryFuture = queryFuture;
+        }
+
+        private static Request command(CoreMessage message, UUID commandId) {
+            return new Request(message, commandId, new CompletableFuture<>(), null);
+        }
+
+        private static Request query(CoreMessage message, UUID queryId) {
+            return new Request(message, queryId, null, new CompletableFuture<>());
+        }
+
+        private void terminal(CoreResponse response) {
+            if (commandFuture != null) {
+                commandFuture.complete(new CoreCommandOutcome.Terminal(response));
+            } else {
+                queryFuture.complete(response);
+            }
+        }
+
+        private void notAccepted(CoreCommandOutcome.NotAccepted rejection) {
+            if (commandFuture != null) {
+                commandFuture.complete(rejection);
+            } else {
+                queryFuture.completeExceptionally(new CoreCommandOutcome.NotAcceptedException(rejection));
+            }
+        }
+
+        private void resultUnknown() {
+            if (commandFuture != null) {
+                commandFuture.complete(new CoreCommandOutcome.ResultUnknown(operationId));
+            } else {
+                queryFuture.completeExceptionally(new ResultUnknownException(operationId,
+                        "Aeron control query was admitted but its result is unknown"));
+            }
         }
     }
 }

@@ -24,7 +24,7 @@ import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 
-public final class SurprisingAeronClient implements AutoCloseable, EgressListener {
+public final class SurprisingAeronClient implements AeronClientPool.Session, EgressListener {
 
     private final ProductLine productLine;
     private final Duration responseTimeout;
@@ -146,30 +146,17 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
     }
 
     public CoreResponse submit(CoreMessage message) {
-        if (message.header().productLine() != productLine) {
-            throw new IllegalArgumentException("client and message product line differ");
-        }
-        byte[] encoded = CoreMessageCodec.encode(message);
-        UnsafeBuffer buffer = new UnsafeBuffer(encoded);
         long deadline = System.nanoTime() + responseTimeout.toNanos();
         idleStrategy.reset();
-        while (true) {
-            long offerResult = cluster.offer(buffer, 0, encoded.length);
-            if (offerResult >= 0) {
-                break;
-            }
-            if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
-                throw resultUnknown(message, "Aeron Cluster publication is no longer writable: " + offerResult);
-            }
-            pollAndCheckSession();
-            if (System.nanoTime() >= deadline) {
-                throw resultUnknown(message, "timed out while offering command to Aeron Cluster");
-            }
-            idleStrategy.idle();
+        long offerResult = offer(message);
+        if (offerResult <= 0) {
+            CoreCommandOutcome.NotAccepted rejected = CoreCommandOutcome.notAccepted(offerResult);
+            throw new IllegalStateException("Aeron command was not accepted: " + rejected.reason()
+                    + " (offer=" + rejected.rawOfferResult() + ')');
         }
         while (System.nanoTime() < deadline) {
             pollAndCheckSession();
-            CoreResponse response = responses.remove(message.header().correlationId());
+            CoreResponse response = takeResponse(message.header().correlationId());
             if (response != null) {
                 return response;
             }
@@ -179,12 +166,34 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
     }
 
     public long trySubmit(CoreMessage message) {
+        return offer(message);
+    }
+
+    @Override
+    public long offer(CoreMessage message) {
         if (message.header().productLine() != productLine) {
             throw new IllegalArgumentException("client and message product line differ");
         }
         byte[] encoded = CoreMessageCodec.encode(message);
-        cluster.pollEgress();
         return cluster.offer(new UnsafeBuffer(encoded), 0, encoded.length);
+    }
+
+    @Override
+    public int pollEgress(int fragmentLimit) {
+        if (fragmentLimit <= 0) {
+            throw new IllegalArgumentException("fragmentLimit must be positive");
+        }
+        return cluster.pollEgress();
+    }
+
+    @Override
+    public CoreResponse takeResponse(long correlationId) {
+        return responses.remove(correlationId);
+    }
+
+    @Override
+    public RuntimeException sessionFailure() {
+        return sessionFailure;
     }
 
     @Override
@@ -257,7 +266,7 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
                 + "; retry or query with the same commandId=" + message.header().commandId());
     }
 
-    static final class AsyncConnection implements AutoCloseable, EgressListener {
+    static final class AsyncConnection implements AeronClientPool.Session, EgressListener {
 
         private final ProductLine productLine;
         private final Duration responseTimeout;
@@ -291,6 +300,30 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
             current = new SurprisingAeronClient(productLine, responseTimeout, mediaDriver, false, connected);
             client = current;
             return current;
+        }
+
+        @Override
+        public long offer(CoreMessage message) {
+            SurprisingAeronClient current = poll();
+            return current == null ? Publication.NOT_CONNECTED : current.offer(message);
+        }
+
+        @Override
+        public int pollEgress(int fragmentLimit) {
+            SurprisingAeronClient current = poll();
+            return current == null ? 0 : current.pollEgress(fragmentLimit);
+        }
+
+        @Override
+        public CoreResponse takeResponse(long correlationId) {
+            SurprisingAeronClient current = client;
+            return current == null ? null : current.takeResponse(correlationId);
+        }
+
+        @Override
+        public RuntimeException sessionFailure() {
+            SurprisingAeronClient current = client;
+            return current == null ? null : current.sessionFailure();
         }
 
         @Override
