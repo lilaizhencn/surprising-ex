@@ -1311,16 +1311,24 @@ public final class TradingCoreReducer {
         CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
         long previousSettlement = state.treasuryState().lifecycleSettlements()
                 .getOrDefault(instrument.symbol(), 0L);
-        if (command.settlementId() <= previousSettlement) {
+        if (command.settlementId() < previousSettlement) {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "lifecycle settlement id must increase");
+        }
+        if (command.settlementId() == previousSettlement) {
+            return new SettlementApplication(state, new com.surprising.aeron.protocol.CoreSettlementProgressView(
+                    command.settlementId(), true, true, 0, 0, 0, 0));
         }
         if (!instrument.contractType().isDelivery() && !instrument.contractType().isOption()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
                     "instrument settlement requires delivery or option product");
         }
-        if (instrument.contractType().isDelivery() && command.settlementPriceTicks() <= 0) {
+        if ((instrument.contractType().isDelivery() || instrument.contractType().isOption())
+                && command.settlementPriceTicks() <= 0) {
             throw new CoreStateRejectedException("INVALID_SETTLEMENT_PRICE", "delivery price must be positive");
         }
+        long optionSettlementCashUnits = instrument.contractType().isOption()
+                ? CoreContractMath.optionSettlementCashUnits(instrument, command.settlementPriceTicks())
+                : command.optionCashUnitsPerContract();
         CoreTreasuryState.LifecycleProgress previousProgress = state.treasuryState()
                 .lifecycleProgress(instrument.symbol());
         boolean chunked = indexedUserIds != null && chunkCommandId != null;
@@ -1398,7 +1406,7 @@ public final class TradingCoreReducer {
             for (CorePositionState position : settling) {
                 if (position.positionMarginUnits() > 0) balance = balance.release(position.positionMarginUnits());
                 long cashDelta = instrument.contractType().isOption()
-                        ? Math.multiplyExact(command.optionCashUnitsPerContract(), position.signedQuantitySteps())
+                        ? Math.multiplyExact(optionSettlementCashUnits, position.signedQuantitySteps())
                         : CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
                         position.entryPriceTicks(), command.settlementPriceTicks());
                 CashResult result = applyCash(balance, cashDelta);
@@ -1467,6 +1475,10 @@ public final class TradingCoreReducer {
                                                                 UUID chunkCommandId) {
         if (nextCursorOrderId <= 0 || chunkCommandId == null) {
             throw new IllegalArgumentException("settlement cursor must advance");
+        }
+        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
+        if (instrument.contractType().isOption()) {
+            CoreContractMath.optionSettlementCashUnits(instrument, command.settlementPriceTicks());
         }
         CoreTreasuryState.LifecycleProgress progress = state.treasuryState().lifecycleProgress(command.symbol());
         if (progress != null && (progress.settlementId() != command.settlementId()

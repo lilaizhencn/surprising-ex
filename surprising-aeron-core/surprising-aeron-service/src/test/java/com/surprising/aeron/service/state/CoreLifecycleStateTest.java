@@ -169,10 +169,28 @@ class CoreLifecycleStateTest {
                 new SettleInstrumentCommand(72, "BTC-USDT", 1, 120, 25));
 
         assertThat(total(exercised, "USDT")).isEqualTo(optionBefore);
-        assertThat(exercised.user(1).totalUnits("USDT")).isEqualTo(1_050);
-        assertThat(exercised.user(2).totalUnits("USDT")).isEqualTo(950);
+        assertThat(exercised.user(1).totalUnits("USDT")).isEqualTo(1_040);
+        assertThat(exercised.user(2).totalUnits("USDT")).isEqualTo(960);
         assertThat(exercised.users().values()).allSatisfy(user ->
                 assertThat(user.positions().get("BTC-USDT").signedQuantitySteps()).isZero());
+    }
+
+    @Test
+    void duplicateSettlementIsIdempotentAfterPositionsAndOrdersAreClosed() {
+        TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
+                ContractType.LINEAR_DELIVERY, 100, 10, 100);
+        TradingCoreState settled = reducer.settleInstrument(state,
+                new SettleInstrumentCommand(73, "BTC-USDT", 1, 120, 999));
+
+        TradingCoreState duplicate = reducer.settleInstrument(settled,
+                new SettleInstrumentCommand(73, "BTC-USDT", 1, 1, 1));
+
+        assertThat(duplicate).isSameAs(settled);
+        assertThat(duplicate.treasuryState().lifecycleSettlements()).containsEntry("BTC-USDT", 73L);
+        assertThat(duplicate.users().values()).allSatisfy(user -> {
+            assertThat(user.positions().get("BTC-USDT").signedQuantitySteps()).isZero();
+            assertThat(user.balances().get("USDT").lockedUnits()).isZero();
+        });
     }
 
     @Test
