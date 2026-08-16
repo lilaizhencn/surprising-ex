@@ -35,6 +35,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -45,7 +46,6 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.client.MarketDataRpcApi;
 import com.surprising.trading.api.client.OrderRpcApi;
-import feign.FeignException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -749,9 +749,10 @@ public class MarketMakerService {
                 List<PlaceOrderRequest> batchRequests = requests.subList(start,
                         Math.min(start + MAX_BATCH_PLACE_ORDERS, requests.size()));
                 try {
-                    var batch = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(batchRequests));
+                    OrderCommandReceipt receipt = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(batchRequests));
+                    OrderBatchResponse batch = receiptResult(receipt, OrderBatchResponse.class);
                     if (batch == null) {
-                        throw new IllegalStateException("订单服务未返回批量报价结果");
+                        throw new IllegalStateException(receiptMessage(receipt));
                     }
                     for (int i = 0; i < batchRequests.size(); i++) {
                     int resultIndex = i;
@@ -888,11 +889,12 @@ public class MarketMakerService {
                 takerClientOrderId(strategy, symbol, accountId, cycleSequence),
                 symbol, side, OrderType.LIMIT, TimeInForce.IOC, priceTicks, quantitySteps,
                 strategy.getMarginMode(), PositionSide.NET, false, false);
-        OrderResponse response = orderRpcApi.place(request);
-        if (response.status() == OrderStatus.REJECTED) {
+        OrderCommandReceipt receipt = orderRpcApi.place(request);
+        OrderResponse response = receiptResult(receipt, OrderResponse.class);
+        if (response == null || response.status() == OrderStatus.REJECTED) {
             state.addRejected(1L);
             recordRunEvent(strategy, symbol, accountId, cycleSequence, "TRADE_REJECTED",
-                    0, 0, 1, null, response.rejectReason(), traceId, now);
+                    0, 0, 1, null, response == null ? receiptMessage(receipt) : response.rejectReason(), traceId, now);
         } else {
             state.addSubmitted(1L);
             lastTradeTimes.put(tradeKey, now);
@@ -1085,7 +1087,8 @@ public class MarketMakerService {
             return new CancelResult(0L, List.of());
         }
         try {
-            OrderBatchResponse response = orderRpcApi.cancelBatch(new BatchCancelOrdersRequest(requests));
+            OrderCommandReceipt receipt = orderRpcApi.cancelBatch(new BatchCancelOrdersRequest(requests));
+            OrderBatchResponse response = receiptResult(receipt, OrderBatchResponse.class);
             if (response != null) {
                 long canceled = response.results().stream()
                         .filter(item -> item != null && item.success())
@@ -1103,38 +1106,24 @@ public class MarketMakerService {
                 }
                 return new CancelResult(canceled, List.copyOf(failed));
             }
-        } catch (UnsupportedOperationException ex) {
-            return cancelIndividually(productLine, accountId, symbol, requests);
-        } catch (FeignException.NotFound ex) {
-            return cancelIndividually(productLine, accountId, symbol, requests);
+            log.warn("做市批量撤单未返回终态结果 accountId={} symbol={} receipt={}", accountId, symbol,
+                    receiptMessage(receipt));
+            return new CancelResult(0L, List.copyOf(requests));
         } catch (RuntimeException ex) {
             log.warn("做市批量撤单状态不确定 accountId={} symbol={} error={}", accountId, symbol, ex.getMessage());
             return new CancelResult(0L, List.copyOf(requests));
         }
-        return cancelIndividually(productLine, accountId, symbol, requests);
     }
 
-    private CancelResult cancelIndividually(ProductLine productLine,
-                                            long accountId,
-                                            String symbol,
-                                            List<CancelOrderRequest> requests) {
-        long canceled = 0L;
-        List<CancelOrderRequest> failed = new ArrayList<>();
-        for (CancelOrderRequest request : requests) {
-            try {
-                orderRpcApi.cancel(request);
-                canceled++;
-                forgetOrder(productLine, accountId, symbol, request.orderId());
-            } catch (FeignException.NotFound ex) {
-                canceled++;
-                forgetOrder(productLine, accountId, symbol, request.orderId());
-            } catch (RuntimeException ex) {
-                failed.add(request);
-                log.warn("做市撤单状态不确定 accountId={} orderId={} error={}",
-                        accountId, request.orderId(), ex.getMessage());
-            }
+    private <T> T receiptResult(OrderCommandReceipt receipt, Class<T> type) {
+        return receipt != null && type.isInstance(receipt.result()) ? type.cast(receipt.result()) : null;
+    }
+
+    private String receiptMessage(OrderCommandReceipt receipt) {
+        if (receipt == null) {
+            return "订单服务未返回命令回执";
         }
-        return new CancelResult(canceled, List.copyOf(failed));
+        return receipt.code() + ": " + receipt.message();
     }
 
     private List<OrderResponse> openOrders(ProductLine productLine,

@@ -1,9 +1,7 @@
 package com.surprising.trading.order.controller;
 
 import com.surprising.trading.api.TradingApiPaths;
-import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
-import com.surprising.trading.api.model.AmendOrderResponse;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
 import com.surprising.trading.api.model.AlgoOrderQueryResponse;
 import com.surprising.trading.api.model.AlgoOrderResponse;
@@ -18,6 +16,7 @@ import com.surprising.trading.api.model.CancelOpenAlgoOrdersRequest;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
@@ -29,6 +28,7 @@ import com.surprising.trading.order.service.CancelAllAfterService;
 import com.surprising.trading.order.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,13 +36,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.UUID;
 
 @RestController
 public class OrderController {
-
-    private static final Logger log = LoggerFactory.getLogger(OrderController.class);
 
     private final OrderService orderService;
     private final AlgoOrderService algoOrderService;
@@ -57,25 +54,20 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH)
-    public OrderResponse place(@Valid @RequestBody PlaceOrderRequest request) {
+    public ResponseEntity<OrderCommandReceipt> place(@Valid @RequestBody PlaceOrderRequest request) {
         try {
-            return orderService.place(request);
+            return commandResponse(orderService.placeCommand(request));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
-            // 账户快照尚未具备或发生修订冲突时安全拒绝，不应伪装成服务内部错误。
-            log.warn("下单因本地状态未就绪或命令冲突被拒绝 userId={} clientOrderId={} symbol={} 原因={}",
-                    request == null ? null : request.userId(),
-                    request == null ? null : request.clientOrderId(),
-                    request == null ? null : request.symbol(), ex.getMessage());
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         }
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch")
-    public OrderBatchResponse placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request) {
+    public ResponseEntity<OrderCommandReceipt> placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request) {
         try {
-            return orderService.placeBatch(request);
+            return commandResponse(orderService.placeBatchCommand(request));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -93,9 +85,9 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/amend")
-    public AmendOrderResponse amend(@Valid @RequestBody AmendOrderRequest request) {
+    public ResponseEntity<OrderCommandReceipt> amend(@Valid @RequestBody AmendOrderRequest request) {
         try {
-            return orderService.amend(request);
+            return commandResponse(orderService.amendCommand(request));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -104,9 +96,9 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-amend")
-    public AmendOrderBatchResponse amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request) {
+    public ResponseEntity<OrderCommandReceipt> amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request) {
         try {
-            return orderService.amendBatch(request);
+            return commandResponse(orderService.amendBatchCommand(request));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -124,9 +116,9 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel")
-    public OrderResponse cancel(@RequestBody CancelOrderRequest request) {
+    public ResponseEntity<OrderCommandReceipt> cancel(@RequestBody CancelOrderRequest request) {
         try {
-            return orderService.cancel(request);
+            return commandResponse(orderService.cancelCommand(request));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -135,9 +127,9 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-cancel")
-    public OrderBatchResponse cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request) {
+    public ResponseEntity<OrderCommandReceipt> cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request) {
         try {
-            return orderService.cancelBatch(request);
+            return commandResponse(orderService.cancelBatchCommand(request));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -228,6 +220,15 @@ public class OrderController {
         }
     }
 
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/commands/{commandId}")
+    public ResponseEntity<OrderCommandReceipt> commandResult(@PathVariable("commandId") UUID commandId) {
+        try {
+            return commandResponse(orderService.commandResult(commandId));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/by-client-order-id")
     public OrderResponse getByClientOrderId(@RequestParam("userId") long userId,
                                             @RequestParam("clientOrderId") String clientOrderId,
@@ -284,5 +285,18 @@ public class OrderController {
         } catch (ProjectionReadResult.ResponseTooLargeException ex) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         }
+    }
+
+    private ResponseEntity<OrderCommandReceipt> commandResponse(OrderCommandReceipt receipt) {
+        HttpStatus status = switch (receipt.code()) {
+            case "IDEMPOTENCY_CONFLICT" -> HttpStatus.CONFLICT;
+            case "CLIENT_BACKPRESSURED" -> HttpStatus.TOO_MANY_REQUESTS;
+            case "MATCHING_PENDING", "RESULT_UNKNOWN" -> HttpStatus.ACCEPTED;
+            case "RESULT_UNKNOWN_OUTSIDE_RETENTION" -> HttpStatus.GONE;
+            case "NOT_CONNECTED", "ADMIN_ACTION", "CLOSED", "MAX_POSITION_EXCEEDED", "UNKNOWN" ->
+                    HttpStatus.SERVICE_UNAVAILABLE;
+            default -> HttpStatus.OK;
+        };
+        return ResponseEntity.status(status).body(receipt);
     }
 }
