@@ -1,6 +1,6 @@
 package com.surprising.aeron.exporter;
 
-import com.surprising.aeron.client.AeronClientTransport;
+import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.client.ResultUnknownException;
 
 public final class ExporterMain {
@@ -11,12 +11,11 @@ public final class ExporterMain {
     public static void main(String[] args) throws Exception {
         var productLine = ExporterConfiguration.productLine();
         long reconnectMillis = AdaptiveExportLoop.MIN_IDLE_MILLIS;
-        try (var transport = AeronClientTransport.launch();
-             var sink = new KafkaCoreExportSink(ExporterConfiguration.kafkaProducerProperties())) {
+        try (var sink = new KafkaCoreExportSink(ExporterConfiguration.kafkaProducerProperties())) {
             System.out.printf("Aeron exporter started productLine=%s topic=%s%n",
                     productLine, KafkaCoreExportSink.topic(productLine));
             while (!Thread.currentThread().isInterrupted()) {
-                try (var client = transport.connect(productLine, ExporterConfiguration.aeronHosts(),
+                try (var client = SurprisingAeronClient.connect(productLine, ExporterConfiguration.aeronHosts(),
                         ExporterConfiguration.aeronEgressHost(), ExporterConfiguration.aeronTimeout())) {
                     var exporter = new ReliableCoreExporter(productLine, client::submit, sink,
                             ExporterConfiguration.batchSize());
