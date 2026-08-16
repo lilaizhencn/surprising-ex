@@ -44,15 +44,15 @@ Exact required command:
 task_java_home=$(/usr/libexec/java_home -v 25) && export JAVA_HOME="$task_java_home" PATH="$task_java_home/bin:$PATH" && java -version && mvn -pl :surprising-aeron-service -am -Dtest=CoreDeliveryOptionFinancialMatrixTest,CoreContractMathTest,CoreLifecycleStateTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
-Result: GREEN; all 6 reactor modules succeeded; 20 tests, 0 failures, 0 errors, 0 skipped.
+Result: GREEN; all 6 reactor modules succeeded; 25 tests, 0 failures, 0 errors, 0 skipped.
 
 ```text
 CoreLifecycleStateTest: 14 passed
-CoreDeliveryOptionFinancialMatrixTest: 5 passed
+CoreDeliveryOptionFinancialMatrixTest: 10 passed
 CoreContractMathTest: 1 passed
 ```
 
-The focused matrix also passed independently: 5 tests, 0 failures, 0 errors, 0 skipped.
+The focused matrix also passed independently: 10 tests, 0 failures, 0 errors, 0 skipped.
 
 Named QA methods, each run as an individual JDK25 Maven test:
 
@@ -67,7 +67,7 @@ Affected reactor:
 mvn -pl :surprising-aeron-service -am test
 ```
 
-Result: GREEN; 147 tests, 0 failures, 0 errors, 0 skipped; all 6 reactor modules succeeded. No wallet service was started.
+Result: GREEN; 152 tests, 0 failures, 0 errors, 0 skipped; all 6 reactor modules succeeded. No wallet service was started.
 
 ## Exact formula and funds manifests
 
@@ -88,7 +88,68 @@ All rows use fresh state with user and maker opening balances of 2,000 units. De
 
 Option premium conservation is `premium * quantity * multiplier = 10 * 2 * 1 = 20`; the taker fee is `ceil(20 * 100,000 / 1,000,000) = 2`; the maker receives 20 and the buyer pays 22 including fee before intrinsic settlement. ATM/OTM intrinsic is exactly zero. The reducer derives payout from authoritative option type, strike, multiplier, and underlying settlement price; the unrelated command cash is not used for payout.
 
-The matrix also verifies expiry metadata, duplicate settlement idempotency, cursor rejection after a repeated chunk, snapshot cursor resume for inverse delivery and options, open-order cancellation before settlement, zero positions, released margin/locks, product-line rejection, and exact user/maker/treasury conservation.
+The matrix also verifies expiry metadata, duplicate settlement idempotency, cursor rejection after a repeated chunk, snapshot cursor resume for inverse delivery, both isolated delivery modes, and options, open-order cancellation before settlement with owner reservation release, zero positions, released margin/locks, product-line rejection, and exact user/maker/treasury conservation.
+
+## Blocker closure evidence
+
+The three independent-oracle blockers from the Luna gate are closed at the fix
+diff. The user-preserved untracked gate report remains untouched.
+
+1. Delivery payout oracle independence:
+
+   - `CoreDeliveryOptionFinancialMatrixTest.deliveryRow` no longer calls
+     `CoreContractMath.pnlUnits` for an expected value.
+   - `DELIVERY_EXPECTATIONS` is an explicit four-key manifest for
+     `LINEAR_DELIVERY`/`INVERSE_DELIVERY` crossed with `CROSS`/`ISOLATED`:
+     linear long/short signed payouts are `40/-40` with final balances
+     `2,040/1,960`; inverse long/short signed payouts are `33/-33` with final
+     balances `2,033/1,967`.
+   - `inverseDeliveryRoundingOracleUsesIndependentSignedHalfUpFormula`
+     directly computes and asserts `33` and `-33` using an independent
+     half-up formula; it does not call production math.
+   - The matrix asserts every row's expected and observed `FUNDS_DIFFERENCE`
+     as zero.
+
+2. Shared CROSS/ISOLATED state and snapshot coverage:
+
+   - `settlingIsolatedLossKeepsUnrelatedCrossStateAndReservationIntact` uses
+     one shared LINEAR_DELIVERY state with a 40-unit CROSS margin, a 40-unit
+     isolated loss against only 20 units of isolated margin, and an unrelated
+     open CROSS reservation. It asserts unchanged unrelated position,
+     reservation/open status, free balance `139`, CROSS collateral `180`,
+     insurance offset `20`, and total funds conservation.
+   - The new test was red before the production fix: the current reducer
+     changed the unrelated free balance from `139` to `119`. The minimal
+     reducer change routes lifecycle settlement through the existing
+     margin-mode-aware cash helper; the isolated loss now consumes only its
+     isolated margin and the test is green.
+   - `snapshotCursorResumeCompletesLinearAndInverseIsolatedDelivery` resumes
+     both `LINEAR_DELIVERY:ISOLATED` and `INVERSE_DELIVERY:ISOLATED` after
+     snapshot encode/decode and completes settlement with flat, released
+     positions.
+
+3. No-funding regression:
+
+   - `rejectsFundingForDeliveryAndOptionWithoutStateMutation` explicitly
+     invokes `applyFunding` for `LINEAR_DELIVERY`, `INVERSE_DELIVERY`, and
+     `OPTION`. Each rejects with exact code `PRODUCT_LINE_UNSUPPORTED` and
+     preserves object identity, business hash, and funding settlements.
+
+The natural reservation strengthening is covered by
+`cancelsOpenDeliveryOrderAndReleasesOwnerReservation`, which asserts the
+delivery order owner's reservation is fully released, the order is canceled,
+the balance lock is zero, and total funds are unchanged.
+
+### Red-to-green transcript
+
+```text
+RED  CoreDeliveryOptionFinancialMatrixTest.settlingIsolatedLossKeepsUnrelatedCrossStateAndReservationIntact
+     Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+     expected: 139L but was: 119L
+
+GREEN same test after the minimal reducer change
+     Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+```
 
 ## Final integrity checks
 

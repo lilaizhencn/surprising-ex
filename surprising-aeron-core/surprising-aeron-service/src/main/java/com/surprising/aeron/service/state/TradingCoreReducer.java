@@ -1404,15 +1404,15 @@ public final class TradingCoreReducer {
             Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
             Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
             for (CorePositionState position : settling) {
-                if (position.positionMarginUnits() > 0) balance = balance.release(position.positionMarginUnits());
                 long cashDelta = instrument.contractType().isOption()
                         ? Math.multiplyExact(optionSettlementCashUnits, position.signedQuantitySteps())
                         : CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
                         position.entryPriceTicks(), command.settlementPriceTicks());
-                CashResult result = applyCash(balance, cashDelta);
-                balance = result.balance();
+                LiquidationCashResult cash = applyLiquidationCash(balance, position.marginMode(),
+                        position.positionMarginUnits(), cashDelta, 0);
+                balance = cash.balance();
                 treasury = treasury.adjustInsurance(instrument.settleAsset(),
-                        Math.negateExact(result.appliedDelta()));
+                        Math.negateExact(cash.appliedDelta()));
                 positions.put(position.key(), new CorePositionState(instrument.symbol(), instrument.settleAsset(),
                         position.marginMode(), position.positionSide(), 0, 0, 0, 0,
                         Math.addExact(position.realizedPnlUnits(), cashDelta), 0));

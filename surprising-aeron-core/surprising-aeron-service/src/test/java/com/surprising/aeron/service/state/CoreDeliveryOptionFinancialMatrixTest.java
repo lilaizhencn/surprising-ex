@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -17,6 +18,8 @@ import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +67,12 @@ class CoreDeliveryOptionFinancialMatrixTest {
             new Variant(ContractType.VANILLA_OPTION, CoreMarginMode.CROSS, OptionType.PUT, "OTM", 120, 1, 1,
                     "BTC", "USDT", "USDT"));
 
+    private static final Map<String, DeliveryExpectation> DELIVERY_EXPECTATIONS = Map.of(
+            "LINEAR_DELIVERY:CROSS", new DeliveryExpectation(40, -40, 2_040, 1_960),
+            "LINEAR_DELIVERY:ISOLATED", new DeliveryExpectation(40, -40, 2_040, 1_960),
+            "INVERSE_DELIVERY:CROSS", new DeliveryExpectation(33, -33, 2_033, 1_967),
+            "INVERSE_DELIVERY:ISOLATED", new DeliveryExpectation(33, -33, 2_033, 1_967));
+
     @Test
     void failingFirstCompletenessManifestReportsMissingDeliveryAndOptionRows() {
         List<Row> rows = allRows();
@@ -90,6 +99,12 @@ class CoreDeliveryOptionFinancialMatrixTest {
         List<Row> rows = allRows();
         assertRows(rows);
         assertThat(rows).extracting(Row::key).containsExactlyInAnyOrderElementsOf(REQUIRED_ROWS);
+    }
+
+    @Test
+    void inverseDeliveryRoundingOracleUsesIndependentSignedHalfUpFormula() {
+        assertThat(independentInverseDeliveryPayout(QUANTITY, ENTRY_PRICE, 120)).isEqualTo(33);
+        assertThat(independentInverseDeliveryPayout(-QUANTITY, ENTRY_PRICE, 120)).isEqualTo(-33);
     }
 
     @Test
@@ -159,6 +174,106 @@ class CoreDeliveryOptionFinancialMatrixTest {
     }
 
     @Test
+    void snapshotCursorResumeCompletesLinearAndInverseIsolatedDelivery() {
+        for (Variant variant : List.of(VARIANTS.get(1), VARIANTS.get(3))) {
+            TradingCoreState state = oppositePositions(variant, WALLET, WALLET);
+            long settlementId = variant.type() == ContractType.LINEAR_DELIVERY ? 405 : 406;
+            SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(settlementId, variant.symbol(), 1,
+                    variant.settlementPriceTicks(), 9_999, 0, 1);
+
+            TradingCoreReducer.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
+                    firstCommand, List.of(USER_ID, MAKER_ID),
+                    UUID.fromString("00000000-0000-0000-0000-000000000405"));
+
+            assertThat(first.progress().complete()).isFalse();
+            assertThat(first.progress().nextCursorUserId()).isEqualTo(USER_ID);
+            TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                    TradingStateSnapshotCodec.encode(first.state()), variant.productLine());
+            assertThat(restored).isEqualTo(first.state());
+
+            TradingCoreReducer.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
+                    new SettleInstrumentCommand(settlementId, variant.symbol(), 1,
+                            variant.settlementPriceTicks(), 9_999, USER_ID, 1),
+                    List.of(USER_ID, MAKER_ID),
+                    UUID.fromString("00000000-0000-0000-0000-000000000406"));
+
+            assertThat(second.progress().complete()).isTrue();
+            assertThat(second.state().treasuryState().lifecycleProgress(variant.symbol())).isNull();
+            assertFlatAndReleased(second.state(), variant);
+        }
+    }
+
+    @Test
+    void settlingIsolatedLossKeepsUnrelatedCrossStateAndReservationIntact() {
+        Variant cross = VARIANTS.get(0);
+        Variant isolated = VARIANTS.get(1);
+        String crossSymbol = "BTC-DELIVERY";
+        String isolatedSymbol = "ETH-DELIVERY";
+        TradingCoreState state = TradingCoreState.empty(ProductLine.LINEAR_DELIVERY);
+        state = reducer.upsertInstrument(state, instrument(cross, crossSymbol));
+        state = reducer.upsertInstrument(state, instrument(isolated, isolatedSymbol));
+        state = reducer.adjustBalance(state, USER_ID, new BalanceAdjustmentCommand("USDT", 200));
+        state = addPosition(state, USER_ID, crossSymbol, 1, 100, 40, cross);
+        state = addPosition(state, USER_ID, isolatedSymbol, 1, 140, 20, isolated);
+        state = reducer.placeOrder(state, USER_ID, deliveryOrder(701, cross, crossSymbol));
+
+        CoreUserState beforeUser = state.user(USER_ID);
+        AssetBalance beforeBalance = beforeUser.balances().get("USDT");
+        CorePositionState beforeCrossPosition = beforeUser.positions().get(crossSymbol);
+        OrderReservation beforeReservation = beforeUser.reservations().get(701L);
+        long beforeCrossCollateral = beforeBalance.totalUnits()
+                - beforeUser.positions().get(isolatedSymbol).positionMarginUnits();
+        assertThat(beforeBalance.availableUnits()).isEqualTo(139);
+        assertThat(beforeBalance.lockedUnits()).isEqualTo(61);
+        assertThat(beforeCrossCollateral).isEqualTo(180);
+        long beforeTotal = total(state, "USDT");
+
+        TradingCoreState settled = reducer.settleInstrument(state,
+                new SettleInstrumentCommand(407, isolatedSymbol, 1, 100, 9_999));
+
+        CoreUserState afterUser = settled.user(USER_ID);
+        AssetBalance afterBalance = afterUser.balances().get("USDT");
+        assertThat(afterUser.positions().get(crossSymbol)).isEqualTo(beforeCrossPosition);
+        assertThat(afterUser.reservations().get(701L)).isEqualTo(beforeReservation);
+        assertThat(settled.order(701).status()).isEqualTo(CoreOrderStatus.OPEN);
+        assertThat(afterBalance.availableUnits()).isEqualTo(beforeBalance.availableUnits());
+        assertThat(afterBalance.totalUnits() - afterUser.positions().get(isolatedSymbol).positionMarginUnits())
+                .isEqualTo(beforeCrossCollateral);
+        assertThat(afterBalance.lockedUnits()).isEqualTo(41);
+        assertThat(afterUser.positions().get(isolatedSymbol).signedQuantitySteps()).isZero();
+        assertThat(afterUser.positions().get(isolatedSymbol).realizedPnlUnits()).isEqualTo(-40);
+        assertThat(settled.treasuryState().insuranceBalances()).containsEntry("USDT", 20L);
+        assertThat(total(settled, "USDT")).isEqualTo(beforeTotal);
+    }
+
+    @Test
+    void cancelsOpenDeliveryOrderAndReleasesOwnerReservation() {
+        Variant delivery = VARIANTS.get(0);
+        TradingCoreState state = fundedState(delivery, USER_ID, WALLET);
+        state = reducer.placeOrder(state, USER_ID, deliveryOrder(702, delivery, delivery.symbol()));
+        OrderReservation beforeReservation = state.user(USER_ID).reservations().get(702L);
+        long beforeTotal = total(state, delivery.settleAsset());
+
+        TradingCoreState settled = reducer.settleInstrument(state,
+                new SettleInstrumentCommand(411, delivery.symbol(), 1, delivery.settlementPriceTicks(), 9_999));
+
+        OrderReservation afterReservation = settled.user(USER_ID).reservations().get(702L);
+        assertThat(settled.order(702).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        assertThat(afterReservation.reservedUnits()).isEqualTo(beforeReservation.reservedUnits());
+        assertThat(afterReservation.remainingUnits()).isZero();
+        assertThat(afterReservation.releasedUnits()).isEqualTo(beforeReservation.reservedUnits());
+        assertThat(settled.user(USER_ID).balances().get(delivery.settleAsset()).lockedUnits()).isZero();
+        assertThat(total(settled, delivery.settleAsset())).isEqualTo(beforeTotal);
+    }
+
+    @Test
+    void rejectsFundingForDeliveryAndOptionWithoutStateMutation() {
+        assertFundingRejected(VARIANTS.get(0), 408);
+        assertFundingRejected(VARIANTS.get(2), 409);
+        assertFundingRejected(VARIANTS.get(4), 410);
+    }
+
+    @Test
     void cancelsOpenOptionOrderBeforeSettlementAndReleasesReservation() {
         Variant option = VARIANTS.get(4);
         TradingCoreState state = fundedState(option, USER_ID, WALLET);
@@ -184,16 +299,25 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
     private Row deliveryRow(Variant variant) {
         TradingCoreState opening = oppositePositions(variant, WALLET, WALLET);
-        CoreInstrumentState instrument = opening.instruments().get(variant.symbol());
-        long payout = CoreContractMath.pnlUnits(instrument, QUANTITY, ENTRY_PRICE,
-                variant.settlementPriceTicks());
+        DeliveryExpectation expected = DELIVERY_EXPECTATIONS.get(variant.key());
+        assertThat(expected).as(variant.key() + " independent delivery expectation").isNotNull();
         TradingCoreState ending = reducer.settleInstrument(opening,
                 new SettleInstrumentCommand(100 + variant.marginMode().ordinal(), variant.symbol(), 1,
                         variant.settlementPriceTicks(), 9_999));
         assertFlatAndReleased(ending, variant);
+        assertThat(userValue(ending, variant) - userValue(opening, variant))
+                .as(variant.key() + " signed long payout")
+                .isEqualTo(expected.longPayout());
+        assertThat(userValue(ending, variant, MAKER_ID) - userValue(opening, variant, MAKER_ID))
+                .as(variant.key() + " signed short payout")
+                .isEqualTo(expected.shortPayout());
+        assertThat(userValue(ending, variant)).as(variant.key() + " user final balance")
+                .isEqualTo(expected.userEnding());
+        assertThat(userValue(ending, variant, MAKER_ID)).as(variant.key() + " maker final balance")
+                .isEqualTo(expected.makerEnding());
         return new Row(rowKey(variant), variant, opening, ending,
-                funds(WALLET, WALLET, 0, 0, payout, Math.negateExact(payout), 0, 0,
-                        WALLET + payout, WALLET - payout, 0, 0));
+                funds(WALLET, WALLET, 0, 0, expected.longPayout(), expected.shortPayout(), 0, 0,
+                        expected.userEnding(), expected.makerEnding(), 0, 0));
     }
 
     private Row optionRow(Variant variant) {
@@ -252,14 +376,19 @@ class CoreDeliveryOptionFinancialMatrixTest {
     }
 
     private TradingCoreState addPosition(TradingCoreState state, long userId, long quantity, Variant variant) {
+        return addPosition(state, userId, variant.symbol(), quantity, ENTRY_PRICE, POSITION_MARGIN, variant);
+    }
+
+    private TradingCoreState addPosition(TradingCoreState state, long userId, String symbol, long quantity,
+                                         long entryPrice, long positionMargin, Variant variant) {
         CoreUserState current = state.user(userId);
-        AssetBalance balance = current.balances().get(variant.settleAsset()).reserve(POSITION_MARGIN);
+        AssetBalance balance = current.balances().get(variant.settleAsset()).reserve(positionMargin);
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put(variant.settleAsset(), balance);
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
-        positions.put(variant.symbol(), new CorePositionState(variant.symbol(), variant.settleAsset(),
-                variant.marginMode(), CorePositionSide.NET, 1, quantity, ENTRY_PRICE,
-                Math.multiplyExact(Math.absExact(quantity), ENTRY_PRICE), 0, POSITION_MARGIN));
+        positions.put(symbol, new CorePositionState(symbol, variant.settleAsset(), variant.marginMode(),
+                CorePositionSide.NET, 1, quantity, entryPrice,
+                Math.multiplyExact(Math.absExact(quantity), entryPrice), 0, positionMargin));
         CoreUserState next = new CoreUserState(current.productLine(), userId,
                 Math.incrementExact(current.revision()), balances, current.reservations(), positions,
                 current.positionMode());
@@ -283,11 +412,46 @@ class CoreDeliveryOptionFinancialMatrixTest {
     }
 
     private UpsertInstrumentCommand instrument(Variant variant) {
-        return new UpsertInstrumentCommand(variant.symbol(), 1, variant.type().ordinal(), variant.baseAsset(),
+        return instrument(variant, variant.symbol());
+    }
+
+    private UpsertInstrumentCommand instrument(Variant variant, String symbol) {
+        return new UpsertInstrumentCommand(symbol, 1, variant.type().ordinal(), variant.baseAsset(),
                 variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(), 1,
                 variant.settleScaleUnits(), 100_000, 100_000, 0, 0, 2_000_000_000_000L,
                 variant.optionType() == null ? -1 : variant.optionType().ordinal(),
                 variant.optionType() == null ? 0 : STRIKE_PRICE);
+    }
+
+    private PlaceOrderCommand deliveryOrder(long orderId, Variant variant, String symbol) {
+        return new PlaceOrderCommand(orderId, symbol, 1, variant.baseAsset(), variant.quoteAsset(),
+                variant.settleAsset(), CoreOrderSide.BUY, ENTRY_PRICE, 1, false, CoreMarginMode.CROSS,
+                CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, variant.settleAsset(), 0,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, ENTRY_PRICE, false, "", 0, 0);
+    }
+
+    private void assertFundingRejected(Variant variant, long settlementId) {
+        TradingCoreState state = fundedState(variant, USER_ID, WALLET);
+        TradingCoreState before = state;
+        long hash = state.businessStateHash();
+        assertThatThrownBy(() -> reducer.applyFunding(state,
+                new ApplyFundingCommand(settlementId, variant.symbol(), 1, 100_000)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("PRODUCT_LINE_UNSUPPORTED"));
+        assertThat(state).isSameAs(before);
+        assertThat(state.businessStateHash()).isEqualTo(hash);
+        assertThat(state.treasuryState().fundingSettlements()).doesNotContainKey(variant.symbol());
+    }
+
+    private static long independentInverseDeliveryPayout(long signedQuantitySteps, long entryPriceTicks,
+                                                          long settlementPriceTicks) {
+        BigDecimal numerator = BigDecimal.valueOf(signedQuantitySteps)
+                .multiply(BigDecimal.valueOf(100))
+                .multiply(BigDecimal.valueOf(100))
+                .multiply(BigDecimal.valueOf(settlementPriceTicks - entryPriceTicks));
+        BigDecimal denominator = BigDecimal.valueOf(entryPriceTicks)
+                .multiply(BigDecimal.valueOf(settlementPriceTicks));
+        return numerator.divide(denominator, 0, RoundingMode.HALF_UP).longValueExact();
     }
 
     private void assertFlatAndReleased(TradingCoreState state, Variant variant) {
@@ -398,5 +562,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
     private record Row(String key, Variant variant, TradingCoreState opening,
                        TradingCoreState ending, Funds funds) {
+    }
+
+    private record DeliveryExpectation(long longPayout, long shortPayout, long userEnding, long makerEnding) {
     }
 }
