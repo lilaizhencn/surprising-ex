@@ -471,7 +471,7 @@ remove_core_data() {
 
 drain_owned_core_wrappers() {
   local -a pids=()
-  local service pid pid_file marker command process_state prior_pid
+  local service pid pid_file marker command process_state process_snapshot prior_pid
   local index deadline live pid_file_count=0 expected_pid_file_count=${#CORE_SERVICES[@]}
 
   for service in "${CORE_SERVICES[@]}"; do
@@ -541,9 +541,10 @@ drain_owned_core_wrappers() {
     for index in "${!CORE_SERVICES[@]}"; do
       service="${CORE_SERVICES[$index]}"
       pid="${pids[$index]}"
-      command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-      process_state="$(ps -p "$pid" -o stat= 2>/dev/null | tr -d '[:space:]' || true)"
-      [[ -z "$command" || "$process_state" == Z* ]] && continue
+      process_snapshot="$(ps -p "$pid" -o stat= -o command= 2>/dev/null || true)"
+      [[ -z "$process_snapshot" ]] && continue
+      read -r process_state command <<< "$process_snapshot"
+      [[ "$process_state" == Z* ]] && continue
       marker="surprising-w3w5:$RUN_ID:$service"
       if [[ "$command" != *"$marker"* ]]; then
         printf 'ERROR=CORE_DRAIN_FOREIGN_REPLACEMENT service=%s pid=%s marker=%s command=%q\n' \
@@ -563,9 +564,10 @@ drain_owned_core_wrappers() {
   for index in "${!CORE_SERVICES[@]}"; do
     service="${CORE_SERVICES[$index]}"
     pid="${pids[$index]}"
-    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    process_state="$(ps -p "$pid" -o stat= 2>/dev/null | tr -d '[:space:]' || true)"
-    [[ -z "$command" || "$process_state" == Z* ]] && continue
+    process_snapshot="$(ps -p "$pid" -o stat= -o command= 2>/dev/null || true)"
+    [[ -z "$process_snapshot" ]] && continue
+    read -r process_state command <<< "$process_snapshot"
+    [[ "$process_state" == Z* ]] && continue
     marker="surprising-w3w5:$RUN_ID:$service"
     if [[ "$command" != *"$marker"* ]]; then
       printf 'ERROR=CORE_DRAIN_FOREIGN_REPLACEMENT service=%s pid=%s marker=%s command=%q\n' \
