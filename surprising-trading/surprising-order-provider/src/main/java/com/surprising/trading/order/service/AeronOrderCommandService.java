@@ -31,6 +31,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderCommandReceipt;
+import com.surprising.trading.api.model.OrderCommandResult;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
@@ -266,7 +267,7 @@ public class AeronOrderCommandService {
                         OrderCommandReceipt.commandResultUrl(execution.commandId()),
                         execution.prospectiveOrderIds(), knownExportSequence(response), null, null);
             }
-            Object result = decodeResult(execution.kind(), execution.prospectiveOrderIds(), response.data());
+            OrderCommandResult result = decodeResult(execution.kind(), execution.prospectiveOrderIds(), response.data());
             return new OrderCommandReceipt(execution.commandId(), "TERMINAL", response.resultCode().name(),
                     response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
                     OrderCommandReceipt.commandResultUrl(execution.commandId()), execution.prospectiveOrderIds(),
@@ -302,7 +303,7 @@ public class AeronOrderCommandService {
             return new OrderCommandReceipt(commandId, "TERMINAL", response.resultCode().name(),
                     response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
                     OrderCommandReceipt.commandResultUrl(commandId), List.of(), knownExportSequence(response),
-                    response.data(), null);
+                    null, null);
         } catch (com.surprising.aeron.client.ResultUnknownException exception) {
             return new OrderCommandReceipt(commandId, "RESULT_UNKNOWN", "RESULT_UNKNOWN",
                     "command result is unknown", OrderCommandReceipt.commandResultUrl(commandId), List.of(),
@@ -384,7 +385,7 @@ public class AeronOrderCommandService {
         return response.requiredExportSequence() == 0L ? null : response.requiredExportSequence();
     }
 
-    private Object decodeResult(CommandKind kind, List<Long> prospectiveIds, byte[] data) {
+    private OrderCommandResult decodeResult(CommandKind kind, List<Long> prospectiveIds, byte[] data) {
         if (data == null || data.length == 0) {
             return null;
         }

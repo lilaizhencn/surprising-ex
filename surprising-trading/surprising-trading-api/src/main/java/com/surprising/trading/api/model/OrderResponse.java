@@ -24,7 +24,7 @@ public record OrderResponse(
         OrderStatus status,
         String rejectReason,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt) implements OrderCommandResult {
 
     public OrderResponse {
         marginMode = MarginMode.defaultIfNull(marginMode);

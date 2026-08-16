@@ -6,7 +6,7 @@ public record OrderBatchResponse(
         int requested,
         int completed,
         int failed,
-        List<OrderBatchItemResponse> results) {
+        List<OrderBatchItemResponse> results) implements OrderCommandResult {
 
     public OrderBatchResponse {
         results = results == null ? List.of() : List.copyOf(results);
