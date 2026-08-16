@@ -2,12 +2,10 @@ package com.surprising.trading.order.service;
 
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.protocol.CoreOrderStateView;
-import com.surprising.aeron.protocol.CoreOpenOrdersQuery;
-import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.CoreLeverageView;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
@@ -38,27 +36,6 @@ public class OrderAeronGateway implements AutoCloseable {
 
     public boolean tryCommand(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
         return clients.command(type, commandId, userId, payload).commandStatus() == ResponseStatus.APPLIED;
-    }
-
-    public CoreOrderStateView order(long userId, long orderId) {
-        return query(CoreMessageType.ORDER_STATE_QUERY, userId,
-                TradingCommandCodec.encodeOrderStateQuery(orderId));
-    }
-
-    public CoreOrderStateView order(long userId, String clientOrderId) {
-        return query(CoreMessageType.CLIENT_ORDER_STATE_QUERY, userId,
-                CoreStateQueryCodec.encodeClientOrderStateQuery(clientOrderId));
-    }
-
-    public java.util.List<CoreOrderStateView> openOrders(
-            long userId, String symbol, long beforeOrderId, int limit) {
-        CoreResponse response = clients.query(CoreMessageType.USER_OPEN_ORDERS_QUERY, UUID.randomUUID(), userId,
-                CoreStateQueryCodec.encodeOpenOrdersQuery(
-                        new CoreOpenOrdersQuery(symbol, beforeOrderId, limit)));
-        if (response.status() != ResponseStatus.OK) {
-            throw new IllegalStateException(response.resultCode().name() + ": Aeron open orders query failed");
-        }
-        return CoreStateQueryCodec.decodeOpenOrders(response.data()).orders();
     }
 
     public CoreUserStateView userState(long userId) {
@@ -120,17 +97,6 @@ public class OrderAeronGateway implements AutoCloseable {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron cancel-all-after query failed");
         }
         return com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeList(response.data());
-    }
-
-    private CoreOrderStateView query(CoreMessageType type, long userId, byte[] payload) {
-        CoreResponse response = clients.query(type, UUID.randomUUID(), userId, payload);
-        if (response.status() == ResponseStatus.REJECTED && response.resultCode() == CoreResultCode.ENTITY_NOT_FOUND) {
-            return null;
-        }
-        if (response.status() != ResponseStatus.OK) {
-            throw new IllegalStateException(response.resultCode().name() + ": Aeron order query failed");
-        }
-        return CoreStateQueryCodec.decodeOrderState(response.data());
     }
 
     @Override

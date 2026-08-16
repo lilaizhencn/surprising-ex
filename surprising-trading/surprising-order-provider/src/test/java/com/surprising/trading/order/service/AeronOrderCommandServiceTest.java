@@ -1,9 +1,7 @@
 package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -125,7 +123,9 @@ class AeronOrderCommandServiceTest {
                 new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test")).orderId())
                 .isPositive();
 
-        verify(aeron, never()).order(eq(1001L), org.mockito.ArgumentMatchers.anyLong());
+        verify(aeron, times(1)).command(eq(CoreMessageType.PLACE_ORDER),
+                org.mockito.ArgumentMatchers.any(UUID.class), eq(1001L),
+                org.mockito.ArgumentMatchers.any(byte[].class));
     }
 
     @Test
@@ -244,7 +244,9 @@ class AeronOrderCommandServiceTest {
         assertThat(command.quantitySteps()).isEqualTo(4L);
         assertThat(command.timeInForce()).isEqualTo(CoreTimeInForce.GTX);
         assertThat(command.postOnly()).isTrue();
-        verify(aeron, never()).order(anyLong(), anyLong());
+        verify(aeron, times(1)).command(eq(CoreMessageType.AMEND_ORDER),
+                org.mockito.ArgumentMatchers.any(UUID.class), eq(1001L),
+                org.mockito.ArgumentMatchers.any(byte[].class));
     }
 
     private static InstrumentRule perpetualRule() {

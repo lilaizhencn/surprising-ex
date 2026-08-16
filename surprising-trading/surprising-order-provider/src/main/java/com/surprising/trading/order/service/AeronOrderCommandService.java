@@ -143,29 +143,7 @@ public class AeronOrderCommandService {
         var response = aeron.command(CoreMessageType.CANCEL_ORDER, commandId, userId,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
         CoreOrderStateView responseOrder = commandOrder(response, orderId);
-        if (responseOrder != null) {
-            return requireOrder(responseOrder, "canceled order missing");
-        }
-        return requireOrder(aeron.order(userId, orderId), "canceled order missing");
-    }
-
-    public OrderResponse get(long userId, long orderId) {
-        return requireOrder(aeron.order(userId, orderId), "order not found: " + orderId);
-    }
-
-    public OrderResponse get(long userId, String clientOrderId) {
-        return requireOrder(aeron.order(userId, clientOrderId), "order not found: " + clientOrderId);
-    }
-
-    public OrderResponse find(long userId, String clientOrderId) {
-        CoreOrderStateView view = aeron.order(userId, clientOrderId);
-        return view == null ? null : requireOrder(view, "order not found");
-    }
-
-    public List<OrderResponse> openOrders(long userId, String symbol, long beforeOrderId, int limit) {
-        return aeron.openOrders(userId, symbol, beforeOrderId, limit).stream()
-                .map(view -> requireOrder(view, "open order missing"))
-                .toList();
+        return requireOrder(responseOrder, "canceled order missing");
     }
 
     private long matchingPriceTicks(com.surprising.trading.api.model.PlaceOrderRequest request, long version) {
