@@ -227,9 +227,9 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 ## TraceId 链路追踪
 
 - 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。
-- `surprising-order-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；进入异步链路前会显式写入 `OrderEvent` 和 `OrderCommandEvent`。
+- `surprising-order-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command/export 元数据。
 - Core command、Core Export 和 WebSocket 事件会携带同一个 traceId，查询投影不参与在线裁决。
-- `surprising-matching-provider` 必须把 `OrderCommandEvent.traceId` 原样复制到每个 `MatchResultEvent` 和撮合产生的 `MatchTradeEvent`，撮合层不要重新生成 traceId。
+- matching projection 必须沿用 Core Export 的 traceId，不能重新生成或把投影 trace 当裁决身份。
 - `surprising-account-provider` 会把 `MatchTradeEvent.traceId` 写入 `PositionUpdatedEvent`，这样私有 WebSocket 持仓推送也能和订单入口、撮合审计行关联。
 - PostgreSQL 的 `trading_order_events`、`trading_match_results`、`trading_match_trades` 都保存 `trace_id`。生产日志建议同时输出 `traceId`、`orderId`、`commandId`、`tradeId`、symbol 和 Kafka topic/partition/offset。
 
@@ -240,7 +240,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 - 从 instrument 当前版本读取 `contract_type`、`initial_margin_rate_ppm`、`notional_multiplier_units`、`price_tick_units`、`settle_asset` 和资产 scale。
 - 在 Java `OrderMarginMath` 中换算 `initialMarginUnits`：输入和输出都是 long ticks/steps/asset units，中间乘除使用精确整数计算，溢出会拒绝而不是回绕。
 - Aeron Core 校验用户可用余额和订单预占，并在同一有序命令中把 `availableUnits` 转入 `lockedUnits`；`trading_orders` 只保存订单及预占快照投影，不更新账户余额表。
-- 账户类型、结算资产和初始冻结量作为不可变快照保存在 `trading_orders` 并随 `OrderCommandEvent` 传递；永续不再维护独立的保证金预占记录。
+- 账户类型、结算资产和初始冻结量作为 Core 订单/预占元数据的一部分原子保存；`trading_orders` 只接收异步投影，永续不再维护独立的可裁决保证金预占记录。
 - 如果 Core 判断保证金不足，命令直接返回 `REJECTED`，不会进入撮合；数据库只接收最终订单状态投影。
 
 `reduceOnly=true` 的平仓和强平订单不冻结新增保证金。
@@ -289,8 +289,8 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `max_leverage_ppm` 和 `instrument_risk_brackets` 会参与下单保证金冻结；风险档位越高，允许杠杆越低，最低初始保证金率越高。
 - `maker_fee_rate_ppm` 和 `taker_fee_rate_ppm` 不传给 exchange-core。instrument 提供默认费率，
   `trading_fee_schedules` 可提供用户全局或单 symbol 覆盖，订单接受时会把最终费率固化到
-  `trading_orders`，matching 再把 taker/maker 实际费率带入 `OrderCommandEvent` / `MatchTradeEvent`，
-  账户结算不再回查 fee schedule 或订单费率。
+  Core 订单元数据，成交时直接用 maker/taker 已固化费率计算并导出结算事实，
+  投影和账户查询不再回查 fee schedule 决定既有成交。
 
 所以交易模块 Java 代码仍然保持 long-only。
 
@@ -298,9 +298,9 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 - 每个已接受订单都会保存校验时使用的 `instrument_version`。
 - `reduceOnly` 平仓单绑定当前持仓版本，因此用户可以安全平掉旧版本持仓。
-- `OrderCommandEvent` 携带 `instrumentVersion`；撮合结果保留 taker command 版本。
+- Core place command 携带 `instrumentVersion`；撮合结果和订单元数据保留 taker command 版本。
 - `MatchTradeEvent` 同时携带 `takerInstrumentVersion` 和 `makerInstrumentVersion`，账户结算时可以按双方各自合约公式处理。
-- matching provider 遇到同一 symbol 已有不同 `instrument_version` 的开放订单时，会拒绝新的 `PLACE` command，避免 exchange-core 在同一个 book 里撮合不兼容的 tick/multiplier 版本。
+- ProductExecutionCore 遇到同一 symbol 已有不同 `instrument_version` 的开放订单时拒绝新的 `PLACE` command，避免 exchange-core 在同一个 book 里撮合不兼容的 tick/multiplier 版本。
 - 运维上，tick size、quantity step、multiplier、contract type、settlement asset 这类核心字段变更前，应先暂停交易并清理开放订单。
 
 ## 幂等和多节点
@@ -335,31 +335,23 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `surprising.<product-segment>.orderbook.depth.v1`：可丢失的 L2 盘口快照，key = `symbol`；每个 symbol 只保留最新一份待发送快照。
 - `surprising.<product-segment>.price.events.v1`：指数价和标记价统一流，`eventType` 区分分支，key = `symbol`。
 
-公共逐笔/盘口链路不读写 matching 数据库，也不能阻塞或回滚资金处理。真实经济成交的完整 `MatchTradeEvent` 仍落在 `trading_match_trades` 用于审计，并包含在可靠的 `MatchResultEvent` 中；maker/taker 结算只通过可靠的账户命令执行。maker 和 taker 都属于内部做市白名单时，成交仍进入公共逐笔和盘口链路，但跳过经济成交表与双方成交结算命令。
+公共逐笔/盘口链路不读写可裁决数据库，也不能阻塞或回滚 Core 资金处理。真实经济成交事实由 Core Export
+至少一次发布，下游按稳定事件键幂等写入审计和查询投影；任何内部做市账号也执行相同的成交、手续费和资金规则。
 
-生产产品 Topic 固定为 `32` 个分区并按 symbol 取 key。同一个 symbol 的 command 必须固定落到同一个 matching shard/order book。不能直接增加已运行 Topic 的分区；容量超过 32 分区时，需要创建版本化 Topic、协同切换生产消费端，并完成撮合恢复和状态重建。
-`surprising.trading.matching.kafka.max-poll-records` 默认 `500`；生产调优时应结合 Kafka lag 和 command 处理延迟调整，不需要改代码。
+生产行情/成交投影 Topic 固定为 `32` 个分区并按 symbol 取 key，以保持每个 symbol 的 fanout 顺序；
+这些 partition 不拥有可执行盘口。不能直接增加已运行 Topic 的分区，容量超过时使用版本化 Topic 协同迁移消费者。
 
 ## exchange-core 撮合
 
-`surprising-matching-provider` 启动时通过 Instrument 内部聚合 RPC 加载本产品线 JVM 快照，从快照中筛选 `TRADING`
-symbol，并为 exchange-core 建立稳定的 `symbolId`、asset/currency id：
+每个 `ProductLine` 的 Aeron Core 内嵌一个 fork exchange-core；它是该产品线唯一价格树、FIFO 和可执行盘口。
+`TradingCoreState` 只保存 `CoreOrderState` 业务元数据、资金预留和 `ActiveOrderIndex` 等必要索引，
+不保存 `CoreBookState`、价格桶或 priority sequence。`surprising-matching-provider` 只负责行情/成交查询投影，
+不持有、恢复或裁决第二个 exchange-core。
 
-- symbol 和 asset 映射只在启动及 Instrument Kafka 增量事件到达时加载。command 热路径读取内存活跃 symbol 快照，不再逐单查询 instrument、matching symbol 或 matching asset 表。
-- symbol 从当前可交易集合移除后，会在下一次成功刷新后拒绝新 command。为保证已有订单簿安全，其 exchange-core 注册仍保留在当前进程内，但新 command 已无法访问。
-- 撮合结果、成交、订单状态由 Aeron Core 同一条命令原子更新；matching provider 只消费 Core
-  Event 做行情和查询投影。合约正文、当前版本和可交易状态统一从本地 JVM 快照读取，运行中由
-  Instrument Kafka 增量事件更新。
-- exchange-core 是唯一可执行和可查询的实时订单簿；Aeron Core 中的 `CoreBookState` 只作为快照恢复和一致性校验清单，不作为第二撮合或盘口查询实现。
-- 启动订单簿从 Aeron `BOOK_STATE_QUERY`/Cluster snapshot 恢复，不读取订单表拼装在线订单簿。
+命令在 Core 单写 transition 内按以下顺序执行：
 
-撮合资产和交易对编号不再持久化到数据库，由 `MatchingSymbolService` 按产品线和标准化名称稳定哈希派生，
-并以 JVM 反向索引检测编号碰撞。历史订单和恢复数据仍使用 symbol 字符串，不依赖旧映射表。
-已部署数据库中的旧映射表不会由应用自动删除，完成全量升级和恢复验证后再安排独立数据库变更窗口清理。
-
-symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设计：exchange-core 在这里只作为确定性的 long 订单簿和撮合器使用；合约保证金、交易手续费、强平、资金费率、保险基金和 ADL 都由外围服务负责。
-
-收到 `OrderCommandEvent` 后：
+1. 校验幂等、instrument 版本、价格/数量、资金或保证金、margin scope 和风险边界。
+2. 将订单映射为 fork 原生命令：
 
 - `PLACE` -> `ApiPlaceOrder`
 - `CANCEL` -> `ApiCancelOrder`
@@ -368,18 +360,23 @@ symbol 在 exchange-core 内注册为 `CURRENCY_EXCHANGE_PAIR`。这是有意设
 - `GTC/IOC/FOK/GTX` -> exchange-core 对应 order type；GTX 直接映射到 exchange-core 原生
   `OrderType.GTX`，由订单簿在同一撮合命令内原子判定会否吃单。`CANCEL` 必须绕过 post-only 检查。
 - `MARKET` 转换为基于最新 mark price 和配置最大滑点的 IOC/FOK 保护限价单。
+
+3. 在同一 Core 命令中应用成交、手续费、余额、持仓、风险、生命周期和 `CommandDelta`。
+
 - `IOC`、`FOK`、`MARKET` 订单在撮合返回后就是终态，撮合结果落库后会释放未成交部分冻结保证金。如果 MARKET 订单按保守风险边界冻结、但按更优订单簿价格成交，account 结算成交时会释放差额。
 - Core Event 使用 `(product_line, symbol, trade_id)` 作为投影幂等键。`trade_id` 由
   `commandId * 1_000_000 + matchIndex` 确定性生成，成交热路径不发生数据库序列往返。
 - Core 以 `commandId` 做重放幂等；投影端收到重复事件只更新更高 revision，不反向驱动订单状态。
 - 资金结算命令携带不可变的订单总量和 `reduceOnly` 快照；account-provider 对照自己持有的 reservation 校验，成交热路径不再 join `trading_orders`。
-- guarded 订单成交/状态更新、保证金释放和 matching outbox 写入仍然必须影响 1 行。若 overfill guard、数量不变量不一致、目标订单缺失或 outbox 写入导致行数异常，matcher 会失败并走重启恢复，不能在已变更的 exchange-core 内存簿上继续处理。
+- matcher 提交后若业务状态、delta 或恢复对账不一致，当前 Member 进入 sticky fail-closed；不得在进程内 rebuild、retry 或 resubmit。
 
-当前 matching-provider 使用 exchange-core 的真实订单簿和成交事件链，但关闭 exchange-core 内置风险处理和内置手续费。订单入口已接入下单前初始保证金冻结；账户 provider 已接入成交后的开仓保证金迁移，并按 `MatchTradeEvent` 必须携带的费率写入 maker/taker `TRADE_FEE` ledger。资金费率、保险基金和 ADL 由独立结算模块处理。
+adapter 关闭 exchange-core 内置业务风险、保证金和手续费；这些仍由 ProductExecutionCore 权威裁决。
+exchange-core 内的 user/symbol/risk module 只是 matcher 技术状态，随原生 snapshot 恢复，不能作为业务资金查询源。
 
 ### 盘口深度
 
-每个成功的 exchange-core 命令改变盘口后，matching 会在数据库/outbox 持久化之前，把完整 `SNAPSHOT` 直接交给独立的公共行情 publisher：
+每个成功的 exchange-core 命令改变盘口后，Core Event 驱动 matching projection 获取有界 `BOOK_STATE_QUERY`
+并把完整 `SNAPSHOT` 交给独立公共行情 publisher：
 
 - 每个 symbol 有独立的 latest-only 槽位，热点 symbol 不会覆盖其他 symbol 的快照；
 - 某个 symbol 有一条快照正在发送时，后续新快照只覆盖该 symbol 唯一的待发送槽位，过时的中间状态直接丢弃，不形成积压；
@@ -400,54 +397,34 @@ PostgreSQL 仅保存异步查询投影、审计和对账数据。
 
 ### 订单簿恢复
 
-启动恢复默认开启：
+Aeron snapshot 以 `CoreState v6` 配对保存 Core 业务状态和 exchange-core 原生 `ME0/RE0` module bytes。
+恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，随后由 Aeron Cluster Log 追赶 snapshot 水位后的命令；
+不从 PostgreSQL、订单投影或 `BOOK_STATE_QUERY` 拼装在线簿，也不逐单 place 活动订单。
 
-```yaml
-surprising:
-  trading:
-    matching:
-      recovery:
-        open-order-book-restore-enabled: true
-        open-order-batch-size: 10000
-```
-
-matching provider 启动时从 Aeron `BOOK_STATE_QUERY` 和 Cluster snapshot 恢复聚合 L2 与
-Export watermark；不从 PostgreSQL 开放订单重建在线簿。Core Event 断序、snapshot 校验失败或
-symbol 映射不一致时必须 fail fast，先完成 replay/bootstrap 后才能接收新的命令。
+开放流量前必须校验 CRC32C、产品线/路由、fork/config、registry、完整 engine/book hash 和全部 OPEN
+订单逐字段一致。任何断序、损坏、版本或集合不一致都 fail-closed。matching provider 只恢复可重建的
+L2/成交投影；它的故障或积压不改变 Core 撮合与资金裁决。
 
 ### 多节点撮合
 
-当前产品线的 order command topic 必须以 `symbol` 作为 key。Kafka 会把每个 partition 分配给该产品线 matching consumer group 中的一个 consumer，所以同一时刻一个 symbol partition 只能由一个 live matcher 处理。
+当前采用“一个 `ProductLine` 变体一个逻辑 Core”，每个逻辑 Core 是三 Member Aeron Cluster，
+三个 Member 各自运行确定性 exchange-core 副本，只有 Leader 接收入站命令，Cluster Log 决定全序。
+Kafka partition 只服务外围输入/导出与投影，不再决定可执行盘口的 owner。
 
-matching consumer 使用 cooperative sticky assignment 和 `MatchingPartitionAssignmentGuard`：
-
-- 进程启动时先从 Aeron snapshot/replay 恢复订单簿，再消费命令。
-- 如果一个已经处理过命令的 matcher 在运行中拿到新的 partition，会关闭 Spring context。systemd/EC2 ASG 应重启进程，新进程先恢复当前 Aeron 状态再消费。
-- 这样可以避免旧进程拿到一个本地 exchange-core 订单簿已经过期的 symbol 后继续撮合。
-- 如果 command payload 已经解析成功、但 Core replay 或 snapshot 校验失败，matcher 也会关闭 Spring context，
-  避免在未确认的本地簿上继续消费 Kafka command。Exporter/Projection 故障只造成查询投影积压，
-  不改变 Core 的撮合与资金裁决。
-- 生产环境保持 `surprising.trading.matching.kafka.restart-on-partition-reassignment=true`。
-- `surprising.trading.matching.kafka.partition-assignment-startup-grace-ms` 默认 `30000`，用于让并发 listener 容器完成初始 assignment，然后再把新 partition 视为不安全的运行期迁移。
-- command 失败后的重启是无条件保护；partition-reassignment 开关只控制 partition 迁移场景的重启行为。
-- `surprising.trading.matching.kafka.client-id` 要给每个 matching 进程配成稳定且唯一的值。这样 Kafka consumer group 输出才能把某个 `symbol` partition 映射到真正持有本地 exchange-core 订单簿的节点。
-
-扩容规则：先在既有 32 分区映射内调整 matching 实例和 listener 并发，不增加线上 Topic 的分区。容量超过 32 分区时必须采用版本化 Topic 迁移，并安排重启恢复。不要对 matching 进程做高频自动扩缩容，因为 partition 迁移可能触发重启并重建订单簿。
-把 matching 在命令处理期间退出视为必须通过 Aeron snapshot/replay 恢复重启的场景，不要在同一进程内强行重试。
+当前不为热点币对单独建 Core。只有单产品线容量证据显示某 symbol 持续破坏 SLO，且 Cross Margin
+用户/资金域、强平、ADL、保险基金、幂等和路由协议能一起迁移时，才启用预留的 shard identity 做版本化拆分。
+不能仅移动 order book，也不能让同一 Cross Margin 资金域被两个可写 Core 并发裁决。
 
 ## 自成交防护
 
-`surprising-matching-provider` 在提交 taker 订单前检查同一用户是否存在可成交的反向挂单，命中则拒绝新订单。
+`ProductExecutionCore` 校验 maker/taker 权威订单身份，同一用户成交必须拒绝并触发 fail-closed 保护；
+matching provider 不再持有本地盘口或自行裁决自成交。
 
 - BUY 检查自己的 SELL 挂单是否有 `priceTicks <= effectivePriceTicks`。
 - SELL 检查自己的 BUY 挂单是否有 `priceTicks >= effectivePriceTicks`。
 - `CANCEL_REQUESTED` 订单也会计入，因为 cancel 命令真正处理前订单仍可能在 exchange-core 内有效。
 - 拒绝原因是 `SELF_TRADE_PREVENTED`，已冻结保证金会走正常拒单释放链路。
-- `surprising.trading.matching.protection.internal-market-maker-user-ids` 是唯一的内部流动性账号白名单。白名单 taker 绕过自成交防护，用于维持平台公共价格走势。
-- maker 和 taker 都在白名单时，撮合仍发布相同的 `PublicTradeEvent`、盘口深度、撮合结果、K 线输入和 WebSocket 推送，但不插入 `trading_match_trades`，也不发送 `TRADE_SIDE_SETTLE`。
-- 内部自成交仍由 Core 更新双方订单剩余数量，并复用 `ORDER_RELEASE` 释放对应冻结保证金，防止
-  撮合重启恢复出陈旧订单或资金长期冻结；不会形成持仓、手续费、盈亏和账户账本。数据库只接收异步投影。
-- 任意一方不在白名单时，成交完整进入经济成交和账户结算链路。混合扫单按每一笔 matcher fill 独立分类，主动订单的最终释放依赖最后一笔真实 taker 结算命令。
+- 当前没有绕过该规则的内部账户白名单；做市账号必须使用不同用户身份并接受相同资金、手续费和风险规则。
 
 ## 接口
 
@@ -553,12 +530,14 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 ## 生产注意事项
 
 - `surprising-order-provider` 和 `surprising-trigger-provider` 独立部署。普通订单、撮合、账户结算和条件单热路径只依赖 Aeron Core 与内存状态；trigger provider 不连接 PostgreSQL、Redis 或价格/持仓 Kafka，也不保留数据库回退链路。不要做每个 symbol 一个 worker。
-- `surprising-matching-provider` 独立于 order/trigger；它持有 exchange-core 订单簿，应该单独扩缩容和重启恢复。
-- matching provider 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.8-emporia` 传递依赖 Chronicle/OpenHFT，父 POM 通过 BOM 统一到 JDK 25 可用的 2026.x 版本，生产进程仍需使用本地运行示例里的 `JAVA_TOOL_OPTIONS`。升级后 GTX 由 exchange-core 原生处理，必须通过撮合模块全量测试再发布。
+- `surprising-matching-provider` 独立于 order/trigger，但只维护可重建的行情与成交查询投影，不持有可执行订单簿。
+- Aeron Core 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.14-emporia` 传递依赖 Chronicle/OpenHFT，
+  父 POM 固定 fork Git SHA、整包 SHA-256 和 JDK 25 可用的 2026.x BOM；service Maven `validate`
+  同时验证 whole dependency JAR 与内嵌 provenance。
 - 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。
 - MARKET 订单在订单入口和撮合阶段都要求 mark price 新鲜。订单入口会用配置的 mark 派生可成交区间校验 min/max notional，再发布撮合命令；线性合约 max-notional 和初始保证金按上边界计算，避免市价 SELL 开空在高买价成交时抵押不足。`surprising.trading.*.market-max-slippage-ppm` 需要按产品流动性配置。
 - 默认 application 配置已开启 LIMIT 订单价格带保护，`limit-price-band-ppm: 50000` 表示 5%。正式开放高频用户或做市商报价前，需要按具体产品流动性调整。
-- 当前已经实现基于 Aeron snapshot/replay 的开放订单簿恢复；PostgreSQL 只保留异步投影，不参与在线簿恢复。
+- 当前已经实现 Aeron 配对 native snapshot + Cluster Log catch-up 的开放订单簿恢复；PostgreSQL 只保留异步投影，不参与在线簿恢复。
 - Instrument `max_notional_units` 已同时约束限价单和保护价市价单。真实盘口深度、延迟和强平压力测试证明更大额度安全之前，产品 notional 限额应保持保守。
 - 下单冻结保证金时还会校验投影后的持仓敞口：当前持仓 + 同方向未完成非 reduce-only 委托 + 本次委托，用这个投影值检查 `max_position_notional_units`、动态平台 OI 限额和命中的 `instrument_risk_brackets.notional_cap_units`；纯减仓单按减仓后的投影校验，不会简单用当前敞口加本单 notional 误拒。
 - 动态单用户持仓量限额已实现：account 根据 Core Export 的结算事实把 OI 投影到 64 个 `trading_symbol_open_interest_shards`，`trading_symbol_open_interest` 视图向读端聚合 long/short 和 `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`；order 入口按当前价格折算平台 OI notional，并使用 `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` 作为每个用户的有效持仓上限。默认 BTC/ETH 为 30% 平台 OI，固定下限 250,000 USDT。生产需要定期用 Core Export/用户状态快照重建核对分片，`account_positions` 只作为对账投影，尤其在人工修数或灾备恢复之后。
@@ -566,8 +545,9 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 - 止盈止损触发后一定通过 order-provider 提交 reduce-only 平仓单。WebSocket 客户端会在普通私有订单/成交/持仓频道收到触发后生成的真实订单和成交。
 - outbox 是至少一次投递；下游撮合和推送必须幂等。
 - matching result 通过 `commandId` 幂等，成交通过 `tradeId` 幂等。
-- 如果 matching 进程处理过命令后又拿到新的 Kafka partition，会主动退出并由编排系统重启，以便从 Aeron snapshot/replay 重建新的 exchange-core 订单簿。这是预期的 failover 行为。
-- 不要在订单入口做每个 symbol 一个线程，symbol 扩展应通过 Kafka partition 和 matching shard 调度完成。
+- Aeron Member 的 matcher/Core 任一一致性门禁失败必须关闭成员，由 Cluster 选主或从配对 snapshot 恢复；
+  matching projection 的 Kafka rebalance 只影响查询/行情滞后，不迁移 executable book。
+- 不要在订单入口做每个 symbol 一个线程；当前以一个 ProductLine 一个 Core 为扩展单元。
 
 ## 验证
 
