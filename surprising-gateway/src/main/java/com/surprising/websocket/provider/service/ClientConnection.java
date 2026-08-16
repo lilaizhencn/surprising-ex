@@ -7,6 +7,8 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.slf4j.Logger;
@@ -29,10 +31,13 @@ public class ClientConnection implements AutoCloseable {
     private volatile Long authenticatedUserId;
     /** 有界环形队列；满载时主动断开慢连接，背压不会传回 Kafka 消费线程。 */
     private final BlockingQueue<String> outbound;
-    private final Duration sendTimeout;
+    private final long sendTimeoutNanos;
     private final AtomicBoolean open = new AtomicBoolean(true);
+    private final AtomicLong sendStartedAtNanos = new AtomicLong();
+    private final ReentrantLock enqueueLock = new ReentrantLock();
     private final ReentrantLock sendLock = new ReentrantLock();
     private final Thread writerThread;
+    private final Thread timeoutWatcher;
 
     public ClientConnection(WebSocketSession session,
                             Long authenticatedUserId,
@@ -41,8 +46,9 @@ public class ClientConnection implements AutoCloseable {
         this.session = session;
         this.authenticatedUserId = authenticatedUserId;
         this.outbound = new ArrayBlockingQueue<>(Math.max(1, outboundQueueCapacity));
-        this.sendTimeout = sendTimeout;
+        this.sendTimeoutNanos = Math.max(1L, sendTimeout.toNanos());
         this.writerThread = Thread.ofVirtual().name("ws-send-" + session.getId()).start(this::drain);
+        this.timeoutWatcher = Thread.ofVirtual().name("ws-timeout-" + session.getId()).start(this::watchSendTimeout);
     }
 
     public String id() {
@@ -69,27 +75,36 @@ public class ClientConnection implements AutoCloseable {
 
     /** 批量投递消息，避免同一连接在一次 fanout 中反复争用队列。 */
     public boolean sendBatch(List<String> payloads) {
-        if (!open.get()) {
-            return false;
-        }
         if (payloads == null || payloads.isEmpty()) {
             return true;
         }
-        if (outbound.remainingCapacity() < payloads.size()) {
-            close(CloseStatus.SERVICE_OVERLOAD.withReason("websocket outbound queue full"));
-            return false;
-        }
-        for (String payload : payloads) {
-            if (!outbound.offer(payload)) {
-                close(CloseStatus.SERVICE_OVERLOAD.withReason("websocket outbound queue full"));
+        enqueueLock.lock();
+        try {
+            if (!open.get()) {
                 return false;
             }
+            if (outbound.remainingCapacity() < payloads.size()) {
+                close(CloseStatus.SERVICE_OVERLOAD);
+                return false;
+            }
+            for (String payload : payloads) {
+                if (!outbound.offer(payload)) {
+                    close(CloseStatus.SERVICE_OVERLOAD);
+                    return false;
+                }
+            }
+            return true;
+        } finally {
+            enqueueLock.unlock();
         }
-        return true;
     }
 
     public int queuedMessages() {
         return outbound.size();
+    }
+
+    public int queueCapacity() {
+        return outbound.size() + outbound.remainingCapacity();
     }
 
     private void drain() {
@@ -113,34 +128,39 @@ public class ClientConnection implements AutoCloseable {
         }
     }
 
-    private boolean sendWithinTimeout(String payload) throws Exception {
-        Thread sender = Thread.currentThread();
-        long timeoutMillis = Math.max(1L, sendTimeout.toMillis());
-        AtomicBoolean sent = new AtomicBoolean(false);
-        Thread watchdog = Thread.ofVirtual().start(() -> {
-            try {
-                Thread.sleep(timeoutMillis);
-                if (!sent.get()) {
-                    sender.interrupt();
-                }
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
+    private void watchSendTimeout() {
+        while (open.get()) {
+            long startedAt = sendStartedAtNanos.get();
+            if (startedAt == 0L) {
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+                continue;
             }
-        });
+            long remaining = sendTimeoutNanos - (System.nanoTime() - startedAt);
+            if (remaining <= 0L) {
+                close(CloseStatus.SESSION_NOT_RELIABLE.withReason("websocket send timeout"));
+                return;
+            }
+            LockSupport.parkNanos(Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(1)));
+        }
+    }
+
+    private boolean sendWithinTimeout(String payload) throws Exception {
+        if (!sendLock.tryLock(sendTimeoutNanos, TimeUnit.NANOSECONDS)) {
+            return false;
+        }
         try {
-            sendLock.lockInterruptibly();
+            if (!session.isOpen()) {
+                return false;
+            }
+            sendStartedAtNanos.set(System.nanoTime());
             try {
-                if (!session.isOpen()) {
-                    return false;
-                }
                 session.sendMessage(new TextMessage(payload));
             } finally {
-                sendLock.unlock();
+                sendStartedAtNanos.set(0L);
             }
             return true;
         } finally {
-            sent.set(true);
-            watchdog.interrupt();
+            sendLock.unlock();
         }
     }
 
@@ -154,6 +174,7 @@ public class ClientConnection implements AutoCloseable {
             return;
         }
         writerThread.interrupt();
+        timeoutWatcher.interrupt();
         try {
             if (session.isOpen()) {
                 session.close(status);
