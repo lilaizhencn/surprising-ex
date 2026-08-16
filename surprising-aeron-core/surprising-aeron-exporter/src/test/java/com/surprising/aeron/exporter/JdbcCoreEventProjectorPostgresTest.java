@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,6 +74,7 @@ class JdbcCoreEventProjectorPostgresTest {
 
     @BeforeEach
     void clearProjection() throws Exception {
+        dropFaultInjection();
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             statement.execute("TRUNCATE core_websocket_audit_projection, "
                     + "core_funding_payment_projection, core_funding_settlement_projection, "
@@ -80,6 +82,11 @@ class JdbcCoreEventProjectorPostgresTest {
                     + "core_liquidation_projection, core_treasury_projection, core_event_projection");
             statement.executeUpdate("UPDATE core_projection_watermark SET last_export_sequence = 0");
         }
+    }
+
+    @AfterEach
+    void removeFaultInjection() throws Exception {
+        dropFaultInjection();
     }
 
     @Test
@@ -122,6 +129,26 @@ class JdbcCoreEventProjectorPostgresTest {
                 event(2, UUID.randomUUID(), List.of(duplicate, duplicate))))
                 .isInstanceOf(SQLException.class);
         assertProjectionState(1, 1, 1, 1);
+    }
+
+    @Test
+    void rollsBackAuditInsertFailure() throws Exception {
+        installFaultInjection("fail_audit_insert", "core_websocket_audit_projection", "INSERT");
+
+        assertThatThrownBy(() -> new JdbcCoreEventProjector(dataSource).project(ProductLine.SPOT,
+                event(1, UUID.randomUUID(), List.of(user(31, 1)))))
+                .isInstanceOf(SQLException.class).hasMessageContaining("injected projection failure");
+        assertProjectionState(0, 0, 0, 0);
+    }
+
+    @Test
+    void rollsBackWatermarkUpdateFailure() throws Exception {
+        installFaultInjection("fail_watermark_update", "core_projection_watermark", "UPDATE");
+
+        assertThatThrownBy(() -> new JdbcCoreEventProjector(dataSource).project(ProductLine.SPOT,
+                event(1, UUID.randomUUID(), List.of(user(32, 1)))))
+                .isInstanceOf(SQLException.class).hasMessageContaining("injected projection failure");
+        assertProjectionState(0, 0, 0, 0);
     }
 
     private static CoreMessage event(long sequence, UUID commandId, List<CoreUserStateView> users) {
@@ -170,6 +197,26 @@ class JdbcCoreEventProjectorPostgresTest {
         assertThat(actual).containsExactly(
                 "INVERSE_DELIVERY", "INVERSE_PERPETUAL", "LINEAR_DELIVERY",
                 "LINEAR_PERPETUAL", "OPTION", "SPOT");
+    }
+
+    private static void installFaultInjection(String trigger, String table, String operation) throws Exception {
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE OR REPLACE FUNCTION fail_projection_write() RETURNS trigger AS $$
+                    BEGIN
+                        RAISE EXCEPTION 'injected projection failure';
+                    END;
+                    $$ LANGUAGE plpgsql
+                    """);
+            statement.execute("CREATE TRIGGER " + trigger + " BEFORE " + operation + " ON " + table
+                    + " FOR EACH ROW EXECUTE FUNCTION fail_projection_write()");
+        }
+    }
+
+    private static void dropFaultInjection() throws Exception {
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            statement.execute("DROP FUNCTION IF EXISTS fail_projection_write() CASCADE");
+        }
     }
 
     private static void migrate() throws Exception {
