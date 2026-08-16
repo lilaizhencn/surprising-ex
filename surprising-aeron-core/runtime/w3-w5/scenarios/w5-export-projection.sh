@@ -259,18 +259,32 @@ start_host_core() {
 }
 
 verify_host_core() {
-  local smoke_log="$ATTEMPT_DIR/core-connectivity-smoke.txt" status
-  set +e
-  "$JAVA_BIN" "${JAVA_FLAGS[@]}" \
-    "-Dsurprising.aeron.product-line=$PRODUCT_LINE" \
-    "-Dsurprising.aeron.hostnames=$AERON_HOSTNAMES" \
-    "-Dsurprising.aeron.egress-hostname=$AERON_EGRESS_HOSTNAME" \
-    -Dsurprising.aeron.probe-mode=query \
-    -Dsurprising.aeron.source-id=17017 \
-    -cp "$JARS_DIR/surprising-aeron-tools.jar" \
-    com.surprising.aeron.tools.ClusterProbeMain > "$smoke_log" 2>&1
-  status=$?
-  set -e
+  local smoke_log="$ATTEMPT_DIR/core-connectivity-smoke.txt" attempt_log status=1
+  local attempt=0 deadline=$((SECONDS + 90))
+  : > "$smoke_log"
+  while (( SECONDS < deadline )); do
+    attempt=$((attempt + 1))
+    attempt_log="$ATTEMPT_DIR/core-connectivity-smoke-attempt-$attempt.txt"
+    set +e
+    "$JAVA_BIN" "${JAVA_FLAGS[@]}" \
+      "-Dsurprising.aeron.product-line=$PRODUCT_LINE" \
+      "-Dsurprising.aeron.hostnames=$AERON_HOSTNAMES" \
+      "-Dsurprising.aeron.egress-hostname=$AERON_EGRESS_HOSTNAME" \
+      -Dsurprising.aeron.probe-mode=query \
+      -Dsurprising.aeron.source-id=17017 \
+      -cp "$JARS_DIR/surprising-aeron-tools.jar" \
+      com.surprising.aeron.tools.ClusterProbeMain > "$attempt_log" 2>&1
+    status=$?
+    set -e
+    {
+      printf 'CORE_CONNECTIVITY_ATTEMPT=%s status=%s\n' "$attempt" "$status"
+      cat "$attempt_log"
+    } >> "$smoke_log"
+    if (( status == 0 )) && rg -q '^status=OK ' "$attempt_log"; then
+      break
+    fi
+    sleep 1
+  done
   cat "$smoke_log"
   (( status == 0 )) || fail "CORE_CONNECTIVITY_FAILED status=$status artifact=$smoke_log"
   rg -q '^status=OK ' "$smoke_log" || fail "CORE_ELECTION_RESPONSE_MISSING artifact=$smoke_log"
