@@ -758,6 +758,9 @@ public final class CoreProbeState implements AutoCloseable {
         OrderBatchPending batch;
         try {
             batch = decodeOrderBatch(message, clusterTimestamp, clusterPosition);
+            validateOrderBatchIdentity(batch, message.header().userId());
+        } catch (CoreStateRejectedException exception) {
+            return rejected(CoreResultCode.fromRejectionCode(exception.code()));
         } catch (ArithmeticException | IllegalArgumentException exception) {
             return recordRejectedMatching(message, sourceKey,
                     exception instanceof ArithmeticException
@@ -820,6 +823,18 @@ public final class CoreProbeState implements AutoCloseable {
                     tradingState, clusterTimestamp, clusterPosition, PendingMatching.Operation.AMEND);
         }
         throw new IllegalArgumentException("unsupported order batch type");
+    }
+
+    private void validateOrderBatchIdentity(OrderBatchPending batch, long userId) {
+        if (batch.kind == OrderBatchKind.PLACE) return;
+        for (OrderBatchItem item : batch.items) {
+            long orderId = batch.kind == OrderBatchKind.CANCEL ? item.orderId : item.originalOrderId;
+            CoreOrderState order = tradingState.order(orderId);
+            if (order != null && order.userId() != userId) {
+                throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH",
+                        "order batch contains another user's order");
+            }
+        }
     }
 
     private CoreResponse startOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
@@ -2107,6 +2122,7 @@ public final class CoreProbeState implements AutoCloseable {
     private boolean matchingResultNeedsRecovery(PendingMatching pending,
                                                 com.surprising.aeron.service.matching.CoreMatchingResult result) {
         if (result.accepted()) return false;
+        if (result.matcherStateChanged()) return true;
         if (pending.operation() == PendingMatching.Operation.LIQUIDATION
                 || pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH
                 || pending.operation() == PendingMatching.Operation.SETTLEMENT) return true;
