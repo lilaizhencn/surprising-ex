@@ -9,12 +9,67 @@ import com.surprising.product.api.ProductLine;
 import io.aeron.Publication;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class AeronClientAgentTest {
+
+    @Test
+    void tryCommandOnceReflectsTheSinglePublicationOffer() {
+        AtomicInteger offers = new AtomicInteger();
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session(message -> {
+            offers.incrementAndGet();
+            return Publication.NOT_CONNECTED;
+        }))) {
+            assertThat(pool.tryCommandOnce(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 9, new byte[0]))
+                    .isEqualTo(AeronClientPool.TryCommandResult.NOT_READY);
+            assertThat(offers).hasValue(1);
+        }
+    }
+
+    @Test
+    void oneDispatcherOwnsEgressForEveryFixedSession() throws Exception {
+        CountDownLatch polled = new CountDownLatch(2);
+        Set<String> owners = ConcurrentHashMap.newKeySet();
+        Set<Integer> fragmentLimits = ConcurrentHashMap.newKeySet();
+        AeronClientPool.Session session = new AeronClientPool.Session() {
+            @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
+            @Override public int pollEgress(int fragmentLimit) {
+                owners.add(Thread.currentThread().getName());
+                fragmentLimits.add(fragmentLimit);
+                polled.countDown();
+                return 0;
+            }
+            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            @Override public RuntimeException sessionFailure() { return null; }
+            @Override public void close() { }
+        };
+
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session)) {
+            assertThat(polled.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(owners).containsExactly("agent-egress-dispatcher");
+            assertThat(fragmentLimits).containsExactly(32);
+            assertThat(pool.agentThreadCount()).isEqualTo(1);
+            assertThat(pool.configuredSessionCount()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    void productionEgressAdapterNeverExceedsTheConfiguredFragmentLimit() {
+        AtomicInteger polls = new AtomicInteger();
+        int fragments = SurprisingAeronClient.pollEgressBounded(32, () -> {
+            polls.incrementAndGet();
+            return 10;
+        });
+
+        assertThat(fragments).isEqualTo(30);
+        assertThat(polls).hasValue(3);
+    }
 
     @Test
     void returnsUnknownAfterPositiveOfferTimeoutWithoutRetry() throws Exception {
@@ -37,17 +92,30 @@ class AeronClientAgentTest {
     @Test
     void returnsTypedNegativeAdmissionWithoutRetry() throws Exception {
         AtomicInteger offers = new AtomicInteger();
-        try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session(message -> {
-            offers.incrementAndGet();
-            return Publication.ADMIN_ACTION;
-        }))) {
-            CoreCommandOutcome outcome = pool.commandOutcomeAsync(CoreMessageType.APPLY_MARK_PRICE,
-                    UUID.randomUUID(), 9, new byte[0]).get(2, TimeUnit.SECONDS);
+        long[] rawResults = {Publication.BACK_PRESSURED, Publication.NOT_CONNECTED, Publication.ADMIN_ACTION,
+                Publication.CLOSED, Publication.MAX_POSITION_EXCEEDED, -99};
+        CoreCommandOutcome.NotAcceptedReason[] reasons = {
+                CoreCommandOutcome.NotAcceptedReason.CLIENT_BACKPRESSURED,
+                CoreCommandOutcome.NotAcceptedReason.NOT_CONNECTED,
+                CoreCommandOutcome.NotAcceptedReason.ADMIN_ACTION,
+                CoreCommandOutcome.NotAcceptedReason.CLOSED,
+                CoreCommandOutcome.NotAcceptedReason.MAX_POSITION_EXCEEDED,
+                CoreCommandOutcome.NotAcceptedReason.UNKNOWN};
 
-            assertThat(outcome).isInstanceOfSatisfying(CoreCommandOutcome.NotAccepted.class,
-                    value -> assertThat(value.reason()).isEqualTo(CoreCommandOutcome.NotAcceptedReason.ADMIN_ACTION));
-            assertThat(offers).hasValue(1);
+        for (int index = 0; index < rawResults.length; index++) {
+            long rawResult = rawResults[index];
+            CoreCommandOutcome.NotAcceptedReason reason = reasons[index];
+            try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session(message -> {
+                offers.incrementAndGet();
+                return rawResult;
+            }))) {
+                CoreCommandOutcome outcome = pool.commandOutcomeAsync(CoreMessageType.APPLY_MARK_PRICE,
+                        UUID.randomUUID(), 9, new byte[0]).get(2, TimeUnit.SECONDS);
+
+                assertThat(outcome).isEqualTo(new CoreCommandOutcome.NotAccepted(reason, rawResult));
+            }
         }
+        assertThat(offers).hasValue(rawResults.length);
     }
 
     private static AeronClientPool pool(Duration timeout, AeronClientPool.SessionFactory sessions) {

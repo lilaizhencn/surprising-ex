@@ -22,7 +22,7 @@ class AeronClientCapacityTest {
     }
 
     @Test
-    void startsExactlyFourCommandOwnersAndOneReservedControlOwner() throws Exception {
+    void startsExactlyFourCommandSessionsAndOneReservedSessionOnOneDispatcher() throws Exception {
         CountDownLatch opened = new CountDownLatch(5);
         try (AeronClientPool pool = new AeronClientPool("capacity", ProductLine.SPOT,
                 List.of("localhost", "localhost", "localhost"), "localhost", Duration.ofSeconds(1),
@@ -31,7 +31,8 @@ class AeronClientCapacityTest {
                     opened.countDown();
                     return idleSession();
                 }, true)) {
-            assertThat(pool.agentThreadCount()).isEqualTo(5);
+            assertThat(pool.agentThreadCount()).isEqualTo(1);
+            assertThat(pool.configuredSessionCount()).isEqualTo(5);
             assertThat(opened.await(1, TimeUnit.SECONDS)).isTrue();
         }
     }

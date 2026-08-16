@@ -19,12 +19,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntSupplier;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 
 public final class SurprisingAeronClient implements AeronClientPool.Session, EgressListener {
+
+    private static final int AERON_EGRESS_POLL_LIMIT = 10;
 
     private final ProductLine productLine;
     private final Duration responseTimeout;
@@ -180,10 +183,28 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
 
     @Override
     public int pollEgress(int fragmentLimit) {
+        return pollEgressBounded(fragmentLimit, cluster::pollEgress);
+    }
+
+    static int pollEgressBounded(int fragmentLimit, IntSupplier poller) {
         if (fragmentLimit <= 0) {
             throw new IllegalArgumentException("fragmentLimit must be positive");
         }
-        return cluster.pollEgress();
+        Objects.requireNonNull(poller, "poller");
+        int workCount = 0;
+        int remainingFragments = fragmentLimit;
+        while (remainingFragments >= AERON_EGRESS_POLL_LIMIT) {
+            int polled = poller.getAsInt();
+            if (polled < 0) {
+                throw new IllegalStateException("Aeron egress poll returned invalid fragment count: " + polled);
+            }
+            workCount += polled;
+            remainingFragments -= AERON_EGRESS_POLL_LIMIT;
+            if (polled < AERON_EGRESS_POLL_LIMIT) {
+                break;
+            }
+        }
+        return workCount;
     }
 
     @Override
