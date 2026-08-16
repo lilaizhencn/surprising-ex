@@ -105,6 +105,21 @@ class OrderServiceTest {
     }
 
     @Test
+    void adminSingleCancelUsesTheProductLineScopedProjectionOrder() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
+        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
+        when(projection.byOrder(ProductLine.LINEAR_PERPETUAL, (Long) null, 91L, null))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
+        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+
+        assertThat(service.adminCancelOrder(91L, "risk", ProductLine.LINEAR_PERPETUAL).orderId()).isEqualTo(91L);
+
+        verify(projection).byOrder(ProductLine.LINEAR_PERPETUAL, (Long) null, 91L, null);
+        verify(aeronOrders).cancel(1001L, 91L);
+    }
+
+    @Test
     void optionProductLineUsesTheLocalAccountFactStream() {
         OrderService service = service(ProductLine.OPTION);
         PlaceOrderRequest optionRequest = new PlaceOrderRequest(1001L, "option-1", "BTC-USDT",
@@ -167,6 +182,60 @@ class OrderServiceTest {
         assertThat(result.completed()).isEqualTo(1);
         verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 1000, null);
         verify(aeronOrders).cancel(1001L, 91L);
+    }
+
+    @Test
+    void lifecycleCancellationUsesAeronAuthorityInsteadOfStaleProjection() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
+        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
+        when(aeronOrders.lifecycleOpenOrders("BTC-USDT", 1000)).thenReturn(java.util.List.of(open));
+        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+
+        assertThat(service.requestLifecycleCancellation("BTC-USDT", 1000)).isEqualTo(1);
+
+        verify(aeronOrders).lifecycleOpenOrders("BTC-USDT", 1000);
+        verify(aeronOrders).cancel(1001L, 91L);
+        verifyNoInteractions(projection);
+    }
+
+    @Test
+    void lifecycleActiveCheckUsesAeronAuthorityInsteadOfStaleProjection() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        when(aeronOrders.lifecycleOpenOrders("BTC-USDT", 1))
+                .thenReturn(java.util.List.of(response(91, "client-91", OrderStatus.ACCEPTED)));
+
+        assertThat(service.hasLifecycleActiveOrders("BTC-USDT")).isTrue();
+
+        verify(aeronOrders).lifecycleOpenOrders("BTC-USDT", 1);
+        verifyNoInteractions(projection);
+    }
+
+    @Test
+    void adminSingleCancelRejectsProductLineMismatchBeforeProjectionOrAeronOffer() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+
+        assertThatThrownBy(() -> service.adminCancelOrder(91L, "risk", ProductLine.OPTION))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("product line");
+
+        verifyNoInteractions(projection, aeronOrders);
+    }
+
+    @Test
+    void oversizedFirstProjectionRowPreservesContinuationCursorAtServiceBoundary() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, null);
+        String continuation = "eyJvcmRlciI6MTIzfQ";
+        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null))
+                .thenReturn(ProjectionReadResult.responseTooLarge(12L, 0L, continuation));
+
+        assertThatThrownBy(() -> service.openOrders(1001L, "BTC-USDT", 10))
+                .isInstanceOf(ProjectionReadResult.ResponseTooLargeException.class)
+                .satisfies(throwable -> assertThat(
+                        ((ProjectionReadResult.ResponseTooLargeException) throwable).nextCursor())
+                        .isEqualTo(continuation));
+        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null);
+        verifyNoInteractions(aeronOrders);
     }
 
     private OrderService service(ProductLine productLine) {

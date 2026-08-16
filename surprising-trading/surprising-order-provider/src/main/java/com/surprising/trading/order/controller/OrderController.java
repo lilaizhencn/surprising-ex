@@ -220,6 +220,8 @@ public class OrderController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
@@ -236,6 +238,8 @@ public class OrderController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
@@ -254,6 +258,8 @@ public class OrderController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         }
     }
 
@@ -274,6 +280,8 @@ public class OrderController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         }
     }
 }

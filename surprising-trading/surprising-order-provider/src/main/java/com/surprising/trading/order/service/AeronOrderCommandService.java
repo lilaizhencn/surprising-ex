@@ -15,6 +15,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -146,6 +147,16 @@ public class AeronOrderCommandService {
         return requireOrder(responseOrder, "canceled order missing");
     }
 
+    public List<OrderResponse> lifecycleOpenOrders(String symbol, int limit) {
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        ProductLine productLine = properties.getKafka().getProductLine();
+        return aeron.lifecycleOpenOrders(symbol, limit).stream()
+                .map(view -> requireLocalOrder(view, productLine))
+                .toList();
+    }
+
     private long matchingPriceTicks(com.surprising.trading.api.model.PlaceOrderRequest request, long version) {
         if (request.orderType() == OrderType.LIMIT) return request.priceTicks();
         long mark = markPrices.latestMarkPriceTicks(request.symbol(), version,
@@ -164,6 +175,16 @@ public class AeronOrderCommandService {
                 PositionSide.valueOf(view.positionSide().name()), view.makerFeeRatePpm(), view.takerFeeRatePpm(),
                 view.reduceOnly(), view.postOnly(), status(view), null,
                 Instant.ofEpochMilli(view.createdAtEpochMillis()), Instant.ofEpochMilli(view.updatedAtEpochMillis()));
+    }
+
+    private static OrderResponse requireLocalOrder(CoreOrderStateView view, ProductLine productLine) {
+        if (view == null) {
+            throw new IllegalStateException("lifecycle order query returned a missing order");
+        }
+        if (view.productLine() != productLine) {
+            throw new IllegalStateException("lifecycle order product line does not match local core");
+        }
+        return requireOrder(view, "lifecycle order missing");
     }
 
     private static CoreOrderStateView commandOrder(com.surprising.aeron.protocol.CoreResponse response, long orderId) {

@@ -42,4 +42,17 @@ class CoreQueryClassTest {
                     new byte[0])).isNotCompleted();
         }
     }
+
+    @Test
+    void lifecycleAuthorityReadsHaveAnExplicitReservedLane() {
+        try (AeronClientPool pool = new AeronClientPool("query-class", ProductLine.SPOT,
+                List.of("localhost", "localhost", "localhost"), "localhost", Duration.ofSeconds(1),
+                "query-class", "epoch", AeronClientCapacity.defaults(),
+                () -> { throw new AssertionError("agents are paused"); }, false)) {
+            assertThat(pool.lifecycleControlQueryAsync(CoreMessageType.USER_OPEN_ORDERS_QUERY,
+                    UUID.randomUUID(), 0L, new byte[0])).isNotCompleted();
+            assertThatIllegalArgumentException().isThrownBy(() -> pool.query(CoreMessageType.USER_OPEN_ORDERS_QUERY,
+                    UUID.randomUUID(), 0L, new byte[0])).withMessageContaining("ordinary Core reads");
+        }
+    }
 }

@@ -28,6 +28,9 @@ public record ProjectionReadResult(
         if (status == Status.OK && observedExportSequence < requiredExportSequence) {
             throw new IllegalArgumentException("ready projection result is below required watermark");
         }
+        if (status == Status.RESPONSE_TOO_LARGE && (nextCursor == null || nextCursor.isBlank())) {
+            throw new IllegalArgumentException("oversized projection result requires a continuation cursor");
+        }
     }
 
     public static ProjectionReadResult ok(List<OrderResponse> orders, String nextCursor, boolean hasMore,
@@ -78,6 +81,35 @@ public record ProjectionReadResult(
 
         public long requiredExportSequence() {
             return requiredExportSequence;
+        }
+    }
+
+    public static final class ResponseTooLargeException extends IllegalStateException {
+        private final long observedExportSequence;
+        private final long requiredExportSequence;
+        private final String nextCursor;
+
+        public ResponseTooLargeException(long observedExportSequence, long requiredExportSequence, String nextCursor) {
+            super("PROJECTION_RESPONSE_TOO_LARGE observed=" + observedExportSequence
+                    + " required=" + requiredExportSequence + " nextCursor=" + nextCursor);
+            if (nextCursor == null || nextCursor.isBlank()) {
+                throw new IllegalArgumentException("oversized projection result requires a continuation cursor");
+            }
+            this.observedExportSequence = observedExportSequence;
+            this.requiredExportSequence = requiredExportSequence;
+            this.nextCursor = nextCursor;
+        }
+
+        public long observedExportSequence() {
+            return observedExportSequence;
+        }
+
+        public long requiredExportSequence() {
+            return requiredExportSequence;
+        }
+
+        public String nextCursor() {
+            return nextCursor;
         }
     }
 }

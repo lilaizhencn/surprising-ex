@@ -8,6 +8,7 @@ import com.surprising.trading.api.model.AdminCancelOrderResult;
 import com.surprising.trading.api.model.AdminCancelOrdersResponse;
 import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
+import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -46,6 +47,8 @@ public class AdminOrderController {
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             return orderService.adminOrders(userId, symbol, status, orderId, limit, cursor, sort, productLine);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -62,6 +65,8 @@ public class AdminOrderController {
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             return orderService.adminCancelOrder(orderId, request == null ? null : request.reason(), productLine);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -81,6 +86,8 @@ public class AdminOrderController {
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             return orderService.adminCancelPreview(userId, symbol, limit, productLine);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -96,6 +103,8 @@ public class AdminOrderController {
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             return orderService.adminCancelOrders(request, productLine);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -111,6 +120,8 @@ public class AdminOrderController {
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             return orderService.adminCancelBySymbol(request, productLine);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

@@ -402,10 +402,11 @@ public class OrderService {
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
         requireOrderId(orderId);
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
+        requireCurrentProductLine(resolved);
         OrderResponse selected = singleProjection(requireProjection().byOrder(resolved, (Long) null, orderId, null),
                 "order not found: " + orderId);
         requireAeron();
-        OrderResponse canceled = aeronOrders.cancel(selected.userId(), orderId);
+        OrderResponse canceled = aeronOrders.cancel(selected.userId(), selected.orderId());
         boolean requested = cancelSucceeded(canceled.status());
         return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.symbol(),
                 canceled.status(), requested, requested ? "cancel requested" : "order is already "
@@ -489,9 +490,7 @@ public class OrderService {
      */
     public int requestLifecycleCancellation(String symbol, int limit) {
         String normalizedSymbol = normalizeSymbol(symbol);
-        ProductLine line = currentProductLine();
-        List<OrderResponse> selected = projectionOpenOrders(line, null, normalizedSymbol, limit);
-        requireAeron();
+        List<OrderResponse> selected = requireAeron().lifecycleOpenOrders(normalizedSymbol, limit);
         int completed = 0;
         for (OrderResponse order : selected) {
             try {
@@ -503,7 +502,7 @@ public class OrderService {
     }
 
     public boolean hasLifecycleActiveOrders(String symbol) {
-        return !projectionOpenOrders(currentProductLine(), null, normalizeSymbol(symbol), 1).isEmpty();
+        return !requireAeron().lifecycleOpenOrders(normalizeSymbol(symbol), 1).isEmpty();
     }
 
     private AeronOrderProjectionRepository requireProjection() {
@@ -525,7 +524,8 @@ public class OrderService {
                     result.requiredExportSequence());
         }
         if (result.status() == ProjectionReadResult.Status.RESPONSE_TOO_LARGE) {
-            throw new IllegalStateException("PROJECTION_RESPONSE_TOO_LARGE");
+            throw new ProjectionReadResult.ResponseTooLargeException(result.observedExportSequence(),
+                    result.requiredExportSequence(), result.nextCursor());
         }
         return result.orders();
     }
@@ -538,6 +538,13 @@ public class OrderService {
     private AeronOrderCommandService requireAeron() {
         if (aeronOrders == null) throw new IllegalStateException("Aeron order gateway is required");
         return aeronOrders;
+    }
+
+    private ProductLine requireCurrentProductLine(ProductLine productLine) {
+        if (productLine != currentProductLine()) {
+            throw new IllegalArgumentException("product line does not match this order core");
+        }
+        return productLine;
     }
 
     private String adminCancelReason(String reason) {

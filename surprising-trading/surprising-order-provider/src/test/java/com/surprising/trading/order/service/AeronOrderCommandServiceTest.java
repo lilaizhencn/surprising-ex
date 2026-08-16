@@ -68,6 +68,7 @@ class AeronOrderCommandServiceTest {
     void setUp() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAeron().setNodeId(3);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         service = new AeronOrderCommandService(aeron, new AeronOrderIdGenerator(properties), instrumentRules,
                 markPrices, properties);
     }
@@ -175,6 +176,26 @@ class AeronOrderCommandServiceTest {
     }
 
     @Test
+    void lifecycleOpenOrdersUsesAuthorityQueryAndRejectsCrossProductLineResults() {
+        when(aeron.lifecycleOpenOrders("BTC-USDT", 1000))
+                .thenReturn(List.of(orderView(91, new PlaceOrderRequest(1001, "client-91", "BTC-USDT",
+                        OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS,
+                        PositionSide.NET, false, false))));
+
+        assertThat(service.lifecycleOpenOrders("BTC-USDT", 1000)).hasSize(1);
+        verify(aeron).lifecycleOpenOrders("BTC-USDT", 1000);
+
+        when(aeron.lifecycleOpenOrders("BTC-USDT", 1))
+                .thenReturn(List.of(orderView(ProductLine.OPTION, 92, new PlaceOrderRequest(1001, "client-92",
+                        "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000, 2,
+                        MarginMode.CROSS, PositionSide.NET, false, false))));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.lifecycleOpenOrders("BTC-USDT", 1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("product line");
+    }
+
+    @Test
     void replaceCarriesCompleteReplacementInOneCoreCommand() {
         PlaceOrderRequest originalRequest = new PlaceOrderRequest(1001, "old", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 5, MarginMode.CROSS, PositionSide.NET,
@@ -257,7 +278,11 @@ class AeronOrderCommandServiceTest {
     }
 
     private static CoreOrderStateView orderView(long orderId, PlaceOrderRequest request) {
-        return new CoreOrderStateView(orderId, ProductLine.LINEAR_PERPETUAL, request.userId(), request.symbol(), 7,
+        return orderView(ProductLine.LINEAR_PERPETUAL, orderId, request);
+    }
+
+    private static CoreOrderStateView orderView(ProductLine productLine, long orderId, PlaceOrderRequest request) {
+        return new CoreOrderStateView(orderId, productLine, request.userId(), request.symbol(), 7,
                 CoreOrderSide.valueOf(request.side().name()), request.priceTicks(), request.quantitySteps(),
                 0, request.quantitySteps(), request.reduceOnly(), CoreMarginMode.valueOf(request.marginMode().name()),
                 CorePositionSide.valueOf(request.positionSide().name()), CoreOrderType.valueOf(request.orderType().name()),

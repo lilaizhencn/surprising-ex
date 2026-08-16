@@ -110,6 +110,33 @@ class ProjectedOrderQueryRepositoryTest {
     }
 
     @Test
+    void firstOversizedRowReturnsItsContinuationCursor() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.queryForObject(any(String.class), eq(Long.class), eq(ProductLine.SPOT.name())))
+                .thenReturn(12L);
+        doAnswer(invocation -> {
+            RowMapper<?> mapper = invocation.getArgument(1);
+            return List.of(mapper.mapRow(resultSet(91L), 0));
+        }).when(jdbcTemplate).query(any(String.class), any(RowMapper.class), any(Object[].class));
+
+        AeronOrderProjectionRepository baseline = new AeronOrderProjectionRepository(jdbcTemplate,
+                new ProjectionWatermarkWaiter(jdbcTemplate), 4 * 1024 * 1024);
+        int oneRowBytes = baseline.openOrders(ProductLine.SPOT, 1001L, "BTC-USDT", null, 1, 12L)
+                .encodedBytes();
+        AeronOrderProjectionRepository bounded = new AeronOrderProjectionRepository(jdbcTemplate,
+                new ProjectionWatermarkWaiter(jdbcTemplate), oneRowBytes - 1);
+
+        ProjectionReadResult result = bounded.openOrders(ProductLine.SPOT, 1001L, "BTC-USDT", null, 1000, 12L);
+
+        assertThat(result.status()).isEqualTo(ProjectionReadResult.Status.RESPONSE_TOO_LARGE);
+        assertThat(result.orders()).isEmpty();
+        assertThat(result.hasMore()).isTrue();
+        assertThat(result.nextCursor()).isNotBlank();
+        assertThat(AeronOrderProjectionRepository.decodeCursor(result.nextCursor()))
+                .isEqualTo(new AeronOrderProjectionRepository.Cursor(1_700_000_000_100L, 91L));
+    }
+
+    @Test
     void cursorEncodingIsStableForEqualTimestampsAndDifferentOrderIds() {
         String first = AeronOrderProjectionRepository.encodeCursor(1_700_000_000_100L, 91L);
         String second = AeronOrderProjectionRepository.encodeCursor(1_700_000_000_100L, 92L);

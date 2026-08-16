@@ -229,6 +229,33 @@ public final class AeronClientPool implements AutoCloseable {
             return CompletableFuture.failedFuture(new IllegalStateException("CLOSED"));
         }
         requireReservedControl(type);
+        return enqueueControlQuery(type, queryId, userId, payload);
+    }
+
+    public CompletableFuture<CoreResponse> lifecycleControlQueryAsync(
+            CoreMessageType type, UUID queryId, long userId, byte[] payload) {
+        if (closed.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("CLOSED"));
+        }
+        if (type != CoreMessageType.USER_OPEN_ORDERS_QUERY) {
+            throw new IllegalArgumentException("lifecycle control query type is required: " + type);
+        }
+        return enqueueControlQuery(type, queryId, userId, payload);
+    }
+
+    public CoreResponse lifecycleControlQuery(
+            CoreMessageType type, UUID queryId, long userId, byte[] payload) {
+        return lifecycleControlQueryAsync(type, queryId, userId, payload).join();
+    }
+
+    public CoreResponse lifecycleOpenOrders(long userId, String symbol, int limit) {
+        return lifecycleControlQuery(CoreMessageType.USER_OPEN_ORDERS_QUERY, UUID.randomUUID(), userId,
+                com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOpenOrdersQuery(
+                        new com.surprising.aeron.protocol.CoreOpenOrdersQuery(symbol, 0L, limit)));
+    }
+
+    private CompletableFuture<CoreResponse> enqueueControlQuery(
+            CoreMessageType type, UUID queryId, long userId, byte[] payload) {
         Objects.requireNonNull(queryId, "queryId");
         byte[] safePayload = requirePayload(payload);
         Request request = reservedControlAgent.queryRequest(type, queryId, userId, safePayload);
