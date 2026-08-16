@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
@@ -80,10 +81,10 @@ class AeronOrderCommandServiceTest {
                 false, false);
         when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
         when(markPrices.latestMarkPriceTicks("BTC-USDT", 7, 5_000)).thenReturn(OptionalLong.of(60_000L));
-        when(aeron.command(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
-            return commandResponse(orderView(command.orderId(), request), List.of());
+            return new CoreCommandOutcome.Terminal(commandResponse(orderView(command.orderId(), request), List.of()));
         });
 
         assertThat(service.place(request,
@@ -92,7 +93,7 @@ class AeronOrderCommandServiceTest {
                 .isEqualTo(OrderStatus.ACCEPTED);
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
-        verify(aeron).command(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        verify(aeron).commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), payload.capture());
         PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(payload.getValue());
         assertThat(command.orderType()).isEqualTo(CoreOrderType.MARKET);
@@ -113,10 +114,10 @@ class AeronOrderCommandServiceTest {
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
         when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
-        when(aeron.command(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
-            return commandResponse(orderView(command.orderId(), request), List.of());
+            return new CoreCommandOutcome.Terminal(commandResponse(orderView(command.orderId(), request), List.of()));
         });
 
         assertThat(service.place(request,
@@ -124,7 +125,7 @@ class AeronOrderCommandServiceTest {
                 new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test")).orderId())
                 .isPositive();
 
-        verify(aeron, times(1)).command(eq(CoreMessageType.PLACE_ORDER),
+        verify(aeron, times(1)).commandOutcome(eq(CoreMessageType.PLACE_ORDER),
                 org.mockito.ArgumentMatchers.any(UUID.class), eq(1001L),
                 org.mockito.ArgumentMatchers.any(byte[].class));
     }
@@ -138,11 +139,11 @@ class AeronOrderCommandServiceTest {
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 3, MarginMode.CROSS, PositionSide.NET,
                 false, false);
         when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
-        when(aeron.command(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
             PlaceOrderRequest viewRequest = command.quantitySteps() == request.quantitySteps() ? request : changed;
-            return commandResponse(orderView(command.orderId(), viewRequest), List.of());
+            return new CoreCommandOutcome.Terminal(commandResponse(orderView(command.orderId(), viewRequest), List.of()));
         });
 
         ValidationResult validation = ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL);
@@ -152,7 +153,7 @@ class AeronOrderCommandServiceTest {
         service.place(changed, validation, fee);
 
         ArgumentCaptor<UUID> commandIds = ArgumentCaptor.forClass(UUID.class);
-        verify(aeron, times(3)).command(eq(CoreMessageType.PLACE_ORDER), commandIds.capture(), eq(1001L),
+        verify(aeron, times(3)).commandOutcome(eq(CoreMessageType.PLACE_ORDER), commandIds.capture(), eq(1001L),
                 org.mockito.ArgumentMatchers.any(byte[].class));
         assertThat(commandIds.getAllValues().get(0)).isEqualTo(commandIds.getAllValues().get(1));
         assertThat(commandIds.getAllValues().get(0)).isEqualTo(commandIds.getAllValues().get(2));
@@ -163,14 +164,14 @@ class AeronOrderCommandServiceTest {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-2", "BTC-USDT", OrderSide.SELL,
                 OrderType.LIMIT, TimeInForce.GTC, 61_000, 3, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        when(aeron.command(eq(CoreMessageType.CANCEL_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        when(aeron.commandOutcome(eq(CoreMessageType.CANCEL_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class)))
-                .thenReturn(commandResponse(orderView(99, request), List.of()));
+                .thenReturn(new CoreCommandOutcome.Terminal(commandResponse(orderView(99, request), List.of())));
 
         assertThat(service.cancel(1001, 99).orderId()).isEqualTo(99);
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
-        verify(aeron).command(eq(CoreMessageType.CANCEL_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        verify(aeron).commandOutcome(eq(CoreMessageType.CANCEL_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), payload.capture());
         assertThat(TradingCommandCodec.decodeCancelOrder(payload.getValue()).orderId()).isEqualTo(99);
     }
@@ -209,13 +210,13 @@ class AeronOrderCommandServiceTest {
                 false, false, OrderStatus.ACCEPTED, null,
                 java.time.Instant.ofEpochMilli(1_000), java.time.Instant.ofEpochMilli(1_000));
         when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
-        when(aeron.command(eq(CoreMessageType.REPLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        when(aeron.commandOutcome(eq(CoreMessageType.REPLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             ReplaceOrderCommand command = TradingCommandCodec.decodeReplaceOrder(invocation.getArgument(3));
-            return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
+            return new CoreCommandOutcome.Terminal(new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                     1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(
                             orderView(77, originalRequest),
-                            orderView(command.replacement().orderId(), replacementRequest)), List.of())));
+                            orderView(command.replacement().orderId(), replacementRequest)), List.of()))));
         });
 
         assertThat(service.replace(original, replacementRequest,
@@ -224,7 +225,7 @@ class AeronOrderCommandServiceTest {
                 .replacementOrder().clientOrderId()).isEqualTo("new");
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
-        verify(aeron).command(eq(CoreMessageType.REPLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        verify(aeron).commandOutcome(eq(CoreMessageType.REPLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), payload.capture());
         ReplaceOrderCommand command = TradingCommandCodec.decodeReplaceOrder(payload.getValue());
         assertThat(command.originalOrderId()).isEqualTo(77);
@@ -245,19 +246,19 @@ class AeronOrderCommandServiceTest {
         PlaceOrderRequest replacementRequest = new PlaceOrderRequest(1001, "new", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTX, 59_000, 4, MarginMode.CROSS, PositionSide.NET,
                 false, true);
-        when(aeron.command(eq(CoreMessageType.AMEND_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        when(aeron.commandOutcome(eq(CoreMessageType.AMEND_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             AmendOrderCommand command = TradingCommandCodec.decodeAmendOrder(invocation.getArgument(3));
-            return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
+            return new CoreCommandOutcome.Terminal(new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                     1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(
                             orderView(77, originalRequest), orderView(command.replacementOrderId(), replacementRequest)),
-                            List.of())));
+                            List.of()))));
         });
 
         assertThat(service.replace(request).replacementOrder().clientOrderId()).isEqualTo("new");
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
-        verify(aeron).command(eq(CoreMessageType.AMEND_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
+        verify(aeron).commandOutcome(eq(CoreMessageType.AMEND_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), payload.capture());
         AmendOrderCommand command = TradingCommandCodec.decodeAmendOrder(payload.getValue());
         assertThat(command.originalOrderId()).isEqualTo(77);
@@ -265,7 +266,7 @@ class AeronOrderCommandServiceTest {
         assertThat(command.quantitySteps()).isEqualTo(4L);
         assertThat(command.timeInForce()).isEqualTo(CoreTimeInForce.GTX);
         assertThat(command.postOnly()).isTrue();
-        verify(aeron, times(1)).command(eq(CoreMessageType.AMEND_ORDER),
+        verify(aeron, times(1)).commandOutcome(eq(CoreMessageType.AMEND_ORDER),
                 org.mockito.ArgumentMatchers.any(UUID.class), eq(1001L),
                 org.mockito.ArgumentMatchers.any(byte[].class));
     }

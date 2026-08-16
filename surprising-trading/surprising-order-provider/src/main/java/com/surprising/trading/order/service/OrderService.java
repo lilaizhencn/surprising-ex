@@ -1,7 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.AmendOrderBatchItemResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.AmendOrderResponse;
@@ -79,6 +79,12 @@ public class OrderService {
         return placeAeron(request);
     }
 
+    public OrderCommandReceipt placeCommand(PlaceOrderRequest request) {
+        requireAeron();
+        PreparedAeronOrder prepared = prepareAeronOrder(normalize(request));
+        return aeronOrders.receipt(aeronOrders.placeCommand(prepared.request(), prepared.validation(), prepared.fee()));
+    }
+
     private OrderResponse placeAeron(PlaceOrderRequest request) {
         requireAeron();
         PlaceOrderRequest normalized = normalize(request);
@@ -98,18 +104,25 @@ public class OrderService {
     }
 
     public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
-        List<PlaceOrderRequest> orders = request == null ? List.of() : request.orders();
-        requireBatchSize(orders.size(), 20, "orders");
-        List<OrderBatchItemResponse> results = new ArrayList<>();
-        for (int i = 0; i < orders.size(); i++) {
-            try {
-                OrderResponse order = place(orders.get(i));
-                results.add(new OrderBatchItemResponse(i, true, "completed", order));
-            } catch (IllegalArgumentException | IllegalStateException ex) {
-                results.add(new OrderBatchItemResponse(i, false, ex.getMessage(), null));
-            }
+        return terminalBatchResult(placeBatchCommand(request), OrderBatchResponse.class);
+    }
+
+    public OrderCommandReceipt placeBatchCommand(BatchPlaceOrderRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("place batch request is required");
         }
-        return orderBatchResponse(results);
+        List<PlaceOrderRequest> normalized = new ArrayList<>();
+        List<ValidationResult> validations = new ArrayList<>();
+        List<OrderFeeSnapshot> fees = new ArrayList<>();
+        requireBatchSize(request.orders().size(), 20, "orders");
+        for (PlaceOrderRequest order : request.orders()) {
+            PreparedAeronOrder prepared = prepareAeronOrder(normalize(order));
+            normalized.add(prepared.request());
+            validations.add(prepared.validation());
+            fees.add(prepared.fee());
+        }
+        requireAeron();
+        return aeronOrders.receipt(aeronOrders.placeBatchCommand(request.batchKey(), normalized, validations, fees));
     }
 
     public TestOrderResponse test(PlaceOrderRequest request) {
@@ -140,6 +153,11 @@ public class OrderService {
         return amendAeron(request);
     }
 
+    public OrderCommandReceipt amendCommand(AmendOrderRequest request) {
+        requireAeron();
+        return aeronOrders.receipt(aeronOrders.replaceCommand(normalizeAmend(request)));
+    }
+
     private AmendOrderResponse amendAeron(AmendOrderRequest request) {
         requireAeron();
         AmendOrderRequest normalized = normalizeAmend(request);
@@ -147,18 +165,17 @@ public class OrderService {
     }
 
     public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
-        List<AmendOrderRequest> orders = request == null ? List.of() : request.orders();
-        requireBatchSize(orders.size(), 20, "orders");
-        List<AmendOrderBatchItemResponse> results = new ArrayList<>();
-        for (int i = 0; i < orders.size(); i++) {
-            try {
-                AmendOrderResponse amend = amend(orders.get(i));
-                results.add(new AmendOrderBatchItemResponse(i, true, amend.message(), amend));
-            } catch (IllegalArgumentException | IllegalStateException ex) {
-                results.add(new AmendOrderBatchItemResponse(i, false, ex.getMessage(), null));
-            }
+        return terminalBatchResult(amendBatchCommand(request), AmendOrderBatchResponse.class);
+    }
+
+    public OrderCommandReceipt amendBatchCommand(BatchAmendOrdersRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("amend batch request is required");
         }
-        return amendBatchResponse(results);
+        requireBatchSize(request.orders().size(), 20, "orders");
+        List<AmendOrderRequest> normalized = request.orders().stream().map(this::normalizeAmend).toList();
+        requireAeron();
+        return aeronOrders.receipt(aeronOrders.amendBatchCommand(request.batchKey(), normalized));
     }
 
     public OrderResponse closePosition(ClosePositionRequest request) {
@@ -220,19 +237,34 @@ public class OrderService {
         return requireAeron().cancel(request.userId(), request.orderId());
     }
 
-    public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
-        List<CancelOrderRequest> orders = request == null ? List.of() : request.orders();
-        requireBatchSize(orders.size(), 50, "orders");
-        List<OrderBatchItemResponse> results = new ArrayList<>();
-        for (int i = 0; i < orders.size(); i++) {
-            try {
-                OrderResponse order = cancel(orders.get(i));
-                results.add(new OrderBatchItemResponse(i, true, "completed", order));
-            } catch (IllegalArgumentException | IllegalStateException ex) {
-                results.add(new OrderBatchItemResponse(i, false, ex.getMessage(), null));
-            }
+    public OrderCommandReceipt cancelCommand(CancelOrderRequest request) {
+        if (request == null || request.userId() <= 0 || request.orderId() <= 0) {
+            throw new IllegalArgumentException("userId and orderId must be positive");
         }
-        return orderBatchResponse(results);
+        requireAeron();
+        return aeronOrders.receipt(aeronOrders.cancelCommand(request.userId(), request.orderId()));
+    }
+
+    public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
+        return terminalBatchResult(cancelBatchCommand(request), OrderBatchResponse.class);
+    }
+
+    public OrderCommandReceipt cancelBatchCommand(BatchCancelOrdersRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("cancel batch request is required");
+        }
+        requireBatchSize(request.orders().size(), 50, "orders");
+        request.orders().forEach(this::validateCancelRequest);
+        requireAeron();
+        return aeronOrders.receipt(aeronOrders.cancelBatchCommand(request.batchKey(), request.orders()));
+    }
+
+    public OrderCommandReceipt commandResult(java.util.UUID commandId) {
+        if (commandId == null) {
+            throw new IllegalArgumentException("commandId is required");
+        }
+        requireAeron();
+        return aeronOrders.commandResult(commandId);
     }
 
     public OrderBatchResponse cancelOpenOrders(CancelOpenOrdersRequest request) {
@@ -579,9 +611,26 @@ public class OrderService {
         return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
     }
 
-    private AmendOrderBatchResponse amendBatchResponse(List<AmendOrderBatchItemResponse> results) {
-        int completed = (int) results.stream().filter(AmendOrderBatchItemResponse::success).count();
-        return new AmendOrderBatchResponse(results.size(), completed, results.size() - completed, results);
+    private <T> T terminalBatchResult(OrderCommandReceipt receipt, Class<T> type) {
+        if (type.isInstance(receipt.result())) {
+            return type.cast(receipt.result());
+        }
+        if ("RESULT_UNKNOWN".equals(receipt.code())) {
+            throw new com.surprising.aeron.client.ResultUnknownException(receipt.commandId(), receipt.message());
+        }
+        if ("NOT_ACCEPTED".equals(receipt.outcome())) {
+            throw new com.surprising.aeron.client.CoreCommandOutcome.NotAcceptedException(
+                    new com.surprising.aeron.client.CoreCommandOutcome.NotAccepted(
+                            com.surprising.aeron.client.CoreCommandOutcome.NotAcceptedReason.valueOf(receipt.code()),
+                            receipt.rawOfferResult() == null ? 0L : receipt.rawOfferResult()));
+        }
+        throw new IllegalStateException(receipt.code() + ": batch result is unavailable");
+    }
+
+    private void validateCancelRequest(CancelOrderRequest request) {
+        if (request == null || request.userId() <= 0L || request.orderId() <= 0L) {
+            throw new IllegalArgumentException("userId and orderId must be positive");
+        }
     }
 
     private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation,
