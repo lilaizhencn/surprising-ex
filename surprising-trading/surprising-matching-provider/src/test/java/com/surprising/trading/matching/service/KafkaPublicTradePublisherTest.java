@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.matching.config.MatchingProperties;
@@ -24,11 +25,13 @@ class KafkaPublicTradePublisherTest {
     @Test
     @SuppressWarnings("unchecked")
     void preservesEveryQueuedTradeInPerSymbolFifoOrder() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
         KafkaPublicTradePublisher publisher = new KafkaPublicTradePublisher(
-                new ObjectMapper(), new MatchingProperties(), kafkaTemplate);
+                new ObjectMapper(), properties, kafkaTemplate);
 
         publisher.offer(trade("BTC-USDT", 1L));
         publisher.offer(trade("BTC-USDT", 2L));
@@ -39,7 +42,7 @@ class KafkaPublicTradePublisherTest {
         ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(kafkaTemplate, times(3)).send(
-                org.mockito.ArgumentMatchers.eq("surprising.perp.match.trades.v1"),
+                org.mockito.ArgumentMatchers.eq("surprising.linear-perp.match.trades.v1"),
                 key.capture(), payload.capture());
         List<PublicTradeEvent> events = payload.getAllValues().stream().map(this::read).toList();
         assertThat(events.stream().filter(event -> event.symbol().equals("BTC-USDT"))
@@ -55,11 +58,13 @@ class KafkaPublicTradePublisherTest {
     @Test
     @SuppressWarnings("unchecked")
     void dropsOnlyTheOldestTradeAfterOneSymbolExceedsItsBoundedFifo() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
         KafkaPublicTradePublisher publisher = new KafkaPublicTradePublisher(
-                new ObjectMapper(), new MatchingProperties(), kafkaTemplate);
+                new ObjectMapper(), properties, kafkaTemplate);
 
         for (long sequence = 1L; sequence <= KafkaPublicTradePublisher.MAX_QUEUED_PER_SYMBOL + 1L; sequence++) {
             publisher.offer(trade("BTC-USDT", sequence));
@@ -80,13 +85,15 @@ class KafkaPublicTradePublisherTest {
     @Test
     @SuppressWarnings("unchecked")
     void retriesTradeAfterKafkaSendFailure() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         CompletableFuture<SendResult<String, String>> failed = new CompletableFuture<>();
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(failed)
                 .thenReturn(CompletableFuture.completedFuture(null));
         KafkaPublicTradePublisher publisher = new KafkaPublicTradePublisher(
-                new ObjectMapper(), new MatchingProperties(), kafkaTemplate);
+                new ObjectMapper(), properties, kafkaTemplate);
 
         publisher.offer(trade("BTC-USDT", 1L));
         publisher.publishPending();
@@ -102,13 +109,15 @@ class KafkaPublicTradePublisherTest {
     @Test
     @SuppressWarnings("unchecked")
     void doesNotSendLaterTradeBeforeEarlierTradeRetryCompletes() throws Exception {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         CompletableFuture<SendResult<String, String>> first = new CompletableFuture<>();
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(first)
                 .thenReturn(CompletableFuture.completedFuture(null));
         KafkaPublicTradePublisher publisher = new KafkaPublicTradePublisher(
-                new ObjectMapper(), new MatchingProperties(), kafkaTemplate);
+                new ObjectMapper(), properties, kafkaTemplate);
 
         publisher.offer(trade("BTC-USDT", 1L));
         publisher.offer(trade("BTC-USDT", 2L));

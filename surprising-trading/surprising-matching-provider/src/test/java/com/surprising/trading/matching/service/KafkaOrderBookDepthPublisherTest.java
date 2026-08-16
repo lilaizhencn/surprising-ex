@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderBookDepthUpdateType;
 import com.surprising.trading.api.model.OrderBookLevel;
@@ -26,6 +27,7 @@ class KafkaOrderBookDepthPublisherTest {
     @SuppressWarnings("unchecked")
     void keepsOnlyTheLatestSnapshotIndependentlyForEachSymbol() throws Exception {
         MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
@@ -45,7 +47,7 @@ class KafkaOrderBookDepthPublisherTest {
         ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
         verify(kafkaTemplate, times(2)).send(
-                org.mockito.ArgumentMatchers.eq("surprising.perp.orderbook.depth.v1"),
+                org.mockito.ArgumentMatchers.eq("surprising.linear-perp.orderbook.depth.v1"),
                 key.capture(), payload.capture());
         assertThat(key.getAllValues()).containsExactly("BTC-USDT", "ETH-USDT");
         List<OrderBookDepthEvent> events = payload.getAllValues().stream()
@@ -63,6 +65,7 @@ class KafkaOrderBookDepthPublisherTest {
     @SuppressWarnings("unchecked")
     void replacesSnapshotsThatArriveWhileTheSameSymbolIsInFlight() throws Exception {
         MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getMarketData().setMaxInFlight(1);
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         CompletableFuture<SendResult<String, String>> first = new CompletableFuture<>();
@@ -96,6 +99,7 @@ class KafkaOrderBookDepthPublisherTest {
     @SuppressWarnings("unchecked")
     void retriesLatestSnapshotAfterKafkaSendFailure() {
         MatchingProperties properties = new MatchingProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         CompletableFuture<SendResult<String, String>> failed = new CompletableFuture<>();
         when(kafkaTemplate.send(anyString(), anyString(), anyString()))
