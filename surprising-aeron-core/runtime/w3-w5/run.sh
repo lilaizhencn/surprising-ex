@@ -35,9 +35,21 @@ require_boolean() {
 }
 
 validate_context() {
+  validate_common_context
+  [[ "$PRODUCT_LINE" == 'LINEAR_PERPETUAL' ]] || fail "PRODUCT_LINE_REFUSED expected=LINEAR_PERPETUAL actual=${PRODUCT_LINE:-unset}"
+}
+
+validate_line_context() {
+  validate_common_context
+  case "$PRODUCT_LINE" in
+    SPOT|LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION) ;;
+    *) fail "PRODUCT_LINE_REFUSED unsupported=${PRODUCT_LINE:-unset}" ;;
+  esac
+}
+
+validate_common_context() {
   [[ -n "$RUN_ID" ]] || fail 'RUN_ID_REQUIRED'
   [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] || fail "INVALID_RUN_ID runId=$RUN_ID"
-  [[ "$PRODUCT_LINE" == 'LINEAR_PERPETUAL' ]] || fail "PRODUCT_LINE_REFUSED expected=LINEAR_PERPETUAL actual=${PRODUCT_LINE:-unset}"
   require_boolean WALLET_ENABLED "$WALLET_ENABLED"
   [[ "$WALLET_ENABLED" == false ]] || fail 'WALLET_REFUSED wallet must remain absent'
   require_boolean TASK_RUN_FRESH "$TASK_RUN_FRESH"
@@ -71,13 +83,33 @@ compose() {
 }
 
 topic_list() {
-  awk -v prefix='surprising.linear-perp' '
+  local topic_segment
+  case "$PRODUCT_LINE" in
+    SPOT) topic_segment=spot ;;
+    LINEAR_PERPETUAL) topic_segment=linear-perp ;;
+    INVERSE_PERPETUAL) topic_segment=inverse-perp ;;
+    LINEAR_DELIVERY) topic_segment=linear-delivery ;;
+    INVERSE_DELIVERY) topic_segment=inverse-delivery ;;
+    OPTION) topic_segment=option ;;
+    *) fail "PRODUCT_LINE_REFUSED unsupported=$PRODUCT_LINE" ;;
+  esac
+  awk -v prefix="surprising.$topic_segment" '
     /return topic\("/ {
       value=$0; sub(/^.*return topic\("/, "", value); sub(/"\).*$/, "", value);
       print prefix "." value ".v1"
     }
     /return INSTRUMENT_EVENTS_TOPIC/ { print "surprising.instrument.events.v1" }
   ' "$PRODUCT_TOPIC_SOURCE"
+}
+
+line_process_services() {
+  printf '%s\n' exporter projector instrument price order matching trigger risk gateway
+  case "$PRODUCT_LINE" in
+    LINEAR_PERPETUAL|INVERSE_PERPETUAL)
+      printf '%s\n' funding liquidation insurance adl
+      ;;
+  esac
+  printf '%s\n' maker
 }
 
 port_lines() {
@@ -313,8 +345,14 @@ jar_path() {
 preflight_real_artifacts() {
   docker image inspect "surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}" >/dev/null 2>&1 || \
     fail "CORE_IMAGE_MISSING image=surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}"
-  local service jar
-  for service in "${PROCESS_SERVICES[@]}"; do
+  local service jar mode="${1:-real}"
+  local -a required_services=()
+  if [[ "$mode" == line-subset ]]; then
+    while IFS= read -r service; do required_services+=("$service"); done < <(line_process_services)
+  else
+    required_services=("${PROCESS_SERVICES[@]}")
+  fi
+  for service in "${required_services[@]}"; do
     jar="$(jar_path "$service")"
     [[ -f "$jar" ]] || fail "SERVICE_ARTIFACT_MISSING service=$service path=$jar"
   done
@@ -322,8 +360,14 @@ preflight_real_artifacts() {
 
 start_process_stack() {
   local mode="$1" index service port jar main_class
-  for index in "${!PROCESS_SERVICES[@]}"; do
-    service="${PROCESS_SERVICES[$index]}"
+  local -a process_services=()
+  if [[ "$mode" == line-subset ]]; then
+    while IFS= read -r service; do process_services+=("$service"); done < <(line_process_services)
+  else
+    process_services=("${PROCESS_SERVICES[@]}")
+  fi
+  for index in "${!process_services[@]}"; do
+    service="${process_services[$index]}"
     port=''
     for http_index in "${!HTTP_SERVICES[@]}"; do
       [[ "${HTTP_SERVICES[$http_index]}" != "$service" ]] || port="${HTTP_PORTS[$http_index]}"
@@ -354,7 +398,7 @@ start_process_stack() {
 up_internal() {
   local mode="$1"
   assert_ports_free
-  [[ "$mode" == fixture ]] || preflight_real_artifacts
+  [[ "$mode" == fixture ]] || preflight_real_artifacts "$mode"
   claim_runtime
   trap 'cleanup_after_failed_up' EXIT ERR INT TERM
   compose up -d postgres kafka node0 node1 node2
@@ -370,6 +414,11 @@ up_internal() {
   write_inventory "$RUN_DIR/ownership-live.txt"
   trap - EXIT ERR INT TERM
   printf 'UP=PASS runId=%s mode=%s\n' "$RUN_ID" "$mode"
+}
+
+line_up_internal() {
+  [[ "$PRODUCT_LINE" != LINEAR_PERPETUAL ]] || { up_internal real; return; }
+  up_internal line-subset
 }
 
 stop_processes() {
@@ -445,9 +494,31 @@ print_status() {
   printf 'MAKER_POSITION=%s\nWALLET=ABSENT\n' "$(tail -1 "$READY_FILE" | cut -f2)"
 }
 
+command_name="${1:-status}"
+
+if [[ "$command_name" == scenario ]]; then
+  validate_context
+  scenario_name="${2:-}"
+  case "$scenario_name" in
+    w4-six-line|w4-faults)
+      W4_SCENARIO="$scenario_name" exec "$SCRIPT_DIR/scenarios/w4-six-line.sh"
+      ;;
+    *) fail "USAGE scenario=$scenario_name expected=w4-six-line,w4-faults" ;;
+  esac
+fi
+
+if [[ "$command_name" == line-up || "$command_name" == line-down ]]; then
+  validate_line_context
+  initialize_names
+  case "$command_name" in
+    line-up) line_up_internal ;;
+    line-down) down_internal ;;
+  esac
+  exit 0
+fi
+
 validate_context
 initialize_names
-command_name="${1:-status}"
 
 case "$command_name" in
   dry-run) print_dry_run ;;
