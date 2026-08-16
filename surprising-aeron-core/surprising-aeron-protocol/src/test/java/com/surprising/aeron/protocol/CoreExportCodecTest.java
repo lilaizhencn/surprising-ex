@@ -30,7 +30,7 @@ class CoreExportCodecTest {
                 List.of(liquidation), List.of(treasury));
         CoreMessage message = new CoreMessage(new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION,
                 WireMessageKind.EXPORT_EVENT, CoreMessageType.CORE_EVENT, commandId, ProductLine.SPOT,
-                CommandSource.GATEWAY, 1, 7, 17, 19, 23), CoreExportCodec.encodeEvent(event));
+                CoreRoute.DEFAULT, CommandSource.GATEWAY, 1, 7, 17, 19, 23), CoreExportCodec.encodeEvent(event));
 
         CoreExportEvent restored = CoreExportCodec.decodeEvent(message.payload());
         List<CoreMessage> batch = CoreExportCodec.decodeBatch(CoreExportCodec.encodeBatch(List.of(message)));
@@ -46,6 +46,7 @@ class CoreExportCodecTest {
         assertThat(restored.changedLiquidations()).containsExactly(liquidation);
         assertThat(restored.changedTreasuryAssets()).containsExactly(treasury);
         assertThat(batch).containsExactly(message);
+        assertThat(batch.getFirst().header().route()).isEqualTo(CoreRoute.DEFAULT);
         assertThat(batchWithStatus.acknowledgedSequence()).isEqualTo(6);
         assertThat(batchWithStatus.events()).containsExactly(message);
         assertThat(CoreExportCodec.decodeAck(CoreExportCodec.encodeAck(new AckExportCommand(7))))
