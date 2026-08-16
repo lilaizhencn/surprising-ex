@@ -242,8 +242,26 @@ create_topics() {
   local topic
   while IFS= read -r topic; do
     compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 \
-      --create --if-not-exists --partitions 1 --replication-factor 1 --topic "$topic" >/dev/null
+      --create --if-not-exists --partitions 1 --replication-factor 1 --topic "$topic" </dev/null >/dev/null
   done < <(topic_list)
+  verify_topics
+}
+
+verify_topics() {
+  local expected actual topic partition_count expected_csv actual_csv
+  expected="$(topic_list | LC_ALL=C sort)"
+  actual="$(compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list </dev/null | LC_ALL=C sort)"
+  if [[ "$actual" != "$expected" ]]; then
+    expected_csv="$(printf '%s\n' "$expected" | paste -sd, -)"
+    actual_csv="$(printf '%s\n' "$actual" | paste -sd, -)"
+    fail "KAFKA_TOPICS_MISMATCH expected=$expected_csv actual=$actual_csv"
+  fi
+  while IFS= read -r topic; do
+    [[ -n "$topic" ]] || continue
+    partition_count="$(compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic "$topic" </dev/null | \
+      awk '{ for (field = 1; field <= NF; field++) if ($field == "PartitionCount:") { print $(field + 1); exit } }')"
+    [[ "$partition_count" == 1 ]] || fail "KAFKA_TOPIC_PARTITIONS_MISMATCH topic=$topic expected=1 actual=${partition_count:-missing}"
+  done <<< "$expected"
 }
 
 start_owned_process() {
