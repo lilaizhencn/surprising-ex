@@ -67,24 +67,121 @@ class CorePerpetualFinancialMatrixTest {
     private static final List<String> POSITIVE_SCENARIOS = SCENARIOS.subList(0, 15);
     private static final List<String> NEGATIVE_SCENARIOS = SCENARIOS.subList(15, SCENARIOS.size());
 
+    private static final Set<String> REQUIRED_ROWS = Set.of(
+            "LINEAR_PERPETUAL:CROSS:OPEN_CLOSE_REVERSAL",
+            "LINEAR_PERPETUAL:CROSS:TIER_CHANGE",
+            "LINEAR_PERPETUAL:CROSS:MAKER_TAKER_FEES",
+            "LINEAR_PERPETUAL:CROSS:FUNDING_POSITIVE",
+            "LINEAR_PERPETUAL:CROSS:FUNDING_NEGATIVE",
+            "LINEAR_PERPETUAL:CROSS:STALE_MARK",
+            "LINEAR_PERPETUAL:CROSS:RISK_SCAN",
+            "LINEAR_PERPETUAL:CROSS:LIQUIDATION_PARTIAL",
+            "LINEAR_PERPETUAL:CROSS:LIQUIDATION_FULL",
+            "LINEAR_PERPETUAL:CROSS:LIQUIDATION_FEE_CAP",
+            "LINEAR_PERPETUAL:CROSS:INSURANCE_FULL",
+            "LINEAR_PERPETUAL:CROSS:INSURANCE_PARTIAL",
+            "LINEAR_PERPETUAL:CROSS:ADL_ORDER",
+            "LINEAR_PERPETUAL:CROSS:ADL_COVERAGE",
+            "LINEAR_PERPETUAL:CROSS:SNAPSHOT_CONTINUATION",
+            "LINEAR_PERPETUAL:CROSS:CROSS_LINE_REJECTED",
+            "LINEAR_PERPETUAL:CROSS:ISOLATED_COLLATERAL_LEAKAGE",
+            "LINEAR_PERPETUAL:ISOLATED:OPEN_CLOSE_REVERSAL",
+            "LINEAR_PERPETUAL:ISOLATED:TIER_CHANGE",
+            "LINEAR_PERPETUAL:ISOLATED:MAKER_TAKER_FEES",
+            "LINEAR_PERPETUAL:ISOLATED:FUNDING_POSITIVE",
+            "LINEAR_PERPETUAL:ISOLATED:FUNDING_NEGATIVE",
+            "LINEAR_PERPETUAL:ISOLATED:STALE_MARK",
+            "LINEAR_PERPETUAL:ISOLATED:RISK_SCAN",
+            "LINEAR_PERPETUAL:ISOLATED:LIQUIDATION_PARTIAL",
+            "LINEAR_PERPETUAL:ISOLATED:LIQUIDATION_FULL",
+            "LINEAR_PERPETUAL:ISOLATED:LIQUIDATION_FEE_CAP",
+            "LINEAR_PERPETUAL:ISOLATED:INSURANCE_FULL",
+            "LINEAR_PERPETUAL:ISOLATED:INSURANCE_PARTIAL",
+            "LINEAR_PERPETUAL:ISOLATED:ADL_ORDER",
+            "LINEAR_PERPETUAL:ISOLATED:ADL_COVERAGE",
+            "LINEAR_PERPETUAL:ISOLATED:SNAPSHOT_CONTINUATION",
+            "LINEAR_PERPETUAL:ISOLATED:CROSS_LINE_REJECTED",
+            "LINEAR_PERPETUAL:ISOLATED:ISOLATED_COLLATERAL_LEAKAGE",
+            "INVERSE_PERPETUAL:CROSS:OPEN_CLOSE_REVERSAL",
+            "INVERSE_PERPETUAL:CROSS:TIER_CHANGE",
+            "INVERSE_PERPETUAL:CROSS:MAKER_TAKER_FEES",
+            "INVERSE_PERPETUAL:CROSS:FUNDING_POSITIVE",
+            "INVERSE_PERPETUAL:CROSS:FUNDING_NEGATIVE",
+            "INVERSE_PERPETUAL:CROSS:STALE_MARK",
+            "INVERSE_PERPETUAL:CROSS:RISK_SCAN",
+            "INVERSE_PERPETUAL:CROSS:LIQUIDATION_PARTIAL",
+            "INVERSE_PERPETUAL:CROSS:LIQUIDATION_FULL",
+            "INVERSE_PERPETUAL:CROSS:LIQUIDATION_FEE_CAP",
+            "INVERSE_PERPETUAL:CROSS:INSURANCE_FULL",
+            "INVERSE_PERPETUAL:CROSS:INSURANCE_PARTIAL",
+            "INVERSE_PERPETUAL:CROSS:ADL_ORDER",
+            "INVERSE_PERPETUAL:CROSS:ADL_COVERAGE",
+            "INVERSE_PERPETUAL:CROSS:SNAPSHOT_CONTINUATION",
+            "INVERSE_PERPETUAL:CROSS:CROSS_LINE_REJECTED",
+            "INVERSE_PERPETUAL:CROSS:ISOLATED_COLLATERAL_LEAKAGE",
+            "INVERSE_PERPETUAL:ISOLATED:OPEN_CLOSE_REVERSAL",
+            "INVERSE_PERPETUAL:ISOLATED:TIER_CHANGE",
+            "INVERSE_PERPETUAL:ISOLATED:MAKER_TAKER_FEES",
+            "INVERSE_PERPETUAL:ISOLATED:FUNDING_POSITIVE",
+            "INVERSE_PERPETUAL:ISOLATED:FUNDING_NEGATIVE",
+            "INVERSE_PERPETUAL:ISOLATED:STALE_MARK",
+            "INVERSE_PERPETUAL:ISOLATED:RISK_SCAN",
+            "INVERSE_PERPETUAL:ISOLATED:LIQUIDATION_PARTIAL",
+            "INVERSE_PERPETUAL:ISOLATED:LIQUIDATION_FULL",
+            "INVERSE_PERPETUAL:ISOLATED:LIQUIDATION_FEE_CAP",
+            "INVERSE_PERPETUAL:ISOLATED:INSURANCE_FULL",
+            "INVERSE_PERPETUAL:ISOLATED:INSURANCE_PARTIAL",
+            "INVERSE_PERPETUAL:ISOLATED:ADL_ORDER",
+            "INVERSE_PERPETUAL:ISOLATED:ADL_COVERAGE",
+            "INVERSE_PERPETUAL:ISOLATED:SNAPSHOT_CONTINUATION",
+            "INVERSE_PERPETUAL:ISOLATED:CROSS_LINE_REJECTED",
+            "INVERSE_PERPETUAL:ISOLATED:ISOLATED_COLLATERAL_LEAKAGE");
+
     private final TradingCoreReducer reducer = new TradingCoreReducer();
 
     @Test
     void failingFirstCompletenessManifestReportsEveryMissingRow() {
-        Set<String> required = requiredRows(SCENARIOS);
-        Set<String> implemented = implementedRows();
+        List<Row> rows = allRows();
+        Map<String, Integer> counts = new TreeMap<>();
+        for (Row row : rows) {
+            counts.merge(row.key(), 1, Integer::sum);
+        }
+        Set<String> actual = counts.keySet();
+        Set<String> required = REQUIRED_ROWS;
         Set<String> missing = new LinkedHashSet<>(required);
-        missing.removeAll(implemented);
-        Set<String> duplicate = new LinkedHashSet<>(implemented);
-        duplicate.removeAll(required);
+        missing.removeAll(actual);
+        Set<String> unexpected = new LinkedHashSet<>(actual);
+        unexpected.removeAll(required);
+        Set<String> duplicate = new LinkedHashSet<>();
+        counts.forEach((key, count) -> {
+            if (count > 1) duplicate.add(key);
+        });
 
         assertThat(missing).as("missing perpetual financial matrix rows").isEmpty();
-        assertThat(duplicate).as("unexpected perpetual financial matrix rows").isEmpty();
-        assertThat(implemented).hasSize(required.size());
+        assertThat(unexpected).as("unexpected perpetual financial matrix rows").isEmpty();
+        assertThat(duplicate).as("duplicate perpetual financial matrix rows").isEmpty();
+        assertThat(actual).containsExactlyInAnyOrderElementsOf(required);
+        assertThat(rows).hasSize(required.size());
     }
 
     @Test
     void coversLinearInverseCrossIsolated() {
+        List<Row> rows = allRows();
+
+        assertRows(rows);
+        assertManifest(rows, POSITIVE_SCENARIOS);
+    }
+
+    @Test
+    void rejectsStaleCrossLineAndCollateralLeakage() {
+        List<Row> rows = allRows();
+
+        assertRows(rows);
+        assertManifest(rows, List.of("STALE_MARK"));
+        assertManifest(rows, NEGATIVE_SCENARIOS);
+    }
+
+    private List<Row> allRows() {
         List<Row> rows = new ArrayList<>();
         for (Variant variant : VARIANTS) {
             rows.add(openCloseReversal(variant));
@@ -102,24 +199,10 @@ class CorePerpetualFinancialMatrixTest {
             rows.add(adlOrder(variant));
             rows.add(adlCoverage(variant));
             rows.add(snapshotContinuation(variant));
-        }
-
-        assertRows(rows);
-        assertManifest(rows, POSITIVE_SCENARIOS);
-    }
-
-    @Test
-    void rejectsStaleCrossLineAndCollateralLeakage() {
-        List<Row> rows = new ArrayList<>();
-        for (Variant variant : VARIANTS) {
-            rows.add(staleMark(variant));
             rows.add(crossLineRejected(variant));
             rows.add(isolatedCollateralLeakage(variant));
         }
-
-        assertRows(rows);
-        assertManifest(rows, List.of("STALE_MARK"));
-        assertManifest(rows, NEGATIVE_SCENARIOS);
+        return rows;
     }
 
     private Row openCloseReversal(Variant variant) {
@@ -216,31 +299,186 @@ class CorePerpetualFinancialMatrixTest {
     }
 
     private Row liquidation(Variant variant, long closeQuantity, String scenario) {
-        TradingCoreState opening = withPosition(variant, USER_ID, QUANTITY, ENTRY_PRICE, 100, POSITION_MARGIN);
-        TradingCoreState marked = mark(opening, variant, 90, 1);
+        boolean partial = closeQuantity != QUANTITY;
+        TradingCoreState opening;
+        TradingCoreState marked;
+        TradingCoreReducer.FundingApplication funding = null;
+        long executionPrice;
+        long feeRate;
+        if (partial) {
+            opening = oppositePositions(variant, 450, 300);
+            TradingCoreState markedAtEntry = mark(opening, variant, ENTRY_PRICE, 1);
+            funding = reducer.applyFundingWithFacts(markedAtEntry,
+                    new ApplyFundingCommand(500, SYMBOL, 1, 100_000));
+            marked = mark(funding.state(), variant, 70, 2);
+            executionPrice = 70;
+            feeRate = 100_000;
+        } else {
+            opening = withPosition(variant, USER_ID, QUANTITY, ENTRY_PRICE, 100, POSITION_MARGIN);
+            marked = mark(opening, variant, 90, 1);
+            executionPrice = 90;
+            feeRate = 0;
+        }
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
-        if (closeQuantity != QUANTITY) {
+        if (partial) {
             plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
                     plan.positionSide(), plan.instrumentVersion(), plan.triggerPriceSequence(),
                     plan.signedQuantitySteps(), closeQuantity, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
             marked = replaceLiquidation(marked, plan);
         }
         TradingCoreState ending = reducer.executeLiquidation(marked,
-                new ExecuteLiquidationCommand(1, 1, 90, 0));
+                new ExecuteLiquidationCommand(1, partial ? 2 : 1, executionPrice, feeRate));
 
-        long endingUser = closeQuantity == QUANTITY ? 0 : 50;
-        long insurance = closeQuantity == QUANTITY ? 100 : 50;
-        long deficit = closeQuantity == QUANTITY
-                ? linearOrInverse(variant, 0, 11) : linearOrInverse(variant, 0, 6);
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
+        CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
+        if (partial) {
+            long realizedPnl = linearOrInverse(variant, -150, -214);
+            long liquidationFee = linearOrInverse(variant, 35, 72);
+            long insurance = linearOrInverse(variant, 185, 286);
+            long userEnding = linearOrInverse(variant, 165, 64);
+            assertThat(funding.payments()).extracting(payment -> payment.amountUnits())
+                    .containsExactly(-100L, 100L);
+            assertThat(ending.treasuryState().fundingSettlements()).containsEntry(SYMBOL, 500L);
+            assertThat(position.signedQuantitySteps()).isEqualTo(5);
+            assertThat(position.positionMarginUnits()).isEqualTo(50);
+            assertThat(position.entryPriceTicks()).isEqualTo(100);
+            assertThat(position.entryValueTicks()).isEqualTo(500);
+            assertThat(position.realizedPnlUnits()).isEqualTo(realizedPnl);
+            assertThat(result.deficitUnits()).isZero();
+            assertThat(result.status()).isEqualTo(CoreLiquidationState.Status.COMPLETED);
+            assertThat(result.liquidationFeeUnits()).isEqualTo(liquidationFee);
+            assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(userEnding);
+            assertThat(ending.treasuryState().feeBalances()).doesNotContainKey(variant.settleAsset());
+            assertThat(ending.treasuryState().insuranceBalances())
+                    .containsEntry(variant.settleAsset(), insurance);
+            assertShortPartialLiquidation(variant);
+            assertNonDivisiblePartial(variant);
+            assertLiquidationBoundaries(variant);
+            return row(variant, scenario, opening, ending, List.of(MAKER_ID), false, false,
+                    funds(450, 300, 0, 0, userEnding - 450, 100, 0, insurance,
+                            userEnding, 400, 0, insurance));
+        }
+
+        long realizedPnl = linearOrInverse(variant, -100, -111);
+        assertThat(position.signedQuantitySteps()).isZero();
+        assertThat(position.positionMarginUnits()).isZero();
+        assertThat(position.entryPriceTicks()).isZero();
+        assertThat(position.entryValueTicks()).isZero();
+        assertThat(position.realizedPnlUnits()).isEqualTo(realizedPnl);
+        long deficit = linearOrInverse(variant, 0, 11);
         assertThat(result.deficitUnits()).isEqualTo(deficit);
-        assertThat(ending.user(USER_ID).positions().get(SYMBOL).signedQuantitySteps())
-                .isEqualTo(closeQuantity == QUANTITY ? 0 : 5);
         assertThat(result.status()).isEqualTo(deficit == 0
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.INSURANCE_REQUIRED);
+        assertThat(result.liquidationFeeUnits()).isZero();
+        assertThat(ending.treasuryState().insuranceBalances())
+                .containsEntry(variant.settleAsset(), 100L);
         return row(variant, scenario, opening, ending, List.of(), false, false,
-                funds(100, 0, 0, 0, endingUser - 100, 0, 0, insurance,
-                        endingUser, 0, 0, insurance));
+                funds(100, 0, 0, 0, -100, 0, 0, 100, 0, 0, 0, 100));
+    }
+
+    private void assertShortPartialLiquidation(Variant variant) {
+        TradingCoreState opening = withPosition(variant, USER_ID, -QUANTITY, ENTRY_PRICE, 400, POSITION_MARGIN);
+        opening = withPosition(opening, variant, MAKER_ID, QUANTITY, ENTRY_PRICE, 300, POSITION_MARGIN);
+        TradingCoreState markedAtEntry = mark(opening, variant, ENTRY_PRICE, 1);
+        TradingCoreReducer.FundingApplication funding = reducer.applyFundingWithFacts(markedAtEntry,
+                new ApplyFundingCommand(501, SYMBOL, 1, -100_000));
+        TradingCoreState marked = mark(funding.state(), variant, 150, 2);
+        CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
+        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
+                plan.positionSide(), plan.instrumentVersion(), plan.triggerPriceSequence(),
+                plan.signedQuantitySteps(), 5, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
+        marked = replaceLiquidation(marked, plan);
+        TradingCoreState ending = reducer.executeLiquidation(marked,
+                new ExecuteLiquidationCommand(1, 2, 150, 100_000));
+
+        long realizedPnl = linearOrInverse(variant, -250, -167);
+        long liquidationFee = linearOrInverse(variant, 0, 34);
+        long insurance = linearOrInverse(variant, 250, 201);
+        long userEnding = linearOrInverse(variant, 50, 99);
+        CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
+        CoreLiquidationState result = ending.riskState().liquidations().get(1L);
+        assertThat(funding.payments()).extracting(payment -> payment.amountUnits())
+                .containsExactly(-100L, 100L);
+        assertThat(ending.treasuryState().fundingSettlements()).containsEntry(SYMBOL, 501L);
+        assertThat(position.signedQuantitySteps()).isEqualTo(-5);
+        assertThat(position.positionMarginUnits()).isEqualTo(50);
+        assertThat(position.entryPriceTicks()).isEqualTo(100);
+        assertThat(position.entryValueTicks()).isEqualTo(500);
+        assertThat(position.realizedPnlUnits()).isEqualTo(realizedPnl);
+        assertThat(result.deficitUnits()).isZero();
+        assertThat(result.status()).isEqualTo(CoreLiquidationState.Status.COMPLETED);
+        assertThat(result.liquidationFeeUnits()).isEqualTo(liquidationFee);
+        assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(userEnding);
+        assertThat(ending.user(MAKER_ID).totalUnits(variant.settleAsset())).isEqualTo(400);
+        assertThat(ending.treasuryState().feeBalances()).doesNotContainKey(variant.settleAsset());
+        assertThat(ending.treasuryState().insuranceBalances())
+                .containsEntry(variant.settleAsset(), insurance);
+        assertThat(userEnding + 400 + insurance - 700).isZero();
+    }
+
+    private void assertNonDivisiblePartial(Variant variant) {
+        assertRoundedPartial(variant, 3, 60, 2, linearOrInverse(variant, -40, -67),
+                linearOrInverse(variant, 7, 34), linearOrInverse(variant, 68, 68),
+                linearOrInverse(variant, 33, 33));
+        assertRoundedPartial(variant, -3, 140, -2, linearOrInverse(variant, -40, -29),
+                linearOrInverse(variant, 7, 0), linearOrInverse(variant, 68, 72),
+                linearOrInverse(variant, 33, 29));
+    }
+
+    private void assertRoundedPartial(Variant variant, long signedQuantity, long markPrice,
+                                      long expectedQuantity, long expectedPnl, long expectedDeficit,
+                                      long expectedUser, long expectedInsurance) {
+        TradingCoreState opening = withPosition(variant, USER_ID, signedQuantity, ENTRY_PRICE, 101, 101);
+        TradingCoreState marked = mark(opening, variant, markPrice, 1);
+        CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
+        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
+                plan.positionSide(), plan.instrumentVersion(), plan.triggerPriceSequence(),
+                plan.signedQuantitySteps(), 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
+        marked = replaceLiquidation(marked, plan);
+        TradingCoreState ending = reducer.executeLiquidation(marked,
+                new ExecuteLiquidationCommand(1, 1, markPrice, 0));
+
+        CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
+        CoreLiquidationState result = ending.riskState().liquidations().get(1L);
+        assertThat(position.signedQuantitySteps()).isEqualTo(expectedQuantity);
+        assertThat(position.positionMarginUnits()).isEqualTo(68);
+        assertThat(position.entryPriceTicks()).isEqualTo(100);
+        assertThat(position.entryValueTicks()).isEqualTo(200);
+        assertThat(position.realizedPnlUnits()).isEqualTo(expectedPnl);
+        assertThat(result.deficitUnits()).isEqualTo(expectedDeficit);
+        assertThat(result.status()).isEqualTo(expectedDeficit == 0
+                ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.INSURANCE_REQUIRED);
+        assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(expectedUser);
+        assertThat(ending.treasuryState().insuranceBalances())
+                .containsEntry(variant.settleAsset(), expectedInsurance);
+        assertThat(expectedUser + expectedInsurance - 101).isZero();
+    }
+
+    private void assertLiquidationBoundaries(Variant variant) {
+        assertThatThrownBy(() -> new CoreLiquidationState(1, USER_ID, SYMBOL, variant.marginMode(),
+                CorePositionSide.NET, 1, 1, Long.MIN_VALUE, 1, 0, 0, 0, 0,
+                CoreLiquidationState.Status.PLANNED)).isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> new CoreLiquidationState(1, USER_ID, SYMBOL, variant.marginMode(),
+                CorePositionSide.NET, 1, 1, QUANTITY, QUANTITY + 1, 0, 0, 0, 0,
+                CoreLiquidationState.Status.PLANNED)).isInstanceOf(IllegalArgumentException.class);
+
+        TradingCoreState opening = withPosition(variant, USER_ID, 3, ENTRY_PRICE, 100, 100);
+        TradingCoreState marked = mark(opening, variant, 50, 1);
+        CorePositionState position = marked.user(USER_ID).positions().get(SYMBOL);
+        TradingCoreState overflow = replacePosition(marked, USER_ID,
+                new CorePositionState(SYMBOL, variant.settleAsset(), variant.marginMode(), CorePositionSide.NET,
+                        1, 3, ENTRY_PRICE, Long.MAX_VALUE, position.realizedPnlUnits(),
+                        position.positionMarginUnits()));
+        CoreLiquidationState plan = overflow.riskState().liquidations().get(1L);
+        plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
+                plan.positionSide(), plan.instrumentVersion(), plan.triggerPriceSequence(),
+                plan.signedQuantitySteps(), 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
+        overflow = replaceLiquidation(overflow, plan);
+        TradingCoreState overflowState = overflow;
+        long hash = overflowState.businessStateHash();
+        assertThatThrownBy(() -> reducer.executeLiquidation(overflowState,
+                new ExecuteLiquidationCommand(1, 1, 50, 0))).isInstanceOf(ArithmeticException.class);
+        assertThat(overflowState.businessStateHash()).isEqualTo(hash);
     }
 
     private Row cappedLiquidation(Variant variant) {
@@ -370,26 +608,37 @@ class CorePerpetualFinancialMatrixTest {
     private Row isolatedCollateralLeakage(Variant variant) {
         TradingCoreState opening = stateWithInstrument(variant, false);
         opening = reducer.upsertInstrument(opening, instrument(variant, "ETH-USDT", "ETH", false));
-        opening = fundedState(opening, USER_ID, 300);
+        opening = reducer.upsertInstrument(opening, instrument(variant, "SOL-USDT", "SOL", false));
+        opening = fundedState(opening, USER_ID, 175);
         opening = addPosition(opening, variant, USER_ID, SYMBOL, QUANTITY, ENTRY_PRICE,
-                POSITION_MARGIN, CoreMarginMode.ISOLATED);
-        opening = addPosition(opening, variant, USER_ID, "ETH-USDT", QUANTITY, ENTRY_PRICE,
-                200, CoreMarginMode.CROSS);
+                50, variant.marginMode());
+        opening = addPosition(opening, variant, USER_ID, "ETH-USDT", 1, ENTRY_PRICE,
+                75, CoreMarginMode.CROSS);
+        opening = addPosition(opening, variant, USER_ID, "SOL-USDT", 1, ENTRY_PRICE,
+                50, CoreMarginMode.ISOLATED);
         TradingCoreState markedEth = reducer.applyMarkPrice(opening,
                 new ApplyMarkPriceCommand("ETH-USDT", 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
-        TradingCoreState marked = reducer.applyMarkPrice(markedEth,
+        TradingCoreState markedSol = reducer.applyMarkPrice(markedEth,
+                new ApplyMarkPriceCommand("SOL-USDT", 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
+        TradingCoreState marked = reducer.applyMarkPrice(markedSol,
                 new ApplyMarkPriceCommand(SYMBOL, 1, 90, 1, 1_700_000_000_000L));
         TradingCoreState ending = reducer.executeLiquidation(marked,
                 new ExecuteLiquidationCommand(1, 1, 90, 0));
 
         CoreUserState user = ending.user(USER_ID);
-        assertThat(user.balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(200);
-        assertThat(user.positions().get("ETH-USDT").positionMarginUnits()).isEqualTo(200);
+        assertThat(user.positions().get(SYMBOL).marginMode()).isEqualTo(variant.marginMode());
+        assertThat(user.balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
+        assertThat(user.positions().get("ETH-USDT").marginMode()).isEqualTo(CoreMarginMode.CROSS);
+        assertThat(user.positions().get("ETH-USDT").signedQuantitySteps()).isEqualTo(1);
+        assertThat(user.positions().get("ETH-USDT").positionMarginUnits()).isEqualTo(75);
+        assertThat(user.positions().get("SOL-USDT").marginMode()).isEqualTo(CoreMarginMode.ISOLATED);
+        assertThat(user.positions().get("SOL-USDT").signedQuantitySteps()).isEqualTo(1);
+        assertThat(user.positions().get("SOL-USDT").positionMarginUnits()).isEqualTo(50);
         assertThat(user.positions().get(SYMBOL).signedQuantitySteps()).isZero();
         assertThat(ending.treasuryState().insuranceBalances())
-                .containsEntry(variant.settleAsset(), 100L);
+                .containsEntry(variant.settleAsset(), 50L);
         return row(variant, "ISOLATED_COLLATERAL_LEAKAGE", opening, ending, List.of(), false, false,
-                funds(300, 0, 0, 0, -100, 0, 0, 100, 200, 0, 0, 100));
+                funds(175, 0, 0, 0, -50, 0, 0, 50, 125, 0, 0, 50));
     }
 
     private TradingCoreState adlSetup(Variant variant) {
@@ -508,6 +757,19 @@ class CorePerpetualFinancialMatrixTest {
                 state.orders(), state.instruments(), risk, state.treasuryState());
     }
 
+    private TradingCoreState replacePosition(TradingCoreState state, long userId, CorePositionState position) {
+        CoreUserState current = state.user(userId);
+        Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
+        positions.put(position.key(), position);
+        CoreUserState nextUser = new CoreUserState(current.productLine(), current.userId(),
+                Math.incrementExact(current.revision()), current.balances(), current.reservations(), positions,
+                current.positionMode());
+        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        users.put(userId, nextUser);
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
+                state.orders(), state.instruments(), state.riskState(), state.treasuryState());
+    }
+
     private Row row(Variant variant, String scenario, TradingCoreState opening, TradingCoreState ending,
                     List<Long> makerIds, boolean economic, boolean includeLiquidationDeficit, Funds funds) {
         return new Row(rowKey(variant.type(), variant.marginMode(), scenario), variant, opening, ending,
@@ -563,22 +825,13 @@ class CorePerpetualFinancialMatrixTest {
 
     private static Set<String> requiredRows(List<String> scenarios) {
         Set<String> required = new LinkedHashSet<>();
-        for (Variant variant : VARIANTS) {
-            for (String scenario : scenarios) {
-                required.add(rowKey(variant.type(), variant.marginMode(), scenario));
+        for (String key : REQUIRED_ROWS) {
+            String scenario = key.substring(key.lastIndexOf(':') + 1);
+            if (scenarios.contains(scenario)) {
+                required.add(key);
             }
         }
         return required;
-    }
-
-    private static Set<String> implementedRows() {
-        Set<String> implemented = new LinkedHashSet<>();
-        for (Variant variant : VARIANTS) {
-            for (String scenario : SCENARIOS) {
-                implemented.add(rowKey(variant.type(), variant.marginMode(), scenario));
-            }
-        }
-        return implemented;
     }
 
     private long userValue(Row row, TradingCoreState state, long userId) {
