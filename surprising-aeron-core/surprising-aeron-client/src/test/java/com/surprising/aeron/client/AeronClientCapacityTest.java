@@ -76,6 +76,7 @@ class AeronClientCapacityTest {
                 return null;
             }
             @Override public RuntimeException sessionFailure() { return null; }
+            @Override public boolean keepAlive() { return true; }
             @Override public void close() { }
         };
     }

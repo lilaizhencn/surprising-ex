@@ -218,6 +218,11 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
+    public boolean keepAlive() {
+        return cluster.sendKeepAlive();
+    }
+
+    @Override
     public void onMessage(
             long clusterSessionId,
             long timestamp,
@@ -345,6 +350,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         public RuntimeException sessionFailure() {
             SurprisingAeronClient current = client;
             return current == null ? null : current.sessionFailure();
+        }
+
+        @Override
+        public boolean keepAlive() {
+            SurprisingAeronClient current = poll();
+            return current != null && current.keepAlive();
         }
 
         @Override

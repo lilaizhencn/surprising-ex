@@ -10,16 +10,19 @@ import com.surprising.product.api.ProductLine;
 import io.aeron.Publication;
 import io.aeron.driver.MediaDriver;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -31,6 +34,8 @@ public final class AeronClientPool implements AutoCloseable {
     private static final long DISPATCHER_CLOSE_TIMEOUT_MILLIS = 5_000L;
     private static final long MIN_RECONNECT_MILLIS = 25L;
     private static final long MAX_RECONNECT_MILLIS = 1_000L;
+    private static final long KEEP_ALIVE_INTERVAL_MILLIS = 1_000L;
+    private static final long KEEP_ALIVE_RETRY_MILLIS = 25L;
 
     public enum TryCommandResult {
         SENT,
@@ -46,6 +51,7 @@ public final class AeronClientPool implements AutoCloseable {
         int pollEgress(int fragmentLimit);
         CoreResponse takeResponse(long correlationId);
         RuntimeException sessionFailure();
+        boolean keepAlive();
         @Override
         void close();
     }
@@ -68,6 +74,7 @@ public final class AeronClientPool implements AutoCloseable {
     private final AgentLane reservedControlAgent;
     private final EgressDispatcher egressDispatcher;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean dispatcherStopped = new AtomicBoolean();
     private final AtomicReference<MediaDriver> mediaDriver = new AtomicReference<>();
     private final AtomicReference<RuntimeException> dispatcherFailure = new AtomicReference<>();
 
@@ -298,17 +305,9 @@ public final class AeronClientPool implements AutoCloseable {
         if (!lane.enqueue(request)) {
             request.notAccepted(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
         }
-        if (request.commandFuture != null) {
-            return requireTerminal(request.commandFuture.join());
-        }
-        try {
-            return request.queryFuture.join();
-        } catch (CompletionException exception) {
-            if (exception.getCause() instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            throw exception;
-        }
+        return request.commandFuture == null
+                ? awaitPrepared(request, request.queryFuture)
+                : requireTerminal(awaitPrepared(request, request.commandFuture));
     }
 
     public CoreResponse commandResult(UUID commandId, long userId) {
@@ -333,27 +332,17 @@ public final class AeronClientPool implements AutoCloseable {
         return capacity.queryMailboxCapacity();
     }
 
+    boolean dispatcherStopped() {
+        return dispatcherStopped.get();
+    }
+
     @Override
-    public void close() {
-        if (!closed.compareAndSet(false, true)) {
+    public synchronized void close() {
+        boolean firstClose = closed.compareAndSet(false, true);
+        if (!firstClose && !egressDispatcher.isAlive() && mediaDriver.get() == null) {
             return;
         }
         RuntimeException failure = egressDispatcher.stop();
-        MediaDriver driver;
-        synchronized (mediaDriver) {
-            driver = mediaDriver.getAndSet(null);
-        }
-        if (driver != null) {
-            try {
-                driver.close();
-            } catch (RuntimeException exception) {
-                if (failure == null) {
-                    failure = exception;
-                } else {
-                    failure.addSuppressed(exception);
-                }
-            }
-        }
         if (failure != null) {
             throw failure;
         }
@@ -372,8 +361,9 @@ public final class AeronClientPool implements AutoCloseable {
         synchronized (mediaDriver) {
             current = mediaDriver.get();
             if (current == null) {
-                String directoryName = "surprising-aeron-" + stableLong(
-                        clientName + ':' + productLine + ':' + ProcessHandle.current().pid());
+                String directoryName = Path.of(System.getProperty("java.io.tmpdir"),
+                        "surprising-aeron-" + stableLong(
+                                clientName + ':' + productLine + ':' + ProcessHandle.current().pid())).toString();
                 current = SurprisingAeronClient.newMediaDriver(directoryName);
                 mediaDriver.set(current);
             }
@@ -391,6 +381,28 @@ public final class AeronClientPool implements AutoCloseable {
                             + unknown.originalCommandId());
         }
         throw new CoreCommandOutcome.NotAcceptedException((CoreCommandOutcome.NotAccepted) outcome);
+    }
+
+    private static <T> T awaitPrepared(Request request, CompletableFuture<T> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException exception) {
+            boolean cancelled = request.cancelBeforeOffer();
+            Thread.currentThread().interrupt();
+            if (cancelled) {
+                throw new IllegalStateException("Interrupted before prepared Aeron request admission", exception);
+            }
+            throw new ResultUnknownException(request.operationId,
+                    "Interrupted after prepared Aeron request admission; result is unknown");
+        } catch (ExecutionException exception) {
+            if (exception.getCause() instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (exception.getCause() instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("Prepared Aeron request failed", exception.getCause());
+        }
     }
 
     private static TryCommandResult mapTryCommandResult(long offerResult) {
@@ -435,9 +447,11 @@ public final class AeronClientPool implements AutoCloseable {
         private final AtomicLong nextSequence = new AtomicLong();
         private final AtomicLong nextCorrelation = new AtomicLong();
         private final Map<Long, Request> pending = new LinkedHashMap<>();
+        private final Set<Long> claimedCorrelations = ConcurrentHashMap.newKeySet();
         private Session session;
         private long reconnectAtNanos;
         private long reconnectMillis = MIN_RECONNECT_MILLIS;
+        private long keepAliveAtNanos;
 
         private AgentLane(int mailboxCapacity, int maxInFlight, long sourceId) {
             this.mailbox = new ArrayBlockingQueue<>(mailboxCapacity);
@@ -465,17 +479,48 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private boolean enqueue(Request request) {
-            return mailbox.offer(request);
+            long correlationId = request.message.header().correlationId();
+            if (!claimedCorrelations.add(correlationId)) {
+                request.fail(new IllegalStateException(
+                        "duplicate in-flight Aeron correlationId=" + correlationId));
+                return true;
+            }
+            request.releaseCorrelationWith(() -> claimedCorrelations.remove(correlationId));
+            RuntimeException failure = dispatcherFailure.get();
+            if (failure != null) {
+                request.fail(failure);
+                return true;
+            }
+            if (closed.get() || dispatcherStopped.get()) {
+                request.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
+                return true;
+            }
+            if (!mailbox.offer(request)) {
+                request.releaseCorrelation();
+                return false;
+            }
+            failure = dispatcherFailure.get();
+            if ((closed.get() || dispatcherStopped.get() || failure != null) && mailbox.remove(request)) {
+                if (failure == null) {
+                    request.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
+                } else {
+                    request.fail(failure);
+                }
+            }
+            return true;
         }
 
         private void connected() {
             reconnectAtNanos = 0;
             reconnectMillis = MIN_RECONNECT_MILLIS;
+            keepAliveAtNanos = System.nanoTime()
+                    + TimeUnit.MILLISECONDS.toNanos(KEEP_ALIVE_INTERVAL_MILLIS);
         }
 
         private void reconnectLater() {
             reconnectAtNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(reconnectMillis);
             reconnectMillis = Math.min(MAX_RECONNECT_MILLIS, Math.multiplyExact(reconnectMillis, 2));
+            keepAliveAtNanos = 0;
         }
     }
 
@@ -511,6 +556,9 @@ public final class AeronClientPool implements AutoCloseable {
                         worked |= pollSession(lane);
                     }
                     for (AgentLane lane : lanes) {
+                        worked |= keepAliveSession(lane);
+                    }
+                    for (AgentLane lane : lanes) {
                         worked |= admitQueued(lane);
                         expireAdmitted(lane);
                     }
@@ -530,9 +578,11 @@ public final class AeronClientPool implements AutoCloseable {
             } catch (RuntimeException exception) {
                 dispatcherFailure.compareAndSet(null, exception);
             } finally {
+                dispatcherStopped.set(true);
                 rejectQueuedAsClosed();
                 completeAdmittedAsUnknown();
                 closeSessions();
+                closeMediaDriver();
             }
         }
 
@@ -585,6 +635,27 @@ public final class AeronClientPool implements AutoCloseable {
             }
         }
 
+        private boolean keepAliveSession(AgentLane lane) {
+            Session current = lane.session;
+            long now = System.nanoTime();
+            if (current == null || now < lane.keepAliveAtNanos) {
+                return false;
+            }
+            try {
+                if (current.keepAlive()) {
+                    lane.connected();
+                    return true;
+                }
+                lane.keepAliveAtNanos = now + TimeUnit.MILLISECONDS.toNanos(KEEP_ALIVE_RETRY_MILLIS);
+                return false;
+            } catch (RuntimeException exception) {
+                lane.pending.values().forEach(Request::resultUnknown);
+                lane.pending.clear();
+                closeSession(lane);
+                return true;
+            }
+        }
+
         private boolean admitQueued(AgentLane lane) {
             boolean worked = false;
             while (true) {
@@ -598,6 +669,7 @@ public final class AeronClientPool implements AutoCloseable {
                 }
                 worked = true;
                 if (!request.beginOffer()) {
+                    request.releaseCorrelation();
                     continue;
                 }
                 admit(lane, request);
@@ -624,6 +696,8 @@ public final class AeronClientPool implements AutoCloseable {
                 if (!request.oneWay) {
                     request.deadlineNanos = System.nanoTime() + responseTimeout.toNanos();
                     lane.pending.put(request.message.header().correlationId(), request);
+                } else {
+                    request.releaseCorrelation();
                 }
             } else {
                 request.notAccepted(CoreCommandOutcome.notAccepted(offerResult));
@@ -635,13 +709,12 @@ public final class AeronClientPool implements AutoCloseable {
 
         private void expireAdmitted(AgentLane lane) {
             long now = System.nanoTime();
-            var iterator = lane.pending.entrySet().iterator();
-            while (iterator.hasNext()) {
-                Request request = iterator.next().getValue();
-                if (now >= request.deadlineNanos) {
-                    iterator.remove();
-                    request.resultUnknown();
-                }
+            boolean expired = lane.pending.values().stream()
+                    .anyMatch(request -> now >= request.deadlineNanos);
+            if (expired) {
+                lane.pending.values().forEach(Request::resultUnknown);
+                lane.pending.clear();
+                closeSession(lane);
             }
         }
 
@@ -696,24 +769,42 @@ public final class AeronClientPool implements AutoCloseable {
                     current.close();
                 }
             } finally {
-                if (!closed.get()) {
+                if (!closed.get() && !dispatcherStopped.get()) {
                     lane.reconnectLater();
                 }
             }
         }
 
         private RuntimeException stop() {
+            boolean interrupted = false;
             if (thread.isAlive()) {
-                try {
-                    thread.join(DISPATCHER_CLOSE_TIMEOUT_MILLIS);
-                    if (thread.isAlive()) {
+                long deadline = System.nanoTime()
+                        + TimeUnit.MILLISECONDS.toNanos(DISPATCHER_CLOSE_TIMEOUT_MILLIS);
+                while (thread.isAlive() && System.nanoTime() < deadline) {
+                    try {
+                        long remaining = Math.max(1L, deadline - System.nanoTime());
+                        TimeUnit.NANOSECONDS.timedJoin(thread, remaining);
+                    } catch (InterruptedException exception) {
+                        interrupted = true;
                         thread.interrupt();
-                        thread.join(1_000L);
                     }
-                } catch (InterruptedException exception) {
-                    Thread.currentThread().interrupt();
+                }
+                if (thread.isAlive()) {
+                    thread.interrupt();
+                    deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+                    while (thread.isAlive() && System.nanoTime() < deadline) {
+                        try {
+                            long remaining = Math.max(1L, deadline - System.nanoTime());
+                            TimeUnit.NANOSECONDS.timedJoin(thread, remaining);
+                        } catch (InterruptedException exception) {
+                            interrupted = true;
+                            thread.interrupt();
+                        }
+                    }
+                }
+                if (interrupted) {
                     dispatcherFailure.compareAndSet(null,
-                            new IllegalStateException("Interrupted while stopping Aeron dispatcher", exception));
+                            new IllegalStateException("Interrupted while stopping Aeron dispatcher"));
                 }
                 if (thread.isAlive()) {
                     dispatcherFailure.compareAndSet(null,
@@ -723,8 +814,36 @@ public final class AeronClientPool implements AutoCloseable {
                 rejectQueuedAsClosed();
                 completeAdmittedAsUnknown();
                 closeSessions();
+                closeMediaDriver();
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt();
             }
             return dispatcherFailure.get();
+        }
+
+        private boolean isAlive() {
+            return thread.isAlive();
+        }
+
+        private void closeMediaDriver() {
+            MediaDriver driver;
+            synchronized (mediaDriver) {
+                driver = mediaDriver.getAndSet(null);
+            }
+            if (driver == null) {
+                return;
+            }
+            try {
+                driver.close();
+            } catch (RuntimeException exception) {
+                RuntimeException first = dispatcherFailure.get();
+                if (first == null) {
+                    dispatcherFailure.compareAndSet(null, exception);
+                } else {
+                    first.addSuppressed(exception);
+                }
+            }
         }
     }
 
@@ -735,6 +854,8 @@ public final class AeronClientPool implements AutoCloseable {
         private final CompletableFuture<CoreCommandOutcome> commandFuture;
         private final CompletableFuture<CoreResponse> queryFuture;
         private final CompletableFuture<Long> admissionFuture = new CompletableFuture<>();
+        private final AtomicBoolean correlationReleased = new AtomicBoolean();
+        private Runnable correlationRelease = () -> { };
         private boolean offering;
         private boolean cancelled;
         private long deadlineNanos;
@@ -773,7 +894,18 @@ public final class AeronClientPool implements AutoCloseable {
             return true;
         }
 
+        private void releaseCorrelationWith(Runnable release) {
+            correlationRelease = Objects.requireNonNull(release, "release");
+        }
+
+        private void releaseCorrelation() {
+            if (correlationReleased.compareAndSet(false, true)) {
+                correlationRelease.run();
+            }
+        }
+
         private void terminal(CoreResponse response) {
+            releaseCorrelation();
             if (commandFuture != null) {
                 commandFuture.complete(new CoreCommandOutcome.Terminal(response));
             } else {
@@ -782,6 +914,7 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private void notAccepted(CoreCommandOutcome.NotAccepted rejection) {
+            releaseCorrelation();
             admissionFuture.complete(rejection.rawOfferResult());
             if (commandFuture != null) {
                 commandFuture.complete(rejection);
@@ -791,11 +924,22 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private void resultUnknown() {
+            releaseCorrelation();
             if (commandFuture != null) {
                 commandFuture.complete(new CoreCommandOutcome.ResultUnknown(operationId));
             } else if (queryFuture != null) {
                 queryFuture.completeExceptionally(new ResultUnknownException(operationId,
                         "Aeron control query was admitted but its result is unknown"));
+            }
+        }
+
+        private void fail(RuntimeException failure) {
+            releaseCorrelation();
+            admissionFuture.completeExceptionally(failure);
+            if (commandFuture != null) {
+                commandFuture.completeExceptionally(failure);
+            } else if (queryFuture != null) {
+                queryFuture.completeExceptionally(failure);
             }
         }
     }

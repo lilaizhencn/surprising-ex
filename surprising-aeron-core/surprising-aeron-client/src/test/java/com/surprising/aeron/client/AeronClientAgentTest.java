@@ -14,6 +14,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,7 @@ class AeronClientAgentTest {
             }
             @Override public CoreResponse takeResponse(long correlationId) { return null; }
             @Override public RuntimeException sessionFailure() { return null; }
+            @Override public boolean keepAlive() { return true; }
             @Override public void close() { }
         };
 
@@ -75,10 +77,18 @@ class AeronClientAgentTest {
     @Test
     void returnsUnknownAfterPositiveOfferTimeoutWithoutRetry() throws Exception {
         AtomicInteger offers = new AtomicInteger();
-        AeronClientPool.Session session = session(message -> {
-            offers.incrementAndGet();
-            return 1;
-        });
+        AtomicInteger closes = new AtomicInteger();
+        AeronClientPool.Session session = new AeronClientPool.Session() {
+            @Override public long offer(CoreMessage message) {
+                offers.incrementAndGet();
+                return 1;
+            }
+            @Override public int pollEgress(int fragmentLimit) { return 0; }
+            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            @Override public RuntimeException sessionFailure() { return null; }
+            @Override public boolean keepAlive() { return true; }
+            @Override public void close() { closes.incrementAndGet(); }
+        };
         UUID commandId = UUID.randomUUID();
 
         try (AeronClientPool pool = pool(Duration.ofMillis(20), () -> session)) {
@@ -87,6 +97,11 @@ class AeronClientAgentTest {
 
             assertThat(outcome).isEqualTo(new CoreCommandOutcome.ResultUnknown(commandId));
             assertThat(offers).hasValue(1);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (closes.get() == 0 && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
+            assertThat(closes.get()).isPositive();
         }
     }
 
@@ -155,6 +170,7 @@ class AeronClientAgentTest {
                     @Override public RuntimeException sessionFailure() {
                         return new IllegalStateException("session failed");
                     }
+                    @Override public boolean keepAlive() { return true; }
                     @Override public void close() { }
                 };
             }
@@ -166,6 +182,7 @@ class AeronClientAgentTest {
                 }
                 @Override public CoreResponse takeResponse(long correlationId) { return null; }
                 @Override public RuntimeException sessionFailure() { return null; }
+                @Override public boolean keepAlive() { return true; }
                 @Override public void close() { }
             };
         };
@@ -174,6 +191,164 @@ class AeronClientAgentTest {
             assertThat(recovered.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(opened.get()).isGreaterThanOrEqualTo(4);
         }
+    }
+
+    @Test
+    void keepsEveryFixedSessionAliveWhileIdle() throws Exception {
+        CountDownLatch keepAlives = new CountDownLatch(2);
+        AeronClientPool.SessionFactory factory = () -> new AeronClientPool.Session() {
+            @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
+            @Override public int pollEgress(int fragmentLimit) { return 0; }
+            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            @Override public RuntimeException sessionFailure() { return null; }
+            @Override public boolean keepAlive() {
+                keepAlives.countDown();
+                return true;
+            }
+            @Override public void close() { }
+        };
+
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), factory)) {
+            assertThat(keepAlives.await(2, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void dispatcherFailureRejectsNewRequestsInsteadOfLeavingThemQueued() throws Exception {
+        CountDownLatch failed = new CountDownLatch(1);
+        AtomicInteger opened = new AtomicInteger();
+        RuntimeException fatal = new IllegalStateException("fatal dispatcher failure");
+        AeronClientPool.SessionFactory factory = () -> {
+            if (opened.incrementAndGet() != 1) {
+                return session(message -> Publication.NOT_CONNECTED);
+            }
+            return new AeronClientPool.Session() {
+                @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
+                @Override public int pollEgress(int fragmentLimit) { throw new IllegalStateException("poll failed"); }
+                @Override public CoreResponse takeResponse(long correlationId) { return null; }
+                @Override public RuntimeException sessionFailure() { return null; }
+                @Override public boolean keepAlive() { return true; }
+                @Override public void close() {
+                    failed.countDown();
+                    throw fatal;
+                }
+            };
+        };
+        AeronClientPool pool = pool(Duration.ofSeconds(1), factory);
+
+        assertThat(failed.await(2, TimeUnit.SECONDS)).isTrue();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!pool.dispatcherStopped() && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertThat(pool.dispatcherStopped()).isTrue();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> pool.submitPrepared(preparedQuery(31)))
+                .isSameAs(fatal);
+        org.assertj.core.api.Assertions.assertThatThrownBy(pool::close).isSameAs(fatal);
+    }
+
+    @Test
+    void rejectsDuplicatePreparedCorrelationWithoutOverwritingPendingRequest() throws Exception {
+        CountDownLatch offered = new CountDownLatch(1);
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        try (AeronClientPool pool = pool(Duration.ofSeconds(5), () -> session(message -> {
+            offered.countDown();
+            return 1;
+        }))) {
+            Thread first = Thread.ofPlatform().start(() -> {
+                try {
+                    pool.submitPrepared(preparedQuery(41));
+                } catch (Throwable throwable) {
+                    firstFailure.set(throwable);
+                }
+            });
+            assertThat(offered.await(2, TimeUnit.SECONDS)).isTrue();
+
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> pool.submitPrepared(preparedQuery(41)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("duplicate in-flight Aeron correlationId=41");
+
+            pool.close();
+            first.join(2_000L);
+            assertThat(first.isAlive()).isFalse();
+            assertThat(firstFailure.get()).isInstanceOf(ResultUnknownException.class);
+        }
+    }
+
+    @Test
+    void preparedWaitPreservesInterruptionAndStopsWaiting() throws Exception {
+        CountDownLatch offered = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interrupted = new AtomicBoolean();
+        try (AeronClientPool pool = pool(Duration.ofSeconds(5), () -> session(message -> {
+            offered.countDown();
+            return 1;
+        }))) {
+            Thread caller = Thread.ofPlatform().start(() -> {
+                try {
+                    pool.submitPrepared(preparedQuery(51));
+                } catch (Throwable throwable) {
+                    failure.set(throwable);
+                    interrupted.set(Thread.currentThread().isInterrupted());
+                }
+            });
+            assertThat(offered.await(2, TimeUnit.SECONDS)).isTrue();
+
+            caller.interrupt();
+            caller.join(2_000L);
+
+            assertThat(caller.isAlive()).isFalse();
+            assertThat(failure.get()).isInstanceOf(ResultUnknownException.class);
+            assertThat(interrupted).isTrue();
+        }
+    }
+
+    @Test
+    void interruptedCloseStillStopsDispatcherBeforeReturning() throws Exception {
+        CountDownLatch sessionsOpened = new CountDownLatch(2);
+        CountDownLatch sessionsClosed = new CountDownLatch(2);
+        AeronClientPool pool = pool(Duration.ofSeconds(1), () -> {
+            sessionsOpened.countDown();
+            return new AeronClientPool.Session() {
+                @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
+                @Override public int pollEgress(int fragmentLimit) { return 0; }
+                @Override public CoreResponse takeResponse(long correlationId) { return null; }
+                @Override public RuntimeException sessionFailure() { return null; }
+                @Override public boolean keepAlive() { return true; }
+                @Override public void close() { sessionsClosed.countDown(); }
+            };
+        });
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interruptPreserved = new AtomicBoolean();
+        assertThat(sessionsOpened.await(2, TimeUnit.SECONDS)).isTrue();
+
+        Thread closer = Thread.ofPlatform().start(() -> {
+            Thread.currentThread().interrupt();
+            try {
+                pool.close();
+            } catch (Throwable throwable) {
+                failure.set(throwable);
+            } finally {
+                interruptPreserved.set(Thread.currentThread().isInterrupted());
+            }
+        });
+        closer.join(2_000L);
+
+        assertThat(closer.isAlive()).isFalse();
+        assertThat(pool.dispatcherStopped()).isTrue();
+        assertThat(sessionsClosed.getCount()).isZero();
+        assertThat(interruptPreserved).isTrue();
+        assertThat(failure.get()).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Interrupted while stopping Aeron dispatcher");
+    }
+
+    private static CoreMessage preparedQuery(long correlationId) {
+        return new CoreMessage(
+                com.surprising.aeron.protocol.CoreMessageHeader.query(
+                        CoreMessageType.EXPORT_STATUS_QUERY, UUID.randomUUID(), ProductLine.SPOT,
+                        com.surprising.aeron.protocol.CommandSource.OPERATIONS,
+                        0x4558504f52544552L, 0, 0, 1, correlationId),
+                new byte[0]);
     }
 
     private static AeronClientPool pool(Duration timeout, AeronClientPool.SessionFactory sessions) {
@@ -188,6 +363,7 @@ class AeronClientAgentTest {
             @Override public int pollEgress(int fragmentLimit) { return 0; }
             @Override public CoreResponse takeResponse(long correlationId) { return null; }
             @Override public RuntimeException sessionFailure() { return null; }
+            @Override public boolean keepAlive() { return true; }
             @Override public void close() { }
         };
     }
