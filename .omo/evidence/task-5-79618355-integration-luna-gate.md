@@ -67,7 +67,7 @@ Fix and add a real JSON/Feign contract test for polymorphic `OrderCommandReceipt
 
 ## Final verdict
 
-**PASS after closure** — the exact JSON polymorphism blocker is green in the validated worktree; commit and push are the remaining handoff actions.
+**PASS after closure** — the exact JSON polymorphism blocker is green, and the implementation plus semantic evidence are committed and pushed.
 
 Date: 2026-08-17 (Asia/Shanghai)
 Validation worktree: `/Users/atomex/Desktop/surprising/w3-w5-production-closure-worktree`
@@ -105,3 +105,10 @@ IBM Semeru: `/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/H
 | Maker full reactor | `mvn -pl :surprising-maker -am test` | Maker module 34 run, 0 failures/errors/skips; BUILD SUCCESS |
 
 The provider reactor included the existing Aeron protocol contract tests (53 protocol tests passed). No Aeron protocol types, runtime/Task16/17 files, wallet service, or per-order fallback were changed. `git diff --check` passed for the fix worktree.
+
+### Completed handoff
+
+- Implementation commit: `6067928e0d9cd8160b42920a24ff9e04d24335ff` (`fix(order): type mutation receipt wire results`).
+- Evidence commit: `51483644dddcd64a615bf2420ce250531e7346db` (`docs: record Task 5 receipt contract closure`).
+- Pushed branch: `codex/w3-w5-production-closure`.
+- Verified remote tip: `51483644dddcd64a615bf2420ce250531e7346db`.
