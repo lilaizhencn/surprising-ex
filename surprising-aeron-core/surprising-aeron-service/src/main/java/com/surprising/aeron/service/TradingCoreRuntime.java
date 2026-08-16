@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
+import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.state.OpenInterestIndex;
 import com.surprising.aeron.service.state.AlgoOrderIndex;
 import com.surprising.aeron.service.state.LiquidationIndex;
@@ -14,8 +15,6 @@ import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.Set;
 
 public final class TradingCoreRuntime implements AutoCloseable {
     private final ProductLine productLine;
@@ -31,22 +30,27 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final AdlPositionIndex adlPositions;
     private final RiskSnapshotIndex riskSnapshots;
     private TradingCoreState state;
-    private volatile CompletableFuture<Void> matcherReady;
-    private final AtomicLong matcherGeneration = new AtomicLong();
+    private final CompletableFuture<Void> matcherReady;
     private Thread owner;
 
     public TradingCoreRuntime(ProductLine productLine, TradingCoreState initialState) {
-        this(productLine, initialState, Set.of());
+        this(productLine, initialState, 0, null);
     }
 
-    public TradingCoreRuntime(ProductLine productLine, TradingCoreState initialState, Set<Long> excludedOrderIds) {
+    public TradingCoreRuntime(
+            ProductLine productLine,
+            TradingCoreState initialState,
+            long coreSequence,
+            MatcherSnapshot matcherSnapshot) {
         if (productLine == null || initialState == null || initialState.productLine() != productLine) {
             throw new IllegalArgumentException("invalid trading runtime state");
         }
         this.productLine = productLine;
         this.state = initialState;
         this.reducer = new TradingCoreReducer();
-        this.matcher = new DeterministicExchangeCoreAdapter(false);
+        this.matcher = matcherSnapshot == null
+                ? new DeterministicExchangeCoreAdapter()
+                : new DeterministicExchangeCoreAdapter(initialState, coreSequence, matcherSnapshot);
         this.positionUsers = new PositionUserIndex(initialState);
         this.openInterest = new OpenInterestIndex(initialState);
         this.triggers = new TriggerOrderIndex(initialState);
@@ -56,7 +60,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.activeOrders = new ActiveOrderIndex(initialState);
         this.adlPositions = new AdlPositionIndex(initialState);
         this.riskSnapshots = new RiskSnapshotIndex(initialState);
-        this.matcherReady = matcher.rebuildAsync(initialState, excludedOrderIds);
+        this.matcherReady = CompletableFuture.completedFuture(null);
     }
 
     public void bindOwner() {
@@ -97,10 +101,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     CompletableFuture<Void> matcherReady() {
         return matcherReady;
-    }
-
-    long matcherGeneration() {
-        return matcherGeneration.get();
     }
 
     public PositionUserIndex positionUsers() {
@@ -208,24 +208,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
             throw new IllegalArgumentException("invalid matcher state");
         }
         restoreIndexes(restored);
-    }
-
-    public CompletableFuture<Void> rebuildMatcherAsync(TradingCoreState restored) {
-        return rebuildMatcherAsync(restored, Set.of());
-    }
-
-    public CompletableFuture<Void> rebuildMatcherAsync(TradingCoreState restored, Set<Long> excludedOrderIds) {
-        assertOwner();
-        if (restored == null || restored.productLine() != productLine) {
-            throw new IllegalArgumentException("invalid matcher state");
-        }
-        matcherGeneration.incrementAndGet();
-        try {
-            matcherReady = matcher.rebuildAsync(restored, excludedOrderIds);
-        } catch (RuntimeException exception) {
-            matcherReady = CompletableFuture.failedFuture(exception);
-        }
-        return matcherReady;
     }
 
     private void restoreIndexes(TradingCoreState restored) {

@@ -1,0 +1,159 @@
+package com.surprising.aeron.service.matching;
+
+import com.surprising.aeron.service.state.CoreOrderStatus;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.product.api.ProductLine;
+import exchange.core2.core.processors.journaling.ISerializationProcessor.SerializedModuleType;
+import exchange.core2.core.processors.journaling.InMemorySerializationProcessor.SerializedModule;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+
+public record MatcherSnapshot(
+        ProductLine productLine,
+        String coreShardId,
+        int routeVersion,
+        long snapshotId,
+        long coreSequence,
+        long matcherSequence,
+        long coreBusinessStateHash,
+        int engineStateHash,
+        int bookStateHash,
+        long symbolRegistryHash,
+        long userRegistryHash,
+        long instrumentRegistryHash,
+        long activeOrderHash,
+        String forkGitSha,
+        String artifactSha256,
+        long matcherConfigHash,
+        Map<String, Integer> symbols,
+        Set<Long> users,
+        List<SerializedModule> modules) {
+
+    public static final String CORE_SHARD_ID = "default";
+    public static final int ROUTE_VERSION = 1;
+    public static final String FORK_GIT_SHA = "9819b9fea48b8b962bdef6bfcf67ed5f5a04981f";
+    public static final String ARTIFACT_SHA256 =
+            "b2ee6f235f9dbde4d2a37e407a8a855938b0f7cc0622ea28cb6e778552ff934a";
+    public static final long MATCHER_CONFIG_HASH = hashText(
+            "matching=1;risk=1;wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED");
+
+    public MatcherSnapshot {
+        if (productLine == null || !CORE_SHARD_ID.equals(coreShardId)
+                || routeVersion != ROUTE_VERSION || snapshotId <= 0 || coreSequence < 0
+                || matcherSequence < 0 || !FORK_GIT_SHA.equals(forkGitSha)
+                || !ARTIFACT_SHA256.equals(artifactSha256)
+                || matcherConfigHash != MATCHER_CONFIG_HASH || symbols == null || users == null
+                || modules == null || modules.isEmpty()) {
+            throw new IllegalArgumentException("invalid matcher snapshot manifest");
+        }
+        symbols = Collections.unmodifiableMap(new TreeMap<>(symbols));
+        users = Collections.unmodifiableSet(new TreeSet<>(users));
+        modules = List.copyOf(modules);
+        if (symbols.values().stream().anyMatch(symbolId -> symbolId == null || symbolId <= 0)
+                || new java.util.HashSet<>(symbols.values()).size() != symbols.size()
+                || users.stream().anyMatch(userId -> userId == null || userId <= 0)) {
+            throw new IllegalArgumentException("invalid matcher registries");
+        }
+        if (symbolRegistryHash != symbolRegistryHash(symbols)
+                || userRegistryHash != userRegistryHash(users)) {
+            throw new IllegalArgumentException("matcher registry hash mismatch");
+        }
+        boolean matching = false;
+        boolean risk = false;
+        long maximumModuleSequence = Long.MIN_VALUE;
+        for (SerializedModule module : modules) {
+            if (module.snapshotId() != snapshotId || module.sequence() < 0 || module.sequence() > matcherSequence
+                    || module.instanceId() != 0) {
+                throw new IllegalArgumentException("matcher snapshot module watermark mismatch");
+            }
+            maximumModuleSequence = Math.max(maximumModuleSequence, module.sequence());
+            if (module.type() == SerializedModuleType.MATCHING_ENGINE_ROUTER) {
+                if (matching) throw new IllegalArgumentException("duplicate matching module");
+                matching = true;
+            } else if (module.type() == SerializedModuleType.RISK_ENGINE) {
+                if (risk) throw new IllegalArgumentException("duplicate risk module");
+                risk = true;
+            }
+        }
+        if (!matching || !risk || modules.size() != 2 || maximumModuleSequence != matcherSequence) {
+            throw new IllegalArgumentException("incomplete matcher snapshot modules");
+        }
+    }
+
+    public void verifyCoreState(TradingCoreState state, long expectedCoreSequence) {
+        if (state == null || state.productLine() != productLine || coreSequence != expectedCoreSequence
+                || coreBusinessStateHash != state.businessStateHash()
+                || instrumentRegistryHash != instrumentRegistryHash(state)
+                || activeOrderHash != activeOrderHash(state)) {
+            throw new IllegalStateException("Core and matcher snapshot manifests do not match");
+        }
+    }
+
+    public static long symbolRegistryHash(Map<String, Integer> symbols) {
+        long hash = offset();
+        for (Map.Entry<String, Integer> entry : new TreeMap<>(symbols).entrySet()) {
+            hash = mix(hash, entry.getKey());
+            hash = mix(hash, entry.getValue());
+        }
+        return hash;
+    }
+
+    public static long userRegistryHash(Set<Long> users) {
+        long hash = offset();
+        for (Long userId : new TreeSet<>(users)) hash = mix(hash, userId);
+        return hash;
+    }
+
+    public static long instrumentRegistryHash(TradingCoreState state) {
+        long hash = offset();
+        for (var instrument : state.instruments().values()) {
+            hash = mix(hash, instrument.symbol());
+            hash = mix(hash, instrument.version());
+        }
+        return hash;
+    }
+
+    public static long activeOrderHash(TradingCoreState state) {
+        long hash = offset();
+        for (var order : state.orders().values()) {
+            if (order.status() != CoreOrderStatus.OPEN) continue;
+            hash = mix(hash, order.orderId());
+            hash = mix(hash, order.userId());
+            hash = mix(hash, order.symbol());
+            hash = mix(hash, order.side().wireCode());
+            hash = mix(hash, order.priceTicks());
+            hash = mix(hash, order.remainingQuantitySteps());
+        }
+        return hash;
+    }
+
+    private static long hashText(String value) {
+        return mix(offset(), value);
+    }
+
+    private static long offset() {
+        return 0xcbf29ce484222325L;
+    }
+
+    private static long mix(long hash, long value) {
+        long mixed = hash;
+        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
+            mixed ^= (value >>> shift) & 0xff;
+            mixed *= 0x100000001b3L;
+        }
+        return mixed;
+    }
+
+    private static long mix(long hash, String value) {
+        long mixed = hash;
+        for (int index = 0; index < value.length(); index++) {
+            mixed ^= value.charAt(index);
+            mixed *= 0x100000001b3L;
+        }
+        return mixed;
+    }
+}

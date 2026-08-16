@@ -3,15 +3,12 @@ package com.surprising.aeron.service;
 import com.surprising.aeron.protocol.CoreMessage;
 import java.util.Objects;
 
-record PendingMatching(long sequence, Operation operation, CoreMessage command,
-                       long attemptGeneration, long attemptDeadline, int recoveryAttempts,
-                       long attemptToken) {
+record PendingMatching(long sequence, Operation operation, CoreMessage command, long attemptDeadline) {
 
     static final long ATTEMPT_TIMEOUT_MILLIS = 30_000;
-    static final int MAX_RECOVERY_ATTEMPTS = 1;
 
     PendingMatching(long sequence, Operation operation, CoreMessage command) {
-        this(sequence, operation, command, 0, Long.MAX_VALUE, 0, 1);
+        this(sequence, operation, command, Long.MAX_VALUE);
     }
 
     PendingMatching {
@@ -20,20 +17,13 @@ record PendingMatching(long sequence, Operation operation, CoreMessage command,
             throw new IllegalArgumentException("invalid pending matching request");
         }
         Objects.requireNonNull(command.header().commandId(), "commandId");
-        if (attemptGeneration < 0 || attemptDeadline < 0 || recoveryAttempts < 0
-                || recoveryAttempts > MAX_RECOVERY_ATTEMPTS || attemptToken <= 0) {
+        if (attemptDeadline < 0) {
             throw new IllegalArgumentException("invalid matching attempt");
         }
     }
 
-    PendingMatching withAttempt(long generation, long deadline, int retries) {
-        return new PendingMatching(sequence, operation, command, generation, deadline, retries,
-                Math.addExact(attemptToken, 1));
-    }
-
     PendingMatching withCommand(CoreMessage nextCommand) {
-        return new PendingMatching(sequence, operation, nextCommand, attemptGeneration, attemptDeadline,
-                recoveryAttempts, attemptToken);
+        return new PendingMatching(sequence, operation, nextCommand, attemptDeadline);
     }
 
     enum Operation {

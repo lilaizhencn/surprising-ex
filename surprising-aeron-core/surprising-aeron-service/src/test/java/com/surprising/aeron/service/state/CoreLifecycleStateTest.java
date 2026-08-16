@@ -92,7 +92,7 @@ class CoreLifecycleStateTest {
         Map<Long, CoreUserState> users = new TreeMap<>(base.users());
         users.put(1L, hedgedUser);
         TradingCoreState hedged = new TradingCoreState(base.productLine(), base.revision() + 1, users,
-                base.orders(), base.bookState(), base.instruments(), base.riskState(), base.treasuryState());
+                base.orders(), base.instruments(), base.riskState(), base.treasuryState());
         hedged = reducer.applyMarkPrice(hedged, new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1,
                 1_700_000_000_000L));
 
@@ -410,7 +410,7 @@ class CoreLifecycleStateTest {
         Map<Long, CoreUserState> users = new TreeMap<>(funded.users());
         users.put(userId, user);
         return new TradingCoreState(funded.productLine(), funded.revision() + 1, users, funded.orders(),
-                funded.bookState(), funded.instruments(), funded.riskState(), funded.treasuryState());
+                funded.instruments(), funded.riskState(), funded.treasuryState());
     }
 
     private static PlaceOrderCommand lifecycleOrder(long orderId) {

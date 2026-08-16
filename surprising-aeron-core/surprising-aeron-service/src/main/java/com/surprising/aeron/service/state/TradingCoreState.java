@@ -12,7 +12,6 @@ public record TradingCoreState(
         long revision,
         Map<Long, CoreUserState> users,
         Map<Long, CoreOrderState> orders,
-        CoreBookState bookState,
         Map<String, CoreInstrumentState> instruments,
         CoreRiskState riskState,
         CoreTreasuryState treasuryState,
@@ -23,7 +22,7 @@ public record TradingCoreState(
         Map<Long, CoreTriggerOrderState> triggerOrders) {
 
     public TradingCoreState {
-        if (productLine == null || revision < 0 || users == null || orders == null || bookState == null
+        if (productLine == null || revision < 0 || users == null || orders == null
                 || instruments == null || riskState == null || treasuryState == null || leverages == null
                 || algoOrders == null || cancelAllAfterTimers == null
                 || triggerOrders == null) {
@@ -70,22 +69,6 @@ public record TradingCoreState(
                 throw new IllegalArgumentException("client order index does not match authoritative orders");
             }
         }
-        boolean bookDelta = StateMapSupport.isDelta(bookState.openOrders());
-        Map<String, CoreInstrumentState> sourceInstruments = instruments;
-        boolean validateInstrumentVersion = !sourceInstruments.isEmpty();
-        if (!bookDelta) {
-            bookState.openOrders().forEach((orderId, prioritySequence) ->
-                    validateBookOrder(sortedOrders, sourceInstruments, bookState.nextPrioritySequence(), orderId,
-                            prioritySequence, validateInstrumentVersion));
-        } else {
-            for (Object key : StateMapSupport.changedKeys(bookState.openOrders())) {
-                Long prioritySequence = bookState.openOrders().get(key);
-                if (prioritySequence != null) {
-                    validateBookOrder(sortedOrders, instruments, bookState.nextPrioritySequence(), (Long) key,
-                            prioritySequence, validateInstrumentVersion);
-                }
-            }
-        }
         users = sortedUsers;
         orders = sortedOrders;
         instruments = StateMapSupport.freezeSorted(instruments);
@@ -115,53 +98,53 @@ public record TradingCoreState(
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders, CoreBookState bookState,
+                            Map<Long, CoreOrderState> orders,
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState) {
-        this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
+        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
                 Map.of(), Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders, CoreBookState bookState,
+                            Map<Long, CoreOrderState> orders,
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages) {
-        this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
+        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
                 leverages, Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders, CoreBookState bookState,
+                            Map<Long, CoreOrderState> orders,
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders) {
-        this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
+        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
                 leverages, algoOrders, Map.of(), deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders, CoreBookState bookState,
+                            Map<Long, CoreOrderState> orders,
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders,
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers) {
-        this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
+        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
                 leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), Map.of());
     }
 
     public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders, CoreBookState bookState,
+                            Map<Long, CoreOrderState> orders,
                             Map<String, CoreInstrumentState> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
                             Map<Long, CoreAlgoOrderState> algoOrders,
                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
                             Map<Long, CoreTriggerOrderState> triggerOrders) {
-        this(productLine, revision, users, orders, bookState, instruments, riskState, treasuryState,
+        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
                 leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), triggerOrders);
     }
 
     public static TradingCoreState empty(ProductLine productLine) {
-        return new TradingCoreState(productLine, 0, Map.of(), Map.of(), CoreBookState.empty(),
+        return new TradingCoreState(productLine, 0, Map.of(), Map.of(),
                 Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
     }
 
@@ -218,10 +201,10 @@ public record TradingCoreState(
         }
         if (!changed) return this;
         if (changedOrderIds == null) {
-            return new TradingCoreState(productLine, revision, users, stamped, bookState,
+            return new TradingCoreState(productLine, revision, users, stamped,
                     instruments, riskState, treasuryState, leverages, algoOrders, cancelAllAfterTimers, triggerOrders);
         }
-        return new TradingCoreState(productLine, revision, users, stamped, bookState,
+        return new TradingCoreState(productLine, revision, users, stamped,
                 instruments, riskState, treasuryState, leverages, algoOrders, cancelAllAfterTimers,
                 StateMapSupport.delta(clientOrderIndex), triggerOrders);
     }
@@ -254,20 +237,6 @@ public record TradingCoreState(
         }
     }
 
-    private static void validateBookOrder(Map<Long, CoreOrderState> orders,
-                                          Map<String, CoreInstrumentState> instruments,
-                                          long nextPrioritySequence, long orderId, long prioritySequence,
-                                          boolean validateInstrumentVersion) {
-        CoreOrderState order = orders.get(orderId);
-        CoreInstrumentState instrument = order == null ? null : instruments.get(order.symbol());
-        if (order == null || (validateInstrumentVersion
-                && (instrument == null || instrument.version() != order.instrumentVersion()))
-                || order.status() != CoreOrderStatus.OPEN
-                || prioritySequence <= 0 || prioritySequence >= nextPrioritySequence) {
-            throw new IllegalArgumentException("book order does not match authoritative order state");
-        }
-    }
-
     public long businessStateHash() {
         return RollingBusinessStateHash.compute(this);
     }
@@ -281,7 +250,6 @@ public record TradingCoreState(
         for (CoreOrderState order : orders.values()) {
             hash = hashOrder(hash, order);
         }
-        hash = CoreStateHash.mix(hash, bookState.stateHash());
         for (CoreInstrumentState instrument : instruments.values()) {
             hash = CoreStateHash.mix(hash, instrument.symbol());
             hash = CoreStateHash.mix(hash, instrument.version());
@@ -458,24 +426,6 @@ public record TradingCoreState(
         return hash;
     }
 
-    public long bookStateHash(String symbol) {
-        String normalized = symbol == null ? null : OrderReservation.normalizeSymbol(symbol);
-        long hash = CoreStateHash.start();
-        hash = CoreStateHash.mix(hash, bookState.nextPrioritySequence());
-        for (Map.Entry<Long, Long> entry : bookState.openOrders().entrySet()) {
-            CoreOrderState order = orders.get(entry.getKey());
-            if (order == null || (normalized != null && !normalized.equals(order.symbol()))) continue;
-            hash = CoreStateHash.mix(hash, order.orderId());
-            hash = CoreStateHash.mix(hash, order.userId());
-            hash = CoreStateHash.mix(hash, order.symbol());
-            hash = CoreStateHash.mix(hash, order.side().wireCode());
-            hash = CoreStateHash.mix(hash, order.priceTicks());
-            hash = CoreStateHash.mix(hash, order.remainingQuantitySteps());
-            hash = CoreStateHash.mix(hash, entry.getValue());
-        }
-        return hash;
-    }
-
     public long userStateHash(long userId) {
         CoreUserState user = users.get(userId);
         if (user == null) return 0;
@@ -535,7 +485,6 @@ public record TradingCoreState(
         if (before == null || before == this) return;
         requireLineage("users", before.users, users);
         requireLineage("orders", before.orders, orders);
-        requireLineage("book", before.bookState.openOrders(), bookState.openOrders());
         requireLineage("instruments", before.instruments, instruments);
         requireLineage("leverages", before.leverages, leverages);
         requireLineage("algo orders", before.algoOrders, algoOrders);

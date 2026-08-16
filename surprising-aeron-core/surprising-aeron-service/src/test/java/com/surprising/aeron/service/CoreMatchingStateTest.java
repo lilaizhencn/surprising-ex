@@ -20,6 +20,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
+import com.surprising.aeron.service.state.CoreOrderState;
 import com.surprising.aeron.service.state.CoreOrderStatus;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -50,7 +51,8 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().user(22).balances().get("USDT").availableUnits()).isEqualTo(300);
             assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.tradingState().user(22).totalUnits("BTC")).isEqualTo(2);
-            assertThat(state.tradingState().bookState().openOrders()).isEmpty();
+            assertThat(state.tradingState().orders().values())
+                    .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
         }
     }
 
@@ -75,7 +77,10 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.REJECTED);
             assertThat(state.tradingState().user(22).balances().get("USDT").availableUnits()).isEqualTo(500);
             assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(state.tradingState().bookState().openOrders()).containsOnlyKeys(101L);
+            assertThat(state.tradingState().orders().values())
+                    .filteredOn(order -> order.status() == CoreOrderStatus.OPEN)
+                    .extracting(CoreOrderState::orderId)
+                    .containsExactly(101L);
         }
     }
 
@@ -96,12 +101,13 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().order(202).priceTicks()).isZero();
             assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
             assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(state.tradingState().bookState().openOrders()).isEmpty();
+            assertThat(state.tradingState().orders().values())
+                    .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
         }
     }
 
     @Test
-    void spotMatchUpdatesBothUsersFundsOrdersAndRecoverableBookAtomically() {
+    void spotMatchUpdatesBothUsersFundsOrdersAndNativeMatcherAtomically() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
@@ -110,7 +116,7 @@ class CoreMatchingStateTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
             apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, 5, ReservationKind.SPOT_ASSET, "BTC", 5));
-            long restingBookHash = state.tradingState().bookStateHash("BTC-USDT");
+            int restingBookHash = awaitMatchingHash(state);
             apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 3, ReservationKind.SPOT_ASSET, "USDT", 300));
 
@@ -125,18 +131,17 @@ class CoreMatchingStateTest {
                     + state.tradingState().user(22).totalUnits("BTC")).isEqualTo(10);
             assertThat(state.tradingState().user(11).totalUnits("USDT")
                     + state.tradingState().user(22).totalUnits("USDT")).isEqualTo(1_000);
-            assertThat(state.tradingState().bookStateHash("BTC-USDT")).isNotEqualTo(restingBookHash);
-            assertThat(awaitMatchingHash(state)).isNotZero();
+            int matchedBookHash = awaitMatchingHash(state);
+            assertThat(matchedBookHash).isNotEqualTo(restingBookHash).isNotZero();
 
             try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
-                assertThat(restored.tradingState().bookStateHash("BTC-USDT"))
-                        .isEqualTo(state.tradingState().bookStateHash("BTC-USDT"));
-                assertThat(awaitMatchingHash(restored)).isNotZero();
+                assertThat(awaitMatchingHash(restored)).isEqualTo(matchedBookHash);
                 apply(restored, 5, 22, CoreMessageType.PLACE_ORDER,
                         place(203, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
                 assertThat(restored.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
-                assertThat(restored.tradingState().bookState().openOrders()).isEmpty();
+                assertThat(restored.tradingState().orders().values())
+                        .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
             }
         }
     }
@@ -158,7 +163,8 @@ class CoreMatchingStateTest {
 
             assertThat(state.tradingState().orders().values())
                     .allMatch(order -> order.status() == CoreOrderStatus.FILLED);
-            assertThat(state.tradingState().bookState().openOrders()).isEmpty();
+            assertThat(state.tradingState().orders().values())
+                    .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
             assertThat(state.tradingState().user(11).positions().get("BTC-USDT").signedQuantitySteps())
                     .isEqualTo(-2);
             assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps())
@@ -227,7 +233,7 @@ class CoreMatchingStateTest {
     }
 
     @Test
-    void replaceLosesPriorityCanMatchAndRebuildsToSameExchangeCoreHash() {
+    void replaceLosesPriorityCanMatchAndRestoresToSameExchangeCoreHash() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
@@ -244,36 +250,48 @@ class CoreMatchingStateTest {
                                     CoreOrderSide.BUY, 110, 2, false, ReservationKind.SPOT_ASSET,
                                     "USDT", 220))));
 
-            assertThat(state.tradingState().bookState().openOrders()).isEmpty();
+            assertThat(state.tradingState().orders().values())
+                    .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
             assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
             assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.CANCELED);
             assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.FILLED);
             try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
-                assertThat(restored.tradingState().bookState().openOrders()).isEmpty();
+                assertThat(restored.tradingState().orders().values())
+                        .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
             }
         }
     }
 
-    @Test
-    void snapshotRecoveryKeepsOriginalFifoAfterPartialFillUpdatesOrderMetadata() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+    @ParameterizedTest
+    @MethodSource("allProductLines")
+    void preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine productLine) {
+        try (CoreProbeState state = new CoreProbeState(productLine)) {
             applyInstrument(state);
+            ReservationKind reservationKind = productLine == ProductLine.SPOT
+                    ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
+            String sellerAsset = productLine == ProductLine.SPOT ? "BTC" : settleAsset(productLine);
+            String buyerAsset = productLine == ProductLine.SPOT ? "USDT" : settleAsset(productLine);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10)));
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(sellerAsset, 2_000)));
             apply(state, 2, 12, CoreMessageType.ADJUST_BALANCE,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10)));
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(sellerAsset, 2_000)));
             apply(state, 3, 22, CoreMessageType.ADJUST_BALANCE,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(buyerAsset, 2_000)));
             apply(state, 4, 11, CoreMessageType.PLACE_ORDER,
-                    place(101, CoreOrderSide.SELL, 100, 5, ReservationKind.SPOT_ASSET, "BTC", 5));
+                    place(101, CoreOrderSide.SELL, 100, 5, reservationKind, sellerAsset,
+                            productLine == ProductLine.SPOT ? 5 : 1_000));
             apply(state, 5, 12, CoreMessageType.PLACE_ORDER,
-                    place(102, CoreOrderSide.SELL, 100, 5, ReservationKind.SPOT_ASSET, "BTC", 5));
+                    place(102, CoreOrderSide.SELL, 100, 5, reservationKind, sellerAsset,
+                            productLine == ProductLine.SPOT ? 5 : 1_000));
             apply(state, 6, 22, CoreMessageType.PLACE_ORDER,
-                    place(201, CoreOrderSide.BUY, 100, 1, ReservationKind.SPOT_ASSET, "USDT", 100));
+                    place(201, CoreOrderSide.BUY, 100, 1, reservationKind, buyerAsset, 100));
 
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            byte[] snapshot = state.snapshot();
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
+                assertThat(restored.tradingState()).isEqualTo(state.tradingState());
+                assertThat(awaitMatchingHash(restored)).isEqualTo(awaitMatchingHash(state));
                 apply(restored, 7, 22, CoreMessageType.PLACE_ORDER,
-                        place(202, CoreOrderSide.BUY, 100, 4, ReservationKind.SPOT_ASSET, "USDT", 400));
+                        place(202, CoreOrderSide.BUY, 100, 4, reservationKind, buyerAsset, 400));
 
                 assertThat(restored.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
                 assertThat(restored.tradingState().order(102).status()).isEqualTo(CoreOrderStatus.OPEN);
@@ -422,5 +440,9 @@ class CoreMatchingStateTest {
         return Stream.of(ProductLine.values())
                 .filter(ProductLine::isDerivative)
                 .filter(productLine -> !productLine.isOptionProduct());
+    }
+
+    private static Stream<ProductLine> allProductLines() {
+        return Stream.of(ProductLine.values());
     }
 }

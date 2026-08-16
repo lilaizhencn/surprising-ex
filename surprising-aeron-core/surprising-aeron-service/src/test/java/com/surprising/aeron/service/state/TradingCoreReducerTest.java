@@ -46,7 +46,6 @@ class TradingCoreReducerTest {
         assertThat(StateMapSupport.isDelta(canceled.orders())).isTrue();
         assertThat(StateMapSupport.isDelta(canceled.user(101).balances())).isTrue();
         assertThat(StateMapSupport.isDelta(canceled.user(101).reservations())).isTrue();
-        assertThat(StateMapSupport.isDelta(canceled.bookState().openOrders())).isTrue();
         assertBalance(placed, "USDT", 9_900, 100);
         assertThat(placed.user(101).totalUnits("USDT")).isEqualTo(10_000);
         assertThat(placed.user(101).reservations().get(1L).remainingUnits()).isEqualTo(100);
@@ -329,7 +328,7 @@ class TradingCoreReducerTest {
         Map<Long, CoreUserState> users = new TreeMap<>(funded.users());
         users.put(user.userId(), user);
         TradingCoreState withPosition = new TradingCoreState(funded.productLine(), funded.revision() + 1,
-                users, funded.orders(), funded.bookState(), funded.instruments(), funded.riskState(),
+                users, funded.orders(), funded.instruments(), funded.riskState(),
                 funded.treasuryState());
 
         TradingCoreState added = reducer.adjustPositionMargin(withPosition, 101,

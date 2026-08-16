@@ -52,7 +52,7 @@ class TradingStateSnapshotCodecTest {
                 Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 70_000, 7)),
                 Map.of(), Map.of(), Map.of("BTC-USDT", scan), 1);
         TradingCoreState state = new TradingCoreState(empty.productLine(), empty.revision(), empty.users(),
-                empty.orders(), empty.bookState(), empty.instruments(), risk, empty.treasuryState(),
+                empty.orders(), empty.instruments(), risk, empty.treasuryState(),
                 empty.leverages(), empty.algoOrders(), empty.cancelAllAfterTimers(), empty.clientOrderIndex(),
                 empty.triggerOrders());
 
@@ -79,7 +79,7 @@ class TradingStateSnapshotCodecTest {
         TradingCoreState state = TradingCoreState.empty(ProductLine.SPOT);
 
         assertThatThrownBy(() -> new TradingCoreState(state.productLine(), state.revision(), state.users(),
-                state.orders(), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                state.orders(), state.instruments(), state.riskState(), state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), null, state.triggerOrders()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("client order index is required");

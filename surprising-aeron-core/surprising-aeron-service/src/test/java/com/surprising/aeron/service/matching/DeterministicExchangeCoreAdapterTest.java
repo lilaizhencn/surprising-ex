@@ -1,13 +1,21 @@
 package com.surprising.aeron.service.matching;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.state.CoreOrderState;
 import com.surprising.aeron.service.state.CoreOrderStatus;
+import com.surprising.aeron.service.state.CoreRiskState;
+import com.surprising.aeron.service.state.CoreTreasuryState;
+import com.surprising.aeron.service.state.CoreUserState;
+import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
@@ -41,9 +49,86 @@ class DeterministicExchangeCoreAdapterTest {
                 .containsExactly("SUCCESS", "MATCHING_INVALID_ORDER_ID", "NOT_SUBMITTED");
     }
 
+    @Test
+    void nativeSnapshotRoundTripRestoresTheOnlyExecutableBook() {
+        TradingCoreState state = stateWithOpenBid(100);
+        MatcherSnapshot snapshot;
+        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+            assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
+            snapshot = adapter.snapshotAsync(91, 1, state).join();
+        }
+
+        byte[] encoded = MatcherSnapshotCodec.encode(snapshot);
+        MatcherSnapshot decoded = MatcherSnapshotCodec.decode(encoded);
+        assertThat(decoded.symbols()).containsExactlyEntriesOf(snapshot.symbols());
+        assertThat(decoded.users()).containsExactlyElementsOf(snapshot.users());
+        assertThat(decoded.modules()).hasSize(2);
+        assertThat(decoded.modules()).zipSatisfy(snapshot.modules(), (actual, expected) -> {
+            assertThat(actual.type()).isEqualTo(expected.type());
+            assertThat(actual.sequence()).isEqualTo(expected.sequence());
+            assertThat(actual.checksum()).isEqualTo(expected.checksum());
+            assertThat(actual.data()).containsExactly(expected.data());
+        });
+
+        try (DeterministicExchangeCoreAdapter restored =
+                     new DeterministicExchangeCoreAdapter(state, 1, decoded)) {
+            assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(snapshot.bookStateHash());
+        }
+    }
+
+    @Test
+    void restoreFailsClosedWhenCoreMetadataDoesNotMatchNativeOpenOrders() {
+        TradingCoreState original = stateWithOpenBid(100);
+        MatcherSnapshot snapshot;
+        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+            assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
+            snapshot = adapter.snapshotAsync(92, 1, original).join();
+        }
+        TradingCoreState divergent = stateWithOpenBid(101);
+        MatcherSnapshot divergentManifest = new MatcherSnapshot(
+                snapshot.productLine(), snapshot.coreShardId(), snapshot.routeVersion(), snapshot.snapshotId(),
+                snapshot.coreSequence(), snapshot.matcherSequence(), divergent.businessStateHash(),
+                snapshot.engineStateHash(), snapshot.bookStateHash(), snapshot.symbolRegistryHash(), snapshot.userRegistryHash(),
+                MatcherSnapshot.instrumentRegistryHash(divergent), MatcherSnapshot.activeOrderHash(divergent),
+                snapshot.forkGitSha(), snapshot.artifactSha256(), snapshot.matcherConfigHash(),
+                snapshot.symbols(), snapshot.users(), snapshot.modules());
+
+        assertThatThrownBy(() -> new DeterministicExchangeCoreAdapter(divergent, 1, divergentManifest))
+                .isInstanceOf(FatalMatchingDivergenceException.class)
+                .hasMessageContaining("Core OPEN orders do not exactly match exchange-core open orders");
+    }
+
+    @Test
+    void matcherSnapshotCodecRejectsCorruption() {
+        TradingCoreState state = stateWithOpenBid(100);
+        byte[] encoded;
+        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+            assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
+            encoded = MatcherSnapshotCodec.encode(adapter.snapshotAsync(93, 1, state).join());
+        }
+        encoded[encoded.length / 2] ^= 1;
+
+        assertThatThrownBy(() -> MatcherSnapshotCodec.decode(encoded))
+                .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)
+                .hasMessageContaining("checksum");
+    }
+
     private static CoreOrderState order(long orderId) {
         return new CoreOrderState(orderId, ProductLine.SPOT, 7, "BTC-USDT", 1,
                 CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+    }
+
+    private static PlaceOrderCommand bid(long priceTicks) {
+        return new PlaceOrderCommand(1, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+                CoreOrderSide.BUY, priceTicks, 2, false, ReservationKind.SPOT_ASSET, "USDT", 200);
+    }
+
+    private static TradingCoreState stateWithOpenBid(long priceTicks) {
+        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", 1,
+                CoreOrderSide.BUY, priceTicks, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
+        return new TradingCoreState(ProductLine.SPOT, 1,
+                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order), Map.of(),
+                CoreRiskState.empty(), CoreTreasuryState.empty());
     }
 
     private static CoreMatchingResult result(boolean accepted, String resultCode) {

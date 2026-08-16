@@ -1,14 +1,11 @@
 # Surprising Aeron 统一交易核心
 
 本目录承载按产品线隔离的 Aeron Cluster 交易核心。每个 `ProductLine` 变体使用相同代码、独立 `clusterId`、
-端口空间、Archive 和数据卷；一个逻辑 Core 固定由三个 Member 组成，并管理该变体全部 symbol。当前实现和后续改造的唯一规格是
-[`docs/high-performance-trading-core-implementation.md`](../docs/high-performance-trading-core-implementation.md)。
+端口空间、Archive 和数据卷；一个逻辑 Core 固定由三个 Member 组成，并管理该变体全部 symbol。
 
-当前 P2 已按 O(delta) persistent state 通过阶段出口，P3 仍为 `IN_PROGRESS`：`TradingCoreRuntime` 已成为
-Core 单写边界，撮合命令只进入 exchange-core 0.5.8-emporia，但 `TradingCoreState` 仍保存
-`CoreBookState` priority map，matcher 恢复仍会 `cleanStart` 后逐单回放。下一阻断项是把 fork 的
-`ISerializationProcessor`/`ApiPersistState` 接入 Aeron 配对 snapshot，改为 snapshot-only restore，随后删除
-`CoreBookState` 和生产 rebuild 路径。现有 Core-only 恢复 smoke 证明过渡路径可恢复，不等于单一盘口 P3 已完成。
+W1/W2 已完成单一可执行盘口改造：`TradingCoreRuntime` 是 Core 单写边界，撮合命令只进入 fork 的
+exchange-core 0.5.10-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
+matcher 恢复导入 Aeron 配对 snapshot 中的原生 `ME0/RE0`，通过 `fromSnapshotOnly` 启动，不逐单回放。
 
 部署基线不按 margin mode 或热点 symbol 分 Core：CROSS 和 ISOLATED 都由同一个 ProductLine Core 裁决；
 CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。当前仅保留 `coreShardId=default` 和
@@ -35,10 +32,8 @@ export PATH="${JAVA_HOME}/bin:${PATH}"
 mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ```
 
-三节点可以通过 `compose.yaml` 启动；仓库根目录的 canonical `scripts/` 已按主规格提供 Core-only 启停、
-探针、export、资金对账、恢复和容量入口。一次只启动
-一条产品线；删除 Archive 或数据卷前必须先确认目标产品线并使用显式的 Docker volume 操作。脚本职责和验收
-命令以主规格第 18.3 节为准；这些入口不会伪装成已经运行的 HTTP provider、做市进程或 Kafka 集群。
+三节点部署与验证入口正在重新整理。一次只启动一条产品线；删除 Archive 或数据卷前必须先确认目标产品线，
+任何迁移工具只能在检测到既有状态时中止，不能自动删除状态。
 
 ## 协议约束
 
@@ -47,21 +42,22 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
   外部提交时间和 `correlationId`。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
-- 目标状态由 exchange-core 0.5.8-emporia 独占价格树/FIFO；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。当前 `CoreBookState` 是待 W2 删除的过渡性第二份优先级状态，不能作为撮合或恢复的长期权威。
+- exchange-core 0.5.10-emporia 独占价格树/FIFO；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。
+  Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
 - Core owner 线程只提交 exchange-core 异步命令；撮合结果通过 Cluster timer continuation 按序回到 owner，普通下单、撤单、改单、强平、结算和标记价触发子单均不在 owner 线程等待 ring future。adapter 不再提供同步交易入口；恢复和离线工具也通过显式异步 continuation drain 完成。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
   通过一个 `EXECUTE_LIQUIDATION_BATCH` 同时提交有序 action 和可选 Risk Scan continuation，订单阶段完成后才推进用户阶段。
   每个批次共享最多 `1024` 笔撤单预算，Core 以 `nextCursorOrderId` 保存独占下一页位置。
-  生命周期进度和 matcher attempt 元数据写入 Core snapshot，异常、超时或重启后最多 rebuild/resubmit 一次，第二次失败返回
-  `MATCHING_CONTINUATION_FAILED`；生命周期期间同 symbol 的普通订单被拒绝，其他 symbol 仍可提交。
+  生命周期进度保存在 Core 状态中，但 pending matcher continuation 不写入 snapshot。matcher 异常、超时、
+  malformed result 或 Core/matcher 分歧直接抛出 `FatalMatchingDivergenceException`，Cluster Member 失败关闭，
+  不 rebuild、不 retry、不 resubmit；生命周期期间同 symbol 的普通订单被拒绝，其他 symbol 仍可提交。
 - exchange-core 的异步提交按 symbol lane 串行，同一 symbol 保序、不同 symbol 重叠，snapshot/hash/settlement 等全局操作使用 barrier；
   当前物理 matcher 保持 `matchingEnginesNum(1)`，lane dispatcher 使用 adapter 自有线程，不依赖公共 ForkJoinPool。
 
 生命周期批量协议使用 `EXECUTE_LIQUIDATION_BATCH` wire code 43。`CoreLiquidationWorkCodec` 返回 action 的
 `ORDERED` cursor 和精确 Risk Scan token；`CoreLiquidationBatchResultCodec` 返回 offered/applied/pending/obsolete/
-processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期，`MATCHING_CONTINUATION_FAILED` 表示 matcher
-超时、异常或一次 rebuild/resubmit 后仍无法完成。旧的单 action 强平和 `CONTINUE_RISK_SCAN` 命令仅保留给直接工具，
+processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期。旧的单 action 强平和 `CONTINUE_RISK_SCAN` 命令仅保留给直接工具，
 正常 provider 周期不调用它们。
 
 | 生产者 / Core 组合 | 结果 |
@@ -76,5 +72,17 @@ processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期，`MAT
 - 同步调用超时表示结果未知。调用方必须复用同一 `commandId` 查询或重试，不能生成新 ID。
 - `SurprisingAeronClient` 串行提交消息；Gateway 后续通过固定数量的单线程 client agent 扩展吞吐。
 
-完整架构、阶段台账、问题追踪、风险参数所有权、脚本矩阵和验收门禁均在 `docs/` 主规格中维护；任何
-代码阶段完成后必须同步更新该文档的状态和证据。
+## W1/W2 原生快照契约
+
+- fork 坐标为 `exchange.core2:exchange-core:0.5.10-emporia`，Git SHA
+  `9819b9fea48b8b962bdef6bfcf67ed5f5a04981f`，JAR SHA-256
+  `b2ee6f235f9dbde4d2a37e407a8a855938b0f7cc0622ea28cb6e778552ff934a`。
+- `CoreState v6` 是唯一外层快照，配对保存 Core 状态和 exchange-core 的 `MATCHING_ENGINE_ROUTER/0`、
+  `RISK_ENGINE/0`；`TradingState v19` 不含盘口。三个 Member 必须运行完全相同的 fork、配置和 schema。
+- capture 在 `SymbolMatchingLanes.barrier` 内等待全部 lane 和 callback；pending matching 存在时拒绝发布。
+  恢复先校验三层 CRC32C、产品线、默认 shard/route、fork/config、symbol/user registry、完整 engine/book hash，
+  再以 O(活动订单数) 一次报告逐字段核对 OPEN 订单，全部通过后才允许服务启动完成。
+- snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；没有 clean-start fallback、订单回放、
+  隐藏 FIFO、matcher journal 或跨 Member 部分恢复。
+- 由于 v6/v19 不兼容未发布的 v5/v18，首次切换必须使用全新 Cluster 并保留旧二进制和旧 Archive 供诊断。
+  v6 接受命令后禁止二进制回滚读取新状态，只能用固定制品向前恢复。

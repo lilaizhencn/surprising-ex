@@ -2,6 +2,7 @@ package com.surprising.aeron.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -29,6 +30,7 @@ import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -318,7 +320,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void pendingMatcherAttemptMetadataSurvivesSnapshot() {
+    void rejectsSnapshotWhileMatchingPending() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
             state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
@@ -331,19 +333,41 @@ class CoreProbeStateTest {
                             "snapshot-attempt-713", 0, 0)));
 
             state.apply(place);
-            long sequence = state.matchingSequence(place.header().commandId());
-            PendingMatching expected = state.pendingMatching(sequence);
-            byte[] snapshot = state.snapshot();
-            state.close();
+            assertThatThrownBy(state::snapshot)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("cannot snapshot while matching commands are pending");
+        }
+    }
 
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot)) {
-                PendingMatching actual = restored.pendingMatching(sequence);
-                assertThat(actual).isNotNull();
-                assertThat(actual.attemptGeneration()).isEqualTo(expected.attemptGeneration());
-                assertThat(actual.attemptDeadline()).isEqualTo(expected.attemptDeadline());
-                assertThat(actual.recoveryAttempts()).isEqualTo(expected.recoveryAttempts());
-                assertThat(actual.attemptToken()).isEqualTo(expected.attemptToken());
-            }
+    @Test
+    void failsClosedWithoutRetryOnMatcherDivergence() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            UUID commandId = UUID.randomUUID();
+            CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, commandId, 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(714, "BTC-USDT", 1,
+                            "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 2, false,
+                            CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT",
+                            2_000, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 1_000, false,
+                            "fatal-714", 0, 0)));
+            assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.matchingSequence(commandId);
+            var matcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
+                    false, "EXCHANGE_CORE_FAILURE", List.of());
+
+            Throwable fatal = catchThrowable(() -> state.completeMatching(sequence, matcherFailure, 2_000, 3));
+
+            assertThat(fatal).isInstanceOf(
+                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+            assertThatThrownBy(() -> state.apply(command(UUID.randomUUID(), 3, 1)))
+                    .isSameAs(fatal);
+            assertThatThrownBy(state::snapshot).isSameAs(fatal);
+            assertThat(state.pendingMatching()).containsOnlyKeys(sequence);
+            assertThat(state.tradingState().order(714).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
         }
     }
 
@@ -621,7 +645,7 @@ class CoreProbeStateTest {
                 Map.of("BTC-USDT", new com.surprising.aeron.service.state.CoreRiskState.RiskScan(
                         "BTC-USDT", 7, 7, 1001, false)), 3);
         var trading = new com.surprising.aeron.service.state.TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(), Map.of(), com.surprising.aeron.service.state.CoreBookState.empty(), Map.of(), risk,
+                Map.of(), Map.of(), Map.of(), risk,
                 com.surprising.aeron.service.state.CoreTreasuryState.empty());
         CoreProbeState state = CoreProbeState.restore(ProductLine.SPOT, 0, 0,
                 Map.of(), Map.of(), trading, new CoreExportState());
@@ -738,9 +762,16 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(5);
+        assertThat(manifest.schemaVersion()).isEqualTo(6);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+        assertThat(manifest.engineStateHash()).isNotZero();
+        assertThat(manifest.coreShardId()).isEqualTo("default");
+        assertThat(manifest.routeVersion()).isEqualTo(1);
+        assertThat(manifest.forkGitSha()).isEqualTo(
+                com.surprising.aeron.service.matching.MatcherSnapshot.FORK_GIT_SHA);
+        assertThat(manifest.artifactSha256()).isEqualTo(
+                com.surprising.aeron.service.matching.MatcherSnapshot.ARTIFACT_SHA256);
         assertThat(manifest.exportStatus().pendingCount()).isEqualTo(1);
         assertThat(manifest.checksum()).isPositive();
     }

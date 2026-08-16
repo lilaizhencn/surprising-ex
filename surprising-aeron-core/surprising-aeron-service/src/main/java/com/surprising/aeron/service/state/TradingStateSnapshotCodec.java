@@ -21,7 +21,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 18;
+    private static final int VERSION = 19;
     private static final int MAX_TEXT_BYTES = 64;
 
     private TradingStateSnapshotCodec() {
@@ -96,13 +96,6 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(order.clusterPosition());
             writer.intValue(order.status().ordinal());
             writer.longValue(order.revision());
-        });
-        writer.longValue(state.bookState().nextPrioritySequence());
-        writer.intValue(state.bookState().openOrders().size());
-        state.bookState().priorityOrder().forEach(orderId -> {
-            long prioritySequence = state.bookState().prioritySequence(orderId);
-            writer.longValue(orderId);
-            writer.longValue(prioritySequence);
         });
         writer.intValue(state.instruments().size());
         state.instruments().values().forEach(instrument -> {
@@ -358,14 +351,6 @@ public final class TradingStateSnapshotCodec {
                     CoreOrderStatus.values()[statusCode], reader.positiveLong("order revision"));
             putUnique(orders, orderId, order);
         }
-        long nextPrioritySequence = reader.positiveLong("next book priority sequence");
-        int bookOrderCount = reader.count("book orders");
-        Map<Long, Long> bookOrders = new TreeMap<>();
-        for (int index = 0; index < bookOrderCount; index++) {
-            putUnique(bookOrders, reader.positiveLong("book orderId"),
-                    reader.positiveLong("book priority sequence"));
-        }
-        CoreBookState bookState = new CoreBookState(nextPrioritySequence, bookOrders);
         Map<String, CoreInstrumentState> instruments = new TreeMap<>();
         int instrumentCount = reader.count("instruments");
         for (int index = 0; index < instrumentCount; index++) {
@@ -569,7 +554,7 @@ public final class TradingStateSnapshotCodec {
             putUnique(triggerOrders, trigger.triggerOrderId(), trigger);
         }
         reader.requireConsumed();
-        return new TradingCoreState(productLine, revision, users, orders, bookState, instruments, riskState,
+        return new TradingCoreState(productLine, revision, users, orders, instruments, riskState,
                 treasuryState, leverages, algoOrders, cancelAllAfterTimers, triggerOrders);
     }
 

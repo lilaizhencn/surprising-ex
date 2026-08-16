@@ -5,9 +5,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 仓库覆盖现货、永续、交割和欧式现金结算期权四类业务线（六个 `ProductLine` 变体）；每个变体使用独立的
 三节点 Aeron Cluster、Topic、投影和账户类型。
 
-完整架构、问题追踪、唯一参数来源、阶段台账、脚本矩阵和验收门禁以
-[`docs/high-performance-trading-core-implementation.md`](docs/high-performance-trading-core-implementation.md)
-为唯一实施依据。canonical 脚本均绑定显式产品线的内存 Core；真实 provider/做市进程仍由部署编排单独管理。
+本 README 与各模块 README 记录当前架构和验收边界；真实 provider、做市进程和基础设施由部署编排单独管理。
 
 ## 已确认架构基线
 
@@ -18,9 +16,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 - 当前不为热点币对单独部署 Core。协议、路由、事件、指标和 snapshot 只预留
   `coreShardId=default`、`routeVersion=1` 的语义；字段按主规格 W1/W3 版本化落地，完成前拒绝任何非默认路由。
   只有容量门禁证明单 Core 不足后才评审独立风险子账户式分片。
-- 目标架构以 exchange-core 为唯一 FIFO/价格树，Core 只保留业务订单元数据和必要索引。当前源码仍保留
-  `CoreBookState` 并在恢复时逐单 rebuild matcher，因此 P3 是 `IN_PROGRESS`；必须完成 fork 原生 snapshot
-  的 Aeron 托管、snapshot-only restore 和双本删除后才能宣称改造完成。
+- exchange-core 已是唯一可执行盘口和 FIFO/价格树权威；Core 只保留订单元数据、资金、持仓、风险状态和
+  必要派生索引。`CoreBookState`、优先级副本、逐单 rebuild、恢复 retry/resubmit 已从生产代码删除。
 
 ## 核心边界
 
@@ -87,21 +84,15 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。入口层边界由源码审查和
 对应 Maven 测试维护。
 
-## 构建与本地启动
+## 构建与本地验证
 
-要求 JDK 25。基础设施启动、数据库初始化和 Topic 创建脚本仍由各部署编排管理；Core 本地三节点可以先执行：
+要求 JDK 25。基础设施启动、数据库初始化、Topic 创建和三节点部署入口正在重新整理；当前优先执行受影响模块测试：
 
 ```bash
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh fresh
-PRODUCT_LINE=SPOT scripts/integration-smoke.sh
-PRODUCT_LINE=SPOT scripts/aeron-core-local.sh down
+mvn -pl surprising-aeron-core/surprising-aeron-service -am test
 ```
 
-恢复与容量门禁分别使用 `scripts/run-product-line-recovery-matrix.sh` 和
-`scripts/run-product-line-capacity.sh`。`fresh` 只删除显式产品线的 Docker volume；`up/down` 默认保留卷。
-脚本不会启动 wallet，也不会把未接入的 HTTP provider、做市进程或 Kafka 集群验证伪装成 Core 已完成能力。
-
-matching 使用 `exchange.core2:exchange-core:0.5.8-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
+matching 使用 `exchange.core2:exchange-core:0.5.10-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
 以下 JVM 参数：
 
 ```text
@@ -137,10 +128,9 @@ mvn test
 mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ```
 
-当前 Maven 测试覆盖构建和核心 Aeron 客户端/工具链；产品线资金守恒、恢复和容量脚本按主规格的单线门禁执行，
-未通过真实 provider/做市/Kafka 集群验证的场景必须在证据中明确标记。根 `mvn test` 当前仍会在既有
-`surprising-gateway` 的 `BinanceApiControllerTest` 泛型断言编译错误处停止；Core、Risk 和 Trigger 模块的定向
-Maven 测试可独立通过，详见主规格验证证据。
+当前 Maven 测试覆盖构建和核心 Aeron 客户端/工具链。恢复门禁按六个 `ProductLine` 分别启动一个 Core，
+验证原生 matcher snapshot、同价 FIFO、订单/资金/持仓状态和失败关闭；未通过真实三节点、provider、做市、
+Kafka 集群或长时间容量验证的场景必须在交付记录中明确标记。
 交易裁决和结算在 Aeron Core 内存状态机完成；PostgreSQL 只用于异步投影、审计和对账。
 
 ## 生产部署
@@ -151,7 +141,7 @@ Maven 测试可独立通过，详见主规格验证证据。
 - 每个变体只配置一个 `coreShardId=default` 的三 Member Cluster；cluster id、端口、Archive、snapshot、
   data volume、gateway route、Topic、consumer group 和账户类型不得复用。
 - 三个 Member 必须跨故障域部署，使用本地持久盘保存 Archive；启动时校验 fork SHA、matcher/Core snapshot
-  manifest、registry hash 和恢复水位，任一不一致保持 `NOT_READY`。
+  manifest、完整 engine/book hash、registry hash 和恢复水位，任一不一致直接失败关闭，不进入 `READY`。
 - Gateway 通过固定 Aeron agents 和有界 mailbox 向 Core 提交命令；Kafka、Order Provider、PostgreSQL 和
   Redis/Valkey 不参与资金预留、撮合或成交结算的同步裁决，也不承担核心恢复。
 - 关闭 Kafka 自动建 Topic，使用经过审查的配置创建外围输入和 Core Export Topic；不在已有 symbol-keyed
@@ -164,6 +154,19 @@ Maven 测试可独立通过，详见主规格验证证据。
   export event age、Kafka/PG/WebSocket lag、资金差额和 book hash；不以平均 TPS 代替容量结论。
 
 Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Runbook 补充；不得改变上述所有权和恢复边界。
+
+### W1/W2 快照与发布契约
+
+- fork 固定为 `exchange-core 0.5.10-emporia`，源码提交
+  `9819b9fea48b8b962bdef6bfcf67ed5f5a04981f`，JAR SHA-256
+  `b2ee6f235f9dbde4d2a37e407a8a855938b0f7cc0622ea28cb6e778552ff934a`。
+- `CoreState v6` 同时封装 Core 业务状态和 exchange-core 原生 `ME0/RE0`；`TradingState v19` 不包含盘口。
+  恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，不允许 clean-start、活动订单回放或第二本 FIFO。
+- capture 在 symbol-lane barrier 内完成；存在 pending matching 时精确拒绝快照。恢复在开放流量前执行
+  CRC32C、产品线/路由、fork/config、注册表、完整引擎哈希、盘口哈希和全部 OPEN 订单逐字段对账。
+- v5/v18 未发布兼容层。首次上线采用全体 Member 同版本的新 Cluster；检测到旧状态时只中止，不自动删除。
+  v6 接受命令前可回退旧二进制及其保留的旧快照；v6 接受命令后只能保留数据并用上述精确制品向前恢复，
+  禁止新旧 Member 混跑或让旧二进制读取 v6/v19。
 
 ## 文档
 

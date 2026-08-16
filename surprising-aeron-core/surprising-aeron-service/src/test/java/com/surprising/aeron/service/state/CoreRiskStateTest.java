@@ -221,7 +221,7 @@ class CoreRiskStateTest {
                 state.riskState().liquidations(), Map.of("BTC-USDT", scan),
                 state.riskState().nextLiquidationId());
         TradingCoreState pending = new TradingCoreState(state.productLine(), state.revision() + 1,
-                state.users(), state.orders(), state.bookState(), state.instruments(), risk,
+                state.users(), state.orders(), state.instruments(), risk,
                 state.treasuryState(), state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
                 state.clientOrderIndex(), state.triggerOrders());
 
@@ -276,6 +276,6 @@ class CoreRiskStateTest {
         Map<Long, CoreUserState> users = new TreeMap<>(state.users());
         users.put(userId, user);
         return new TradingCoreState(state.productLine(), state.revision() + 1, users, state.orders(),
-                state.bookState(), state.instruments(), state.riskState(), state.treasuryState());
+                state.instruments(), state.riskState(), state.treasuryState());
     }
 }

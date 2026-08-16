@@ -52,7 +52,6 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (snapshotImage != null) {
             loadSnapshot(snapshotImage);
         }
-        state.resumePendingMatching();
         schedulePendingMatchingTimers();
     }
 
@@ -100,7 +99,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTakeSnapshot(ExclusivePublication snapshotPublication) {
-        byte[] snapshot = state.snapshot();
+        byte[] snapshot = state.snapshot(Math.max(1, cluster.logPosition()));
         org.agrona.concurrent.UnsafeBuffer buffer = new org.agrona.concurrent.UnsafeBuffer(snapshot);
         idleStrategy.reset();
         int offset = 0;
@@ -212,7 +211,11 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (snapshot.size() == 0) {
             throw new IllegalStateException("incomplete Aeron core snapshot");
         }
-        CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot.toByteArray());
+        restoreSnapshot(snapshot.toByteArray());
+    }
+
+    void restoreSnapshot(byte[] snapshot) {
+        CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot);
         state.close();
         state = restored;
     }
@@ -273,11 +276,12 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private void scheduleMatchingTimer(long sequence) {
         if (cluster == null || sequence == 0) return;
-        try {
-            long delay = Math.max(1L, cluster.timeUnit().convert(MATCHING_TIMER_DELAY_MS,
-                    java.util.concurrent.TimeUnit.MILLISECONDS));
-            cluster.scheduleTimer(sequence, cluster.time() + delay);
-        } catch (RuntimeException ignored) {
+        long delay = Math.max(1L, cluster.timeUnit().convert(MATCHING_TIMER_DELAY_MS,
+                java.util.concurrent.TimeUnit.MILLISECONDS));
+        long deadline = cluster.time() + delay;
+        idleStrategy.reset();
+        while (!cluster.scheduleTimer(sequence, deadline)) {
+            idleStrategy.idle();
         }
     }
 

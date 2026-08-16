@@ -29,8 +29,8 @@ class TriggerOrderIndexTest {
                     "trace-" + id, 0, 0, 1, 1, 1));
         }
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 0,
-                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), CoreBookState.empty(),
-                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
+                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), Map.of(),
+                CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
         TriggerOrderIndex index = new TriggerOrderIndex(state);
 
         long upperId = index.maxPendingId("BTC-USDT");
@@ -64,8 +64,8 @@ class TriggerOrderIndexTest {
         triggers.put(303L, trailing(303, CoreOrderSide.SELL, 0, 100_000, 0, 0, 0));
         triggers.put(304L, trailing(304, CoreOrderSide.BUY, 0, 100_000, 0, 100, 1_000));
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 0,
-                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), CoreBookState.empty(),
-                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
+                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), Map.of(),
+                CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
         TriggerOrderIndex index = new TriggerOrderIndex(state);
 
         assertThat(candidateIds(index, 95)).containsExactly(303L);

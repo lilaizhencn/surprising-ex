@@ -9,7 +9,6 @@ public final class RollingBusinessStateHash {
 
     private final Aggregate users = new Aggregate();
     private final Aggregate orders = new Aggregate();
-    private final Aggregate bookOrders = new Aggregate();
     private final Aggregate instruments = new Aggregate();
     private final Aggregate leverages = new Aggregate();
     private final Aggregate algoOrders = new Aggregate();
@@ -30,13 +29,11 @@ public final class RollingBusinessStateHash {
     private final int productLine;
     private long revision;
     private long nextLiquidationId;
-    private CoreBookState bookState;
 
     private RollingBusinessStateHash(TradingCoreState state) {
         productLine = state.productLine().ordinal();
         revision = state.revision();
         nextLiquidationId = state.riskState().nextLiquidationId();
-        bookState = state.bookState();
         rebuild(state);
     }
 
@@ -60,10 +57,6 @@ public final class RollingBusinessStateHash {
         updateMap(clientOrderIndex, before.clientOrderIndex(), after.clientOrderIndex());
         updateMap(triggers, before.triggerOrders(), after.triggerOrders());
 
-        if (before.bookState() != after.bookState()) {
-            updateMap(bookOrders, before.bookState().openOrders(), after.bookState().openOrders());
-            bookState = after.bookState();
-        }
         if (before.riskState() != after.riskState()) {
             updateMap(markPrices, before.riskState().markPrices(), after.riskState().markPrices());
             updateMap(riskSnapshots, before.riskState().snapshots(), after.riskState().snapshots());
@@ -87,7 +80,6 @@ public final class RollingBusinessStateHash {
     public void restore(TradingCoreState state) {
         revision = state.revision();
         nextLiquidationId = state.riskState().nextLiquidationId();
-        bookState = state.bookState();
         rebuild(state);
     }
 
@@ -97,8 +89,6 @@ public final class RollingBusinessStateHash {
         hash = CoreStateHash.mix(hash, revision);
         hash = mixAggregate(hash, "users", users);
         hash = mixAggregate(hash, "orders", orders);
-        hash = mixAggregate(hash, "book", bookOrders);
-        hash = CoreStateHash.mix(hash, bookState.nextPrioritySequence());
         hash = mixAggregate(hash, "instruments", instruments);
         hash = mixAggregate(hash, "leverages", leverages);
         hash = mixAggregate(hash, "algo", algoOrders);
@@ -122,7 +112,6 @@ public final class RollingBusinessStateHash {
     private void rebuild(TradingCoreState state) {
         rebuildMap(users, state.users());
         rebuildMap(orders, state.orders());
-        rebuildMap(bookOrders, state.bookState().openOrders());
         rebuildMap(instruments, state.instruments());
         rebuildMap(leverages, state.leverages());
         rebuildMap(algoOrders, state.algoOrders());

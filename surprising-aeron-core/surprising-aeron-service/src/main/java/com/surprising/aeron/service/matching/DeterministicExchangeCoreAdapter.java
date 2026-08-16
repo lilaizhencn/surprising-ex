@@ -6,7 +6,6 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.state.CoreInstrumentState;
 import com.surprising.aeron.service.state.CoreOrderState;
-import com.surprising.aeron.service.state.CoreOrderStatus;
 import com.surprising.aeron.service.state.TradingCoreState;
 import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
@@ -20,17 +19,23 @@ import exchange.core2.core.common.api.ApiAddUser;
 import exchange.core2.core.common.api.ApiCancelOrder;
 import exchange.core2.core.common.api.ApiPlaceOrder;
 import exchange.core2.core.common.api.ApiMoveOrder;
+import exchange.core2.core.common.api.ApiPersistState;
 import exchange.core2.core.common.api.binary.BatchAddSymbolsCommand;
+import exchange.core2.core.common.api.reports.OpenOrdersReportQuery;
+import exchange.core2.core.common.api.reports.OpenOrdersReportResult;
 import exchange.core2.core.common.cmd.CommandResultCode;
 import exchange.core2.core.common.config.ExchangeConfiguration;
 import exchange.core2.core.common.config.InitialStateConfiguration;
 import exchange.core2.core.common.config.OrdersProcessingConfiguration;
 import exchange.core2.core.common.config.PerformanceConfiguration;
+import exchange.core2.core.common.config.SerializationConfiguration;
+import exchange.core2.core.processors.journaling.InMemorySerializationProcessor;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -46,6 +51,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private ExchangeCore core;
     private ExchangeApi api;
+    private final InMemorySerializationProcessor serializationProcessor =
+            new InMemorySerializationProcessor();
     private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
     private final Set<Long> users = ConcurrentHashMap.newKeySet();
@@ -67,6 +74,41 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public DeterministicExchangeCoreAdapter(boolean startImmediately) {
         if (startImmediately) {
             start();
+        }
+    }
+
+    public DeterministicExchangeCoreAdapter(
+            TradingCoreState state,
+            long coreSequence,
+            MatcherSnapshot snapshot) {
+        if (snapshot == null) {
+            throw new IllegalArgumentException("matcher snapshot is required");
+        }
+        try {
+            snapshot.verifyCoreState(state, coreSequence);
+            serializationProcessor.importSnapshot(snapshot.modules());
+            snapshot.symbols().forEach((symbol, symbolId) -> {
+                String previous = symbolNames.put(symbolId, symbol);
+                if (previous != null && !previous.equals(symbol)) {
+                    throw new IllegalArgumentException("matcher symbol registry collision");
+                }
+                symbols.put(symbol, symbolId);
+            });
+            users.addAll(snapshot.users());
+            start(snapshot);
+            reconcileOpenOrdersAsync(state, coreSequence, snapshot.snapshotId(), "matcher restore").join();
+            StateHashes restoredHashes = currentStateHashesAsync().join();
+            if (restoredHashes.engineHash() != snapshot.engineStateHash()
+                    || restoredHashes.bookHash() != snapshot.bookStateHash()) {
+                throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
+                        snapshot.snapshotId(), "restored exchange-core state hash mismatch");
+            }
+        } catch (RuntimeException exception) {
+            stop();
+            Throwable cause = unwrap(exception);
+            if (cause instanceof FatalMatchingDivergenceException divergence) throw divergence;
+            throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
+                    snapshot.snapshotId(), "native snapshot validation failed", cause);
         }
     }
 
@@ -197,13 +239,88 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CompletableFuture<Integer> orderBooksStateHashAsync() {
-        return matchingLanes.barrier(() -> api.processReport(
-                            new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0)
-                    .thenApply(report -> report.getHashCodes().entrySet().stream()
-                            .filter(entry -> entry.getKey().submodule
-                                    == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType.MATCHING_ORDER_BOOKS)
-                            .mapToInt(Map.Entry::getValue)
-                            .reduce(0, (left, right) -> left * 31 + right)));
+        return matchingLanes.barrier(() -> currentStateHashesAsync().thenApply(StateHashes::bookHash));
+    }
+
+    public CompletableFuture<MatcherSnapshot> snapshotAsync(
+            long snapshotId,
+            long coreSequence,
+            TradingCoreState state) {
+        if (snapshotId <= 0 || coreSequence < 0 || state == null) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher snapshot request"));
+        }
+        return matchingLanes.barrier(() -> reconcileOpenOrdersAsync(state, coreSequence, snapshotId,
+                "matcher snapshot").thenCompose(ignored -> currentStateHashesAsync()).thenCompose(hashes ->
+                api.submitCommandAsync(ApiPersistState.builder().dumpId(snapshotId).build())
+                        .thenApply(result -> {
+                            if (result != CommandResultCode.SUCCESS) {
+                                throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence,
+                                        snapshotId, "exchange-core persist failed: " + result);
+                            }
+                            try {
+                                List<InMemorySerializationProcessor.SerializedModule> modules =
+                                        serializationProcessor.exportSnapshot(snapshotId);
+                                long matcherSequence = modules.stream()
+                                        .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence)
+                                        .max().orElseThrow();
+                                return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
+                                        MatcherSnapshot.ROUTE_VERSION, snapshotId, coreSequence, matcherSequence,
+                                        state.businessStateHash(), hashes.engineHash(), hashes.bookHash(),
+                                        MatcherSnapshot.symbolRegistryHash(symbols),
+                                        MatcherSnapshot.userRegistryHash(users),
+                                        MatcherSnapshot.instrumentRegistryHash(state),
+                                        MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
+                                        MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.MATCHER_CONFIG_HASH,
+                                        symbols, users, modules);
+                            } finally {
+                                serializationProcessor.removeSnapshot(snapshotId);
+                            }
+                        })));
+    }
+
+    private CompletableFuture<Void> reconcileOpenOrdersAsync(
+            TradingCoreState state,
+            long coreSequence,
+            long snapshotId,
+            String operation) {
+        return api.processReport(new OpenOrdersReportQuery(), 0).thenAccept(report -> {
+            Map<Long, ReconciledOrder> expected = new TreeMap<>();
+            for (CoreOrderState order : state.orders().values()) {
+                if (order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN) continue;
+                Integer symbolId = symbols.get(order.symbol());
+                if (symbolId == null) {
+                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                            "Core open order references an unregistered matcher symbol");
+                }
+                expected.put(order.orderId(), new ReconciledOrder(symbolId, order.orderId(), order.userId(),
+                        order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
+                        order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
+                        order.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : order.priceTicks()));
+            }
+            Map<Long, ReconciledOrder> actual = new TreeMap<>();
+            for (OpenOrdersReportResult.OpenOrder order : report.getOrders()) {
+                ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
+                        order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
+                if (actual.put(order.orderId(), reconciled) != null) {
+                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                            "exchange-core returned duplicate open order ID " + order.orderId());
+                }
+            }
+            if (!expected.equals(actual)) {
+                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                        "Core OPEN orders do not exactly match exchange-core open orders"
+                                + " (expected=" + expected.size() + ", actual=" + actual.size() + ')');
+            }
+        });
+    }
+
+    private CompletableFuture<StateHashes> currentStateHashesAsync() {
+        return api.processReport(new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0)
+                .thenApply(report -> new StateHashes(report.getStateHash(), report.getHashCodes().entrySet().stream()
+                        .filter(entry -> entry.getKey().submodule
+                                == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType.MATCHING_ORDER_BOOKS)
+                        .mapToInt(Map.Entry::getValue)
+                        .reduce(0, (left, right) -> left * 31 + right)));
     }
 
     public CompletableFuture<List<CoreBookLevelView>> orderBookLevelsAsync(String requestedSymbol, int depth) {
@@ -238,65 +355,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         });
     }
 
-    public CompletableFuture<Void> rebuildAsync(TradingCoreState state) {
-        return rebuildAsync(state, Set.of());
-    }
-
-    public CompletableFuture<Void> rebuildAsync(TradingCoreState state, Set<Long> excludedOrderIds) {
-        return matchingLanes.barrier(() -> rebuildUnlanedAsync(state, excludedOrderIds));
-    }
-
-    private CompletableFuture<Void> rebuildUnlanedAsync(TradingCoreState state, Set<Long> excludedOrderIds) {
-        stop();
-        symbols.clear();
-        symbolNames.clear();
-        users.clear();
-        start();
-        CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
-        for (CoreInstrumentState instrument : state.instruments().values().stream()
-                .sorted(java.util.Comparator.comparing(CoreInstrumentState::symbol)).toList()) {
-            chain = chain.thenCompose(ignored -> ensureInstrumentAsync(instrument).thenApply(symbolId -> null));
-        }
-        for (Long userId : state.users().keySet().stream().sorted().toList()) {
-            chain = chain.thenCompose(ignored -> ensureUserAsync(userId));
-        }
-        long activeOrderCount = state.orders().values().stream()
-                .filter(order -> order.status() == CoreOrderStatus.OPEN)
-                .count();
-        if (activeOrderCount != state.bookState().openOrders().size()) {
-            throw new IllegalStateException("book recovery active order count mismatch");
-        }
-        List<PlaceRequest> requests = state.bookState().priorityOrder().stream()
-                .map(state::order)
-                .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN
-                        && (excludedOrderIds == null || !excludedOrderIds.contains(order.orderId())))
-                .map(order -> {
-            CoreInstrumentState instrument = state.instruments().get(order.symbol());
-            if (instrument == null) {
-                throw new IllegalStateException("book recovery instrument is missing symbol=" + order.symbol());
-            }
-            boolean spot = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT;
-            PlaceOrderCommand command = new PlaceOrderCommand(order.orderId(), order.symbol(), order.instrumentVersion(),
-                    instrument.baseAsset(), instrument.quoteAsset(), instrument.settleAsset(), order.side(),
-                    order.priceTicks(), order.remainingQuantitySteps(), order.reduceOnly(), order.marginMode(),
-                    order.positionSide(), spot ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
-                    spot && order.side() == CoreOrderSide.BUY ? instrument.quoteAsset()
-                            : spot ? instrument.baseAsset() : instrument.settleAsset(), 0,
-                    order.orderType(), order.timeInForce(), order.priceTicks(), order.postOnly(),
-                    order.clientOrderId(), order.makerFeeRatePpm(), order.takerFeeRatePpm());
-            return new PlaceRequest(order.userId(), command);
-        }).toList();
-        for (PlaceRequest request : requests) {
-            chain = chain.thenCompose(ignored -> placeUnlanedAsync(request.userId(), request.command()).thenAccept(result -> {
-                if (!result.accepted() || !result.matches().isEmpty()) {
-                    throw new IllegalStateException("book recovery crossed or rejected orderId="
-                            + request.command().orderId());
-                }
-            }));
-        }
-        return chain;
-    }
-
     public CompletableFuture<Integer> ensureInstrumentAsync(CoreInstrumentState instrument) {
         if (instrument == null) {
             throw new IllegalArgumentException("instrument is required");
@@ -305,6 +363,14 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private void start() {
+        start(null);
+    }
+
+    private void start(MatcherSnapshot snapshot) {
+        InitialStateConfiguration initialState = snapshot == null
+                ? InitialStateConfiguration.cleanStart("aeron-authoritative-book")
+                : InitialStateConfiguration.fromSnapshotOnly(
+                        "aeron-authoritative-book", snapshot.snapshotId(), 0);
         ExchangeConfiguration configuration = ExchangeConfiguration.defaultBuilder()
                 .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
                         .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.MATCHING_ONLY)
@@ -312,7 +378,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .build())
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
                         .matchingEnginesNum(1).riskEnginesNum(1).waitStrategy(CoreWaitStrategy.BUSY_SPIN).build())
-                .initStateCfg(InitialStateConfiguration.cleanStart("aeron-authoritative-book"))
+                .initStateCfg(initialState)
+                .serializationCfg(SerializationConfiguration.builder()
+                        .enableJournaling(false)
+                        .serializationProcessorFactory(ignored -> serializationProcessor)
+                        .build())
                 .build();
         core = ExchangeCore.builder().exchangeConfiguration(configuration).resultsConsumer((command, sequence) -> {
         }).build();
@@ -354,12 +424,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 }));
     }
 
-    public record PlaceRequest(long userId, PlaceOrderCommand command) {
-        public PlaceRequest {
-            if (userId <= 0 || command == null) throw new IllegalArgumentException("invalid place request");
-        }
-    }
-
     private int stableSymbolId(String symbol) {
         int symbolId = stableId("SYMBOL:" + symbol);
         while (symbolId == 0 || (symbolNames.containsKey(symbolId) && !symbol.equals(symbolNames.get(symbolId)))) {
@@ -375,6 +439,20 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             hash *= 0x01000193;
         }
         return hash & 0x7fffffff;
+    }
+
+    private record ReconciledOrder(
+            int symbolId,
+            long orderId,
+            long userId,
+            OrderAction action,
+            long price,
+            long size,
+            long filled,
+            long reserveBidPrice) {
+    }
+
+    private record StateHashes(int engineHash, int bookHash) {
     }
 
     private void stop() {

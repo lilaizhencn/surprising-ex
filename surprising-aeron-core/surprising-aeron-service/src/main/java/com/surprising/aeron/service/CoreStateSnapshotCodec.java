@@ -7,6 +7,8 @@ import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingStateSnapshotCodec;
+import com.surprising.aeron.service.matching.MatcherSnapshot;
+import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -21,8 +23,8 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 final class CoreStateSnapshotCodec {
 
     private static final int MAGIC = 0x5358534E;
-    private static final int VERSION = 5;
-    private static final int FIXED_LENGTH = 40;
+    private static final int VERSION = 6;
+    private static final int FIXED_LENGTH = 48;
     private static final int SOURCE_SEQUENCE_LENGTH = 24;
     private static final int RESULT_LENGTH = 40;
     private static final int EXPORT_FIXED_LENGTH = 20;
@@ -31,8 +33,13 @@ final class CoreStateSnapshotCodec {
     private CoreStateSnapshotCodec() {
     }
 
-    static byte[] encode(CoreProbeState state) {
+    static byte[] encode(CoreProbeState state, MatcherSnapshot matcherSnapshot) {
+        if (!state.pendingMatching().isEmpty()) {
+            throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
+        }
+        matcherSnapshot.verifyCoreState(state.tradingState(), state.appliedCommandCount());
         byte[] tradingState = TradingStateSnapshotCodec.encode(state.tradingState());
+        byte[] matcherState = MatcherSnapshotCodec.encode(matcherSnapshot);
         java.util.ArrayList<byte[]> pendingEvents = new java.util.ArrayList<>(state.exportState().pendingCount());
         for (CoreMessage event : state.exportState().pendingEvents()) {
             pendingEvents.add(CoreMessageCodec.encode(event));
@@ -41,31 +48,25 @@ final class CoreStateSnapshotCodec {
         for (byte[] event : pendingEvents) {
             exportLength = Math.addExact(exportLength, Math.addExact(Integer.BYTES, event.length));
         }
-        long pendingLength = 0;
-        java.util.ArrayList<byte[]> pendingCommands = new java.util.ArrayList<>(state.pendingMatching().size());
-        for (PendingMatching pending : state.pendingMatching().values()) {
-            byte[] encoded = CoreMessageCodec.encode(pending.command());
-            pendingCommands.add(encoded);
-            pendingLength = Math.addExact(pendingLength,
-                    Math.addExact(44L, encoded.length));
-        }
         int snapshotLength = Math.toIntExact(Math.addExact(Math.addExact(Math.addExact(
                 Math.addExact((long) FIXED_LENGTH,
                         Math.multiplyExact((long) state.lastSourceSequences().size(), SOURCE_SEQUENCE_LENGTH)),
                 Math.multiplyExact((long) state.commandResults().size(), RESULT_LENGTH)),
-                Math.addExact(exportLength, pendingLength)), Math.addExact(tradingState.length, CHECKSUM_LENGTH)));
+                exportLength), Math.addExact(Math.addExact(matcherState.length, tradingState.length), CHECKSUM_LENGTH)));
         ByteBuffer buffer = ByteBuffer.allocate(snapshotLength)
                 .order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(MAGIC);
         buffer.putShort((short) VERSION);
         buffer.put((byte) ProductLineWireCode.encode(state.productLine()));
         buffer.put((byte) 0);
+        buffer.putInt(MatcherSnapshot.ROUTE_VERSION);
         buffer.putLong(state.appliedCommandCount());
         buffer.putLong(state.probeValue());
         buffer.putInt(state.commandResults().size());
         buffer.putInt(state.lastSourceSequences().size());
         buffer.putInt(tradingState.length);
-        buffer.putInt(state.pendingMatching().size());
+        buffer.putInt(matcherState.length);
+        buffer.putInt(0);
         state.lastSourceSequences().forEach((sourceKey, sequence) -> {
             buffer.putInt(sourceKey.source().wireCode());
             buffer.putInt(0);
@@ -87,18 +88,7 @@ final class CoreStateSnapshotCodec {
             buffer.putInt(encoded.length);
             buffer.put(encoded);
         });
-        int pendingIndex = 0;
-        for (PendingMatching pending : state.pendingMatching().values()) {
-            byte[] encoded = pendingCommands.get(pendingIndex++);
-            buffer.putLong(pending.sequence());
-            buffer.putInt(pending.operation().ordinal());
-            buffer.putLong(pending.attemptGeneration());
-            buffer.putLong(pending.attemptDeadline());
-            buffer.putInt(pending.recoveryAttempts());
-            buffer.putLong(pending.attemptToken());
-            buffer.putInt(encoded.length);
-            buffer.put(encoded);
-        }
+        buffer.put(matcherState);
         buffer.put(tradingState);
         CRC32C checksum = new CRC32C();
         checksum.update(buffer.array(), 0, buffer.position());
@@ -129,22 +119,27 @@ final class CoreStateSnapshotCodec {
             throw new ProtocolException("snapshot checksum mismatch");
         }
         ProductLine productLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.get()));
-        buffer.get();
+        int shardCode = Byte.toUnsignedInt(buffer.get());
+        int routeVersion = buffer.getInt();
         if (productLine != expectedProductLine) {
             throw new ProtocolException("snapshot product line mismatch: " + productLine);
+        }
+        if (shardCode != 0 || routeVersion != MatcherSnapshot.ROUTE_VERSION) {
+            throw new ProtocolException("unsupported matcher route");
         }
         long appliedCommandCount = buffer.getLong();
         buffer.getLong();
         int resultCount = buffer.getInt();
         int sourceSequenceCount = buffer.getInt();
         int tradingStateLength = buffer.getInt();
+        int matcherStateLength = buffer.getInt();
         int pendingCount = buffer.getInt();
-        if (resultCount < 0 || sourceSequenceCount < 0
+        if (resultCount < 0 || resultCount > CoreProbeState.MAX_IDEMPOTENCY_RESULTS || sourceSequenceCount < 0
                 || sourceSequenceCount > CoreProbeState.MAX_SOURCE_SEQUENCES
-                || pendingCount < 0 || pendingCount > CoreProbeState.MAX_IDEMPOTENCY_RESULTS
-                || tradingStateLength < 0
+                || pendingCount != 0 || tradingStateLength <= 0 || matcherStateLength <= 0
                 || FIXED_LENGTH + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
-                        + (long) resultCount * RESULT_LENGTH + tradingStateLength > snapshot.length) {
+                        + (long) resultCount * RESULT_LENGTH + tradingStateLength
+                        + matcherStateLength > snapshot.length) {
             throw new ProtocolException("invalid snapshot manifest counts");
         }
         int fixedDataEnd = Math.toIntExact(FIXED_LENGTH
@@ -163,42 +158,34 @@ final class CoreStateSnapshotCodec {
                 throw new ProtocolException("truncated snapshot export event");
             }
             int eventLength = buffer.getInt();
-            if (eventLength <= 0 || eventLength > buffer.remaining() - tradingStateLength - CHECKSUM_LENGTH) {
+            long eventBudget = (long) buffer.remaining() - matcherStateLength
+                    - tradingStateLength - CHECKSUM_LENGTH;
+            if (eventLength <= 0 || eventLength > eventBudget) {
                 throw new ProtocolException("invalid snapshot export event length");
             }
             byte[] event = new byte[eventLength];
             buffer.get(event);
             events.add(CoreMessageCodec.decode(event));
         }
-        for (int index = 0; index < pendingCount; index++) {
-            if (buffer.remaining() < 44 + CHECKSUM_LENGTH) {
-                throw new ProtocolException("truncated pending matching entry");
-            }
-            long sequence = buffer.getLong();
-            int operationOrdinal = buffer.getInt();
-            long attemptGeneration = buffer.getLong();
-            long attemptDeadline = buffer.getLong();
-            int recoveryAttempts = buffer.getInt();
-            long attemptToken = buffer.getLong();
-            int messageLength = buffer.getInt();
-            if (sequence <= 0 || messageLength <= 0 || messageLength > buffer.remaining() - CHECKSUM_LENGTH
-                    || operationOrdinal < 0 || operationOrdinal >= PendingMatching.Operation.values().length) {
-                throw new ProtocolException("invalid pending matching entry");
-            }
-            buffer.position(buffer.position() + messageLength);
-        }
-        if (buffer.remaining() != tradingStateLength + CHECKSUM_LENGTH) {
+        if (buffer.remaining() != matcherStateLength + tradingStateLength + CHECKSUM_LENGTH) {
             throw new ProtocolException("invalid snapshot manifest length");
         }
+        byte[] encodedMatcherState = new byte[matcherStateLength];
+        buffer.get(encodedMatcherState);
+        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(encodedMatcherState);
         byte[] encodedTradingState = new byte[tradingStateLength];
         buffer.get(encodedTradingState);
-        TradingCoreState tradingState = tradingStateLength == 0
-                ? TradingCoreState.empty(productLine)
-                : TradingStateSnapshotCodec.decode(encodedTradingState, productLine);
+        TradingCoreState tradingState = TradingStateSnapshotCodec.decode(encodedTradingState, productLine);
+        matcherSnapshot.verifyCoreState(tradingState, appliedCommandCount);
         buffer.getLong();
         CoreExportState exportState = CoreExportState.restore(acknowledgedSequence, nextSequence, events);
-        return new CoreSnapshotManifest(productLine, version, appliedCommandCount,
-                tradingState.businessStateHash(), exportState.status(), storedChecksum);
+        return new CoreSnapshotManifest(productLine, version, matcherSnapshot.coreShardId(), routeVersion,
+                appliedCommandCount, matcherSnapshot.matcherSequence(), tradingState.businessStateHash(),
+                matcherSnapshot.engineStateHash(), matcherSnapshot.bookStateHash(), matcherSnapshot.symbolRegistryHash(),
+                matcherSnapshot.userRegistryHash(), matcherSnapshot.instrumentRegistryHash(),
+                matcherSnapshot.activeOrderHash(), matcherSnapshot.forkGitSha(),
+                matcherSnapshot.artifactSha256(), matcherSnapshot.matcherConfigHash(),
+                exportState.status(), storedChecksum);
     }
 
     static CoreProbeState decode(byte[] snapshot, ProductLine expectedProductLine) {
@@ -224,23 +211,28 @@ final class CoreStateSnapshotCodec {
             throw new ProtocolException("snapshot checksum mismatch");
         }
         ProductLine productLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.get()));
-        buffer.get();
+        int shardCode = Byte.toUnsignedInt(buffer.get());
+        int routeVersion = buffer.getInt();
         if (productLine != expectedProductLine) {
             throw new ProtocolException("snapshot product line mismatch: " + productLine);
+        }
+        if (shardCode != 0 || routeVersion != MatcherSnapshot.ROUTE_VERSION) {
+            throw new ProtocolException("unsupported matcher route");
         }
         long appliedCommandCount = buffer.getLong();
         long probeValue = buffer.getLong();
         int resultCount = buffer.getInt();
         int sourceSequenceCount = buffer.getInt();
         int tradingStateLength = buffer.getInt();
+        int matcherStateLength = buffer.getInt();
         int pendingCount = buffer.getInt();
         int fixedLength = FIXED_LENGTH;
-        if (resultCount < 0 || sourceSequenceCount < 0
+        if (resultCount < 0 || resultCount > CoreProbeState.MAX_IDEMPOTENCY_RESULTS || sourceSequenceCount < 0
                 || sourceSequenceCount > CoreProbeState.MAX_SOURCE_SEQUENCES
-                || pendingCount < 0 || pendingCount > CoreProbeState.MAX_IDEMPOTENCY_RESULTS
-                || tradingStateLength < 0
+                || pendingCount != 0 || tradingStateLength <= 0 || matcherStateLength <= 0
                 || fixedLength + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
-                        + (long) resultCount * RESULT_LENGTH + tradingStateLength > snapshot.length) {
+                        + (long) resultCount * RESULT_LENGTH + tradingStateLength
+                        + matcherStateLength > snapshot.length) {
             throw new ProtocolException("invalid snapshot result count: " + resultCount);
         }
         Map<CoreProbeState.SourceKey, Long> lastSourceSequences = new LinkedHashMap<>();
@@ -282,7 +274,9 @@ final class CoreStateSnapshotCodec {
                 throw new ProtocolException("truncated snapshot export event");
             }
             int eventLength = buffer.getInt();
-            if (eventLength <= 0 || eventLength > buffer.remaining() - tradingStateLength - CHECKSUM_LENGTH) {
+            long eventBudget = (long) buffer.remaining() - matcherStateLength
+                    - tradingStateLength - CHECKSUM_LENGTH;
+            if (eventLength <= 0 || eventLength > eventBudget) {
                 throw new ProtocolException("invalid snapshot export event length");
             }
             byte[] event = new byte[eventLength];
@@ -290,44 +284,18 @@ final class CoreStateSnapshotCodec {
             events.add(CoreMessageCodec.decode(event));
         }
         exportState = CoreExportState.restore(acknowledgedSequence, nextSequence, events);
-        Map<Long, PendingMatching> pendingMatching = new LinkedHashMap<>();
-        for (int index = 0; index < pendingCount; index++) {
-            if (buffer.remaining() < 44 + CHECKSUM_LENGTH) {
-                throw new ProtocolException("truncated pending matching entry");
-            }
-            long sequence = buffer.getLong();
-            int operationOrdinal = buffer.getInt();
-            long attemptGeneration = buffer.getLong();
-            long attemptDeadline = buffer.getLong();
-            int recoveryAttempts = buffer.getInt();
-            long attemptToken = buffer.getLong();
-            int messageLength = buffer.getInt();
-            if (sequence <= 0 || messageLength <= 0 || messageLength > buffer.remaining() - CHECKSUM_LENGTH
-                    || operationOrdinal < 0 || operationOrdinal >= PendingMatching.Operation.values().length) {
-                throw new ProtocolException("invalid pending matching entry");
-            }
-            byte[] encoded = new byte[messageLength];
-            buffer.get(encoded);
-            PendingMatching pending = new PendingMatching(sequence,
-                    PendingMatching.Operation.values()[operationOrdinal], CoreMessageCodec.decode(encoded),
-                    attemptGeneration, attemptDeadline, recoveryAttempts, attemptToken);
-            if (pendingMatching.put(sequence, pending) != null) {
-                throw new ProtocolException("duplicate pending matching sequence");
-            }
-        }
-        if (buffer.remaining() != tradingStateLength + CHECKSUM_LENGTH) {
+        if (buffer.remaining() != matcherStateLength + tradingStateLength + CHECKSUM_LENGTH) {
             throw new ProtocolException("invalid snapshot manifest length");
         }
-        TradingCoreState tradingState;
-        if (tradingStateLength == 0) {
-            tradingState = TradingCoreState.empty(productLine);
-        } else {
-            byte[] encodedTradingState = new byte[tradingStateLength];
-            buffer.get(encodedTradingState);
-            tradingState = TradingStateSnapshotCodec.decode(encodedTradingState, productLine);
-        }
+        byte[] encodedMatcherState = new byte[matcherStateLength];
+        buffer.get(encodedMatcherState);
+        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(encodedMatcherState);
+        byte[] encodedTradingState = new byte[tradingStateLength];
+        buffer.get(encodedTradingState);
+        TradingCoreState tradingState = TradingStateSnapshotCodec.decode(encodedTradingState, productLine);
+        matcherSnapshot.verifyCoreState(tradingState, appliedCommandCount);
         buffer.getLong();
         return CoreProbeState.restore(productLine, appliedCommandCount, probeValue,
-                results, lastSourceSequences, pendingMatching, tradingState, exportState);
+                results, lastSourceSequences, tradingState, exportState, matcherSnapshot);
     }
 }

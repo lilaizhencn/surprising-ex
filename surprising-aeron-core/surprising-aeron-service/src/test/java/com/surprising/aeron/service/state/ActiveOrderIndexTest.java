@@ -16,7 +16,7 @@ class ActiveOrderIndexTest {
                 CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreOrderStatus.OPEN, 1);
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11)), Map.of(7L, order),
-                CoreBookState.empty(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
 
         assertThat(new ActiveOrderIndex(state).ids()).containsExactly(7L);
     }
@@ -30,7 +30,7 @@ class ActiveOrderIndexTest {
         }
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11)), orders,
-                CoreBookState.empty(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
         ActiveOrderIndex index = new ActiveOrderIndex(state);
 
         ActiveOrderIndex.Page first = index.page(11, "BTC-USDT", 0, ActiveOrderIndex.MAX_PAGE_SIZE);

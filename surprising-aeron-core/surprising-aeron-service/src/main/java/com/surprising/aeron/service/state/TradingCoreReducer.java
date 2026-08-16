@@ -244,7 +244,7 @@ public final class TradingCoreReducer {
     private TradingCoreState withTriggers(TradingCoreState state, Map<Long, CoreTriggerOrderState> triggers) {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                state.instruments(), state.riskState(), state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(), triggers);
     }
 
@@ -312,7 +312,7 @@ public final class TradingCoreReducer {
         timers.put(key, next);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                state.instruments(), state.riskState(), state.treasuryState(),
                 state.leverages(), state.algoOrders(), timers, state.clientOrderIndex(), state.triggerOrders());
     }
 
@@ -376,7 +376,7 @@ public final class TradingCoreReducer {
         values.put(next.algoOrderId(), next);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                state.instruments(), state.riskState(), state.treasuryState(),
                 state.leverages(), values, state.cancelAllAfterTimers(), state.clientOrderIndex(), state.triggerOrders());
     }
 
@@ -468,7 +468,7 @@ public final class TradingCoreReducer {
         leverages.put(key, command.leveragePpm());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                state.instruments(), state.riskState(), state.treasuryState(),
                 leverages, state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(), state.triggerOrders());
     }
 
@@ -495,7 +495,7 @@ public final class TradingCoreReducer {
         CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
                 Math.incrementExact(user.revision()), user.balances(), user.reservations(), user.positions(),
                 command.positionMode());
-        return replaceUser(state, nextUser, state.orders(), state.bookState());
+        return replaceUser(state, nextUser, state.orders());
     }
 
     public TradingCoreState adjustPositionMargin(
@@ -540,7 +540,7 @@ public final class TradingCoreReducer {
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin));
         CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
                 Math.incrementExact(user.revision()), balances, user.reservations(), positions, user.positionMode());
-        return replaceUser(state, nextUser, state.orders(), state.bookState());
+        return replaceUser(state, nextUser, state.orders());
     }
 
     public TradingCoreState adjustBalance(
@@ -559,7 +559,7 @@ public final class TradingCoreReducer {
         CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
                 Math.incrementExact(currentUser.revision()), balances,
                 currentUser.reservations(), currentUser.positions(), currentUser.positionMode());
-        return replaceUser(state, nextUser, state.orders(), state.bookState());
+        return replaceUser(state, nextUser, state.orders());
     }
 
     public TradingCoreState placeOrder(TradingCoreState state, long userId, PlaceOrderCommand command) {
@@ -632,7 +632,7 @@ public final class TradingCoreReducer {
         if (!order.clientOrderId().isEmpty()) {
             clientOrderIndex.put(new ClientOrderKey(order.userId(), order.clientOrderId()), order.orderId());
         }
-        return replaceUser(state, nextUser, orders, state.bookState(), clientOrderIndex);
+        return replaceUser(state, nextUser, orders, clientOrderIndex);
     }
 
     public TradingCoreState cancelOrder(TradingCoreState state, long userId, CancelOrderCommand command) {
@@ -671,10 +671,7 @@ public final class TradingCoreReducer {
                 currentUser.positionMode());
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         orders.put(command.orderId(), currentOrder.cancel());
-        Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
-        bookOrders.remove(command.orderId());
-        CoreBookState bookState = new CoreBookState(state.bookState().nextPrioritySequence(), bookOrders);
-        return replaceUser(state, nextUser, orders, bookState, StateMapSupport.delta(state.clientOrderIndex()));
+        return replaceUser(state, nextUser, orders, StateMapSupport.delta(state.clientOrderIndex()));
     }
 
     public TradingCoreState rejectPlaceOrder(TradingCoreState state, long userId, long orderId) {
@@ -701,11 +698,7 @@ public final class TradingCoreReducer {
                 Math.incrementExact(user.revision()), balances, reservations, user.positions(), user.positionMode());
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         orders.put(orderId, order.reject());
-        Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
-        bookOrders.remove(orderId);
-        return replaceUser(state, nextUser, orders,
-                new CoreBookState(state.bookState().nextPrioritySequence(), bookOrders),
-                StateMapSupport.delta(state.clientOrderIndex()));
+        return replaceUser(state, nextUser, orders, StateMapSupport.delta(state.clientOrderIndex()));
     }
 
     public TradingCoreState pruneAcknowledgedTerminalReservations(
@@ -735,7 +728,7 @@ public final class TradingCoreReducer {
         }
         if (!changed) return state;
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.bookState(), state.instruments(), state.riskState(), state.treasuryState(),
+                state.orders(), state.instruments(), state.riskState(), state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }
@@ -753,20 +746,11 @@ public final class TradingCoreReducer {
             CoreOrderState taker = requireOpenOrder(state.orders(), takerOrderId);
             if (!taker.timeInForce().immediate()
                     && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
-                Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
-                bookOrders.put(taker.orderId(), state.bookState().nextPrioritySequence());
-                return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                        state.users(), state.orders(),
-                        new CoreBookState(Math.incrementExact(state.bookState().nextPrioritySequence()),
-                                bookOrders), state.instruments(), state.riskState(), state.treasuryState(),
-                        state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
-                        state.triggerOrders());
+                return state;
             }
         }
         Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
-        Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
-        long nextPrioritySequence = state.bookState().nextPrioritySequence();
         CoreTreasuryState treasury = state.treasuryState();
         CoreOrderState taker = requireOpenOrder(orders, takerOrderId);
         CoreInstrumentState instrument = requireInstrument(state, taker.symbol(), taker.instrumentVersion());
@@ -816,21 +800,12 @@ public final class TradingCoreReducer {
             maker = maker.fill(match.quantitySteps());
             orders.put(taker.orderId(), taker);
             orders.put(maker.orderId(), maker);
-            if (maker.status() == CoreOrderStatus.OPEN) {
-                Long previousPrioritySequence = bookOrders.get(maker.orderId());
-                if (previousPrioritySequence == null) {
-                    throw new IllegalStateException("maker order missing from book state");
-                }
-                bookOrders.put(maker.orderId(), previousPrioritySequence);
-            } else {
-                bookOrders.remove(maker.orderId());
+            if (maker.status() != CoreOrderStatus.OPEN) {
                 users.put(maker.userId(), releaseTerminalReservation(users.get(maker.userId()), maker.orderId()));
             }
         }
         if (taker.status() == CoreOrderStatus.OPEN && !taker.timeInForce().immediate()
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
-            bookOrders.put(taker.orderId(), nextPrioritySequence);
-            nextPrioritySequence = Math.incrementExact(nextPrioritySequence);
         } else {
             if (taker.status() == CoreOrderStatus.OPEN) {
                 taker = taker.cancel();
@@ -839,8 +814,7 @@ public final class TradingCoreReducer {
             users.put(taker.userId(), releaseTerminalReservation(users.get(taker.userId()), taker.orderId()));
         }
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
-                new CoreBookState(nextPrioritySequence, bookOrders), state.instruments(), state.riskState(),
-                treasury, state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
+                state.instruments(), state.riskState(), treasury, state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
                 state.clientOrderIndex(), state.triggerOrders());
     }
 
@@ -865,7 +839,7 @@ public final class TradingCoreReducer {
         instruments.put(instrument.symbol(), instrument);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), instruments, state.riskState(),
+                instruments, state.riskState(),
                 state.treasuryState(), state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
                 state.clientOrderIndex(), state.triggerOrders());
     }
@@ -901,7 +875,7 @@ public final class TradingCoreReducer {
                 state.riskState().liquidations(), scans, state.riskState().nextLiquidationId());
         TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), state.instruments(), risk, state.treasuryState(),
+                state.instruments(), risk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
         return continueRiskScan(withMark, DEFAULT_RISK_SCAN_BATCH_SIZE,
@@ -980,7 +954,7 @@ public final class TradingCoreReducer {
                 scans, nextLiquidationId);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), state.instruments(), nextRisk, state.treasuryState(),
+                state.instruments(), nextRisk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }
@@ -1298,7 +1272,7 @@ public final class TradingCoreReducer {
         var progress = new com.surprising.aeron.protocol.CoreFundingProgressView(
                 command.settlementId(), complete, nextCursorUserId, selectedUserIds.size());
         return new FundingApplication(new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury,
+                state.orders(), state.instruments(), state.riskState(), treasury,
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders()), payments,
                 progress);
@@ -1450,7 +1424,7 @@ public final class TradingCoreReducer {
                     command.optionCashUnitsPerContract(), true, 0, nextCursorUserId, chunkCommandId));
         }
         TradingCoreState next = new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
-                canceled.orders(), canceled.bookState(), canceled.instruments(), canceled.riskState(), treasury,
+                canceled.orders(), canceled.instruments(), canceled.riskState(), treasury,
                 canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(), canceled.clientOrderIndex(),
                 canceled.triggerOrders());
         return new SettlementApplication(next, new com.surprising.aeron.protocol.CoreSettlementProgressView(
@@ -1481,7 +1455,7 @@ public final class TradingCoreReducer {
         CoreRiskState risk = new CoreRiskState(canceled.riskState().markPrices(), canceled.riskState().snapshots(),
                 liquidations, canceled.riskState().scans(), canceled.riskState().nextLiquidationId());
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), canceled.users(),
-                canceled.orders(), canceled.bookState(), canceled.instruments(), risk, canceled.treasuryState(),
+                canceled.orders(), canceled.instruments(), risk, canceled.treasuryState(),
                 canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(),
                 canceled.clientOrderIndex(), canceled.triggerOrders());
     }
@@ -1516,7 +1490,7 @@ public final class TradingCoreReducer {
 
     private static TradingCoreState withTreasury(TradingCoreState state, CoreTreasuryState treasury) {
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
-                state.orders(), state.bookState(), state.instruments(), state.riskState(), treasury,
+                state.orders(), state.instruments(), state.riskState(), treasury,
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }
@@ -1606,7 +1580,7 @@ public final class TradingCoreReducer {
         CoreRiskState risk = new CoreRiskState(canceled.riskState().markPrices(), canceled.riskState().snapshots(),
                 liquidations, canceled.riskState().scans(), canceled.riskState().nextLiquidationId());
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
-                canceled.orders(), canceled.bookState(), canceled.instruments(), risk, treasury,
+                canceled.orders(), canceled.instruments(), risk, treasury,
                 canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(), canceled.clientOrderIndex(),
                 canceled.triggerOrders());
     }
@@ -1650,7 +1624,7 @@ public final class TradingCoreReducer {
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), state.instruments(), risk, state.treasuryState(),
+                state.instruments(), risk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }
@@ -1708,7 +1682,7 @@ public final class TradingCoreReducer {
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                state.users(), state.orders(), state.bookState(), state.instruments(), risk, treasury,
+                state.users(), state.orders(), state.instruments(), risk, treasury,
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }
@@ -1723,7 +1697,7 @@ public final class TradingCoreReducer {
         CoreTreasuryState treasury = state.treasuryState().adjustInsurance(command.asset(), command.deltaUnits());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
-                state.bookState(), state.instruments(), state.riskState(), treasury,
+                state.instruments(), state.riskState(), treasury,
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }
@@ -1794,7 +1768,7 @@ public final class TradingCoreReducer {
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.bookState(), state.instruments(), risk, state.treasuryState(),
+                state.orders(), state.instruments(), risk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }
@@ -1890,7 +1864,6 @@ public final class TradingCoreReducer {
         if (openOrders == null || openOrders.isEmpty()) return state;
         Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
-        Map<Long, Long> bookOrders = StateMapSupport.delta(state.bookState().openOrders());
         boolean changed = false;
         for (CoreOrderState order : openOrders) {
             CoreOrderState currentOrder = orders.get(order.orderId());
@@ -1910,13 +1883,11 @@ public final class TradingCoreReducer {
                     Math.incrementExact(currentUser.revision()), balances, reservations, currentUser.positions(),
                     currentUser.positionMode()));
             orders.put(currentOrder.orderId(), currentOrder.cancel());
-            bookOrders.remove(currentOrder.orderId());
             changed = true;
         }
         if (!changed) return state;
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
-                new CoreBookState(state.bookState().nextPrioritySequence(), bookOrders), state.instruments(),
-                state.riskState(), state.treasuryState(), state.leverages(), state.algoOrders(),
+                state.instruments(), state.riskState(), state.treasuryState(), state.leverages(), state.algoOrders(),
                 state.cancelAllAfterTimers(), state.clientOrderIndex(), state.triggerOrders());
     }
 
@@ -2142,16 +2113,14 @@ public final class TradingCoreReducer {
     private static TradingCoreState replaceUser(
             TradingCoreState state,
             CoreUserState user,
-            Map<Long, CoreOrderState> orders,
-            CoreBookState bookState) {
-        return replaceUser(state, user, orders, bookState, StateMapSupport.delta(state.clientOrderIndex()));
+            Map<Long, CoreOrderState> orders) {
+        return replaceUser(state, user, orders, StateMapSupport.delta(state.clientOrderIndex()));
     }
 
     private static TradingCoreState replaceUser(
             TradingCoreState state,
             CoreUserState user,
             Map<Long, CoreOrderState> orders,
-            CoreBookState bookState,
             Map<ClientOrderKey, Long> clientOrderIndex) {
         Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
         users.put(user.userId(), user);
@@ -2161,12 +2130,12 @@ public final class TradingCoreReducer {
                 ? StateMapSupport.delta(state.clientOrderIndex()) : clientOrderIndex;
         if (clientOrderIndex != null) {
             return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, nextOrders,
-                    bookState, state.instruments(), state.riskState(), state.treasuryState(),
+                    state.instruments(), state.riskState(), state.treasuryState(),
                     state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), nextClientOrderIndex,
                     state.triggerOrders());
         }
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, nextOrders,
-                bookState, state.instruments(), state.riskState(), state.treasuryState(),
+                state.instruments(), state.riskState(), state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), nextClientOrderIndex,
                 state.triggerOrders());
     }

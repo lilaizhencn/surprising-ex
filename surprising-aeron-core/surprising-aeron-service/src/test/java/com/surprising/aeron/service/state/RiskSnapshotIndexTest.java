@@ -24,7 +24,7 @@ class RiskSnapshotIndexTest {
         CoreRiskState risk = new CoreRiskState(before.riskState().markPrices(), snapshots,
                 before.riskState().liquidations(), before.riskState().scans(), before.riskState().nextLiquidationId());
         TradingCoreState after = new TradingCoreState(ProductLine.SPOT, 2, before.users(), before.orders(),
-                before.bookState(), before.instruments(), risk, before.treasuryState());
+                before.instruments(), risk, before.treasuryState());
 
         index.update(before, after);
 
@@ -34,7 +34,7 @@ class RiskSnapshotIndexTest {
     }
 
     private static TradingCoreState state(Map<String, CoreRiskSnapshot> snapshots) {
-        return new TradingCoreState(ProductLine.SPOT, 1, Map.of(), Map.of(), CoreBookState.empty(), Map.of(),
+        return new TradingCoreState(ProductLine.SPOT, 1, Map.of(), Map.of(), Map.of(),
                 new CoreRiskState(Map.of(), snapshots, Map.of(), Map.of(), 1), CoreTreasuryState.empty());
     }
 }
