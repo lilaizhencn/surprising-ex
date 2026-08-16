@@ -27,6 +27,7 @@ import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.AlgoOrderService;
 import com.surprising.trading.order.service.CancelAllAfterService;
 import com.surprising.trading.order.service.OrderService;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -56,7 +57,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH)
-    public OrderResponse place(@RequestBody PlaceOrderRequest request) {
+    public OrderResponse place(@Valid @RequestBody PlaceOrderRequest request) {
         try {
             return orderService.place(request);
         } catch (IllegalArgumentException ex) {
@@ -72,7 +73,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch")
-    public OrderBatchResponse placeBatch(@RequestBody BatchPlaceOrderRequest request) {
+    public OrderBatchResponse placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request) {
         try {
             return orderService.placeBatch(request);
         } catch (IllegalArgumentException ex) {
@@ -83,7 +84,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/test")
-    public TestOrderResponse test(@RequestBody PlaceOrderRequest request) {
+    public TestOrderResponse test(@Valid @RequestBody PlaceOrderRequest request) {
         try {
             return orderService.test(request);
         } catch (IllegalArgumentException ex) {
@@ -92,7 +93,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/amend")
-    public AmendOrderResponse amend(@RequestBody AmendOrderRequest request) {
+    public AmendOrderResponse amend(@Valid @RequestBody AmendOrderRequest request) {
         try {
             return orderService.amend(request);
         } catch (IllegalArgumentException ex) {
@@ -103,7 +104,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-amend")
-    public AmendOrderBatchResponse amendBatch(@RequestBody BatchAmendOrdersRequest request) {
+    public AmendOrderBatchResponse amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request) {
         try {
             return orderService.amendBatch(request);
         } catch (IllegalArgumentException ex) {
@@ -112,7 +113,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/close-position")
-    public OrderResponse closePosition(@RequestBody ClosePositionRequest request) {
+    public OrderResponse closePosition(@Valid @RequestBody ClosePositionRequest request) {
         try {
             return orderService.closePosition(request);
         } catch (IllegalArgumentException ex) {
@@ -134,7 +135,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-cancel")
-    public OrderBatchResponse cancelBatch(@RequestBody BatchCancelOrdersRequest request) {
+    public OrderBatchResponse cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request) {
         try {
             return orderService.cancelBatch(request);
         } catch (IllegalArgumentException ex) {

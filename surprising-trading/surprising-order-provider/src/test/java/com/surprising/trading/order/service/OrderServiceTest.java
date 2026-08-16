@@ -15,6 +15,7 @@ import com.surprising.trading.api.model.AdminCancelOrdersResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -28,11 +29,15 @@ import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
+import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.ValidationResult;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -61,6 +66,45 @@ class OrderServiceTest {
         assertThatThrownBy(() -> service.place(request)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Aeron order gateway");
         verifyNoInteractions(aeronOrders);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void placeRejectsMissingClientOrderIdAtServiceBoundary(ProductLine productLine) {
+        OrderService service = service(productLine, aeronOrders);
+
+        assertThatThrownBy(() -> service.place(request(null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("clientOrderId is required");
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void closePositionRejectsMissingClientOrderIdAtServiceBoundary(ProductLine productLine) {
+        OrderService service = service(productLine, aeronOrders);
+
+        assertThatThrownBy(() -> service.closePosition(new ClosePositionRequest(
+                1001L, null, "BTC-USDT", MarginMode.CROSS, PositionSide.NET)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("clientOrderId is required");
+        verifyNoInteractions(aeronOrders, placementStateService);
+    }
+
+    @Test
+    void closePositionUsesExplicitClientOrderIdForTheStableCloseOrder() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        when(placementStateService.position(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.CROSS, PositionSide.NET))
+                .thenReturn(Optional.of(new ReduceOnlyPosition(5L, 7L)));
+        when(aeronOrders.place(any(), any(), any())).thenReturn(response(91, "close-1", OrderStatus.ACCEPTED));
+
+        service.closePosition(new ClosePositionRequest(1001L, "close-1", "BTC-USDT",
+                MarginMode.CROSS, PositionSide.NET));
+
+        ArgumentCaptor<PlaceOrderRequest> request = ArgumentCaptor.forClass(PlaceOrderRequest.class);
+        verify(aeronOrders).place(request.capture(), any(), any());
+        assertThat(request.getValue().clientOrderId()).isEqualTo("close-1");
     }
 
     @Test

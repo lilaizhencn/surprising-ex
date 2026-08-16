@@ -168,6 +168,7 @@ public class OrderService {
         if (request.userId() <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
+        String clientOrderId = normalizeClientOrderId(request.clientOrderId());
         String symbol = normalizeSymbol(request.symbol());
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
@@ -185,7 +186,7 @@ public class OrderService {
         OrderSide closeSide = position.signedQuantitySteps() > 0L ? OrderSide.SELL : OrderSide.BUY;
         PlaceOrderRequest closeOrder = new PlaceOrderRequest(
                 request.userId(),
-                emptyToNull(request.clientOrderId()),
+                clientOrderId,
                 symbol,
                 closeSide,
                 OrderType.MARKET,
@@ -600,10 +601,7 @@ public class OrderService {
         if (request.priceTicks() < 0 || request.quantitySteps() <= 0) {
             throw new IllegalArgumentException("priceTicks must be non-negative and quantitySteps must be positive");
         }
-        String clientOrderId = emptyToNull(request.clientOrderId());
-        if (clientOrderId != null && clientOrderId.length() > 64) {
-            throw new IllegalArgumentException("clientOrderId length must be <= 64");
-        }
+        String clientOrderId = normalizeClientOrderId(request.clientOrderId());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         return new PlaceOrderRequest(
                 request.userId(),

@@ -2791,22 +2791,22 @@ public final class CoreProbeState implements AutoCloseable {
         }
         StoredResult previous = commandResults.get(commandId);
         if (previous != null) {
-            commandResultBytes -= resultEntryBytes(previous);
             commandResults.put(commandId, result.withRetentionSequence(previous.retentionSequence()));
-            commandResultBytes = Math.addExact(commandResultBytes, resultBytes);
-            return;
+        } else {
+            StoredResult retained = result.withRetentionSequence(nextResultRetentionSequence);
+            nextResultRetentionSequence = Math.incrementExact(nextResultRetentionSequence);
+            commandResults.put(commandId, retained);
         }
-        while (!commandResults.isEmpty()
-                && (commandResults.size() >= MAX_IDEMPOTENCY_RESULTS
-                || commandResultBytes > MAX_RESULT_LEDGER_BYTES - resultBytes)) {
-            UUID oldest = commandResults.keySet().iterator().next();
-            StoredResult evicted = commandResults.remove(oldest);
-            commandResultBytes -= resultEntryBytes(evicted);
+        commandResultBytes = resultLedgerBytes(commandResults);
+        while (commandResults.size() > MAX_IDEMPOTENCY_RESULTS
+                || commandResultBytes > MAX_RESULT_LEDGER_BYTES) {
+            UUID oldest = commandResults.keySet().stream()
+                    .filter(key -> !key.equals(commandId))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException("result ledger protected entry exceeds bound"));
+            commandResults.remove(oldest);
+            commandResultBytes = resultLedgerBytes(commandResults);
         }
-        StoredResult retained = result.withRetentionSequence(nextResultRetentionSequence);
-        nextResultRetentionSequence = Math.incrementExact(nextResultRetentionSequence);
-        commandResults.put(commandId, retained);
-        commandResultBytes = Math.addExact(commandResultBytes, resultBytes);
     }
 
     private CoreResponse rejected(CoreResultCode resultCode) {

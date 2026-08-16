@@ -81,6 +81,41 @@ class CoreResultLedgerTest {
     }
 
     @Test
+    void replacementEvictsOldestOtherResultsAndKeepsTheReplacedKeyBounded() throws Exception {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        Method storeResult = CoreProbeState.class.getDeclaredMethod(
+                "storeResult", UUID.class, CoreProbeState.StoredResult.class);
+        storeResult.setAccessible(true);
+        UUID oldest = UUID.randomUUID();
+        UUID pending = UUID.randomUUID();
+        UUID newest = UUID.randomUUID();
+        byte[] fourteenMiB = new byte[14 * 1024 * 1024];
+        byte[] oneMiB = new byte[1024 * 1024];
+        byte[] fourMiB = new byte[4 * 1024 * 1024];
+
+        storeResult.invoke(state, oldest,
+                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, fourteenMiB));
+        storeResult.invoke(state, pending,
+                new CoreProbeState.StoredResult(ResponseStatus.OK, CoreResultCode.MATCHING_PENDING, 2, 2,
+                        oneMiB));
+        long pendingRetention = state.commandResults().get(pending).retentionSequence();
+        storeResult.invoke(state, newest,
+                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, fourteenMiB));
+
+        storeResult.invoke(state, pending,
+                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 4, 4, fourMiB));
+
+        assertThat(state.commandResults()).doesNotContainKey(oldest);
+        assertThat(state.commandResults()).containsKeys(pending, newest);
+        assertThat(state.commandResults().get(pending).status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(state.commandResults().get(pending).responseData()).hasSize(fourMiB.length);
+        assertThat(state.commandResults().get(pending).retentionSequence()).isEqualTo(pendingRetention);
+        assertThat(CoreProbeState.restore(ProductLine.SPOT, state.appliedCommandCount(), state.probeValue(),
+                state.commandResults(), state.lastSourceSequences(), state.tradingState(), state.exportState()))
+                .isNotNull();
+    }
+
+    @Test
     void requiredExportSequenceIsNotAppliedCommandCountAfterExportAck() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         state.apply(probe(UUID.randomUUID(), 1, 1));
