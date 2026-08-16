@@ -170,20 +170,33 @@ create_topics() {
 }
 
 verify_topics() {
-  local expected actual topic partition_count expected_csv actual_csv
-  expected="$(topic_list | LC_ALL=C sort)"
-  actual="$(compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list </dev/null | LC_ALL=C sort)"
+  local expected metadata actual expected_csv actual_csv metadata_status=0
+  expected="$(topic_list | awk '{ print $0 "\t1" }' | LC_ALL=C sort)"
+  metadata="$(compose exec -T kafka timeout 30s /opt/kafka/bin/kafka-topics.sh \
+    --bootstrap-server localhost:9092 --describe </dev/null)" || metadata_status=$?
+  (( metadata_status == 0 )) || fail "KAFKA_TOPIC_METADATA_COMMAND_FAILED status=$metadata_status"
+  metadata_status=0
+  actual="$(printf '%s\n' "$metadata" | awk '
+    /PartitionCount:/ {
+      topic=""; partitions=""
+      for (field = 1; field <= NF; field++) {
+        if ($field == "Topic:") topic=$(field + 1)
+        else if ($field ~ /^Topic:/) { topic=$field; sub(/^Topic:/, "", topic) }
+        if ($field == "PartitionCount:") partitions=$(field + 1)
+        else if ($field ~ /^PartitionCount:/) { partitions=$field; sub(/^PartitionCount:/, "", partitions) }
+      }
+      if (topic == "" || partitions !~ /^[0-9]+$/) exit 2
+      print topic "\t" partitions
+      summaries++
+    }
+    END { if (summaries == 0) exit 2 }
+  ' | LC_ALL=C sort)" || metadata_status=$?
+  (( metadata_status == 0 )) || fail "KAFKA_TOPIC_METADATA_INVALID status=$metadata_status"
   if [[ "$actual" != "$expected" ]]; then
-    expected_csv="$(printf '%s\n' "$expected" | paste -sd, -)"
-    actual_csv="$(printf '%s\n' "$actual" | paste -sd, -)"
-    fail "KAFKA_TOPICS_MISMATCH expected=$expected_csv actual=$actual_csv"
+    expected_csv="$(printf '%s\n' "$expected" | tr '\t\n' '=,')"
+    actual_csv="$(printf '%s\n' "$actual" | tr '\t\n' '=,')"
+    fail "KAFKA_TOPIC_METADATA_MISMATCH expected=$expected_csv actual=$actual_csv"
   fi
-  while IFS= read -r topic; do
-    [[ -n "$topic" ]] || continue
-    partition_count="$(compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic "$topic" </dev/null | \
-      awk '{ for (field = 1; field <= NF; field++) if ($field == "PartitionCount:") { print $(field + 1); exit } }')"
-    [[ "$partition_count" == 1 ]] || fail "KAFKA_TOPIC_PARTITIONS_MISMATCH topic=$topic expected=1 actual=${partition_count:-missing}"
-  done <<< "$expected"
 }
 
 start_owned_process() {
@@ -444,7 +457,20 @@ remove_core_data() {
 drain_owned_core_wrappers() {
   local -a pids=()
   local service pid pid_file marker command process_state prior_pid
-  local index deadline live
+  local index deadline live pid_file_count=0 expected_pid_file_count=${#CORE_SERVICES[@]}
+
+  for service in "${CORE_SERVICES[@]}"; do
+    [[ ! -f "$RUN_DIR/pids/$service.pid" ]] || pid_file_count=$((pid_file_count + 1))
+  done
+  if (( pid_file_count == 0 )); then
+    printf 'CORE_DRAIN=SKIPPED reason=ALL_CORE_PID_FILES_ABSENT\n'
+    return 0
+  fi
+  if (( pid_file_count != expected_pid_file_count )); then
+    printf 'ERROR=CORE_DRAIN_PID_SET_PARTIAL expected=%s actual=%s path=%s\n' \
+      "$expected_pid_file_count" "$pid_file_count" "$RUN_DIR/pids" >&2
+    return 1
+  fi
 
   for service in "${CORE_SERVICES[@]}"; do
     pid_file="$RUN_DIR/pids/$service.pid"
