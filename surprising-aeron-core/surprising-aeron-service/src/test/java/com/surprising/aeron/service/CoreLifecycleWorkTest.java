@@ -14,6 +14,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.CoreRoute;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -115,6 +116,6 @@ class CoreLifecycleWorkTest {
     private static CoreMessage query(CoreMessageType type, byte[] payload) {
         return new CoreMessage(new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION,
                 com.surprising.aeron.protocol.WireMessageKind.QUERY, type, UUID.randomUUID(),
-                ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 1, 0, 0, 1, 1), payload);
+                ProductLine.LINEAR_PERPETUAL, CoreRoute.DEFAULT, CommandSource.GATEWAY, 1, 0, 0, 1, 1), payload);
     }
 }
