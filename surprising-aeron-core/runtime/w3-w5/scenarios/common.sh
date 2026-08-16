@@ -13,7 +13,7 @@ start_line_subset() {
   W4_LINE_LOG="${W4_RUN_DIR}/${W4_LINE_INDEX}-${line}.runtime.log"
   mkdir -p "$W4_RUN_DIR"
   if [[ "${W4_STATIC_ONLY:-false}" == true ]]; then
-    printf 'LINE_START=STATIC productLine=%s runId=%s maker=REQUIRED wallet=ABSENT\n' "$line" "$run_id" \
+    printf 'LINE_START=STATIC_PREP productLine=%s runId=%s maker=REQUIRED wallet=ABSENT\n' "$line" "$run_id" \
       > "$W4_LINE_LOG"
     return 0
   fi
@@ -34,7 +34,7 @@ stop_line_subset() {
     return 2
   }
   if [[ "${W4_STATIC_ONLY:-false}" == true ]]; then
-    printf 'LINE_STOP=STATIC productLine=%s cleanup=PASS mainWorktree=PROTECTED\n' "$line" >> "$W4_LINE_LOG"
+    printf 'LINE_STOP=STATIC_PREP productLine=%s cleanup=STATIC_PREP mainWorktree=PROTECTED\n' "$line" >> "$W4_LINE_LOG"
   else
     if ! RUN_ID="$W4_ACTIVE_RUN_ID" PRODUCT_LINE="$line" WALLET_ENABLED=false \
         TASK_RUN_FRESH="${TASK_RUN_FRESH:-false}" "$W4_RUNNER" down >>"$W4_LINE_LOG" 2>&1; then

@@ -3,26 +3,40 @@
 Date: 2026-08-17
 Worktree: `/Users/atomex/Desktop/surprising/w3w5-t16-real-w4`
 Branch: `codex/w3w5-t16-real-w4`
-Base before changes: `e508b8cdd5aa2315eeeadb49a03d3636a6453e6d`
+Reviewed baseline: `36febc5e495f6fdedbea1660926da759474a6511`
 Plan source: `/Users/atomex/Desktop/surprising/surprising-ex/.omo/plans/w3-w5-production-closure.md`, Task 16
 
-## Static checks
+## Failing-first evidence
+
+The new assertions were run against the baseline before implementation:
+
+```text
+bash -x surprising-aeron-core/runtime/w3-w5/tests/w4-static.sh
+status=1
+failure: expected W4_STATIC_PLAN=STATIC_PREP; baseline emitted the unqualified W4_SIX_LINE=PASS path
+
+mvn -pl :surprising-aeron-tools -am -Dtest=W4LifecycleQaMainTest -Dsurefire.failIfNoSpecifiedTests=false test
+BUILD FAILURE: 15 test-compilation errors for the missing exact-row, pending-capability,
+sequence-assignment, and manifest-reconciliation guards
+```
+
+The independent pre-fix gate report remains preserved unchanged at
+`.omo/evidence/task-16-36febc5-luna-gate.md`.
+
+## Static checks after the fix
 
 ```text
 bash -n surprising-aeron-core/runtime/w3-w5/run.sh surprising-aeron-core/runtime/w3-w5/scenarios/common.sh surprising-aeron-core/runtime/w3-w5/scenarios/w4-six-line.sh surprising-aeron-core/runtime/w3-w5/tests/w4-static.sh
 PASS
 
-./surprising-aeron-core/runtime/w3-w5/tests/w4-static.sh
-W4_STATIC=PASS manifests=6 order=required wallet=absent maker=required
-
-W4_STATIC_ONLY=true ... run.sh scenario w4-faults
-W4_FAULTS=PASS productLine=LINEAR_PERPETUAL cleanup=PASS wallet=ABSENT
+bash surprising-aeron-core/runtime/w3-w5/tests/w4-static.sh
+W4_STATIC_PREP=PASS manifests=6 order=required wallet=absent maker=required faults=not-exercised checker=fail-closed
 
 git diff --check
 PASS
 ```
 
-The static path produced six uniquely named manifests in this exact order:
+The static path produces six uniquely named manifests in this exact order:
 
 ```text
 1-SPOT.manifest
@@ -33,22 +47,45 @@ The static path produced six uniquely named manifests in this exact order:
 6-OPTION.manifest
 ```
 
-The static assertions cover the required SPOT conservation/control rows, perpetual CROSS/ISOLATED rows, delivery CROSS/ISOLATED rows, option CALL/PUT ITM/ATM/OTM rows, CORE selection authority, maker required, wallet absent, cursor policy, and `FUNDS_DIFFERENCE=0` manifest fields. The runtime driver includes bounded Core lifecycle calls for mark, funding, risk, liquidation, insurance/ADL work queries, delivery settlement, option settlement, state/progress snapshots, cross-line rejection, and funds reconciliation.
+Every manifest is checked for an exact `rows=` value, product-line identity,
+CORE selection/projection authority, wallet absence, and monotonic cursor policy.
+Static manifests are explicitly `mode=STATIC_PREP` and `W4_STATUS=STATIC_PREP`,
+with `fundsReconciliation=NOT_RUN`; they contain no `FUNDS_DIFFERENCE=0`.
+Static line start/stop receipts use `STATIC_PREP` and `cleanup=STATIC_PREP`.
+The adversarial checker test removes a required SPOT row and observes
+`ROWS_MISMATCH productLine=SPOT` with a non-zero exit. Static fault preparation
+records `faults=NOT_EXERCISED`; it does not label cursor/PG attacks as rejected.
 
 ## JDK 25 compile/test
 
-```text
-task_java_home=$(/usr/libexec/java_home -v 25) && export JAVA_HOME="$task_java_home" PATH="$task_java_home/bin:$PATH" && java -version
-openjdk version "25.0.2"
+IBM Semeru JDK 25 was selected with `/usr/libexec/java_home -v 25`:
+`IBM Semeru Runtime Open Edition 25.0.2.1` / OpenJ9 `25.0.2+10-LTS`.
+Maven's `require-jdk-25` enforcer passed.
 
+```text
 mvn -pl :surprising-aeron-tools -am -DskipTests compile
 BUILD SUCCESS
 
-mvn -pl :surprising-aeron-tools -am -Dtest=OfflineReplayMainTest -Dsurefire.failIfNoSpecifiedTests=false test
-Tests run: 2, Failures: 0, Errors: 0, Skipped: 0
+mvn -pl :surprising-aeron-tools -am -Dtest=W4LifecycleQaMainTest,OfflineReplayMainTest -Dsurefire.failIfNoSpecifiedTests=false test
+Tests run: 8, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
+The W4 driver tests prove that real mode fails before `SurprisingAeronClient`
+connection or manifest creation with:
+`W4_REAL_CAPABILITY_PENDING missing=provider-to-core-lifecycle,cursor-repeat-gap,pg-selected,maker-user-treasury-reconciliation`.
+The query allocator assigns the increment back to `sequence`. Manifest writing
+is guarded by observed provider-boundary, maker, and user/treasury reconciliation
+state; no verify/fault/static path can emit `FUNDS_DIFFERENCE=0` or a real pass
+without those observations.
+
 ## Scope boundary
 
-No real runtime was started, no runtime lock was acquired, and no wallet service was started. This is static implementation evidence only; it does not claim a real six-line W4 QA pass. The later executor must run the real line-scoped stack and retain each `UP=PASS`, maker-last, `MAIN_WORKTREE_PROTECTED=PASS`, and `CLEANUP=PASS` receipt.
+No real runtime was started, no runtime lock was acquired, and no wallet service
+was started. The repository has separate provider modules/controllers, but this
+Task16 driver has no wired provider-to-Core lifecycle/fault boundary. Therefore
+real `execute`, `verify`, and `faults` are deliberately fail-closed as pending;
+there is no claimed real W4 pass and no synthetic cursor-repeat/gap or PG-selected
+rejection evidence. A later executor must add/use the real provider boundary,
+exercise those faults with before/after state checks, and retain exact user,
+maker, treasury, lifecycle, and cleanup receipts before changing this scope.

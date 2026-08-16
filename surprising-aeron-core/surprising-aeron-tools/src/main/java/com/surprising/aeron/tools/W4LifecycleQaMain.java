@@ -57,21 +57,28 @@ public final class W4LifecycleQaMain {
     private static final long VERSION = 1;
     private static final long STRIKE = 100;
     private static final long SOURCE_ID_BASE = 160_000;
+    private static final String REAL_CAPABILITY_PENDING =
+            "provider-to-core-lifecycle,cursor-repeat-gap,pg-selected,maker-user-treasury-reconciliation";
 
     private final ProductLine productLine;
     private final SurprisingAeronClient client;
     private final long seed;
     private final long sourceId;
+    private final long makerUserId;
     private long sequence;
     private final Set<Long> participantUsers = new LinkedHashSet<>();
     private final Map<String, Long> expectedFunds = new LinkedHashMap<>();
     private final List<String> rows = new ArrayList<>();
+    private boolean reconciliationObserved;
+    private boolean makerReconciliationObserved;
+    private boolean providerBoundaryObserved;
 
-    private W4LifecycleQaMain(ProductLine productLine, SurprisingAeronClient client, long seed) {
+    W4LifecycleQaMain(ProductLine productLine, SurprisingAeronClient client, long seed) {
         this.productLine = productLine;
         this.client = client;
         this.seed = seed;
         this.sourceId = SOURCE_ID_BASE + seed;
+        this.makerUserId = configuredPositiveLong("surprising.aeron.w4-maker-user-id");
         this.sequence = Math.multiplyExact(seed, 10_000L);
     }
 
@@ -93,13 +100,17 @@ public final class W4LifecycleQaMain {
         if (!"CORE".equals(System.getenv().getOrDefault("W4_LIFECYCLE_AUTHORITY", "CORE"))) {
             throw new IllegalArgumentException("LIFECYCLE_AUTHORITY_REFUSED");
         }
+        long seed = positiveLong("surprising.aeron.w4-seed", 16_001);
+        String mode = System.getProperty("surprising.aeron.w4-mode", "execute").trim().toLowerCase();
+        if (!Set.of("execute", "verify", "faults").contains(mode)) {
+            throw new IllegalArgumentException("unsupported W4 mode: " + mode);
+        }
+        requireProviderCapabilities(mode);
         Path manifest = Path.of(requiredProperty("surprising.aeron.w4-manifest"));
         if (Files.exists(manifest)) {
             throw new IllegalStateException("manifest already exists: " + manifest);
         }
         Files.createDirectories(manifest.toAbsolutePath().getParent());
-        long seed = positiveLong("surprising.aeron.w4-seed", 16_001);
-        String mode = System.getProperty("surprising.aeron.w4-mode", "execute").trim().toLowerCase();
         List<String> hosts = Arrays.stream(System.getProperty(
                         "surprising.aeron.hostnames", "localhost,localhost,localhost").split(","))
                 .map(String::trim).filter(value -> !value.isEmpty()).toList();
@@ -114,16 +125,22 @@ public final class W4LifecycleQaMain {
                 qa.runFaults();
             } else if (mode.equals("execute") || mode.equals("verify")) {
                 qa.run(mode.equals("verify"));
-            } else {
-                throw new IllegalArgumentException("unsupported W4 mode: " + mode);
             }
             qa.writeManifest(manifest, mode);
         }
-        System.out.printf("W4_MANIFEST=PASS productLine=%s path=%s FUNDS_DIFFERENCE=0%n",
+        System.out.printf("W4_MANIFEST=REAL_PASS productLine=%s path=%s FUNDS_DIFFERENCE=0%n",
                 productLine, manifest);
     }
 
+    static void requireProviderCapabilities(String mode) {
+        throw new IllegalStateException("W4_REAL_CAPABILITY_PENDING mode=" + mode
+                + " missing=" + REAL_CAPABILITY_PENDING);
+    }
+
     private void run(boolean verifyOnly) {
+        if (verifyOnly) {
+            throw new IllegalStateException("W4_VERIFY_REQUIRES_REAL_RECONCILIATION");
+        }
         if (!verifyOnly) {
             switch (productLine) {
                 case SPOT -> runSpot();
@@ -140,12 +157,7 @@ public final class W4LifecycleQaMain {
     }
 
     private void runFaults() {
-        crossLineGuard();
-        rows.add(productLine + ":CROSS_LINE_REJECTED");
-        rows.add(productLine + ":CURSOR_REPEAT_REJECTED");
-        rows.add(productLine + ":CURSOR_GAP_REJECTED");
-        rows.add(productLine + ":PG_SELECTED_REJECTED");
-        rows.add(productLine + ":ZERO_MUTATION");
+        requireProviderCapabilities("faults");
     }
 
     private void runSpot() {
@@ -345,8 +357,13 @@ public final class W4LifecycleQaMain {
     }
 
     private void reconcile() {
+        if (makerUserId <= 0) {
+            throw new IllegalStateException("MAKER_USER_ID_REQUIRED");
+        }
         Map<String, Long> actual = new LinkedHashMap<>();
-        for (long userId : participantUsers) {
+        Set<Long> reconciliationUsers = new LinkedHashSet<>(participantUsers);
+        reconciliationUsers.add(makerUserId);
+        for (long userId : reconciliationUsers) {
             CoreUserStateView state = CoreStateQueryCodec.decodeUserState(
                     query(CoreMessageType.USER_STATE_QUERY, userId, new byte[0]));
             for (var balance : state.balances()) {
@@ -354,6 +371,9 @@ public final class W4LifecycleQaMain {
                         Math::addExact);
             }
         }
+        rows.add("USER_RECONCILIATION_OBSERVED");
+        rows.add("MAKER_RECONCILIATION_OBSERVED");
+        makerReconciliationObserved = true;
         for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
                 query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
             actual.merge(treasury.asset(), Math.subtractExact(
@@ -369,6 +389,8 @@ public final class W4LifecycleQaMain {
                 throw new IllegalStateException("FUNDS_DIFFERENCE asset=" + asset + " difference=" + difference);
             }
         }
+        rows.add("TREASURY_RECONCILIATION_OBSERVED");
+        reconciliationObserved = true;
         rows.add("FUNDS_DIFFERENCE=0");
     }
 
@@ -396,7 +418,7 @@ public final class W4LifecycleQaMain {
     }
 
     private void command(CoreMessageType type, long userId, byte[] payload) {
-        long currentSequence = Math.incrementExact(sequence);
+        long currentSequence = nextSequence();
         UUID commandId = UUID.nameUUIDFromBytes((productLine + ":" + seed + ":" + currentSequence + ":" + type)
                 .getBytes(StandardCharsets.UTF_8));
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, commandId, productLine,
@@ -410,7 +432,7 @@ public final class W4LifecycleQaMain {
     }
 
     private byte[] query(CoreMessageType type, long userId, byte[] payload) {
-        long correlation = Math.incrementExact(sequence);
+        long correlation = nextSequence();
         CoreMessage message = new CoreMessage(CoreMessageHeader.query(
                 type, UUID.nameUUIDFromBytes((productLine + ":query:" + correlation + ':' + type)
                         .getBytes(StandardCharsets.UTF_8)), productLine, CommandSource.OPERATIONS,
@@ -422,19 +444,44 @@ public final class W4LifecycleQaMain {
         return response.data();
     }
 
-    private void writeManifest(Path manifest, String mode) throws IOException {
+    long nextSequence() {
+        sequence = Math.incrementExact(sequence);
+        return sequence;
+    }
+
+    long sequence() {
+        return sequence;
+    }
+
+    void writeManifest(Path manifest, String mode) throws IOException {
+        if (!"execute".equals(mode)) {
+            throw new IllegalStateException("W4_MODE_PASS_FORBIDDEN mode=" + mode);
+        }
+        if (!reconciliationObserved) {
+            throw new IllegalStateException("FUNDS_RECONCILIATION_REQUIRED");
+        }
+        if (!makerReconciliationObserved) {
+            throw new IllegalStateException("MAKER_RECONCILIATION_REQUIRED");
+        }
+        if (!providerBoundaryObserved) {
+            throw new IllegalStateException("PROVIDER_BOUNDARY_REQUIRED");
+        }
         List<String> output = new ArrayList<>();
         output.add("manifestVersion=1");
         output.add("productLine=" + productLine);
         output.add("seed=" + seed);
         output.add("mode=" + mode);
+        output.add("W4_STATUS=REAL_PASS");
         output.add("providerProductLine=" + productLine);
         output.add("coreProductLine=" + productLine);
         output.add("selectionAuthority=CORE");
         output.add("projectionAuthority=CORE");
-        output.add("maker=REQUIRED");
+        output.add("providerBoundary=OBSERVED");
+        output.add("maker=OBSERVED");
         output.add("wallet=ABSENT");
         output.add("cursorPolicy=MONOTONIC_NO_REPEAT_NO_GAP");
+        output.add("fundsReconciliation=OBSERVED");
+        output.add("rows=" + requiredRows(productLine));
         output.add("FUNDS_DIFFERENCE=0");
         output.addAll(new LinkedHashSet<>(rows));
         Files.write(manifest, output, StandardCharsets.UTF_8);
@@ -486,11 +533,13 @@ public final class W4LifecycleQaMain {
         };
     }
 
-    static String rows(ProductLine productLine) {
+    static String requiredRows(ProductLine productLine) {
         return switch (productLine) {
             case SPOT -> "SPOT:CONSERVATION,SPOT:CONTROL_GUARD";
-            case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> productLine + ":CROSS," + productLine + ":ISOLATED";
-            case LINEAR_DELIVERY, INVERSE_DELIVERY -> productLine + ":CROSS," + productLine + ":ISOLATED";
+            case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> productLine + ":CROSS," + productLine
+                    + ":ISOLATED,FUNDING_POSITIVE,MARK,RISK_SCAN,LIQUIDATION,INSURANCE,ADL";
+            case LINEAR_DELIVERY, INVERSE_DELIVERY -> productLine + ":CROSS," + productLine
+                    + ":ISOLATED,SETTLEMENT,CURSOR";
             case OPTION -> "OPTION:CALL:ITM,OPTION:CALL:ATM,OPTION:CALL:OTM,OPTION:PUT:ITM,OPTION:PUT:ATM,OPTION:PUT:OTM";
         };
     }
@@ -509,5 +558,17 @@ public final class W4LifecycleQaMain {
             throw new IllegalArgumentException(name + " must be positive");
         }
         return value;
+    }
+
+    private static long configuredPositiveLong(String name) {
+        String value = System.getProperty(name);
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        long parsed = Long.parseLong(value);
+        if (parsed <= 0) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return parsed;
     }
 }
