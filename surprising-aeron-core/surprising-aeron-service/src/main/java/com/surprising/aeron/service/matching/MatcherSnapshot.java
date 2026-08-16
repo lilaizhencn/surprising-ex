@@ -35,9 +35,9 @@ public record MatcherSnapshot(
 
     public static final String CORE_SHARD_ID = "default";
     public static final int ROUTE_VERSION = 1;
-    public static final String FORK_GIT_SHA = "0511efca1458e9733d7911732ccab1fd83fc373b";
+    public static final String FORK_GIT_SHA = "310235eadea617fb9a893cd65cd1fb9eef1cb923";
     public static final String ARTIFACT_SHA256 =
-            "ed2dbcf86f2ebf6c1b2bd5642e7585ce5568104da9b61f3649a5a506cd37931f";
+            "16a55192a9f6df85e396fefadbfe23d7d354dc729609beecccf5a8eed09ded27";
     public static final long MATCHER_CONFIG_HASH = hashText(
             "matching=1;risk=1;wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED");
 
