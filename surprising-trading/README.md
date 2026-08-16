@@ -531,7 +531,7 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 
 - `surprising-order-provider` 和 `surprising-trigger-provider` 独立部署。普通订单、撮合、账户结算和条件单热路径只依赖 Aeron Core 与内存状态；trigger provider 不连接 PostgreSQL、Redis 或价格/持仓 Kafka，也不保留数据库回退链路。不要做每个 symbol 一个 worker。
 - `surprising-matching-provider` 独立于 order/trigger，但只维护可重建的行情与成交查询投影，不持有可执行订单簿。
-- Aeron Core 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.14-emporia` 传递依赖 Chronicle/OpenHFT，
+- Aeron Core 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.15-emporia` 传递依赖 Chronicle/OpenHFT，
   父 POM 固定 fork Git SHA、整包 SHA-256 和 JDK 25 可用的 2026.x BOM；service Maven `validate`
   同时验证 whole dependency JAR 与内嵌 provenance。
 - 新 symbol 必须先在 instrument 模块上线，确认 Kafka partition 足够，再开放下单。

@@ -2,7 +2,7 @@
 
 > 状态：`IMPLEMENTATION_SOURCE_OF_TRUTH`
 >
-> 适用范围：Aeron Cluster、交易核心、exchange-core 0.5.14-emporia、账户资金、订单、风险、触发单、导出、查询、Gateway 和四类业务线（六个 `ProductLine` 变体）。
+> 适用范围：Aeron Cluster、交易核心、exchange-core 0.5.15-emporia、账户资金、订单、风险、触发单、导出、查询、Gateway 和四类业务线（六个 `ProductLine` 变体）。
 >
 > 目标：单写者、无锁热路径、减少复制、减少往返、内存裁决、高吞吐、可恢复、资金守恒。
 >
@@ -27,7 +27,7 @@ ProductExecutionCore（单写者、无锁、内存状态）
         |
         +-- R1：校验、幂等、资金/保证金预留
         |
-        +-- exchange-core 0.5.14-emporia：唯一价格时间优先订单簿和撮合
+        +-- exchange-core 0.5.15-emporia：唯一价格时间优先订单簿和撮合
         |
         +-- R2：成交、手续费、余额、持仓、风险和生命周期结算
         |
@@ -120,7 +120,7 @@ available + locked = accountTotal
 ## 3. 基线问题和当前处置状态
 
 以下清单保留改造前的完整问题，便于后续阶段继续追踪。W1/W2 已将 exchange-core 升级并固定为
-`0.5.14-emporia`，删除第二本 FIFO 和生产逐单恢复；其余 P4-P6 项仍按状态表推进。
+`0.5.15-emporia`，删除第二本 FIFO 和生产逐单恢复；其余 P4-P6 项仍按状态表推进。
 
 ### 3.1 状态复制、构造和历史增长
 
@@ -212,7 +212,7 @@ available + locked = accountTotal
 
 ### 3.7 历史迁移方案的不可丢失约束
 
-前序迁移方案中的以下决策仍然有效，并已按当前 `exchange-core:0.5.14-emporia`、四条业务线和内存交易链路更新措辞：
+前序迁移方案中的以下决策仍然有效，并已按当前 `exchange-core:0.5.15-emporia`、四条业务线和内存交易链路更新措辞：
 
 1. Aeron Cluster Log/Archive/Snapshot 是交易核心唯一恢复权威；Kafka 仍承担外围事件和异步输入，不替代 Aeron。
 2. PostgreSQL 不参与下单、撮合、资金预留、成交、风险、强平、交割或行权同步裁决，只做投影、历史、审计和对账。
@@ -223,7 +223,7 @@ available + locked = accountTotal
 7. Exporter 允许 Kafka 成功而 Aeron ACK 丢失导致的重复事件，消费者必须幂等；不声称跨 Aeron/Kafka/PG exactly-once。
 8. 所有长任务（风险扫描、资金费、交割、行权、强平、ADL）必须有最大工作量、确定性 cursor、可暂停续跑和幂等命令。
 9. 保险基金/ADL 第一版可以保留外围审计模块，但任何用户资金变化必须通过 Core 命令执行；不能由外围数据库或队列直接改资金。
-10. 撮合固定使用 exchange-core 0.5.14-emporia；不包装成第二本盘口，`GTX` 使用其原生 post-only 语义。
+10. 撮合固定使用 exchange-core 0.5.15-emporia；不包装成第二本盘口，`GTX` 使用其原生 post-only 语义。
 
 ## 4. 目标状态和所有权
 
@@ -364,9 +364,9 @@ rollingHash = H(previousHash, coreSequence, commandDigest, deltaDigest)
 
 全量 business hash 只用于 snapshot、离线回放和低频审计。若必须计算全量 hash，必须显式命名为 `fullBusinessStateHash`，不能从普通命令或普通查询隐式调用。
 
-## 7. exchange-core 0.5.14-emporia 适配
+## 7. exchange-core 0.5.15-emporia 适配
 
-1. 继续使用当前 fork，不自研撮合。父 POM 固定 `0.5.14-emporia`、仓库、完整 Git SHA、JDK 25 和整包 SHA-256；service 的 Maven `validate` 同时校验依赖 JAR 整包 hash 与 JAR 内 provenance，无法证明来源的同版本制品不得进入生产。
+1. 继续使用当前 fork，不自研撮合。父 POM 固定 `0.5.15-emporia`、仓库、完整 Git SHA、JDK 25 和整包 SHA-256；fork 从已认证提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和 JAR 内 provenance；service 的 Maven `validate` 同时校验依赖 JAR 整包 hash 与 JAR 内 provenance，无法证明来源的同版本制品不得进入生产。
 2. LIMIT `GTC/IOC/FOK/GTX` 直接映射原生类型；MARKET 映射受保护的 IOC/FOK。`GTX` 的拒绝必须由 matcher 原子保证，外层不得 `requestOrderBook + place`。
 3. symbol/user ID 使用稳定显式 registry，配置阶段完成碰撞校验；registry version/hash 进入 Core snapshot 和 matcher manifest，恢复后接受交易前必须完全一致。
 4. adapter 只暴露结构化异步 place/cancel/replace/batch 和有界 book query；正常调用、恢复和离线工具都不能逐条 `join()`，不能用字符串推断结果。
@@ -597,7 +597,7 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 | 业务 reducer | `.../state/TradingCoreReducer.java` | 资金、订单、成交、风险、生命周期和 bounded continuation | 通过外部 repository 决定交易结果 |
 | 状态容器过渡期 | `.../state/TradingCoreState.java`、`StateMapSupport.java` | 支持 snapshot/replay、delta lineage 和显式 changed keys | 继续把全量 constructor scan 当最终方案 |
 | Instrument | `.../state/CoreInstrumentState.java`、`protocol/UpsertInstrumentCommand.java` | 接收版本化全量参数、校验档位、提供 Core 数学输入 | Risk Provider/订单 Provider 自己复制保证金参数 |
-| 撮合 | `.../matching/DeterministicExchangeCoreAdapter.java` | 0.5.14-emporia 原生 GTC/IOC/FOK/GTX、结构化 fill、原生配对快照 | 自建第二本 book、查盘口后模拟 GTX、正常路径 rebuild |
+| 撮合 | `.../matching/DeterministicExchangeCoreAdapter.java` | 0.5.15-emporia 原生 GTC/IOC/FOK/GTX、结构化 fill、原生配对快照 | 自建第二本 book、查盘口后模拟 GTX、正常路径 rebuild |
 | 风险 | `.../state/CoreContractMath.java`、`CoreRiskPolicy.java` | bracket margin、风险快照、强平状态和 policy version | 由 Risk Provider 重新判定或覆盖 Core 状态 |
 | 触发/长任务 | `.../state/*Index.java`、`CoreProbeState` command handlers | index 命中、claim token、bounded cursor、幂等续跑 | DB claim/complete 和无界全表扫描 |
 | 导出 | `CoreCommandDelta.java`、`CoreExportState.java`、`surprising-aeron-exporter/` | 一次事实组装、编码、批量读取、连续 ACK 和幂等 projection | 提交后 before/after 全量 diff、超前 ACK |

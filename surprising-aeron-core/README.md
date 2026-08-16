@@ -4,7 +4,7 @@
 端口空间、Archive 和数据卷；一个逻辑 Core 固定由三个 Member 组成，并管理该变体全部 symbol。
 
 W1/W2 已完成单一可执行盘口改造：`TradingCoreRuntime` 是 Core 单写边界，撮合命令只进入 fork 的
-exchange-core 0.5.14-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
+exchange-core 0.5.15-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
 matcher 恢复导入 Aeron 配对 snapshot 中的原生 `ME0/RE0`，通过 `fromSnapshotOnly` 启动，不逐单回放。
 
 部署基线不按 margin mode 或热点 symbol 分 Core：CROSS 和 ISOLATED 都由同一个 ProductLine Core 裁决；
@@ -42,7 +42,7 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
   外部提交时间和 `correlationId`。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
-- exchange-core 0.5.14-emporia 独占价格树/FIFO；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。
+- exchange-core 0.5.15-emporia 独占价格树/FIFO；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
 - Core owner 线程只提交 exchange-core 异步命令；撮合结果通过 Cluster timer continuation 按序回到 owner，普通下单、撤单、改单、强平、结算和标记价触发子单均不在 owner 线程等待 ring future。adapter 不再提供同步交易入口；恢复和离线工具也通过显式异步 continuation drain 完成。
@@ -74,10 +74,11 @@ processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期。旧�
 
 ## W1/W2 原生快照契约
 
-- fork 坐标为 `exchange.core2:exchange-core:0.5.14-emporia`，Git SHA
-  `310235eadea617fb9a893cd65cd1fb9eef1cb923`，可复现 JAR SHA-256
-  `16a55192a9f6df85e396fefadbfe23d7d354dc729609beecccf5a8eed09ded27`；fork 只允许 clean
-  worktree 构建并在 JAR 内写入源码 SHA，service 的 Maven `validate` 同时校验 provenance 与整包 hash。
+- fork 坐标为 `exchange.core2:exchange-core:0.5.15-emporia`，Git SHA
+  `627ddf68fbb0594b07e4b59a1a0e3377354e26b9`，可复现 JAR SHA-256
+  `09e324685e9ae77244939c9f8c4044dc00dda4f03b98b60ff5d48f7e051e2d21`；fork 只允许 clean
+  worktree 构建，从该提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 SHA；
+  service 的 Maven `validate` 同时校验 provenance 与整包 hash。
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
 - `CoreState v6` 是唯一外层快照，配对保存 Core 状态和 exchange-core 的 `MATCHING_ENGINE_ROUTER/0`、
   `RISK_ENGINE/0`；`TradingState v19` 不含盘口。三个 Member 必须运行完全相同的 fork、配置和 schema。
