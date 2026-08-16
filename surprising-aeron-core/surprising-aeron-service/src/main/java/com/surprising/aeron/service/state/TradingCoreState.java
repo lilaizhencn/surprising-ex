@@ -2,8 +2,10 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
+import java.util.Collections;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 public record TradingCoreState(
         ProductLine productLine,
@@ -472,90 +474,69 @@ public record TradingCoreState(
         return order == null ? 0 : hashOrder(CoreStateHash.start(), order);
     }
 
-    public Set<Long> changedLiquidationIdsSince(TradingCoreState before) {
-        if (before == null) return null;
-        return StateMapSupport.changedKeysSince(before.riskState().liquidations(), riskState.liquidations());
+    public Set<Long> changedLiquidationIds() {
+        return StateMapSupport.changedKeys(riskState.liquidations());
     }
 
-    public Set<String> changedRiskSnapshotKeysSince(TradingCoreState before) {
-        if (before == null) return null;
-        return StateMapSupport.changedKeysSince(before.riskState().snapshots(), riskState.snapshots());
+    public Set<String> changedRiskSnapshotKeys() {
+        return StateMapSupport.changedKeys(riskState.snapshots());
     }
 
-    public Set<Long> changedUserIdsSince(TradingCoreState before) {
-        if (before == null) return null;
-        return StateMapSupport.changedKeysSince(before.users, users);
+    public Set<Long> changedUserIds() {
+        return StateMapSupport.changedKeys(users);
     }
 
-    public Set<Long> changedOrderIdsSince(TradingCoreState before) {
-        if (before == null) return null;
-        return StateMapSupport.changedKeysSince(before.orders, orders);
+    public Set<Long> changedOrderIds() {
+        return StateMapSupport.changedKeys(orders);
     }
 
-    public Set<Long> changedTriggerOrderIdsSince(TradingCoreState before) {
-        if (before == null) return null;
-        return StateMapSupport.changedKeysSince(before.triggerOrders(), triggerOrders);
+    public Set<Long> changedTriggerOrderIds() {
+        return StateMapSupport.changedKeys(triggerOrders);
     }
 
-    public Set<Long> changedAlgoOrderIdsSince(TradingCoreState before) {
-        if (before == null) return null;
-        return StateMapSupport.changedKeysSince(before.algoOrders(), algoOrders);
+
+    public Set<Long> changedAlgoOrderIds() {
+        return StateMapSupport.changedKeys(algoOrders);
     }
 
-    public Set<ClientOrderKey> changedClientOrderKeysSince(TradingCoreState before) {
-        if (before == null) return null;
-        return StateMapSupport.changedKeysSince(before.clientOrderIndex(), clientOrderIndex);
+    public Set<ClientOrderKey> changedClientOrderKeys() {
+        return StateMapSupport.changedKeys(clientOrderIndex);
     }
 
-    public Set<CoreCancelAllAfterKey> changedCancelAllAfterKeysSince(TradingCoreState before) {
-        if (before == null) return null;
-        return StateMapSupport.changedKeysSince(before.cancelAllAfterTimers(), cancelAllAfterTimers);
+    public Set<CoreCancelAllAfterKey> changedCancelAllAfterKeys() {
+        return StateMapSupport.changedKeys(cancelAllAfterTimers);
     }
 
-    public Set<String> changedTreasuryAssetsSince(TradingCoreState before) {
-        if (before == null) return null;
-        return treasuryState.changedAssetsSince(before.treasuryState());
+    public Set<String> changedTreasuryAssets() {
+        return treasuryState.changedAssets();
     }
 
     public void requireIncrementalLineage(TradingCoreState before) {
         if (before == null || before == this) return;
-        requireLineage("users", StateMapSupport.changedKeysSince(before.users, users));
-        requireLineage("orders", StateMapSupport.changedKeysSince(before.orders, orders));
-        requireLineage("book", StateMapSupport.changedKeysSince(before.bookState.openOrders(), bookState.openOrders()));
-        requireLineage("instruments", StateMapSupport.changedKeysSince(before.instruments, instruments));
-        requireLineage("leverages", StateMapSupport.changedKeysSince(before.leverages, leverages));
-        requireLineage("algo orders", StateMapSupport.changedKeysSince(before.algoOrders, algoOrders));
-        requireLineage("cancel-all-after timers",
-                StateMapSupport.changedKeysSince(before.cancelAllAfterTimers, cancelAllAfterTimers));
-        requireLineage("client order index",
-                StateMapSupport.changedKeysSince(before.clientOrderIndex, clientOrderIndex));
-        requireLineage("trigger orders", StateMapSupport.changedKeysSince(before.triggerOrders, triggerOrders));
-        requireLineage("mark prices",
-                StateMapSupport.changedKeysSince(before.riskState.markPrices(), riskState.markPrices()));
-        requireLineage("risk snapshots",
-                StateMapSupport.changedKeysSince(before.riskState.snapshots(), riskState.snapshots()));
-        requireLineage("liquidations",
-                StateMapSupport.changedKeysSince(before.riskState.liquidations(), riskState.liquidations()));
-        requireLineage("risk scans",
-                StateMapSupport.changedKeysSince(before.riskState.scans(), riskState.scans()));
-        requireLineage("fee balances",
-                StateMapSupport.changedKeysSince(before.treasuryState.feeBalances(), treasuryState.feeBalances()));
-        requireLineage("insurance balances", StateMapSupport.changedKeysSince(
-                before.treasuryState.insuranceBalances(), treasuryState.insuranceBalances()));
-        requireLineage("insurance deficits", StateMapSupport.changedKeysSince(
-                before.treasuryState.insuranceDeficits(), treasuryState.insuranceDeficits()));
-        requireLineage("funding settlements", StateMapSupport.changedKeysSince(
-                before.treasuryState.fundingSettlements(), treasuryState.fundingSettlements()));
-        requireLineage("lifecycle settlements", StateMapSupport.changedKeysSince(
-                before.treasuryState.lifecycleSettlements(), treasuryState.lifecycleSettlements()));
-        requireLineage("funding progress", StateMapSupport.changedKeysSince(
-                before.treasuryState.fundingProgress(), treasuryState.fundingProgress()));
-        requireLineage("lifecycle progress", StateMapSupport.changedKeysSince(
-                before.treasuryState.lifecycleProgress(), treasuryState.lifecycleProgress()));
+        requireLineage("users", before.users, users);
+        requireLineage("orders", before.orders, orders);
+        requireLineage("book", before.bookState.openOrders(), bookState.openOrders());
+        requireLineage("instruments", before.instruments, instruments);
+        requireLineage("leverages", before.leverages, leverages);
+        requireLineage("algo orders", before.algoOrders, algoOrders);
+        requireLineage("cancel-all-after timers", before.cancelAllAfterTimers, cancelAllAfterTimers);
+        requireLineage("client order index", before.clientOrderIndex, clientOrderIndex);
+        requireLineage("trigger orders", before.triggerOrders, triggerOrders);
+        requireLineage("mark prices", before.riskState.markPrices(), riskState.markPrices());
+        requireLineage("risk snapshots", before.riskState.snapshots(), riskState.snapshots());
+        requireLineage("liquidations", before.riskState.liquidations(), riskState.liquidations());
+        requireLineage("risk scans", before.riskState.scans(), riskState.scans());
+        requireLineage("fee balances", before.treasuryState.feeBalances(), treasuryState.feeBalances());
+        requireLineage("insurance balances", before.treasuryState.insuranceBalances(), treasuryState.insuranceBalances());
+        requireLineage("insurance deficits", before.treasuryState.insuranceDeficits(), treasuryState.insuranceDeficits());
+        requireLineage("funding settlements", before.treasuryState.fundingSettlements(), treasuryState.fundingSettlements());
+        requireLineage("lifecycle settlements", before.treasuryState.lifecycleSettlements(), treasuryState.lifecycleSettlements());
+        requireLineage("funding progress", before.treasuryState.fundingProgress(), treasuryState.fundingProgress());
+        requireLineage("lifecycle progress", before.treasuryState.lifecycleProgress(), treasuryState.lifecycleProgress());
     }
 
-    private static void requireLineage(String name, Set<?> changedKeys) {
-        if (changedKeys == null) {
+    private static void requireLineage(String name, Map<?, ?> before, Map<?, ?> after) {
+        if (before != after && !StateMapSupport.isDelta(after)) {
             throw new IllegalStateException(name + " lineage is unavailable");
         }
     }

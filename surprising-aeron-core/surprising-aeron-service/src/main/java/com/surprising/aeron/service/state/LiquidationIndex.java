@@ -26,11 +26,12 @@ public final class LiquidationIndex {
     }
 
     public void update(TradingCoreState before, TradingCoreState after) {
-        Set<Long> changed = after.changedLiquidationIdsSince(before);
-        if (changed == null) {
+        if (before.riskState().liquidations() == after.riskState().liquidations()) return;
+        if (!StateMapSupport.isDelta(after.riskState().liquidations())) {
             rebuild(after);
             return;
         }
+        Set<Long> changed = after.changedLiquidationIds();
         for (Long id : changed) {
             if (id == null) continue;
             CoreLiquidationState previous = before.riskState().liquidations().get(id);

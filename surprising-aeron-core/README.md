@@ -44,6 +44,7 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
 - exchange-core 0.5.8-emporia 是唯一可执行 book；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。
+- Core owner 线程只提交 exchange-core 异步命令；撮合结果通过 Cluster timer continuation 按序回到 owner，普通下单、撤单、改单、强平、结算和标记价触发子单均不在 owner 线程 `join()` 等待。同步 adapter 入口仅保留给恢复/测试冷路径。
 - 下单、撮合、资金、风险、强平和生命周期热路径不访问 JDBC、Redis、Kafka 或 HTTP；这些系统只做输入桥、
   异步导出、投影、审计和查询。
 - 幂等结果窗口有界；窗口外仍用 `(source, sourceId)` 的序列高水位阻止旧命令再次执行。

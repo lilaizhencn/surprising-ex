@@ -126,12 +126,10 @@ public record CoreTreasuryState(
                 fundingSettlements, lifecycleSettlements, fundingProgress, next);
     }
 
-    public Set<String> changedAssetsSince(CoreTreasuryState before) {
-        if (before == null) return null;
-        Set<String> fee = StateMapSupport.changedKeysSince(before.feeBalances, feeBalances);
-        Set<String> insurance = StateMapSupport.changedKeysSince(before.insuranceBalances, insuranceBalances);
-        Set<String> deficits = StateMapSupport.changedKeysSince(before.insuranceDeficits, insuranceDeficits);
-        if (fee == null || insurance == null || deficits == null) return null;
+    public Set<String> changedAssets() {
+        Set<String> fee = StateMapSupport.changedKeys(feeBalances);
+        Set<String> insurance = StateMapSupport.changedKeys(insuranceBalances);
+        Set<String> deficits = StateMapSupport.changedKeys(insuranceDeficits);
         TreeSet<String> assets = new TreeSet<>();
         assets.addAll(fee);
         assets.addAll(insurance);

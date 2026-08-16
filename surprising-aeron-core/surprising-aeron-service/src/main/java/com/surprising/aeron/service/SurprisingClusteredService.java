@@ -4,6 +4,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
+import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
@@ -25,12 +26,15 @@ import org.agrona.concurrent.IdleStrategy;
 public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
+    private static final long MATCHING_TIMER_DELAY_MS = 1;
 
     private final ProductLine productLine;
     private final AtomicReference<Cluster.Role> role = new AtomicReference<>();
     private CoreProbeState state;
+    private Cluster cluster;
     private IdleStrategy idleStrategy;
     private final Map<Long, PendingEgress> pendingEgress = new HashMap<>();
+    private final Map<Long, PendingClient> pendingClients = new HashMap<>();
 
     public SurprisingClusteredService(ProductLine productLine) {
         this.productLine = productLine;
@@ -39,13 +43,17 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onStart(Cluster cluster, Image snapshotImage) {
+        this.cluster = cluster;
         pendingEgress.clear();
+        pendingClients.clear();
         idleStrategy = cluster.idleStrategy();
         role.set(cluster.role());
         System.out.printf("Aeron core role productLine=%s role=%s%n", productLine, cluster.role());
         if (snapshotImage != null) {
             loadSnapshot(snapshotImage);
         }
+        state.resumePendingMatching();
+        schedulePendingMatchingTimers();
     }
 
     @Override
@@ -65,6 +73,22 @@ public final class SurprisingClusteredService implements ClusteredService {
             return;
         }
         var result = state.apply(request, timestamp, header.position());
+        long matchingSequence = state.matchingSequence(request.header().commandId());
+        if (matchingSequence > 0) {
+            if (session != null) {
+                pendingClients.put(matchingSequence, new PendingClient(session, request));
+            }
+            scheduleMatchingTimer(matchingSequence);
+            return;
+        }
+        long querySequence = state.querySequence(request.header().commandId());
+        if (querySequence != 0) {
+            if (session != null) {
+                pendingClients.put(querySequence, new PendingClient(session, request));
+            }
+            scheduleMatchingTimer(querySequence);
+            return;
+        }
         if (session != null) {
             CoreMessage response = new CoreMessage(request.header().response(responseType(request)),
                     CoreProtocol.responsePayload(result));
@@ -91,6 +115,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     public void onRoleChange(Cluster.Role newRole) {
         role.set(newRole);
         System.out.printf("Aeron core role-change productLine=%s role=%s%n", productLine, newRole);
+        schedulePendingMatchingTimers();
     }
 
     @Override
@@ -105,12 +130,15 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public void onTerminate(Cluster cluster) {
         pendingEgress.clear();
+        pendingClients.clear();
+        this.cluster = null;
         state.close();
     }
 
     @Override
     public void onSessionOpen(ClientSession session, long timestamp) {
         pendingEgress.put(session.id(), new PendingEgress(session));
+        schedulePendingMatchingTimers();
     }
 
     @Override
@@ -120,6 +148,38 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTimerEvent(long correlationId, long timestamp) {
+        if (correlationId < 0) {
+            CoreResponse queryResult = state.takeQueryResult(correlationId);
+            if (queryResult == null) {
+                scheduleMatchingTimer(correlationId);
+                return;
+            }
+            PendingClient pendingClient = pendingClients.remove(correlationId);
+            if (pendingClient != null && !pendingClient.session().isClosing()) {
+                CoreMessage response = new CoreMessage(pendingClient.request().header().response(
+                        responseType(pendingClient.request())), CoreProtocol.responsePayload(queryResult));
+                offer(pendingClient.session(), CoreMessageCodec.encode(response));
+            }
+            return;
+        }
+        var matchingResult = state.takeMatchingResult(correlationId);
+        if (matchingResult == null) {
+            scheduleMatchingTimer(correlationId);
+            return;
+        }
+        CoreResponse result = state.completeMatching(correlationId, matchingResult, timestamp,
+                cluster == null ? 0 : cluster.logPosition());
+        if (result == null) {
+            scheduleMatchingTimer(correlationId);
+            return;
+        }
+        PendingClient pendingClient = pendingClients.remove(correlationId);
+        if (pendingClient != null && !pendingClient.session().isClosing()) {
+            CoreMessage response = new CoreMessage(pendingClient.request().header().response(
+                    responseType(pendingClient.request())), CoreProtocol.responsePayload(result));
+            offer(pendingClient.session(), CoreMessageCodec.encode(response));
+        }
+        schedulePendingMatchingTimers();
     }
 
     CoreProbeState state() {
@@ -190,6 +250,26 @@ public final class SurprisingClusteredService implements ClusteredService {
         private PendingEgress(ClientSession session) {
             this.session = session;
         }
+    }
+
+    private void schedulePendingMatchingTimers() {
+        if (cluster == null) return;
+        for (long sequence : state.pendingMatching().keySet()) {
+            scheduleMatchingTimer(sequence);
+        }
+    }
+
+    private void scheduleMatchingTimer(long sequence) {
+        if (cluster == null || sequence == 0) return;
+        try {
+            long delay = Math.max(1L, cluster.timeUnit().convert(MATCHING_TIMER_DELAY_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS));
+            cluster.scheduleTimer(sequence, cluster.time() + delay);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private record PendingClient(ClientSession session, CoreMessage request) {
     }
 
     private static CoreMessageType responseType(CoreMessage request) {

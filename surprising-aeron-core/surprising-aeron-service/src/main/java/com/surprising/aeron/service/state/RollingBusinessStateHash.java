@@ -84,6 +84,13 @@ public final class RollingBusinessStateHash {
         }
     }
 
+    public void restore(TradingCoreState state) {
+        revision = state.revision();
+        nextLiquidationId = state.riskState().nextLiquidationId();
+        bookState = state.bookState();
+        rebuild(state);
+    }
+
     public long value() {
         long hash = CoreStateHash.start();
         hash = CoreStateHash.mix(hash, productLine);
@@ -142,11 +149,11 @@ public final class RollingBusinessStateHash {
 
     private static <K, V> void updateMap(Aggregate target, Map<K, V> before, Map<K, V> after) {
         if (before == after) return;
-        Set<K> changed = StateMapSupport.changedKeysSince(before, after);
-        if (changed == null) {
+        if (!StateMapSupport.isDelta(after)) {
             rebuildMap(target, after);
             return;
         }
+        Set<K> changed = StateMapSupport.changedKeys(after);
         for (K key : changed) {
             if (before.containsKey(key)) target.remove(entryHash(key, before.get(key)));
             if (after.containsKey(key)) target.add(entryHash(key, after.get(key)));

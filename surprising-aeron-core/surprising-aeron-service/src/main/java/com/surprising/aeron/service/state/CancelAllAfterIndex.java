@@ -41,11 +41,12 @@ public final class CancelAllAfterIndex {
     }
 
     public void update(TradingCoreState before, TradingCoreState after) {
-        Set<CoreCancelAllAfterKey> changed = after.changedCancelAllAfterKeysSince(before);
-        if (changed == null) {
+        if (before.cancelAllAfterTimers() == after.cancelAllAfterTimers()) return;
+        if (!StateMapSupport.isDelta(after.cancelAllAfterTimers())) {
             rebuild(after);
             return;
         }
+        Set<CoreCancelAllAfterKey> changed = after.changedCancelAllAfterKeys();
         for (CoreCancelAllAfterKey key : changed) {
             if (key == null) continue;
             CoreCancelAllAfterState previous = before.cancelAllAfterTimers().get(key);

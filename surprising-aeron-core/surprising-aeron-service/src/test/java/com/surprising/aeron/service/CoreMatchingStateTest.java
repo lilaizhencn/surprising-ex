@@ -10,6 +10,8 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
@@ -21,6 +23,7 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.aeron.service.state.CoreOrderStatus;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -121,13 +124,13 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().user(11).totalUnits("USDT")
                     + state.tradingState().user(22).totalUnits("USDT")).isEqualTo(1_000);
             assertThat(state.tradingState().bookStateHash("BTC-USDT")).isNotEqualTo(restingBookHash);
-            assertThat(state.matchingStateHash()).isNotZero();
+            assertThat(awaitMatchingHash(state)).isNotZero();
 
             try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
                 assertThat(restored.tradingState().bookStateHash("BTC-USDT"))
                         .isEqualTo(state.tradingState().bookStateHash("BTC-USDT"));
-                assertThat(restored.matchingStateHash()).isNotZero();
+                assertThat(awaitMatchingHash(restored)).isNotZero();
                 apply(restored, 5, 22, CoreMessageType.PLACE_ORDER,
                         place(203, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
                 assertThat(restored.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
@@ -375,7 +378,33 @@ class CoreMatchingStateTest {
             CoreMessageType messageType,
             byte[] payload) {
         CoreMessage message = message(state, sequence, userId, messageType, payload);
-        assertThat(state.apply(message).status()).isEqualTo(ResponseStatus.APPLIED);
+        CoreResponse response = state.apply(message);
+        assertThat(response.status()).isIn(ResponseStatus.APPLIED, ResponseStatus.OK);
+        drainMatching(state, response, message);
+    }
+
+    private static void drainMatching(CoreProbeState state, CoreResponse response, CoreMessage message) {
+        if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return;
+        long sequence = state.matchingSequence(message.header().commandId());
+        com.surprising.aeron.service.matching.CoreMatchingResult result = null;
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (result == null && System.nanoTime() < deadline) {
+            result = state.takeMatchingResult(sequence);
+            if (result == null) Thread.onSpinWait();
+        }
+        assertThat(result).as("matching result for " + message.header().messageType()).isNotNull();
+        CoreResponse completed = state.completeMatching(sequence, result,
+                message.header().submittedAtEpochMillis(), message.header().sourceSequence());
+        assertThat(completed).isNotNull();
+        assertThat(completed.status()).isIn(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
+    }
+
+    private static int awaitMatchingHash(CoreProbeState state) {
+        CompletableFuture<Integer> future = state.matchingStateHashAsync();
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (!future.isDone() && System.nanoTime() < deadline) Thread.onSpinWait();
+        assertThat(future).isDone();
+        return future.getNow(0);
     }
 
     private static CoreMessage message(CoreProbeState state, long sequence, long userId,

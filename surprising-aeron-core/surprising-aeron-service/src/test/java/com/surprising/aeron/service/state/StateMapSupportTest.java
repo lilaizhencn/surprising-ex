@@ -32,7 +32,7 @@ class StateMapSupportTest {
     }
 
     @Test
-    void changedKeysSinceWalksNestedDeltaChainAndKeepsDeletes() {
+    void nestedDeltaTracksOnlyItsOwnChanges() {
         NavigableMap<Long, String> base = new TreeMap<>(Map.of(1L, "one", 2L, "two"));
         NavigableMap<Long, String> first = StateMapSupport.delta(base);
         first.put(1L, "uno");
@@ -40,12 +40,12 @@ class StateMapSupportTest {
         second.put(3L, "three");
         second.remove(2L);
 
-        assertThat(StateMapSupport.changedKeysSince(base, second)).containsExactlyInAnyOrder(1L, 2L, 3L);
-        assertThat(StateMapSupport.changedKeysSince(first, second)).containsExactly(2L, 3L);
+        assertThat(StateMapSupport.changedKeys(first)).containsExactly(1L);
+        assertThat(StateMapSupport.changedKeys(second)).containsExactly(2L, 3L);
     }
 
     @Test
-    void changedKeysSinceRetainsLineageAcrossCompaction() {
+    void persistentPathCopiesKeepValuesWithoutPeriodicCompaction() {
         NavigableMap<Long, String> base = new TreeMap<>(Map.of(1L, "one"));
         NavigableMap<Long, String> previous = base;
         for (int index = 0; index < 300; index++) {
@@ -54,7 +54,6 @@ class StateMapSupportTest {
             previous = next;
         }
 
-        assertThat(StateMapSupport.changedKeysSince(base, previous)).hasSize(300);
         assertThat(previous.get(301L)).isEqualTo("value-299");
     }
 }

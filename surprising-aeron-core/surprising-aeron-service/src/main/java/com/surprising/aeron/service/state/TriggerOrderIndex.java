@@ -100,11 +100,12 @@ public final class TriggerOrderIndex {
     }
 
     public void update(TradingCoreState before, TradingCoreState after) {
-        Set<Long> changed = after.changedTriggerOrderIdsSince(before);
-        if (changed == null) {
+        if (before.triggerOrders() == after.triggerOrders()) return;
+        if (!StateMapSupport.isDelta(after.triggerOrders())) {
             rebuild(after);
             return;
         }
+        Set<Long> changed = after.changedTriggerOrderIds();
         for (Long id : changed) {
             if (id == null) continue;
             CoreTriggerOrderState previous = before.triggerOrders().get(id);

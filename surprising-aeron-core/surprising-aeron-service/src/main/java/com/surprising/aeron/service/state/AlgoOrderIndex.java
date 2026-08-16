@@ -56,11 +56,12 @@ public final class AlgoOrderIndex {
     }
 
     public void update(TradingCoreState before, TradingCoreState after) {
-        Set<Long> changed = after.changedAlgoOrderIdsSince(before);
-        if (changed == null) {
+        if (before.algoOrders() == after.algoOrders()) return;
+        if (!StateMapSupport.isDelta(after.algoOrders())) {
             rebuild(after);
             return;
         }
+        Set<Long> changed = after.changedAlgoOrderIds();
         for (Long id : changed) {
             if (id == null) continue;
             CoreAlgoOrderState previous = before.algoOrders().get(id);

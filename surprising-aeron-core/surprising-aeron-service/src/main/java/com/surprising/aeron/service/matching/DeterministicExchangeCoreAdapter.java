@@ -22,23 +22,22 @@ import exchange.core2.core.common.api.ApiCancelOrder;
 import exchange.core2.core.common.api.ApiPlaceOrder;
 import exchange.core2.core.common.api.ApiMoveOrder;
 import exchange.core2.core.common.api.binary.BatchAddSymbolsCommand;
-import exchange.core2.core.common.api.reports.StateHashReportQuery;
-import exchange.core2.core.common.api.reports.StateHashReportResult;
 import exchange.core2.core.common.cmd.CommandResultCode;
 import exchange.core2.core.common.config.ExchangeConfiguration;
 import exchange.core2.core.common.config.InitialStateConfiguration;
 import exchange.core2.core.common.config.OrdersProcessingConfiguration;
 import exchange.core2.core.common.config.PerformanceConfiguration;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+import java.util.function.Function;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
@@ -46,41 +45,38 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private ExchangeCore core;
     private ExchangeApi api;
-    private final Map<String, Integer> symbols = new HashMap<>();
-    private final Map<Integer, String> symbolNames = new HashMap<>();
-    private final Set<Long> users = new HashSet<>();
+    private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
+    private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
+    private final Set<Long> users = ConcurrentHashMap.newKeySet();
+    private final Map<String, CompletableFuture<Integer>> symbolRegistrations = new ConcurrentHashMap<>();
+    private final Map<Long, CompletableFuture<Void>> userRegistrations = new ConcurrentHashMap<>();
+    private final AtomicReference<CompletableFuture<Void>> submissionTail =
+            new AtomicReference<>(CompletableFuture.completedFuture(null));
+    private final AtomicReference<CompletableFuture<Void>> matchingSubmissionTail =
+            new AtomicReference<>(CompletableFuture.completedFuture(null));
 
     public DeterministicExchangeCoreAdapter() {
         start();
     }
 
-    public CoreMatchingResult place(long userId, PlaceOrderCommand command) {
-        return placeAsync(userId, command).join();
-    }
-
     public CompletableFuture<CoreMatchingResult> placeAsync(long userId, PlaceOrderCommand command) {
-        int symbolId = ensureSymbol(command.symbol());
-        ensureUser(userId);
-        return api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
-                .orderId(command.orderId())
-                .uid(userId)
-                .symbol(symbolId)
-                .action(command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
-                .orderType(orderType(command))
-                .price(command.matchingPriceTicks())
-                .reservePrice(command.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : command.matchingPriceTicks())
-                .size(command.quantitySteps())
-                .build()).thenApply(DeterministicExchangeCoreAdapter::matchingResult);
-    }
-
-    public List<CoreMatchingResult> placeBatch(List<PlaceRequest> requests) {
-        if (requests == null || requests.isEmpty()) return List.of();
-        ensureUsersBatch(requests.stream().map(PlaceRequest::userId).toList());
-        List<CompletableFuture<CoreMatchingResult>> futures = requests.stream()
-                .map(request -> placeAsync(request.userId(), request.command()))
-                .toList();
-        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
-        return futures.stream().map(CompletableFuture::join).toList();
+        return enqueueMatching(advance -> ensureSymbolAsync(command.symbol())
+                .thenCombine(ensureUserAsync(userId), (symbolId, ignored) -> symbolId)
+                .thenCompose(symbolId -> {
+                    CompletableFuture<exchange.core2.core.common.cmd.OrderCommand> submitted = api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
+                        .orderId(command.orderId())
+                        .uid(userId)
+                        .symbol(symbolId)
+                        .action(command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
+                        .orderType(orderType(command))
+                        .price(command.matchingPriceTicks())
+                        .reservePrice(command.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : command.matchingPriceTicks())
+                        .size(command.quantitySteps())
+                        .build());
+                    advance.run();
+                    return submitted;
+                }))
+                .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
     }
 
     private static CoreMatchingResult matchingResult(exchange.core2.core.common.cmd.OrderCommand response) {
@@ -108,96 +104,146 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         };
     }
 
-    public CoreMatchingResult cancel(long userId, long orderId, String symbol) {
-        return cancelAsync(userId, orderId, symbol).join();
-    }
-
-    public List<CoreMatchingResult> cancelBatch(List<CoreOrderState> orders) {
+    public CompletableFuture<CoreMatchingResult> cancelBatchAsync(List<CoreOrderState> orders) {
         if (orders == null || orders.isEmpty()) {
-            return List.of();
+            return CompletableFuture.completedFuture(new CoreMatchingResult(true, "SUCCESS", List.of()));
         }
-        List<CompletableFuture<CoreMatchingResult>> futures = new ArrayList<>(orders.size());
-        for (CoreOrderState order : orders) {
-            futures.add(cancelAsync(order.userId(), order.orderId(), order.symbol()));
+        List<CompletableFuture<CoreMatchingResult>> futures = orders.stream()
+                .map(order -> cancelAsync(order.userId(), order.orderId(), order.symbol())).toList();
+        CompletableFuture<List<CoreMatchingResult>> combined = CompletableFuture.completedFuture(new ArrayList<>());
+        for (CompletableFuture<CoreMatchingResult> future : futures) {
+            combined = combined.thenCombine(future, (results, result) -> {
+                List<CoreMatchingResult> next = new ArrayList<>(results);
+                next.add(result);
+                return next;
+            });
         }
-        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
-        return futures.stream().map(CompletableFuture::join).toList();
+        return combined.thenApply(results -> results.stream().filter(result -> !result.accepted()).findFirst()
+                .orElse(new CoreMatchingResult(true, "SUCCESS", List.of())));
     }
 
     private CompletableFuture<CoreMatchingResult> cancelAsync(long userId, long orderId, String symbol) {
-        Integer symbolId = symbols.get(symbol);
-        if (symbolId == null) {
-            return CompletableFuture.completedFuture(
-                    new CoreMatchingResult(false, "UNKNOWN_SYMBOL", List.of()));
-        }
-        ensureUser(userId);
-        return api.submitCommandAsync(ApiCancelOrder.builder()
-                        .orderId(orderId).uid(userId).symbol(symbolId).build())
+        return enqueueMatching(advance -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+                .thenCompose(ignored -> {
+                    CompletableFuture<CommandResultCode> submitted = api.submitCommandAsync(ApiCancelOrder.builder()
+                            .orderId(orderId).uid(userId).symbol(symbolId).build());
+                    advance.run();
+                    return submitted;
+                })))
                 .thenApply(resultCode -> new CoreMatchingResult(resultCode == CommandResultCode.SUCCESS,
                         resultCode.name(), List.of()));
     }
 
-    public CoreMatchingResult replace(long userId, long orderId, String symbol, long newPriceTicks) {
-        Integer symbolId = symbols.get(symbol);
-        if (symbolId == null) {
-            return new CoreMatchingResult(false, "UNKNOWN_SYMBOL", List.of());
-        }
-        ensureUser(userId);
-        var response = api.submitCommandAsyncFullResponse(ApiMoveOrder.builder()
-                .orderId(orderId).uid(userId).symbol(symbolId).newPrice(newPriceTicks).build()).join();
-        List<CoreMatch> matches = new ArrayList<>();
-        response.processMatcherEvents(event -> {
-            if (event.eventType == MatcherEventType.TRADE) {
-                matches.add(new CoreMatch(event.matchedOrderId, event.matchedOrderUid, event.price, event.size,
-                        event.matchedOrderCompleted, event.activeOrderCompleted));
-            }
+    public CompletableFuture<CoreMatchingResult> cancelAsyncForContinuation(long userId, long orderId,
+                                                                               String symbol) {
+        return cancelAsync(userId, orderId, symbol);
+    }
+
+    public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String symbol,
+                                                                    PlaceOrderCommand replacement) {
+        return enqueueMatching(advance -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+                .thenCompose(ignored -> {
+                    CompletableFuture<CommandResultCode> cancel = api.submitCommandAsync(ApiCancelOrder.builder()
+                            .orderId(orderId).uid(userId).symbol(symbolId).build());
+                    return cancel.thenCompose(cancelResult -> {
+                        if (cancelResult != CommandResultCode.SUCCESS) {
+                            advance.run();
+                            return CompletableFuture.completedFuture(new CoreMatchingResult(false,
+                                    cancelResult.name(), List.of()));
+                        }
+                        return ensureSymbolAsync(replacement.symbol()).thenCompose(replacementSymbolId -> {
+                            CompletableFuture<exchange.core2.core.common.cmd.OrderCommand> place =
+                                    api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
+                                            .orderId(replacement.orderId()).uid(userId).symbol(replacementSymbolId)
+                                            .action(replacement.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
+                                            .orderType(orderType(replacement)).price(replacement.matchingPriceTicks())
+                                            .reservePrice(replacement.side() == CoreOrderSide.BUY
+                                                    ? Long.MAX_VALUE : replacement.matchingPriceTicks())
+                                            .size(replacement.quantitySteps()).build());
+                            advance.run();
+                            return place.thenApply(DeterministicExchangeCoreAdapter::matchingResult);
+                        });
+                    });
+                })));
+    }
+
+    public CompletableFuture<CoreMatchingResult> replaceAsync(long userId, long orderId, String symbol,
+                                                               long newPriceTicks) {
+        return enqueueMatching(advance -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+                .thenCompose(ignored -> {
+                    CompletableFuture<exchange.core2.core.common.cmd.OrderCommand> submitted = api.submitCommandAsyncFullResponse(ApiMoveOrder.builder()
+                            .orderId(orderId).uid(userId).symbol(symbolId).newPrice(newPriceTicks).build());
+                    advance.run();
+                    return submitted;
+                })))
+                .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
+    }
+
+    public CompletableFuture<Integer> orderBooksStateHashAsync() {
+        return enqueueMatching(advance -> {
+            CompletableFuture<Integer> result = api.processReport(
+                            new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0)
+                    .thenApply(report -> report.getHashCodes().entrySet().stream()
+                            .filter(entry -> entry.getKey().submodule
+                                    == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType.MATCHING_ORDER_BOOKS)
+                            .mapToInt(Map.Entry::getValue)
+                            .reduce(0, (left, right) -> left * 31 + right));
+            advance.run();
+            return result;
         });
-        return new CoreMatchingResult(response.resultCode == CommandResultCode.SUCCESS,
-                response.resultCode.name(), matches);
     }
 
-    public int orderBooksStateHash() {
-        var result = api.processReport(new StateHashReportQuery(), 0).join();
-        return result.getHashCodes().entrySet().stream()
-                .filter(entry -> entry.getKey().submodule
-                        == StateHashReportResult.SubmoduleType.MATCHING_ORDER_BOOKS)
-                .mapToInt(Map.Entry::getValue)
-                .reduce(0, (left, right) -> left * 31 + right);
-    }
-
-    public List<CoreBookLevelView> orderBookLevels() {
-        return orderBookLevels("", MAX_QUERY_DEPTH);
-    }
-
-    public List<CoreBookLevelView> orderBookLevels(String requestedSymbol, int depth) {
-        String symbolFilter = requestedSymbol == null ? "" : requestedSymbol;
-        int boundedDepth = Math.min(Math.max(depth, 1), MAX_QUERY_DEPTH);
-        List<CoreBookLevelView> levels = new ArrayList<>();
-        symbols.entrySet().stream().filter(entry -> symbolFilter.isEmpty() || entry.getKey().equals(symbolFilter))
-                .sorted(Map.Entry.comparingByKey()).forEach(entry -> {
-            L2MarketData book = api.requestOrderBookAsync(entry.getValue(), boundedDepth).join();
-            for (int index = 0; index < book.askSize; index++) {
-                levels.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.SELL, book.askPrices[index],
-                        book.askVolumes[index], book.askOrders[index]));
+    public CompletableFuture<List<CoreBookLevelView>> orderBookLevelsAsync(String requestedSymbol, int depth) {
+        return enqueueMatching(advance -> {
+            String symbolFilter = requestedSymbol == null ? "" : requestedSymbol;
+            int boundedDepth = Math.min(Math.max(depth, 1), MAX_QUERY_DEPTH);
+            List<Map.Entry<String, Integer>> entries = symbols.entrySet().stream()
+                    .filter(entry -> symbolFilter.isEmpty() || entry.getKey().equals(symbolFilter))
+                    .sorted(Map.Entry.comparingByKey()).toList();
+            CompletableFuture<List<CoreBookLevelView>> result = CompletableFuture.completedFuture(new ArrayList<>());
+            for (Map.Entry<String, Integer> entry : entries) {
+                result = result.thenCombine(api.requestOrderBookAsync(entry.getValue(), boundedDepth), (levels, book) -> {
+                    List<CoreBookLevelView> next = new ArrayList<>(levels);
+                    for (int index = 0; index < book.askSize; index++) {
+                        next.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.SELL, book.askPrices[index],
+                                book.askVolumes[index], book.askOrders[index]));
+                    }
+                    for (int index = 0; index < book.bidSize; index++) {
+                        next.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.BUY, book.bidPrices[index],
+                                book.bidVolumes[index], book.bidOrders[index]));
+                    }
+                    return next;
+                });
             }
-            for (int index = 0; index < book.bidSize; index++) {
-                levels.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.BUY, book.bidPrices[index],
-                        book.bidVolumes[index], book.bidOrders[index]));
-            }
+            CompletableFuture<List<CoreBookLevelView>> sorted = result.thenApply(levels -> {
+                levels.sort(Comparator.comparing(CoreBookLevelView::symbol)
+                        .thenComparing(CoreBookLevelView::side)
+                        .thenComparingLong(CoreBookLevelView::priceTicks));
+                return List.copyOf(levels);
+            });
+            advance.run();
+            return sorted;
         });
-        levels.sort(Comparator.comparing(CoreBookLevelView::symbol)
-                .thenComparing(CoreBookLevelView::side)
-                .thenComparingLong(CoreBookLevelView::priceTicks));
-        return List.copyOf(levels);
     }
 
-    public void rebuild(TradingCoreState state) {
+    public CompletableFuture<Void> rebuildAsync(TradingCoreState state) {
+        return rebuildAsync(state, Set.of());
+    }
+
+    public CompletableFuture<Void> rebuildAsync(TradingCoreState state, Set<Long> excludedOrderIds) {
         stop();
         symbols.clear();
         symbolNames.clear();
         users.clear();
         start();
-        state.instruments().values().forEach(this::ensureInstrument);
+        CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
+        for (CoreInstrumentState instrument : state.instruments().values().stream()
+                .sorted(java.util.Comparator.comparing(CoreInstrumentState::symbol)).toList()) {
+            chain = chain.thenCompose(ignored -> ensureInstrumentAsync(instrument).thenApply(symbolId -> null));
+        }
+        for (Long userId : state.users().keySet().stream().sorted().toList()) {
+            chain = chain.thenCompose(ignored -> ensureUserAsync(userId));
+        }
         long activeOrderCount = state.orders().values().stream()
                 .filter(order -> order.status() == CoreOrderStatus.OPEN)
                 .count();
@@ -206,7 +252,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
         List<PlaceRequest> requests = state.bookState().priorityOrder().stream()
                 .map(state::order)
-                .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN)
+                .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN
+                        && (excludedOrderIds == null || !excludedOrderIds.contains(order.orderId())))
                 .map(order -> {
             CoreInstrumentState instrument = state.instruments().get(order.symbol());
             if (instrument == null) {
@@ -223,21 +270,22 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                     order.clientOrderId(), order.makerFeeRatePpm(), order.takerFeeRatePpm());
             return new PlaceRequest(order.userId(), command);
         }).toList();
-        List<CoreMatchingResult> results = placeBatch(requests);
-        for (int index = 0; index < results.size(); index++) {
-            CoreMatchingResult result = results.get(index);
-            if (!result.accepted() || !result.matches().isEmpty()) {
-                throw new IllegalStateException("book recovery crossed or rejected orderId="
-                        + requests.get(index).command().orderId());
-            }
+        for (PlaceRequest request : requests) {
+            chain = chain.thenCompose(ignored -> placeAsync(request.userId(), request.command()).thenAccept(result -> {
+                if (!result.accepted() || !result.matches().isEmpty()) {
+                    throw new IllegalStateException("book recovery crossed or rejected orderId="
+                            + request.command().orderId());
+                }
+            }));
         }
+        return chain;
     }
 
-    public void ensureInstrument(CoreInstrumentState instrument) {
+    public CompletableFuture<Integer> ensureInstrumentAsync(CoreInstrumentState instrument) {
         if (instrument == null) {
             throw new IllegalArgumentException("instrument is required");
         }
-        ensureSymbol(instrument.symbol(), instrument);
+        return ensureSymbolAsync(instrument.symbol());
     }
 
     private void start() {
@@ -256,31 +304,38 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         api = core.getApi();
     }
 
-    private int ensureSymbol(String symbol) {
-        return ensureSymbol(symbol, null);
-    }
-
-    private int ensureSymbol(String symbol, CoreInstrumentState instrument) {
+    private CompletableFuture<Integer> ensureSymbolAsync(String symbol) {
         Integer existing = symbols.get(symbol);
-        if (existing != null) {
-            return existing;
-        }
-        int symbolId = stableSymbolId(symbol);
-        CoreSymbolSpecification specification = CoreSymbolSpecification.builder()
-                .symbolId(symbolId).type(symbolType(instrument))
-                .baseCurrency(stableId("BASE:" + symbol)).quoteCurrency(stableId("QUOTE:" + symbol))
-                .baseScaleK(1).quoteScaleK(1).makerFee(0).takerFee(0).marginBuy(0).marginSell(0).build();
-        CommandResultCode result = api.submitBinaryDataAsync(new BatchAddSymbolsCommand(specification)).join();
-        if (result != CommandResultCode.SUCCESS) {
-            throw new IllegalStateException("failed to add exchange-core symbol " + symbol + ": " + result);
-        }
-        symbols.put(symbol, symbolId);
-        symbolNames.put(symbolId, symbol);
-        return symbolId;
+        if (existing != null) return CompletableFuture.completedFuture(existing);
+        return symbolRegistrations.computeIfAbsent(symbol, key -> {
+            int symbolId = stableSymbolId(key);
+            CoreSymbolSpecification specification = CoreSymbolSpecification.builder()
+                    .symbolId(symbolId).type(SymbolType.CURRENCY_EXCHANGE_PAIR)
+                    .baseCurrency(stableId("BASE:" + key)).quoteCurrency(stableId("QUOTE:" + key))
+                    .baseScaleK(1).quoteScaleK(1).makerFee(0).takerFee(0).marginBuy(0).marginSell(0).build();
+            return submitOrdered(() -> api.submitBinaryDataAsync(new BatchAddSymbolsCommand(specification))).thenApply(result -> {
+                if (result != CommandResultCode.SUCCESS
+                        && result != CommandResultCode.SYMBOL_MGMT_SYMBOL_ALREADY_EXISTS) {
+                    throw new IllegalStateException("failed to add exchange-core symbol " + key + ": " + result);
+                }
+                symbols.put(key, symbolId);
+                symbolNames.put(symbolId, key);
+                return symbolId;
+            });
+        });
     }
 
-    private static SymbolType symbolType(CoreInstrumentState instrument) {
-        return SymbolType.CURRENCY_EXCHANGE_PAIR;
+    private CompletableFuture<Void> ensureUserAsync(long userId) {
+        if (users.contains(userId)) return CompletableFuture.completedFuture(null);
+        return userRegistrations.computeIfAbsent(userId, key ->
+                submitOrdered(() -> api.submitCommandAsync(ApiAddUser.builder().uid(key).build())).thenApply(result -> {
+                    if (result != CommandResultCode.SUCCESS
+                            && result != CommandResultCode.USER_MGMT_USER_ALREADY_EXISTS) {
+                        throw new IllegalStateException("failed to add exchange-core user " + key + ": " + result);
+                    }
+                    users.add(key);
+                    return null;
+                }));
     }
 
     public record PlaceRequest(long userId, PlaceOrderCommand command) {
@@ -297,38 +352,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return symbolId;
     }
 
-    private void ensureUser(long userId) {
-        if (users.add(userId)) {
-            CommandResultCode result = api.submitCommandAsync(ApiAddUser.builder().uid(userId).build()).join();
-            if (result != CommandResultCode.SUCCESS) {
-                users.remove(userId);
-                throw new IllegalStateException("failed to add exchange-core user " + userId + ": " + result);
-            }
-        }
-    }
-
-    private void ensureUsersBatch(Collection<Long> userIds) {
-        List<CompletableFuture<CommandResultCode>> futures = new ArrayList<>();
-        List<Long> addedUsers = new ArrayList<>();
-        for (Long userId : userIds) {
-            if (userId == null || userId <= 0 || !users.add(userId)) continue;
-            addedUsers.add(userId);
-            futures.add(api.submitCommandAsync(ApiAddUser.builder().uid(userId).build()));
-        }
-        if (futures.isEmpty()) return;
-        try {
-            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
-            for (int index = 0; index < futures.size(); index++) {
-                if (futures.get(index).join() != CommandResultCode.SUCCESS) {
-                    throw new IllegalStateException("failed to add exchange-core user during batch recovery");
-                }
-            }
-        } catch (RuntimeException exception) {
-            addedUsers.forEach(users::remove);
-            throw exception;
-        }
-    }
-
     private static int stableId(String value) {
         int hash = 0x811c9dc5;
         for (int index = 0; index < value.length(); index++) {
@@ -343,7 +366,52 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             core.shutdown(5, TimeUnit.SECONDS);
             core = null;
             api = null;
+            symbolRegistrations.clear();
+            userRegistrations.clear();
+            submissionTail.set(CompletableFuture.completedFuture(null));
+            matchingSubmissionTail.set(CompletableFuture.completedFuture(null));
         }
+    }
+
+    private <T> CompletableFuture<T> enqueueMatching(
+            Function<Runnable, CompletableFuture<T>> submission) {
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        CompletableFuture<Void> previous = reserve(matchingSubmissionTail, gate);
+        return previous.thenCompose(ignored -> {
+            CompletableFuture<T> result;
+            try {
+                result = submission.apply(() -> gate.complete(null));
+            } catch (RuntimeException exception) {
+                gate.complete(null);
+                throw exception;
+            }
+            return result.whenComplete((value, failure) -> gate.complete(null));
+        });
+    }
+
+    private <T> CompletableFuture<T> submitOrdered(Supplier<CompletableFuture<T>> submission) {
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        CompletableFuture<Void> previous = reserve(submissionTail, gate);
+        return previous.thenCompose(ignored -> {
+            CompletableFuture<T> result;
+            try {
+                result = submission.get();
+                gate.complete(null);
+            } catch (RuntimeException exception) {
+                gate.complete(null);
+                throw exception;
+            }
+            return result;
+        });
+    }
+
+    private static CompletableFuture<Void> reserve(
+            AtomicReference<CompletableFuture<Void>> tail, CompletableFuture<Void> gate) {
+        CompletableFuture<Void> previous;
+        do {
+            previous = tail.get();
+        } while (!tail.compareAndSet(previous, gate));
+        return previous;
     }
 
     @Override

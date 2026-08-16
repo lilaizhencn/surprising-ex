@@ -24,11 +24,12 @@ public final class OpenInterestIndex {
     }
 
     public void update(TradingCoreState before, TradingCoreState after) {
-        Set<Long> changedUsers = after.changedUserIdsSince(before);
-        if (changedUsers == null) {
+        if (before.users() == after.users()) return;
+        if (!StateMapSupport.isDelta(after.users())) {
             rebuild(after);
             return;
         }
+        Set<Long> changedUsers = after.changedUserIds();
         for (Long userId : changedUsers) {
             if (userId == null) continue;
             CoreUserState previous = before.user(userId);

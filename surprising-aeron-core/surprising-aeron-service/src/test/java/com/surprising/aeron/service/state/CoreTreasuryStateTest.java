@@ -12,7 +12,7 @@ class CoreTreasuryStateTest {
 
         CoreTreasuryState after = before.adjustFee("USDT", 5);
 
-        assertThat(after.changedAssetsSince(before)).containsExactly("USDT");
+        assertThat(after.changedAssets()).containsExactly("USDT");
         assertThat(after.insuranceBalances()).isSameAs(before.insuranceBalances());
         assertThat(after.insuranceDeficits()).isSameAs(before.insuranceDeficits());
     }

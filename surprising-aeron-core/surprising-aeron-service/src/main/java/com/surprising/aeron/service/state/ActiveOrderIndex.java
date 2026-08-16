@@ -40,11 +40,12 @@ public final class ActiveOrderIndex {
     }
 
     public void update(TradingCoreState before, TradingCoreState after) {
-        Set<Long> changed = after.changedOrderIdsSince(before);
-        if (changed == null) {
+        if (before.orders() == after.orders()) return;
+        if (!StateMapSupport.isDelta(after.orders())) {
             rebuild(after);
             return;
         }
+        Set<Long> changed = after.changedOrderIds();
         for (Long id : changed) {
             if (id == null) continue;
             CoreOrderState previous = before.order(id);

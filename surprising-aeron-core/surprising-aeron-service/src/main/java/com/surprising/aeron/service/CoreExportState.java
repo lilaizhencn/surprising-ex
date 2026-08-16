@@ -99,10 +99,14 @@ final class CoreExportState {
     }
 
     boolean hasCapacityFor() {
-        if (!hasCapacity()) {
+        return hasCapacityFor(1);
+    }
+
+    boolean hasCapacityFor(int additionalEvents) {
+        if (additionalEvents < 1 || pending.size() > MAX_PENDING_EVENTS - additionalEvents) {
             return false;
         }
-        return pendingBytes <= MAX_PENDING_BYTES - MAX_EVENT_BYTES;
+        return pendingBytes <= MAX_PENDING_BYTES - Math.multiplyExact(MAX_EVENT_BYTES, additionalEvents);
     }
 
     List<Long> acknowledge(AckExportCommand command) {

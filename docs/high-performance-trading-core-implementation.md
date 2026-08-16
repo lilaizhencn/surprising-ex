@@ -170,7 +170,7 @@ available + locked = accountTotal
 | `CoreProbeState.java:416` Export 前扫描全部 users/orders 计算变更集合 | H02 | export 只消费 `CoreCommandDelta`，变更集合缺失时直接拒绝提交 | `PARTIAL` |
 | `TradingCoreState.java:169` `businessStateHash()` 全量遍历业务状态 | H01 | 热路径使用增量 rolling hash；全量 hash 改名并限制在 snapshot/replay/audit | `PARTIAL`，已有 rolling hash 但 full hash API 仍存在 |
 | `CoreProbeState.java:441` `stateHash()` 再次调用 business hash | H03 | 状态 hash、业务 hash、命令摘要分离；查询不得污染提交 hash | `PARTIAL` |
-| `DeterministicExchangeCoreAdapter.java:52` `submitCommandAsyncFullResponse(...).join()` | M01 | 使用结构化异步结果和协议级 batch；正常路径不逐条 join | `PARTIAL`，仍保留固定同步等待边界 |
+| `DeterministicExchangeCoreAdapter.java:52` `submitCommandAsyncFullResponse(...).join()` | M01 | 使用结构化异步结果和协议级 batch；正常路径不逐条 join | `IMPLEMENTED`，Core owner 由 timer continuation 按序接收结果；join 仅保留在恢复/测试冷路径 |
 | `CoreBookState` 与 exchange-core 同时保存活动盘口 | S08/M02 | exchange-core 是唯一可执行 book；外层只保留业务活动订单索引和恢复校验 | `PARTIAL` |
 | Risk Provider 与 Core 各自维护预警/强平阈值 | D05/H01 | Instrument 参数进入 Core；Risk 只展示 Core snapshot；动态阈值必须是版本化 Core RiskPolicy | `IMPLEMENTED`，当前 Core policy version 1 |
 | `RiskLimitBracket.maintenanceMarginRatePpm` 已存储但未用于实时计算 | D05 | 以当前名义价值选择 bracket 的 maintenance rate，边界和超限 fail-closed | `IMPLEMENTED` |
@@ -678,6 +678,7 @@ load snapshot -> restore exchange-core native state
 35. 新增 `aeron-core-tool.sh` 及九个显式产品线 wrapper：Core 启停、探针、export 状态/失败演练、资金对账、集成 smoke、容量和受控恢复矩阵均绑定同一 compose project；脚本不启动 wallet、不把数据库/Kafka/Provider 流程伪装成内存 Core 已验证能力，并为恢复 hash 和命令参数生成可审计 manifest。
 36. Aeron trigger 的 mark-price、trigger-price、维护和持仓归零扫描统一使用降序 triggerOrderId 的有界分页；每页使用上页最后 ID 作为 before cursor，异常 cursor 立即停止并记录，达到页数上限显式告警，不再只扫描第一页或无界追赶。
 37. Core 为 `ResultUnknownException` 增加显式只读 `COMMAND_RESULT_QUERY` 协议；结果查询返回原命令的 `commandStatus/resultCode/appliedCommandCount/stateHash/data`，未知 commandId fail-closed，不改变命令重放和幂等语义。
+38. `SurprisingClusteredService` 使用有界 pending matching、Cluster timer continuation 和按序完成栅栏；普通下单/撤单/改单、盘口查询、强平、结算以及标记价触发的子单都先提交 exchange-core 异步命令，owner 线程不等待 ring future。pending 命令随 Core snapshot 保存，恢复后重新提交；落后的结果不会越过前序命令。
 
 仍未宣称完成的交付物：
 
@@ -688,7 +689,7 @@ load snapshot -> restore exchange-core native state
 
 ## 19. 本轮验证证据
 
-- `mvn -pl surprising-aeron-core/surprising-aeron-service -am test`：service 91 个测试全部通过；`COMMAND_RESULT_QUERY` 覆盖超时后结果核验。
+- `mvn -pl surprising-aeron-core/surprising-aeron-service -am test`：service 95 个测试全部通过，包含异步下单和异步触发 continuation；`COMMAND_RESULT_QUERY` 覆盖超时后结果核验。
 - `bash -n scripts/aeron-core-local.sh`、未知 `PRODUCT_LINE` 拒绝和空集群 `status` 验证通过。
 - `mvn -f surprising-risk/surprising-risk-provider/pom.xml -am test`：Risk Provider 10 个测试全部通过，覆盖 Core 快照状态展示、本地保证金阈值更新拒绝和投影数据不回传。
 - `mvn -f surprising-trading/surprising-trigger-provider/pom.xml -am test`：88 个测试全部通过。

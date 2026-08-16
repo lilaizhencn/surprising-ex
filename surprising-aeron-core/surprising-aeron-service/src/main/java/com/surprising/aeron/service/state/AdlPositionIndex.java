@@ -21,11 +21,12 @@ public final class AdlPositionIndex {
     }
 
     public void update(TradingCoreState before, TradingCoreState after) {
-        Set<Long> changed = after.changedUserIdsSince(before);
-        if (changed == null) {
+        if (before.users() == after.users()) return;
+        if (!StateMapSupport.isDelta(after.users())) {
             rebuild(after);
             return;
         }
+        Set<Long> changed = after.changedUserIds();
         for (Long userId : changed) {
             if (userId == null) continue;
             CoreUserState previous = before.user(userId);

@@ -21,8 +21,8 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 final class CoreStateSnapshotCodec {
 
     private static final int MAGIC = 0x5358534E;
-    private static final int VERSION = 3;
-    private static final int FIXED_LENGTH = 36;
+    private static final int VERSION = 4;
+    private static final int FIXED_LENGTH = 40;
     private static final int SOURCE_SEQUENCE_LENGTH = 24;
     private static final int RESULT_LENGTH = 40;
     private static final int EXPORT_FIXED_LENGTH = 20;
@@ -41,11 +41,19 @@ final class CoreStateSnapshotCodec {
         for (byte[] event : pendingEvents) {
             exportLength = Math.addExact(exportLength, Math.addExact(Integer.BYTES, event.length));
         }
+        long pendingLength = 0;
+        java.util.ArrayList<byte[]> pendingCommands = new java.util.ArrayList<>(state.pendingMatching().size());
+        for (PendingMatching pending : state.pendingMatching().values()) {
+            byte[] encoded = CoreMessageCodec.encode(pending.command());
+            pendingCommands.add(encoded);
+            pendingLength = Math.addExact(pendingLength,
+                    Math.addExact(16L, encoded.length));
+        }
         int snapshotLength = Math.toIntExact(Math.addExact(Math.addExact(Math.addExact(
                 Math.addExact((long) FIXED_LENGTH,
                         Math.multiplyExact((long) state.lastSourceSequences().size(), SOURCE_SEQUENCE_LENGTH)),
                 Math.multiplyExact((long) state.commandResults().size(), RESULT_LENGTH)),
-                exportLength), Math.addExact(tradingState.length, CHECKSUM_LENGTH)));
+                Math.addExact(exportLength, pendingLength)), Math.addExact(tradingState.length, CHECKSUM_LENGTH)));
         ByteBuffer buffer = ByteBuffer.allocate(snapshotLength)
                 .order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(MAGIC);
@@ -57,6 +65,7 @@ final class CoreStateSnapshotCodec {
         buffer.putInt(state.commandResults().size());
         buffer.putInt(state.lastSourceSequences().size());
         buffer.putInt(tradingState.length);
+        buffer.putInt(state.pendingMatching().size());
         state.lastSourceSequences().forEach((sourceKey, sequence) -> {
             buffer.putInt(sourceKey.source().wireCode());
             buffer.putInt(0);
@@ -78,6 +87,14 @@ final class CoreStateSnapshotCodec {
             buffer.putInt(encoded.length);
             buffer.put(encoded);
         });
+        int pendingIndex = 0;
+        for (PendingMatching pending : state.pendingMatching().values()) {
+            byte[] encoded = pendingCommands.get(pendingIndex++);
+            buffer.putLong(pending.sequence());
+            buffer.putInt(pending.operation().ordinal());
+            buffer.putInt(encoded.length);
+            buffer.put(encoded);
+        }
         buffer.put(tradingState);
         CRC32C checksum = new CRC32C();
         checksum.update(buffer.array(), 0, buffer.position());
@@ -86,14 +103,94 @@ final class CoreStateSnapshotCodec {
     }
 
     static CoreSnapshotManifest manifest(byte[] snapshot, ProductLine expectedProductLine) {
-        CoreProbeState state = decode(snapshot, expectedProductLine);
-        ByteBuffer header = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
-        header.getInt();
-        int version = Short.toUnsignedInt(header.getShort());
-        long checksum = ByteBuffer.wrap(snapshot, snapshot.length - CHECKSUM_LENGTH, CHECKSUM_LENGTH)
+        if (snapshot == null || snapshot.length < FIXED_LENGTH) {
+            throw new ProtocolException("snapshot shorter than fixed header");
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
+        if (buffer.getInt() != MAGIC) {
+            throw new ProtocolException("invalid snapshot magic");
+        }
+        int version = Short.toUnsignedInt(buffer.getShort());
+        if (version != VERSION) {
+            throw new ProtocolException("unsupported snapshot version: " + version);
+        }
+        if (snapshot.length < FIXED_LENGTH + EXPORT_FIXED_LENGTH + CHECKSUM_LENGTH) {
+            throw new ProtocolException("snapshot manifest is truncated");
+        }
+        long storedChecksum = ByteBuffer.wrap(snapshot, snapshot.length - CHECKSUM_LENGTH, CHECKSUM_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN).getLong();
-        return new CoreSnapshotManifest(expectedProductLine, version, state.appliedCommandCount(),
-                state.tradingState().businessStateHash(), state.exportState().status(), checksum);
+        CRC32C checksum = new CRC32C();
+        checksum.update(snapshot, 0, snapshot.length - CHECKSUM_LENGTH);
+        if (storedChecksum != checksum.getValue()) {
+            throw new ProtocolException("snapshot checksum mismatch");
+        }
+        ProductLine productLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.get()));
+        buffer.get();
+        if (productLine != expectedProductLine) {
+            throw new ProtocolException("snapshot product line mismatch: " + productLine);
+        }
+        long appliedCommandCount = buffer.getLong();
+        buffer.getLong();
+        int resultCount = buffer.getInt();
+        int sourceSequenceCount = buffer.getInt();
+        int tradingStateLength = buffer.getInt();
+        int pendingCount = buffer.getInt();
+        if (resultCount < 0 || sourceSequenceCount < 0
+                || sourceSequenceCount > CoreProbeState.MAX_SOURCE_SEQUENCES
+                || pendingCount < 0 || pendingCount > CoreProbeState.MAX_IDEMPOTENCY_RESULTS
+                || tradingStateLength < 0
+                || FIXED_LENGTH + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
+                        + (long) resultCount * RESULT_LENGTH + tradingStateLength > snapshot.length) {
+            throw new ProtocolException("invalid snapshot manifest counts");
+        }
+        int fixedDataEnd = Math.toIntExact(FIXED_LENGTH
+                + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
+                + (long) resultCount * RESULT_LENGTH);
+        buffer.position(fixedDataEnd);
+        long acknowledgedSequence = buffer.getLong();
+        long nextSequence = buffer.getLong();
+        int eventCount = buffer.getInt();
+        if (eventCount < 0 || eventCount > CoreExportState.MAX_PENDING_EVENTS) {
+            throw new ProtocolException("invalid snapshot export count");
+        }
+        ArrayList<CoreMessage> events = new ArrayList<>(eventCount);
+        for (int index = 0; index < eventCount; index++) {
+            if (buffer.remaining() < Integer.BYTES) {
+                throw new ProtocolException("truncated snapshot export event");
+            }
+            int eventLength = buffer.getInt();
+            if (eventLength <= 0 || eventLength > buffer.remaining() - tradingStateLength - CHECKSUM_LENGTH) {
+                throw new ProtocolException("invalid snapshot export event length");
+            }
+            byte[] event = new byte[eventLength];
+            buffer.get(event);
+            events.add(CoreMessageCodec.decode(event));
+        }
+        for (int index = 0; index < pendingCount; index++) {
+            if (buffer.remaining() < 16 + CHECKSUM_LENGTH) {
+                throw new ProtocolException("truncated pending matching entry");
+            }
+            long sequence = buffer.getLong();
+            int operationOrdinal = buffer.getInt();
+            int messageLength = buffer.getInt();
+            if (sequence <= 0 || messageLength <= 0 || messageLength > buffer.remaining() - CHECKSUM_LENGTH
+                    || operationOrdinal < 0 || operationOrdinal >= PendingMatching.Operation.values().length) {
+                throw new ProtocolException("invalid pending matching entry");
+            }
+            buffer.position(buffer.position() + messageLength);
+        }
+        if (buffer.remaining() != tradingStateLength + CHECKSUM_LENGTH) {
+            throw new ProtocolException("invalid snapshot manifest length");
+        }
+        byte[] encodedTradingState = new byte[tradingStateLength];
+        buffer.get(encodedTradingState);
+        TradingCoreState tradingState = tradingStateLength == 0
+                ? TradingCoreState.empty(productLine)
+                : TradingStateSnapshotCodec.decode(encodedTradingState, productLine);
+        buffer.getLong();
+        CoreExportState exportState = CoreExportState.restore(acknowledgedSequence, nextSequence, events);
+        return new CoreSnapshotManifest(productLine, version, appliedCommandCount,
+                tradingState.businessStateHash(), exportState.status(), storedChecksum);
     }
 
     static CoreProbeState decode(byte[] snapshot, ProductLine expectedProductLine) {
@@ -128,9 +225,11 @@ final class CoreStateSnapshotCodec {
         int resultCount = buffer.getInt();
         int sourceSequenceCount = buffer.getInt();
         int tradingStateLength = buffer.getInt();
+        int pendingCount = buffer.getInt();
         int fixedLength = FIXED_LENGTH;
         if (resultCount < 0 || sourceSequenceCount < 0
                 || sourceSequenceCount > CoreProbeState.MAX_SOURCE_SEQUENCES
+                || pendingCount < 0 || pendingCount > CoreProbeState.MAX_IDEMPOTENCY_RESULTS
                 || tradingStateLength < 0
                 || fixedLength + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
                         + (long) resultCount * RESULT_LENGTH + tradingStateLength > snapshot.length) {
@@ -183,6 +282,26 @@ final class CoreStateSnapshotCodec {
             events.add(CoreMessageCodec.decode(event));
         }
         exportState = CoreExportState.restore(acknowledgedSequence, nextSequence, events);
+        Map<Long, PendingMatching> pendingMatching = new LinkedHashMap<>();
+        for (int index = 0; index < pendingCount; index++) {
+            if (buffer.remaining() < 16 + CHECKSUM_LENGTH) {
+                throw new ProtocolException("truncated pending matching entry");
+            }
+            long sequence = buffer.getLong();
+            int operationOrdinal = buffer.getInt();
+            int messageLength = buffer.getInt();
+            if (sequence <= 0 || messageLength <= 0 || messageLength > buffer.remaining() - CHECKSUM_LENGTH
+                    || operationOrdinal < 0 || operationOrdinal >= PendingMatching.Operation.values().length) {
+                throw new ProtocolException("invalid pending matching entry");
+            }
+            byte[] encoded = new byte[messageLength];
+            buffer.get(encoded);
+            PendingMatching pending = new PendingMatching(sequence,
+                    PendingMatching.Operation.values()[operationOrdinal], CoreMessageCodec.decode(encoded));
+            if (pendingMatching.put(sequence, pending) != null) {
+                throw new ProtocolException("duplicate pending matching sequence");
+            }
+        }
         if (buffer.remaining() != tradingStateLength + CHECKSUM_LENGTH) {
             throw new ProtocolException("invalid snapshot manifest length");
         }
@@ -196,6 +315,6 @@ final class CoreStateSnapshotCodec {
         }
         buffer.getLong();
         return CoreProbeState.restore(productLine, appliedCommandCount, probeValue,
-                results, lastSourceSequences, tradingState, exportState);
+                results, lastSourceSequences, pendingMatching, tradingState, exportState);
     }
 }

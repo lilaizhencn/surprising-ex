@@ -99,6 +99,19 @@ public record CoreOrderState(
                 Math.incrementExact(revision));
     }
 
+    public CoreOrderState reject() {
+        if (status.terminal()) {
+            return this;
+        }
+        return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
+                side, priceTicks, quantitySteps,
+                executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
+                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
+                CoreOrderStatus.REJECTED,
+                Math.incrementExact(revision));
+    }
+
     public CoreOrderState fill(long quantitySteps) {
         if (status != CoreOrderStatus.OPEN || quantitySteps <= 0 || quantitySteps > remainingQuantitySteps) {
             throw new IllegalStateException("invalid order fill");
