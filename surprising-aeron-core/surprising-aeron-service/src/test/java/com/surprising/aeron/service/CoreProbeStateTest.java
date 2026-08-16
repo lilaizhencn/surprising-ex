@@ -651,7 +651,9 @@ class CoreProbeStateTest {
                 Map.of(), Map.of(), trading, new CoreExportState());
 
         var response = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
-                com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeQuery(1)));
+                com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeQuery(ProductLine.SPOT,
+                        com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION,
+                        0, 1, 1_048_576)));
         var work = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeWork(response.data());
 
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);

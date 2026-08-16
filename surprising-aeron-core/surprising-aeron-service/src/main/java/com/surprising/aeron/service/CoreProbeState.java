@@ -476,34 +476,82 @@ public final class CoreProbeState implements AutoCloseable {
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.LIQUIDATION_WORK_QUERY) {
             try {
-                int limit = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeQuery(message.payload());
-                var actions = liquidationIndex.activeIds().stream()
+                var query = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeQuery(message.payload());
+                if (query.productLine() != productLine) {
+                    return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
+                }
+                var eligible = liquidationIndex.activeIds().tailSet(query.afterLiquidationId(), false).stream()
                         .map(tradingState.riskState().liquidations()::get)
                         .filter(java.util.Objects::nonNull)
-                        .filter(value -> value.status()
-                                == com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED
-                                || value.status()
-                                == com.surprising.aeron.service.state.CoreLiquidationState.Status.ORDERED)
-                        .map(value -> {
+                        .filter(value -> switch (query.purpose()) {
+                            case EXECUTION -> value.status()
+                                    == com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED
+                                    || value.status()
+                                    == com.surprising.aeron.service.state.CoreLiquidationState.Status.ORDERED;
+                            case INSURANCE -> value.status()
+                                    == com.surprising.aeron.service.state.CoreLiquidationState.Status.INSURANCE_REQUIRED;
+                            case ADL -> value.status()
+                                    == com.surprising.aeron.service.state.CoreLiquidationState.Status.ADL_REQUIRED;
+                        })
+                        .filter(value -> {
+                            if (query.purpose()
+                                    == com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION) {
+                                var mark = tradingState.riskState().markPrices().get(value.symbol());
+                                return mark != null && mark.priceSequence() == value.triggerPriceSequence();
+                            }
+                            var instrument = tradingState.instruments().get(value.symbol());
+                            return instrument != null && instrument.version() == value.instrumentVersion()
+                                    && instrument.contractType().productLine() == productLine;
+                        })
+                        .toList();
+                var scan = tradingState.riskState().scan();
+                var continuation = query.purpose() == com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION
+                        && !scan.riskComplete()
+                        ? new com.surprising.aeron.protocol.CoreRiskScanContinuation(scan.symbol(),
+                        scan.priceSequence(), scan.lastUserId()) : null;
+                java.util.ArrayList<com.surprising.aeron.protocol.CoreLiquidationActionView> actions =
+                        new java.util.ArrayList<>();
+                java.util.ArrayList<com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution> resolutions =
+                        new java.util.ArrayList<>();
+                long nextCursor = query.afterLiquidationId();
+                for (var value : eligible) {
+                    if (actions.size() + resolutions.size() >= query.maxItems()) break;
+                    com.surprising.aeron.protocol.CoreLiquidationActionView action = null;
+                    com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution resolution = null;
+                    if (query.purpose()
+                            == com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION) {
                             var mark = tradingState.riskState().markPrices().get(value.symbol());
-                            if (mark == null || mark.priceSequence() != value.triggerPriceSequence()) return null;
-                            return new com.surprising.aeron.protocol.CoreLiquidationActionView(
+                            action = new com.surprising.aeron.protocol.CoreLiquidationActionView(
                                     value.liquidationId(), value.userId(), value.symbol(), value.marginMode(),
                                     value.positionSide(), value.instrumentVersion(), value.triggerPriceSequence(),
                                     value.signedQuantitySteps(), value.closeQuantitySteps(), mark.markPriceTicks(),
                                     value.status().name(), value.status()
                                             == com.surprising.aeron.service.state.CoreLiquidationState.Status.ORDERED
                                             ? value.nextCancelOrderId() : 0);
-                        })
-                        .filter(java.util.Objects::nonNull)
-                        .limit(limit)
-                        .toList();
-                var scan = tradingState.riskState().scan();
-                var continuation = !scan.riskComplete()
-                        ? new com.surprising.aeron.protocol.CoreRiskScanContinuation(scan.symbol(),
-                        scan.priceSequence(), scan.lastUserId()) : null;
-                var work = new com.surprising.aeron.protocol.CoreLiquidationWorkView(
-                        continuation, actions);
+                    } else {
+                        var instrument = tradingState.instruments().get(value.symbol());
+                        resolution = new com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution(
+                                value.liquidationId(), value.userId(), value.symbol(), instrument.settleAsset(),
+                                value.marginMode(), value.positionSide(), value.instrumentVersion(),
+                                value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(),
+                                query.purpose());
+                    }
+                    if (action != null) actions.add(action);
+                    if (resolution != null) resolutions.add(resolution);
+                    long candidateCursor = value.liquidationId();
+                    var candidate = new com.surprising.aeron.protocol.CoreLiquidationWorkView(productLine,
+                            candidateCursor, false, continuation, actions, resolutions);
+                    if (com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(candidate).length
+                            > query.maxBytes()) {
+                        if (action != null) actions.removeLast();
+                        if (resolution != null) resolutions.removeLast();
+                        break;
+                    }
+                    nextCursor = candidateCursor;
+                }
+                boolean complete = actions.size() + resolutions.size() == eligible.size();
+                var work = new com.surprising.aeron.protocol.CoreLiquidationWorkView(productLine, nextCursor,
+                        complete, continuation, actions, resolutions);
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
             } catch (IllegalArgumentException exception) {

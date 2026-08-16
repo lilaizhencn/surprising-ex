@@ -1,6 +1,7 @@
 package com.surprising.adl.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;
@@ -16,6 +17,8 @@ import com.surprising.adl.provider.repository.CoreAdlProjectionRepository;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreLiquidationWorkView;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -69,6 +72,26 @@ class AdlServiceTest {
         assertThat(response.events()).containsExactly(event);
         assertThat(response.nextCursor()).isEqualTo("next");
         verify(events).page(any(), eq(1L), eq("USDT"), eq("BTC-USDT"), eq(50), eq("cursor"), eq("createdAt.desc"));
+    }
+
+    @Test
+    void rejectsProjectionSelectedWork() {
+        AdlProperties properties = new AdlProperties();
+        CoreAdlProjectionRepository projections = mock(CoreAdlProjectionRepository.class);
+        when(projections.pending(any(), anyInt())).thenReturn(List.of(
+                new CoreAdlLiquidationProjection(7, 1001, "BTC-USDT", "USDT", 10, 50)));
+        AdlAeronGateway aeron = mock(AdlAeronGateway.class);
+        when(aeron.resolutionWork(CoreLiquidationWorkView.Purpose.ADL, 0, 50, 1_048_576))
+                .thenReturn(new CoreLiquidationWorkView(ProductLine.INVERSE_PERPETUAL,
+                        0, true, null, List.of(), List.of()));
+        AdlService service = service(properties, projections, aeron,
+                mock(AdlEventRepository.class), mock(AdlSequenceRepository.class));
+
+        assertThatThrownBy(service::processResidualDeficits)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Core ADL work ProductLine mismatch");
+        verifyNoInteractions(projections);
+        verify(aeron, never()).execute(any(), any());
     }
 
     private static AdlService service(AdlProperties properties, CoreAdlProjectionRepository projections,

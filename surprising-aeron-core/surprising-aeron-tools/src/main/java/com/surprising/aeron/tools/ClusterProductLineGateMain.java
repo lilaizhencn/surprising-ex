@@ -133,7 +133,9 @@ public final class ClusterProductLineGateMain {
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                         SYMBOL, 1, markPrice, priceSequence, 1_700_000_000_000L)));
         var work = CoreLiquidationWorkCodec.decodeWork(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
-                CoreLiquidationWorkCodec.encodeQuery(100)));
+                CoreLiquidationWorkCodec.encodeQuery(productLine,
+                        com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION,
+                        0, 100, 1_048_576)));
         var action = work.actions().stream().filter(value -> value.userId() == longUser).findFirst()
                 .orElseThrow(() -> new IllegalStateException("missing liquidation work for user " + longUser));
         applied(longUser, CoreMessageType.EXECUTE_LIQUIDATION,
@@ -156,7 +158,9 @@ public final class ClusterProductLineGateMain {
             requirePosition(userState(user(3)), -10);
             requirePosition(userState(user(4)), 0);
             var work = CoreLiquidationWorkCodec.decodeWork(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
-                    CoreLiquidationWorkCodec.encodeQuery(100)));
+                    CoreLiquidationWorkCodec.encodeQuery(productLine,
+                            com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION,
+                            0, 100, 1_048_576)));
             if (work.actions().stream().anyMatch(value -> value.userId() == user(4))) {
                 throw new IllegalStateException("completed liquidation still returned as work");
             }

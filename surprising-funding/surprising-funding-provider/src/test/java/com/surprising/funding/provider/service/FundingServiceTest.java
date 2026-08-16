@@ -1,12 +1,14 @@
 package com.surprising.funding.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
@@ -26,6 +28,7 @@ import com.surprising.funding.provider.repository.FundingRateRepository;
 import com.surprising.funding.provider.repository.FundingSequenceRepository;
 import com.surprising.funding.provider.repository.FundingSettlementRepository;
 import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -103,6 +106,40 @@ class FundingServiceTest {
     }
 
     @Test
+    void boundsFundingPagesPerRun() {
+        FundingProperties properties = new FundingProperties();
+        properties.getSettlement().setMaxPagesPerRun(2);
+        Fixture fixture = new Fixture(properties);
+        Instant fundingTime = Instant.parse("2026-08-13T12:00:00Z");
+        FundingRateResponse due = new FundingRateResponse("BTC-USDT", 11, 100, 90, 10,
+                fundingTime, 8, "PREDICTED", Instant.now());
+        fixture.cache.update(due);
+        long settlementId = fundingTime.toEpochMilli();
+        when(fixture.settlementRepository.reserveCore(due))
+                .thenReturn(new FundingSettlementRepository.CoreSettlement(settlementId, 7));
+        when(fixture.aeron.query(eq(CoreMessageType.FUNDING_PROGRESS_QUERY), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 0, 0,
+                        CoreFundingProgressCodec.encode(new CoreFundingProgressView(settlementId, false, 0, 0))));
+        when(fixture.aeron.commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any()))
+                .thenReturn(progress(settlementId, 10), progress(settlementId, 20), progress(settlementId, 30));
+
+        fixture.service.settleDueRates();
+
+        verify(fixture.aeron, times(2)).commandWithResponse(eq(CoreMessageType.APPLY_FUNDING), any(), any());
+        verify(fixture.rateRepository, never()).saveFinal(due);
+    }
+
+    @Test
+    void rejectsWrongProductLine() {
+        FundingProperties properties = new FundingProperties();
+        properties.getKafka().setProductLine(ProductLine.SPOT);
+
+        assertThatThrownBy(() -> new Fixture(properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("funding provider requires a funding ProductLine");
+    }
+
+    @Test
     void keepsDueRateWhenAeronFailsSoSameCommandCanRetry() {
         FundingProperties properties = new FundingProperties();
         Fixture fixture = new Fixture(properties);
@@ -134,6 +171,11 @@ class FundingServiceTest {
 
     private static FundingRateInput rateInput() {
         return new FundingRateInput("BTC-USDT", 0, 100, 10, -3_750, 3_750, 8, Instant.now());
+    }
+
+    private static CoreResponse progress(long settlementId, long cursor) {
+        return new CoreResponse(ResponseStatus.APPLIED, 1, 0,
+                CoreFundingProgressCodec.encode(new CoreFundingProgressView(settlementId, false, cursor, 1)));
     }
 
     private static final class Fixture {

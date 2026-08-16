@@ -4,6 +4,7 @@ import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
+import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.insurance.api.model.InsuranceCoverageQueryResponse;
@@ -51,19 +52,29 @@ import java.util.UUID;
         this.aeron = aeron;
     }
 
-    /**
-     * PostgreSQL 只选择待处理投影，覆盖金额和最终状态由 Aeron Core 同步裁决。
-     */
     @Transactional
     public void coverDeficits() {
         if (!properties.getCoverage().isEnabled()) {
             return;
         }
         int batchSize = properties.getCoverage().getBatchSize();
-        List<com.surprising.insurance.provider.model.CoreLiquidationProjection> deficits =
-                projectionRepository.pendingInsurance(properties.getKafka().getProductLine().name(), batchSize);
-        for (var deficit : deficits) {
-            coverDeficit(deficit);
+        CoreLiquidationWorkView work = aeron.resolutionWork(CoreLiquidationWorkView.Purpose.INSURANCE,
+                0, batchSize, 1_048_576);
+        requireOwnedWork(work);
+        for (CoreLiquidationWorkView.Resolution resolution : work.resolutions()) {
+            coverDeficit(new com.surprising.insurance.provider.model.CoreLiquidationProjection(
+                    resolution.liquidationId(), resolution.userId(), resolution.asset(),
+                    resolution.deficitUnits()));
+        }
+    }
+
+    private void requireOwnedWork(CoreLiquidationWorkView work) {
+        if (work.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalStateException("Core insurance work ProductLine mismatch");
+        }
+        if (!work.actions().isEmpty() || work.resolutions().stream()
+                .anyMatch(value -> value.purpose() != CoreLiquidationWorkView.Purpose.INSURANCE)) {
+            throw new IllegalStateException("Core insurance authority mismatch");
         }
     }
 

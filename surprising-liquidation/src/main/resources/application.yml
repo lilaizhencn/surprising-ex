@@ -42,6 +42,8 @@ surprising:
       delay-ms: 25
       work-batch-size: 256
       risk-scan-batch-size: 1024
+      max-pages-per-run: ${LIQUIDATION_MAX_PAGES_PER_RUN:8}
+      max-work-bytes: ${LIQUIDATION_MAX_WORK_BYTES:1048576}
     execution:
       enabled: true
       liquidation-fee-rate-ppm: 3000

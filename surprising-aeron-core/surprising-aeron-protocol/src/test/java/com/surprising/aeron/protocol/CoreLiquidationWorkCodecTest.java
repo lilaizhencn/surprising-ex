@@ -3,6 +3,7 @@ package com.surprising.aeron.protocol;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -11,20 +12,24 @@ class CoreLiquidationWorkCodecTest {
 
     @Test
     void roundTripsBoundedLiquidationWork() {
-        assertThat(CoreLiquidationWorkCodec.decodeQuery(CoreLiquidationWorkCodec.encodeQuery(128))).isEqualTo(128);
-        CoreLiquidationWorkView work = new CoreLiquidationWorkView(
-                new CoreRiskScanContinuation("BTC-USDT", 19, 41), List.of(
+        var query = new CoreLiquidationWorkView.Query(ProductLine.LINEAR_PERPETUAL,
+                CoreLiquidationWorkView.Purpose.EXECUTION, 41, 128, 65_536);
+        assertThat(CoreLiquidationWorkCodec.decodeQuery(CoreLiquidationWorkCodec.encodeQuery(query)))
+                .isEqualTo(query);
+        CoreLiquidationWorkView work = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,
+                7, true, new CoreRiskScanContinuation("BTC-USDT", 19, 41), List.of(
                 new CoreLiquidationActionView(7, 11, "BTC-USDT", CoreMarginMode.ISOLATED,
-                        CorePositionSide.LONG, 3, 19, 5, 5, 60_000, "ORDERED", 91)));
+                        CorePositionSide.LONG, 3, 19, 5, 5, 60_000, "ORDERED", 91)), List.of());
 
         assertThat(CoreLiquidationWorkCodec.decodeWork(CoreLiquidationWorkCodec.encodeWork(work))).isEqualTo(work);
     }
 
     @Test
     void rejectsTruncatedAndTrailingWorkPayloads() {
-        CoreLiquidationWorkView work = new CoreLiquidationWorkView(null, List.of(
+        CoreLiquidationWorkView work = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,
+                7, true, null, List.of(
                 new CoreLiquidationActionView(7, 11, "BTC-USDT", CoreMarginMode.ISOLATED,
-                        CorePositionSide.LONG, 3, 19, 5, 5, 60_000, "PLANNED", 0)));
+                        CorePositionSide.LONG, 3, 19, 5, 5, 60_000, "PLANNED", 0)), List.of());
         byte[] encoded = CoreLiquidationWorkCodec.encodeWork(work);
 
         for (int length = 0; length < encoded.length; length++) {

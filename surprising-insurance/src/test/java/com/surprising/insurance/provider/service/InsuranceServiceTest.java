@@ -1,6 +1,7 @@
 package com.surprising.insurance.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -11,6 +12,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreLiquidationWorkView;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.product.api.ProductLine;
 import com.surprising.insurance.api.model.AdminCursorPage;
 import com.surprising.insurance.api.model.InsuranceCoverageResponse;
 import com.surprising.insurance.api.model.InsuranceFundAdjustmentRequest;
@@ -39,11 +44,31 @@ class InsuranceServiceTest {
     }
 
     @Test
-    void coversProjectionWithOneAeronCommandAndSynchronousAudit() {
+    void rejectsProjectionSelectedWork() {
+        Fixture fixture = new Fixture(new InsuranceProperties());
+        when(fixture.projectionRepository.pendingInsurance(any(), anyInt()))
+                .thenReturn(List.of(new CoreLiquidationProjection(81, 4004, "USDT", 1_000)));
+        when(fixture.aeron.resolutionWork(CoreLiquidationWorkView.Purpose.INSURANCE, 0, 100, 1_048_576))
+                .thenReturn(new CoreLiquidationWorkView(ProductLine.INVERSE_PERPETUAL,
+                        0, true, null, List.of(), List.of()));
+
+        assertThatThrownBy(fixture.service::coverDeficits)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Core insurance work ProductLine mismatch");
+        verify(fixture.projectionRepository, never()).pendingInsurance(any(), anyInt());
+        verify(fixture.aeron, never()).command(eq(CoreMessageType.RESOLVE_LIQUIDATION), any(), any());
+    }
+
+    @Test
+    void coversCoreSelectedDeficitWithOneAeronCommandAndSynchronousAudit() {
         Fixture fixture = new Fixture(new InsuranceProperties());
         var deficit = new CoreLiquidationProjection(81, 4004, "USDT", 1_000);
-        when(fixture.projectionRepository.pendingInsurance("LINEAR_PERPETUAL", 100))
-                .thenReturn(List.of(deficit));
+        var resolution = new CoreLiquidationWorkView.Resolution(81, 4004, "BTC-USDT", "USDT",
+                CoreMarginMode.CROSS, CorePositionSide.NET, 7, 9, 10, 1_000,
+                CoreLiquidationWorkView.Purpose.INSURANCE);
+        when(fixture.aeron.resolutionWork(CoreLiquidationWorkView.Purpose.INSURANCE, 0, 100, 1_048_576))
+                .thenReturn(new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,
+                        81, true, null, List.of(), List.of(resolution)));
         when(fixture.aeron.balance("USDT")).thenReturn(600L, 0L);
         when(fixture.sequenceRepository.next("insurance-coverage")).thenReturn(9501L);
         when(fixture.sequenceRepository.next("insurance-ledger")).thenReturn(9502L);
