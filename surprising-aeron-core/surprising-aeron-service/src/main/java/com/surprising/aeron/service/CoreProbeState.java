@@ -9,6 +9,7 @@ import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreBalanceView;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreCommandResultView;
+import com.surprising.aeron.protocol.CoreExecutionView;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CorePositionView;
 import com.surprising.aeron.protocol.CoreReservationView;
@@ -18,6 +19,7 @@ import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
@@ -26,9 +28,16 @@ import com.surprising.aeron.protocol.CoreLiquidationProgressCodec;
 import com.surprising.aeron.protocol.CoreLiquidationProgressView;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultCodec;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultView;
+import com.surprising.aeron.protocol.CoreOrderBatchResult;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchAction;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
+import com.surprising.aeron.protocol.AmendOrderBatchCommand;
+import com.surprising.aeron.protocol.AmendOrderCommand;
+import com.surprising.aeron.protocol.CancelOrderBatchCommand;
+import com.surprising.aeron.protocol.CancelOrderCommand;
+import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
@@ -81,6 +90,7 @@ public final class CoreProbeState implements AutoCloseable {
     private long nextResultRetentionSequence;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final LinkedHashMap<Long, PendingMatching> pendingMatching;
+    private final LinkedHashMap<Long, OrderBatchPending> pendingOrderBatches;
     private final List<CoreMessage> queuedMatching = new ArrayList<>();
     private final Map<Long, com.surprising.aeron.service.matching.CoreMatchingResult> completedMatching
             = new ConcurrentHashMap<>();
@@ -149,6 +159,7 @@ public final class CoreProbeState implements AutoCloseable {
         this.nextResultRetentionSequence = nextRetentionSequence(commandResults);
         this.lastSourceSequences = lastSourceSequences;
         this.pendingMatching = new LinkedHashMap<>();
+        this.pendingOrderBatches = new LinkedHashMap<>();
         this.tradingState = tradingState;
         this.rollingBusinessStateHash = com.surprising.aeron.service.state.RollingBusinessStateHash.create(tradingState);
         this.cachedBusinessStateHash = rollingBusinessStateHash.value();
@@ -622,6 +633,9 @@ public final class CoreProbeState implements AutoCloseable {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
         if (isMatchingCommand(message.header().messageType())) {
+            if (isOrderBatchCommand(message.header().messageType())) {
+                return beginOrderBatchMatching(message, clusterTimestamp, clusterPosition, sourceKey);
+            }
             return beginMatching(message, clusterTimestamp, clusterPosition, sourceKey);
         }
         TradingCoreState beforeTradingState = tradingState;
@@ -739,12 +753,307 @@ public final class CoreProbeState implements AutoCloseable {
         queuedMatching.clear();
     }
 
+    private CoreResponse beginOrderBatchMatching(CoreMessage message, long clusterTimestamp,
+                                                  long clusterPosition, SourceKey sourceKey) {
+        OrderBatchPending batch;
+        try {
+            batch = decodeOrderBatch(message, clusterTimestamp, clusterPosition);
+        } catch (ArithmeticException | IllegalArgumentException exception) {
+            return recordRejectedMatching(message, sourceKey,
+                    exception instanceof ArithmeticException
+                            ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
+        }
+        if (!exportState.hasCapacityFor()) {
+            return rejected(CoreResultCode.EXPORT_BACKLOG_FULL);
+        }
+        commandOrderViews = List.of();
+        commandChangedUserIds = List.of();
+        commandChangedOrderIds = List.of();
+        commandChangedLiquidationIds = List.of();
+        commandChangedTriggerOrderIds = List.of();
+        commandChangedTreasuryAssets = List.of();
+        commandExecutions = List.of();
+        commandFundingPayments = List.of();
+        commandFundingProgress = null;
+        commandLiquidationProgress = null;
+        commandLiquidationBatchResult = null;
+        commandSettlementProgress = null;
+        commandDelta = CoreCommandDelta.empty();
+        resetChangeAccumulators();
+        long sequence = Math.incrementExact(appliedCommandCount);
+        PendingMatching pending = newPendingMatching(sequence, batch.operation, message, clusterTimestamp);
+        batch.sequence = sequence;
+        pendingMatching.put(sequence, pending);
+        pendingOrderBatches.put(sequence, batch);
+        appliedCommandCount = sequence;
+        recordSourceSequence(sourceKey, message.header().sourceSequence());
+        long pendingStateHash = stateHash(cachedBusinessStateHash, message.header().commandId(),
+                ResponseStatus.OK, matchingPendingCode(), appliedCommandCount);
+        storeResult(message.header().commandId(), new StoredResult(CommandFingerprint.of(message),
+                ResponseStatus.OK, matchingPendingCode(), appliedCommandCount, 0, pendingStateHash,
+                new byte[0], 0));
+        CoreResponse completed = startOrderBatchItem(batch, pending, clusterTimestamp, clusterPosition);
+        if (completed != null) return completed;
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
+                appliedCommandCount, 0, pendingStateHash, new byte[0]);
+    }
+
+    private OrderBatchPending decodeOrderBatch(CoreMessage message, long clusterTimestamp, long clusterPosition) {
+        CoreMessageType type = message.header().messageType();
+        if (type == CoreMessageType.PLACE_ORDER_BATCH) {
+            PlaceOrderBatchCommand command = TradingOrderBatchCodec.decodePlaceOrderBatch(message.payload());
+            return new OrderBatchPending(OrderBatchKind.PLACE, command.orders().stream()
+                    .map(value -> new OrderBatchItem(value.orderId(), 0, 0, value)).toList(),
+                    tradingState, clusterTimestamp, clusterPosition, PendingMatching.Operation.PLACE);
+        }
+        if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
+            CancelOrderBatchCommand command = TradingOrderBatchCodec.decodeCancelOrderBatch(message.payload());
+            return new OrderBatchPending(OrderBatchKind.CANCEL, command.orders().stream()
+                    .map(value -> new OrderBatchItem(value.orderId(), 0, 0, value)).toList(),
+                    tradingState, clusterTimestamp, clusterPosition, PendingMatching.Operation.CANCEL);
+        }
+        if (type == CoreMessageType.AMEND_ORDER_BATCH) {
+            AmendOrderBatchCommand command = TradingOrderBatchCodec.decodeAmendOrderBatch(message.payload());
+            return new OrderBatchPending(OrderBatchKind.AMEND, command.orders().stream()
+                    .map(value -> new OrderBatchItem(value.replacementOrderId(), value.originalOrderId(),
+                            value.replacementOrderId(), value)).toList(),
+                    tradingState, clusterTimestamp, clusterPosition, PendingMatching.Operation.AMEND);
+        }
+        throw new IllegalArgumentException("unsupported order batch type");
+    }
+
+    private CoreResponse startOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
+                                             long clusterTimestamp, long clusterPosition) {
+        while (batch.nextIndex < batch.items.size()) {
+            OrderBatchItem item = batch.items.get(batch.nextIndex);
+            TradingCoreState before = tradingState;
+            try {
+                prepareOrderBatchItem(batch, item, pending.command().header().userId(), pending.command().header().commandId());
+                batch.currentBefore = before;
+                submitMatching(pending);
+                return null;
+            } catch (CoreStateRejectedException exception) {
+                if (tradingState != before) {
+                    restoreCommandState(before);
+                    runtime.restoreStateOnly(before);
+                }
+                appendOrderBatchResult(batch, item, ResponseStatus.REJECTED,
+                        CoreResultCode.fromRejectionCode(exception.code()), List.of());
+                batch.nextIndex++;
+            } catch (ArithmeticException | IllegalArgumentException exception) {
+                if (tradingState != before) {
+                    restoreCommandState(before);
+                    runtime.restoreStateOnly(before);
+                }
+                appendOrderBatchResult(batch, item, ResponseStatus.REJECTED,
+                        exception instanceof ArithmeticException
+                                ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND,
+                        List.of());
+                batch.nextIndex++;
+            }
+        }
+        return finishOrderBatch(batch, pending, clusterTimestamp, clusterPosition);
+    }
+
+    private void prepareOrderBatchItem(OrderBatchPending batch, OrderBatchItem item, long userId,
+                                       UUID commandId) {
+        switch (batch.kind) {
+            case PLACE -> {
+                PlaceOrderCommand command = (PlaceOrderCommand) item.command;
+                adoptState(tradingReducer.placeOrder(tradingState, userId, command, commandId,
+                        openInterestIndex.openInterestSteps(command.symbol())));
+            }
+            case CANCEL -> {
+                CancelOrderCommand command = (CancelOrderCommand) item.command;
+                CoreOrderState order = tradingState.order(command.orderId());
+                if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+                if (order.userId() != userId) {
+                    throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
+                }
+            }
+            case AMEND -> {
+                AmendOrderCommand command = (AmendOrderCommand) item.command;
+                CoreOrderState order = tradingState.order(command.originalOrderId());
+                if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+                if (order.userId() != userId) {
+                    throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
+                }
+                if (order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN
+                        || order.orderType() != com.surprising.aeron.protocol.CoreOrderType.LIMIT) {
+                    throw new CoreStateRejectedException("INVALID_COMMAND", "order is not amendable");
+                }
+                if (tradingState.order(command.replacementOrderId()) != null) {
+                    throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
+                }
+            }
+        }
+    }
+
+    private void submitOrderBatchMatching(PendingMatching pending) {
+        OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
+        if (batch == null) return;
+        runtime.matcherReady().thenCompose(ignored -> submitOrderBatchMatchingNow(pending, batch))
+                .whenComplete((result, failure) -> {
+                    OrderBatchPending current = pendingOrderBatches.get(pending.sequence());
+                    if (current != batch) return;
+                    completedMatching.put(pending.sequence(), failure == null && result != null ? result
+                            : new com.surprising.aeron.service.matching.CoreMatchingResult(
+                                    false, "EXCHANGE_CORE_FAILURE", List.of()));
+                });
+    }
+
+    private CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> submitOrderBatchMatchingNow(
+            PendingMatching pending, OrderBatchPending batch) {
+        OrderBatchItem item = batch.items.get(batch.nextIndex);
+        try {
+            return switch (batch.kind) {
+                case PLACE -> matchingAdapter.placeAsync(pending.command().header().userId(),
+                        (PlaceOrderCommand) item.command);
+                case CANCEL -> {
+                    CancelOrderCommand command = (CancelOrderCommand) item.command;
+                    CoreOrderState order = tradingState.order(command.orderId());
+                    yield matchingAdapter.cancelAsyncForContinuation(pending.command().header().userId(),
+                            command.orderId(), order == null ? "" : order.symbol());
+                }
+                case AMEND -> {
+                    AmendOrderCommand command = (AmendOrderCommand) item.command;
+                    CoreOrderState order = tradingState.order(command.originalOrderId());
+                    yield matchingAdapter.replaceOrderAsync(pending.command().header().userId(),
+                            command.originalOrderId(), order.symbol(), replacementForAmend(command, order));
+                }
+            };
+        } catch (RuntimeException exception) {
+            return CompletableFuture.completedFuture(new com.surprising.aeron.service.matching.CoreMatchingResult(
+                    false, "EXCHANGE_CORE_FAILURE", List.of()));
+        }
+    }
+
+    private CoreResponse completeOrderBatchMatching(long sequence,
+                                                    com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
+                                                    long clusterTimestamp, long clusterPosition) {
+        PendingMatching pending = pendingMatching.get(sequence);
+        OrderBatchPending batch = pendingOrderBatches.get(sequence);
+        if (pending == null || batch == null || matchingResult == null) return null;
+        if (matchingResultNeedsRecovery(pending, matchingResult)) {
+            throw failMatching(pending, "matcher continuation returned " + matchingResult.resultCode(), null);
+        }
+        OrderBatchItem item = batch.items.get(batch.nextIndex);
+        TradingCoreState before = batch.currentBefore;
+        ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
+        CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
+        try {
+            List<CoreExecutionView> executions = applyOrderBatchMatcherResult(batch, item, pending, matchingResult);
+            if (tradingState != before) {
+                adoptState(tradingState.stampOrderChanges(before, clusterTimestamp, clusterPosition,
+                        batch.changedOrderIds(item, matchingResult)));
+            }
+            appendOrderBatchResult(batch, item, status, resultCode, executions);
+            batch.nextIndex++;
+        } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException exception) {
+            if (tradingState != before) restoreCommandState(before);
+            runtime.restoreStateOnly(before);
+            throw failMatching(pending, "Core and matcher state diverged", exception);
+        }
+        return startOrderBatchItem(batch, pending, clusterTimestamp, clusterPosition);
+    }
+
+    private List<CoreExecutionView> applyOrderBatchMatcherResult(
+            OrderBatchPending batch, OrderBatchItem item, PendingMatching pending,
+            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
+        switch (batch.kind) {
+            case PLACE -> {
+                PlaceOrderCommand command = (PlaceOrderCommand) item.command;
+                if (matchingResult.accepted()) {
+                    adoptState(tradingReducer.applyMatches(tradingState, command.orderId(), command.baseAsset(),
+                            command.quoteAsset(), matchingResult.matches()));
+                } else {
+                    adoptState(tradingReducer.rejectPlaceOrder(tradingState,
+                            pending.command().header().userId(), command.orderId()));
+                }
+                return executionViews(command.orderId(), pending.command().header().userId(), matchingResult.matches());
+            }
+            case CANCEL -> {
+                CancelOrderCommand command = (CancelOrderCommand) item.command;
+                if (matchingResult.accepted()) {
+                    adoptState(tradingReducer.cancelOrder(tradingState, pending.command().header().userId(), command));
+                }
+                return List.of();
+            }
+            case AMEND -> {
+                AmendOrderCommand command = (AmendOrderCommand) item.command;
+                PlaceOrderCommand replacement = replacementForAmend(command,
+                        tradingState.order(command.originalOrderId()));
+                if (matchingResult.accepted()) {
+                    adoptState(tradingReducer.cancelOrder(tradingState, pending.command().header().userId(),
+                            new CancelOrderCommand(command.originalOrderId())));
+                    adoptState(tradingReducer.placeOrder(tradingState, pending.command().header().userId(), replacement,
+                            pending.command().header().commandId(), openInterestIndex.openInterestSteps(replacement.symbol())));
+                    adoptState(tradingReducer.applyMatches(tradingState, replacement.orderId(), replacement.baseAsset(),
+                            replacement.quoteAsset(), matchingResult.matches()));
+                }
+                return executionViews(replacement.orderId(), pending.command().header().userId(), matchingResult.matches());
+            }
+            default -> throw new IllegalStateException("unsupported order batch kind");
+        }
+    }
+
+    private void appendOrderBatchResult(OrderBatchPending batch, OrderBatchItem item,
+                                        ResponseStatus status, CoreResultCode resultCode,
+                                        List<CoreExecutionView> executions) {
+        CoreOrderState order = tradingState.order(item.orderId);
+        if (order == null && item.originalOrderId > 0) order = tradingState.order(item.originalOrderId);
+        batch.results.add(new CoreOrderBatchResult.Item(batch.results.size(), item.orderId,
+                item.originalOrderId, item.replacementOrderId, status, resultCode,
+                order == null ? null : orderView(order), executions));
+    }
+
+    private CoreResponse finishOrderBatch(OrderBatchPending batch, PendingMatching pending,
+                                          long clusterTimestamp, long clusterPosition) {
+        CoreOrderBatchResult result = new CoreOrderBatchResult(batch.results);
+        byte[] responseData = TradingOrderBatchCodec.encodeResult(result);
+        commandExecutions = batch.results.stream()
+                .flatMap(item -> item.executions().stream())
+                .toList();
+        materializeChangeAccumulators();
+        CoreCommandDelta delta = commandDelta(batch.beforeState, tradingState, true);
+        long businessStateHash = tradingState == batch.beforeState
+                ? cachedBusinessStateHash : rollingBusinessStateHash.value();
+        long requiredExportSequence = exportState.append(pending.command(), ResponseStatus.APPLIED,
+                CoreResultCode.NONE, appliedCommandCount, businessStateHash, delta.changedUsers(),
+                delta.changedOrders(), delta.executions(), delta.fundingPayments(), delta.changedLiquidations(),
+                delta.changedTreasuryAssets(), delta.changedTriggerOrders());
+        cachedBusinessStateHash = businessStateHash;
+        long stateHash = stateHash(businessStateHash, pending.command().header().commandId(),
+                ResponseStatus.APPLIED, CoreResultCode.NONE, appliedCommandCount);
+        storeResult(pending.command().header().commandId(), new StoredResult(
+                CommandFingerprint.of(pending.command()), ResponseStatus.APPLIED, CoreResultCode.NONE,
+                appliedCommandCount, requiredExportSequence, stateHash, responseData, 0));
+        pendingMatching.remove(batch.sequence);
+        pendingOrderBatches.remove(batch.sequence);
+        return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                appliedCommandCount, requiredExportSequence, stateHash, responseData);
+    }
+
+    private void recordSourceSequence(SourceKey sourceKey, long sourceSequence) {
+        Long previousSourceSequence = lastSourceSequences.put(sourceKey, sourceSequence);
+        if (previousSourceSequence != null) {
+            lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, previousSourceSequence);
+        }
+        lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, sourceSequence);
+    }
+
     private static boolean isMatchingCommand(CoreMessageType type) {
         return type == CoreMessageType.PLACE_ORDER || type == CoreMessageType.CANCEL_ORDER
                 || type == CoreMessageType.REPLACE_ORDER || type == CoreMessageType.AMEND_ORDER
+                || isOrderBatchCommand(type)
                 || type == CoreMessageType.EXECUTE_LIQUIDATION
                 || type == CoreMessageType.EXECUTE_LIQUIDATION_BATCH
                 || type == CoreMessageType.SETTLE_INSTRUMENT;
+    }
+
+    private static boolean isOrderBatchCommand(CoreMessageType type) {
+        return type == CoreMessageType.PLACE_ORDER_BATCH || type == CoreMessageType.CANCEL_ORDER_BATCH
+                || type == CoreMessageType.AMEND_ORDER_BATCH;
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
@@ -1234,6 +1543,10 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void submitMatching(PendingMatching pending) {
+        if (pendingOrderBatches.containsKey(pending.sequence())) {
+            submitOrderBatchMatching(pending);
+            return;
+        }
         runtime.matcherReady().thenCompose(ignored -> submitMatchingNow(pending))
                 .whenComplete((result, failure) -> {
                     PendingMatching current = pendingMatching.get(pending.sequence());
@@ -1335,6 +1648,28 @@ public final class CoreProbeState implements AutoCloseable {
                 clientOrderId, order.makerFeeRatePpm(), order.takerFeeRatePpm());
     }
 
+    private PlaceOrderCommand replacementForAmend(AmendOrderCommand command, CoreOrderState order) {
+        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+        var instrument = tradingState.instruments().get(order.symbol());
+        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
+        long priceTicks = command.priceTicks() == null ? order.priceTicks() : command.priceTicks();
+        long quantitySteps = command.quantitySteps() == null ? order.remainingQuantitySteps() : command.quantitySteps();
+        var timeInForce = command.timeInForce() == null ? order.timeInForce() : command.timeInForce();
+        boolean postOnly = command.postOnly() == null ? order.postOnly() : command.postOnly();
+        String clientOrderId = command.newClientOrderId() == null ? "" : command.newClientOrderId();
+        return new PlaceOrderCommand(command.replacementOrderId(), order.symbol(), order.instrumentVersion(),
+                instrument.baseAsset(), instrument.quoteAsset(), instrument.settleAsset(), order.side(), priceTicks,
+                quantitySteps, order.reduceOnly(), order.marginMode(), order.positionSide(),
+                instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
+                        ? com.surprising.aeron.protocol.ReservationKind.SPOT_ASSET
+                        : com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
+                instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
+                        ? order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
+                                ? instrument.quoteAsset() : instrument.baseAsset()
+                        : instrument.settleAsset(), 0, order.orderType(), timeInForce, priceTicks, postOnly,
+                clientOrderId, order.makerFeeRatePpm(), order.takerFeeRatePpm());
+    }
+
     private com.surprising.aeron.protocol.PlaceOrderCommand triggerPlacement(
             com.surprising.aeron.service.state.CoreTriggerOrderState trigger, long triggeredPriceTicks) {
         var instrument = tradingState.instruments().get(trigger.symbol());
@@ -1384,6 +1719,9 @@ public final class CoreProbeState implements AutoCloseable {
         assertHealthy();
         PendingMatching pending = pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
+        if (pendingOrderBatches.containsKey(sequence)) {
+            return completeOrderBatchMatching(sequence, matchingResult, clusterTimestamp, clusterPosition);
+        }
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
             throw failMatching(pending, "matcher continuation returned " + matchingResult.resultCode(), null);
         }
@@ -1947,6 +2285,7 @@ public final class CoreProbeState implements AutoCloseable {
                         TradingCommandCodec.decodeBalanceAdjustment(message.payload())));
             }
             case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER,
+                    PLACE_ORDER_BATCH, CANCEL_ORDER_BATCH, AMEND_ORDER_BATCH,
                     EXECUTE_LIQUIDATION, SETTLE_INSTRUMENT ->
                     throw new IllegalStateException("matching command must use async continuation");
             case UPSERT_INSTRUMENT -> {
@@ -2476,6 +2815,7 @@ public final class CoreProbeState implements AutoCloseable {
         failedQueries.clear();
         queryIds.clear();
         pendingMatching.clear();
+        pendingOrderBatches.clear();
         runtime.close();
     }
 
@@ -2816,6 +3156,56 @@ public final class CoreProbeState implements AutoCloseable {
 
     private static CoreResultCode matchingPendingCode() {
         return CoreResultCode.fromWireCode(MATCHING_PENDING_WIRE_CODE);
+    }
+
+    private enum OrderBatchKind {
+        PLACE,
+        CANCEL,
+        AMEND
+    }
+
+    private record OrderBatchItem(
+            long orderId,
+            long originalOrderId,
+            long replacementOrderId,
+            Object command) {
+    }
+
+    private static final class OrderBatchPending {
+        private final OrderBatchKind kind;
+        private final List<OrderBatchItem> items;
+        private final TradingCoreState beforeState;
+        private final long clusterTimestamp;
+        private final long clusterPosition;
+        private final PendingMatching.Operation operation;
+        private final List<CoreOrderBatchResult.Item> results = new ArrayList<>();
+        private int nextIndex;
+        private long sequence;
+        private TradingCoreState currentBefore;
+
+        private OrderBatchPending(OrderBatchKind kind, List<OrderBatchItem> items,
+                                  TradingCoreState beforeState, long clusterTimestamp,
+                                  long clusterPosition, PendingMatching.Operation operation) {
+            this.kind = kind;
+            this.items = List.copyOf(items);
+            this.beforeState = beforeState;
+            this.clusterTimestamp = clusterTimestamp;
+            this.clusterPosition = clusterPosition;
+            this.operation = operation;
+        }
+
+        private List<Long> changedOrderIds(
+                OrderBatchItem item,
+                com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
+            java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+            ids.add(item.orderId());
+            if (item.originalOrderId() > 0) ids.add(item.originalOrderId());
+            if (item.replacementOrderId() > 0) ids.add(item.replacementOrderId());
+            matchingResult.matches().stream()
+                    .map(com.surprising.aeron.service.matching.CoreMatch::makerOrderId)
+                    .forEach(ids::add);
+            return List.copyOf(ids);
+        }
     }
 
     record StoredResult(
