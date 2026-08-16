@@ -1,9 +1,7 @@
 package com.surprising.trading.api.client;
 
 import com.surprising.trading.api.TradingApiPaths;
-import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
-import com.surprising.trading.api.model.AmendOrderResponse;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
 import com.surprising.trading.api.model.AlgoOrderQueryResponse;
 import com.surprising.trading.api.model.AlgoOrderResponse;
@@ -18,6 +16,7 @@ import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
@@ -43,28 +42,28 @@ import org.springframework.web.bind.annotation.RequestParam;
 public interface OrderRpcApi {
 
     @PostMapping
-    OrderResponse place(@Valid @RequestBody PlaceOrderRequest request);
+    OrderCommandReceipt place(@Valid @RequestBody PlaceOrderRequest request);
 
     @PostMapping("/batch")
-    OrderBatchResponse placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request);
+    OrderCommandReceipt placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request);
 
     @PostMapping("/test")
     TestOrderResponse test(@Valid @RequestBody PlaceOrderRequest request);
 
     @PostMapping("/amend")
-    AmendOrderResponse amend(@Valid @RequestBody AmendOrderRequest request);
+    OrderCommandReceipt amend(@Valid @RequestBody AmendOrderRequest request);
 
     @PostMapping("/batch-amend")
-    AmendOrderBatchResponse amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request);
+    OrderCommandReceipt amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request);
 
     @PostMapping("/close-position")
     OrderResponse closePosition(@Valid @RequestBody ClosePositionRequest request);
 
     @PostMapping("/cancel")
-    OrderResponse cancel(@Valid @RequestBody CancelOrderRequest request);
+    OrderCommandReceipt cancel(@Valid @RequestBody CancelOrderRequest request);
 
     @PostMapping("/batch-cancel")
-    OrderBatchResponse cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request);
+    OrderCommandReceipt cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request);
 
     @PostMapping("/cancel-open")
     OrderBatchResponse cancelOpen(@Valid @RequestBody CancelOpenOrdersRequest request);

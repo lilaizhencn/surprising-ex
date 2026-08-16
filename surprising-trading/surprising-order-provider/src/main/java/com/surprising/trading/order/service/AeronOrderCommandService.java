@@ -260,6 +260,12 @@ public class AeronOrderCommandService {
     public OrderCommandReceipt receipt(CommandExecution execution) {
         if (execution.outcome() instanceof CoreCommandOutcome.Terminal terminal) {
             com.surprising.aeron.protocol.CoreResponse response = terminal.response();
+            if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                return new OrderCommandReceipt(execution.commandId(), "MATCHING_PENDING",
+                        CoreResultCode.MATCHING_PENDING.name(), "matching pending",
+                        OrderCommandReceipt.commandResultUrl(execution.commandId()),
+                        execution.prospectiveOrderIds(), knownExportSequence(response), null, null);
+            }
             Object result = decodeResult(execution.kind(), execution.prospectiveOrderIds(), response.data());
             return new OrderCommandReceipt(execution.commandId(), "TERMINAL", response.resultCode().name(),
                     response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
@@ -286,6 +292,12 @@ public class AeronOrderCommandService {
                         CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION.name(),
                         CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION.name(), null, List.of(),
                         null, null, null);
+            }
+            if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                return new OrderCommandReceipt(commandId, "MATCHING_PENDING",
+                        CoreResultCode.MATCHING_PENDING.name(), "matching pending",
+                        OrderCommandReceipt.commandResultUrl(commandId), List.of(),
+                        knownExportSequence(response), null, null);
             }
             return new OrderCommandReceipt(commandId, "TERMINAL", response.resultCode().name(),
                     response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),

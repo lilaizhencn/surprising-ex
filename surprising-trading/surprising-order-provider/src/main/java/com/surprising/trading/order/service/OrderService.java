@@ -39,12 +39,17 @@ import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
 public class OrderService {
+
+    private static final int MAX_CANCEL_BATCH_SIZE = 50;
 
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
@@ -282,16 +287,10 @@ public class OrderService {
                 ? null : normalizeSymbol(request.symbol());
         List<OrderResponse> open = projectionOpenOrders(currentProductLine(), request.userId(), symbol, limit);
         requireAeron();
-        List<OrderBatchItemResponse> results = new ArrayList<>();
-        for (int index = 0; index < open.size(); index++) {
-            try {
-                results.add(new OrderBatchItemResponse(index, true, "completed",
-                        aeronOrders.cancel(request.userId(), open.get(index).orderId())));
-            } catch (IllegalStateException exception) {
-                results.add(new OrderBatchItemResponse(index, false, exception.getMessage(), null));
-            }
-        }
-        return orderBatchResponse(results);
+        List<CancelOrderRequest> requests = open.stream()
+                .map(order -> new CancelOrderRequest(request.userId(), order.orderId()))
+                .toList();
+        return orderBatchResponse(cancelOrderChunks(requests));
     }
 
     public OrderResponse get(long userId, long orderId) {
@@ -464,24 +463,26 @@ public class OrderService {
         }
         String reason = adminCancelReason(request == null ? null : request.reason());
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
+        requireCurrentProductLine(resolved);
         List<OrderResponse> selected = projectionOpenOrders(resolved, userId, symbol, limit);
         requireAeron();
-        List<OrderResponse> values = new ArrayList<>();
-        for (OrderResponse order : selected) {
-            try {
-                values.add(aeronOrders.cancel(order.userId(), order.orderId()));
-            } catch (IllegalStateException ignored) {
-            }
-        }
-        List<OrderResponse> canceled = List.copyOf(values);
+        List<CancelOrderRequest> requests = selected.stream()
+                .map(order -> new CancelOrderRequest(order.userId(), order.orderId()))
+                .toList();
+        List<OrderBatchItemResponse> canceled = cancelOrderChunks(requests);
         List<AdminCancelOrderResult> results = canceled.stream()
-                .map(order -> new AdminCancelOrderResult(order.orderId(), order.userId(), order.symbol(),
-                        order.status(), cancelSucceeded(order.status()),
-                        cancelSucceeded(order.status()) ? "cancel completed"
-                                : "order is already " + order.status().name(), order))
+                .map(item -> {
+                    OrderResponse selectedOrder = selected.get(item.index());
+                    OrderResponse order = item.order() == null ? selectedOrder : item.order();
+                    boolean requested = item.success() && cancelSucceeded(order.status());
+                    String message = requested ? "cancel completed"
+                            : item.success() ? "order is already " + order.status().name() : item.message();
+                    return new AdminCancelOrderResult(order.orderId(), order.userId(), order.symbol(),
+                            order.status(), requested, message, order);
+                })
                 .toList();
         int canceledCount = (int) results.stream().filter(AdminCancelOrderResult::cancelRequested).count();
-        return new AdminCancelOrdersResponse(results.size(), canceledCount, results.size() - canceledCount, results);
+        return new AdminCancelOrdersResponse(selected.size(), canceledCount, selected.size() - canceledCount, results);
     }
 
     public AdminCancelOrdersPreviewResponse adminCancelPreview(Long userId, String symbol, int limit) {
@@ -524,14 +525,12 @@ public class OrderService {
     public int requestLifecycleCancellation(String symbol, int limit) {
         String normalizedSymbol = normalizeSymbol(symbol);
         List<OrderResponse> selected = requireAeron().lifecycleOpenOrders(normalizedSymbol, limit);
-        int completed = 0;
-        for (OrderResponse order : selected) {
-            try {
-                if (cancelSucceeded(aeronOrders.cancel(order.userId(), order.orderId()).status())) completed++;
-            } catch (IllegalStateException ignored) {
-            }
-        }
-        return completed;
+        List<CancelOrderRequest> requests = selected.stream()
+                .map(order -> new CancelOrderRequest(order.userId(), order.orderId()))
+                .toList();
+        return (int) cancelOrderChunks(requests).stream()
+                .filter(item -> item.success() && item.order() != null && cancelSucceeded(item.order().status()))
+                .count();
     }
 
     public boolean hasLifecycleActiveOrders(String symbol) {
@@ -611,6 +610,58 @@ public class OrderService {
         return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
     }
 
+    private List<OrderBatchItemResponse> cancelOrderChunks(List<CancelOrderRequest> requests) {
+        if (requests.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<IndexedCancelRequest>> requestsByUser = new LinkedHashMap<>();
+        for (int index = 0; index < requests.size(); index++) {
+            CancelOrderRequest request = requests.get(index);
+            validateCancelRequest(request);
+            requestsByUser.computeIfAbsent(request.userId(), ignored -> new ArrayList<>())
+                    .add(new IndexedCancelRequest(index, request));
+        }
+
+        List<OrderBatchItemResponse> results = new ArrayList<>(requests.size());
+        for (List<IndexedCancelRequest> userRequests : requestsByUser.values()) {
+            for (int start = 0; start < userRequests.size(); start += MAX_CANCEL_BATCH_SIZE) {
+                List<IndexedCancelRequest> chunk = userRequests.subList(start,
+                        Math.min(start + MAX_CANCEL_BATCH_SIZE, userRequests.size()));
+                List<CancelOrderRequest> chunkRequests = chunk.stream()
+                        .map(IndexedCancelRequest::request)
+                        .toList();
+                OrderBatchResponse response;
+                try {
+                    response = cancelBatch(new BatchCancelOrdersRequest(chunkRequests));
+                } catch (RuntimeException exception) {
+                    response = failedCancelBatch(chunkRequests, exception.getMessage());
+                }
+                for (int localIndex = 0; localIndex < chunk.size(); localIndex++) {
+                    int resultIndex = localIndex;
+                    IndexedCancelRequest indexed = chunk.get(localIndex);
+                    OrderBatchItemResponse item = response.results().stream()
+                            .filter(value -> value != null && value.index() == resultIndex)
+                            .findFirst()
+                            .orElseGet(() -> new OrderBatchItemResponse(resultIndex, false,
+                                    "batch cancellation result is missing", null));
+                    results.add(new OrderBatchItemResponse(indexed.index(), item.success(), item.message(),
+                            item.order()));
+                }
+            }
+        }
+        results.sort(Comparator.comparingInt(OrderBatchItemResponse::index));
+        return List.copyOf(results);
+    }
+
+    private OrderBatchResponse failedCancelBatch(List<CancelOrderRequest> requests, String message) {
+        String reason = message == null || message.isBlank() ? "batch cancellation failed" : message;
+        List<OrderBatchItemResponse> results = new ArrayList<>(requests.size());
+        for (int index = 0; index < requests.size(); index++) {
+            results.add(new OrderBatchItemResponse(index, false, reason, null));
+        }
+        return new OrderBatchResponse(results.size(), 0, results.size(), results);
+    }
+
     private <T> T terminalBatchResult(OrderCommandReceipt receipt, Class<T> type) {
         if (type.isInstance(receipt.result())) {
             return type.cast(receipt.result());
@@ -631,6 +682,9 @@ public class OrderService {
         if (request == null || request.userId() <= 0L || request.orderId() <= 0L) {
             throw new IllegalArgumentException("userId and orderId must be positive");
         }
+    }
+
+    private record IndexedCancelRequest(int index, CancelOrderRequest request) {
     }
 
     private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation,

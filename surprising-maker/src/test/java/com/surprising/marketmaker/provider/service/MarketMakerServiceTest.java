@@ -66,6 +66,7 @@ import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderBatchItemResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -88,6 +89,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.Optional;
 import java.util.zip.CRC32;
 import org.junit.jupiter.api.AfterEach;
@@ -558,15 +560,15 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public OrderResponse place(PlaceOrderRequest request) {
+        public OrderCommandReceipt place(PlaceOrderRequest request) {
             productLinesDuringPlace.add(MarketMakerProductLineContext.current());
             placeRequests.add(request);
-            return orderAt(1000L + placeRequests.size(), request.userId(), request.clientOrderId(), request.side(),
-                    request.priceTicks(), request.quantitySteps(), OrderStatus.ACCEPTED, Instant.now());
+            return terminal(orderAt(1000L + placeRequests.size(), request.userId(), request.clientOrderId(),
+                    request.side(), request.priceTicks(), request.quantitySteps(), OrderStatus.ACCEPTED, Instant.now()));
         }
 
         @Override
-        public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
+        public OrderCommandReceipt placeBatch(BatchPlaceOrderRequest request) {
             if (!batchSupported) {
                 throw new UnsupportedOperationException();
             }
@@ -581,7 +583,7 @@ class MarketMakerServiceTest {
                                 placeRequest.clientOrderId(), placeRequest.side(), placeRequest.priceTicks(),
                                 placeRequest.quantitySteps(), OrderStatus.ACCEPTED, Instant.now())));
             }
-            return new OrderBatchResponse(results.size(), results.size(), 0, results);
+            return terminal(new OrderBatchResponse(results.size(), results.size(), 0, results));
         }
 
         @Override
@@ -590,12 +592,12 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public AmendOrderResponse amend(AmendOrderRequest request) {
+        public OrderCommandReceipt amend(AmendOrderRequest request) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
+        public OrderCommandReceipt amendBatch(BatchAmendOrdersRequest request) {
             throw new UnsupportedOperationException();
         }
 
@@ -605,15 +607,15 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public OrderResponse cancel(CancelOrderRequest request) {
+        public OrderCommandReceipt cancel(CancelOrderRequest request) {
             productLinesDuringCancel.add(MarketMakerProductLineContext.current());
             cancelRequests.add(request);
-            return order(request.orderId(), request.userId(), "canceled", OrderSide.BUY,
-                    1L, 0L, OrderStatus.CANCELED);
+            return terminal(order(request.orderId(), request.userId(), "canceled", OrderSide.BUY,
+                    1L, 0L, OrderStatus.CANCELED));
         }
 
         @Override
-        public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
+        public OrderCommandReceipt cancelBatch(BatchCancelOrdersRequest request) {
             cancelBatchCalls++;
             List<OrderBatchItemResponse> results = new ArrayList<>();
             for (int i = 0; i < request.orders().size(); i++) {
@@ -624,7 +626,13 @@ class MarketMakerServiceTest {
                         order(cancelRequest.orderId(), cancelRequest.userId(), "canceled", OrderSide.BUY,
                                 1L, 0L, OrderStatus.CANCELED)));
             }
-            return new OrderBatchResponse(results.size(), results.size(), 0, results);
+            return terminal(new OrderBatchResponse(results.size(), results.size(), 0, results));
+        }
+
+        private OrderCommandReceipt terminal(Object result) {
+            UUID commandId = UUID.nameUUIDFromBytes(("fake:" + result).getBytes(StandardCharsets.UTF_8));
+            return new OrderCommandReceipt(commandId, "TERMINAL", "NONE", "completed",
+                    OrderCommandReceipt.commandResultUrl(commandId), List.of(), null, result, null);
         }
 
         @Override

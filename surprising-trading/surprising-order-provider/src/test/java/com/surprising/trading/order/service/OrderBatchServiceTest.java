@@ -136,6 +136,29 @@ class OrderBatchServiceTest {
     }
 
     @Test
+    void preservesMatchingPendingForInitialReceiptAndCommandResultQuery() {
+        UUID commandId = UUID.fromString("66666666-6666-6666-6666-666666666666");
+        CoreResponse pendingResponse = new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
+                CoreResultCode.MATCHING_PENDING, 4L, 9L, 17L, new byte[0]);
+        AeronOrderCommandService.CommandExecution execution = new AeronOrderCommandService.CommandExecution(
+                commandId, List.of(7001L), new CoreCommandOutcome.Terminal(pendingResponse),
+                AeronOrderCommandService.CommandKind.PLACE);
+        when(aeron.commandResult(commandId)).thenReturn(pendingResponse);
+
+        OrderCommandReceipt initial = service.receipt(execution);
+        OrderCommandReceipt queried = service.commandResult(commandId);
+
+        assertThat(initial.outcome()).isEqualTo("MATCHING_PENDING");
+        assertThat(initial.code()).isEqualTo("MATCHING_PENDING");
+        assertThat(initial.commandId()).isEqualTo(commandId);
+        assertThat(initial.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId));
+        assertThat(queried.outcome()).isEqualTo("MATCHING_PENDING");
+        assertThat(queried.code()).isEqualTo("MATCHING_PENDING");
+        assertThat(queried.commandId()).isEqualTo(commandId);
+        assertThat(queried.commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId));
+    }
+
+    @Test
     void maximumAmendAndCancelBatchesUseOneNativeGatewayCallEach() {
         List<AmendOrderRequest> amends = java.util.stream.IntStream.range(0, 20)
                 .mapToObj(index -> new AmendOrderRequest(1001L, 10_000L + index, "amend-" + index,

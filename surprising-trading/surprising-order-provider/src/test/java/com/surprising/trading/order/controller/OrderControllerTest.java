@@ -110,10 +110,40 @@ class OrderControllerTest {
         assertThat(outside.getBody().code()).isEqualTo("RESULT_UNKNOWN_OUTSIDE_RETENTION");
     }
 
+    @Test
+    void mapsMatchingPendingAdmissionAndQueryToAcceptedWithOriginalCommandIdentity() {
+        OrderService orderService = mock(OrderService.class);
+        OrderController controller = new OrderController(orderService, mock(AlgoOrderService.class),
+                mock(CancelAllAfterService.class));
+        PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-pending", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);
+        UUID commandId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+        OrderCommandReceipt pending = receipt("MATCHING_PENDING", "MATCHING_PENDING", commandId);
+
+        when(orderService.placeCommand(any())).thenReturn(pending);
+        ResponseEntity<OrderCommandReceipt> initial = controller.place(request);
+
+        when(orderService.commandResult(commandId)).thenReturn(pending);
+        ResponseEntity<OrderCommandReceipt> queried = controller.commandResult(commandId);
+
+        assertThat(initial.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(initial.getBody().outcome()).isEqualTo("MATCHING_PENDING");
+        assertThat(initial.getBody().commandId()).isEqualTo(commandId);
+        assertThat(initial.getBody().commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId));
+        assertThat(queried.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(queried.getBody().outcome()).isEqualTo("MATCHING_PENDING");
+        assertThat(queried.getBody().commandId()).isEqualTo(commandId);
+        assertThat(queried.getBody().commandResultUrl()).isEqualTo(OrderCommandReceipt.commandResultUrl(commandId));
+    }
+
     private static OrderCommandReceipt receipt(String outcome, String code) {
-        UUID commandId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        return receipt(outcome, code, UUID.fromString("22222222-2222-2222-2222-222222222222"));
+    }
+
+    private static OrderCommandReceipt receipt(String outcome, String code, UUID commandId) {
         return new OrderCommandReceipt(commandId, outcome, code, code,
                 "RESULT_UNKNOWN".equals(outcome) || "TERMINAL".equals(outcome)
+                        || "MATCHING_PENDING".equals(outcome)
                         ? OrderCommandReceipt.commandResultUrl(commandId) : null,
                 List.of(91L), "TERMINAL".equals(outcome) ? 17L : null, null, null);
     }

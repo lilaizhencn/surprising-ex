@@ -291,7 +291,7 @@ public class OrderController {
         HttpStatus status = switch (receipt.code()) {
             case "IDEMPOTENCY_CONFLICT" -> HttpStatus.CONFLICT;
             case "CLIENT_BACKPRESSURED" -> HttpStatus.TOO_MANY_REQUESTS;
-            case "RESULT_UNKNOWN" -> HttpStatus.ACCEPTED;
+            case "MATCHING_PENDING", "RESULT_UNKNOWN" -> HttpStatus.ACCEPTED;
             case "RESULT_UNKNOWN_OUTSIDE_RETENTION" -> HttpStatus.GONE;
             case "NOT_CONNECTED", "ADMIN_ACTION", "CLOSED", "MAX_POSITION_EXCEEDED", "UNKNOWN" ->
                     HttpStatus.SERVICE_UNAVAILABLE;
