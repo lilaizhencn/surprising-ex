@@ -630,7 +630,7 @@ public final class W5FaultQaMain {
 
         private long committedOffset(String group) {
             TopicPartition partition = new TopicPartition(topics.coreEventsTopic(), 0);
-            Properties properties = consumerProperties(kafkaBootstrap, group + "-offset-query");
+            Properties properties = consumerProperties(kafkaBootstrap, group);
             try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties)) {
                 consumer.assign(List.of(partition));
                 var offset = consumer.committed(Set.of(partition)).get(partition);
