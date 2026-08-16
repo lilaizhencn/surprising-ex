@@ -78,18 +78,7 @@ public final class ReliableCoreExporter {
             sink.publish(productLine, events);
             long throughSequence = CoreExportCodec.decodeEvent(events.getLast().payload()).exportSequence();
             metrics.recordPublished(events.size(), throughSequence);
-            CoreResponse ackResponse;
-            try {
-                ackResponse = core.submit(ack(throughSequence));
-            } catch (ResultUnknownException exception) {
-                CoreExportStatus resolved = status();
-                if (resolved.acknowledgedSequence() < throughSequence) {
-                    throw exception;
-                }
-                metrics.recordUnknown();
-                metrics.recordRetry();
-                return new ExportCycleResult(events.size(), resolved);
-            }
+            CoreResponse ackResponse = core.submit(ack(throughSequence));
             if (ackResponse.commandStatus() != ResponseStatus.APPLIED
                     && ackResponse.commandStatus() != ResponseStatus.DUPLICATE) {
                 throw new IllegalStateException("export ack rejected: " + ackResponse.resultCode());

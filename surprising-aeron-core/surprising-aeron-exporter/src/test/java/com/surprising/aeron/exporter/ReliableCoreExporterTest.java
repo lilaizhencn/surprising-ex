@@ -109,34 +109,6 @@ class ReliableCoreExporterTest {
     }
 
     @Test
-    void committedUnknownAckIsResolvedByAuthoritativeStatus() throws Exception {
-        CoreProbeState state = stateWithCommands(1);
-        List<CoreMessageType> calls = new ArrayList<>();
-        ReliableCoreExporter exporter = new ReliableCoreExporter(
-                ProductLine.SPOT, message -> {
-                    calls.add(message.header().messageType());
-                    var response = state.apply(message);
-                    if (message.header().messageType() == CoreMessageType.ACK_EXPORT) {
-                        throw new com.surprising.aeron.client.ResultUnknownException(
-                                message.header().commandId(), "ack response lost after commit");
-                    }
-                    return response;
-                }, (line, events) -> { }, 10);
-
-        var result = exporter.exportOnce();
-
-        assertThat(result.publishedEvents()).isEqualTo(1);
-        assertThat(result.status().acknowledgedSequence()).isEqualTo(1);
-        assertThat(result.status().pendingCount()).isZero();
-        assertThat(calls).containsExactly(
-                CoreMessageType.EXPORT_BATCH_QUERY,
-                CoreMessageType.ACK_EXPORT,
-                CoreMessageType.EXPORT_STATUS_QUERY);
-        assertThat(exporter.metrics().unknownCount()).isEqualTo(1);
-        assertThat(exporter.metrics().retryCount()).isEqualTo(1);
-    }
-
-    @Test
     void emptyCycleDoesNotIssueASeparateStatusQuery() throws Exception {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         List<CoreMessageType> calls = new ArrayList<>();
