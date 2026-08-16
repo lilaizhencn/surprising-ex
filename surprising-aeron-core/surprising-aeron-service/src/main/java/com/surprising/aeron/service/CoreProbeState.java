@@ -700,8 +700,8 @@ public final class CoreProbeState implements AutoCloseable {
 
     private CoreResponse beginBookQuery(CoreMessage message) {
         var query = message.payload().length == 0
-                ? new com.surprising.aeron.protocol.CoreBookStateQuery("", 1_000)
-                : CoreStateQueryCodec.decodeBookStateQuery(message.payload());
+                ? new com.surprising.aeron.protocol.CoreOrderBookQuery("", 1_000)
+                : CoreStateQueryCodec.decodeOrderBookQuery(message.payload());
         long queryId = nextAsyncQueryId++;
         matchingAdapter.orderBookLevelsAsync(query.symbol(), query.depth()).whenComplete((levels, failure) -> {
             if (failure != null) {
@@ -1741,11 +1741,11 @@ public final class CoreProbeState implements AutoCloseable {
         }
         List<com.surprising.aeron.protocol.CoreBookLevelView> levels = completedBookQueries.remove(queryId);
         if (levels == null) return null;
-        var view = new com.surprising.aeron.protocol.CoreBookStateView(
+        var view = new com.surprising.aeron.protocol.CoreOrderBookView(
                 Math.decrementExact(exportState.nextSequence()), levels);
         queryIds.values().removeIf(value -> value == queryId);
         return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
-                CoreStateQueryCodec.encodeBookState(view));
+                CoreStateQueryCodec.encodeOrderBookView(view));
     }
 
     public int pendingMatchingCount() {

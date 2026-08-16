@@ -6,7 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.surprising.aeron.protocol.CommandSource;
-import com.surprising.aeron.protocol.CoreBookStateView;
+import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.CoreExecutionView;
 import com.surprising.aeron.protocol.CoreExportCodec;
@@ -38,7 +38,7 @@ class CoreMarketDataProjectionTest {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.SPOT);
         MatchingAeronGateway gateway = mock(MatchingAeronGateway.class);
-        when(gateway.bookState()).thenReturn(new CoreBookStateView(1,
+        when(gateway.orderBookProjection()).thenReturn(new CoreOrderBookView(1,
                 List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 10, 10, 1))));
         List<OrderBookDepthEvent> depths = new ArrayList<>();
         List<PublicTradeEvent> trades = new ArrayList<>();
@@ -80,7 +80,7 @@ class CoreMarketDataProjectionTest {
 
     @Test
     void appliesCancellationAndNewRestingOrderWithoutRetainingStaleLevels() {
-        ProjectionFixture fixture = fixture(new CoreBookStateView(5,
+        ProjectionFixture fixture = fixture(new CoreOrderBookView(5,
                 List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.BUY, 10, 10, 1))));
         UUID cancelCommandId = new UUID(0, 600);
         CoreOrderStateView canceled = order(1, 101, CoreOrderSide.BUY, 0, 10, "CANCELED", 0, 0,
@@ -103,7 +103,7 @@ class CoreMarketDataProjectionTest {
 
     @Test
     void removesFullyFilledMakerLevel() {
-        ProjectionFixture fixture = fixture(new CoreBookStateView(1,
+        ProjectionFixture fixture = fixture(new CoreOrderBookView(1,
                 List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 10, 6, 1))));
         CoreOrderStateView maker = order(2, 202, CoreOrderSide.SELL, 6, 0, "FILLED", 0, 0);
         CoreOrderStateView taker = order(1, 101, CoreOrderSide.BUY, 6, 0, "FILLED", 0, 0);
@@ -117,7 +117,7 @@ class CoreMarketDataProjectionTest {
 
     @Test
     void rejectsSequenceGapBeforeMutatingBook() {
-        ProjectionFixture fixture = fixture(new CoreBookStateView(1, List.of()));
+        ProjectionFixture fixture = fixture(new CoreOrderBookView(1, List.of()));
         UUID commandId = new UUID(0, 300);
         CoreOrderStateView resting = order(3, 303, CoreOrderSide.BUY, 0, 4, "OPEN", 0, 0, commandId);
 
@@ -129,11 +129,11 @@ class CoreMarketDataProjectionTest {
         assertThat(fixture.projection().snapshot("BTC-USDT", 10).bids()).isEmpty();
     }
 
-    private static ProjectionFixture fixture(CoreBookStateView bootstrap) {
+    private static ProjectionFixture fixture(CoreOrderBookView bootstrap) {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.SPOT);
         MatchingAeronGateway gateway = mock(MatchingAeronGateway.class);
-        when(gateway.bookState()).thenReturn(bootstrap);
+        when(gateway.orderBookProjection()).thenReturn(bootstrap);
         List<OrderBookDepthEvent> depths = new ArrayList<>();
         List<PublicTradeEvent> trades = new ArrayList<>();
         CoreMarketDataProjection projection = new CoreMarketDataProjection(properties, gateway, depths::add,

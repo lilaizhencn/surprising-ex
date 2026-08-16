@@ -61,18 +61,18 @@ class CoreStateQueryCodecTest {
 
     @Test
     void roundTripsBookStateWithExportWatermark() {
-        CoreBookStateView state = new CoreBookStateView(19,
+        CoreOrderBookView state = new CoreOrderBookView(19,
                 List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 10, 4, 2)));
 
-        assertThat(CoreStateQueryCodec.decodeBookState(CoreStateQueryCodec.encodeBookState(state)))
+        assertThat(CoreStateQueryCodec.decodeOrderBookView(CoreStateQueryCodec.encodeOrderBookView(state)))
                 .isEqualTo(state);
     }
 
     @Test
     void roundTripsBoundedBookQuery() {
-        CoreBookStateQuery query = new CoreBookStateQuery(" btc-usdt ", 25);
-        assertThat(CoreStateQueryCodec.decodeBookStateQuery(
-                CoreStateQueryCodec.encodeBookStateQuery(query))).isEqualTo(query);
+        CoreOrderBookQuery query = new CoreOrderBookQuery(" btc-usdt ", 25);
+        assertThat(CoreStateQueryCodec.decodeOrderBookQuery(
+                CoreStateQueryCodec.encodeOrderBookQuery(query))).isEqualTo(query);
     }
 
     @Test

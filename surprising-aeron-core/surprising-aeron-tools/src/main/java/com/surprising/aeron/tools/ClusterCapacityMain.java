@@ -388,7 +388,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     }
 
     private void verifyFundsAndBook() {
-        var book = CoreStateQueryCodec.decodeBookState(clients.query(CoreMessageType.BOOK_STATE_QUERY,
+        var book = CoreStateQueryCodec.decodeOrderBookView(clients.query(CoreMessageType.BOOK_STATE_QUERY,
                 stableId("book-query"), 0, new byte[0]).data());
         if (!book.levels().isEmpty()) {
             throw new IllegalStateException("capacity book is not empty levels=" + book.levels().size());

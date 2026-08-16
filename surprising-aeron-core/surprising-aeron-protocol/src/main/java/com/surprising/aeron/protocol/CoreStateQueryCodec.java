@@ -290,7 +290,7 @@ public final class CoreStateQueryCodec {
         return new CoreOpenOrdersView(orders);
     }
 
-    public static byte[] encodeBookState(CoreBookStateView state) {
+    public static byte[] encodeOrderBookView(CoreOrderBookView state) {
         Writer writer = new Writer();
         writer.intValue(VERSION);
         writer.longValue(state.exportSequence());
@@ -305,7 +305,7 @@ public final class CoreStateQueryCodec {
         return writer.toByteArray();
     }
 
-    public static byte[] encodeBookStateQuery(CoreBookStateQuery query) {
+    public static byte[] encodeOrderBookQuery(CoreOrderBookQuery query) {
         Writer writer = new Writer();
         writer.intValue(1);
         writer.optionalText(query.symbol());
@@ -313,15 +313,15 @@ public final class CoreStateQueryCodec {
         return writer.toByteArray();
     }
 
-    public static CoreBookStateQuery decodeBookStateQuery(byte[] encoded) {
+    public static CoreOrderBookQuery decodeOrderBookQuery(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version(1);
-        CoreBookStateQuery query = new CoreBookStateQuery(reader.optionalText(), reader.intValue());
+        CoreOrderBookQuery query = new CoreOrderBookQuery(reader.optionalText(), reader.intValue());
         reader.requireConsumed();
         return query;
     }
 
-    public static CoreBookStateView decodeBookState(byte[] encoded) {
+    public static CoreOrderBookView decodeOrderBookView(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version(VERSION);
         long exportSequence = reader.nonNegativeLong("exportSequence");
@@ -333,7 +333,7 @@ public final class CoreStateQueryCodec {
                     reader.positiveLong("orderCount")));
         }
         reader.requireConsumed();
-        return new CoreBookStateView(exportSequence, levels);
+        return new CoreOrderBookView(exportSequence, levels);
     }
 
     private static final class Writer {

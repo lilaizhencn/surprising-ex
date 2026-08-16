@@ -1,8 +1,8 @@
 package com.surprising.trading.matching.service;
 
 import com.surprising.aeron.client.AeronClientPool;
-import com.surprising.aeron.protocol.CoreBookStateView;
-import com.surprising.aeron.protocol.CoreBookStateQuery;
+import com.surprising.aeron.protocol.CoreOrderBookView;
+import com.surprising.aeron.protocol.CoreOrderBookQuery;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
@@ -23,17 +23,17 @@ public class MatchingAeronGateway implements AutoCloseable {
                 aeron.getHostnames(), aeron.getEgressHostname(), aeron.getResponseTimeout(), 1);
     }
 
-    public CoreBookStateView bookState() {
-        return bookState(new CoreBookStateQuery("", 1_000));
+    public CoreOrderBookView orderBookProjection() {
+        return orderBookProjection(new CoreOrderBookQuery("", 1_000));
     }
 
-    public CoreBookStateView bookState(CoreBookStateQuery query) {
+    public CoreOrderBookView orderBookProjection(CoreOrderBookQuery query) {
         CoreResponse response = clients.query(CoreMessageType.BOOK_STATE_QUERY, UUID.randomUUID(), 0,
-                CoreStateQueryCodec.encodeBookStateQuery(query));
+                CoreStateQueryCodec.encodeOrderBookQuery(query));
         if (response.status() != ResponseStatus.OK) {
-            throw new IllegalStateException(response.resultCode().name() + ": Aeron book state query failed");
+            throw new IllegalStateException(response.resultCode().name() + ": Aeron order-book projection query failed");
         }
-        return CoreStateQueryCodec.decodeBookState(response.data());
+        return CoreStateQueryCodec.decodeOrderBookView(response.data());
     }
 
     @Override

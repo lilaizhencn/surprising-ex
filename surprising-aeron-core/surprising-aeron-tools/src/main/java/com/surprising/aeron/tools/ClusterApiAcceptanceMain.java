@@ -181,7 +181,7 @@ public final class ClusterApiAcceptanceMain {
     }
 
     private void requireBookEmpty() {
-        var book = CoreStateQueryCodec.decodeBookState(query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0]));
+        var book = CoreStateQueryCodec.decodeOrderBookView(query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0]));
         if (!book.levels().isEmpty()) {
             throw new IllegalStateException("book is not empty: " + book.levels());
         }

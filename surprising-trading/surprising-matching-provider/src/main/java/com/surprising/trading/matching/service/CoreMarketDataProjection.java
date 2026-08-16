@@ -58,7 +58,7 @@ public class CoreMarketDataProjection {
 
     @PostConstruct
     public synchronized void initialize() {
-        var bootstrap = aeronGateway.bookState();
+        var bootstrap = aeronGateway.orderBookProjection();
         books.clear();
         bootstrap.levels().forEach(level -> adjustLevel(normalizeSymbol(level.symbol()), level.side(),
                 level.priceTicks(), level.quantitySteps(), level.orderCount()));

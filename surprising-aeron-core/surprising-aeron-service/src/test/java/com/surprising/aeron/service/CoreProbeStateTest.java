@@ -219,7 +219,7 @@ class CoreProbeStateTest {
                         new com.surprising.aeron.protocol.CoreOpenOrdersQuery("BTC-USDT", 0, 10)));
         var openOrders = CoreStateQueryCodec.decodeOpenOrders(original.apply(openOrdersQuery).data());
         assertThat(openOrders.orders()).extracting(order -> order.orderId()).containsExactly(91L);
-        var book = CoreStateQueryCodec.decodeBookState(
+        var book = CoreStateQueryCodec.decodeOrderBookView(
                 applyBookQuery(original, query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0])).data());
         assertThat(book.exportSequence()).isEqualTo(5);
         assertThat(book.levels()).singleElement().satisfies(value -> {
