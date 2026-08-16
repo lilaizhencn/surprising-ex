@@ -200,8 +200,9 @@ verify_topics() {
 }
 
 start_owned_process() {
-  local service="$1" port="$2" defer_ready=false
+  local service="$1" port="$2" defer_ready=false readiness_timeout=45
   shift 2
+  [[ "$service" != gateway ]] || readiness_timeout=90
   if [[ "${1:-}" == --defer-ready ]]; then
     defer_ready=true
     shift
@@ -210,7 +211,7 @@ start_owned_process() {
   bash -c "$WRAPPER_SCRIPT" "$marker" "$@" > "$RUN_DIR/logs/$service.log" 2>&1 &
   local pid=$!
   printf '%s\n' "$pid" > "$RUN_DIR/pids/$service.pid"
-  local deadline=$((SECONDS + 45))
+  local deadline=$((SECONDS + readiness_timeout))
   while (( SECONDS < deadline )); do
     kill -0 "$pid" 2>/dev/null || fail "PROCESS_EXITED service=$service log=$RUN_DIR/logs/$service.log"
     if [[ -n "$port" ]] && port_ready "$port"; then
@@ -224,7 +225,7 @@ start_owned_process() {
     fi
     sleep 1
   done
-  fail "READINESS_TIMEOUT service=$service port=$port log=$RUN_DIR/logs/$service.log"
+  fail "READINESS_TIMEOUT service=$service port=$port timeout=${readiness_timeout}s log=$RUN_DIR/logs/$service.log"
 }
 
 port_ready() {
