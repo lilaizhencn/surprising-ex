@@ -41,7 +41,8 @@ class JdbcCoreEventProjectorTest {
                     "/db/migration/V002__create_core_state_projections.sql",
                     "/db/migration/V004__create_core_liquidation_projections.sql",
                     "/db/migration/V005__enrich_core_execution_projection.sql",
-                    "/db/migration/V006__enrich_core_liquidation_projection.sql")) {
+                    "/db/migration/V006__enrich_core_liquidation_projection.sql",
+                    "/db/migration/V007__add_projection_watermark_and_websocket_audit.sql")) {
                 try (var stream = getClass().getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) {
@@ -110,25 +111,25 @@ class JdbcCoreEventProjectorTest {
                 CorePositionSide.NET, "USDT", 2, 120_000, 100, -12);
         var shortPayment = new CoreFundingPaymentView(81, 18, "BTC-USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, "USDT", -2, 120_000, 100, 12);
-        var event = new CoreExportEvent(3, 3, 9, commandId, CoreMessageType.APPLY_FUNDING,
+        var event = new CoreExportEvent(1, 3, 9, commandId, CoreMessageType.APPLY_FUNDING,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 0, TradingCommandCodec.encodeApplyFunding(command),
                 java.util.List.of(), java.util.List.of(), java.util.List.of(),
                 java.util.List.of(longPayment, shortPayment));
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_FUNDING, commandId,
-                ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 1, 0, 1234, 1).exportEvent(3),
+                ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 1, 0, 1234, 1).exportEvent(1),
                 CoreExportCodec.encodeEvent(event));
 
         assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.LINEAR_PERPETUAL, message)).isTrue();
         var continuationCommand = new ApplyFundingCommand(81, "BTC-USDT", 7, 100, 18, 128);
         var continuationPayment = new CoreFundingPaymentView(81, 19, "BTC-USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, "USDT", 1, 60_000, 100, -6);
-        var continuation = new CoreExportEvent(4, 4, 10, UUID.randomUUID(), CoreMessageType.APPLY_FUNDING,
+        var continuation = new CoreExportEvent(2, 4, 10, UUID.randomUUID(), CoreMessageType.APPLY_FUNDING,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 0,
                 TradingCommandCodec.encodeApplyFunding(continuationCommand), java.util.List.of(),
                 java.util.List.of(), java.util.List.of(), java.util.List.of(continuationPayment));
         var continuationMessage = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_FUNDING,
                 continuation.commandId(), ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 4, 0,
-                1234, 1).exportEvent(4), CoreExportCodec.encodeEvent(continuation));
+                1234, 1).exportEvent(2), CoreExportCodec.encodeEvent(continuation));
         assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.LINEAR_PERPETUAL,
                 continuationMessage)).isTrue();
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
@@ -153,14 +154,14 @@ class JdbcCoreEventProjectorTest {
                 com.surprising.aeron.protocol.CoreMarginMode.ISOLATED, CorePositionSide.NET,
                 3, 8, 2, 2, 12, 60_000, 25_000, 3, "INSURANCE_REQUIRED");
         var treasury = new com.surprising.aeron.protocol.CoreTreasuryAssetView("USDT", 4, 9, 12);
-        var event = new CoreExportEvent(4, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
+        var event = new CoreExportEvent(1, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17,
                 TradingCommandCodec.encodeExecuteLiquidation(
                         new com.surprising.aeron.protocol.ExecuteLiquidationCommand(9, 1, 60_000, 25_000)),
                 java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(),
                 java.util.List.of(liquidation), java.util.List.of(treasury));
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.EXECUTE_LIQUIDATION, commandId,
-                ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 1, 17, 1234, 1).exportEvent(4),
+                ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 1, 17, 1234, 1).exportEvent(1),
                 CoreExportCodec.encodeEvent(event));
 
         assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.LINEAR_PERPETUAL, message)).isTrue();
@@ -188,7 +189,8 @@ class JdbcCoreEventProjectorTest {
                     "/db/migration/V003__create_core_funding_projections.sql",
                     "/db/migration/V004__create_core_liquidation_projections.sql",
                     "/db/migration/V005__enrich_core_execution_projection.sql",
-                    "/db/migration/V006__enrich_core_liquidation_projection.sql")) {
+                    "/db/migration/V006__enrich_core_liquidation_projection.sql",
+                    "/db/migration/V007__add_projection_watermark_and_websocket_audit.sql")) {
                 try (var stream = JdbcCoreEventProjectorTest.class.getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) if (!sql.isBlank()) statement.execute(sql);
