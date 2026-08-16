@@ -348,7 +348,7 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 int maxEvents = CoreExportCodec.decodeBatchQuery(message.payload());
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, stateHash(),
-                        CoreExportCodec.encodeBatchWithStatus(exportState.acknowledgedSequence(),
+                        CoreExportCodec.encodeBatchWithStatus(exportState.status(),
                                 exportState.batch(maxEvents)));
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);

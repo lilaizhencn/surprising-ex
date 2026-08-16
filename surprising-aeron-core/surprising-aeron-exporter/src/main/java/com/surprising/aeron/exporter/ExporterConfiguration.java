@@ -33,7 +33,9 @@ final class ExporterConfiguration {
     }
 
     static long idleMillis() {
-        return positiveLong("EXPORT_IDLE_MS", 10);
+        long configured = positiveLong("EXPORT_IDLE_MS", AdaptiveExportLoop.MIN_IDLE_MILLIS);
+        return Math.max(AdaptiveExportLoop.MIN_IDLE_MILLIS,
+                Math.min(configured, AdaptiveExportLoop.MAX_IDLE_MILLIS));
     }
 
     static Map<String, Object> kafkaProducerProperties() {

@@ -1,5 +1,6 @@
 package com.surprising.aeron.exporter;
 
+import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreExportBatch;
@@ -8,6 +9,7 @@ import com.surprising.aeron.protocol.CoreExportStatus;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
@@ -25,6 +27,7 @@ public final class ReliableCoreExporter {
     private final CoreCommandGateway core;
     private final CoreExportSink sink;
     private final int batchSize;
+    private final ExporterMetrics metrics;
     private final AtomicLong correlations = new AtomicLong();
 
     public ReliableCoreExporter(
@@ -32,9 +35,19 @@ public final class ReliableCoreExporter {
             CoreCommandGateway core,
             CoreExportSink sink,
             int batchSize) {
+        this(productLine, core, sink, batchSize, new ExporterMetrics(productLine));
+    }
+
+    public ReliableCoreExporter(
+            ProductLine productLine,
+            CoreCommandGateway core,
+            CoreExportSink sink,
+            int batchSize,
+            ExporterMetrics metrics) {
         this.productLine = Objects.requireNonNull(productLine, "productLine");
         this.core = Objects.requireNonNull(core, "core");
         this.sink = Objects.requireNonNull(sink, "sink");
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
         CoreExportCodec.encodeBatchQuery(batchSize);
         this.batchSize = batchSize;
     }
@@ -44,37 +57,56 @@ public final class ReliableCoreExporter {
     }
 
     private ExportCycleResult exportOnce(CoreExportStatus before) throws Exception {
-        CoreResponse batchResponse = core.submit(query(CoreMessageType.EXPORT_BATCH_QUERY,
-                CoreExportCodec.encodeBatchQuery(batchSize)));
-        requireOk(batchResponse, "export batch query");
-        CoreExportBatch batch = CoreExportCodec.decodeBatchResponse(batchResponse.data());
-        List<CoreMessage> events = batch.events();
-        if (events.isEmpty()) {
-            if (before != null && before.pendingCount() > 0) {
-                throw new IllegalStateException("non-empty export backlog returned an empty batch");
+        try {
+            CoreResponse batchResponse = submitQuery(CoreMessageType.EXPORT_BATCH_QUERY,
+                    CoreExportCodec.encodeBatchQuery(batchSize));
+            requireOk(batchResponse, "export batch query");
+            CoreExportBatch batch = CoreExportCodec.decodeBatchResponse(batchResponse.data());
+            CoreExportStatus queryStatus = batch.status();
+            List<CoreMessage> events = batch.events();
+            metrics.observeBatch(queryStatus, events);
+            if (before != null && queryStatus.acknowledgedSequence() != before.acknowledgedSequence()) {
+                throw new IllegalStateException("export acknowledgement moved during batch query");
             }
-            return new ExportCycleResult(0, before == null ? status() : before);
+            if (events.isEmpty()) {
+                if (queryStatus.pendingCount() > 0) {
+                    throw new IllegalStateException("non-empty export backlog returned an empty batch");
+                }
+                return new ExportCycleResult(0, queryStatus);
+            }
+            validateContiguous(events, queryStatus.acknowledgedSequence() + 1);
+            sink.publish(productLine, events);
+            long throughSequence = CoreExportCodec.decodeEvent(events.getLast().payload()).exportSequence();
+            metrics.recordPublished(events.size(), throughSequence);
+            CoreResponse ackResponse = core.submit(ack(throughSequence));
+            if (ackResponse.commandStatus() != ResponseStatus.APPLIED
+                    && ackResponse.commandStatus() != ResponseStatus.DUPLICATE) {
+                throw new IllegalStateException("export ack rejected: " + ackResponse.resultCode());
+            }
+            if (ackResponse.commandStatus() == ResponseStatus.DUPLICATE) {
+                metrics.recordDuplicate(1);
+            }
+            CoreExportStatus after = ackResponse.data().length == 0
+                    ? statusAfterAck(queryStatus, events) : CoreExportCodec.decodeStatus(ackResponse.data());
+            metrics.recordAcknowledged(after);
+            return new ExportCycleResult(events.size(), after);
+        } catch (ResultUnknownException exception) {
+            metrics.recordUnknown();
+            metrics.recordRetry();
+            throw exception;
+        } catch (Exception exception) {
+            metrics.recordFailure();
+            metrics.recordRetry();
+            throw exception;
         }
-        if (before != null && batch.acknowledgedSequence() != before.acknowledgedSequence()) {
-            throw new IllegalStateException("export acknowledgement moved during batch query");
-        }
-        validateContiguous(events, batch.acknowledgedSequence() + 1);
-        sink.publish(productLine, events);
-        long throughSequence = CoreExportCodec.decodeEvent(events.getLast().payload()).exportSequence();
-        CoreResponse ackResponse = core.submit(ack(throughSequence));
-        if (ackResponse.commandStatus() != ResponseStatus.APPLIED
-                && ackResponse.commandStatus() != ResponseStatus.DUPLICATE) {
-            throw new IllegalStateException("export ack rejected: " + ackResponse.resultCode());
-        }
-        CoreExportStatus after = ackResponse.data().length == 0
-                ? status() : CoreExportCodec.decodeStatus(ackResponse.data());
-        return new ExportCycleResult(events.size(), after);
     }
 
     public CoreExportStatus status() {
-        CoreResponse response = core.submit(query(CoreMessageType.EXPORT_STATUS_QUERY, new byte[0]));
+        CoreResponse response = submitQuery(CoreMessageType.EXPORT_STATUS_QUERY, new byte[0]);
         requireOk(response, "export status query");
-        return CoreExportCodec.decodeStatus(response.data());
+        CoreExportStatus status = CoreExportCodec.decodeStatus(response.data());
+        metrics.recordAcknowledged(status);
+        return status;
     }
 
     public ExportHealth health() {
@@ -86,14 +118,26 @@ public final class ReliableCoreExporter {
         if (maxCycles <= 0) {
             throw new IllegalArgumentException("maxCycles must be positive");
         }
-        CoreExportStatus current = status();
-        for (int cycle = 0; cycle < maxCycles && current.pendingCount() > 0; cycle++) {
+        CoreExportStatus current = null;
+        for (int cycle = 0; cycle < maxCycles; cycle++) {
             current = exportOnce(current).status();
+            if (current.pendingCount() == 0) {
+                return current;
+            }
         }
-        if (current.pendingCount() > 0) {
+        if (current != null && current.pendingCount() > 0) {
             throw new IllegalStateException("export drain exceeded max cycles; pending=" + current.pendingCount());
         }
         return current;
+    }
+
+    public ExporterMetrics.Snapshot metrics() {
+        return metrics.snapshot();
+    }
+
+    private CoreResponse submitQuery(CoreMessageType type, byte[] payload) {
+        metrics.recordQuery();
+        return core.submit(query(type, payload));
     }
 
     private CoreMessage query(CoreMessageType type, byte[] payload) {
@@ -112,6 +156,17 @@ public final class ReliableCoreExporter {
                 productLine, CommandSource.OPERATIONS, SOURCE_ID, throughSequence, 0,
                 System.currentTimeMillis(), correlations.incrementAndGet()),
                 CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)));
+    }
+
+    private static CoreExportStatus statusAfterAck(CoreExportStatus before, List<CoreMessage> events) {
+        long encodedBytes = events.stream()
+                .mapToLong(message -> CoreProtocol.HEADER_LENGTH + message.payloadLength()).sum();
+        return new CoreExportStatus(
+                CoreExportCodec.decodeEvent(events.getLast().payload()).exportSequence(),
+                before.nextSequence(),
+                Math.max(0, before.pendingCount() - events.size()),
+                Math.max(0, before.pendingBytes() - encodedBytes),
+                before.maxPendingCount(), before.maxPendingBytes());
     }
 
     private static void validateContiguous(List<CoreMessage> events, long expectedFirst) {

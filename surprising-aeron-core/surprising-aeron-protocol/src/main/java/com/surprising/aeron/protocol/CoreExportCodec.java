@@ -9,14 +9,14 @@ import java.util.UUID;
 public final class CoreExportCodec {
 
     private static final int EVENT_V6_MARKER = 0xC0E6_0006;
-    private static final int BATCH_V2_MARKER = 0xC0B2_0002;
+    private static final int BATCH_V3_MARKER = 0xC0B2_0003;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
             CoreMessageCodec.MAX_PAYLOAD_LENGTH - EVENT_FIXED_LENGTH;
     private static final int MAX_BATCH_EVENTS = 4096;
     public static final int MAX_BATCH_ENCODED_LENGTH =
             CoreMessageCodec.MAX_PAYLOAD_LENGTH - CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH;
-    public static final int BATCH_STATUS_FIXED_LENGTH = Integer.BYTES + Long.BYTES;
+    public static final int BATCH_STATUS_FIXED_LENGTH = Integer.BYTES + Long.BYTES * 4 + Integer.BYTES * 2;
 
     private CoreExportCodec() {
     }
@@ -325,30 +325,47 @@ public final class CoreExportCodec {
         return output.array();
     }
 
-    public static byte[] encodeBatchWithStatus(long acknowledgedSequence, List<CoreMessage> events) {
-        if (acknowledgedSequence < 0) {
-            throw new IllegalArgumentException("invalid acknowledged export sequence");
+    public static byte[] encodeBatchWithStatus(CoreExportStatus status, List<CoreMessage> events) {
+        if (status == null) {
+            throw new IllegalArgumentException("export status is required");
         }
         byte[] batch = encodeBatch(events);
         int length = Math.addExact(BATCH_STATUS_FIXED_LENGTH, batch.length);
         if (length > MAX_BATCH_ENCODED_LENGTH) {
             throw new IllegalArgumentException("export batch exceeds response payload limit");
         }
-        return littleEndian(length).putInt(BATCH_V2_MARKER).putLong(acknowledgedSequence).put(batch).array();
+        return littleEndian(length).putInt(BATCH_V3_MARKER)
+                .putLong(status.acknowledgedSequence())
+                .putLong(status.nextSequence())
+                .putInt(status.pendingCount())
+                .putLong(status.pendingBytes())
+                .putInt(status.maxPendingCount())
+                .putLong(status.maxPendingBytes())
+                .put(batch).array();
     }
 
     public static CoreExportBatch decodeBatchResponse(byte[] encoded) {
-        if (encoded == null || encoded.length < BATCH_STATUS_FIXED_LENGTH) {
+        if (encoded == null || encoded.length < BATCH_STATUS_FIXED_LENGTH + Integer.BYTES) {
             throw new ProtocolException("export batch response is truncated");
         }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
-        if (input.getInt() != BATCH_V2_MARKER) {
+        if (input.getInt() != BATCH_V3_MARKER) {
             throw new ProtocolException("unsupported export batch response version");
         }
         long acknowledgedSequence = input.getLong();
+        long nextSequence = input.getLong();
+        int pendingCount = input.getInt();
+        long pendingBytes = input.getLong();
+        int maxPendingCount = input.getInt();
+        long maxPendingBytes = input.getLong();
         byte[] batch = new byte[input.remaining()];
         input.get(batch);
-        return new CoreExportBatch(acknowledgedSequence, decodeBatch(batch));
+        try {
+            return new CoreExportBatch(new CoreExportStatus(acknowledgedSequence, nextSequence, pendingCount,
+                    pendingBytes, maxPendingCount, maxPendingBytes), decodeBatch(batch));
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException("invalid export batch status");
+        }
     }
 
     public static List<CoreMessage> decodeBatch(byte[] encoded) {

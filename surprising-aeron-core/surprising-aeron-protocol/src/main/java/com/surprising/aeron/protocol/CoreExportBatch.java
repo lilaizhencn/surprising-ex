@@ -1,12 +1,18 @@
 package com.surprising.aeron.protocol;
 
 import java.util.List;
+import java.util.Objects;
 
-public record CoreExportBatch(long acknowledgedSequence, List<CoreMessage> events) {
+public record CoreExportBatch(CoreExportStatus status, List<CoreMessage> events) {
     public CoreExportBatch {
-        if (acknowledgedSequence < 0 || events == null) {
+        Objects.requireNonNull(status, "status");
+        if (events == null) {
             throw new IllegalArgumentException("invalid export batch");
         }
         events = List.copyOf(events);
+    }
+
+    public long acknowledgedSequence() {
+        return status.acknowledgedSequence();
     }
 }

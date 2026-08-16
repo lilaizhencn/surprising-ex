@@ -29,8 +29,12 @@ public final class ProjectionMain {
                     ExporterConfiguration.databasePassword()));
             var worker = new KafkaProjectionWorker(productLine, consumer, projector);
             System.out.printf("Core projection started productLine=%s%n", productLine);
+            long pollMillis = AdaptiveExportLoop.MIN_IDLE_MILLIS;
             while (!Thread.currentThread().isInterrupted()) {
-                worker.pollOnce(Duration.ofMillis(250));
+                int processed = worker.pollOnce(Duration.ofMillis(pollMillis));
+                pollMillis = processed == 0
+                        ? AdaptiveExportLoop.nextIdleMillis(pollMillis, AdaptiveExportLoop.MAX_IDLE_MILLIS)
+                        : AdaptiveExportLoop.MIN_IDLE_MILLIS;
             }
         }
     }

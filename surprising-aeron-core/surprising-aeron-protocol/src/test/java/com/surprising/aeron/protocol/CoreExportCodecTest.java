@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.product.api.ProductLine;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -34,8 +37,9 @@ class CoreExportCodecTest {
 
         CoreExportEvent restored = CoreExportCodec.decodeEvent(message.payload());
         List<CoreMessage> batch = CoreExportCodec.decodeBatch(CoreExportCodec.encodeBatch(List.of(message)));
+        CoreExportStatus status = new CoreExportStatus(6, 8, 1, 256, 1_000_000, 64L * 1024 * 1024);
         CoreExportBatch batchWithStatus = CoreExportCodec.decodeBatchResponse(
-                CoreExportCodec.encodeBatchWithStatus(6, List.of(message)));
+                CoreExportCodec.encodeBatchWithStatus(status, List.of(message)));
 
         assertThat(restored.exportSequence()).isEqualTo(7);
         assertThat(restored.commandPayload()).containsExactly(1, 2, 3);
@@ -51,8 +55,8 @@ class CoreExportCodecTest {
         assertThat(batchWithStatus.events()).containsExactly(message);
         assertThat(CoreExportCodec.decodeAck(CoreExportCodec.encodeAck(new AckExportCommand(7))))
                 .isEqualTo(new AckExportCommand(7));
-        CoreExportStatus status = new CoreExportStatus(6, 8, 1, 256, 1_000_000, 64L * 1024 * 1024);
         assertThat(CoreExportCodec.decodeStatus(CoreExportCodec.encodeStatus(status))).isEqualTo(status);
+        assertThat(batchWithStatus.status()).isEqualTo(status);
     }
 
     @Test
@@ -62,6 +66,36 @@ class CoreExportCodecTest {
         assertThatThrownBy(() -> CoreExportCodec.decodeAck(new byte[7]))
                 .isInstanceOf(ProtocolException.class);
         assertThatThrownBy(() -> CoreExportCodec.decodeBatchQuery(new byte[]{0, 0, 0, 0}))
+                .isInstanceOf(ProtocolException.class);
+    }
+
+    @Test
+    void batchResponseCarriesCompletePostQueryStatus() {
+        CoreExportStatus expected = new CoreExportStatus(12, 17, 4, 1_024,
+                1_000_000, 64L * 1024 * 1024);
+
+        CoreExportBatch actual = CoreExportCodec.decodeBatchResponse(
+                CoreExportCodec.encodeBatchWithStatus(expected, List.of()));
+
+        assertThat(actual.status()).isEqualTo(expected);
+        assertThat(actual.events()).isEmpty();
+    }
+
+    @Test
+    void rejectsMalformedStatusBearingBatchResponses() {
+        CoreExportStatus status = new CoreExportStatus(0, 1, 0, 0, 1_000_000, 64L * 1024 * 1024);
+        byte[] encoded = CoreExportCodec.encodeBatchWithStatus(status, List.of());
+
+        assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(
+                Arrays.copyOf(encoded, CoreExportCodec.BATCH_STATUS_FIXED_LENGTH)))
+                .isInstanceOf(ProtocolException.class);
+        assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(
+                Arrays.copyOf(encoded, encoded.length + 1)))
+                .isInstanceOf(ProtocolException.class);
+
+        byte[] invalidStatus = encoded.clone();
+        ByteBuffer.wrap(invalidStatus).order(ByteOrder.LITTLE_ENDIAN).putInt(20, -1);
+        assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(invalidStatus))
                 .isInstanceOf(ProtocolException.class);
     }
 }
