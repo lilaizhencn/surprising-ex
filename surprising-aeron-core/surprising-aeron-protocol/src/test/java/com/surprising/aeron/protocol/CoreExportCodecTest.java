@@ -98,4 +98,39 @@ class CoreExportCodecTest {
         assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(invalidStatus))
                 .isInstanceOf(ProtocolException.class);
     }
+
+    @Test
+    void enforcesCompleteStatusBearingResponseMaximumAtBoundaryAndPlusOne() {
+        CoreExportStatus status = new CoreExportStatus(0, 2, 1, 64, 1_000_000, 64L * 1024 * 1024);
+        int maximumInnerBatchLength = CoreExportCodec.MAX_BATCH_ENCODED_LENGTH
+                - CoreExportCodec.BATCH_STATUS_FIXED_LENGTH;
+        CoreMessage maximumMessage = messageForBatchLength(maximumInnerBatchLength);
+        byte[] exact = CoreExportCodec.encodeBatchWithStatus(status, List.of(maximumMessage));
+
+        assertThat(exact).hasSize(CoreExportCodec.MAX_BATCH_ENCODED_LENGTH);
+        assertThat(CoreExportCodec.decodeBatchResponse(exact).events()).containsExactly(maximumMessage);
+
+        byte[] oversizedInnerBatch = CoreExportCodec.encodeBatch(
+                List.of(messageForBatchLength(maximumInnerBatchLength + 1)));
+        byte[] oversized = withStatusHeader(status, oversizedInnerBatch);
+        assertThat(oversized).hasSize(CoreExportCodec.MAX_BATCH_ENCODED_LENGTH + 1);
+        assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(oversized))
+                .isInstanceOf(ProtocolException.class);
+    }
+
+    private static CoreMessage messageForBatchLength(int batchLength) {
+        int payloadLength = batchLength - Integer.BYTES * 2 - CoreProtocol.HEADER_LENGTH;
+        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 1, 1, 0, 1, 1),
+                new byte[payloadLength]);
+        assertThat(CoreExportCodec.encodeBatch(List.of(message))).hasSize(batchLength);
+        return message;
+    }
+
+    private static byte[] withStatusHeader(CoreExportStatus status, byte[] batch) {
+        byte[] empty = CoreExportCodec.encodeBatchWithStatus(status, List.of());
+        byte[] encoded = Arrays.copyOf(empty, CoreExportCodec.BATCH_STATUS_FIXED_LENGTH + batch.length);
+        System.arraycopy(batch, 0, encoded, CoreExportCodec.BATCH_STATUS_FIXED_LENGTH, batch.length);
+        return encoded;
+    }
 }

@@ -348,6 +348,9 @@ public final class CoreExportCodec {
         if (encoded == null || encoded.length < BATCH_STATUS_FIXED_LENGTH + Integer.BYTES) {
             throw new ProtocolException("export batch response is truncated");
         }
+        if (encoded.length > MAX_BATCH_ENCODED_LENGTH) {
+            throw new ProtocolException("export batch response exceeds payload limit");
+        }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
         if (input.getInt() != BATCH_V3_MARKER) {
             throw new ProtocolException("unsupported export batch response version");
