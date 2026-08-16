@@ -109,6 +109,6 @@ The provider reactor included the existing Aeron protocol contract tests (53 pro
 ### Completed handoff
 
 - Implementation commit: `6067928e0d9cd8160b42920a24ff9e04d24335ff` (`fix(order): type mutation receipt wire results`).
-- Evidence commit: `51483644dddcd64a615bf2420ce250531e7346db` (`docs: record Task 5 receipt contract closure`).
+- Semantic evidence file is committed on the branch after the implementation commit.
 - Pushed branch: `codex/w3-w5-production-closure`.
-- Verified remote tip: `51483644dddcd64a615bf2420ce250531e7346db`.
+- Final remote verification matched the local `HEAD`.
