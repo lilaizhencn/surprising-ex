@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntSupplier;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BackoffIdleStrategy;
@@ -29,7 +28,6 @@ import org.agrona.concurrent.UnsafeBuffer;
 public final class SurprisingAeronClient implements AeronClientPool.Session, EgressListener {
 
     private static final int AERON_EGRESS_POLL_LIMIT = 10;
-    private static final AtomicLong MEDIA_DRIVER_SEQUENCE = new AtomicLong();
 
     private final ProductLine productLine;
     private final Duration responseTimeout;
@@ -136,8 +134,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     static MediaDriver newMediaDriver() {
-        return newMediaDriver("surprising-aeron-client-" + ProcessHandle.current().pid()
-                + '-' + MEDIA_DRIVER_SEQUENCE.incrementAndGet());
+        return newMediaDriver(null);
     }
 
     static MediaDriver newMediaDriver(String aeronDirectoryName) {
