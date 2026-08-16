@@ -29,6 +29,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -176,6 +177,113 @@ class CoreOrderedOrderBatchTest {
         }
     }
 
+    @Test
+    void amendPartialMatcherFailureMustFailStickyBeforeRecordingBusinessRejection() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            CoreMessage place = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(12_101, "partial-amend-source", 1_000)))));
+            assertThat(drainBatch(state, place).status()).isEqualTo(ResponseStatus.APPLIED);
+
+            UUID commandId = UUID.randomUUID();
+            CoreMessage amend = command(CoreMessageType.AMEND_ORDER_BATCH, commandId, 3,
+                    TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
+                            new AmendOrderCommand(12_101, 12_102, "partial-amend-replacement", 1_100L, 2L,
+                                    CoreTimeInForce.GTC, false),
+                            new AmendOrderCommand(12_101, 12_103, "must-not-run", 1_200L, 1L,
+                                    CoreTimeInForce.GTC, false)))));
+
+            assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.matchingSequence(commandId);
+            var partialMatcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
+                    false, "MATCHING_INVALID_ORDER_ID", List.of(), List.of(), 0, true);
+
+            Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
+                    () -> state.completeMatching(sequence, partialMatcherFailure, 2_000, 4));
+
+            assertThat(divergence).isInstanceOf(
+                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+            assertThat(state.tradingState().order(12_101).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().order(12_102)).isNull();
+            assertThat(state.tradingState().order(12_103)).isNull();
+            assertThat(state.pendingMatchingCount()).isEqualTo(1);
+            assertThat(state.commandResults().get(commandId).resultCode())
+                    .isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
+                    .isSameAs(divergence);
+        }
+    }
+
+    @Test
+    void rejectsMixedUserCancelBatchBeforeAnyMutation() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            applyBalance(state, 1002, 100_000, 2);
+            CoreMessage ownPlace = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(13_001, "mixed-user-own", 1_000)))), 1001);
+            CoreMessage foreignPlace = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(13_002, "mixed-user-foreign", 1_000)))), 1002);
+            assertThat(drainBatch(state, ownPlace).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(drainBatch(state, foreignPlace).status()).isEqualTo(ResponseStatus.APPLIED);
+
+            TradingCoreState before = state.tradingState();
+            long appliedBefore = state.appliedCommandCount();
+            long stateHashBefore = state.stateHash();
+            int exportEventsBefore = state.exportState().pendingCount();
+            UUID commandId = UUID.randomUUID();
+            CoreMessage mixed = command(CoreMessageType.CANCEL_ORDER_BATCH, commandId, 5,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(13_001), new CancelOrderCommand(13_002)))), 1001);
+
+            CoreResponse response = state.apply(mixed);
+
+            assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(response.resultCode()).isEqualTo(CoreResultCode.ORDER_OWNER_MISMATCH);
+            assertThat(state.tradingState()).isSameAs(before);
+            assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
+            assertThat(state.stateHash()).isEqualTo(stateHashBefore);
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.exportState().pendingCount()).isEqualTo(exportEventsBefore);
+            assertThat(state.commandResults()).doesNotContainKey(commandId);
+            assertThat(state.tradingState().order(13_001).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().order(13_002).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+        }
+    }
+
+    @Test
+    void rejectsProductLineMismatchBeforeAnyBatchMutation() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            TradingCoreState before = state.tradingState();
+            long appliedBefore = state.appliedCommandCount();
+            long stateHashBefore = state.stateHash();
+            int exportEventsBefore = state.exportState().pendingCount();
+            UUID commandId = UUID.randomUUID();
+            CoreMessage crossLine = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
+                    commandId, 2, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(14_001, "cross-line", 1_000)))));
+
+            CoreResponse response = state.apply(crossLine);
+
+            assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(response.resultCode()).isEqualTo(CoreResultCode.PRODUCT_LINE_MISMATCH);
+            assertThat(state.tradingState()).isSameAs(before);
+            assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
+            assertThat(state.stateHash()).isEqualTo(stateHashBefore);
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.exportState().pendingCount()).isEqualTo(exportEventsBefore);
+            assertThat(state.commandResults()).doesNotContainKey(commandId);
+        }
+    }
+
     private static CoreResponse drainBatch(CoreProbeState state, CoreMessage batch) {
         CoreResponse initial = state.apply(batch);
         if (initial.resultCode() != CoreResultCode.MATCHING_PENDING) return initial;
@@ -223,7 +331,11 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static void applyBalance(CoreProbeState state, long userId, long units) {
-        assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+        applyBalance(state, userId, units, 1);
+    }
+
+    private static void applyBalance(CoreProbeState state, long userId, long units, long sourceSequence) {
+        assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), sourceSequence,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", units)), userId))
                 .status()).isEqualTo(ResponseStatus.APPLIED);
     }
@@ -234,7 +346,17 @@ class CoreOrderedOrderBatchTest {
 
     private static CoreMessage command(CoreMessageType type, UUID commandId, long sourceSequence,
                                        byte[] payload, long userId) {
-        return new CoreMessage(CoreMessageHeader.command(type, commandId, ProductLine.SPOT,
+        return command(ProductLine.SPOT, type, commandId, sourceSequence, payload, userId);
+    }
+
+    private static CoreMessage command(ProductLine productLine, CoreMessageType type, UUID commandId,
+                                       long sourceSequence, byte[] payload) {
+        return command(productLine, type, commandId, sourceSequence, payload, 1001);
+    }
+
+    private static CoreMessage command(ProductLine productLine, CoreMessageType type, UUID commandId,
+                                       long sourceSequence, byte[] payload, long userId) {
+        return new CoreMessage(CoreMessageHeader.command(type, commandId, productLine,
                 CommandSource.GATEWAY, 77, sourceSequence, userId, 1_000, sourceSequence), payload);
     }
 

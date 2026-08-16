@@ -222,7 +222,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                             .reservePrice(replacement.side() == CoreOrderSide.BUY
                                                     ? Long.MAX_VALUE : replacement.matchingPriceTicks())
                                             .size(replacement.quantitySteps()).build());
-                            return place.thenApply(DeterministicExchangeCoreAdapter::matchingResult);
+                            return place.thenApply(response -> {
+                                CoreMatchingResult result = matchingResult(response);
+                                return result.accepted() ? result : new CoreMatchingResult(false,
+                                        result.resultCode(), result.matches(), result.cancellations(),
+                                        result.successfulPrefixCount(), true);
+                            });
                         });
                     });
                 })));

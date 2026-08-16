@@ -3,7 +3,11 @@ package com.surprising.aeron.service.matching;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.state.ActiveOrderIndex;
@@ -48,6 +52,20 @@ class DeterministicExchangeCoreAdapterTest {
         assertThat(outcome.exception()).isNull();
         assertThat(outcome.results()).extracting(CoreMatchingResult::resultCode)
                 .containsExactly("SUCCESS", "MATCHING_INVALID_ORDER_ID", "NOT_SUBMITTED");
+    }
+
+    @Test
+    void marksRejectedReplacementAfterSuccessfulCancelAsMatcherStateChanged() {
+        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+            assertThat(adapter.placeAsync(7, bid(1, 100)).join().accepted()).isTrue();
+            assertThat(adapter.placeAsync(7, ask(2, 110)).join().accepted()).isTrue();
+
+            CoreMatchingResult result = adapter.replaceOrderAsync(7, 1, "BTC-USDT", postOnlyBid(3, 120)).join();
+
+            assertThat(result.accepted()).isFalse();
+            assertThat(result.resultCode()).isNotEqualTo("SUCCESS");
+            assertThat(result.matcherStateChanged()).isTrue();
+        }
     }
 
     @Test
@@ -122,8 +140,24 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static PlaceOrderCommand bid(long priceTicks) {
-        return new PlaceOrderCommand(1, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+        return bid(1, priceTicks);
+    }
+
+    private static PlaceOrderCommand bid(long orderId, long priceTicks) {
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT",
                 CoreOrderSide.BUY, priceTicks, 2, false, ReservationKind.SPOT_ASSET, "USDT", 200);
+    }
+
+    private static PlaceOrderCommand ask(long orderId, long priceTicks) {
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+                CoreOrderSide.SELL, priceTicks, 2, false, ReservationKind.SPOT_ASSET, "BTC", 0);
+    }
+
+    private static PlaceOrderCommand postOnlyBid(long orderId, long priceTicks) {
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+                CoreOrderSide.BUY, priceTicks, 2, false, CoreMarginMode.CROSS,
+                CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT", 0,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTX, priceTicks, true, "", 0, 0);
     }
 
     private static TradingCoreState stateWithOpenBid(long priceTicks) {
