@@ -130,7 +130,7 @@ class AeronOrderCommandServiceTest {
     }
 
     @Test
-    void clientOrderIdCommandIdentityIsStableOnlyForTheSameIntent() {
+    void clientOrderIdCommandIdentityIsStableAcrossChangedPayloads() {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-identity", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
@@ -155,7 +155,7 @@ class AeronOrderCommandServiceTest {
         verify(aeron, times(3)).command(eq(CoreMessageType.PLACE_ORDER), commandIds.capture(), eq(1001L),
                 org.mockito.ArgumentMatchers.any(byte[].class));
         assertThat(commandIds.getAllValues().get(0)).isEqualTo(commandIds.getAllValues().get(1));
-        assertThat(commandIds.getAllValues().get(0)).isNotEqualTo(commandIds.getAllValues().get(2));
+        assertThat(commandIds.getAllValues().get(0)).isEqualTo(commandIds.getAllValues().get(2));
     }
 
     @Test

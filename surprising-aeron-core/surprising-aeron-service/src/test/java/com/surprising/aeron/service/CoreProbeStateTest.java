@@ -75,7 +75,7 @@ class CoreProbeStateTest {
                 CommandSource.GATEWAY, 7, 0, 1001, 1_000, 3),
                 CoreStateQueryCodec.encodeCommandResultQuery(UUID.randomUUID())));
         assertThat(unknown.status()).isEqualTo(ResponseStatus.REJECTED);
-        assertThat(unknown.resultCode()).isEqualTo(CoreResultCode.ENTITY_NOT_FOUND);
+        assertThat(unknown.resultCode()).isEqualTo(CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION);
     }
 
     @Test
@@ -764,7 +764,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(6);
+        assertThat(manifest.schemaVersion()).isEqualTo(7);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();

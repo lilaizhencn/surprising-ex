@@ -642,7 +642,8 @@ public class OrderService {
             throw new IllegalArgumentException("amended resting order requires GTC or GTX");
         }
         return new AmendOrderRequest(request.userId(), request.orderId(), newClientOrderId,
-                request.priceTicks(), request.quantitySteps(), request.timeInForce(), request.postOnly());
+                request.priceTicks(), request.quantitySteps(), request.timeInForce(), request.postOnly(),
+                request.clientRequestId());
     }
 
     private PlaceOrderRequest normalizePositionSemantics(PlaceOrderRequest request, ProductLine productLine) {

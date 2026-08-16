@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -23,10 +24,10 @@ import java.util.zip.CRC32C;
 final class CoreStateSnapshotCodec {
 
     private static final int MAGIC = 0x5358534E;
-    private static final int VERSION = 6;
+    private static final int VERSION = 7;
     private static final int FIXED_LENGTH = 48;
     private static final int SOURCE_SEQUENCE_LENGTH = 24;
-    private static final int RESULT_LENGTH = 40;
+    static final int RESULT_FIXED_LENGTH = 92;
     private static final int EXPORT_FIXED_LENGTH = 20;
     private static final int CHECKSUM_LENGTH = Long.BYTES;
     static final int MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
@@ -49,10 +50,15 @@ final class CoreStateSnapshotCodec {
         for (byte[] event : pendingEvents) {
             exportLength = Math.addExact(exportLength, Math.addExact(Integer.BYTES, event.length));
         }
+        long resultLength = 0;
+        for (CoreProbeState.StoredResult result : state.commandResults().values()) {
+            resultLength = Math.addExact(resultLength,
+                    Math.addExact(Integer.BYTES, resultEntryLength(result)));
+        }
         long calculatedLength = Math.addExact(Math.addExact(Math.addExact(
                 Math.addExact((long) FIXED_LENGTH,
                         Math.multiplyExact((long) state.lastSourceSequences().size(), SOURCE_SEQUENCE_LENGTH)),
-                Math.multiplyExact((long) state.commandResults().size(), RESULT_LENGTH)),
+                resultLength),
                 exportLength), Math.addExact(Math.addExact(matcherState.length, tradingState.length), CHECKSUM_LENGTH));
         if (calculatedLength > MAX_SNAPSHOT_BYTES) {
             throw new IllegalArgumentException("core snapshot exceeds maximum size");
@@ -79,12 +85,9 @@ final class CoreStateSnapshotCodec {
             buffer.putLong(sequence);
         });
         state.commandResults().forEach((commandId, result) -> {
-            buffer.putLong(commandId.getMostSignificantBits());
-            buffer.putLong(commandId.getLeastSignificantBits());
-            buffer.putInt(result.status().wireCode());
-            buffer.putInt(result.resultCode().wireCode());
-            buffer.putLong(result.appliedCommandCount());
-            buffer.putLong(result.stateHash());
+            byte[] encoded = encodeResult(commandId, result);
+            buffer.putInt(encoded.length);
+            buffer.put(encoded);
         });
         buffer.putLong(state.exportState().acknowledgedSequence());
         buffer.putLong(state.exportState().nextSequence());
@@ -144,14 +147,16 @@ final class CoreStateSnapshotCodec {
                 || sourceSequenceCount > CoreProbeState.MAX_SOURCE_SEQUENCES
                 || pendingCount != 0 || tradingStateLength <= 0 || matcherStateLength <= 0
                 || FIXED_LENGTH + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
-                        + (long) resultCount * RESULT_LENGTH + tradingStateLength
-                        + matcherStateLength > snapshot.length) {
+                        + (long) resultCount * (Integer.BYTES + RESULT_FIXED_LENGTH)
+                        + EXPORT_FIXED_LENGTH + tradingStateLength + matcherStateLength + CHECKSUM_LENGTH
+                        > snapshot.length) {
             throw new ProtocolException("invalid snapshot manifest counts");
         }
-        int fixedDataEnd = Math.toIntExact(FIXED_LENGTH
-                + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
-                + (long) resultCount * RESULT_LENGTH);
-        buffer.position(fixedDataEnd);
+        buffer.position(Math.toIntExact(FIXED_LENGTH
+                + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH));
+        for (int index = 0; index < resultCount; index++) {
+            readResult(buffer, matcherStateLength, tradingStateLength);
+        }
         long acknowledgedSequence = buffer.getLong();
         long nextSequence = buffer.getLong();
         int eventCount = buffer.getInt();
@@ -233,13 +238,13 @@ final class CoreStateSnapshotCodec {
         int tradingStateLength = buffer.getInt();
         int matcherStateLength = buffer.getInt();
         int pendingCount = buffer.getInt();
-        int fixedLength = FIXED_LENGTH;
         if (resultCount < 0 || resultCount > CoreProbeState.MAX_IDEMPOTENCY_RESULTS || sourceSequenceCount < 0
                 || sourceSequenceCount > CoreProbeState.MAX_SOURCE_SEQUENCES
                 || pendingCount != 0 || tradingStateLength <= 0 || matcherStateLength <= 0
-                || fixedLength + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
-                        + (long) resultCount * RESULT_LENGTH + tradingStateLength
-                        + matcherStateLength > snapshot.length) {
+                || FIXED_LENGTH + (long) sourceSequenceCount * SOURCE_SEQUENCE_LENGTH
+                        + (long) resultCount * (Integer.BYTES + RESULT_FIXED_LENGTH)
+                        + EXPORT_FIXED_LENGTH + tradingStateLength + matcherStateLength + CHECKSUM_LENGTH
+                        > snapshot.length) {
             throw new ProtocolException("invalid snapshot result count: " + resultCount);
         }
         Map<CoreProbeState.SourceKey, Long> lastSourceSequences = new LinkedHashMap<>();
@@ -258,14 +263,9 @@ final class CoreStateSnapshotCodec {
         }
         Map<UUID, CoreProbeState.StoredResult> results = new LinkedHashMap<>();
         for (int index = 0; index < resultCount; index++) {
-            UUID commandId = new UUID(buffer.getLong(), buffer.getLong());
-            ResponseStatus status = ResponseStatus.fromWireCode(buffer.getInt());
-            CoreResultCode resultCode = CoreResultCode.fromWireCode(buffer.getInt());
-            long resultAppliedCount = buffer.getLong();
-            long stateHash = buffer.getLong();
-            if (resultAppliedCount < 0 || results.put(commandId,
-                    new CoreProbeState.StoredResult(status, resultCode, resultAppliedCount, stateHash)) != null) {
-                throw new ProtocolException("invalid duplicate snapshot command result: " + commandId);
+            SnapshotResult result = readResult(buffer, matcherStateLength, tradingStateLength);
+            if (results.put(result.commandId(), result.value()) != null) {
+                throw new ProtocolException("invalid duplicate snapshot command result: " + result.commandId());
             }
         }
         CoreExportState exportState = new CoreExportState();
@@ -304,6 +304,63 @@ final class CoreStateSnapshotCodec {
         buffer.getLong();
         return CoreProbeState.restore(productLine, appliedCommandCount, probeValue,
                 results, lastSourceSequences, tradingState, exportState, matcherSnapshot);
+    }
+
+    private static int resultEntryLength(CoreProbeState.StoredResult result) {
+        return Math.addExact(RESULT_FIXED_LENGTH, result.responseData().length);
+    }
+
+    private static byte[] encodeResult(UUID commandId, CoreProbeState.StoredResult result) {
+        byte[] responseData = result.responseData();
+        ByteBuffer buffer = ByteBuffer.allocate(resultEntryLength(result)).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putLong(commandId.getMostSignificantBits());
+        buffer.putLong(commandId.getLeastSignificantBits());
+        buffer.put(result.fingerprint().bytes());
+        buffer.putInt(result.status().wireCode());
+        buffer.putInt(result.resultCode().wireCode());
+        buffer.putLong(result.appliedCommandCount());
+        buffer.putLong(result.requiredExportSequence());
+        buffer.putLong(result.stateHash());
+        buffer.putLong(result.retentionSequence());
+        buffer.putInt(responseData.length);
+        buffer.put(responseData);
+        return buffer.array();
+    }
+
+    private static SnapshotResult readResult(ByteBuffer source, int matcherStateLength, int tradingStateLength) {
+        if (source.remaining() < Integer.BYTES) {
+            throw new ProtocolException("truncated snapshot command result");
+        }
+        int encodedLength = source.getInt();
+        long resultBudget = (long) source.remaining() - matcherStateLength - tradingStateLength - CHECKSUM_LENGTH;
+        if (encodedLength < RESULT_FIXED_LENGTH || encodedLength > resultBudget) {
+            throw new ProtocolException("invalid snapshot command result length");
+        }
+        byte[] encoded = new byte[encodedLength];
+        source.get(encoded);
+        ByteBuffer buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
+        UUID commandId = new UUID(buffer.getLong(), buffer.getLong());
+        byte[] fingerprint = new byte[CommandFingerprint.LENGTH];
+        buffer.get(fingerprint);
+        ResponseStatus status = ResponseStatus.fromWireCode(buffer.getInt());
+        CoreResultCode resultCode = CoreResultCode.fromWireCode(buffer.getInt());
+        long appliedCommandCount = buffer.getLong();
+        long requiredExportSequence = buffer.getLong();
+        long stateHash = buffer.getLong();
+        long retentionSequence = buffer.getLong();
+        int responseLength = buffer.getInt();
+        if (appliedCommandCount < 0 || requiredExportSequence < 0 || retentionSequence <= 0
+                || responseLength < 0 || responseLength != buffer.remaining()) {
+            throw new ProtocolException("invalid snapshot command result metadata");
+        }
+        byte[] responseData = new byte[responseLength];
+        buffer.get(responseData);
+        return new SnapshotResult(commandId, new CoreProbeState.StoredResult(
+                CommandFingerprint.fromBytes(fingerprint), status, resultCode, appliedCommandCount,
+                requiredExportSequence, stateHash, responseData, retentionSequence));
+    }
+
+    private record SnapshotResult(UUID commandId, CoreProbeState.StoredResult value) {
     }
 
     private static void rejectOversizedSnapshot(byte[] snapshot) {

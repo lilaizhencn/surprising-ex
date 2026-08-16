@@ -30,7 +30,6 @@ import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.model.MarkPriceLookup;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -40,7 +39,6 @@ import org.springframework.stereotype.Service;
 public class AeronOrderCommandService {
 
     private final OrderAeronGateway aeron;
-    private final AeronOrderIdGenerator orderIds;
     private final InstrumentRuleLookup instrumentRules;
     private final MarkPriceLookup markPrices;
     private final TradingOrderProperties properties;
@@ -49,7 +47,6 @@ public class AeronOrderCommandService {
                                     InstrumentRuleLookup instrumentRules, MarkPriceLookup markPrices,
                                     TradingOrderProperties properties) {
         this.aeron = aeron;
-        this.orderIds = orderIds;
         this.instrumentRules = instrumentRules;
         this.markPrices = markPrices;
         this.properties = properties;
@@ -59,9 +56,11 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation,
             OrderFeeSnapshot fee) {
-        long orderId = orderIds.next();
+        String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
+        ProductLine productLine = requireProductLine(fee.productLine());
+        long orderId = StableOrderIdentity.orderId(productLine, request.userId(), clientOrderId);
         PlaceOrderCommand command = placeCommand(orderId, request, validation, fee);
-        UUID commandId = placeCommandId(request, orderId);
+        UUID commandId = StableOrderIdentity.commandId(productLine, request.userId(), clientOrderId);
         var response = aeron.command(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodePlaceOrder(command));
         return requireOrder(commandOrder(response, orderId), "placed order missing");
@@ -72,10 +71,12 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest replacement,
             ValidationResult validation,
             OrderFeeSnapshot fee) {
-        long replacementOrderId = orderIds.next();
+        String clientOrderId = requireClientKey(replacement.clientOrderId(), "clientOrderId");
+        ProductLine productLine = requireProductLine(fee.productLine());
+        long replacementOrderId = StableOrderIdentity.replacementOrderId(
+                productLine, replacement.userId(), clientOrderId);
         PlaceOrderCommand replacementCommand = placeCommand(replacementOrderId, replacement, validation, fee);
-        UUID commandId = stableId("ORDER_REPLACE:" + replacement.userId() + ':' + original.orderId() + ':'
-                + placeIntent(replacement, replacementOrderId));
+        UUID commandId = StableOrderIdentity.replacementCommandId(productLine, replacement.userId(), clientOrderId);
         var response = aeron.command(CoreMessageType.REPLACE_ORDER, commandId, replacement.userId(),
                 TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(original.orderId(), replacementCommand)));
         CoreCommandResultView result = requireCommandResult(response);
@@ -91,12 +92,14 @@ public class AeronOrderCommandService {
 
     public com.surprising.trading.api.model.AmendOrderResponse replace(
             com.surprising.trading.api.model.AmendOrderRequest request) {
-        long replacementOrderId = orderIds.next();
+        String clientOrderId = requireClientKey(request.newClientOrderId(), "newClientOrderId");
+        String clientRequestId = requireClientKey(request.clientRequestId(), "clientRequestId");
+        ProductLine productLine = configuredProductLine();
+        long replacementOrderId = StableOrderIdentity.replacementOrderId(productLine, request.userId(), clientOrderId);
         AmendOrderCommand command = new AmendOrderCommand(request.orderId(), replacementOrderId,
-                request.newClientOrderId(), request.priceTicks(), request.quantitySteps(),
+                clientOrderId, request.priceTicks(), request.quantitySteps(),
                 request.timeInForce() == null ? null : timeInForce(request.timeInForce()), request.postOnly());
-        UUID commandId = stableId("ORDER_AMEND:" + request.userId() + ':' + request.orderId() + ':'
-                + replacementOrderId + ':' + amendIntent(request));
+        UUID commandId = StableOrderIdentity.replacementCommandId(productLine, request.userId(), clientRequestId);
         var response = aeron.command(CoreMessageType.AMEND_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodeAmendOrder(command));
         CoreCommandResultView result = requireCommandResult(response);
@@ -128,7 +131,7 @@ public class AeronOrderCommandService {
                 positionSide(request.positionSide()), instrument.spot() ? ReservationKind.SPOT_ASSET
                 : ReservationKind.DERIVATIVE_MARGIN, reservationAsset, 0,
                 orderType(request.orderType()), timeInForce(request.timeInForce()), matchingPriceTicks,
-                request.postOnly(), request.clientOrderId() == null ? "" : request.clientOrderId(),
+                request.postOnly(), requireClientKey(request.clientOrderId(), "clientOrderId"),
                 fee.makerFeeRatePpm(), fee.takerFeeRatePpm());
     }
 
@@ -136,11 +139,14 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation,
             OrderFeeSnapshot fee) {
-        return aeron.preflight(request.userId(), placeCommand(orderIds.next(), request, validation, fee));
+        ProductLine productLine = requireProductLine(fee.productLine());
+        long orderId = StableOrderIdentity.orderId(productLine, request.userId(),
+                requireClientKey(request.clientOrderId(), "clientOrderId"));
+        return aeron.preflight(request.userId(), placeCommand(orderId, request, validation, fee));
     }
 
     public OrderResponse cancel(long userId, long orderId) {
-        UUID commandId = stableId("ORDER_CANCEL:" + userId + ':' + orderId);
+        UUID commandId = StableOrderIdentity.commandId(configuredProductLine(), userId, "cancel:" + orderId);
         var response = aeron.command(CoreMessageType.CANCEL_ORDER, commandId, userId,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
         CoreOrderStateView responseOrder = commandOrder(response, orderId);
@@ -208,40 +214,22 @@ public class AeronOrderCommandService {
         return OrderStatus.valueOf(view.status());
     }
 
-    private static UUID stableId(String value) {
-        return UUID.nameUUIDFromBytes(value.getBytes(StandardCharsets.UTF_8));
+    private ProductLine configuredProductLine() {
+        return requireProductLine(properties.getKafka().getProductLine());
     }
 
-    private static UUID placeCommandId(
-            com.surprising.trading.api.model.PlaceOrderRequest request, long orderId) {
-        return stableId("ORDER_PLACE:" + request.userId() + ':' + placeIntent(request, orderId));
+    private static ProductLine requireProductLine(ProductLine productLine) {
+        if (productLine == null) {
+            throw new IllegalStateException("order provider product line is required");
+        }
+        return productLine;
     }
 
-    private static String placeIntent(
-            com.surprising.trading.api.model.PlaceOrderRequest request, long orderId) {
-        String clientOrderId = request.clientOrderId();
-        return field(clientOrderId == null || clientOrderId.isBlank()
-                        ? "ORDER:" + orderId : "CLIENT:" + clientOrderId)
-                + field(request.symbol())
-                + field(request.side())
-                + field(request.orderType())
-                + field(request.timeInForce())
-                + field(request.priceTicks())
-                + field(request.quantitySteps())
-                + field(request.marginMode())
-                + field(request.positionSide())
-                + field(request.reduceOnly())
-                + field(request.postOnly());
-    }
-
-    private static String amendIntent(com.surprising.trading.api.model.AmendOrderRequest request) {
-        return field(request.newClientOrderId()) + field(request.priceTicks()) + field(request.quantitySteps())
-                + field(request.timeInForce()) + field(request.postOnly());
-    }
-
-    private static String field(Object value) {
-        String text = String.valueOf(value);
-        return text.length() + ":" + text;
+    private static String requireClientKey(String key, String name) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException(name + " is required");
+        }
+        return key;
     }
 
     private static String emptyToNull(String value) { return value == null || value.isEmpty() ? null : value; }
