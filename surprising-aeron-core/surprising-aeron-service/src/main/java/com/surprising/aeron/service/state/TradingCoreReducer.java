@@ -1548,11 +1548,17 @@ public final class TradingCoreReducer {
         user = canceled.user(user.userId());
         position = user.positions().get(positionKey);
         AssetBalance balance = requireBalance(user, instrument.settleAsset());
-        if (position.positionMarginUnits() > 0) {
-            balance = balance.release(position.positionMarginUnits());
+        long currentAbs = Math.absExact(position.signedQuantitySteps());
+        long closeQuantity = liquidation.closeQuantitySteps();
+        long remainingAbs = Math.subtractExact(currentAbs, closeQuantity);
+        long releasedMargin = position.positionMarginUnits() == 0 ? 0
+                : proportional(position.positionMarginUnits(), closeQuantity, currentAbs);
+        if (releasedMargin > 0) {
+            balance = balance.release(releasedMargin);
         }
         long pnl = instrument.contractType().isOption() ? 0
-                : CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
+                : CoreContractMath.pnlUnits(instrument,
+                position.signedQuantitySteps() > 0 ? closeQuantity : Math.negateExact(closeQuantity),
                 position.entryPriceTicks(), command.executionPriceTicks());
         CashResult cash = applyCash(balance, pnl);
         long uncovered = pnl < 0 ? Math.subtractExact(Math.negateExact(pnl),
@@ -1567,9 +1573,15 @@ public final class TradingCoreReducer {
         Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
         balances.put(instrument.settleAsset(), feeCash.balance());
         Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
+        long nextQuantity = remainingAbs == 0 ? 0
+                : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
+        long nextEntryValue = remainingAbs == 0 ? 0
+                : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         positions.put(positionKey, new CorePositionState(instrument.symbol(), instrument.settleAsset(),
-                position.marginMode(), position.positionSide(), 0, 0, 0, 0,
-                Math.addExact(position.realizedPnlUnits(), pnl), 0));
+                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
+                nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
+                Math.addExact(position.realizedPnlUnits(), pnl),
+                Math.subtractExact(position.positionMarginUnits(), releasedMargin)));
         CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
                 Math.incrementExact(user.revision()), balances, user.reservations(), positions, user.positionMode());
         Map<Long, CoreUserState> users = StateMapSupport.delta(canceled.users());
