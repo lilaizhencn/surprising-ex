@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class AeronClientAgentTest {
@@ -116,6 +117,63 @@ class AeronClientAgentTest {
             }
         }
         assertThat(offers).hasValue(rawResults.length);
+    }
+
+    @Test
+    void preparedInfrastructureMessageRetainsItsStableHeader() {
+        AtomicReference<CoreMessage> offered = new AtomicReference<>();
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session(message -> {
+            offered.set(message);
+            return Publication.NOT_CONNECTED;
+        }))) {
+            CoreMessage message = new CoreMessage(
+                    com.surprising.aeron.protocol.CoreMessageHeader.command(
+                            CoreMessageType.ACK_EXPORT, UUID.randomUUID(), ProductLine.SPOT,
+                            com.surprising.aeron.protocol.CommandSource.OPERATIONS,
+                            0x4558504f52544552L, 17, 0, 1, 19),
+                    com.surprising.aeron.protocol.CoreExportCodec.encodeAck(
+                            new com.surprising.aeron.protocol.AckExportCommand(17)));
+
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> pool.submitPrepared(message))
+                    .isInstanceOf(CoreCommandOutcome.NotAcceptedException.class);
+
+            assertThat(offered.get()).isEqualTo(message);
+        }
+    }
+
+    @Test
+    void reopensFixedSessionsAfterAeronFailure() throws Exception {
+        AtomicInteger opened = new AtomicInteger();
+        CountDownLatch recovered = new CountDownLatch(2);
+        AeronClientPool.SessionFactory factory = () -> {
+            int index = opened.incrementAndGet();
+            if (index <= 2) {
+                return new AeronClientPool.Session() {
+                    @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
+                    @Override public int pollEgress(int fragmentLimit) { return 0; }
+                    @Override public CoreResponse takeResponse(long correlationId) { return null; }
+                    @Override public RuntimeException sessionFailure() {
+                        return new IllegalStateException("session failed");
+                    }
+                    @Override public void close() { }
+                };
+            }
+            return new AeronClientPool.Session() {
+                @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
+                @Override public int pollEgress(int fragmentLimit) {
+                    recovered.countDown();
+                    return 0;
+                }
+                @Override public CoreResponse takeResponse(long correlationId) { return null; }
+                @Override public RuntimeException sessionFailure() { return null; }
+                @Override public void close() { }
+            };
+        };
+
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), factory)) {
+            assertThat(recovered.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(opened.get()).isGreaterThanOrEqualTo(4);
+        }
     }
 
     private static AeronClientPool pool(Duration timeout, AeronClientPool.SessionFactory sessions) {
