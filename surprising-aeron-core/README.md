@@ -4,7 +4,7 @@
 端口空间、Archive 和数据卷；一个逻辑 Core 固定由三个 Member 组成，并管理该变体全部 symbol。
 
 W1/W2 已完成单一可执行盘口改造：`TradingCoreRuntime` 是 Core 单写边界，撮合命令只进入 fork 的
-exchange-core 0.5.10-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
+exchange-core 0.5.12-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
 matcher 恢复导入 Aeron 配对 snapshot 中的原生 `ME0/RE0`，通过 `fromSnapshotOnly` 启动，不逐单回放。
 
 部署基线不按 margin mode 或热点 symbol 分 Core：CROSS 和 ISOLATED 都由同一个 ProductLine Core 裁决；
@@ -20,7 +20,7 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。当前�
 | `surprising-aeron-service` | `ClusteredService`、有界幂等状态、Snapshot 和节点启动器。 |
 | `surprising-aeron-client` | Leader 自动发现、切换处理和“超时即结果未知”同步客户端。 |
 | `surprising-aeron-exporter` | P5 可靠 Exporter 的最小 sink 边界。 |
-| `surprising-aeron-tools` | Cluster 探针、状态 hash 查询和离线 replay 骨架。 |
+| `surprising-aeron-tools` | Cluster 探针、状态 hash 查询和只读离线 replay 诊断；不得作为生产恢复或 snapshot 来源。 |
 
 ## 本地构建与三节点运行
 
@@ -42,7 +42,7 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
   外部提交时间和 `correlationId`。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
-- exchange-core 0.5.10-emporia 独占价格树/FIFO；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。
+- exchange-core 0.5.12-emporia 独占价格树/FIFO；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
 - Core owner 线程只提交 exchange-core 异步命令；撮合结果通过 Cluster timer continuation 按序回到 owner，普通下单、撤单、改单、强平、结算和标记价触发子单均不在 owner 线程等待 ring future。adapter 不再提供同步交易入口；恢复和离线工具也通过显式异步 continuation drain 完成。
@@ -74,12 +74,15 @@ processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期。旧�
 
 ## W1/W2 原生快照契约
 
-- fork 坐标为 `exchange.core2:exchange-core:0.5.10-emporia`，Git SHA
-  `9819b9fea48b8b962bdef6bfcf67ed5f5a04981f`，JAR SHA-256
-  `b2ee6f235f9dbde4d2a37e407a8a855938b0f7cc0622ea28cb6e778552ff934a`。
+- fork 坐标为 `exchange.core2:exchange-core:0.5.12-emporia`，Git SHA
+  `33a9f135c4e2396aaac0f28fad2afbc1350b7a3c`，可复现 JAR SHA-256
+  `e7eb6b3cb292a605c30cb1fc224ced5cde7f1f5481306dbf01e76299a860f66d`；service 在 Maven
+  `validate` 阶段强制校验该 JAR。开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
 - `CoreState v6` 是唯一外层快照，配对保存 Core 状态和 exchange-core 的 `MATCHING_ENGINE_ROUTER/0`、
   `RISK_ENGINE/0`；`TradingState v19` 不含盘口。三个 Member 必须运行完全相同的 fork、配置和 schema。
 - capture 在 `SymbolMatchingLanes.barrier` 内等待全部 lane 和 callback；pending matching 存在时拒绝发布。
+- Aeron fragment 在复制前执行 64 MiB 外层上限；matcher envelope 为 48 MiB、单个原生 module 为 32 MiB，
+  超限时 fail closed。修改这些上限必须同步默认 heap 并完成目标活动订单规模的快照容量测试。
   恢复先校验三层 CRC32C、产品线、默认 shard/route、fork/config、symbol/user registry、完整 engine/book hash，
   再以 O(活动订单数) 一次报告逐字段核对 OPEN 订单，全部通过后才允许服务启动完成。
 - snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；没有 clean-start fallback、订单回放、

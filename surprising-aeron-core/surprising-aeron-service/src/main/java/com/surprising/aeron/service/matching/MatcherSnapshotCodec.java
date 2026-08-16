@@ -25,16 +25,16 @@ public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
     private static final int VERSION = 1;
-    private static final int MAX_SNAPSHOT_BYTES = 1_073_741_824;
+    private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
-    private static final int MAX_MODULE_BYTES = 536_870_912;
+    private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
 
     private MatcherSnapshotCodec() {
     }
 
     public static byte[] encode(MatcherSnapshot snapshot) {
         try {
-            ByteArrayOutputStream body = new ByteArrayOutputStream();
+            ByteArrayOutputStream body = new BoundedByteArrayOutputStream(MAX_SNAPSHOT_BYTES - Long.BYTES);
             try (DataOutputStream output = new DataOutputStream(body)) {
                 output.writeInt(MAGIC);
                 output.writeInt(VERSION);
@@ -64,6 +64,9 @@ public final class MatcherSnapshotCodec {
                 output.writeInt(snapshot.modules().size());
                 for (SerializedModule module : snapshot.modules()) {
                     byte[] data = module.data();
+                    if (data.length == 0 || data.length > MAX_MODULE_BYTES) {
+                        throw new IllegalArgumentException("matcher module exceeds maximum size");
+                    }
                     output.writeInt(module.type().ordinal());
                     output.writeInt(module.instanceId());
                     output.writeLong(module.sequence());
@@ -87,7 +90,10 @@ public final class MatcherSnapshotCodec {
     }
 
     public static MatcherSnapshot decode(byte[] encoded) {
-        if (encoded == null || encoded.length < 64 || encoded.length > MAX_SNAPSHOT_BYTES) {
+        if (encoded != null && encoded.length > MAX_SNAPSHOT_BYTES) {
+            throw new ProtocolException("matcher snapshot exceeds maximum size");
+        }
+        if (encoded == null || encoded.length < 64) {
             throw new ProtocolException("matcher snapshot is truncated");
         }
         long storedChecksum = ByteBuffer.wrap(encoded, encoded.length - Long.BYTES, Long.BYTES).getLong();
@@ -196,5 +202,32 @@ public final class MatcherSnapshotCodec {
         CRC32C checksum = new CRC32C();
         checksum.update(data, offset, length);
         return (int) checksum.getValue();
+    }
+
+    private static final class BoundedByteArrayOutputStream extends ByteArrayOutputStream {
+        private final int maximumBytes;
+
+        private BoundedByteArrayOutputStream(int maximumBytes) {
+            super(Math.min(8 * 1024, maximumBytes));
+            this.maximumBytes = maximumBytes;
+        }
+
+        @Override
+        public synchronized void write(int value) {
+            ensureCapacityFor(1);
+            super.write(value);
+        }
+
+        @Override
+        public synchronized void write(byte[] data, int offset, int length) {
+            ensureCapacityFor(length);
+            super.write(data, offset, length);
+        }
+
+        private void ensureCapacityFor(int additionalBytes) {
+            if (additionalBytes < 0 || count > maximumBytes - additionalBytes) {
+                throw new IllegalArgumentException("matcher snapshot exceeds maximum size");
+            }
+        }
     }
 }

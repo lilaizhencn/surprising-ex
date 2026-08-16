@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.service.state.ActiveOrderIndex;
 import com.surprising.aeron.service.state.CoreOrderState;
 import com.surprising.aeron.service.state.CoreOrderStatus;
 import com.surprising.aeron.service.state.CoreRiskState;
@@ -55,7 +56,7 @@ class DeterministicExchangeCoreAdapterTest {
         MatcherSnapshot snapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
-            snapshot = adapter.snapshotAsync(91, 1, state).join();
+            snapshot = adapter.snapshotAsync(91, 1, state, activeOrders(state)).join();
         }
 
         byte[] encoded = MatcherSnapshotCodec.encode(snapshot);
@@ -71,7 +72,7 @@ class DeterministicExchangeCoreAdapterTest {
         });
 
         try (DeterministicExchangeCoreAdapter restored =
-                     new DeterministicExchangeCoreAdapter(state, 1, decoded)) {
+                     new DeterministicExchangeCoreAdapter(state, activeOrders(state), 1, decoded)) {
             assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(snapshot.bookStateHash());
         }
     }
@@ -82,7 +83,7 @@ class DeterministicExchangeCoreAdapterTest {
         MatcherSnapshot snapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
-            snapshot = adapter.snapshotAsync(92, 1, original).join();
+            snapshot = adapter.snapshotAsync(92, 1, original, activeOrders(original)).join();
         }
         TradingCoreState divergent = stateWithOpenBid(101);
         MatcherSnapshot divergentManifest = new MatcherSnapshot(
@@ -93,7 +94,8 @@ class DeterministicExchangeCoreAdapterTest {
                 snapshot.forkGitSha(), snapshot.artifactSha256(), snapshot.matcherConfigHash(),
                 snapshot.symbols(), snapshot.users(), snapshot.modules());
 
-        assertThatThrownBy(() -> new DeterministicExchangeCoreAdapter(divergent, 1, divergentManifest))
+        assertThatThrownBy(() -> new DeterministicExchangeCoreAdapter(
+                divergent, activeOrders(divergent), 1, divergentManifest))
                 .isInstanceOf(FatalMatchingDivergenceException.class)
                 .hasMessageContaining("Core OPEN orders do not exactly match exchange-core open orders");
     }
@@ -104,7 +106,8 @@ class DeterministicExchangeCoreAdapterTest {
         byte[] encoded;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
-            encoded = MatcherSnapshotCodec.encode(adapter.snapshotAsync(93, 1, state).join());
+            encoded = MatcherSnapshotCodec.encode(adapter.snapshotAsync(
+                    93, 1, state, activeOrders(state)).join());
         }
         encoded[encoded.length / 2] ^= 1;
 
@@ -129,6 +132,10 @@ class DeterministicExchangeCoreAdapterTest {
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order), Map.of(),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
+    }
+
+    private static Iterable<CoreOrderState> activeOrders(TradingCoreState state) {
+        return new ActiveOrderIndex(state).orders();
     }
 
     private static CoreMatchingResult result(boolean accepted, String resultCode) {

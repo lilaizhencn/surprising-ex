@@ -13,7 +13,7 @@ Liquidation Coordinator，不保存候选、不创建交易订单，也不参与
 3. Provider 正常周期不逐 action 往返、不调用 `CONTINUE_RISK_SCAN`，也不做业务重试或建立无界积压队列；一次
    work 查询只对应一次批量提交。命令超时后复用同一稳定 `commandId`，由 Core 的幂等结果和 continuation 处理。
 4. Core 对同 symbol 结算、同 user+symbol 强平和订单变更执行生命周期栅栏；不同 symbol 仍可并行。Core matcher
-   尝试超时或异常时只做一次有界 rebuild/resubmit，第二次失败返回 `MATCHING_CONTINUATION_FAILED`。
+   matcher 异常、超时或 Core/matcher 分歧会让对应 Aeron Member 失败关闭，不在 Core 内 rebuild、retry 或 resubmit。
 5. REST 历史和后台列表只读 `core_liquidation_projection`。
 
 ## 依赖边界

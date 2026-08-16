@@ -1,6 +1,8 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
@@ -12,13 +14,11 @@ import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.ArrayList;
 import java.util.zip.CRC32C;
-import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.protocol.CoreMessageCodec;
 
 final class CoreStateSnapshotCodec {
 
@@ -29,6 +29,7 @@ final class CoreStateSnapshotCodec {
     private static final int RESULT_LENGTH = 40;
     private static final int EXPORT_FIXED_LENGTH = 20;
     private static final int CHECKSUM_LENGTH = Long.BYTES;
+    static final int MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 
     private CoreStateSnapshotCodec() {
     }
@@ -40,7 +41,7 @@ final class CoreStateSnapshotCodec {
         matcherSnapshot.verifyCoreState(state.tradingState(), state.appliedCommandCount());
         byte[] tradingState = TradingStateSnapshotCodec.encode(state.tradingState());
         byte[] matcherState = MatcherSnapshotCodec.encode(matcherSnapshot);
-        java.util.ArrayList<byte[]> pendingEvents = new java.util.ArrayList<>(state.exportState().pendingCount());
+        ArrayList<byte[]> pendingEvents = new ArrayList<>(state.exportState().pendingCount());
         for (CoreMessage event : state.exportState().pendingEvents()) {
             pendingEvents.add(CoreMessageCodec.encode(event));
         }
@@ -48,11 +49,15 @@ final class CoreStateSnapshotCodec {
         for (byte[] event : pendingEvents) {
             exportLength = Math.addExact(exportLength, Math.addExact(Integer.BYTES, event.length));
         }
-        int snapshotLength = Math.toIntExact(Math.addExact(Math.addExact(Math.addExact(
+        long calculatedLength = Math.addExact(Math.addExact(Math.addExact(
                 Math.addExact((long) FIXED_LENGTH,
                         Math.multiplyExact((long) state.lastSourceSequences().size(), SOURCE_SEQUENCE_LENGTH)),
                 Math.multiplyExact((long) state.commandResults().size(), RESULT_LENGTH)),
-                exportLength), Math.addExact(Math.addExact(matcherState.length, tradingState.length), CHECKSUM_LENGTH)));
+                exportLength), Math.addExact(Math.addExact(matcherState.length, tradingState.length), CHECKSUM_LENGTH));
+        if (calculatedLength > MAX_SNAPSHOT_BYTES) {
+            throw new IllegalArgumentException("core snapshot exceeds maximum size");
+        }
+        int snapshotLength = Math.toIntExact(calculatedLength);
         ByteBuffer buffer = ByteBuffer.allocate(snapshotLength)
                 .order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(MAGIC);
@@ -97,6 +102,7 @@ final class CoreStateSnapshotCodec {
     }
 
     static CoreSnapshotManifest manifest(byte[] snapshot, ProductLine expectedProductLine) {
+        rejectOversizedSnapshot(snapshot);
         if (snapshot == null || snapshot.length < FIXED_LENGTH) {
             throw new ProtocolException("snapshot shorter than fixed header");
         }
@@ -189,6 +195,7 @@ final class CoreStateSnapshotCodec {
     }
 
     static CoreProbeState decode(byte[] snapshot, ProductLine expectedProductLine) {
+        rejectOversizedSnapshot(snapshot);
         if (snapshot == null || snapshot.length < FIXED_LENGTH) {
             throw new ProtocolException("snapshot shorter than fixed header");
         }
@@ -297,5 +304,11 @@ final class CoreStateSnapshotCodec {
         buffer.getLong();
         return CoreProbeState.restore(productLine, appliedCommandCount, probeValue,
                 results, lastSourceSequences, tradingState, exportState, matcherSnapshot);
+    }
+
+    private static void rejectOversizedSnapshot(byte[] snapshot) {
+        if (snapshot != null && snapshot.length > MAX_SNAPSHOT_BYTES) {
+            throw new ProtocolException("core snapshot exceeds maximum size");
+        }
     }
 }

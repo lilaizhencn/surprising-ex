@@ -200,6 +200,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void loadSnapshot(Image snapshotImage) {
         ByteArrayOutputStream snapshot = new ByteArrayOutputStream();
         FragmentAssembler assembler = new FragmentAssembler((buffer, offset, length, header) -> {
+            ensureSnapshotCapacity(snapshot.size(), length);
             byte[] data = new byte[length];
             buffer.getBytes(offset, data);
             snapshot.writeBytes(data);
@@ -212,6 +213,13 @@ public final class SurprisingClusteredService implements ClusteredService {
             throw new IllegalStateException("incomplete Aeron core snapshot");
         }
         restoreSnapshot(snapshot.toByteArray());
+    }
+
+    static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
+        if (currentLength < 0 || fragmentLength < 0
+                || currentLength > CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - fragmentLength) {
+            throw new IllegalStateException("Aeron core snapshot exceeds maximum size");
+        }
     }
 
     void restoreSnapshot(byte[] snapshot) {

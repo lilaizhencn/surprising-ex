@@ -48,16 +48,17 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.productLine = productLine;
         this.state = initialState;
         this.reducer = new TradingCoreReducer();
+        this.activeOrders = new ActiveOrderIndex(initialState);
         this.matcher = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter()
-                : new DeterministicExchangeCoreAdapter(initialState, coreSequence, matcherSnapshot);
+                : new DeterministicExchangeCoreAdapter(
+                        initialState, activeOrders.orders(), coreSequence, matcherSnapshot);
         this.positionUsers = new PositionUserIndex(initialState);
         this.openInterest = new OpenInterestIndex(initialState);
         this.triggers = new TriggerOrderIndex(initialState);
         this.algos = new AlgoOrderIndex(initialState);
         this.liquidations = new LiquidationIndex(initialState);
         this.timers = new CancelAllAfterIndex(initialState);
-        this.activeOrders = new ActiveOrderIndex(initialState);
         this.adlPositions = new AdlPositionIndex(initialState);
         this.riskSnapshots = new RiskSnapshotIndex(initialState);
         this.matcherReady = CompletableFuture.completedFuture(null);

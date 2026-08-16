@@ -32,10 +32,10 @@ import exchange.core2.core.common.config.SerializationConfiguration;
 import exchange.core2.core.processors.journaling.InMemorySerializationProcessor;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -79,9 +79,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public DeterministicExchangeCoreAdapter(
             TradingCoreState state,
+            Iterable<CoreOrderState> activeOrders,
             long coreSequence,
             MatcherSnapshot snapshot) {
-        if (snapshot == null) {
+        if (snapshot == null || activeOrders == null) {
             throw new IllegalArgumentException("matcher snapshot is required");
         }
         try {
@@ -96,7 +97,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             });
             users.addAll(snapshot.users());
             start(snapshot);
-            reconcileOpenOrdersAsync(state, coreSequence, snapshot.snapshotId(), "matcher restore").join();
+            reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
             StateHashes restoredHashes = currentStateHashesAsync().join();
             if (restoredHashes.engineHash() != snapshot.engineStateHash()
                     || restoredHashes.bookHash() != snapshot.bookStateHash()) {
@@ -245,11 +246,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public CompletableFuture<MatcherSnapshot> snapshotAsync(
             long snapshotId,
             long coreSequence,
-            TradingCoreState state) {
-        if (snapshotId <= 0 || coreSequence < 0 || state == null) {
+            TradingCoreState state,
+            Iterable<CoreOrderState> activeOrders) {
+        if (snapshotId <= 0 || coreSequence < 0 || state == null || activeOrders == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher snapshot request"));
         }
-        return matchingLanes.barrier(() -> reconcileOpenOrdersAsync(state, coreSequence, snapshotId,
+        return matchingLanes.barrier(() -> reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshotId,
                 "matcher snapshot").thenCompose(ignored -> currentStateHashesAsync()).thenCompose(hashes ->
                 api.submitCommandAsync(ApiPersistState.builder().dumpId(snapshotId).build())
                         .thenApply(result -> {
@@ -279,25 +281,31 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private CompletableFuture<Void> reconcileOpenOrdersAsync(
-            TradingCoreState state,
+            Iterable<CoreOrderState> activeOrders,
             long coreSequence,
             long snapshotId,
             String operation) {
         return api.processReport(new OpenOrdersReportQuery(), 0).thenAccept(report -> {
-            Map<Long, ReconciledOrder> expected = new TreeMap<>();
-            for (CoreOrderState order : state.orders().values()) {
-                if (order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN) continue;
+            Map<Long, ReconciledOrder> expected = new HashMap<>();
+            for (CoreOrderState order : activeOrders) {
+                if (order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN) {
+                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                            "active-order index contains a terminal order");
+                }
                 Integer symbolId = symbols.get(order.symbol());
                 if (symbolId == null) {
                     throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
                             "Core open order references an unregistered matcher symbol");
                 }
-                expected.put(order.orderId(), new ReconciledOrder(symbolId, order.orderId(), order.userId(),
+                if (expected.put(order.orderId(), new ReconciledOrder(symbolId, order.orderId(), order.userId(),
                         order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                         order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
-                        order.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : order.priceTicks()));
+                        order.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : order.priceTicks())) != null) {
+                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                            "active-order index contains duplicate order ID " + order.orderId());
+                }
             }
-            Map<Long, ReconciledOrder> actual = new TreeMap<>();
+            Map<Long, ReconciledOrder> actual = new HashMap<>();
             for (OpenOrdersReportResult.OpenOrder order : report.getOrders()) {
                 ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
                         order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());

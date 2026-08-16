@@ -1,10 +1,13 @@
 package com.surprising.aeron.service.state;
 
-import java.util.Map;
-import java.util.NavigableSet;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -15,14 +18,18 @@ public final class ActiveOrderIndex {
 
     private final Map<Long, NavigableSet<Long>> idsByUser = new TreeMap<>();
     private final Map<String, NavigableSet<Long>> idsBySymbol = new TreeMap<>();
-    private final NavigableSet<Long> allIds = new TreeSet<>();
+    private final NavigableMap<Long, CoreOrderState> ordersById = new TreeMap<>();
 
     public ActiveOrderIndex(TradingCoreState state) {
         rebuild(state);
     }
 
     public NavigableSet<Long> ids() {
-        return allIds.descendingSet();
+        return ordersById.descendingKeySet();
+    }
+
+    public Collection<CoreOrderState> orders() {
+        return Collections.unmodifiableCollection(ordersById.values());
     }
 
     public NavigableSet<Long> ids(long userId) {
@@ -52,7 +59,7 @@ public final class ActiveOrderIndex {
         NavigableSet<Long> source;
         NavigableSet<Long> filter = null;
         if (userId == 0 && (normalizedSymbol == null || normalizedSymbol.isBlank())) {
-            source = allIds;
+            source = ordersById.navigableKeySet();
         } else if (userId == 0) {
             source = idsBySymbol.get(normalizedSymbol);
         } else if (normalizedSymbol == null || normalizedSymbol.isBlank()) {
@@ -116,7 +123,7 @@ public final class ActiveOrderIndex {
     public void rebuild(TradingCoreState state) {
         idsByUser.clear();
         idsBySymbol.clear();
-        allIds.clear();
+        ordersById.clear();
         state.orders().values().stream()
                 .filter(ActiveOrderIndex::isActive)
                 .forEach(this::add);
@@ -127,13 +134,13 @@ public final class ActiveOrderIndex {
     }
 
     private void add(CoreOrderState order) {
-        allIds.add(order.orderId());
+        ordersById.put(order.orderId(), order);
         idsByUser.computeIfAbsent(order.userId(), ignored -> new TreeSet<>()).add(order.orderId());
         idsBySymbol.computeIfAbsent(order.symbol(), ignored -> new TreeSet<>()).add(order.orderId());
     }
 
     private void remove(CoreOrderState order) {
-        allIds.remove(order.orderId());
+        ordersById.remove(order.orderId());
         remove(idsByUser, order.userId(), order.orderId());
         remove(idsBySymbol, order.symbol(), order.orderId());
     }

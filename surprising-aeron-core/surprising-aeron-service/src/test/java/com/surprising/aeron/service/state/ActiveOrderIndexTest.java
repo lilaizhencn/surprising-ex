@@ -18,7 +18,9 @@ class ActiveOrderIndexTest {
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11)), Map.of(7L, order),
                 Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
 
-        assertThat(new ActiveOrderIndex(state).ids()).containsExactly(7L);
+        ActiveOrderIndex index = new ActiveOrderIndex(state);
+        assertThat(index.ids()).containsExactly(7L);
+        assertThat(index.orders()).containsExactly(order);
     }
 
     @Test

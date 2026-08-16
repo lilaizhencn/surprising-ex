@@ -114,7 +114,6 @@ class TradingCommandCodecTest {
         assertThat(CoreMessageType.EXECUTE_LIQUIDATION_BATCH.wireCode()).isEqualTo(43);
         assertThat(CoreResultCode.MATCHING_PENDING.wireCode()).isEqualTo(66);
         assertThat(CoreResultCode.LIFECYCLE_IN_PROGRESS.wireCode()).isEqualTo(67);
-        assertThat(CoreResultCode.MATCHING_CONTINUATION_FAILED.wireCode()).isEqualTo(68);
     }
 
     @Test

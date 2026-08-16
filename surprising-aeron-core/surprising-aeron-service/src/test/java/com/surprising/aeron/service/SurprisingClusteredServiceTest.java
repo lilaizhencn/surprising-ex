@@ -35,6 +35,16 @@ import org.junit.jupiter.api.Test;
 class SurprisingClusteredServiceTest {
 
     @Test
+    void rejectsSnapshotFragmentsBeyondBoundedRecoveryBuffer() {
+        SurprisingClusteredService.ensureSnapshotCapacity(CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 1);
+
+        assertThatThrownBy(() -> SurprisingClusteredService.ensureSnapshotCapacity(
+                CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 2))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Aeron core snapshot exceeds maximum size");
+    }
+
+    @Test
     void doesNotReplaceStateAfterCorruptSnapshot() {
         SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
         try {

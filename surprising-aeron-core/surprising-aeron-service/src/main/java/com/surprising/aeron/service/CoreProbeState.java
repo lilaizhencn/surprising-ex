@@ -1812,7 +1812,7 @@ public final class CoreProbeState implements AutoCloseable {
             throw new IllegalStateException("cannot snapshot while matching commands are pending");
         }
         MatcherSnapshot matcherSnapshot = matchingAdapter
-                .snapshotAsync(snapshotId, appliedCommandCount, tradingState)
+                .snapshotAsync(snapshotId, appliedCommandCount, tradingState, activeOrderIndex.orders())
                 .orTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                 .join();
         return CoreStateSnapshotCodec.encode(this, matcherSnapshot);

@@ -50,6 +50,37 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>verify-exchange-core-artifact</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <property name="exchange-core.artifact.path"
+                                          location="${settings.localRepository}/exchange/core2/exchange-core/${exchange-core.version}/exchange-core-${exchange-core.version}.jar"/>
+                                <available file="${exchange-core.artifact.path}" property="exchange-core.artifact.exists"/>
+                                <fail unless="exchange-core.artifact.exists"
+                                      message="Pinned exchange-core artifact is missing: ${exchange-core.artifact.path}"/>
+                                <checksum file="${exchange-core.artifact.path}" algorithm="SHA-256"
+                                          property="exchange-core.actual.sha256"/>
+                                <condition property="exchange-core.checksum.matches">
+                                    <equals arg1="${exchange-core.actual.sha256}" arg2="${exchange-core.sha256}"
+                                            casesensitive="false" trim="true"/>
+                                </condition>
+                                <fail unless="exchange-core.checksum.matches"
+                                      message="exchange-core artifact SHA-256 does not match the pinned build"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.6.1</version>
                 <executions>
