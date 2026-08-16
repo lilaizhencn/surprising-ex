@@ -14,6 +14,7 @@ import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.Set;
 
 public final class TradingCoreRuntime implements AutoCloseable {
@@ -31,6 +32,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final RiskSnapshotIndex riskSnapshots;
     private TradingCoreState state;
     private volatile CompletableFuture<Void> matcherReady;
+    private final AtomicLong matcherGeneration = new AtomicLong();
     private Thread owner;
 
     public TradingCoreRuntime(ProductLine productLine, TradingCoreState initialState) {
@@ -44,7 +46,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.productLine = productLine;
         this.state = initialState;
         this.reducer = new TradingCoreReducer();
-        this.matcher = new DeterministicExchangeCoreAdapter();
+        this.matcher = new DeterministicExchangeCoreAdapter(false);
         this.positionUsers = new PositionUserIndex(initialState);
         this.openInterest = new OpenInterestIndex(initialState);
         this.triggers = new TriggerOrderIndex(initialState);
@@ -95,6 +97,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     CompletableFuture<Void> matcherReady() {
         return matcherReady;
+    }
+
+    long matcherGeneration() {
+        return matcherGeneration.get();
     }
 
     public PositionUserIndex positionUsers() {
@@ -196,19 +202,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         state = after;
     }
 
-    public CompletableFuture<Void> restoreAsync(TradingCoreState restored) {
-        return restoreAsync(restored, Set.of());
-    }
-
-    public CompletableFuture<Void> restoreAsync(TradingCoreState restored, Set<Long> excludedOrderIds) {
-        assertOwner();
-        if (restored == null || restored.productLine() != productLine) {
-            throw new IllegalArgumentException("invalid restored trading state");
-        }
-        matcherReady = matcher.rebuildAsync(restored, excludedOrderIds).thenRun(() -> restoreIndexes(restored));
-        return matcherReady;
-    }
-
     public void restoreStateOnly(TradingCoreState restored) {
         assertOwner();
         if (restored == null || restored.productLine() != productLine) {
@@ -226,7 +219,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (restored == null || restored.productLine() != productLine) {
             throw new IllegalArgumentException("invalid matcher state");
         }
-        matcherReady = matcher.rebuildAsync(restored, excludedOrderIds);
+        matcherGeneration.incrementAndGet();
+        try {
+            matcherReady = matcher.rebuildAsync(restored, excludedOrderIds);
+        } catch (RuntimeException exception) {
+            matcherReady = CompletableFuture.failedFuture(exception);
+        }
         return matcherReady;
     }
 

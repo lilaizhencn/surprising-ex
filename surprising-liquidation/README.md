@@ -5,11 +5,15 @@ Liquidation Coordinator，不保存候选、不创建交易订单，也不参与
 
 ## 运行流程
 
-1. 定时调用 `LIQUIDATION_WORK_QUERY`，取得有界 `PLANNED` action 和 Risk Scan pending 标记。
-2. 每个 action 使用 `productLine + liquidationId + triggerSequence + markPrice + feeRate` 派生稳定
-   `commandId`，提交 `EXECUTE_LIQUIDATION`。
-3. Core 原子校验并执行 takeover；陈旧计划视为无害过期，不回退 Kafka、Redis 或 PG。
-4. 存在未完成扫描时提交一条 `CONTINUE_RISK_SCAN`。
+1. 定时调用 `LIQUIDATION_WORK_QUERY`，取得有界 `PLANNED`/`ORDERED` action、每个 action 的独占取消游标和
+   精确的 Risk Scan continuation。
+2. 将本次 work 原样编码为一个 `EXECUTE_LIQUIDATION_BATCH`，按
+   `productLine + canonical batch payload` 派生稳定 `commandId`。Core 在一个命令内共享最多 1,024 笔撤单预算，
+   按 action 顺序返回 `applied/pending/obsolete/processedOrders` 结果，并持久化下一页 cursor。
+3. Provider 正常周期不逐 action 往返、不调用 `CONTINUE_RISK_SCAN`，也不做业务重试或建立无界积压队列；一次
+   work 查询只对应一次批量提交。命令超时后复用同一稳定 `commandId`，由 Core 的幂等结果和 continuation 处理。
+4. Core 对同 symbol 结算、同 user+symbol 强平和订单变更执行生命周期栅栏；不同 symbol 仍可并行。Core matcher
+   尝试超时或异常时只做一次有界 rebuild/resubmit，第二次失败返回 `MATCHING_CONTINUATION_FAILED`。
 5. REST 历史和后台列表只读 `core_liquidation_projection`。
 
 ## 依赖边界
@@ -30,8 +34,12 @@ Liquidation Coordinator，不保存候选、不创建交易订单，也不参与
 - `surprising.liquidation.aeron.hostnames`：恰好三个 Member hostname。
 - `surprising.liquidation.aeron.egress-hostname`
 - `surprising.liquidation.coordinator.delay-ms`
-- `surprising.liquidation.coordinator.work-batch-size`：`1..1000`。
-- `surprising.liquidation.coordinator.risk-scan-batch-size`：`1..4096`。
+- `surprising.liquidation.coordinator.work-batch-size`：`1..1000`，只控制 Core work 查询返回的 action 数量；
+  单条执行命令的撤单预算固定不超过 1,024。
+- `surprising.liquidation.coordinator.risk-scan-batch-size`：`1..4096`，作为批量命令中的 Risk Scan continuation
+  用户预算。
+- `surprising.liquidation.aeron.client-connections`：仅保留连接池容量配置；正常批处理路径不按 action 并发发送
+  Aeron 请求。
 - `surprising.liquidation.execution.enabled`
 - `surprising.liquidation.execution.liquidation-fee-rate-ppm`：`0..1000000`。
 

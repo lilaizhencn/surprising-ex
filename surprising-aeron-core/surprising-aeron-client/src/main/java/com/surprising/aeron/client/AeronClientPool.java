@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.product.api.ProductLine;
+import io.aeron.Publication;
 import io.aeron.driver.MediaDriver;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -17,6 +18,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,6 +31,15 @@ public final class AeronClientPool implements AutoCloseable {
 
     private static final int MAX_SUBMIT_ATTEMPTS = 3;
 
+    public enum TryCommandResult {
+        SENT,
+        BUSY,
+        NOT_READY,
+        BACK_PRESSURED,
+        UNAVAILABLE,
+        CLOSED
+    }
+
     private final String clientName;
     private final ProductLine productLine;
     private final List<String> hostnames;
@@ -38,6 +49,7 @@ public final class AeronClientPool implements AutoCloseable {
     private final String sourceEpoch;
     private final ClientSlot[] clients;
     private final ExecutorService commandExecutor;
+    private final ExecutorService connectionExecutor;
     private final AtomicInteger nextClient = new AtomicInteger();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicReference<MediaDriver> mediaDriver = new AtomicReference<>();
@@ -110,10 +122,21 @@ public final class AeronClientPool implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         };
+        AtomicInteger connectionThreadSequence = new AtomicInteger();
+        ThreadFactory connectionThreadFactory = runnable -> {
+            Thread thread = new Thread(runnable, this.clientName + "-connect-"
+                    + connectionThreadSequence.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
         int queueCapacity = Math.max(1, Math.min(256, clientConnections * 4));
         this.commandExecutor = new java.util.concurrent.ThreadPoolExecutor(
                 clientConnections, clientConnections, 0L, TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(queueCapacity), commandThreadFactory,
+                new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+        this.connectionExecutor = new java.util.concurrent.ThreadPoolExecutor(
+                clientConnections, clientConnections, 0L, TimeUnit.MILLISECONDS,
+                new SynchronousQueue<>(), connectionThreadFactory,
                 new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
         for (int index = 0; index < clients.length; index++) {
             long sourceId = stableLong(this.sourceIdentity + ':' + productLine + ':' + this.sourceEpoch + ':' + index);
@@ -151,6 +174,54 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
+    public TryCommandResult tryCommandOnce(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+        if (type == null || type.kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
+            throw new IllegalArgumentException("command message type is required");
+        }
+        Objects.requireNonNull(commandId, "commandId");
+        requirePayload(payload);
+        if (closed.get()) {
+            return TryCommandResult.CLOSED;
+        }
+        ClientSlot slot = tryAcquireCommandSlot(userId);
+        if (slot == null) {
+            return TryCommandResult.BUSY;
+        }
+        try {
+            SurprisingAeronClient client = slot.client;
+            if (client == null) {
+                scheduleConnection(slot);
+                return TryCommandResult.NOT_READY;
+            }
+            long sourceSequence = slot.nextSequence.get() + 1;
+            long correlationId = -slot.nextCorrelation.incrementAndGet();
+            CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, commandId, productLine,
+                    CommandSource.GATEWAY, slot.sourceId, sourceSequence, userId,
+                    Instant.now().toEpochMilli(), correlationId), payload);
+            long offerResult;
+            try {
+                offerResult = client.trySubmit(message);
+            } catch (RuntimeException exception) {
+                closeClient(slot);
+                return TryCommandResult.UNAVAILABLE;
+            }
+            if (offerResult >= 0) {
+                slot.nextSequence.compareAndSet(sourceSequence - 1, sourceSequence);
+                return TryCommandResult.SENT;
+            }
+            if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
+                closeClient(slot);
+                return TryCommandResult.UNAVAILABLE;
+            }
+            if (offerResult == Publication.NOT_CONNECTED) {
+                return TryCommandResult.NOT_READY;
+            }
+            return TryCommandResult.BACK_PRESSURED;
+        } finally {
+            slot.inFlight.set(false);
+        }
+    }
+
     public CoreResponse query(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
         if (type == null || type.kind() != com.surprising.aeron.protocol.WireMessageKind.QUERY) {
             throw new IllegalArgumentException("query message type is required");
@@ -179,17 +250,29 @@ public final class AeronClientPool implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
-        RuntimeException failure = null;
+        RuntimeException failure = closePendingConnections();
+        connectionExecutor.shutdown();
         commandExecutor.shutdown();
         try {
             long timeoutMillis = Math.max(1L, responseTimeout.toMillis());
+            if (!connectionExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
+                connectionExecutor.shutdownNow();
+                if (!connectionExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
+                    if (failure == null) {
+                        failure = new IllegalStateException("Aeron connection executor did not terminate");
+                    }
+                }
+            }
             if (!commandExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
                 commandExecutor.shutdownNow();
                 if (!commandExecutor.awaitTermination(timeoutMillis, TimeUnit.MILLISECONDS)) {
-                    failure = new IllegalStateException("Aeron command executor did not terminate");
+                    if (failure == null) {
+                        failure = new IllegalStateException("Aeron command executor did not terminate");
+                    }
                 }
             }
         } catch (InterruptedException exception) {
+            connectionExecutor.shutdownNow();
             commandExecutor.shutdownNow();
             Thread.currentThread().interrupt();
             failure = new IllegalStateException("Interrupted while stopping Aeron command executor", exception);
@@ -228,6 +311,27 @@ public final class AeronClientPool implements AutoCloseable {
         if (failure != null) {
             throw failure;
         }
+    }
+
+    private RuntimeException closePendingConnections() {
+        RuntimeException failure = null;
+        for (ClientSlot slot : clients) {
+            synchronized (slot) {
+                if (slot.connection == null) {
+                    continue;
+                }
+                try {
+                    slot.connection.close();
+                } catch (RuntimeException exception) {
+                    if (failure == null) {
+                        failure = exception;
+                    } else {
+                        failure.addSuppressed(exception);
+                    }
+                }
+            }
+        }
+        return failure;
     }
 
     private ClientSlot acquireSlot() {
@@ -293,6 +397,77 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
+    private ClientSlot tryAcquireCommandSlot(long userId) {
+        if (closed.get()) {
+            return null;
+        }
+        ClientSlot slot = clients[Math.floorMod(Long.hashCode(userId), clients.length)];
+        return slot.inFlight.compareAndSet(false, true) ? slot : null;
+    }
+
+    private void scheduleConnection(ClientSlot slot) {
+        if (closed.get() || slot.client != null || !slot.connecting.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            connectionExecutor.execute(() -> {
+                SurprisingAeronClient.AsyncConnection connection = null;
+                try {
+                    synchronized (slot) {
+                        if (!closed.get() && slot.client == null && slot.connection == null) {
+                            connection = SurprisingAeronClient.connectAsync(productLine, hostnames,
+                                    egressHostname, responseTimeout, sharedMediaDriver());
+                            slot.connection = connection;
+                        }
+                    }
+                    while (!closed.get() && connection != null && slot.client == null) {
+                        boolean connected = false;
+                        synchronized (slot) {
+                            if (closed.get() || slot.connection != connection || slot.client != null) {
+                                break;
+                            }
+                            SurprisingAeronClient client = connection.poll();
+                            if (client != null) {
+                                if (closed.get()) {
+                                    client.close();
+                                    slot.connection = null;
+                                    connection = null;
+                                } else {
+                                    slot.client = client;
+                                    slot.connection = null;
+                                    connection = null;
+                                }
+                                connected = true;
+                            }
+                        }
+                        if (connected || connection == null) {
+                            break;
+                        }
+                        LockSupport.parkNanos(1_000_000L);
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (connection != null) {
+                        synchronized (slot) {
+                            if (slot.connection == connection) {
+                                slot.connection = null;
+                            }
+                        }
+                        if (slot.client == null) {
+                            try {
+                                connection.close();
+                            } catch (RuntimeException ignored) {
+                            }
+                        }
+                    }
+                    slot.connecting.set(false);
+                }
+            });
+        } catch (RejectedExecutionException exception) {
+            slot.connecting.set(false);
+        }
+    }
+
     private static void acquireSlotForClose(ClientSlot slot) {
         while (!slot.inFlight.compareAndSet(false, true)) {
             Thread.onSpinWait();
@@ -300,11 +475,13 @@ public final class AeronClientPool implements AutoCloseable {
     }
 
     private SurprisingAeronClient client(ClientSlot slot) {
-        if (slot.client == null) {
-            slot.client = SurprisingAeronClient.connect(productLine, hostnames, egressHostname, responseTimeout,
-                    sharedMediaDriver());
+        synchronized (slot) {
+            if (slot.client == null) {
+                slot.client = SurprisingAeronClient.connect(productLine, hostnames, egressHostname, responseTimeout,
+                        sharedMediaDriver());
+            }
+            return slot.client;
         }
-        return slot.client;
     }
 
     private MediaDriver sharedMediaDriver() {
@@ -366,9 +543,11 @@ public final class AeronClientPool implements AutoCloseable {
     }
 
     private static final class ClientSlot {
-        private SurprisingAeronClient client;
+        private volatile SurprisingAeronClient client;
+        private volatile SurprisingAeronClient.AsyncConnection connection;
         private final long sourceId;
         private final AtomicBoolean inFlight = new AtomicBoolean();
+        private final AtomicBoolean connecting = new AtomicBoolean();
         private final AtomicLong nextSequence = new AtomicLong();
         private final AtomicLong nextCorrelation = new AtomicLong();
 

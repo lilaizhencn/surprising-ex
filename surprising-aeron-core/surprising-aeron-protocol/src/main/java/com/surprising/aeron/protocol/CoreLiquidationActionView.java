@@ -10,13 +10,26 @@ public record CoreLiquidationActionView(
         long triggerPriceSequence,
         long signedQuantitySteps,
         long closeQuantitySteps,
-        long markPriceTicks) {
+        long markPriceTicks,
+        String status,
+        long cursorOrderId) {
+
+    public CoreLiquidationActionView(long liquidationId, long userId, String symbol,
+                                     CoreMarginMode marginMode, CorePositionSide positionSide,
+                                     long instrumentVersion, long triggerPriceSequence,
+                                     long signedQuantitySteps, long closeQuantitySteps,
+                                     long markPriceTicks) {
+        this(liquidationId, userId, symbol, marginMode, positionSide, instrumentVersion,
+                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, markPriceTicks,
+                "PLANNED", 0);
+    }
 
     public CoreLiquidationActionView {
         if (liquidationId <= 0 || userId <= 0 || symbol == null || symbol.isBlank()
                 || marginMode == null || positionSide == null || instrumentVersion <= 0
                 || triggerPriceSequence <= 0 || signedQuantitySteps == 0 || closeQuantitySteps <= 0
-                || closeQuantitySteps > Math.absExact(signedQuantitySteps) || markPriceTicks <= 0) {
+                || closeQuantitySteps > Math.absExact(signedQuantitySteps) || markPriceTicks <= 0
+                || status == null || status.isBlank() || cursorOrderId < 0) {
             throw new IllegalArgumentException("invalid Core liquidation action");
         }
     }

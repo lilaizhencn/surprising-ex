@@ -33,6 +33,7 @@ public enum CoreMessageType {
     EXPIRE_TRIGGER_ORDER(40, WireMessageKind.COMMAND),
     RETRY_TRIGGER_ORDER(41, WireMessageKind.COMMAND),
     EXECUTE_TRIGGER_ORDER(42, WireMessageKind.COMMAND),
+    EXECUTE_LIQUIDATION_BATCH(43, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),

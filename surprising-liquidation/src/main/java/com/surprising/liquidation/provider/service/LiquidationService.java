@@ -1,7 +1,6 @@
 package com.surprising.liquidation.provider.service;
 
 import com.surprising.aeron.protocol.CoreLiquidationActionView;
-import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
@@ -29,20 +28,13 @@ public class LiquidationService {
     }
 
     public WorkCycle processWork() {
-        if (!properties.getExecution().isEnabled()) return new WorkCycle(false, 0, 0, 0);
+        if (!properties.getExecution().isEnabled()) return new WorkCycle(false, 0, 0, 0, 0, 0);
         var work = aeron.work(properties.getCoordinator().getWorkBatchSize());
-        int applied = 0;
-        int obsolete = 0;
         long feeRatePpm = properties.getExecution().getLiquidationFeeRatePpm();
-        for (CoreLiquidationActionView action : work.actions()) {
-            CoreResultCode result = aeron.execute(action, feeRatePpm);
-            if (result == CoreResultCode.NONE) applied++;
-            else obsolete++;
-        }
-        if (work.riskScanPending()) {
-            aeron.continueRiskScan(properties.getCoordinator().getRiskScanBatchSize());
-        }
-        return new WorkCycle(work.riskScanPending(), work.actions().size(), applied, obsolete);
+        var result = aeron.executeBatch(work, feeRatePpm,
+                properties.getCoordinator().getRiskScanBatchSize());
+        return new WorkCycle(result.riskScanContinuedUsers() > 0, result.offeredActions(),
+                result.appliedActions(), result.pendingActions(), result.obsoleteActions(), result.processedOrders());
     }
 
     public LiquidationOrderQueryResponse orders(Long userId, int limit) {
@@ -99,6 +91,7 @@ public class LiquidationService {
         return limit;
     }
 
-    public record WorkCycle(boolean riskScanContinued, int offered, int applied, int obsolete) {
+    public record WorkCycle(boolean riskScanContinued, int offered, int applied, int pending,
+                             int obsolete, int processedOrders) {
     }
 }

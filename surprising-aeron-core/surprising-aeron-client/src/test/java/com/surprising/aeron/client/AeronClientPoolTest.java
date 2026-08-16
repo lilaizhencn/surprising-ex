@@ -3,6 +3,7 @@ package com.surprising.aeron.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.product.api.ProductLine;
@@ -48,7 +49,36 @@ class AeronClientPoolTest {
         pool.close();
 
         assertThatIllegalStateException().isThrownBy(() -> pool.query(CoreMessageType.USER_STATE_QUERY,
-                UUID.randomUUID(), 1, new byte[0]));
+                    UUID.randomUUID(), 1, new byte[0]));
+    }
+
+    @Test
+    void tryCommandOnceReturnsClosedWithoutOpeningAeron() {
+        AeronClientPool pool = pool();
+        pool.close();
+
+        assertThat(pool.tryCommandOnce(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 0, new byte[0]))
+                .isEqualTo(AeronClientPool.TryCommandResult.CLOSED);
+    }
+
+    @Test
+    void connectionExecutorUsesDirectBackpressure() throws Exception {
+        try (AeronClientPool pool = pool(2)) {
+            var field = AeronClientPool.class.getDeclaredField("connectionExecutor");
+            field.setAccessible(true);
+            var executor = (ThreadPoolExecutor) field.get(pool);
+            assertThat(executor.getQueue()).isInstanceOf(java.util.concurrent.SynchronousQueue.class);
+            assertThat(executor.getQueue().remainingCapacity()).isEqualTo(0);
+        }
+    }
+
+    @Test
+    void tryCommandOnceDoesNotWaitForClusterConnection() {
+        try (AeronClientPool pool = pool(Duration.ofMillis(100), 1)) {
+            assertTimeoutPreemptively(Duration.ofSeconds(1), () ->
+                    assertThat(pool.tryCommandOnce(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 0,
+                            new byte[0])).isEqualTo(AeronClientPool.TryCommandResult.NOT_READY));
+        }
     }
 
     @Test
@@ -104,12 +134,16 @@ class AeronClientPoolTest {
     }
 
     private static AeronClientPool pool() {
-        return pool(1);
+        return pool(Duration.ofSeconds(1), 1);
     }
 
     private static AeronClientPool pool(int clientConnections) {
+        return pool(Duration.ofSeconds(1), clientConnections);
+    }
+
+    private static AeronClientPool pool(Duration responseTimeout, int clientConnections) {
         return new AeronClientPool("test", ProductLine.SPOT,
-                List.of("localhost", "localhost", "localhost"), "localhost", Duration.ofSeconds(1),
+                List.of("localhost", "localhost", "localhost"), "localhost", responseTimeout,
                 clientConnections);
     }
 }

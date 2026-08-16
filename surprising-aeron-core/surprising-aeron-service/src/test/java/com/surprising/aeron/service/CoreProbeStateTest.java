@@ -219,7 +219,7 @@ class CoreProbeStateTest {
         assertThat(openOrders.orders()).extracting(order -> order.orderId()).containsExactly(91L);
         var book = CoreStateQueryCodec.decodeBookState(
                 applyBookQuery(original, query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0])).data());
-        assertThat(book.exportSequence()).isEqualTo(4);
+        assertThat(book.exportSequence()).isEqualTo(5);
         assertThat(book.levels()).singleElement().satisfies(value -> {
             assertThat(value.priceTicks()).isEqualTo(1_000);
             assertThat(value.quantitySteps()).isEqualTo(2);
@@ -315,6 +315,36 @@ class CoreProbeStateTest {
         assertThat(state.tradingState().order(712).status()).isEqualTo(
                 com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
         state.close();
+    }
+
+    @Test
+    void pendingMatcherAttemptMetadataSurvivesSnapshot() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
+            CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(713, "BTC-USDT", 1,
+                            "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 2, false,
+                            CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT",
+                            2_000, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 1_000, false,
+                            "snapshot-attempt-713", 0, 0)));
+
+            state.apply(place);
+            long sequence = state.matchingSequence(place.header().commandId());
+            PendingMatching expected = state.pendingMatching(sequence);
+            byte[] snapshot = state.snapshot();
+            state.close();
+
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot)) {
+                PendingMatching actual = restored.pendingMatching(sequence);
+                assertThat(actual).isNotNull();
+                assertThat(actual.attemptGeneration()).isEqualTo(expected.attemptGeneration());
+                assertThat(actual.attemptDeadline()).isEqualTo(expected.attemptDeadline());
+                assertThat(actual.recoveryAttempts()).isEqualTo(expected.recoveryAttempts());
+                assertThat(actual.attemptToken()).isEqualTo(expected.attemptToken());
+            }
+        }
     }
 
     @Test
@@ -436,6 +466,102 @@ class CoreProbeStateTest {
         assertThat(state.tradingState().triggerOrders().get(504L).status())
                 .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED);
         assertThat(state.tradingState().triggerOrders().get(504L).triggerSequence()).isEqualTo(7);
+    }
+
+    @Test
+    void markPriceOcoCancellationResumesInDescendingOrderWithoutSkippingSiblings() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10))));
+        for (long id = 1; id <= 4; id++) {
+            var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(id,
+                    ProductLine.SPOT, 1001, "oco-" + id, "shared-oco", "BTC-USDT", CoreOrderSide.SELL,
+                    com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                    com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                    0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                    CoreMarginMode.CROSS, CorePositionSide.NET,
+                    com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                    "", "oco-trace-" + id, 0, 0, 1_000, 1_000, 1);
+            assertThat(state.apply(tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), id + 1,
+                    com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+        }
+
+        CoreMessage mark = tradingCommand(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 10,
+                TradingCommandCodec.encodeApplyMarkPrice(
+                        new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 2_000)));
+        assertThat(applyAndDrain(state, mark).status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(state.tradingState().triggerOrders().get(1L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING);
+        assertThat(state.tradingState().triggerOrders().get(2L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.CANCELED);
+        assertThat(state.tradingState().triggerOrders().get(3L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.CANCELED);
+        assertThat(state.tradingState().triggerOrders().get(4L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING);
+
+        long sourceSequence = 11;
+        while (!state.tradingState().riskState().scan().complete()) {
+            CoreMessage continuation = tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(),
+                    sourceSequence++, TradingCommandCodec.encodeContinueRiskScan(
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(1_024)));
+            CoreResponse continuationResponse = applyAndDrain(state, continuation);
+            assertThat(continuationResponse.status())
+                    .withFailMessage("continuation seq=%s result=%s scan=%s", sourceSequence,
+                            continuationResponse.resultCode(), state.tradingState().riskState().scan())
+                    .isEqualTo(ResponseStatus.APPLIED);
+        }
+        assertThat(state.tradingState().triggerOrders().get(3L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.CANCELED);
+        assertThat(state.tradingState().triggerOrders().get(4L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED);
+    }
+
+    @Test
+    void markPriceTriggerWorkContinuesFromPersistedCursor() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 400))));
+        for (long id = 1; id <= 260; id++) {
+            var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(id,
+                    ProductLine.SPOT, 1001, "tp-" + id, "", "BTC-USDT", CoreOrderSide.SELL,
+                    com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                    com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                    0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                    CoreMarginMode.CROSS, CorePositionSide.NET,
+                    com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                    "", "trace-" + id, 0, 0, 1_000, 1_000, 1);
+            assertThat(state.apply(tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), id + 1,
+                    com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+        }
+        long throughSequence = state.exportState().nextSequence() - 1;
+        assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
+                UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 2, 0, 2_000, 399),
+                CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)))).status())
+                .isEqualTo(ResponseStatus.APPLIED);
+        var mark = new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 2_000);
+        CoreResponse markResponse = applyAndDrain(state, tradingCommand(CoreMessageType.APPLY_MARK_PRICE,
+                UUID.randomUUID(), 400, TradingCommandCodec.encodeApplyMarkPrice(mark)));
+        assertThat(markResponse.status()).withFailMessage("mark status=%s result=%s", markResponse.status(), markResponse.resultCode())
+                .isEqualTo(ResponseStatus.APPLIED);
+        assertThat(state.tradingState().triggerOrders().values().stream()
+                .filter(value -> value.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED)
+                .count()).isEqualTo(2);
+
+        long sourceSequence = 401;
+        while (!state.tradingState().riskState().scan().complete()) {
+            var continuation = tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(), sourceSequence++,
+                    TradingCommandCodec.encodeContinueRiskScan(
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(1_024)));
+            assertThat(applyAndDrain(state, continuation).status()).isEqualTo(ResponseStatus.APPLIED);
+        }
+        assertThat(state.tradingState().triggerOrders().values().stream()
+                .filter(value -> value.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED)
+                .count()).isEqualTo(260);
+        assertThat(state.tradingState().riskState().scan().complete()).isTrue();
     }
 
     @Test
@@ -612,7 +738,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(4);
+        assertThat(manifest.schemaVersion()).isEqualTo(5);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.exportStatus().pendingCount()).isEqualTo(1);
@@ -700,8 +826,7 @@ class CoreProbeStateTest {
         int pendingBefore = state.pendingMatching().size();
         CoreResponse response = state.apply(message);
         if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-            completeMatching(state, state.matchingSequence(message.header().commandId()), message);
-            return state.commandResult(message.header().commandId());
+            return completeMatching(state, state.matchingSequence(message.header().commandId()), message);
         }
         while (state.pendingMatching().size() > pendingBefore) {
             long sequence = state.pendingMatching().keySet().stream().skip(pendingBefore).findFirst().orElseThrow();
@@ -710,7 +835,7 @@ class CoreProbeStateTest {
         return response;
     }
 
-    private static void completeMatching(CoreProbeState state, long sequence, CoreMessage message) {
+    private static CoreResponse completeMatching(CoreProbeState state, long sequence, CoreMessage message) {
         com.surprising.aeron.service.matching.CoreMatchingResult result = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (result == null && System.nanoTime() < deadline) {
@@ -718,8 +843,10 @@ class CoreProbeStateTest {
             if (result == null) Thread.onSpinWait();
         }
         assertThat(result).as("matching result for " + message.header().messageType()).isNotNull();
-        assertThat(state.completeMatching(sequence, result, message.header().submittedAtEpochMillis(),
-                message.header().sourceSequence())).isNotNull();
+        CoreResponse completed = state.completeMatching(sequence, result, message.header().submittedAtEpochMillis(),
+                message.header().sourceSequence());
+        assertThat(completed).isNotNull();
+        return completed;
     }
 
     private static CoreResponse applyBookQuery(CoreProbeState state, CoreMessage message) {

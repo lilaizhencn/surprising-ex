@@ -21,7 +21,7 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 final class CoreStateSnapshotCodec {
 
     private static final int MAGIC = 0x5358534E;
-    private static final int VERSION = 4;
+    private static final int VERSION = 5;
     private static final int FIXED_LENGTH = 40;
     private static final int SOURCE_SEQUENCE_LENGTH = 24;
     private static final int RESULT_LENGTH = 40;
@@ -47,7 +47,7 @@ final class CoreStateSnapshotCodec {
             byte[] encoded = CoreMessageCodec.encode(pending.command());
             pendingCommands.add(encoded);
             pendingLength = Math.addExact(pendingLength,
-                    Math.addExact(16L, encoded.length));
+                    Math.addExact(44L, encoded.length));
         }
         int snapshotLength = Math.toIntExact(Math.addExact(Math.addExact(Math.addExact(
                 Math.addExact((long) FIXED_LENGTH,
@@ -92,6 +92,10 @@ final class CoreStateSnapshotCodec {
             byte[] encoded = pendingCommands.get(pendingIndex++);
             buffer.putLong(pending.sequence());
             buffer.putInt(pending.operation().ordinal());
+            buffer.putLong(pending.attemptGeneration());
+            buffer.putLong(pending.attemptDeadline());
+            buffer.putInt(pending.recoveryAttempts());
+            buffer.putLong(pending.attemptToken());
             buffer.putInt(encoded.length);
             buffer.put(encoded);
         }
@@ -167,11 +171,15 @@ final class CoreStateSnapshotCodec {
             events.add(CoreMessageCodec.decode(event));
         }
         for (int index = 0; index < pendingCount; index++) {
-            if (buffer.remaining() < 16 + CHECKSUM_LENGTH) {
+            if (buffer.remaining() < 44 + CHECKSUM_LENGTH) {
                 throw new ProtocolException("truncated pending matching entry");
             }
             long sequence = buffer.getLong();
             int operationOrdinal = buffer.getInt();
+            long attemptGeneration = buffer.getLong();
+            long attemptDeadline = buffer.getLong();
+            int recoveryAttempts = buffer.getInt();
+            long attemptToken = buffer.getLong();
             int messageLength = buffer.getInt();
             if (sequence <= 0 || messageLength <= 0 || messageLength > buffer.remaining() - CHECKSUM_LENGTH
                     || operationOrdinal < 0 || operationOrdinal >= PendingMatching.Operation.values().length) {
@@ -284,11 +292,15 @@ final class CoreStateSnapshotCodec {
         exportState = CoreExportState.restore(acknowledgedSequence, nextSequence, events);
         Map<Long, PendingMatching> pendingMatching = new LinkedHashMap<>();
         for (int index = 0; index < pendingCount; index++) {
-            if (buffer.remaining() < 16 + CHECKSUM_LENGTH) {
+            if (buffer.remaining() < 44 + CHECKSUM_LENGTH) {
                 throw new ProtocolException("truncated pending matching entry");
             }
             long sequence = buffer.getLong();
             int operationOrdinal = buffer.getInt();
+            long attemptGeneration = buffer.getLong();
+            long attemptDeadline = buffer.getLong();
+            int recoveryAttempts = buffer.getInt();
+            long attemptToken = buffer.getLong();
             int messageLength = buffer.getInt();
             if (sequence <= 0 || messageLength <= 0 || messageLength > buffer.remaining() - CHECKSUM_LENGTH
                     || operationOrdinal < 0 || operationOrdinal >= PendingMatching.Operation.values().length) {
@@ -297,7 +309,8 @@ final class CoreStateSnapshotCodec {
             byte[] encoded = new byte[messageLength];
             buffer.get(encoded);
             PendingMatching pending = new PendingMatching(sequence,
-                    PendingMatching.Operation.values()[operationOrdinal], CoreMessageCodec.decode(encoded));
+                    PendingMatching.Operation.values()[operationOrdinal], CoreMessageCodec.decode(encoded),
+                    attemptGeneration, attemptDeadline, recoveryAttempts, attemptToken);
             if (pendingMatching.put(sequence, pending) != null) {
                 throw new ProtocolException("duplicate pending matching sequence");
             }

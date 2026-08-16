@@ -6,10 +6,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.aeron.protocol.CoreLiquidationActionView;
+import com.surprising.aeron.protocol.CoreLiquidationBatchResultView;
+import com.surprising.aeron.protocol.CoreRiskScanContinuation;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.CoreLiquidationProjection;
 import com.surprising.liquidation.provider.repository.CoreLiquidationProjectionRepository;
@@ -21,21 +22,23 @@ import org.junit.jupiter.api.Test;
 class LiquidationServiceTest {
 
     @Test
-    void executesBoundedCoreWorkThenContinuesRiskScan() {
+    void executesBoundedCoreWorkInOneBatch() {
         LiquidationProperties properties = new LiquidationProperties();
         LiquidationAeronGateway aeron = mock(LiquidationAeronGateway.class);
         CoreLiquidationProjectionRepository projections = mock(CoreLiquidationProjectionRepository.class);
         CoreLiquidationActionView action = new CoreLiquidationActionView(7, 11, "BTC-USDT",
                 CoreMarginMode.CROSS, CorePositionSide.NET, 2, 9, 3, 3, 60_000);
-        when(aeron.work(256)).thenReturn(new CoreLiquidationWorkView(true, List.of(action)));
-        when(aeron.execute(action, 3_000)).thenReturn(CoreResultCode.NONE);
+        CoreLiquidationWorkView work = new CoreLiquidationWorkView(
+                new CoreRiskScanContinuation("BTC-USDT", 9, 0), List.of(action));
+        when(aeron.work(256)).thenReturn(work);
+        when(aeron.executeBatch(work, 3_000, 1_024))
+                .thenReturn(new CoreLiquidationBatchResultView(1, 1, 0, 0, 3, 1));
         LiquidationService service = new LiquidationService(properties, aeron, projections);
 
         LiquidationService.WorkCycle cycle = service.processWork();
 
-        assertThat(cycle).isEqualTo(new LiquidationService.WorkCycle(true, 1, 1, 0));
-        verify(aeron).execute(action, 3_000);
-        verify(aeron).continueRiskScan(1_024);
+        assertThat(cycle).isEqualTo(new LiquidationService.WorkCycle(true, 1, 1, 0, 0, 3));
+        verify(aeron).executeBatch(work, 3_000, 1_024);
     }
 
     @Test
@@ -46,7 +49,7 @@ class LiquidationServiceTest {
         LiquidationService service = new LiquidationService(properties, aeron,
                 mock(CoreLiquidationProjectionRepository.class));
 
-        assertThat(service.processWork()).isEqualTo(new LiquidationService.WorkCycle(false, 0, 0, 0));
+        assertThat(service.processWork()).isEqualTo(new LiquidationService.WorkCycle(false, 0, 0, 0, 0, 0));
         org.mockito.Mockito.verifyNoInteractions(aeron);
     }
 

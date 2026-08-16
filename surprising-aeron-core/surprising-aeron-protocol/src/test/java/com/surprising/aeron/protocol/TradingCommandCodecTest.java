@@ -3,6 +3,8 @@ package com.surprising.aeron.protocol;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import org.junit.jupiter.api.Test;
 
 class TradingCommandCodecTest {
@@ -30,6 +32,8 @@ class TradingCommandCodecTest {
                 42, 128);
         SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "BTC-USDT", 3, 61_000, 0, 0, 128);
         ExecuteLiquidationCommand liquidation = new ExecuteLiquidationCommand(13, 9, 59_000, 25_000);
+        ExecuteLiquidationCommand chunkedLiquidation = new ExecuteLiquidationCommand(
+                14, 10, 58_000, 30_000, 91, 512);
         ExecuteAdlCommand adl = new ExecuteAdlCommand(13, 18, "BTC-USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, -3, 58_000, 9, 2, 7);
         ResolveLiquidationCommand resolution = new ResolveLiquidationCommand(13,
@@ -61,8 +65,14 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeApplyFunding(chunkedFunding))).isEqualTo(chunkedFunding);
         assertThat(TradingCommandCodec.decodeSettleInstrument(
                 TradingCommandCodec.encodeSettleInstrument(settlement))).isEqualTo(settlement);
+        assertThat(settlement.cursorOrderId()).isZero();
+        assertThat(settlement.maxOrders()).isEqualTo(SettleInstrumentCommand.DEFAULT_MAX_ORDERS);
         assertThat(TradingCommandCodec.decodeExecuteLiquidation(
                 TradingCommandCodec.encodeExecuteLiquidation(liquidation))).isEqualTo(liquidation);
+        assertThat(liquidation.cursorOrderId()).isZero();
+        assertThat(liquidation.maxOrders()).isEqualTo(ExecuteLiquidationCommand.DEFAULT_MAX_ORDERS);
+        assertThat(TradingCommandCodec.decodeExecuteLiquidation(
+                TradingCommandCodec.encodeExecuteLiquidation(chunkedLiquidation))).isEqualTo(chunkedLiquidation);
         assertThat(TradingCommandCodec.decodeExecuteAdl(
                 TradingCommandCodec.encodeExecuteAdl(adl))).isEqualTo(adl);
         assertThat(TradingCommandCodec.decodeResolveLiquidation(
@@ -77,6 +87,34 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeAdjustInsuranceFund(insuranceFund))).isEqualTo(insuranceFund);
         assertThat(TradingCommandCodec.decodeUpdateLeverage(
                 TradingCommandCodec.encodeUpdateLeverage(leverage))).isEqualTo(leverage);
+    }
+
+    @Test
+    void rejectsInvalidSingleActionOrderBoundsFromWire() {
+        byte[] liquidation = TradingCommandCodec.encodeExecuteLiquidation(
+                new ExecuteLiquidationCommand(13, 9, 59_000, 25_000));
+        byte[] settlement = TradingCommandCodec.encodeSettleInstrument(
+                new SettleInstrumentCommand(12, "BTC-USDT", 3, 61_000, 0));
+
+        for (int invalid : new int[] {0, 1_025}) {
+            ByteBuffer.wrap(liquidation).order(ByteOrder.LITTLE_ENDIAN)
+                    .putInt(liquidation.length - Integer.BYTES, invalid);
+            assertThatThrownBy(() -> TradingCommandCodec.decodeExecuteLiquidation(liquidation))
+                    .isInstanceOf(ProtocolException.class);
+            ByteBuffer.wrap(settlement).order(ByteOrder.LITTLE_ENDIAN)
+                    .putInt(settlement.length - Integer.BYTES, invalid);
+            assertThatThrownBy(() -> TradingCommandCodec.decodeSettleInstrument(settlement))
+                    .isInstanceOf(ProtocolException.class);
+        }
+    }
+
+    @Test
+    void preservesAppendOnlyWireCodes() {
+        assertThat(CoreMessageType.EXECUTE_TRIGGER_ORDER.wireCode()).isEqualTo(42);
+        assertThat(CoreMessageType.EXECUTE_LIQUIDATION_BATCH.wireCode()).isEqualTo(43);
+        assertThat(CoreResultCode.MATCHING_PENDING.wireCode()).isEqualTo(66);
+        assertThat(CoreResultCode.LIFECYCLE_IN_PROGRESS.wireCode()).isEqualTo(67);
+        assertThat(CoreResultCode.MATCHING_CONTINUATION_FAILED.wireCode()).isEqualTo(68);
     }
 
     @Test

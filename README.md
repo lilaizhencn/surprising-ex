@@ -2,19 +2,34 @@
 
 
 Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 的交易所后端。
-仓库覆盖现货、永续、交割和欧式现金结算期权四条业务线（含 U/币本位变体）；每条业务线使用独立的
+仓库覆盖现货、永续、交割和欧式现金结算期权四类业务线（六个 `ProductLine` 变体）；每个变体使用独立的
 三节点 Aeron Cluster、Topic、投影和账户类型。
 
 完整架构、问题追踪、唯一参数来源、阶段台账、脚本矩阵和验收门禁以
 [`docs/high-performance-trading-core-implementation.md`](docs/high-performance-trading-core-implementation.md)
 为唯一实施依据。canonical 脚本均绑定显式产品线的内存 Core；真实 provider/做市进程仍由部署编排单独管理。
 
+## 已确认架构基线
+
+- 一个 `ProductLine` 变体对应一个逻辑 ProductExecutionCore；逻辑 Core 是一套三 Member Aeron Cluster，
+  不是单进程。该 Core 管理本产品线全部 symbol、账户、订单元数据、持仓、风险和生命周期。
+- CROSS 与 ISOLATED 都在同一个 Core 内。CROSS 只共享本产品线 Core 内的权益；ISOLATED 绑定 position identity，
+  保证金划拨仍由同一 Core 原子完成。产品线之间不共享 live available balance。
+- 当前不为热点币对单独部署 Core。协议、路由、事件、指标和 snapshot 只预留
+  `coreShardId=default`、`routeVersion=1` 的语义；字段按主规格 W1/W3 版本化落地，完成前拒绝任何非默认路由。
+  只有容量门禁证明单 Core 不足后才评审独立风险子账户式分片。
+- 目标架构以 exchange-core 为唯一 FIFO/价格树，Core 只保留业务订单元数据和必要索引。当前源码仍保留
+  `CoreBookState` 并在恢复时逐单 rebuild matcher，因此 P3 是 `IN_PROGRESS`；必须完成 fork 原生 snapshot
+  的 Aeron 托管、snapshot-only restore 和双本删除后才能宣称改造完成。
+
 ## 核心边界
 
-- Aeron Cluster 中的 Unified Core State 是资金、订单、订单簿、持仓、Risk、强平和 Treasury 的唯一
-  在线权威；Cluster Log、Archive 和 Snapshot 是唯一核心恢复链。
-- Exchange Core 作为确定性订单簿执行器嵌入 Aeron 状态机，不运行独立 journal；同一核心命令原子完成
-  资金预占、撮合、成交结算、风险更新和必要的强平状态推进。
+- Aeron Cluster 中的 ProductExecutionCore 是资金、订单业务状态、持仓、Risk、强平和 Treasury 的唯一
+  在线权威；其内嵌 exchange-core 是唯一可执行盘口权威。Cluster Log、Archive 和配对 Snapshot 是唯一核心恢复链。
+- Exchange Core 作为确定性订单簿执行器嵌入每个 Aeron Member，不运行独立 command journal；同一核心命令
+  原子完成资金预占、撮合、成交结算、风险更新和必要的强平状态推进。
+- exchange-core 固定为 `MATCHING_ONLY` 且禁用其 margin trading；引擎内部 user/symbol/risk module 只是
+  matcher 技术状态，不能成为业务余额、持仓、保证金、强平或对账来源。
 - PostgreSQL 只保存 Core Export 查询投影、审计、报表和对账数据；投影延迟或不可用不能改变交易裁决。
 - Kafka 保留外部输入缓冲与 WebSocket、K 线、通知、数据仓库等外围事件分发，不恢复核心资金状态。
 - Valkey 只承担限流和非权威缓存，不保存 Risk 状态、强平候选、资金或订单恢复进度。
@@ -22,8 +37,10 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
   Insurance Treasury 全部由 Aeron 校验并原子提交。
 - 保证金率、risk brackets、杠杆和持仓上限只由 Instrument Provider 版本化下发到 `CoreInstrumentState`；
   Core 是唯一计算/执行来源，Risk Provider 只查询并展示 Core 风险快照，不再维护本地保证金阈值副本。
-- `surprising-liquidation` 是无状态协调器：查询 Aeron Liquidation Work、续跑 Risk Scan，使用
-  稳定 `commandId` 重试强平命令；它不消费强平 Kafka 回环，也不维护 Redis 队列或 PostgreSQL 强平事务。
+- `surprising-liquidation` 是无状态协调器：查询 Aeron Liquidation Work 后，将有序 action 和精确 Risk Scan
+  continuation 合并为一次 `EXECUTE_LIQUIDATION_BATCH`，按 `productLine + canonical payload` 生成稳定 `commandId`。
+  Core 共享最多 1,024 笔撤单预算并持久化 cursor；provider 正常周期不逐 action 往返、不单独续跑 Risk Scan，也不维护
+  Redis 队列或 PostgreSQL 强平事务。
 - Core Exporter 以连续 Export Sequence 向 Kafka at-least-once 发布并幂等写 PostgreSQL；只有完整批次
   成功后才向 Aeron 提交 ACK，不新增数据库 outbox 或应用 WAL。
 - Matching Provider 只做 Market Data Projection：启动从 Aeron 强查询恢复 L2 和 watermark，随后消费
@@ -129,23 +146,24 @@ Maven 测试可独立通过，详见主规格验证证据。
 ## 生产部署
 
 生产部署 Runbook、基础设施初始化和容量基线正在重新整理，当前不提供可直接执行的部署命令。
-即使部署文档尚未恢复，四条产品线仍必须独立配置和验证：
+即使部署文档尚未恢复，四类业务线的六个 `ProductLine` 变体仍必须独立配置和验证：
 
-- 关闭 Kafka 自动建 Topic，使用经过审查的 Topic 初始化配置显式创建；
-- 永续首发把普通 Topic 和账户指令 Topic 都固定为 32 分区，RF=3、`min.insync.replicas=2`；
-- 不在已有 symbol-keyed Topic 上直接增加分区；扩容需要新版本 Topic、维护窗口和状态重建方案；
-- 为每条产品线配置独立 Topic、消费组、client id、协调 node id 和 gateway route；`PRODUCT_LINE`
-  不允许省略，服务启动会拒绝空值；
-- Order Provider 的账户指令结果 listener 并发度对齐 32 个分区；同一 `productLine:userId` 保序，
-  每个 poll 批量完成订单状态迁移及 ACCEPTED/PLACE Outbox 入库；
-- 撮合指令使用有界 poll 批量事务，批量读取幂等及保护状态；同批同用户/标的的潜在冲突仍逐条复查，
-  保持 symbol 分区顺序；Outbox 积压时优先发布
-  `ORDER_RESERVE/PLACE/CANCEL` 财务指令，再发布通知型订单事件；
-- Redis/Valkey 使用持久化、`noeviction` 和同 hash-tag Lua 兼容的部署；
-- 保持 PostgreSQL durability，监控 Kafka lag、Outbox pending/最老年龄、数据库锁与慢 SQL、Redis
-  readiness、JVM GC，并在上线前完成故障切换和资金零差异核对。
+- 每个变体只配置一个 `coreShardId=default` 的三 Member Cluster；cluster id、端口、Archive、snapshot、
+  data volume、gateway route、Topic、consumer group 和账户类型不得复用。
+- 三个 Member 必须跨故障域部署，使用本地持久盘保存 Archive；启动时校验 fork SHA、matcher/Core snapshot
+  manifest、registry hash 和恢复水位，任一不一致保持 `NOT_READY`。
+- Gateway 通过固定 Aeron agents 和有界 mailbox 向 Core 提交命令；Kafka、Order Provider、PostgreSQL 和
+  Redis/Valkey 不参与资金预留、撮合或成交结算的同步裁决，也不承担核心恢复。
+- 关闭 Kafka 自动建 Topic，使用经过审查的配置创建外围输入和 Core Export Topic；不在已有 symbol-keyed
+  Topic 上直接增加分区，扩容使用版本化 Topic 和受控投影重建。
+- PostgreSQL、Kafka 或 WebSocket 故障只能造成投影/推送延迟；Exporter 必须按 Core export sequence
+  at-least-once 发布，消费者按稳定事件键幂等，积压达到上限时 Core 在 mutation 前显式背压。
+- 上线前按单个 ProductLine 变体运行做市、全链路资金守恒、Leader/follower/cold recovery、24 小时 soak
+  和容量门禁；生产峰值不超过满足 SLO 的实测容量 70%。
+- 监控 Aeron election/commit position、Archive/snapshot、matcher queue/latency、Core p99/p99.9、GC、
+  export event age、Kafka/PG/WebSocket lag、资金差额和 book hash；不以平均 TPS 代替容量结论。
 
-Topic 的精确清单、分区数量和创建后校验命令待部署文档重新整理后补充。
+Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Runbook 补充；不得改变上述所有权和恢复边界。
 
 ## 文档
 

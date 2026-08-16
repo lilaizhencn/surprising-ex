@@ -384,13 +384,31 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, liquidation.liquidationFeeRatePpm());
             hash = CoreStateHash.mix(hash, liquidation.liquidationFeeUnits());
             hash = CoreStateHash.mix(hash, liquidation.status().ordinal());
+            hash = CoreStateHash.mix(hash, liquidation.nextCancelOrderId());
         }
         for (CoreRiskState.RiskScan scan : riskState.scans().values()) {
             hash = CoreStateHash.mix(hash, scan.symbol());
             hash = CoreStateHash.mix(hash, scan.priceSequence());
             hash = CoreStateHash.mix(hash, scan.scanStartPriceSequence());
             hash = CoreStateHash.mix(hash, scan.lastUserId());
-            hash = CoreStateHash.mix(hash, scan.complete());
+            hash = CoreStateHash.mix(hash, scan.riskComplete());
+            hash = CoreStateHash.mix(hash, scan.riskUserId());
+            hash = CoreStateHash.mix(hash, scan.riskPhase());
+            hash = CoreStateHash.mix(hash, scan.riskPositionCursor());
+            hash = CoreStateHash.mix(hash, scan.riskReservationCursor());
+            hash = CoreStateHash.mix(hash, scan.riskUnrealizedPnlUnits());
+            hash = CoreStateHash.mix(hash, scan.riskMaintenanceMarginUnits());
+            hash = CoreStateHash.mix(hash, scan.riskIsolatedMarginUnits());
+            hash = CoreStateHash.mix(hash, scan.riskIsolatedReservationUnits());
+            hash = CoreStateHash.mix(hash, scan.triggerComplete());
+            hash = CoreStateHash.mix(hash, scan.triggerPhase());
+            hash = CoreStateHash.mix(hash, scan.triggerPriceCursor());
+            hash = CoreStateHash.mix(hash, scan.triggerOrderCursor());
+            hash = CoreStateHash.mix(hash, scan.triggerUpperId());
+            hash = CoreStateHash.mix(hash, scan.triggerMarkPriceTicks());
+            hash = CoreStateHash.mix(hash, scan.triggerGeneratedAtEpochMillis());
+            hash = CoreStateHash.mix(hash, scan.triggerOcoOrderId());
+            hash = CoreStateHash.mix(hash, scan.triggerOcoCursor());
         }
         hash = CoreStateHash.mix(hash, riskState.nextLiquidationId());
         for (Map.Entry<String, Long> entry : treasuryState.feeBalances().entrySet()) {
@@ -431,6 +449,8 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, progress.instrumentVersion());
             hash = CoreStateHash.mix(hash, progress.settlementPriceTicks());
             hash = CoreStateHash.mix(hash, progress.optionCashUnitsPerContract());
+            hash = CoreStateHash.mix(hash, progress.ordersComplete());
+            hash = CoreStateHash.mix(hash, progress.nextCursorOrderId());
             hash = CoreStateHash.mix(hash, progress.nextCursorUserId());
             hash = CoreStateHash.mix(hash, progress.commandId().getMostSignificantBits());
             hash = CoreStateHash.mix(hash, progress.commandId().getLeastSignificantBits());

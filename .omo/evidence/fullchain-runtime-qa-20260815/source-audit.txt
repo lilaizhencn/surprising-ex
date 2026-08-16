@@ -1,0 +1,11 @@
+# Source-level concurrency/stability audit — hypotheses, not runtime proof
+
+1. `surprising-price/surprising-price-provider/src/main/java/com/surprising/price/mark/service/MarkPriceCorePublisher.java:22-63`: an unbounded `ConcurrentLinkedQueue<MarkPriceEvent>` feeds one daemon drain executor; each event performs a synchronous `AeronClientPool.command` and retries three times. There is no queue bound, per-symbol coalescing, or durable replay visible. No outage/backpressure test exists for this publisher. This is a source-level throughput/stability hypothesis, not a reproduced failure.
+
+2. `surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:76-83,115-124`: batch place/cancel starts one future per request and waits on `CompletableFuture.allOf(...).join()`. `CoreProbeState.apply` is the Core owner-thread entry (`CoreProbeState.java:143-148`). Large batch/liquidation/settlement work therefore needs a dedicated bounded-load test; no adapter integration test was found in the targeted reports.
+
+3. `surprising-gateway/src/main/java/com/surprising/websocket/provider/service/ClientConnection.java` (source-level review artifact `.omo/evidence/fullchain_quality-code-review.md`): outbound writes use a per-message watchdog around synchronous WebSocket send. No live connection/backpressure test was runnable because Gateway/Kafka were absent.
+
+4. Existing review artifact `.omo/evidence/fullchain_quality-code-review.md` records missing result-unknown retry, large liquidation fairness, mark-price outage, and snapshot-timeout coverage. Those remain hypotheses/gaps; this pass did not convert them into failures by inference.
+
+CodeGraph blast-radius facts: `DeterministicExchangeCoreAdapter` has callers in `TradingCoreRuntime`/`CoreProbeState` and no covering tests; `MarkPriceCorePublisher` has callers in `MarkPriceService`/runtime hints and no covering tests.

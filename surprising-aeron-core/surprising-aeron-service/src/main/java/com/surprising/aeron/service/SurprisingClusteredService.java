@@ -34,7 +34,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private Cluster cluster;
     private IdleStrategy idleStrategy;
     private final Map<Long, PendingEgress> pendingEgress = new HashMap<>();
-    private final Map<Long, PendingClient> pendingClients = new HashMap<>();
+    private final Map<Long, ArrayDeque<PendingClient>> pendingClients = new HashMap<>();
 
     public SurprisingClusteredService(ProductLine productLine) {
         this.productLine = productLine;
@@ -76,7 +76,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         long matchingSequence = state.matchingSequence(request.header().commandId());
         if (matchingSequence > 0) {
             if (session != null) {
-                pendingClients.put(matchingSequence, new PendingClient(session, request));
+                pendingClients.computeIfAbsent(matchingSequence, ignored -> new ArrayDeque<>())
+                        .addLast(new PendingClient(session, request));
             }
             scheduleMatchingTimer(matchingSequence);
             return;
@@ -84,7 +85,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         long querySequence = state.querySequence(request.header().commandId());
         if (querySequence != 0) {
             if (session != null) {
-                pendingClients.put(querySequence, new PendingClient(session, request));
+                pendingClients.computeIfAbsent(querySequence, ignored -> new ArrayDeque<>())
+                        .addLast(new PendingClient(session, request));
             }
             scheduleMatchingTimer(querySequence);
             return;
@@ -154,15 +156,22 @@ public final class SurprisingClusteredService implements ClusteredService {
                 scheduleMatchingTimer(correlationId);
                 return;
             }
-            PendingClient pendingClient = pendingClients.remove(correlationId);
-            if (pendingClient != null && !pendingClient.session().isClosing()) {
-                CoreMessage response = new CoreMessage(pendingClient.request().header().response(
-                        responseType(pendingClient.request())), CoreProtocol.responsePayload(queryResult));
-                offer(pendingClient.session(), CoreMessageCodec.encode(response));
+            ArrayDeque<PendingClient> clients = pendingClients.remove(correlationId);
+            if (clients != null) {
+                for (PendingClient pendingClient : clients) {
+                    if (pendingClient.session().isClosing()) continue;
+                    CoreMessage response = new CoreMessage(pendingClient.request().header().response(
+                            responseType(pendingClient.request())), CoreProtocol.responsePayload(queryResult));
+                    offer(pendingClient.session(), CoreMessageCodec.encode(response));
+                }
             }
             return;
         }
         var matchingResult = state.takeMatchingResult(correlationId);
+        if (matchingResult == null) {
+            state.markMatchingTimeout(correlationId, timestamp);
+            matchingResult = state.takeMatchingResult(correlationId);
+        }
         if (matchingResult == null) {
             scheduleMatchingTimer(correlationId);
             return;
@@ -173,11 +182,14 @@ public final class SurprisingClusteredService implements ClusteredService {
             scheduleMatchingTimer(correlationId);
             return;
         }
-        PendingClient pendingClient = pendingClients.remove(correlationId);
-        if (pendingClient != null && !pendingClient.session().isClosing()) {
-            CoreMessage response = new CoreMessage(pendingClient.request().header().response(
-                    responseType(pendingClient.request())), CoreProtocol.responsePayload(result));
-            offer(pendingClient.session(), CoreMessageCodec.encode(response));
+        ArrayDeque<PendingClient> clients = pendingClients.remove(correlationId);
+        if (clients != null) {
+            for (PendingClient pendingClient : clients) {
+                if (pendingClient.session().isClosing()) continue;
+                CoreMessage response = new CoreMessage(pendingClient.request().header().response(
+                        responseType(pendingClient.request())), CoreProtocol.responsePayload(result));
+                offer(pendingClient.session(), CoreMessageCodec.encode(response));
+            }
         }
         schedulePendingMatchingTimers();
     }

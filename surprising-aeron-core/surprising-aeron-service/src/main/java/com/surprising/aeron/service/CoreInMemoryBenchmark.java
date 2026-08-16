@@ -66,7 +66,7 @@ public final class CoreInMemoryBenchmark {
                         TradingCommandCodec.encodeCancelOrder(new com.surprising.aeron.protocol.CancelOrderCommand(orderId)));
                 if (measured) latencies[index] = System.nanoTime() - operationStarted;
                 if ((index & 255) == 255 || index == orderCount - 1) {
-                    long throughSequence = 2L + (index + 1L) * 2L;
+                    long throughSequence = 2L + (index + 1L) * 4L;
                     applied(state, CoreMessageType.ACK_EXPORT, CommandSource.OPERATIONS,
                             operationsSequence++, 2_000_000L + index,
                             CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)));
@@ -93,8 +93,24 @@ public final class CoreInMemoryBenchmark {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.SPOT,
                 source, source == CommandSource.OPERATIONS ? 9 : 7, sourceSequence, type == CoreMessageType.ACK_EXPORT
                         ? 0 : USER_ID, 1_000, correlationId), payload);
-        if (state.apply(message).status() != ResponseStatus.APPLIED) {
+        int pendingBefore = state.pendingMatchingCount();
+        ResponseStatus status = state.apply(message).status();
+        if (status != ResponseStatus.APPLIED && status != ResponseStatus.OK) {
             throw new IllegalStateException("benchmark command rejected type=" + type);
+        }
+        while (state.pendingMatchingCount() > pendingBefore) {
+            long sequence = state.firstPendingMatchingSequence();
+            com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
+            long deadline = System.nanoTime() + 30_000_000_000L;
+            while (matching == null && System.nanoTime() < deadline) {
+                matching = state.takeMatchingResult(sequence);
+                if (matching == null) Thread.onSpinWait();
+            }
+            if (matching == null) throw new IllegalStateException("benchmark matching timed out");
+            if (state.completeMatching(sequence, matching, message.header().submittedAtEpochMillis(), sequence)
+                    == null) {
+                throw new IllegalStateException("benchmark matching completion lost");
+            }
         }
     }
 

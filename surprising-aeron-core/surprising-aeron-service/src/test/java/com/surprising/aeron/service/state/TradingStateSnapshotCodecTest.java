@@ -11,6 +11,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.product.api.ProductLine;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class TradingStateSnapshotCodecTest {
@@ -38,6 +39,28 @@ class TradingStateSnapshotCodecTest {
         assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
         assertThat(restored.userStateHash(7)).isEqualTo(state.userStateHash(7));
         assertThat(restored.orderStateHash(71)).isEqualTo(state.orderStateHash(71));
+    }
+
+    @Test
+    void roundTripPreservesRiskAndTriggerContinuationCursor() {
+        TradingCoreState empty = TradingCoreState.empty(ProductLine.SPOT);
+        CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(
+                "BTC-USDT", 7, 6, 0, false, 7, 1, "position-key", 9,
+                10, 11, 12, 13, false, TriggerOrderIndex.PHASE_TRAILING_LESS_OR_EQUAL,
+                400, 300, 500, 70_000, 1_234, 88, 77);
+        CoreRiskState risk = new CoreRiskState(
+                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 70_000, 7)),
+                Map.of(), Map.of(), Map.of("BTC-USDT", scan), 1);
+        TradingCoreState state = new TradingCoreState(empty.productLine(), empty.revision(), empty.users(),
+                empty.orders(), empty.bookState(), empty.instruments(), risk, empty.treasuryState(),
+                empty.leverages(), empty.algoOrders(), empty.cancelAllAfterTimers(), empty.clientOrderIndex(),
+                empty.triggerOrders());
+
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(state), ProductLine.SPOT);
+
+        assertThat(restored.riskState().scans().get("BTC-USDT")).isEqualTo(scan);
+        assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
     }
 
     @Test

@@ -12,7 +12,6 @@ import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.CoreWaitStrategy;
-import exchange.core2.core.common.L2MarketData;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.OrderAction;
 import exchange.core2.core.common.OrderType;
@@ -34,6 +33,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -52,18 +53,32 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final Map<Long, CompletableFuture<Void>> userRegistrations = new ConcurrentHashMap<>();
     private final AtomicReference<CompletableFuture<Void>> submissionTail =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
-    private final AtomicReference<CompletableFuture<Void>> matchingSubmissionTail =
-            new AtomicReference<>(CompletableFuture.completedFuture(null));
+    private final ExecutorService laneDispatcher = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "exchange-core-lane-dispatcher");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final SymbolMatchingLanes matchingLanes = new SymbolMatchingLanes(laneDispatcher);
 
     public DeterministicExchangeCoreAdapter() {
-        start();
+        this(true);
+    }
+
+    public DeterministicExchangeCoreAdapter(boolean startImmediately) {
+        if (startImmediately) {
+            start();
+        }
     }
 
     public CompletableFuture<CoreMatchingResult> placeAsync(long userId, PlaceOrderCommand command) {
-        return enqueueMatching(advance -> ensureSymbolAsync(command.symbol())
+        return matchingLanes.enqueue(command.symbol(), () -> placeUnlanedAsync(userId, command));
+    }
+
+    private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, PlaceOrderCommand command) {
+        return ensureSymbolAsync(command.symbol())
                 .thenCombine(ensureUserAsync(userId), (symbolId, ignored) -> symbolId)
                 .thenCompose(symbolId -> {
-                    CompletableFuture<exchange.core2.core.common.cmd.OrderCommand> submitted = api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
+                    return api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
                         .orderId(command.orderId())
                         .uid(userId)
                         .symbol(symbolId)
@@ -71,11 +86,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .orderType(orderType(command))
                         .price(command.matchingPriceTicks())
                         .reservePrice(command.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : command.matchingPriceTicks())
-                        .size(command.quantitySteps())
-                        .build());
-                    advance.run();
-                    return submitted;
-                }))
+                        .size(command.quantitySteps()).build());
+                })
                 .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
     }
 
@@ -105,30 +117,38 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CompletableFuture<CoreMatchingResult> cancelBatchAsync(List<CoreOrderState> orders) {
-        if (orders == null || orders.isEmpty()) {
-            return CompletableFuture.completedFuture(new CoreMatchingResult(true, "SUCCESS", List.of()));
+        List<CoreOrderState> requested = orders == null ? List.of() : List.copyOf(orders);
+        return cancelBatchOrderedAsync(requested).thenApply(outcome -> {
+            List<CoreCancellationResult> cancellations = new ArrayList<>(requested.size());
+            for (int index = 0; index < requested.size(); index++) {
+                CoreMatchingResult result = outcome.results().get(index);
+                cancellations.add(new CoreCancellationResult(requested.get(index).orderId(), result.accepted(),
+                        result.resultCode()));
+            }
+            if (outcome.exception() != null) {
+                return new CoreMatchingResult(false, "EXCHANGE_CORE_FAILURE", List.of(), cancellations,
+                        outcome.successfulPrefix().size());
+            }
+            CoreMatchingResult failure = outcome.failedResult();
+            return new CoreMatchingResult(failure == null, failure == null ? "SUCCESS" : failure.resultCode(),
+                    List.of(), cancellations, outcome.successfulPrefix().size());
+        });
+    }
+
+    public CompletableFuture<CancelBatchOutcome> cancelBatchOrderedAsync(List<CoreOrderState> orders) {
+        if (orders != null && orders.size() > 1_024) {
+            return CompletableFuture.completedFuture(CancelBatchOutcome.rejected(orders.size(),
+                    new CoreMatchingResult(false, "LIFECYCLE_BATCH_TOO_LARGE", List.of())));
         }
-        List<CompletableFuture<CoreMatchingResult>> futures = orders.stream()
-                .map(order -> cancelAsync(order.userId(), order.orderId(), order.symbol())).toList();
-        CompletableFuture<List<CoreMatchingResult>> combined = CompletableFuture.completedFuture(new ArrayList<>());
-        for (CompletableFuture<CoreMatchingResult> future : futures) {
-            combined = combined.thenCombine(future, (results, result) -> {
-                List<CoreMatchingResult> next = new ArrayList<>(results);
-                next.add(result);
-                return next;
-            });
-        }
-        return combined.thenApply(results -> results.stream().filter(result -> !result.accepted()).findFirst()
-                .orElse(new CoreMatchingResult(true, "SUCCESS", List.of())));
+        return cancelBatchOrderedAsync(orders == null ? List.of() : orders,
+                order -> cancelAsync(order.userId(), order.orderId(), order.symbol()));
     }
 
     private CompletableFuture<CoreMatchingResult> cancelAsync(long userId, long orderId, String symbol) {
-        return enqueueMatching(advance -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+        return matchingLanes.enqueue(symbol, () -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
-                    CompletableFuture<CommandResultCode> submitted = api.submitCommandAsync(ApiCancelOrder.builder()
+                    return api.submitCommandAsync(ApiCancelOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).build());
-                    advance.run();
-                    return submitted;
                 })))
                 .thenApply(resultCode -> new CoreMatchingResult(resultCode == CommandResultCode.SUCCESS,
                         resultCode.name(), List.of()));
@@ -141,13 +161,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String symbol,
                                                                     PlaceOrderCommand replacement) {
-        return enqueueMatching(advance -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+        return matchingLanes.enqueue(symbol, () -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
                     CompletableFuture<CommandResultCode> cancel = api.submitCommandAsync(ApiCancelOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).build());
                     return cancel.thenCompose(cancelResult -> {
                         if (cancelResult != CommandResultCode.SUCCESS) {
-                            advance.run();
                             return CompletableFuture.completedFuture(new CoreMatchingResult(false,
                                     cancelResult.name(), List.of()));
                         }
@@ -160,7 +179,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                             .reservePrice(replacement.side() == CoreOrderSide.BUY
                                                     ? Long.MAX_VALUE : replacement.matchingPriceTicks())
                                             .size(replacement.quantitySteps()).build());
-                            advance.run();
                             return place.thenApply(DeterministicExchangeCoreAdapter::matchingResult);
                         });
                     });
@@ -169,32 +187,27 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public CompletableFuture<CoreMatchingResult> replaceAsync(long userId, long orderId, String symbol,
                                                                long newPriceTicks) {
-        return enqueueMatching(advance -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+        return matchingLanes.enqueue(symbol, () -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
                     CompletableFuture<exchange.core2.core.common.cmd.OrderCommand> submitted = api.submitCommandAsyncFullResponse(ApiMoveOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).newPrice(newPriceTicks).build());
-                    advance.run();
                     return submitted;
                 })))
                 .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
     }
 
     public CompletableFuture<Integer> orderBooksStateHashAsync() {
-        return enqueueMatching(advance -> {
-            CompletableFuture<Integer> result = api.processReport(
+        return matchingLanes.barrier(() -> api.processReport(
                             new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0)
                     .thenApply(report -> report.getHashCodes().entrySet().stream()
                             .filter(entry -> entry.getKey().submodule
                                     == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType.MATCHING_ORDER_BOOKS)
                             .mapToInt(Map.Entry::getValue)
-                            .reduce(0, (left, right) -> left * 31 + right));
-            advance.run();
-            return result;
-        });
+                            .reduce(0, (left, right) -> left * 31 + right)));
     }
 
     public CompletableFuture<List<CoreBookLevelView>> orderBookLevelsAsync(String requestedSymbol, int depth) {
-        return enqueueMatching(advance -> {
+        return matchingLanes.barrier(() -> {
             String symbolFilter = requestedSymbol == null ? "" : requestedSymbol;
             int boundedDepth = Math.min(Math.max(depth, 1), MAX_QUERY_DEPTH);
             List<Map.Entry<String, Integer>> entries = symbols.entrySet().stream()
@@ -221,7 +234,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .thenComparingLong(CoreBookLevelView::priceTicks));
                 return List.copyOf(levels);
             });
-            advance.run();
             return sorted;
         });
     }
@@ -231,6 +243,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CompletableFuture<Void> rebuildAsync(TradingCoreState state, Set<Long> excludedOrderIds) {
+        return matchingLanes.barrier(() -> rebuildUnlanedAsync(state, excludedOrderIds));
+    }
+
+    private CompletableFuture<Void> rebuildUnlanedAsync(TradingCoreState state, Set<Long> excludedOrderIds) {
         stop();
         symbols.clear();
         symbolNames.clear();
@@ -271,7 +287,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             return new PlaceRequest(order.userId(), command);
         }).toList();
         for (PlaceRequest request : requests) {
-            chain = chain.thenCompose(ignored -> placeAsync(request.userId(), request.command()).thenAccept(result -> {
+            chain = chain.thenCompose(ignored -> placeUnlanedAsync(request.userId(), request.command()).thenAccept(result -> {
                 if (!result.accepted() || !result.matches().isEmpty()) {
                     throw new IllegalStateException("book recovery crossed or rejected orderId="
                             + request.command().orderId());
@@ -363,30 +379,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private void stop() {
         if (core != null) {
-            core.shutdown(5, TimeUnit.SECONDS);
+            if (api != null) {
+                api.processReport(new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0).join();
+            }
+            core.shutdown(30, TimeUnit.SECONDS);
             core = null;
             api = null;
             symbolRegistrations.clear();
             userRegistrations.clear();
             submissionTail.set(CompletableFuture.completedFuture(null));
-            matchingSubmissionTail.set(CompletableFuture.completedFuture(null));
         }
-    }
-
-    private <T> CompletableFuture<T> enqueueMatching(
-            Function<Runnable, CompletableFuture<T>> submission) {
-        CompletableFuture<Void> gate = new CompletableFuture<>();
-        CompletableFuture<Void> previous = reserve(matchingSubmissionTail, gate);
-        return previous.thenCompose(ignored -> {
-            CompletableFuture<T> result;
-            try {
-                result = submission.apply(() -> gate.complete(null));
-            } catch (RuntimeException exception) {
-                gate.complete(null);
-                throw exception;
-            }
-            return result.whenComplete((value, failure) -> gate.complete(null));
-        });
     }
 
     private <T> CompletableFuture<T> submitOrdered(Supplier<CompletableFuture<T>> submission) {
@@ -416,6 +418,69 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     @Override
     public void close() {
+        matchingLanes.quiesce().join();
         stop();
+        laneDispatcher.shutdown();
+    }
+
+    public record CancelBatchOutcome(List<CoreMatchingResult> results,
+                                     List<CoreMatchingResult> successfulPrefix,
+                                     CoreMatchingResult failedResult,
+                                     Throwable exception) {
+
+        public CancelBatchOutcome {
+            results = List.copyOf(results);
+            successfulPrefix = List.copyOf(successfulPrefix);
+        }
+
+        private static CancelBatchOutcome rejected(int size, CoreMatchingResult failure) {
+            List<CoreMatchingResult> results = new ArrayList<>(java.util.Collections.nCopies(size, notSubmitted()));
+            if (!results.isEmpty()) results.set(0, failure);
+            return new CancelBatchOutcome(results, List.of(), failure, null);
+        }
+    }
+
+    static CompletableFuture<CancelBatchOutcome> cancelBatchOrderedAsync(
+            List<CoreOrderState> orders,
+            Function<CoreOrderState, CompletableFuture<CoreMatchingResult>> cancellation) {
+        List<CoreMatchingResult> results = new ArrayList<>(
+                java.util.Collections.nCopies(orders.size(), notSubmitted()));
+        List<CoreMatchingResult> successfulPrefix = new ArrayList<>();
+        CompletableFuture<BatchProgress> chain = CompletableFuture.completedFuture(new BatchProgress(null, null));
+        for (int index = 0; index < orders.size(); index++) {
+            int resultIndex = index;
+            chain = chain.thenCompose(progress -> {
+                if (progress.failedResult() != null || progress.exception() != null) {
+                    return CompletableFuture.completedFuture(progress);
+                }
+                CompletableFuture<CoreMatchingResult> future;
+                try {
+                    future = cancellation.apply(orders.get(resultIndex));
+                } catch (RuntimeException exception) {
+                    return CompletableFuture.completedFuture(new BatchProgress(null, exception));
+                }
+                return future.handle((result, exception) -> {
+                    if (exception != null) return new BatchProgress(null, unwrap(exception));
+                    results.set(resultIndex, result);
+                    if (!result.accepted()) return new BatchProgress(result, null);
+                    successfulPrefix.add(result);
+                    return progress;
+                });
+            });
+        }
+        return chain.thenApply(progress -> new CancelBatchOutcome(results, successfulPrefix,
+                progress.failedResult(), progress.exception()));
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        return failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                ? failure.getCause() : failure;
+    }
+
+    private static CoreMatchingResult notSubmitted() {
+        return new CoreMatchingResult(false, "NOT_SUBMITTED", List.of());
+    }
+
+    private record BatchProgress(CoreMatchingResult failedResult, Throwable exception) {
     }
 }

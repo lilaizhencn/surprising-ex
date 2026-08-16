@@ -21,7 +21,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 16;
+    private static final int VERSION = 18;
     private static final int MAX_TEXT_BYTES = 64;
 
     private TradingStateSnapshotCodec() {
@@ -171,6 +171,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(liquidation.liquidationFeeRatePpm());
             writer.longValue(liquidation.liquidationFeeUnits());
             writer.intValue(liquidation.status().ordinal());
+            writer.longValue(liquidation.nextCancelOrderId());
         });
         writer.intValue(state.riskState().scans().size());
         state.riskState().scans().values().forEach(scan -> {
@@ -178,7 +179,24 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(scan.priceSequence());
             writer.longValue(scan.scanStartPriceSequence());
             writer.longValue(scan.lastUserId());
-            writer.byteValue(scan.complete() ? 1 : 0);
+            writer.byteValue(scan.riskComplete() ? 1 : 0);
+            writer.longValue(scan.riskUserId());
+            writer.intValue(scan.riskPhase());
+            writer.text(scan.riskPositionCursor());
+            writer.longValue(scan.riskReservationCursor());
+            writer.longValue(scan.riskUnrealizedPnlUnits());
+            writer.longValue(scan.riskMaintenanceMarginUnits());
+            writer.longValue(scan.riskIsolatedMarginUnits());
+            writer.longValue(scan.riskIsolatedReservationUnits());
+            writer.byteValue(scan.triggerComplete() ? 1 : 0);
+            writer.intValue(scan.triggerPhase());
+            writer.longValue(scan.triggerPriceCursor());
+            writer.longValue(scan.triggerOrderCursor());
+            writer.longValue(scan.triggerUpperId());
+            writer.longValue(scan.triggerMarkPriceTicks());
+            writer.longValue(scan.triggerGeneratedAtEpochMillis());
+            writer.longValue(scan.triggerOcoOrderId());
+            writer.longValue(scan.triggerOcoCursor());
         });
         writer.longValue(state.riskState().nextLiquidationId());
         writeUnits(writer, state.treasuryState().feeBalances());
@@ -203,6 +221,8 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(progress.instrumentVersion());
             writer.longValue(progress.settlementPriceTicks());
             writer.longValue(progress.optionCashUnitsPerContract());
+            writer.byteValue(progress.ordersComplete() ? 1 : 0);
+            writer.longValue(progress.nextCursorOrderId());
             writer.longValue(progress.nextCursorUserId());
             writer.longValue(progress.commandId().getMostSignificantBits());
             writer.longValue(progress.commandId().getLeastSignificantBits());
@@ -446,7 +466,7 @@ public final class TradingStateSnapshotCodec {
             CoreLiquidationState liquidation = new CoreLiquidationState(liquidationId, userId, symbol,
                     marginMode, positionSide, instrumentVersion, priceSequence, signedQuantity, closeQuantity,
                     deficitUnits, executionPriceTicks, liquidationFeeRatePpm, liquidationFeeUnits,
-                    CoreLiquidationState.Status.values()[status]);
+                    CoreLiquidationState.Status.values()[status], reader.nonNegativeLong("liquidation cancel cursor"));
             putUnique(liquidations, liquidationId, liquidation);
         }
         Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>();
@@ -456,7 +476,19 @@ public final class TradingStateSnapshotCodec {
             CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(scanSymbol,
                     reader.nonNegativeLong("scan price sequence"),
                     reader.nonNegativeLong("scan start price sequence"),
-                    reader.nonNegativeLong("scan userId"), reader.booleanValue());
+                    reader.nonNegativeLong("scan userId"), reader.booleanValue(),
+                    reader.nonNegativeLong("scan active userId"), reader.intValue(), reader.text(),
+                    reader.nonNegativeLong("scan reservation cursor"), reader.longValue(),
+                    reader.nonNegativeLong("scan maintenance margin"),
+                    reader.nonNegativeLong("scan isolated margin"),
+                    reader.nonNegativeLong("scan isolated reservation"), reader.booleanValue(),
+                    reader.intValue(), reader.nonNegativeLong("trigger price cursor"),
+                    reader.nonNegativeLong("trigger order cursor"),
+                    reader.nonNegativeLong("trigger upper id"),
+                    reader.nonNegativeLong("trigger mark price"),
+                    reader.nonNegativeLong("trigger generated time"),
+                    reader.nonNegativeLong("trigger OCO order id"),
+                    reader.nonNegativeLong("trigger OCO cursor"));
             putUnique(scans, scanSymbol, scan);
         }
         CoreRiskState riskState = new CoreRiskState(marks, risks, liquidations, scans,
@@ -486,7 +518,8 @@ public final class TradingStateSnapshotCodec {
                     reader.positiveLong("lifecycle progress instrument version"),
                     reader.nonNegativeLong("lifecycle progress settlement price"),
                     reader.nonNegativeLong("lifecycle progress option cash"),
-                    reader.nonNegativeLong("lifecycle progress cursor"),
+                    reader.booleanValue(), reader.nonNegativeLong("lifecycle progress order cursor"),
+                    reader.nonNegativeLong("lifecycle progress user cursor"),
                     new UUID(reader.longValue(), reader.longValue()));
             putUnique(lifecycleProgress, symbol, progress);
         }

@@ -292,10 +292,19 @@ public record CoreTreasuryState(
     }
 
     public record LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
-                                   long optionCashUnitsPerContract, long nextCursorUserId, UUID commandId) {
+                                   long optionCashUnitsPerContract, boolean ordersComplete,
+                                   long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
+        public LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
+                                 long optionCashUnitsPerContract, long nextCursorUserId, UUID commandId) {
+            this(settlementId, instrumentVersion, settlementPriceTicks, optionCashUnitsPerContract,
+                    true, 0, nextCursorUserId, commandId);
+        }
+
         public LifecycleProgress {
             if (settlementId <= 0 || instrumentVersion <= 0 || settlementPriceTicks < 0
-                    || optionCashUnitsPerContract < 0 || nextCursorUserId < 0 || commandId == null) {
+                    || optionCashUnitsPerContract < 0 || nextCursorOrderId < 0 || nextCursorUserId < 0
+                    || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)
+                    || commandId == null) {
                 throw new IllegalArgumentException("invalid lifecycle progress");
             }
         }

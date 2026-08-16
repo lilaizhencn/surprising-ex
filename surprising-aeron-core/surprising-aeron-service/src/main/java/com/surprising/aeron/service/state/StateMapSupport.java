@@ -16,7 +16,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 @SuppressWarnings("unchecked")
-final class StateMapSupport {
+public final class StateMapSupport {
 
     private StateMapSupport() {
     }
@@ -30,7 +30,7 @@ final class StateMapSupport {
         return new FrozenMap<>(sorted);
     }
 
-    static <K, V> NavigableMap<K, V> delta(Map<K, V> values) {
+    public static <K, V> NavigableMap<K, V> delta(Map<K, V> values) {
         NavigableMap<K, V> base = raw(values);
         if (base == null) {
             base = new TreeMap<>(values);

@@ -46,19 +46,34 @@ public class ExpiringContractSettlementFanoutService {
         long cursor = 0;
         CoreSettlementProgressView persisted = decodeProgressOrQuery(symbol, settlementId, null);
         if (persisted != null && persisted.complete() && persisted.settlementId() == settlementId) return;
-        if (persisted != null && !persisted.complete()) cursor = persisted.nextCursorUserId();
+        long orderCursor = 0;
+        if (persisted != null && !persisted.complete()) {
+            orderCursor = persisted.ordersComplete() ? 0 : persisted.nextCursorOrderId();
+            cursor = persisted.ordersComplete() ? persisted.nextCursorUserId() : 0;
+        }
         for (;;) {
-            UUID commandId = UUID.nameUUIDFromBytes((identity + ':' + cursor).getBytes(StandardCharsets.UTF_8));
+            UUID commandId = UUID.nameUUIDFromBytes((identity + ':' + orderCursor + ':' + cursor)
+                    .getBytes(StandardCharsets.UTF_8));
             CoreResponse response = aeron.command(CoreMessageType.SETTLE_INSTRUMENT, commandId, 0,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
                             settlementId, symbol, version, settlementPriceTicks, optionCashUnitsPerContract,
-                            cursor, SettleInstrumentCommand.DEFAULT_MAX_USERS)));
+                            cursor, SettleInstrumentCommand.DEFAULT_MAX_USERS, orderCursor,
+                            SettleInstrumentCommand.DEFAULT_MAX_ORDERS)));
             CoreSettlementProgressView progress = decodeProgressOrQuery(symbol, settlementId, response);
             if (progress == null || progress.complete()) return;
-            if (progress.nextCursorUserId() <= cursor) {
-                throw new IllegalStateException("Aeron settlement cursor did not advance");
+            if (!progress.ordersComplete()) {
+                if (progress.nextCursorOrderId() <= orderCursor) {
+                    throw new IllegalStateException("Aeron settlement order cursor did not advance");
+                }
+                orderCursor = progress.nextCursorOrderId();
+                cursor = 0;
+            } else {
+                if (progress.nextCursorUserId() <= cursor) {
+                    throw new IllegalStateException("Aeron settlement user cursor did not advance");
+                }
+                orderCursor = 0;
+                cursor = progress.nextCursorUserId();
             }
-            cursor = progress.nextCursorUserId();
         }
     }
 

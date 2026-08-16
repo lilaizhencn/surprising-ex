@@ -286,8 +286,13 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 cycle++;
             }
             if (!pending.isEmpty()) {
-                AsyncPair pair = pending.remove(0);
-                CoreResponse response = pair.result().join();
+                AsyncPair pair = pending.getFirst();
+                if (!pair.result().isDone()) {
+                    LockSupport.parkNanos(100_000L);
+                    continue;
+                }
+                pending.removeFirst();
+                CoreResponse response = pair.result().getNow(null);
                 record(response.commandStatus(), System.nanoTime() - pair.startedNanos(), measured);
                 if (measured) {
                     commands.incrementAndGet();

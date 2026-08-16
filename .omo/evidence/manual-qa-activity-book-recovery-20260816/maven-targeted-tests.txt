@@ -1,0 +1,54 @@
+Manual QA execution evidence — activity book/recovery
+Date: 2026-08-16 Asia/Shanghai
+
+Surface: surprising-aeron-service Maven module; JUnit/Surefire; no wallet or product-line service started.
+
+Invocation 1 (default environment):
+mvn -pl surprising-aeron-core/surprising-aeron-service -Dtest=CoreMatchingStateTest,CoreProbeStateTest,TradingStateSnapshotCodecTest test
+
+Actual result:
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-service ---
+[INFO] BUILD FAILURE
+[ERROR] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion failed with message:
+[ERROR] Surprising EX must be built with JDK 25.
+Exit code: 1. Tests did not start under the default JDK 21.
+
+Invocation 2 (project-required JDK 25):
+env JAVA_HOME=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin mvn -pl surprising-aeron-core/surprising-aeron-service -Dtest=CoreMatchingStateTest,CoreProbeStateTest,TradingStateSnapshotCodecTest test
+
+Actual result:
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] Running com.surprising.aeron.service.CoreProbeStateTest
+[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 12.49 s -- in com.surprising.aeron.service.CoreProbeStateTest
+[INFO] Running com.surprising.aeron.service.state.TradingStateSnapshotCodecTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.182 s -- in com.surprising.aeron.service.state.TradingStateSnapshotCodecTest
+[INFO] Running com.surprising.aeron.service.CoreMatchingStateTest
+[ERROR] Tests run: 13, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 39.41 s <<< FAILURE! -- in com.surprising.aeron.service.CoreMatchingStateTest
+[ERROR] com.surprising.aeron.service.CoreMatchingStateTest.replaceLosesPriorityCanMatchAndRebuildsToSameExchangeCoreHash -- Time elapsed: 31.04 s <<< ERROR!
+java.lang.IllegalStateException: could not stop a disruptor gracefully. Not all events may be executed.
+    at exchange.core2.core.ExchangeCore.shutdown(ExchangeCore.java:271)
+    at com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.stop(DeterministicExchangeCoreAdapter.java:366)
+    at com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.close(DeterministicExchangeCoreAdapter.java:419)
+    at com.surprising.aeron.service.TradingCoreRuntime.close(TradingCoreRuntime.java:246)
+    at com.surprising.aeron.service.CoreProbeState.close(CoreProbeState.java:2075)
+    at com.surprising.aeron.service.CoreMatchingStateTest.replaceLosesPriorityCanMatchAndRebuildsToSameExchangeCoreHash(CoreMatchingStateTest.java:253)
+[INFO] Tests run: 41, Failures: 0, Errors: 1, Skipped: 0
+[INFO] BUILD FAILURE
+Exit code: 1. The only reported error is teardown/shutdown; no assertion failure was reported.
+
+Invocation 3 (targeted FIFO recovery scenario):
+env JAVA_HOME=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin mvn -pl surprising-aeron-core/surprising-aeron-service -Dtest=CoreMatchingStateTest#snapshotRecoveryKeepsOriginalFifoAfterPartialFillUpdatesOrderMetadata test
+
+Actual result:
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+Exit code: 0.
+
+Invocation 4 (targeted unique-book/hash/snapshot scenario):
+env JAVA_HOME=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin mvn -pl surprising-aeron-core/surprising-aeron-service -Dtest=CoreMatchingStateTest#spotMatchUpdatesBothUsersFundsOrdersAndRecoverableBookAtomically test
+
+Actual result:
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+Exit code: 0.

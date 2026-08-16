@@ -7,7 +7,7 @@ import java.util.List;
 
 public final class CoreLiquidationWorkCodec {
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static final int MAX_ACTIONS = 1_000;
     private static final int MAX_TEXT_BYTES = 64;
 
@@ -36,6 +36,11 @@ public final class CoreLiquidationWorkCodec {
         Writer writer = new Writer();
         writer.intValue(VERSION);
         writer.byteValue(work.riskScanPending() ? 1 : 0);
+        if (work.riskScanPending()) {
+            writer.text(work.riskScanContinuation().symbol());
+            writer.longValue(work.riskScanContinuation().priceSequence());
+            writer.longValue(work.riskScanContinuation().lastUserId());
+        }
         writer.intValue(work.actions().size());
         for (CoreLiquidationActionView action : work.actions()) {
             writer.longValue(action.liquidationId());
@@ -48,6 +53,8 @@ public final class CoreLiquidationWorkCodec {
             writer.longValue(action.signedQuantitySteps());
             writer.longValue(action.closeQuantitySteps());
             writer.longValue(action.markPriceTicks());
+            writer.text(action.status());
+            writer.longValue(action.cursorOrderId());
         }
         return writer.toByteArray();
     }
@@ -56,6 +63,8 @@ public final class CoreLiquidationWorkCodec {
         Reader reader = new Reader(encoded);
         reader.version();
         boolean pending = reader.booleanValue();
+        CoreRiskScanContinuation continuation = pending
+                ? reader.riskScanContinuation() : null;
         int count = reader.intValue();
         if (count < 0 || count > MAX_ACTIONS) throw new ProtocolException("invalid liquidation action count");
         List<CoreLiquidationActionView> actions = new ArrayList<>(count);
@@ -66,10 +75,15 @@ public final class CoreLiquidationWorkCodec {
                     CorePositionSide.fromWireCode(reader.intValue()),
                     reader.positiveLong("instrumentVersion"), reader.positiveLong("triggerPriceSequence"),
                     reader.nonZeroLong("signedQuantitySteps"), reader.positiveLong("closeQuantitySteps"),
-                    reader.positiveLong("markPriceTicks")));
+                    reader.positiveLong("markPriceTicks"), reader.text(),
+                    reader.nonNegativeLong("cursorOrderId")));
         }
         reader.requireConsumed();
-        return new CoreLiquidationWorkView(pending, actions);
+        try {
+            return new CoreLiquidationWorkView(continuation, actions);
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException(exception.getMessage());
+        }
     }
 
     private static final class Writer {
@@ -127,6 +141,19 @@ public final class CoreLiquidationWorkCodec {
             long value = longValue();
             if (value == 0) throw new ProtocolException(field + " must be non-zero");
             return value;
+        }
+        long nonNegativeLong(String field) {
+            long value = longValue();
+            if (value < 0) throw new ProtocolException(field + " must be nonnegative");
+            return value;
+        }
+        CoreRiskScanContinuation riskScanContinuation() {
+            try {
+                return new CoreRiskScanContinuation(text(), nonNegativeLong("priceSequence"),
+                        nonNegativeLong("lastUserId"));
+            } catch (IllegalArgumentException exception) {
+                throw new ProtocolException(exception.getMessage());
+            }
         }
         String text() {
             int length = intValue();

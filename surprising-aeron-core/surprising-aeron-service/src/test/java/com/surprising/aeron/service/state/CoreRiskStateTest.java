@@ -80,10 +80,14 @@ class CoreRiskStateTest {
         TradingCoreState firstBatch = reducer.applyMarkPrice(state,
                 new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1, 1_700_000_000_000L));
         assertThat(firstBatch.riskState().scan().complete()).isFalse();
-        assertThat(firstBatch.riskState().scan().lastUserId()).isEqualTo(1_024);
-        assertThat(firstBatch.riskState().snapshots()).hasSize(1_024);
+        assertThat(firstBatch.riskState().scan().lastUserId()).isEqualTo(511);
+        assertThat(firstBatch.riskState().scan().riskUserId()).isEqualTo(512);
+        assertThat(firstBatch.riskState().snapshots()).hasSize(512);
 
-        TradingCoreState completed = reducer.continueRiskScan(firstBatch, 1_024);
+        TradingCoreState completed = firstBatch;
+        for (int page = 0; page < 10 && !completed.riskState().scan().riskComplete(); page++) {
+            completed = reducer.continueRiskScan(completed, 1_024);
+        }
         assertThat(completed.riskState().scan().complete()).isTrue();
         assertThat(completed.riskState().scan().lastUserId()).isEqualTo(1_300);
         assertThat(completed.riskState().snapshots()).hasSize(1_300);
@@ -128,10 +132,11 @@ class CoreRiskStateTest {
                 1_700_000_000_000L));
 
         assertThat(state.riskState().scans()).containsOnlyKeys("BTC-USDT", "ETH-USDT");
-        assertThat(state.riskState().scans().get("BTC-USDT").complete()).isTrue();
+        assertThat(state.riskState().scans().get("BTC-USDT").complete()).isFalse();
         assertThat(state.riskState().scans().get("ETH-USDT").complete()).isFalse();
-        state = reducer.continueRiskScan(state, 1_024);
-        state = reducer.continueRiskScan(state, 1_024);
+        for (int page = 0; page < 10 && state.riskState().hasPendingScans(); page++) {
+            state = reducer.continueRiskScan(state, 1_024);
+        }
         assertThat(state.riskState().scans().values()).allMatch(CoreRiskState.RiskScan::complete);
     }
 
@@ -152,9 +157,11 @@ class CoreRiskStateTest {
 
         CoreRiskState.RiskScan restarted = state.riskState().scans().get("BTC-USDT");
         assertThat(restarted.priceSequence()).isEqualTo(2);
-        assertThat(restarted.lastUserId()).isZero();
+        assertThat(restarted.lastUserId()).isPositive();
         assertThat(restarted.complete()).isFalse();
-        state = reducer.continueRiskScan(state, 4_096);
+        for (int page = 0; page < 10 && !state.riskState().scans().get("BTC-USDT").riskComplete(); page++) {
+            state = reducer.continueRiskScan(state, 4_096);
+        }
         assertThat(state.riskState().scans().get("BTC-USDT").complete()).isTrue();
         assertThat(state.riskState().snapshots().values())
                 .allMatch(snapshot -> snapshot.priceSequence() == 2);
@@ -189,6 +196,52 @@ class CoreRiskStateTest {
         assertThat(moved.riskState().snapshots().get("7:BTC-USDT").status())
                 .isEqualTo(CoreRiskStatus.LIQUIDATION);
         assertThat(moved.riskState().liquidations()).hasSize(2);
+    }
+
+    @Test
+    void crossRiskPersistsPositionCursorAndCompletesWithTheSamePortfolioResult() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument("BTC-USDT"));
+        state = reducer.upsertInstrument(state, instrument("ETH-USDT"));
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 1_000));
+        state = withPosition(state, new CorePositionState("BTC-USDT", "USDT", CoreMarginMode.CROSS,
+                CorePositionSide.NET, 1, 10, 100, 1_000, 0, 0));
+        state = withPosition(state, new CorePositionState("ETH-USDT", "USDT", CoreMarginMode.CROSS,
+                CorePositionSide.NET, 1, 10, 100, 1_000, 0, 0));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("ETH-USDT", 1, 120, 1,
+                1_700_000_000_000L));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 2,
+                1_700_000_000_000L));
+
+        Map<String, CoreMarkPriceState> marks = new TreeMap<>(state.riskState().markPrices());
+        marks.put("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 80, 3));
+        CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan("BTC-USDT", 3, 3, 0, false)
+                .withTriggerProgress(false, 1, 80, 91, 100, 80, 1_700_000_000_001L);
+        CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
+                state.riskState().liquidations(), Map.of("BTC-USDT", scan),
+                state.riskState().nextLiquidationId());
+        TradingCoreState pending = new TradingCoreState(state.productLine(), state.revision() + 1,
+                state.users(), state.orders(), state.bookState(), state.instruments(), risk,
+                state.treasuryState(), state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
+                state.clientOrderIndex(), state.triggerOrders());
+
+        TradingCoreState firstPage = reducer.continueRiskScan(pending, 1);
+        assertThat(firstPage.riskState().scan().riskUserId()).isEqualTo(7);
+        assertThat(firstPage.riskState().scan().riskPositionCursor()).isEqualTo("BTC-USDT");
+        assertThat(firstPage.riskState().scan().triggerComplete()).isFalse();
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(firstPage), ProductLine.LINEAR_PERPETUAL);
+        assertThat(restored.riskState().scan()).isEqualTo(firstPage.riskState().scan());
+        assertThat(restored.businessStateHash()).isEqualTo(firstPage.businessStateHash());
+
+        TradingCoreState paged = restored;
+        for (int page = 0; page < 10 && !paged.riskState().scan().riskComplete(); page++) {
+            paged = reducer.continueRiskScan(paged, 1);
+        }
+        TradingCoreState unpaged = reducer.continueRiskScan(pending, 4_096);
+        assertThat(paged.riskState().scan().riskComplete()).isTrue();
+        assertThat(paged.riskState().snapshots()).isEqualTo(unpaged.riskState().snapshots());
+        assertThat(paged.riskState().liquidations()).isEqualTo(unpaged.riskState().liquidations());
     }
 
     private static UpsertInstrumentCommand instrument(ContractType type, long settleScale) {

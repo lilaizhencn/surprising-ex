@@ -6,7 +6,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
@@ -199,6 +204,32 @@ class CoreLifecycleStateTest {
     }
 
     @Test
+    void lifecycleSettlementProcessesOpenOrdersInBoundedOrderChunks() {
+        TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
+                ContractType.LINEAR_DELIVERY, 100, 10, 100);
+        state = reducer.placeOrder(state, 1, lifecycleOrder(101));
+        state = reducer.placeOrder(state, 2, lifecycleOrder(102));
+
+        TradingCoreReducer.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
+                new SettleInstrumentCommand(97, "BTC-USDT", 1, 120, 0, 0, 256, 0, 1),
+                List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000097"));
+
+        assertThat(first.progress().complete()).isFalse();
+        assertThat(first.progress().ordersComplete()).isFalse();
+        assertThat(first.progress().nextCursorOrderId()).isEqualTo(102);
+        assertThat(first.state().order(102).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        assertThat(first.state().order(101).status()).isEqualTo(CoreOrderStatus.OPEN);
+
+        TradingCoreReducer.SettlementApplication second = reducer.settleInstrumentWithProgress(first.state(),
+                new SettleInstrumentCommand(97, "BTC-USDT", 1, 120, 0, 0, 256, 102, 1),
+                List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000098"));
+
+        assertThat(second.progress().complete()).isTrue();
+        assertThat(second.state().order(102).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        assertThat(second.state().treasuryState().lifecycleSettlements()).containsEntry("BTC-USDT", 97L);
+    }
+
+    @Test
     void liquidationCreatesExplicitDeficitAndInsuranceReceiptClosesIt() {
         TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
                 ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 100);
@@ -380,6 +411,12 @@ class CoreLifecycleStateTest {
         users.put(userId, user);
         return new TradingCoreState(funded.productLine(), funded.revision() + 1, users, funded.orders(),
                 funded.bookState(), funded.instruments(), funded.riskState(), funded.treasuryState());
+    }
+
+    private static PlaceOrderCommand lifecycleOrder(long orderId) {
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT", CoreOrderSide.BUY,
+                10, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 0);
     }
 
     private static long total(TradingCoreState state, String asset) {

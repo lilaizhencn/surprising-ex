@@ -3,6 +3,8 @@ package com.surprising.aeron.protocol;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class TradingCommandCodec {
 
@@ -412,36 +414,125 @@ public final class TradingCommandCodec {
 
     public static byte[] encodeSettleInstrument(SettleInstrumentCommand command) {
         byte[] symbol = text(command.symbol());
-        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 5 + Integer.BYTES)
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 6 + Integer.BYTES * 2)
                 .order(ByteOrder.LITTLE_ENDIAN).putShort((short) symbol.length).put(symbol)
                 .putLong(command.settlementId()).putLong(command.instrumentVersion())
                 .putLong(command.settlementPriceTicks()).putLong(command.optionCashUnitsPerContract())
-                .putLong(command.cursorUserId()).putInt(command.maxUsers()).array();
+                .putLong(command.cursorUserId()).putInt(command.maxUsers())
+                .putLong(command.cursorOrderId()).putInt(command.maxOrders()).array();
     }
 
     public static SettleInstrumentCommand decodeSettleInstrument(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String symbol = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 5 + Integer.BYTES);
-        SettleInstrumentCommand command = new SettleInstrumentCommand(buffer.getLong(), symbol, buffer.getLong(),
-                buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getInt());
+        requireRemaining(buffer, Long.BYTES * 6 + Integer.BYTES * 2);
+        SettleInstrumentCommand command;
+        try {
+            command = new SettleInstrumentCommand(buffer.getLong(), symbol, buffer.getLong(),
+                    buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getInt(),
+                    buffer.getLong(), buffer.getInt());
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException(exception.getMessage());
+        }
         requireConsumed(buffer);
         return command;
     }
 
     public static byte[] encodeExecuteLiquidation(ExecuteLiquidationCommand command) {
-        return ByteBuffer.allocate(Long.BYTES * 4).order(ByteOrder.LITTLE_ENDIAN)
+        return ByteBuffer.allocate(Long.BYTES * 5 + Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN)
                 .putLong(command.liquidationId()).putLong(command.triggerPriceSequence())
-                .putLong(command.executionPriceTicks()).putLong(command.liquidationFeeRatePpm()).array();
+                .putLong(command.executionPriceTicks()).putLong(command.liquidationFeeRatePpm())
+                .putLong(command.cursorOrderId()).putInt(command.maxOrders()).array();
     }
 
     public static ExecuteLiquidationCommand decodeExecuteLiquidation(byte[] payload) {
         ByteBuffer buffer = readable(payload);
-        requireRemaining(buffer, Long.BYTES * 4);
-        ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(buffer.getLong(), buffer.getLong(),
-                buffer.getLong(), buffer.getLong());
+        requireRemaining(buffer, Long.BYTES * 5 + Integer.BYTES);
+        ExecuteLiquidationCommand command;
+        try {
+            command = new ExecuteLiquidationCommand(buffer.getLong(), buffer.getLong(),
+                    buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getInt());
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException(exception.getMessage());
+        }
         requireConsumed(buffer);
         return command;
+    }
+
+    public static byte[] encodeExecuteLiquidationBatch(ExecuteLiquidationBatchCommand command) {
+        int length = Integer.BYTES * 4 + Long.BYTES + Byte.BYTES;
+        List<byte[]> symbols = new ArrayList<>(command.actions().size());
+        for (ExecuteLiquidationBatchAction action : command.actions()) {
+            byte[] symbol = text(action.symbol());
+            symbols.add(symbol);
+            length = Math.addExact(length, Long.BYTES * 6 + Short.BYTES + symbol.length);
+        }
+        byte[] continuationSymbol = null;
+        if (command.riskScanContinuation() != null) {
+            continuationSymbol = text(command.riskScanContinuation().symbol());
+            length = Math.addExact(length, Short.BYTES + continuationSymbol.length + Long.BYTES * 2);
+        }
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(ExecuteLiquidationBatchCommand.WIRE_VERSION)
+                .putInt(command.actions().size());
+        for (int index = 0; index < command.actions().size(); index++) {
+            ExecuteLiquidationBatchAction action = command.actions().get(index);
+            byte[] symbol = symbols.get(index);
+            buffer.putLong(action.liquidationId()).putLong(action.userId())
+                    .putShort((short) symbol.length).put(symbol)
+                    .putLong(action.instrumentVersion()).putLong(action.triggerPriceSequence())
+                    .putLong(action.executionPriceTicks()).putLong(action.cursorOrderId());
+        }
+        buffer.putInt(command.maxCancelOrders()).putLong(command.liquidationFeeRatePpm())
+                .put((byte) (command.riskScanContinuation() == null ? 0 : 1));
+        if (command.riskScanContinuation() != null) {
+            buffer.putShort((short) continuationSymbol.length).put(continuationSymbol)
+                    .putLong(command.riskScanContinuation().priceSequence())
+                    .putLong(command.riskScanContinuation().lastUserId());
+        }
+        return buffer.putInt(command.maxRiskScanUsers()).array();
+    }
+
+    public static ExecuteLiquidationBatchCommand decodeExecuteLiquidationBatch(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Integer.BYTES * 2);
+        int version = buffer.getInt();
+        if (version != ExecuteLiquidationBatchCommand.WIRE_VERSION) {
+            throw new ProtocolException("unsupported liquidation batch version: " + version);
+        }
+        int count = buffer.getInt();
+        if (count < 0 || count > ExecuteLiquidationBatchCommand.MAX_ACTIONS) {
+            throw new ProtocolException("invalid liquidation batch action count");
+        }
+        List<ExecuteLiquidationBatchAction> actions = new ArrayList<>(count);
+        try {
+            for (int index = 0; index < count; index++) {
+                requireRemaining(buffer, Long.BYTES * 2);
+                long liquidationId = buffer.getLong();
+                long userId = buffer.getLong();
+                String symbol = readText(buffer);
+                requireRemaining(buffer, Long.BYTES * 4);
+                actions.add(new ExecuteLiquidationBatchAction(liquidationId, userId, symbol,
+                        buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong()));
+            }
+            requireRemaining(buffer, Integer.BYTES + Long.BYTES + Byte.BYTES);
+            int maxCancelOrders = buffer.getInt();
+            long liquidationFeeRatePpm = buffer.getLong();
+            boolean hasContinuation = readBoolean(buffer);
+            CoreRiskScanContinuation continuation = null;
+            if (hasContinuation) {
+                String symbol = readText(buffer);
+                requireRemaining(buffer, Long.BYTES * 2);
+                continuation = new CoreRiskScanContinuation(symbol, buffer.getLong(), buffer.getLong());
+            }
+            requireRemaining(buffer, Integer.BYTES);
+            int maxRiskScanUsers = buffer.getInt();
+            requireConsumed(buffer);
+            return new ExecuteLiquidationBatchCommand(actions, maxCancelOrders,
+                    liquidationFeeRatePpm, continuation, maxRiskScanUsers);
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException(exception.getMessage());
+        }
     }
 
     public static byte[] encodeExecuteAdl(ExecuteAdlCommand command) {

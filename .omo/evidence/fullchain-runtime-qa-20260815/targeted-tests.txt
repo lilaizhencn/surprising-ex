@@ -1,0 +1,30 @@
+# Targeted test evidence — 2026-08-15
+
+All Maven commands below used IBM Semeru JDK 25.0.2.1 explicitly:
+`env JAVA_HOME=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin`
+
+1. Surface: Aeron client
+   Invocation: `mvn -q -pl surprising-aeron-core/surprising-aeron-client -am -Dtest=AeronClientPoolTest,SurprisingAeronClientTest -Dsurefire.failIfNoSpecifiedTests=false test`
+   Result: exit 0. `AeronClientPoolTest`: 5 run, 0 failures, 0 errors, 0 skipped. The requested `SurprisingAeronClientTest` name had no report; fail-if-no-specified-tests was disabled, so only the existing class is verdict-bearing.
+
+2. Surface: Core reducer/risk state
+   Invocation: `mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=CoreRiskStateTest,TradingCoreReducerTest -Dsurefire.failIfNoSpecifiedTests=false test`
+   Result: exit 0. `CoreRiskStateTest`: 7/7; `TradingCoreReducerTest`: 24/24; zero failures/errors/skips.
+
+3. Surface: exchange/export adapter boundary
+   Invocation: `mvn -q -pl surprising-aeron-core/surprising-aeron-exporter -am -Dtest=ReliableCoreExporterTest -Dsurefire.failIfNoSpecifiedTests=false test`
+   Result: exit 0. `ReliableCoreExporterTest`: 3/3; zero failures/errors/skips. No live Kafka or Core process was used.
+
+4. Surface: trigger/liquidation-facing provider
+   Invocation: `mvn -q -pl surprising-trading/surprising-trigger-provider -am -Dtest=TriggerOrderServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`
+   Result: exit 0. `TriggerOrderServiceTest`: 37/37; zero failures/errors/skips.
+
+5. Surface: mark-price service
+   Invocation: `mvn -q -pl surprising-price/surprising-price-provider -am -Dtest=MarkPriceCalculatorTest,MarkPriceEncodingServiceTest,MarkPriceServiceTest,MarkPriceAuditConsumerTest -Dsurefire.failIfNoSpecifiedTests=false test`
+   Result: exit 0. The requested classes reported 14 tests total (3+1+8+2), all passing with zero failures/errors/skips. No live Aeron bridge was used.
+
+6. Surface: Gateway/WebSocket provider
+   Invocation: `mvn -q -pl surprising-gateway -am -Dtest=ClientWebSocketHandlerTest,CoreEventFanoutConsumerTest,SubscriptionRegistryTest,WebSocketServerConfigurationTest,WebSocketApplicationYamlTest -Dsurefire.failIfNoSpecifiedTests=false test`
+   Result: exit 0. Requested classes reported 12 tests total (3+2+4+2+1), all passing with zero failures/errors/skips. No live Gateway/Kafka was used.
+
+Aggregate verdict-bearing targeted set: 102 tests (5+31+3+37+14+12), all passed. Maven reported only the known JDK-25 Mockito/Byte Buddy dynamic-agent warning on the trigger run.

@@ -1,0 +1,27 @@
+# Runtime availability evidence — 2026-08-15
+
+Surface: Docker/Core status
+Invocation: `PRODUCT_LINE=SPOT scripts/aeron-core-local.sh status`
+Observed: exit=0; no compose rows were returned. `docker compose ls --all` returned no projects.
+
+Docker state:
+```
+rainbo-kafka Exited (137) 10 hours ago apache/kafka:3.7.0
+rainbo-postgres Up 15 hours postgres:16
+rainbo-valkey Up 15 hours valkey/valkey:7
+```
+Kafka inspect: `status=exited exit=137 oom=true finished=2026-08-15T05:14:21.256525843Z`.
+
+Surface: Aeron client command/query probe
+Invocation: `PRODUCT_LINE=SPOT PROBE_MODE=query PROBE_SOURCE_ID=910001 scripts/aeron-core-tool.sh probe`
+Observed: exit non-zero after the real client attempted all three endpoints. `io.aeron.exceptions.TimeoutException: ERROR - cluster connect timeout: state=AWAIT_PUBLICATION_CONNECTED messageTimeout=10s ingressChannel=aeron:udp ingressEndpoints=0=node0:20002,1=node1:20102,2=node2:20202`; suppressed causes were `UnknownHostException` for node0, node1 and node2. No Core node was running.
+
+Cleanup: the probe created only `surprising-aeron-spot_cluster` and a transient probe container; the container was absent after exit and the created network was removed with `docker network rm surprising-aeron-spot_cluster` (exit=0). No product service was started or stopped.
+
+Surface: HTTP provider health and WebSocket handshake
+Invocation: `curl -i --max-time 1 http://127.0.0.1:{9080,9081,9082,9084,9085,9086,9087,9088,9089,9090,9091,9094,9095,9096}/actuator/health`; then a WebSocket Upgrade `curl -i --http1.1 --max-time 1 ... http://127.0.0.1:9094/ws/v1`
+Observed: every configured provider port returned `curl: (7) Failed to connect`; the Gateway WebSocket handshake returned the same. Source-defined ports are in `surprising-*/**/src/main/resources/application.yml`; Gateway/WebSocket is 9094 and `/ws/v1`.
+
+Environment: default Java is Microsoft OpenJDK 21.0.10; the project enforces JDK 25. Targeted tests used IBM Semeru 25.0.2.1 explicitly.
+
+Static hygiene: `git diff --check` exit=0. The worktree already had unrelated tracked/untracked changes; this audit did not edit product source, reset, checkout, commit, or delete it.
