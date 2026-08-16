@@ -62,7 +62,8 @@ class CorePerpetualFinancialMatrixTest {
             "ADL_COVERAGE",
             "SNAPSHOT_CONTINUATION",
             "CROSS_LINE_REJECTED",
-            "ISOLATED_COLLATERAL_LEAKAGE");
+            "ISOLATED_COLLATERAL_LEAKAGE",
+            "ISOLATED_FREE_COLLATERAL_LEAKAGE");
 
     private static final List<String> POSITIVE_SCENARIOS = SCENARIOS.subList(0, 15);
     private static final List<String> NEGATIVE_SCENARIOS = SCENARIOS.subList(15, SCENARIOS.size());
@@ -85,6 +86,7 @@ class CorePerpetualFinancialMatrixTest {
             "LINEAR_PERPETUAL:CROSS:SNAPSHOT_CONTINUATION",
             "LINEAR_PERPETUAL:CROSS:CROSS_LINE_REJECTED",
             "LINEAR_PERPETUAL:CROSS:ISOLATED_COLLATERAL_LEAKAGE",
+            "LINEAR_PERPETUAL:CROSS:ISOLATED_FREE_COLLATERAL_LEAKAGE",
             "LINEAR_PERPETUAL:ISOLATED:OPEN_CLOSE_REVERSAL",
             "LINEAR_PERPETUAL:ISOLATED:TIER_CHANGE",
             "LINEAR_PERPETUAL:ISOLATED:MAKER_TAKER_FEES",
@@ -102,6 +104,7 @@ class CorePerpetualFinancialMatrixTest {
             "LINEAR_PERPETUAL:ISOLATED:SNAPSHOT_CONTINUATION",
             "LINEAR_PERPETUAL:ISOLATED:CROSS_LINE_REJECTED",
             "LINEAR_PERPETUAL:ISOLATED:ISOLATED_COLLATERAL_LEAKAGE",
+            "LINEAR_PERPETUAL:ISOLATED:ISOLATED_FREE_COLLATERAL_LEAKAGE",
             "INVERSE_PERPETUAL:CROSS:OPEN_CLOSE_REVERSAL",
             "INVERSE_PERPETUAL:CROSS:TIER_CHANGE",
             "INVERSE_PERPETUAL:CROSS:MAKER_TAKER_FEES",
@@ -119,6 +122,7 @@ class CorePerpetualFinancialMatrixTest {
             "INVERSE_PERPETUAL:CROSS:SNAPSHOT_CONTINUATION",
             "INVERSE_PERPETUAL:CROSS:CROSS_LINE_REJECTED",
             "INVERSE_PERPETUAL:CROSS:ISOLATED_COLLATERAL_LEAKAGE",
+            "INVERSE_PERPETUAL:CROSS:ISOLATED_FREE_COLLATERAL_LEAKAGE",
             "INVERSE_PERPETUAL:ISOLATED:OPEN_CLOSE_REVERSAL",
             "INVERSE_PERPETUAL:ISOLATED:TIER_CHANGE",
             "INVERSE_PERPETUAL:ISOLATED:MAKER_TAKER_FEES",
@@ -135,7 +139,8 @@ class CorePerpetualFinancialMatrixTest {
             "INVERSE_PERPETUAL:ISOLATED:ADL_COVERAGE",
             "INVERSE_PERPETUAL:ISOLATED:SNAPSHOT_CONTINUATION",
             "INVERSE_PERPETUAL:ISOLATED:CROSS_LINE_REJECTED",
-            "INVERSE_PERPETUAL:ISOLATED:ISOLATED_COLLATERAL_LEAKAGE");
+            "INVERSE_PERPETUAL:ISOLATED:ISOLATED_COLLATERAL_LEAKAGE",
+            "INVERSE_PERPETUAL:ISOLATED:ISOLATED_FREE_COLLATERAL_LEAKAGE");
 
     private final TradingCoreReducer reducer = new TradingCoreReducer();
 
@@ -201,6 +206,7 @@ class CorePerpetualFinancialMatrixTest {
             rows.add(snapshotContinuation(variant));
             rows.add(crossLineRejected(variant));
             rows.add(isolatedCollateralLeakage(variant));
+            rows.add(isolatedFreeCollateralLeakage(variant));
         }
         return rows;
     }
@@ -333,9 +339,10 @@ class CorePerpetualFinancialMatrixTest {
         CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
         if (partial) {
             long realizedPnl = linearOrInverse(variant, -150, -214);
-            long liquidationFee = linearOrInverse(variant, 35, 72);
-            long insurance = linearOrInverse(variant, 185, 286);
-            long userEnding = linearOrInverse(variant, 165, 64);
+            boolean isolated = variant.marginMode() == CoreMarginMode.ISOLATED;
+            long liquidationFee = isolated ? 0 : linearOrInverse(variant, 35, 72);
+            long insurance = isolated ? 50 : linearOrInverse(variant, 185, 286);
+            long userEnding = isolated ? 300 : linearOrInverse(variant, 165, 64);
             assertThat(funding.payments()).extracting(payment -> payment.amountUnits())
                     .containsExactly(-100L, 100L);
             assertThat(ending.treasuryState().fundingSettlements()).containsEntry(SYMBOL, 500L);
@@ -344,8 +351,9 @@ class CorePerpetualFinancialMatrixTest {
             assertThat(position.entryPriceTicks()).isEqualTo(100);
             assertThat(position.entryValueTicks()).isEqualTo(500);
             assertThat(position.realizedPnlUnits()).isEqualTo(realizedPnl);
-            assertThat(result.deficitUnits()).isZero();
-            assertThat(result.status()).isEqualTo(CoreLiquidationState.Status.COMPLETED);
+            assertThat(result.deficitUnits()).isEqualTo(isolated ? linearOrInverse(variant, 100, 164) : 0);
+            assertThat(result.status()).isEqualTo(isolated
+                    ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED);
             assertThat(result.liquidationFeeUnits()).isEqualTo(liquidationFee);
             assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(userEnding);
             assertThat(ending.treasuryState().feeBalances()).doesNotContainKey(variant.settleAsset());
@@ -392,9 +400,10 @@ class CorePerpetualFinancialMatrixTest {
                 new ExecuteLiquidationCommand(1, 2, 150, 100_000));
 
         long realizedPnl = linearOrInverse(variant, -250, -167);
-        long liquidationFee = linearOrInverse(variant, 0, 34);
-        long insurance = linearOrInverse(variant, 250, 201);
-        long userEnding = linearOrInverse(variant, 50, 99);
+        boolean isolated = variant.marginMode() == CoreMarginMode.ISOLATED;
+        long liquidationFee = isolated ? 0 : linearOrInverse(variant, 0, 34);
+        long insurance = isolated ? 50 : linearOrInverse(variant, 250, 201);
+        long userEnding = isolated ? 250 : linearOrInverse(variant, 50, 99);
         CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         assertThat(funding.payments()).extracting(payment -> payment.amountUnits())
@@ -405,8 +414,9 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(position.entryPriceTicks()).isEqualTo(100);
         assertThat(position.entryValueTicks()).isEqualTo(500);
         assertThat(position.realizedPnlUnits()).isEqualTo(realizedPnl);
-        assertThat(result.deficitUnits()).isZero();
-        assertThat(result.status()).isEqualTo(CoreLiquidationState.Status.COMPLETED);
+        assertThat(result.deficitUnits()).isEqualTo(isolated ? linearOrInverse(variant, 200, 117) : 0);
+        assertThat(result.status()).isEqualTo(isolated
+                ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED);
         assertThat(result.liquidationFeeUnits()).isEqualTo(liquidationFee);
         assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(userEnding);
         assertThat(ending.user(MAKER_ID).totalUnits(variant.settleAsset())).isEqualTo(400);
@@ -487,12 +497,19 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState ending = reducer.executeLiquidation(marked,
                 new ExecuteLiquidationCommand(1, 1, 90, 100_000));
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
-        long expectedFee = linearOrInverse(variant, 80, 69);
+        boolean isolated = variant.marginMode() == CoreMarginMode.ISOLATED;
+        long expectedFee = isolated ? 0 : linearOrInverse(variant, 80, 69);
+        long expectedUser = isolated ? 80 : 0;
+        long expectedInsurance = isolated ? 100 : 180;
+        long expectedDeficit = isolated ? linearOrInverse(variant, 0, 11) : 0;
         assertThat(result.liquidationFeeUnits()).isEqualTo(expectedFee);
-        assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isZero();
-        assertThat(ending.treasuryState().insuranceBalances()).containsEntry(variant.settleAsset(), 180L);
+        assertThat(result.deficitUnits()).isEqualTo(expectedDeficit);
+        assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(expectedUser);
+        assertThat(ending.treasuryState().insuranceBalances())
+                .containsEntry(variant.settleAsset(), expectedInsurance);
         return row(variant, "LIQUIDATION_FEE_CAP", opening, ending, List.of(), false, false,
-                funds(180, 0, 0, 0, -180, 0, 0, 180, 0, 0, 0, 180));
+                funds(180, 0, 0, 0, expectedUser - 180, 0, 0, expectedInsurance,
+                        expectedUser, 0, 0, expectedInsurance));
     }
 
     private Row insurance(Variant variant, boolean full) {
@@ -638,6 +655,40 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(ending.treasuryState().insuranceBalances())
                 .containsEntry(variant.settleAsset(), 50L);
         return row(variant, "ISOLATED_COLLATERAL_LEAKAGE", opening, ending, List.of(), false, false,
+                funds(175, 0, 0, 0, -50, 0, 0, 50, 125, 0, 0, 50));
+    }
+
+    private Row isolatedFreeCollateralLeakage(Variant variant) {
+        TradingCoreState opening = stateWithInstrument(variant, false);
+        opening = reducer.upsertInstrument(opening, instrument(variant, "ETH-USDT", "ETH", false));
+        opening = fundedState(opening, USER_ID, 175);
+        opening = addPosition(opening, variant, USER_ID, SYMBOL, QUANTITY, ENTRY_PRICE,
+                50, CoreMarginMode.ISOLATED);
+        opening = addPosition(opening, variant, USER_ID, "ETH-USDT", 1, ENTRY_PRICE,
+                75, CoreMarginMode.CROSS);
+        assertThat(opening.user(USER_ID).balances().get(variant.settleAsset()).availableUnits()).isEqualTo(50);
+        assertThat(opening.user(USER_ID).balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
+        TradingCoreState markedEth = reducer.applyMarkPrice(opening,
+                new ApplyMarkPriceCommand("ETH-USDT", 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
+        TradingCoreState marked = reducer.applyMarkPrice(markedEth,
+                new ApplyMarkPriceCommand(SYMBOL, 1, 90, 1, 1_700_000_000_000L));
+        TradingCoreState ending = reducer.executeLiquidation(marked,
+                new ExecuteLiquidationCommand(1, 1, 90, 0));
+
+        CoreUserState user = ending.user(USER_ID);
+        CoreLiquidationState result = ending.riskState().liquidations().get(1L);
+        assertThat(user.balances().get(variant.settleAsset()).availableUnits()).isEqualTo(50);
+        assertThat(user.balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(75);
+        assertThat(user.positions().get(SYMBOL).signedQuantitySteps()).isZero();
+        assertThat(user.positions().get(SYMBOL).marginMode()).isEqualTo(CoreMarginMode.ISOLATED);
+        assertThat(user.positions().get("ETH-USDT").signedQuantitySteps()).isEqualTo(1);
+        assertThat(user.positions().get("ETH-USDT").marginMode()).isEqualTo(CoreMarginMode.CROSS);
+        assertThat(user.positions().get("ETH-USDT").positionMarginUnits()).isEqualTo(75);
+        assertThat(result.deficitUnits()).isEqualTo(linearOrInverse(variant, 50, 61));
+        assertThat(result.status()).isEqualTo(CoreLiquidationState.Status.INSURANCE_REQUIRED);
+        assertThat(ending.treasuryState().insuranceBalances())
+                .containsEntry(variant.settleAsset(), 50L);
+        return row(variant, "ISOLATED_FREE_COLLATERAL_LEAKAGE", opening, ending, List.of(), false, false,
                 funds(175, 0, 0, 0, -50, 0, 0, 50, 125, 0, 0, 50));
     }
 
