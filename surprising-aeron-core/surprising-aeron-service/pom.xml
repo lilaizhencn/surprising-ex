@@ -74,6 +74,20 @@
                                 </condition>
                                 <fail unless="exchange-core.checksum.matches"
                                       message="exchange-core artifact SHA-256 does not match the pinned build"/>
+                                <loadresource property="exchange-core.provenance">
+                                    <zipentry zipfile="${exchange-core.artifact.path}"
+                                              name="META-INF/surprising-exchange-core.properties"/>
+                                </loadresource>
+                                <condition property="exchange-core.provenance.matches">
+                                    <and>
+                                        <contains string="${exchange-core.provenance}"
+                                                  substring="fork.git.sha=${exchange-core.git-sha}"/>
+                                        <contains string="${exchange-core.provenance}"
+                                                  substring="fork.git.dirty=false"/>
+                                    </and>
+                                </condition>
+                                <fail unless="exchange-core.provenance.matches"
+                                      message="exchange-core artifact provenance does not match the pinned clean fork commit"/>
                             </target>
                         </configuration>
                     </execution>

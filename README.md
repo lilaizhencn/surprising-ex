@@ -92,7 +92,7 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 mvn -pl surprising-aeron-core/surprising-aeron-service -am test
 ```
 
-matching 使用 `exchange.core2:exchange-core:0.5.12-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
+matching 使用 `exchange.core2:exchange-core:0.5.13-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
 以下 JVM 参数：
 
 ```text
@@ -157,10 +157,10 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
 
 ### W1/W2 快照与发布契约
 
-- fork 固定为 `exchange-core 0.5.12-emporia`，源码提交
-  `33a9f135c4e2396aaac0f28fad2afbc1350b7a3c`，可复现 JAR SHA-256
-  `e7eb6b3cb292a605c30cb1fc224ced5cde7f1f5481306dbf01e76299a860f66d`；Aeron service 的
-  Maven `validate` 阶段会校验本地解析到的 JAR，hash 不一致时拒绝构建。
+- fork 固定为 `exchange-core 0.5.13-emporia`，源码提交
+  `0511efca1458e9733d7911732ccab1fd83fc373b`，可复现 JAR SHA-256
+  `ed2dbcf86f2ebf6c1b2bd5642e7585ce5568104da9b61f3649a5a506cd37931f`；fork 构建拒绝 dirty
+  worktree 并把 Git SHA 写入 JAR，Aeron service 的 Maven `validate` 阶段同时校验 provenance 与整包 hash。
 - `CoreState v6` 同时封装 Core 业务状态和 exchange-core 原生 `ME0/RE0`；`TradingState v19` 不包含盘口。
   恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，不允许 clean-start、活动订单回放或第二本 FIFO。
 - capture 在 symbol-lane barrier 内完成；存在 pending matching 时精确拒绝快照。恢复在开放流量前执行
