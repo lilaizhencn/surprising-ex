@@ -64,7 +64,7 @@ public class CoreEventFanoutConsumer {
     public synchronized void onCoreEvent(ConsumerRecord<String, byte[]> record) {
         CoreEvent coreEvent = decodeAndValidate(record);
         validateKafkaOffset(record);
-        auditRepository.record(coreEvent.productLine(), coreEvent.event(), record.value(),
+        auditRepository.requireProjected(coreEvent.productLine(), coreEvent.event(), record.value(),
                 coreEvent.message().header().submittedAtEpochMillis());
         fanout(coreEvent);
         if (record.offset() >= 0L) {

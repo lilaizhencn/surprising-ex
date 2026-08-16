@@ -122,11 +122,11 @@ class CoreEventFanoutConsumerTest {
         consumer.onCoreEvent(record);
 
         InOrder inOrder = org.mockito.Mockito.inOrder(audit, registry);
-        inOrder.verify(audit).record(eq(ProductLine.LINEAR_PERPETUAL), any(CoreExportEvent.class),
+        inOrder.verify(audit).requireProjected(eq(ProductLine.LINEAR_PERPETUAL), any(CoreExportEvent.class),
                 any(byte[].class), eq(1_700_000_000_000L));
         inOrder.verify(registry, times(8)).publish(any(SubscriptionTopic.class), any(), any(Instant.class));
 
-        doThrow(new IllegalStateException("audit unavailable")).when(audit).record(
+        doThrow(new IllegalStateException("audit unavailable")).when(audit).requireProjected(
                 any(ProductLine.class), any(CoreExportEvent.class), any(byte[].class), anyLong());
         SubscriptionRegistry failedRegistry = mock(SubscriptionRegistry.class);
         CoreEventFanoutConsumer failedConsumer = new CoreEventFanoutConsumer(failedRegistry, properties, audit);
