@@ -1,0 +1,32 @@
+Task 8 failing-first baseline
+==============================
+
+Worktree: /Users/atomex/Desktop/surprising/w3w5-t08-delivery-option
+HEAD: 7c57be7b0d3e98297c93e00b20c90e0b3b2d6bbf
+Branch: codex/w3w5-t08-delivery-option
+Production files changed before this run: none
+
+Command:
+task_java_home=$(/usr/libexec/java_home -v 25) && export JAVA_HOME="$task_java_home" PATH="$task_java_home/bin:$PATH" && java -version && mvn -pl :surprising-aeron-service -am -Dtest=CoreDeliveryOptionFinancialMatrixTest#failingFirstCompletenessManifestReportsMissingDeliveryAndOptionRows -Dsurefire.failIfNoSpecifiedTests=false test
+
+Java:
+openjdk version "25.0.2" 2026-01-20 LTS
+IBM Semeru Runtime Open Edition 25.0.2.1
+
+Result: RED (exit 1)
+Reactor counts: 6 modules, 1 test run, 1 failure, 0 errors, 0 skipped.
+
+Exact assertion excerpt:
+java.lang.AssertionError:
+[missing delivery/option financial matrix rows]
+Expecting empty but was: ["OPTION:CALL:ATM",
+    "OPTION:PUT:ITM",
+    "OPTION:CALL:OTM",
+    "INVERSE_DELIVERY:ISOLATED",
+    "INVERSE_DELIVERY:CROSS",
+    "OPTION:PUT:ATM",
+    "OPTION:CALL:ITM",
+    "LINEAR_DELIVERY:ISOLATED",
+    "OPTION:PUT:OTM"]
+
+Missing baseline rows: 9 total; both INVERSE_DELIVERY rows and all six OPTION CALL/PUT ITM/ATM/OTM rows are absent. The existing baseline linear delivery coverage also lacks an explicit ISOLATED row.

@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.instrument.api.math.PerpetualContractMath;
+import com.surprising.instrument.api.model.OptionType;
 import java.math.BigInteger;
 
 final class CoreContractMath {
@@ -137,6 +138,21 @@ final class CoreContractMath {
             return big(priceTicks).multiply(big(quantitySteps))
                     .multiply(big(instrument.notionalMultiplierUnits())).longValueExact();
         }
+    }
+
+    static long optionSettlementCashUnits(
+            CoreInstrumentState instrument,
+            long underlyingSettlementPriceTicks) {
+        if (!instrument.contractType().isOption() || underlyingSettlementPriceTicks <= 0
+                || instrument.optionType() == null || instrument.strikePriceTicks() <= 0) {
+            throw new IllegalArgumentException("invalid option settlement input");
+        }
+        BigInteger settlement = big(underlyingSettlementPriceTicks);
+        BigInteger strike = big(instrument.strikePriceTicks());
+        BigInteger intrinsic = instrument.optionType() == OptionType.CALL
+                ? settlement.subtract(strike).max(BigInteger.ZERO)
+                : strike.subtract(settlement).max(BigInteger.ZERO);
+        return intrinsic.multiply(big(instrument.notionalMultiplierUnits())).longValueExact();
     }
 
     static long feeDeltaUnits(
