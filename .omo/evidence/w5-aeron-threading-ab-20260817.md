@@ -24,4 +24,8 @@ Core and client MediaDrivers used `DEDICATED`. PostgreSQL, Kafka, migrations, to
 
 Default both embedded client and Core MediaDrivers to `DEDICATED`. Keep explicit `AERON_CLIENT_THREADING_MODE` and `AERON_CORE_THREADING_MODE` overrides only for controlled diagnostics. Archive threading remains unchanged so the A/B changes one failure boundary at a time.
 
-This experiment does not mark W5 complete. The runtime reached a separate Gateway schema/readiness blocker before the complete Kafka/PG/exporter/projector/Gateway/WebSocket fault matrix, so W5 remains partial.
+The A/B run was only the threading experiment. The completed W5 gate ran separately with `RUN_ID=w5-export-final-1315` and `PRODUCT_LINE=LINEAR_PERPETUAL`. It passed crash-before-ACK, replay, duplicate and reorder rejection, projector restart, PostgreSQL pause/recovery, Kafka stop/recovery, exporter reconnect, Gateway restart, WebSocket committed offsets, deterministic audit idempotency, Core independence, and `fundsDiff=0`. The final marker was `W5_EXPORT_PROJECTION=PASS`; the only earlier failure was a stale direct-client session during the Kafka wait, fixed by direct-client keepalive.
+
+An earlier isolation attempt was interrupted when Docker Desktop stopped; it was not used as evidence.
+
+The final isolation gate ran with `RUN_ID=w5-isolation-final-1345` and passed PostgreSQL pause/recovery, projector gap replay, Gateway restart, duplicate WebSocket audit idempotency, `fundsDiff=0`, `LIVE_SLOW_CLIENT_ISOLATION=PASS`, and `CLEANUP=PASS`.

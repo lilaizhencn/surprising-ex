@@ -40,7 +40,10 @@ final class ExporterConfiguration {
 
     static Map<String, Object> kafkaProducerProperties() {
         return Map.of("bootstrap.servers", value("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-                "client.id", "surprising-core-exporter-" + productLine().topicSegment());
+                "client.id", "surprising-core-exporter-" + productLine().topicSegment(),
+                "delivery.timeout.ms", Long.toString(positiveLong("KAFKA_DELIVERY_TIMEOUT_MS", 10_000)),
+                "request.timeout.ms", Long.toString(positiveLong("KAFKA_REQUEST_TIMEOUT_MS", 3_000)),
+                "max.block.ms", Long.toString(positiveLong("KAFKA_MAX_BLOCK_MS", 5_000)));
     }
 
     static String kafkaBootstrapServers() {

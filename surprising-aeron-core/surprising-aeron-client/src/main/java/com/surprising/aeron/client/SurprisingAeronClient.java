@@ -22,8 +22,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
-import java.util.function.IntSupplier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntSupplier;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
@@ -39,6 +41,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     private final MediaDriver mediaDriver;
     private final boolean closeMediaDriver;
     private final AeronCluster cluster;
+    private final ScheduledExecutorService keepAliveExecutor;
     private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
     private final Map<Long, CoreResponse> responses = new HashMap<>();
     private RuntimeException sessionFailure;
@@ -57,6 +60,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         try {
             cluster = AeronCluster.connect(clusterContext(productLine, hostnames, egressHostname,
                     responseTimeout, mediaDriver, this));
+            keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
         } catch (RuntimeException exception) {
             if (closeMediaDriver) {
                 mediaDriver.close();
@@ -76,6 +80,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
         this.closeMediaDriver = closeMediaDriver;
         this.cluster = Objects.requireNonNull(cluster, "cluster");
+        this.keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
     }
 
     public static SurprisingAeronClient connect(ProductLine productLine, List<String> hostnames) {
@@ -333,12 +338,30 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     @Override
     public void close() {
         try {
+            if (keepAliveExecutor != null) {
+                keepAliveExecutor.shutdownNow();
+            }
             cluster.close();
         } finally {
             if (closeMediaDriver) {
                 mediaDriver.close();
             }
         }
+    }
+
+    private ScheduledExecutorService startKeepAlive() {
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "surprising-aeron-client-keepalive-" + productLine.topicSegment());
+            thread.setDaemon(true);
+            return thread;
+        });
+        executor.scheduleAtFixedRate(() -> {
+            try {
+                cluster.sendKeepAlive();
+            } catch (RuntimeException ignored) {
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+        return executor;
     }
 
     private void pollAndCheckSession() {

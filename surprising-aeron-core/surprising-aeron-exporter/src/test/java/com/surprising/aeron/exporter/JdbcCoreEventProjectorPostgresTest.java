@@ -33,7 +33,9 @@ import org.postgresql.ds.PGSimpleDataSource;
 
 class JdbcCoreEventProjectorPostgresTest {
 
-    private static final String IMAGE = "postgres:16-alpine";
+    private static final String IMAGE = System.getProperty(
+            "surprising.test.postgres.image",
+            System.getenv().getOrDefault("SURPRISING_TEST_POSTGRES_IMAGE", "postgres:18"));
     private static final String PASSWORD = "projection-test";
     private static String containerId;
     private static PGSimpleDataSource dataSource;
@@ -102,8 +104,7 @@ class JdbcCoreEventProjectorPostgresTest {
         CoreMessage second = event(2, UUID.randomUUID(), List.of(user(18, 1)));
         assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.SPOT, second)).isTrue();
         assertProjectionState(2, 2, 2, 2);
-        assertThatThrownBy(() -> projector.project(ProductLine.SPOT, first))
-                .isInstanceOf(SQLException.class).hasMessageContaining("reordered event");
+        assertThat(projector.project(ProductLine.SPOT, first)).isFalse();
         assertProjectionState(2, 2, 2, 2);
     }
 

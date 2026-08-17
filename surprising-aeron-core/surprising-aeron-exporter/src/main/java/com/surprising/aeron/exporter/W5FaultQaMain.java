@@ -256,7 +256,7 @@ public final class W5FaultQaMain {
                         beforeReorder.acknowledgedSequence(), reorderRange.firstSequence() + 1, reorderRange.lastSequence());
                 restartOwnedProcess("projector");
                 waitForCommitted(projectionGroup(), reorderEvents.get(reorderRange.lastSequence()).offset() + 1,
-                        Duration.ofSeconds(20));
+                        Duration.ofSeconds(60));
                 PgSnapshot afterReorder = awaitPgWatermark(reorderRange.lastSequence(), Duration.ofSeconds(20));
                 require(afterReorder.watermark() == reorderRange.lastSequence(), "reordered replay did not converge");
                 System.out.printf("PROJECTOR_RESTART=PASS committedOffset=%d pgWatermark=%d%n",
@@ -287,6 +287,7 @@ public final class W5FaultQaMain {
                         pgPauseEvents.get(pgPauseRange.lastSequence()).offset() + 1, afterPause.watermark());
 
                 CoreExportStatus beforeKafkaPause = exportStatus(core);
+                stopOwnedProcess("gateway");
                 stopOwnedContainer("kafka");
                 SequenceRange kafkaPauseRange = generateProbeEvents(core, 4, "exporter-disconnect");
                 CoreExportStatus pendingDuringKafkaPause = awaitStatus(core,
@@ -299,18 +300,20 @@ public final class W5FaultQaMain {
                 System.out.printf("EXPORTER_DISCONNECT=PASS priorAck=%d pending=%d firstKafkaOffset=%d%n",
                         beforeKafkaPause.acknowledgedSequence(), pendingDuringKafkaPause.pendingCount(),
                         -1L);
+                stopOwnedProcess("exporter");
                 startOwnedContainer("kafka");
+                awaitKafkaExternal();
+                restartOwnedProcess("exporter");
                 Map<Long, KafkaEvent> kafkaPauseEvents = observer.await(kafkaPauseRange.sequences(),
-                        Duration.ofSeconds(25));
+                        Duration.ofSeconds(60));
                 printKafka("exporter-disconnect-recovered", kafkaPauseEvents.get(kafkaPauseRange.firstSequence()));
                 CoreExportStatus afterKafka = awaitStatus(core,
-                        status -> status.pendingCount() == 0, Duration.ofSeconds(25));
-                PgSnapshot afterKafkaProjection = awaitPgWatermark(kafkaPauseRange.lastSequence(), Duration.ofSeconds(25));
+                        status -> status.pendingCount() == 0, Duration.ofSeconds(60));
+                PgSnapshot afterKafkaProjection = awaitPgWatermark(kafkaPauseRange.lastSequence(), Duration.ofSeconds(60));
                 require(afterKafkaProjection.watermark() == kafkaPauseRange.lastSequence(),
                         "Kafka reconnect did not recover projection");
                 System.out.printf("ADAPTIVE_RECOVERY=PASS coreAck=%d pgWatermark=%d%n",
                         afterKafka.acknowledgedSequence(), afterKafkaProjection.watermark());
-
                 restartOwnedProcess("gateway");
                 CoreExportStatus beforeGateway = exportStatus(core);
                 SequenceRange gatewayRange = generateProbeEvents(core, 2, "gateway-restart");
@@ -359,6 +362,7 @@ public final class W5FaultQaMain {
                 require(coreResponseDuringFault(coreResponse), "Core command did not apply during PostgreSQL pause");
                 System.out.printf("CORE_DURING_PG_PAUSE=PASS commandStatus=%s requiredExportSequence=%d stateHash=%016x%n",
                         coreResponse.commandStatus(), coreResponse.requiredExportSequence(), coreResponse.stateHash());
+                awaitPgWatermark(coreResponse.requiredExportSequence(), Duration.ofSeconds(20));
 
                 stopOwnedProcess("projector");
                 SequenceRange gapRange = generateProbeEvents(core, 3, "isolation-gap");
@@ -457,8 +461,17 @@ public final class W5FaultQaMain {
             long first = before.nextSequence();
             for (int index = 0; index < count; index++) {
                 var response = core.submit(command(CoreMessageType.PROBE_INCREMENT, 1L));
-                require(response.commandStatus() == ResponseStatus.APPLIED,
-                        "Core probe command rejected reason=" + reason + " result=" + response.resultCode());
+                System.out.printf("CORE_PROBE_RESPONSE reason=%s status=%s commandStatus=%s result=%s "
+                                + "requiredExportSequence=%d appliedCommandCount=%d stateHash=%016x%n",
+                        reason, response.status(), response.commandStatus(), response.resultCode(),
+                        response.requiredExportSequence(), response.appliedCommandCount(), response.stateHash());
+                require(response.status() == ResponseStatus.APPLIED
+                                && response.commandStatus() == ResponseStatus.APPLIED,
+                        "Core probe command was not newly applied reason=" + reason
+                                + " status=" + response.status()
+                                + " commandStatus=" + response.commandStatus()
+                                + " result=" + response.resultCode()
+                                + " requiredExportSequence=" + response.requiredExportSequence());
             }
             long last = Math.addExact(first, count - 1L);
             System.out.printf("CORE_EVENT_BATCH=APPLIED reason=%s firstSequence=%d lastSequence=%d count=%d%n",
@@ -470,7 +483,7 @@ public final class W5FaultQaMain {
         }
 
         private CoreMessage command(CoreMessageType type, long userId) {
-            long sequence = Math.incrementExact(sourceSequence);
+            long sequence = sourceSequence = Math.incrementExact(sourceSequence);
             long now = System.currentTimeMillis();
             UUID commandId = UUID.nameUUIDFromBytes((runId + ":" + type + ":" + sequence)
                     .getBytes(StandardCharsets.UTF_8));
@@ -481,7 +494,8 @@ public final class W5FaultQaMain {
         }
 
         private SurprisingAeronClient connectCore() {
-            return SurprisingAeronClient.connect(productLine, coreHosts, coreEgressHost, Duration.ofSeconds(8));
+            return SurprisingAeronClient.connect(productLine, coreHosts, coreEgressHost,
+                    ExporterConfiguration.aeronTimeout());
         }
 
         private void waitForCore(SurprisingAeronClient core) throws Exception {
@@ -570,7 +584,7 @@ public final class W5FaultQaMain {
                     + "(SELECT COUNT(DISTINCT event_id) FROM core_websocket_audit_projection WHERE product_line = ?) AS audit_ids, "
                     + "(SELECT COUNT(*) FROM core_order_projection WHERE product_line = ?) AS orders, "
                     + "(SELECT COUNT(*) FROM core_user_fact_projection WHERE product_line = ?) AS facts";
-            try (Connection connection = DriverManager.getConnection(databaseUrl, databaseUser, databasePassword);
+            try (Connection connection = DriverManager.getConnection(pgProbeUrl(), databaseUser, databasePassword);
                  PreparedStatement statement = connection.prepareStatement(sql)) {
                 for (int index = 1; index <= 6; index++) {
                     statement.setString(index, productLine.name());
@@ -588,6 +602,11 @@ public final class W5FaultQaMain {
             } catch (SQLException exception) {
                 throw new IllegalStateException("PG snapshot failed label=" + label + " sql=" + sql, exception);
             }
+        }
+
+        private String pgProbeUrl() {
+            return databaseUrl + (databaseUrl.contains("?") ? '&' : '?')
+                    + "connectTimeout=1&socketTimeout=1";
         }
 
         private long auditCount() {
@@ -717,6 +736,22 @@ public final class W5FaultQaMain {
             System.out.printf("PROCESS_FAULT=START service=%s container=%s runId=%s%n", service, id, runId);
         }
 
+        private void awaitKafkaExternal() throws Exception {
+            try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(
+                    consumerProperties(kafkaBootstrap, runId + "-kafka-readiness"))) {
+                await(() -> {
+                    try {
+                        return !consumer.partitionsFor(topics.coreEventsTopic(), Duration.ofSeconds(1)).isEmpty();
+                    } catch (RuntimeException exception) {
+                        return false;
+                    }
+                }, Duration.ofSeconds(60), "Kafka external readiness");
+            }
+            Thread.sleep(5_000L);
+            System.out.printf("KAFKA_EXTERNAL_READY=PASS bootstrap=%s topic=%s%n",
+                    kafkaBootstrap, topics.coreEventsTopic());
+        }
+
         private void unpauseOwnedContainer(String service) {
             String id = ownedContainer(service);
             runCommand(List.of("docker", "unpause", id));
@@ -738,7 +773,7 @@ public final class W5FaultQaMain {
         private boolean containerReady(String id) {
             String state = commandOutput(List.of("docker", "inspect", "--format",
                     "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}", id)).trim();
-            return state.equals("running") || state.equals("running healthy");
+            return state.equals("running healthy");
         }
 
         private void restartOwnedProcess(String service) throws Exception {

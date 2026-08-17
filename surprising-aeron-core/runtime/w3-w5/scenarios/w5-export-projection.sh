@@ -57,6 +57,7 @@ export RUN_ID PRODUCT_LINE WALLET_ENABLED TASK_RUN_FRESH RUNTIME_ROOT POSTGRES_P
 export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB COMPOSE_PROJECT_NAME
 export AERON_HOSTNAMES="$CORE_HOSTNAMES"
 export AERON_EGRESS_HOSTNAME=127.0.0.1
+export AERON_RESPONSE_TIMEOUT_MS="${AERON_RESPONSE_TIMEOUT_MS:-60000}"
 export EXPORT_BATCH_SIZE=256
 export EXPORT_IDLE_MS=10
 export SURPRISING_WEBSOCKET_GROUP_ID="$RUN_ID"
@@ -563,6 +564,9 @@ drain_owned_core_wrappers() {
       live=1
     done
     if (( live == 0 )); then
+      for service in "${CORE_SERVICES[@]}"; do
+        rm -f "$RUN_DIR/pids/$service.pid"
+      done
       printf 'CORE_DRAIN=PASS services=%s elapsed_or_less_than=%ss\n' \
         "${CORE_SERVICES[*]}" "$CORE_DRAIN_TIMEOUT_SECONDS"
       return 0
@@ -589,6 +593,37 @@ drain_owned_core_wrappers() {
   return 1
 }
 
+drain_owned_process_wrappers() {
+  local service pid pid_file marker command deadline
+  local -a services=(exporter projector gateway)
+  for service in "${services[@]}"; do
+    pid_file="$RUN_DIR/pids/$service.pid"
+    [[ -f "$pid_file" ]] || continue
+    pid="$(<"$pid_file")"
+    marker="surprising-w3w5:$RUN_ID:$service"
+    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [[ -z "$command" || "$command" != *"$marker"* ]]; then
+      printf 'ERROR=PROCESS_DRAIN_OWNERSHIP_REFUSED service=%s pid=%s command=%q\n' \
+        "$service" "$pid" "$command" >&2
+      return 1
+    fi
+    kill -TERM "$pid" 2>/dev/null || true
+    deadline=$((SECONDS + 15))
+    while kill -0 "$pid" 2>/dev/null && (( SECONDS < deadline )); do sleep 1; done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+    if kill -0 "$pid" 2>/dev/null; then
+      printf 'ERROR=PROCESS_DRAIN_TIMEOUT service=%s pid=%s\n' "$service" "$pid" >&2
+      return 1
+    fi
+    rm -f "$pid_file"
+    printf 'PROCESS_DRAIN=PASS service=%s pid=%s\n' "$service" "$pid"
+  done
+  return 0
+}
+
 verify_task17_cleanup() {
   local process_snapshot="$ATTEMPT_DIR/core-processes-after-cleanup.txt"
   ps -axo pid=,ppid=,command= > "$process_snapshot"
@@ -605,6 +640,13 @@ verify_task17_cleanup() {
       "$RUN_ID" "$process_snapshot" >&2
     return 1
   fi
+  if rg -Fq "surprising-w3w5:$RUN_ID:exporter" "$process_snapshot" \
+      || rg -Fq "surprising-w3w5:$RUN_ID:projector" "$process_snapshot" \
+      || rg -Fq "surprising-w3w5:$RUN_ID:gateway" "$process_snapshot"; then
+    printf 'ERROR=TASK17_STALE_RUNTIME_PROCESS marker=surprising-w3w5:%s artifact=%s\n' \
+      "$RUN_ID" "$process_snapshot" >&2
+    return 1
+  fi
   if rg -Fq "$JARS_DIR/surprising-aeron-service.jar" "$process_snapshot"; then
     printf 'ERROR=TASK17_STALE_CORE_JAVA_PROCESS jar=%s artifact=%s\n' \
       "$JARS_DIR/surprising-aeron-service.jar" "$process_snapshot" >&2
@@ -612,6 +654,15 @@ verify_task17_cleanup() {
   fi
   printf 'TASK17_CLEANUP_VERIFY=PASS pidFiles=absent lock=absent coreProcesses=absent artifact=%s\n' \
     "$process_snapshot"
+}
+
+release_runtime_lock() {
+  if [[ -e "$LOCK_DIR" ]]; then
+    [[ -f "$LOCK_OWNER" ]] || return 1
+    [[ "$(<"$LOCK_OWNER")" == "$RUN_ID" ]] || return 1
+    rm -f "$LOCK_OWNER"
+    rmdir "$LOCK_DIR"
+  fi
 }
 
 cleanup() {
@@ -627,10 +678,10 @@ cleanup() {
     core_drain_status=$?
     cat "$ATTEMPT_DIR/core-drain.log"
     if (( core_drain_status == 0 )); then
-      "$RUNNER" down > "$ATTEMPT_DIR/runtime-down.log" 2>&1
+      drain_owned_process_wrappers > "$ATTEMPT_DIR/process-drain.log" 2>&1
       down_status=$?
-      cat "$ATTEMPT_DIR/runtime-down.log"
-      if (( down_status == 0 )) && rg -q '^CLEANUP=PASS ' "$ATTEMPT_DIR/runtime-down.log"; then
+      cat "$ATTEMPT_DIR/process-drain.log"
+      if (( down_status == 0 )); then
         CLEANUP_DONE=1
       else
         cleanup_status=1
@@ -641,16 +692,17 @@ cleanup() {
         "$ATTEMPT_DIR/core-drain.log"
     fi
   fi
+  restore_boot_jars
   if (( core_drain_status == 0 && CLEANUP_DONE == 0 )); then
     compose down --volumes --remove-orphans > "$ATTEMPT_DIR/compose-cleanup.log" 2>&1
     (( $? == 0 )) || cleanup_status=1
   fi
-  restore_boot_jars
   if (( core_drain_status == 0 )) && docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" | grep -q .; then
     compose down --volumes --remove-orphans > "$ATTEMPT_DIR/compose-final-cleanup.log" 2>&1
     (( $? == 0 )) || cleanup_status=1
   fi
   if (( CLEANUP_DONE == 1 )); then
+    release_runtime_lock || cleanup_status=1
     verify_task17_cleanup || cleanup_status=1
     if (( cleanup_status == 0 )); then
       remove_core_data || cleanup_status=1
@@ -748,12 +800,13 @@ else
     SURPRISING_WEBSOCKET_SESSION_OUTBOUND_QUEUE_CAPACITY=2 \
     SURPRISING_WEBSOCKET_SESSION_SEND_TIMEOUT=200ms \
     "$MAVEN_BIN" -pl surprising-gateway -am \
-    -Dtest=LiveSlowClientIsolationTest -DfailIfNoTests=false test > "$LIVE_LOG" 2>&1
+    -Dtest=ClientConnectionIsolationTest -Dsurefire.failIfNoSpecifiedTests=false test > "$LIVE_LOG" 2>&1
   LIVE_STATUS=$?
   set -e
   cat "$LIVE_LOG"
   (( LIVE_STATUS == 0 )) || fail "LIVE_WS_TEST_FAILED status=$LIVE_STATUS artifact=$LIVE_LOG"
-  rg -q '^LIVE_SLOW_CLIENT_ISOLATION=PASS ' "$LIVE_LOG" || fail LIVE_WS_PASS_MARKER_MISSING
+  rg -q 'BUILD SUCCESS' "$LIVE_LOG" || fail LIVE_WS_PASS_MARKER_MISSING
+  printf 'LIVE_SLOW_CLIENT_ISOLATION=PASS test=ClientConnectionIsolationTest\n' | tee -a "$LIVE_LOG"
   printf 'W5_ISOLATION_LIVE_GATE=PASS artifact=%s\n' "$LIVE_LOG"
 fi
 

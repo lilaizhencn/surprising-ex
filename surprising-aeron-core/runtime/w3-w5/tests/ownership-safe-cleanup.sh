@@ -53,7 +53,7 @@ expect_refusal CONCURRENT_RUNTIME_REFUSED env RUN_ID="$RUN_ID-lock" PRODUCT_LINE
 
 container_case="$RUN_ID-container"
 container_project="surprising-w3w5-$container_case"
-PROJECT_FOREIGN_CONTAINER="$(docker run -d --label "com.docker.compose.project=$container_project" --label 'com.surprising.runtime.run-id=foreign' postgres:16 sleep 300)"
+PROJECT_FOREIGN_CONTAINER="$(docker run -d --label "com.docker.compose.project=$container_project" --label 'com.surprising.runtime.run-id=foreign' postgres:18 sleep 300)"
 expect_refusal 'OWNERSHIP_REFUSED container=' env RUN_ID="$container_case" PRODUCT_LINE=LINEAR_PERPETUAL WALLET_ENABLED=false RUNTIME_ROOT="$TEST_ROOT/container" "$RUNNER" dry-run
 docker rm -f "$PROJECT_FOREIGN_CONTAINER" >/dev/null
 PROJECT_FOREIGN_CONTAINER=''
@@ -67,7 +67,7 @@ expect_refusal 'OWNERSHIP_REFUSED volume=' env RUN_ID="$volume_case" PRODUCT_LIN
 docker volume rm "$project_foreign_volume" >/dev/null
 PROJECT_FOREIGN_VOLUME=''
 
-FOREIGN_CONTAINER="$(docker run -d --label "com.surprising.runtime.run-id=foreign-$RUN_ID" postgres:16 sleep 300)"
+FOREIGN_CONTAINER="$(docker run -d --label "com.surprising.runtime.run-id=foreign-$RUN_ID" postgres:18 sleep 300)"
 docker volume create --label "com.surprising.runtime.run-id=foreign-$RUN_ID" "$FOREIGN_VOLUME" >/dev/null
 sleep 300 &
 FOREIGN_PID=$!

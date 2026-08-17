@@ -141,8 +141,7 @@ public final class JdbcCoreEventProjector {
                 long lastExportSequence = lockWatermark(connection, productLine);
                 byte[] rawMessage = CoreMessageCodec.encode(message);
                 if (event.exportSequence() <= lastExportSequence) {
-                    if (event.exportSequence() == lastExportSequence
-                            && isIdenticalEvent(connection, productLine, event, rawMessage)) {
+                    if (isIdenticalEvent(connection, productLine, event, rawMessage)) {
                         connection.commit();
                         return false;
                     }
