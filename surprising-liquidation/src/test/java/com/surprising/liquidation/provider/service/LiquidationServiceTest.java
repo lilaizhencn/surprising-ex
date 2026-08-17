@@ -1,6 +1,7 @@
 package com.surprising.liquidation.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,6 +16,7 @@ import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.liquidation.provider.model.CoreLiquidationProjection;
 import com.surprising.liquidation.provider.repository.CoreLiquidationProjectionRepository;
 import com.surprising.liquidation.provider.repository.CoreLiquidationProjectionRepository.ProjectionPage;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -29,8 +31,9 @@ class LiquidationServiceTest {
         CoreLiquidationActionView action = new CoreLiquidationActionView(7, 11, "BTC-USDT",
                 CoreMarginMode.CROSS, CorePositionSide.NET, 2, 9, 3, 3, 60_000);
         CoreLiquidationWorkView work = new CoreLiquidationWorkView(
-                new CoreRiskScanContinuation("BTC-USDT", 9, 0), List.of(action));
-        when(aeron.work(256)).thenReturn(work);
+                ProductLine.LINEAR_PERPETUAL, 7, true,
+                new CoreRiskScanContinuation("BTC-USDT", 9, 0), List.of(action), List.of());
+        when(aeron.work(0, 256, 1_048_576)).thenReturn(work);
         when(aeron.executeBatch(work, 3_000, 1_024))
                 .thenReturn(new CoreLiquidationBatchResultView(1, 1, 0, 0, 3, 1));
         LiquidationService service = new LiquidationService(properties, aeron, projections);
@@ -39,6 +42,50 @@ class LiquidationServiceTest {
 
         assertThat(cycle).isEqualTo(new LiquidationService.WorkCycle(true, 1, 1, 0, 0, 3));
         verify(aeron).executeBatch(work, 3_000, 1_024);
+    }
+
+    @Test
+    void rejectsWrongProductLine() {
+        LiquidationProperties properties = new LiquidationProperties();
+        LiquidationAeronGateway aeron = mock(LiquidationAeronGateway.class);
+        CoreLiquidationWorkView crossLine = new CoreLiquidationWorkView(ProductLine.INVERSE_PERPETUAL,
+                0, true, null, List.of(), List.of());
+        when(aeron.work(0, 256, 1_048_576)).thenReturn(crossLine);
+        LiquidationService service = new LiquidationService(properties, aeron,
+                mock(CoreLiquidationProjectionRepository.class));
+
+        assertThatThrownBy(service::processWork)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Core liquidation work ProductLine mismatch");
+        org.mockito.Mockito.verify(aeron, org.mockito.Mockito.never())
+                .executeBatch(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void rejectsNonAdvancingAndGapCursor() {
+        LiquidationProperties properties = new LiquidationProperties();
+        LiquidationAeronGateway repeatedAeron = mock(LiquidationAeronGateway.class);
+        when(repeatedAeron.work(0, 256, 1_048_576)).thenReturn(new CoreLiquidationWorkView(
+                ProductLine.LINEAR_PERPETUAL, 0, false, null, List.of(), List.of()));
+        LiquidationService repeated = new LiquidationService(properties, repeatedAeron,
+                mock(CoreLiquidationProjectionRepository.class));
+
+        assertThatThrownBy(repeated::processWork)
+                .hasMessage("Core liquidation work cursor did not advance");
+
+        CoreLiquidationActionView action = new CoreLiquidationActionView(7, 11, "BTC-USDT",
+                CoreMarginMode.CROSS, CorePositionSide.NET, 2, 9, 3, 3, 60_000);
+        LiquidationAeronGateway gapAeron = mock(LiquidationAeronGateway.class);
+        when(gapAeron.work(0, 256, 1_048_576)).thenReturn(new CoreLiquidationWorkView(
+                ProductLine.LINEAR_PERPETUAL, 8, false, null, List.of(action), List.of()));
+        LiquidationService gap = new LiquidationService(properties, gapAeron,
+                mock(CoreLiquidationProjectionRepository.class));
+
+        assertThatThrownBy(gap::processWork).hasMessage("Core liquidation work cursor gap");
+        org.mockito.Mockito.verify(gapAeron, org.mockito.Mockito.never())
+                .executeBatch(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test

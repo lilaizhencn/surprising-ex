@@ -57,6 +57,7 @@ surprising:
     settlement:
       settle-delay-ms: 1000
       batch-size: 20
+      max-pages-per-run: ${FUNDING_MAX_PAGES_PER_RUN:8}
     coordination:
       enabled: true
       node-id:

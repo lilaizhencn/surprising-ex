@@ -1,0 +1,100 @@
+name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}
+
+x-runtime-labels: &runtime-labels
+  com.surprising.runtime.bundle: w3-w5
+  com.surprising.runtime.run-id: ${RUN_ID:?RUN_ID is required}
+  com.surprising.runtime.product-line: ${PRODUCT_LINE:?PRODUCT_LINE is required}
+
+x-core-common: &core-common
+  image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+  init: true
+  restart: "no"
+  shm_size: 512mb
+  networks: [runtime]
+  labels: *runtime-labels
+  environment:
+    JAVA_TOOL_OPTIONS: >-
+      -XX:+UseZGC -Xms${AERON_CORE_HEAP:-512m} -Xmx${AERON_CORE_HEAP:-512m}
+
+services:
+  postgres:
+    image: postgres:18
+    restart: "no"
+    networks: [runtime]
+    labels: *runtime-labels
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:?POSTGRES_PORT is required}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  kafka:
+    image: apache/kafka:3.7.0
+    restart: "no"
+    networks: [runtime]
+    labels: *runtime-labels
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://127.0.0.1:${KAFKA_PORT:?KAFKA_PORT is required}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "127.0.0.1:${KAFKA_PORT:?KAFKA_PORT is required}:29092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null"]
+      interval: 1s
+      timeout: 5s
+      retries: 45
+
+  node0:
+    <<: *core-common
+    hostname: node0
+    command: ["-Dsurprising.aeron.product-line=${PRODUCT_LINE}", "-Dsurprising.aeron.node-id=0", "-Dsurprising.aeron.hostnames=node0,node1,node2", "-Dsurprising.aeron.data-dir=/var/lib/surprising/aeron", "-jar", "/opt/surprising/service.jar"]
+    volumes: [node0-data:/var/lib/surprising/aeron]
+
+  node1:
+    <<: *core-common
+    hostname: node1
+    command: ["-Dsurprising.aeron.product-line=${PRODUCT_LINE}", "-Dsurprising.aeron.node-id=1", "-Dsurprising.aeron.hostnames=node0,node1,node2", "-Dsurprising.aeron.data-dir=/var/lib/surprising/aeron", "-jar", "/opt/surprising/service.jar"]
+    volumes: [node1-data:/var/lib/surprising/aeron]
+
+  node2:
+    <<: *core-common
+    hostname: node2
+    command: ["-Dsurprising.aeron.product-line=${PRODUCT_LINE}", "-Dsurprising.aeron.node-id=2", "-Dsurprising.aeron.hostnames=node0,node1,node2", "-Dsurprising.aeron.data-dir=/var/lib/surprising/aeron", "-jar", "/opt/surprising/service.jar"]
+    volumes: [node2-data:/var/lib/surprising/aeron]
+
+networks:
+  runtime:
+    labels: *runtime-labels
+
+volumes:
+  postgres-data:
+    labels: *runtime-labels
+  kafka-data:
+    labels: *runtime-labels
+  node0-data:
+    labels: *runtime-labels
+  node1-data:
+    labels: *runtime-labels
+  node2-data:
+    labels: *runtime-labels

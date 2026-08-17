@@ -14,6 +14,7 @@ import com.surprising.adl.provider.repository.CoreAdlProjectionRepository;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.trading.api.model.PositionSide;
@@ -44,9 +45,24 @@ public class AdlService {
 
     public void processResidualDeficits() {
         if (!properties.getScanner().isEnabled()) return;
-        List<CoreAdlLiquidationProjection> pending = projections.pending(
-                properties.getKafka().getProductLine().name(), properties.getScanner().getBatchSize());
-        for (CoreAdlLiquidationProjection liquidation : pending) process(liquidation);
+        CoreLiquidationWorkView work = aeron.resolutionWork(CoreLiquidationWorkView.Purpose.ADL, 0,
+                properties.getScanner().getBatchSize(), 1_048_576);
+        requireOwnedWork(work);
+        for (CoreLiquidationWorkView.Resolution resolution : work.resolutions()) {
+            process(new CoreAdlLiquidationProjection(resolution.liquidationId(), resolution.userId(),
+                    resolution.symbol(), resolution.asset(), resolution.signedQuantitySteps(),
+                    resolution.deficitUnits()));
+        }
+    }
+
+    private void requireOwnedWork(CoreLiquidationWorkView work) {
+        if (work.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalStateException("Core ADL work ProductLine mismatch");
+        }
+        if (!work.actions().isEmpty() || work.resolutions().stream()
+                .anyMatch(value -> value.purpose() != CoreLiquidationWorkView.Purpose.ADL)) {
+            throw new IllegalStateException("Core ADL authority mismatch");
+        }
     }
 
     private void process(CoreAdlLiquidationProjection liquidation) {

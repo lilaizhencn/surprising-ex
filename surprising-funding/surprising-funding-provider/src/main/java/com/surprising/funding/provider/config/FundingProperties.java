@@ -212,6 +212,9 @@ public class FundingProperties {
         @Min(1)
         @Max(10_000)
         private int batchSize = 20;
+        @Min(1)
+        @Max(1_000)
+        private int maxPagesPerRun = 8;
 
         public boolean isEnabled() {
             return enabled;
@@ -235,6 +238,17 @@ public class FundingProperties {
 
         public void setBatchSize(int batchSize) {
             this.batchSize = batchSize;
+        }
+
+        public int getMaxPagesPerRun() {
+            return maxPagesPerRun;
+        }
+
+        public void setMaxPagesPerRun(int maxPagesPerRun) {
+            if (maxPagesPerRun < 1 || maxPagesPerRun > 1_000) {
+                throw new IllegalArgumentException("maxPagesPerRun must be in [1,1000]");
+            }
+            this.maxPagesPerRun = maxPagesPerRun;
         }
 
     }

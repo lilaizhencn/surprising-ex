@@ -29,12 +29,54 @@ public class LiquidationService {
 
     public WorkCycle processWork() {
         if (!properties.getExecution().isEnabled()) return new WorkCycle(false, 0, 0, 0, 0, 0);
-        var work = aeron.work(properties.getCoordinator().getWorkBatchSize());
         long feeRatePpm = properties.getExecution().getLiquidationFeeRatePpm();
-        var result = aeron.executeBatch(work, feeRatePpm,
-                properties.getCoordinator().getRiskScanBatchSize());
-        return new WorkCycle(result.riskScanContinuedUsers() > 0, result.offeredActions(),
-                result.appliedActions(), result.pendingActions(), result.obsoleteActions(), result.processedOrders());
+        long cursor = 0;
+        boolean riskScanContinued = false;
+        int offered = 0;
+        int applied = 0;
+        int pending = 0;
+        int obsolete = 0;
+        int processedOrders = 0;
+        for (int page = 0; page < properties.getCoordinator().getMaxPagesPerRun(); page++) {
+            var work = aeron.work(cursor, properties.getCoordinator().getWorkBatchSize(),
+                    properties.getCoordinator().getMaxWorkBytes());
+            validateWork(work, cursor);
+            if (work.actions().isEmpty() && !work.riskScanPending()) break;
+            var result = aeron.executeBatch(work, feeRatePpm,
+                    properties.getCoordinator().getRiskScanBatchSize());
+            riskScanContinued |= result.riskScanContinuedUsers() > 0;
+            offered = Math.addExact(offered, result.offeredActions());
+            applied = Math.addExact(applied, result.appliedActions());
+            pending = Math.addExact(pending, result.pendingActions());
+            obsolete = Math.addExact(obsolete, result.obsoleteActions());
+            processedOrders = Math.addExact(processedOrders, result.processedOrders());
+            if (work.complete()) break;
+            cursor = work.nextCursorLiquidationId();
+        }
+        return new WorkCycle(riskScanContinued, offered, applied, pending, obsolete, processedOrders);
+    }
+
+    private void validateWork(com.surprising.aeron.protocol.CoreLiquidationWorkView work, long requestedCursor) {
+        if (work.productLine() != properties.getProductLine()) {
+            throw new IllegalStateException("Core liquidation work ProductLine mismatch");
+        }
+        if (!work.resolutions().isEmpty()) {
+            throw new IllegalStateException("Core liquidation execution query returned resolution work");
+        }
+        if (!work.complete() && work.nextCursorLiquidationId() == requestedCursor) {
+            throw new IllegalStateException("Core liquidation work cursor did not advance");
+        }
+        long expectedCursor = work.actions().isEmpty()
+                ? requestedCursor : work.actions().getLast().liquidationId();
+        if (work.nextCursorLiquidationId() != expectedCursor) {
+            throw new IllegalStateException("Core liquidation work cursor gap");
+        }
+        for (CoreLiquidationActionView action : work.actions()) {
+            boolean ordered = "ORDERED".equals(action.status());
+            if (!ordered && !"PLANNED".equals(action.status()) || ordered != (action.cursorOrderId() > 0)) {
+                throw new IllegalStateException("Core liquidation work status/cursor mismatch");
+            }
+        }
     }
 
     public LiquidationOrderQueryResponse orders(Long userId, int limit) {

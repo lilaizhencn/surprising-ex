@@ -161,6 +161,22 @@ public class SubscriptionRegistry {
                 .orElse(0);
     }
 
+    public int queuedMessageCount() {
+        return sessions.values().stream()
+                .mapToInt(ClientConnection::queuedMessages)
+                .sum();
+    }
+
+    public int queueCapacity() {
+        return sessions.values().stream()
+                .mapToInt(ClientConnection::queueCapacity)
+                .sum();
+    }
+
+    public long backpressureRejectionCount() {
+        return backpressureRejections.sum();
+    }
+
     public List<ChannelMetric> channelMetrics() {
         Map<WsChannel, ChannelAccumulator> metrics = new EnumMap<>(WsChannel.class);
         subscribers.forEach((topic, connections) -> {
@@ -187,6 +203,12 @@ public class SubscriptionRegistry {
                 .register(meterRegistry);
         Gauge.builder("surprising.websocket.topics.active", this, SubscriptionRegistry::uniqueTopicCount)
                 .description("Unique subscribed WebSocket topics on this node")
+                .register(meterRegistry);
+        Gauge.builder("surprising.websocket.queue.depth", this, SubscriptionRegistry::queuedMessageCount)
+                .description("Queued WebSocket messages across active sessions")
+                .register(meterRegistry);
+        Gauge.builder("surprising.websocket.queue.capacity", this, SubscriptionRegistry::queueCapacity)
+                .description("Bounded WebSocket queue capacity across active sessions")
                 .register(meterRegistry);
         Gauge.builder("surprising.websocket.fanout.batches", fanoutBatches, LongAdder::sum)
                 .description("WebSocket Kafka 批量 fanout 次数")

@@ -61,7 +61,7 @@ final class CoreExportState {
         return new CoreExportState(acknowledgedSequence, nextSequence, pending);
     }
 
-    void append(CoreMessage command, ResponseStatus status, com.surprising.aeron.protocol.CoreResultCode resultCode,
+    long append(CoreMessage command, ResponseStatus status, com.surprising.aeron.protocol.CoreResultCode resultCode,
                 long appliedCommandCount, long businessStateHash,
                 List<com.surprising.aeron.protocol.CoreUserStateView> changedUsers,
                 List<com.surprising.aeron.protocol.CoreOrderStateView> changedOrders,
@@ -92,6 +92,7 @@ final class CoreExportState {
         pendingBytes = Math.addExact(pendingBytes, eventBytes);
         pendingDigest ^= eventDigest(message);
         nextSequence = Math.incrementExact(nextSequence);
+        return sequence;
     }
 
     boolean hasCapacity() {

@@ -10,6 +10,7 @@ public record CoreMessageHeader(
         CoreMessageType messageType,
         UUID commandId,
         ProductLine productLine,
+        CoreRoute route,
         CommandSource source,
         long sourceId,
         long sourceSequence,
@@ -25,6 +26,7 @@ public record CoreMessageHeader(
         Objects.requireNonNull(messageType, "messageType");
         Objects.requireNonNull(commandId, "commandId");
         Objects.requireNonNull(productLine, "productLine");
+        Objects.requireNonNull(route, "route");
         Objects.requireNonNull(source, "source");
         if (messageType.kind() != kind) {
             throw new IllegalArgumentException("messageType does not belong to kind: " + messageType);
@@ -48,7 +50,7 @@ public record CoreMessageHeader(
             long submittedAtEpochMillis,
             long correlationId) {
         return new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION, WireMessageKind.COMMAND, messageType,
-                commandId, productLine, source, sourceId, sourceSequence, userId,
+                commandId, productLine, CoreRoute.DEFAULT, source, sourceId, sourceSequence, userId,
                 submittedAtEpochMillis, correlationId);
     }
 
@@ -63,18 +65,19 @@ public record CoreMessageHeader(
             long submittedAtEpochMillis,
             long correlationId) {
         return new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION, WireMessageKind.QUERY, messageType,
-                queryId, productLine, source, sourceId, sourceSequence, userId,
+                queryId, productLine, CoreRoute.DEFAULT, source, sourceId, sourceSequence, userId,
                 submittedAtEpochMillis, correlationId);
     }
 
     public CoreMessageHeader response(CoreMessageType responseType) {
         return new CoreMessageHeader(schemaVersion, WireMessageKind.RESPONSE, responseType, commandId,
-                productLine, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
+                productLine, route, source, sourceId, sourceSequence, userId,
+                submittedAtEpochMillis, correlationId);
     }
 
     public CoreMessageHeader exportEvent(long exportSequence) {
         return new CoreMessageHeader(schemaVersion, WireMessageKind.EXPORT_EVENT, CoreMessageType.CORE_EVENT,
-                commandId, productLine, source, sourceId, exportSequence, userId,
+                commandId, productLine, route, source, sourceId, exportSequence, userId,
                 submittedAtEpochMillis, correlationId);
     }
 }

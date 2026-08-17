@@ -25,9 +25,9 @@ public final class CoreMessageCodec {
         buffer.put((byte) ProductLineWireCode.encode(header.productLine()));
         buffer.putShort((short) header.messageType().wireCode());
         buffer.put((byte) header.source().wireCode());
-        buffer.put((byte) 0);
+        buffer.put((byte) header.route().shardCode());
         buffer.putShort((short) CoreProtocol.HEADER_LENGTH);
-        buffer.putShort((short) 0);
+        buffer.putShort((short) header.route().version());
         buffer.putLong(header.commandId().getMostSignificantBits());
         buffer.putLong(header.commandId().getLeastSignificantBits());
         buffer.putLong(header.sourceId());
@@ -57,12 +57,13 @@ public final class CoreMessageCodec {
         var productLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.get()));
         CoreMessageType messageType = CoreMessageType.fromWireCode(Short.toUnsignedInt(buffer.getShort()));
         CommandSource source = CommandSource.fromWireCode(Byte.toUnsignedInt(buffer.get()));
-        buffer.get();
+        int shardCode = Byte.toUnsignedInt(buffer.get());
         int headerLength = Short.toUnsignedInt(buffer.getShort());
-        buffer.getShort();
+        int routeVersion = Short.toUnsignedInt(buffer.getShort());
         if (headerLength != CoreProtocol.HEADER_LENGTH) {
             throw new ProtocolException("invalid header length: " + headerLength);
         }
+        CoreRoute route = CoreRoute.fromWireCodes(shardCode, routeVersion);
         UUID commandId = new UUID(buffer.getLong(), buffer.getLong());
         long sourceId = buffer.getLong();
         long sourceSequence = buffer.getLong();
@@ -78,7 +79,8 @@ public final class CoreMessageCodec {
         byte[] payload = new byte[payloadLength];
         buffer.get(payload);
         CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType, commandId,
-                productLine, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
+                productLine, route, source, sourceId, sourceSequence, userId,
+                submittedAtEpochMillis, correlationId);
         return new CoreMessage(header, payload);
     }
 }

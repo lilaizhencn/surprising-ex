@@ -11,6 +11,7 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 
 class WebSocketKafkaConfigurationTest {
 
@@ -45,10 +46,13 @@ class WebSocketKafkaConfigurationTest {
 
         var coreConsumerFactory = (DefaultKafkaConsumerFactory<String, byte[]>)
                 configuration.webSocketCoreEventsConsumerFactory(properties);
-        var coreListenerFactory = configuration.webSocketCoreEventsKafkaListenerContainerFactory(coreConsumerFactory);
+        DefaultErrorHandler coreErrorHandler = configuration.webSocketCoreEventsErrorHandler();
+        var coreListenerFactory = configuration.webSocketCoreEventsKafkaListenerContainerFactory(
+                coreConsumerFactory, coreErrorHandler);
         assertThat(coreConsumerFactory.getConfigurationProperties())
                 .containsEntry(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
         assertThat(coreListenerFactory.getContainerProperties().getAckMode())
                 .isEqualTo(ContainerProperties.AckMode.RECORD);
+        assertThat(coreErrorHandler.isAckAfterHandle()).isFalse();
     }
 }

@@ -9,6 +9,7 @@ import io.aeron.cluster.service.ClusteredServiceContainer;
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
 import java.io.File;
+import java.util.Locale;
 import org.agrona.ErrorHandler;
 import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
@@ -27,7 +28,7 @@ public final class SurprisingClusterNode {
 
         MediaDriver.Context mediaDriverContext = new MediaDriver.Context()
                 .aeronDirectoryName(aeronDirectoryName)
-                .threadingMode(ThreadingMode.SHARED)
+                .threadingMode(coreThreadingMode())
                 .termBufferSparseFile(true)
                 .errorHandler(errorHandler("media-driver"));
 
@@ -90,5 +91,19 @@ public final class SurprisingClusterNode {
             System.err.println("Aeron " + component + " failure");
             throwable.printStackTrace(System.err);
         };
+    }
+
+    static ThreadingMode coreThreadingMode() {
+        String configured = System.getProperty("surprising.aeron.core.threading-mode");
+        if (configured == null || configured.isBlank()) {
+            configured = System.getenv().getOrDefault("AERON_CORE_THREADING_MODE", "DEDICATED");
+        }
+        try {
+            return ThreadingMode.valueOf(configured.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                    "surprising.aeron.core.threading-mode must be a valid Aeron ThreadingMode: " + configured,
+                    exception);
+        }
     }
 }

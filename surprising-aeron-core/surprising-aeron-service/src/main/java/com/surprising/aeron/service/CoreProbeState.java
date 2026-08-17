@@ -5,6 +5,7 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreBalanceView;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreCommandResultView;
@@ -64,7 +65,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class CoreProbeState implements AutoCloseable {
 
     static final int MAX_IDEMPOTENCY_RESULTS = 128;
-    static final int MAX_STORED_RESPONSE_BYTES = 1 * 1024 * 1024;
+    static final long MAX_RESULT_LEDGER_BYTES = 32L * 1024 * 1024;
+    static final int MAX_STORED_RESPONSE_BYTES = Math.toIntExact(MAX_RESULT_LEDGER_BYTES);
     static final int MAX_SOURCE_SEQUENCES = 65_536;
     private static final int DEFAULT_RISK_SCAN_BATCH_SIZE = 1_024;
     private static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
@@ -75,6 +77,8 @@ public final class CoreProbeState implements AutoCloseable {
     private final ProductLine productLine;
     private final TradingCoreRuntime runtime;
     private final LinkedHashMap<UUID, StoredResult> commandResults;
+    private long commandResultBytes;
+    private long nextResultRetentionSequence;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final LinkedHashMap<Long, PendingMatching> pendingMatching;
     private final List<CoreMessage> queuedMatching = new ArrayList<>();
@@ -141,6 +145,8 @@ public final class CoreProbeState implements AutoCloseable {
         this.appliedCommandCount = appliedCommandCount;
         this.probeValue = probeValue;
         this.commandResults = commandResults;
+        this.commandResultBytes = resultLedgerBytes(commandResults);
+        this.nextResultRetentionSequence = nextRetentionSequence(commandResults);
         this.lastSourceSequences = lastSourceSequences;
         this.pendingMatching = new LinkedHashMap<>();
         this.tradingState = tradingState;
@@ -185,11 +191,12 @@ public final class CoreProbeState implements AutoCloseable {
             TradingCoreState tradingState,
             CoreExportState exportState,
             MatcherSnapshot matcherSnapshot) {
-        if (appliedCommandCount < 0 || commandResults.size() > MAX_IDEMPOTENCY_RESULTS
-                || lastSourceSequences.size() > MAX_SOURCE_SEQUENCES
+        if (appliedCommandCount < 0 || commandResults == null || commandResults.size() > MAX_IDEMPOTENCY_RESULTS
+                || lastSourceSequences == null || lastSourceSequences.size() > MAX_SOURCE_SEQUENCES
                 || tradingState == null || tradingState.productLine() != productLine || exportState == null) {
             throw new IllegalArgumentException("invalid restored probe state");
         }
+        validateResultLedger(commandResults);
         return new CoreProbeState(productLine, appliedCommandCount, probeValue,
                 new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences),
                 tradingState, exportState, matcherSnapshot);
@@ -241,10 +248,12 @@ public final class CoreProbeState implements AutoCloseable {
                 StoredResult result = commandResults.get(commandId);
                 if (result == null) {
                     return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                            CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount, cachedBusinessStateHash);
+                            CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, appliedCommandCount,
+                            0, cachedBusinessStateHash, new byte[0]);
                 }
                 return new CoreResponse(ResponseStatus.OK, result.status(), result.resultCode(),
-                        result.appliedCommandCount(), result.stateHash(), result.responseData());
+                        result.appliedCommandCount(), result.requiredExportSequence(), result.stateHash(),
+                        result.responseData());
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -348,7 +357,7 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 int maxEvents = CoreExportCodec.decodeBatchQuery(message.payload());
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, stateHash(),
-                        CoreExportCodec.encodeBatchWithStatus(exportState.acknowledgedSequence(),
+                        CoreExportCodec.encodeBatchWithStatus(exportState.status(),
                                 exportState.batch(maxEvents)));
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
@@ -476,34 +485,82 @@ public final class CoreProbeState implements AutoCloseable {
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.LIQUIDATION_WORK_QUERY) {
             try {
-                int limit = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeQuery(message.payload());
-                var actions = liquidationIndex.activeIds().stream()
+                var query = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeQuery(message.payload());
+                if (query.productLine() != productLine) {
+                    return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
+                }
+                var eligible = liquidationIndex.activeIds().tailSet(query.afterLiquidationId(), false).stream()
                         .map(tradingState.riskState().liquidations()::get)
                         .filter(java.util.Objects::nonNull)
-                        .filter(value -> value.status()
-                                == com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED
-                                || value.status()
-                                == com.surprising.aeron.service.state.CoreLiquidationState.Status.ORDERED)
-                        .map(value -> {
+                        .filter(value -> switch (query.purpose()) {
+                            case EXECUTION -> value.status()
+                                    == com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED
+                                    || value.status()
+                                    == com.surprising.aeron.service.state.CoreLiquidationState.Status.ORDERED;
+                            case INSURANCE -> value.status()
+                                    == com.surprising.aeron.service.state.CoreLiquidationState.Status.INSURANCE_REQUIRED;
+                            case ADL -> value.status()
+                                    == com.surprising.aeron.service.state.CoreLiquidationState.Status.ADL_REQUIRED;
+                        })
+                        .filter(value -> {
+                            if (query.purpose()
+                                    == com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION) {
+                                var mark = tradingState.riskState().markPrices().get(value.symbol());
+                                return mark != null && mark.priceSequence() == value.triggerPriceSequence();
+                            }
+                            var instrument = tradingState.instruments().get(value.symbol());
+                            return instrument != null && instrument.version() == value.instrumentVersion()
+                                    && instrument.contractType().productLine() == productLine;
+                        })
+                        .toList();
+                var scan = tradingState.riskState().scan();
+                var continuation = query.purpose() == com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION
+                        && !scan.riskComplete()
+                        ? new com.surprising.aeron.protocol.CoreRiskScanContinuation(scan.symbol(),
+                        scan.priceSequence(), scan.lastUserId()) : null;
+                java.util.ArrayList<com.surprising.aeron.protocol.CoreLiquidationActionView> actions =
+                        new java.util.ArrayList<>();
+                java.util.ArrayList<com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution> resolutions =
+                        new java.util.ArrayList<>();
+                long nextCursor = query.afterLiquidationId();
+                for (var value : eligible) {
+                    if (actions.size() + resolutions.size() >= query.maxItems()) break;
+                    com.surprising.aeron.protocol.CoreLiquidationActionView action = null;
+                    com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution resolution = null;
+                    if (query.purpose()
+                            == com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION) {
                             var mark = tradingState.riskState().markPrices().get(value.symbol());
-                            if (mark == null || mark.priceSequence() != value.triggerPriceSequence()) return null;
-                            return new com.surprising.aeron.protocol.CoreLiquidationActionView(
+                            action = new com.surprising.aeron.protocol.CoreLiquidationActionView(
                                     value.liquidationId(), value.userId(), value.symbol(), value.marginMode(),
                                     value.positionSide(), value.instrumentVersion(), value.triggerPriceSequence(),
                                     value.signedQuantitySteps(), value.closeQuantitySteps(), mark.markPriceTicks(),
                                     value.status().name(), value.status()
                                             == com.surprising.aeron.service.state.CoreLiquidationState.Status.ORDERED
                                             ? value.nextCancelOrderId() : 0);
-                        })
-                        .filter(java.util.Objects::nonNull)
-                        .limit(limit)
-                        .toList();
-                var scan = tradingState.riskState().scan();
-                var continuation = !scan.riskComplete()
-                        ? new com.surprising.aeron.protocol.CoreRiskScanContinuation(scan.symbol(),
-                        scan.priceSequence(), scan.lastUserId()) : null;
-                var work = new com.surprising.aeron.protocol.CoreLiquidationWorkView(
-                        continuation, actions);
+                    } else {
+                        var instrument = tradingState.instruments().get(value.symbol());
+                        resolution = new com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution(
+                                value.liquidationId(), value.userId(), value.symbol(), instrument.settleAsset(),
+                                value.marginMode(), value.positionSide(), value.instrumentVersion(),
+                                value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(),
+                                query.purpose());
+                    }
+                    if (action != null) actions.add(action);
+                    if (resolution != null) resolutions.add(resolution);
+                    long candidateCursor = value.liquidationId();
+                    var candidate = new com.surprising.aeron.protocol.CoreLiquidationWorkView(productLine,
+                            candidateCursor, false, continuation, actions, resolutions);
+                    if (com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(candidate).length
+                            > query.maxBytes()) {
+                        if (action != null) actions.removeLast();
+                        if (resolution != null) resolutions.removeLast();
+                        break;
+                    }
+                    nextCursor = candidateCursor;
+                }
+                boolean complete = actions.size() + resolutions.size() == eligible.size();
+                var work = new com.surprising.aeron.protocol.CoreLiquidationWorkView(productLine, nextCursor,
+                        complete, continuation, actions, resolutions);
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
             } catch (IllegalArgumentException exception) {
@@ -530,15 +587,21 @@ public final class CoreProbeState implements AutoCloseable {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
         }
+        if (message.header().kind() != WireMessageKind.COMMAND) {
+            return rejected(CoreResultCode.INVALID_MESSAGE);
+        }
+        CommandFingerprint fingerprint = CommandFingerprint.of(message);
         StoredResult duplicate = commandResults.get(message.header().commandId());
         if (duplicate != null) {
+            if (!duplicate.fingerprint().equals(fingerprint)) {
+                return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                        CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash(), new byte[0]);
+            }
             return new CoreResponse(ResponseStatus.DUPLICATE,
                     duplicate.status(),
                     duplicate.resultCode(),
-                    duplicate.appliedCommandCount(), duplicate.stateHash(), duplicate.responseData());
-        }
-        if (message.header().kind() != WireMessageKind.COMMAND) {
-            return rejected(CoreResultCode.INVALID_MESSAGE);
+                    duplicate.appliedCommandCount(), duplicate.requiredExportSequence(), duplicate.stateHash(),
+                    duplicate.responseData());
         }
         SourceKey sourceKey = new SourceKey(message.header().source(), message.header().sourceId());
         Long lastSourceSequence = lastSourceSequences.get(sourceKey);
@@ -626,9 +689,11 @@ public final class CoreProbeState implements AutoCloseable {
         }
         long businessStateHash = tradingStateChanged
                 ? rollingBusinessStateHash.value() : cachedBusinessStateHash;
+        long requiredExportSequence = 0;
         if (exportCommand) {
             try {
-                exportState.append(message, status, resultCode, Math.incrementExact(appliedCommandCount),
+                requiredExportSequence = exportState.append(message, status, resultCode,
+                        Math.incrementExact(appliedCommandCount),
                         businessStateHash, commandDelta.changedUsers(), commandDelta.changedOrders(), commandDelta.executions(),
                         commandDelta.fundingPayments(),
                         commandDelta.changedLiquidations(), commandDelta.changedTreasuryAssets(),
@@ -648,20 +713,15 @@ public final class CoreProbeState implements AutoCloseable {
             lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, previousSourceSequence);
         }
         lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, message.header().sourceSequence());
-        if (commandResults.size() >= MAX_IDEMPOTENCY_RESULTS) {
-            UUID oldest = commandResults.keySet().iterator().next();
-            commandResults.remove(oldest);
-        }
         long stateHash = stateHash(businessStateHash, message.header().commandId(), status, resultCode,
                 appliedCommandCount);
         byte[] responseData = message.header().messageType() == CoreMessageType.ACK_EXPORT
                 && status == ResponseStatus.APPLIED
                 ? CoreExportCodec.encodeStatus(exportState.status()) : commandResultData();
-        byte[] storedResponseData = responseData.length <= MAX_STORED_RESPONSE_BYTES
-                ? responseData : new byte[0];
-        commandResults.put(message.header().commandId(),
-                new StoredResult(status, resultCode, appliedCommandCount, stateHash, storedResponseData));
-        return new CoreResponse(status, status, resultCode, appliedCommandCount, stateHash, responseData);
+        storeResult(message.header().commandId(), new StoredResult(fingerprint, status, resultCode,
+                appliedCommandCount, requiredExportSequence, stateHash, responseData, 0));
+        return new CoreResponse(status, status, resultCode, appliedCommandCount,
+                requiredExportSequence, stateHash, responseData);
     }
 
     private void appendQueuedMatching(long businessStateHash) {
@@ -802,8 +862,9 @@ public final class CoreProbeState implements AutoCloseable {
         }
         long businessStateHash = tradingStateChanged ? rollingBusinessStateHash.value() : cachedBusinessStateHash;
         long sequence = Math.incrementExact(appliedCommandCount);
+        long requiredExportSequence;
         try {
-            exportState.append(message, ResponseStatus.APPLIED, matchingPendingCode(), sequence,
+            requiredExportSequence = exportState.append(message, ResponseStatus.APPLIED, matchingPendingCode(), sequence,
                     businessStateHash, commandDelta.changedUsers(), commandDelta.changedOrders(),
                     commandDelta.executions(), commandDelta.fundingPayments(), commandDelta.changedLiquidations(),
                     commandDelta.changedTreasuryAssets(), commandDelta.changedTriggerOrders());
@@ -823,23 +884,20 @@ public final class CoreProbeState implements AutoCloseable {
             lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, previousSourceSequence);
         }
         lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, message.header().sourceSequence());
-        if (commandResults.size() >= MAX_IDEMPOTENCY_RESULTS) {
-            commandResults.remove(commandResults.keySet().iterator().next());
-        }
         long stateHash = stateHash(businessStateHash, message.header().commandId(), ResponseStatus.OK,
                 matchingPendingCode(), appliedCommandCount);
         byte[] responseData = commandResultData();
-        commandResults.put(message.header().commandId(), new StoredResult(ResponseStatus.OK,
-                matchingPendingCode(), appliedCommandCount, stateHash, responseData));
+        storeResult(message.header().commandId(), new StoredResult(CommandFingerprint.of(message), ResponseStatus.OK,
+                matchingPendingCode(), appliedCommandCount, requiredExportSequence, stateHash, responseData, 0));
         submitMatching(pending);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
-                appliedCommandCount, stateHash, responseData);
+                appliedCommandCount, requiredExportSequence, stateHash, responseData);
     }
 
     private CoreResponse recordRejectedMatching(CoreMessage message, SourceKey sourceKey,
                                                 CoreResultCode resultCode) {
         long sequence = Math.incrementExact(appliedCommandCount);
-        exportState.append(message, ResponseStatus.REJECTED, resultCode, sequence,
+        long requiredExportSequence = exportState.append(message, ResponseStatus.REJECTED, resultCode, sequence,
                 cachedBusinessStateHash, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         appliedCommandCount = sequence;
         Long previousSourceSequence = lastSourceSequences.put(sourceKey, message.header().sourceSequence());
@@ -847,15 +905,13 @@ public final class CoreProbeState implements AutoCloseable {
             lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, previousSourceSequence);
         }
         lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, message.header().sourceSequence());
-        if (commandResults.size() >= MAX_IDEMPOTENCY_RESULTS) {
-            commandResults.remove(commandResults.keySet().iterator().next());
-        }
         long stateHash = stateHash(cachedBusinessStateHash, message.header().commandId(),
                 ResponseStatus.REJECTED, resultCode, appliedCommandCount);
-        commandResults.put(message.header().commandId(), new StoredResult(ResponseStatus.REJECTED, resultCode,
-                appliedCommandCount, stateHash, new byte[0]));
+        storeResult(message.header().commandId(), new StoredResult(CommandFingerprint.of(message),
+                ResponseStatus.REJECTED, resultCode, appliedCommandCount, requiredExportSequence, stateHash,
+                new byte[0], 0));
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                appliedCommandCount, stateHash);
+                appliedCommandCount, requiredExportSequence, stateHash, new byte[0]);
     }
 
     private void validatePendingCancel(CoreMessage message) {
@@ -1495,7 +1551,7 @@ public final class CoreProbeState implements AutoCloseable {
         commandDelta = commandDelta(before, tradingState, true);
         long businessStateHash = tradingState == before ? cachedBusinessStateHash : rollingBusinessStateHash.value();
         long applied = Math.incrementExact(appliedCommandCount);
-        exportState.append(pending.command(), status, resultCode, applied, businessStateHash,
+        long requiredExportSequence = exportState.append(pending.command(), status, resultCode, applied, businessStateHash,
                 commandDelta.changedUsers(), commandDelta.changedOrders(), commandDelta.executions(),
                 commandDelta.fundingPayments(), commandDelta.changedLiquidations(), commandDelta.changedTreasuryAssets(),
                 commandDelta.changedTriggerOrders());
@@ -1503,10 +1559,10 @@ public final class CoreProbeState implements AutoCloseable {
         appliedCommandCount = applied;
         long stateHash = stateHash(businessStateHash, pending.command().header().commandId(), status, resultCode, applied);
         byte[] responseData = commandResultData();
-        commandResults.put(pending.command().header().commandId(),
-                new StoredResult(status, resultCode, applied, stateHash, responseData));
+        storeResult(pending.command().header().commandId(), new StoredResult(CommandFingerprint.of(pending.command()),
+                status, resultCode, applied, requiredExportSequence, stateHash, responseData, 0));
         pendingMatching.remove(sequence);
-        return new CoreResponse(status, status, resultCode, applied, stateHash, responseData);
+        return new CoreResponse(status, status, resultCode, applied, requiredExportSequence, stateHash, responseData);
     }
 
     private void applyLiquidationBatch(
@@ -1788,9 +1844,17 @@ public final class CoreProbeState implements AutoCloseable {
         for (Map.Entry<UUID, StoredResult> entry : commandResults.entrySet()) {
             hash = mix(hash, entry.getKey().getMostSignificantBits());
             hash = mix(hash, entry.getKey().getLeastSignificantBits());
+            for (byte value : entry.getValue().fingerprint().bytes()) {
+                hash = mix(hash, Byte.toUnsignedInt(value));
+            }
             hash = mix(hash, entry.getValue().status().wireCode());
             hash = mix(hash, entry.getValue().resultCode().wireCode());
             hash = mix(hash, entry.getValue().appliedCommandCount());
+            hash = mix(hash, entry.getValue().requiredExportSequence());
+            hash = mix(hash, entry.getValue().retentionSequence());
+            for (byte value : entry.getValue().responseData()) {
+                hash = mix(hash, Byte.toUnsignedInt(value));
+            }
         }
         if (commandId != null) {
             hash = mix(hash, commandId.getMostSignificantBits());
@@ -2682,6 +2746,69 @@ public final class CoreProbeState implements AutoCloseable {
         return mix(digest, sequence);
     }
 
+    private static long resultLedgerBytes(Map<UUID, StoredResult> results) {
+        long bytes = 0;
+        for (Map.Entry<UUID, StoredResult> entry : results.entrySet()) {
+            bytes = Math.addExact(bytes, resultEntryBytes(entry.getValue()));
+        }
+        return bytes;
+    }
+
+    private static long resultEntryBytes(StoredResult result) {
+        return Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH, result.responseData().length);
+    }
+
+    private static long nextRetentionSequence(Map<UUID, StoredResult> results) {
+        long next = 1;
+        for (StoredResult result : results.values()) {
+            next = Math.max(next, Math.incrementExact(result.retentionSequence()));
+        }
+        return next;
+    }
+
+    private static void validateResultLedger(Map<UUID, StoredResult> results) {
+        if (results == null || results.size() > MAX_IDEMPOTENCY_RESULTS) {
+            throw new IllegalArgumentException("invalid result ledger count");
+        }
+        long bytes = resultLedgerBytes(results);
+        long previousRetentionSequence = 0;
+        for (Map.Entry<UUID, StoredResult> entry : results.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null
+                    || entry.getValue().retentionSequence() <= previousRetentionSequence) {
+                throw new IllegalArgumentException("invalid result ledger retention metadata");
+            }
+            previousRetentionSequence = entry.getValue().retentionSequence();
+        }
+        if (bytes > MAX_RESULT_LEDGER_BYTES) {
+            throw new IllegalArgumentException("result ledger exceeds byte bound");
+        }
+    }
+
+    private void storeResult(UUID commandId, StoredResult result) {
+        long resultBytes = resultEntryBytes(result);
+        if (resultBytes > MAX_RESULT_LEDGER_BYTES) {
+            throw new IllegalArgumentException("result ledger entry exceeds byte bound");
+        }
+        StoredResult previous = commandResults.get(commandId);
+        if (previous != null) {
+            commandResults.put(commandId, result.withRetentionSequence(previous.retentionSequence()));
+        } else {
+            StoredResult retained = result.withRetentionSequence(nextResultRetentionSequence);
+            nextResultRetentionSequence = Math.incrementExact(nextResultRetentionSequence);
+            commandResults.put(commandId, retained);
+        }
+        commandResultBytes = resultLedgerBytes(commandResults);
+        while (commandResults.size() > MAX_IDEMPOTENCY_RESULTS
+                || commandResultBytes > MAX_RESULT_LEDGER_BYTES) {
+            UUID oldest = commandResults.keySet().stream()
+                    .filter(key -> !key.equals(commandId))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException("result ledger protected entry exceeds bound"));
+            commandResults.remove(oldest);
+            commandResultBytes = resultLedgerBytes(commandResults);
+        }
+    }
+
     private CoreResponse rejected(CoreResultCode resultCode) {
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                 resultCode, appliedCommandCount, stateHash());
@@ -2692,18 +2819,39 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     record StoredResult(
+            CommandFingerprint fingerprint,
             ResponseStatus status,
             CoreResultCode resultCode,
             long appliedCommandCount,
+            long requiredExportSequence,
             long stateHash,
-            byte[] responseData) {
+            byte[] responseData,
+            long retentionSequence) {
 
         StoredResult(ResponseStatus status, CoreResultCode resultCode, long appliedCommandCount, long stateHash) {
-            this(status, resultCode, appliedCommandCount, stateHash, new byte[0]);
+            this(CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]), status,
+                    resultCode, appliedCommandCount, 0, stateHash,
+                    new byte[0], Math.max(1, appliedCommandCount));
+        }
+
+        StoredResult(ResponseStatus status, CoreResultCode resultCode, long appliedCommandCount, long stateHash,
+                     byte[] responseData) {
+            this(CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]), status,
+                    resultCode, appliedCommandCount, 0, stateHash,
+                    responseData, Math.max(1, appliedCommandCount));
         }
 
         StoredResult {
+            if (fingerprint == null || status == null || resultCode == null || appliedCommandCount < 0
+                    || requiredExportSequence < 0 || retentionSequence < 0) {
+                throw new IllegalArgumentException("invalid stored result");
+            }
             responseData = responseData == null ? new byte[0] : responseData.clone();
+        }
+
+        StoredResult withRetentionSequence(long sequence) {
+            return new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
+                    requiredExportSequence, stateHash, responseData, sequence);
         }
 
         @Override

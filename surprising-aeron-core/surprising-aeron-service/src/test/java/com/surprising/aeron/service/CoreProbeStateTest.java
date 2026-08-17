@@ -75,7 +75,7 @@ class CoreProbeStateTest {
                 CommandSource.GATEWAY, 7, 0, 1001, 1_000, 3),
                 CoreStateQueryCodec.encodeCommandResultQuery(UUID.randomUUID())));
         assertThat(unknown.status()).isEqualTo(ResponseStatus.REJECTED);
-        assertThat(unknown.resultCode()).isEqualTo(CoreResultCode.ENTITY_NOT_FOUND);
+        assertThat(unknown.resultCode()).isEqualTo(CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION);
     }
 
     @Test
@@ -651,7 +651,9 @@ class CoreProbeStateTest {
                 Map.of(), Map.of(), trading, new CoreExportState());
 
         var response = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
-                com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeQuery(1)));
+                com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeQuery(ProductLine.SPOT,
+                        com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION,
+                        0, 1, 1_048_576)));
         var work = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeWork(response.data());
 
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
@@ -762,7 +764,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(6);
+        assertThat(manifest.schemaVersion()).isEqualTo(7);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();

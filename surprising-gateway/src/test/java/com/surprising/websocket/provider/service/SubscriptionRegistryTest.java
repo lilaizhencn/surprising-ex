@@ -70,6 +70,7 @@ class SubscriptionRegistryTest {
         verify(failed).close();
         verify(healthy).send(anyString());
         assertThat(registry.subscriberCount(topic)).isEqualTo(1);
+        assertThat(registry.backpressureRejectionCount()).isEqualTo(1);
     }
 
     @Test
@@ -93,6 +94,10 @@ class SubscriptionRegistryTest {
         ClientConnection user = connection("s-user", 7001L);
         registry.add(anonymous);
         registry.add(user);
+        when(anonymous.queuedMessages()).thenReturn(2);
+        when(user.queuedMessages()).thenReturn(3);
+        when(anonymous.queueCapacity()).thenReturn(4);
+        when(user.queueCapacity()).thenReturn(6);
         SubscriptionTopic publicTopic = new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null);
         SubscriptionTopic privateTopic = new SubscriptionTopic(WsChannel.ORDERS, "BTC-USDT", null, 7001L);
         registry.subscribe(anonymous, publicTopic);
@@ -105,6 +110,8 @@ class SubscriptionRegistryTest {
         assertThat(registry.totalSubscriptionCount()).isEqualTo(3);
         assertThat(registry.uniqueTopicCount()).isEqualTo(2);
         assertThat(registry.maxSubscriptionsPerSession()).isEqualTo(2);
+        assertThat(registry.queuedMessageCount()).isEqualTo(5);
+        assertThat(registry.queueCapacity()).isEqualTo(10);
         assertThat(registry.channelMetrics()).extracting(SubscriptionRegistry.ChannelMetric::channel)
                 .containsExactly("ORDERS", "TRADES");
     }

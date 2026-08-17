@@ -65,6 +65,9 @@ public class FundingService {
         this.latestFundingRateCache = latestFundingRateCache;
         this.kafkaTemplate = kafkaTemplate;
         this.aeron = aeron;
+        if (!properties.getKafka().isFundingProductLine()) {
+            throw new IllegalArgumentException("funding provider requires a funding ProductLine");
+        }
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
 
@@ -106,7 +109,8 @@ public class FundingService {
                 if (persisted != null && !persisted.complete()) {
                     cursor = persisted.nextCursorUserId();
                 }
-                for (;;) {
+                boolean complete = false;
+                for (int page = 0; page < properties.getSettlement().getMaxPagesPerRun(); page++) {
                     UUID commandId = UUID.nameUUIDFromBytes((commandPrefix + ':' + cursor)
                             .getBytes(StandardCharsets.UTF_8));
                     CoreResponse response = aeron.commandWithResponse(CoreMessageType.APPLY_FUNDING, commandId,
@@ -114,12 +118,19 @@ public class FundingService {
                                     settlement.settlementId(), rate.symbol(), settlement.instrumentVersion(),
                                     rate.fundingRatePpm(), cursor, ApplyFundingCommand.DEFAULT_MAX_USERS)));
                     CoreFundingProgressView progress = decodeProgressOrQuery(rate.symbol(), settlement, response);
-                    if (progress == null || progress.complete()) break;
+                    if (progress == null) {
+                        throw new IllegalStateException("Aeron funding progress is required");
+                    }
+                    if (progress.complete()) {
+                        complete = true;
+                        break;
+                    }
                     if (progress.nextCursorUserId() <= cursor) {
                         throw new IllegalStateException("Aeron funding cursor did not advance");
                     }
                     cursor = progress.nextCursorUserId();
                 }
+                if (!complete) continue;
                 rateRepository.saveFinal(rate);
                 latestFundingRateCache.removeIfCurrent(rate);
             } catch (Exception exception) {

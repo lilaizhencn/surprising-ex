@@ -33,12 +33,17 @@ final class ExporterConfiguration {
     }
 
     static long idleMillis() {
-        return positiveLong("EXPORT_IDLE_MS", 10);
+        long configured = positiveLong("EXPORT_IDLE_MS", AdaptiveExportLoop.MIN_IDLE_MILLIS);
+        return Math.max(AdaptiveExportLoop.MIN_IDLE_MILLIS,
+                Math.min(configured, AdaptiveExportLoop.MAX_IDLE_MILLIS));
     }
 
     static Map<String, Object> kafkaProducerProperties() {
         return Map.of("bootstrap.servers", value("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-                "client.id", "surprising-core-exporter-" + productLine().topicSegment());
+                "client.id", "surprising-core-exporter-" + productLine().topicSegment(),
+                "delivery.timeout.ms", Long.toString(positiveLong("KAFKA_DELIVERY_TIMEOUT_MS", 10_000)),
+                "request.timeout.ms", Long.toString(positiveLong("KAFKA_REQUEST_TIMEOUT_MS", 3_000)),
+                "max.block.ms", Long.toString(positiveLong("KAFKA_MAX_BLOCK_MS", 5_000)));
     }
 
     static String kafkaBootstrapServers() {

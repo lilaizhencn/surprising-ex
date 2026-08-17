@@ -13,6 +13,8 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
 public class WebSocketKafkaConfiguration {
@@ -71,11 +73,21 @@ public class WebSocketKafkaConfiguration {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, byte[]> webSocketCoreEventsKafkaListenerContainerFactory(
-            ConsumerFactory<String, byte[]> webSocketCoreEventsConsumerFactory) {
+            ConsumerFactory<String, byte[]> webSocketCoreEventsConsumerFactory,
+            DefaultErrorHandler webSocketCoreEventsErrorHandler) {
         ConcurrentKafkaListenerContainerFactory<String, byte[]> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(webSocketCoreEventsConsumerFactory);
         factory.setConcurrency(1);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setCommonErrorHandler(webSocketCoreEventsErrorHandler);
         return factory;
+    }
+
+    @Bean
+    public DefaultErrorHandler webSocketCoreEventsErrorHandler() {
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(
+                new FixedBackOff(100L, FixedBackOff.UNLIMITED_ATTEMPTS));
+        errorHandler.setAckAfterHandle(false);
+        return errorHandler;
     }
 }

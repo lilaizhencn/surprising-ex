@@ -15,6 +15,7 @@ import com.surprising.trading.api.model.AdminCancelOrdersResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -26,11 +27,17 @@ import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
+import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
+import com.surprising.trading.order.repository.ProjectionReadResult;
+import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.ValidationResult;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -49,6 +56,8 @@ class OrderServiceTest {
     private OrderFeeSnapshotLookup feeSnapshotLookup;
     @Mock
     private AeronOrderCommandService aeronOrders;
+    @Mock
+    private AeronOrderProjectionRepository projection;
 
     @Test
     void placeFailsClosedWithoutAeronGateway() {
@@ -59,10 +68,48 @@ class OrderServiceTest {
         verifyNoInteractions(aeronOrders);
     }
 
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void placeRejectsMissingClientOrderIdAtServiceBoundary(ProductLine productLine) {
+        OrderService service = service(productLine, aeronOrders);
+
+        assertThatThrownBy(() -> service.place(request(null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("clientOrderId is required");
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void closePositionRejectsMissingClientOrderIdAtServiceBoundary(ProductLine productLine) {
+        OrderService service = service(productLine, aeronOrders);
+
+        assertThatThrownBy(() -> service.closePosition(new ClosePositionRequest(
+                1001L, null, "BTC-USDT", MarginMode.CROSS, PositionSide.NET)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("clientOrderId is required");
+        verifyNoInteractions(aeronOrders, placementStateService);
+    }
+
+    @Test
+    void closePositionUsesExplicitClientOrderIdForTheStableCloseOrder() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        when(placementStateService.position(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
+                MarginMode.CROSS, PositionSide.NET))
+                .thenReturn(Optional.of(new ReduceOnlyPosition(5L, 7L)));
+        when(aeronOrders.place(any(), any(), any())).thenReturn(response(91, "close-1", OrderStatus.ACCEPTED));
+
+        service.closePosition(new ClosePositionRequest(1001L, "close-1", "BTC-USDT",
+                MarginMode.CROSS, PositionSide.NET));
+
+        ArgumentCaptor<PlaceOrderRequest> request = ArgumentCaptor.forClass(PlaceOrderRequest.class);
+        verify(aeronOrders).place(request.capture(), any(), any());
+        assertThat(request.getValue().clientOrderId()).isEqualTo("close-1");
+    }
+
     @Test
     void missingFeeSnapshotFailsClosedBeforeAppendingOrderFact() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
-        when(aeronOrders.find(1001L, "no-fee")).thenReturn(null);
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.place(request("no-fee"))).isInstanceOf(IllegalStateException.class);
@@ -78,23 +125,41 @@ class OrderServiceTest {
     @Test
     void adminCancelUsesLocalPartitionAndProductLine() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
+        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(), null, false, 12L, 0L));
         assertThatThrownBy(() -> service.adminCancelOrders(new AdminBatchCancelOrdersRequest(
                 1001L, "BTC-USDT", 10, "risk"))).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    void adminCancelSelectsOpenOrdersFromCoreInsteadOfProjection() {
+    void adminCancelSelectsOpenOrdersFromProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
         OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
-        when(aeronOrders.openOrders(0L, "BTC-USDT", Long.MAX_VALUE, 10)).thenReturn(java.util.List.of(open));
+        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, null, "BTC-USDT", null, 10, null))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
         when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
 
         AdminCancelOrdersResponse result = service.adminCancelOrders(
                 new AdminBatchCancelOrdersRequest(null, "BTC-USDT", 10, "risk"));
 
         assertThat(result.canceled()).isEqualTo(1);
-        verify(aeronOrders).openOrders(0L, "BTC-USDT", Long.MAX_VALUE, 10);
+        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, null, "BTC-USDT", null, 10, null);
+        verify(aeronOrders).cancel(1001L, 91L);
+    }
+
+    @Test
+    void adminSingleCancelUsesTheProductLineScopedProjectionOrder() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
+        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
+        when(projection.byOrder(ProductLine.LINEAR_PERPETUAL, (Long) null, 91L, null))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
+        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+
+        assertThat(service.adminCancelOrder(91L, "risk", ProductLine.LINEAR_PERPETUAL).orderId()).isEqualTo(91L);
+
+        verify(projection).byOrder(ProductLine.LINEAR_PERPETUAL, (Long) null, 91L, null);
         verify(aeronOrders).cancel(1001L, 91L);
     }
 
@@ -109,32 +174,112 @@ class OrderServiceTest {
     }
 
     @Test
-    void userOpenOrdersReadFromAeronAndNotProjection() {
-        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+    void readsProjectionAtRequiredExportSequenceWithoutAeron() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, null);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
-        when(aeronOrders.openOrders(1001L, "BTC-USDT", Long.MAX_VALUE, 11)).thenReturn(java.util.List.of(open));
+        when(projection.byOrder(ProductLine.LINEAR_PERPETUAL, 1001L, 91L, 12L))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 12L));
 
-        OrderQueryResponse result = service.openOrders(1001L, "BTC-USDT", 10);
+        OrderResponse result = service.get(1001L, 91L, 12L);
 
-        assertThat(result.orders()).containsExactly(open);
-        assertThat(result.hasMore()).isFalse();
-        verify(aeronOrders).openOrders(1001L, "BTC-USDT", Long.MAX_VALUE, 11);
+        assertThat(result).isEqualTo(open);
+        verify(projection).byOrder(ProductLine.LINEAR_PERPETUAL, 1001L, 91L, 12L);
+        verifyNoInteractions(aeronOrders);
     }
 
     @Test
-    void cancelOpenOrdersSelectsFromAeron() {
+    void allOrdinaryOrderReadsUseProductLineAndUserScopedProjection() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
+        when(projection.byClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "client-91", null))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
+        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
+        when(projection.historyOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
+                null, null, null, null, null))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
+
+        assertThat(service.getByClientOrderId(1001L, "client-91")).isEqualTo(open);
+        assertThat(service.openOrders(1001L, "BTC-USDT", 10).orders()).containsExactly(open);
+        assertThat(service.historyOrders(1001L, "BTC-USDT", 10, null, null, null).orders())
+                .containsExactly(open);
+
+        verify(projection).byClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "client-91", null);
+        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null);
+        verify(projection).historyOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
+                null, null, null, null, null);
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @Test
+    void cancelOpenOrdersSelectsFromProjectionAndSendsOnlyCancelCommandToAeron() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
         OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
-        when(aeronOrders.openOrders(1001L, "BTC-USDT", 0, 1000)).thenReturn(java.util.List.of(open));
+        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 1000, null))
+                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
         when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
 
         OrderBatchResponse result = service.cancelOpenOrders(
                 new com.surprising.trading.api.model.CancelOpenOrdersRequest(1001L, "BTC-USDT", 1000));
 
         assertThat(result.completed()).isEqualTo(1);
-        verify(aeronOrders).openOrders(1001L, "BTC-USDT", 0, 1000);
+        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 1000, null);
         verify(aeronOrders).cancel(1001L, 91L);
+    }
+
+    @Test
+    void lifecycleCancellationUsesAeronAuthorityInsteadOfStaleProjection() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
+        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
+        when(aeronOrders.lifecycleOpenOrders("BTC-USDT", 1000)).thenReturn(java.util.List.of(open));
+        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+
+        assertThat(service.requestLifecycleCancellation("BTC-USDT", 1000)).isEqualTo(1);
+
+        verify(aeronOrders).lifecycleOpenOrders("BTC-USDT", 1000);
+        verify(aeronOrders).cancel(1001L, 91L);
+        verifyNoInteractions(projection);
+    }
+
+    @Test
+    void lifecycleActiveCheckUsesAeronAuthorityInsteadOfStaleProjection() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        when(aeronOrders.lifecycleOpenOrders("BTC-USDT", 1))
+                .thenReturn(java.util.List.of(response(91, "client-91", OrderStatus.ACCEPTED)));
+
+        assertThat(service.hasLifecycleActiveOrders("BTC-USDT")).isTrue();
+
+        verify(aeronOrders).lifecycleOpenOrders("BTC-USDT", 1);
+        verifyNoInteractions(projection);
+    }
+
+    @Test
+    void adminSingleCancelRejectsProductLineMismatchBeforeProjectionOrAeronOffer() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+
+        assertThatThrownBy(() -> service.adminCancelOrder(91L, "risk", ProductLine.OPTION))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("product line");
+
+        verifyNoInteractions(projection, aeronOrders);
+    }
+
+    @Test
+    void oversizedFirstProjectionRowPreservesContinuationCursorAtServiceBoundary() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, null);
+        String continuation = "eyJvcmRlciI6MTIzfQ";
+        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null))
+                .thenReturn(ProjectionReadResult.responseTooLarge(12L, 0L, continuation));
+
+        assertThatThrownBy(() -> service.openOrders(1001L, "BTC-USDT", 10))
+                .isInstanceOf(ProjectionReadResult.ResponseTooLargeException.class)
+                .satisfies(throwable -> assertThat(
+                        ((ProjectionReadResult.ResponseTooLargeException) throwable).nextCursor())
+                        .isEqualTo(continuation));
+        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null);
+        verifyNoInteractions(aeronOrders);
     }
 
     private OrderService service(ProductLine productLine) {
@@ -149,7 +294,7 @@ class OrderServiceTest {
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
                 .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, 100L, 200L, "JVM")));
-        return new OrderService(properties, orderValidator, placementStateService, feeSnapshotLookup, aeron, null);
+        return new OrderService(properties, orderValidator, placementStateService, feeSnapshotLookup, aeron, projection);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

@@ -115,7 +115,9 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
                         symbol, 1, markPrice, 2, 1_700_000_000_000L)),
                 "mark:shock");
         var work = CoreLiquidationWorkCodec.decodeWork(query(
-                CoreMessageType.LIQUIDATION_WORK_QUERY, 0, CoreLiquidationWorkCodec.encodeQuery(1_000)));
+                CoreMessageType.LIQUIDATION_WORK_QUERY, 0, CoreLiquidationWorkCodec.encodeQuery(productLine,
+                        com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION,
+                        0, 1_000, 1_048_576)));
         if (work.riskScanPending()) {
             throw new IllegalStateException("risk scan remained pending for lifecycle capacity batch");
         }
@@ -134,7 +136,9 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
         }
         long elapsed = System.nanoTime() - started;
         var remaining = CoreLiquidationWorkCodec.decodeWork(query(
-                CoreMessageType.LIQUIDATION_WORK_QUERY, 0, CoreLiquidationWorkCodec.encodeQuery(1_000)));
+                CoreMessageType.LIQUIDATION_WORK_QUERY, 0, CoreLiquidationWorkCodec.encodeQuery(productLine,
+                        com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION,
+                        0, 1_000, 1_048_576)));
         if (!remaining.actions().isEmpty() || remaining.riskScanPending()) {
             throw new IllegalStateException("liquidation work remained after storm");
         }

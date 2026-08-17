@@ -40,8 +40,13 @@ public class LiquidationAeronGateway implements AutoCloseable {
     }
 
     public CoreLiquidationWorkView work(int limit) {
+        return work(0, limit, properties.getCoordinator().getMaxWorkBytes());
+    }
+
+    public CoreLiquidationWorkView work(long afterLiquidationId, int limit, int maxBytes) {
         var response = clients.query(CoreMessageType.LIQUIDATION_WORK_QUERY, UUID.randomUUID(), 0,
-                CoreLiquidationWorkCodec.encodeQuery(limit));
+                CoreLiquidationWorkCodec.encodeQuery(properties.getProductLine(),
+                        CoreLiquidationWorkView.Purpose.EXECUTION, afterLiquidationId, limit, maxBytes));
         if (response.status() != ResponseStatus.OK) {
             throw new IllegalStateException(response.resultCode() + ": Aeron liquidation work query failed");
         }
@@ -79,7 +84,7 @@ public class LiquidationAeronGateway implements AutoCloseable {
 
     public CoreResultCode execute(CoreLiquidationActionView action, long liquidationFeeRatePpm) {
         long cursorOrderId = 0;
-        for (;;) {
+        for (int page = 0; page < properties.getCoordinator().getMaxPagesPerRun(); page++) {
             var response = executeStep(action, liquidationFeeRatePpm, cursorOrderId);
             if (response.commandStatus() != ResponseStatus.APPLIED) return rejectedResult(response);
             var progress = CoreLiquidationProgressCodec.decode(response.data());
@@ -89,6 +94,7 @@ public class LiquidationAeronGateway implements AutoCloseable {
             }
             cursorOrderId = progress.nextCursorOrderId();
         }
+        throw new IllegalStateException("Aeron liquidation continuation page bound reached");
     }
 
     public CompletableFuture<List<CoreResultCode>> executeBatch(List<CoreLiquidationActionView> actions,
@@ -110,7 +116,7 @@ public class LiquidationAeronGateway implements AutoCloseable {
                             AtomicInteger next, AtomicInteger remaining) {
         int index = next.getAndIncrement();
         if (index >= actions.size() || completed.isDone()) return;
-        executeAsync(actions.get(index), feeRatePpm, 0).whenComplete((result, failure) -> {
+        executeAsync(actions.get(index), feeRatePpm, 0, 0).whenComplete((result, failure) -> {
             if (failure != null) {
                 completed.completeExceptionally(failure);
                 return;
@@ -126,7 +132,12 @@ public class LiquidationAeronGateway implements AutoCloseable {
 
     private CompletableFuture<CoreResultCode> executeAsync(CoreLiquidationActionView action,
                                                             long liquidationFeeRatePpm,
-                                                            long cursorOrderId) {
+                                                            long cursorOrderId,
+                                                            int page) {
+        if (page >= properties.getCoordinator().getMaxPagesPerRun()) {
+            return CompletableFuture.failedFuture(new IllegalStateException(
+                    "Aeron liquidation continuation page bound reached"));
+        }
         return clients.commandAsync(CoreMessageType.EXECUTE_LIQUIDATION,
                         stableCommandId(action, liquidationFeeRatePpm, cursorOrderId), action.userId(),
                         TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
@@ -142,7 +153,7 @@ public class LiquidationAeronGateway implements AutoCloseable {
                         return CompletableFuture.failedFuture(new IllegalStateException(
                                 "Aeron liquidation cursor did not advance"));
                     }
-                    return executeAsync(action, liquidationFeeRatePpm, progress.nextCursorOrderId());
+                    return executeAsync(action, liquidationFeeRatePpm, progress.nextCursorOrderId(), page + 1);
                 });
     }
 

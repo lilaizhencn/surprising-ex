@@ -6,9 +6,9 @@ import java.nio.ByteOrder;
 public final class CoreProtocol {
 
     public static final int MAGIC = 0x53584558;
-    public static final int SCHEMA_VERSION = 1;
+    public static final int SCHEMA_VERSION = 2;
     public static final int HEADER_LENGTH = 76;
-    public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 32;
+    public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 40;
     public static final int PROBE_PAYLOAD_LENGTH = Long.BYTES;
 
     private CoreProtocol() {
@@ -33,6 +33,7 @@ public final class CoreProtocol {
                 .putInt(response.commandStatus().wireCode())
                 .putInt(response.resultCode().wireCode())
                 .putLong(response.appliedCommandCount())
+                .putLong(response.requiredExportSequence())
                 .putLong(response.stateHash())
                 .putInt(data.length)
                 .put(data)
@@ -48,6 +49,7 @@ public final class CoreProtocol {
         ResponseStatus commandStatus = ResponseStatus.fromWireCode(buffer.getInt());
         CoreResultCode resultCode = CoreResultCode.fromWireCode(buffer.getInt());
         long appliedCommandCount = buffer.getLong();
+        long requiredExportSequence = buffer.getLong();
         long stateHash = buffer.getLong();
         int dataLength = buffer.getInt();
         if (dataLength < 0 || dataLength != buffer.remaining()) {
@@ -55,6 +57,7 @@ public final class CoreProtocol {
         }
         byte[] data = new byte[dataLength];
         buffer.get(data);
-        return new CoreResponse(status, commandStatus, resultCode, appliedCommandCount, stateHash, data);
+        return new CoreResponse(status, commandStatus, resultCode, appliedCommandCount,
+                requiredExportSequence, stateHash, data);
     }
 }

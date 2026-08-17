@@ -19,18 +19,29 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.IntSupplier;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 
-public final class SurprisingAeronClient implements AutoCloseable, EgressListener {
+public final class SurprisingAeronClient implements AeronClientPool.Session, EgressListener {
+
+    private static final int AERON_EGRESS_POLL_LIMIT = 10;
+    private static final AtomicLong MEDIA_DRIVER_SEQUENCE = new AtomicLong();
 
     private final ProductLine productLine;
     private final Duration responseTimeout;
     private final MediaDriver mediaDriver;
     private final boolean closeMediaDriver;
     private final AeronCluster cluster;
+    private final ScheduledExecutorService keepAliveExecutor;
     private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
     private final Map<Long, CoreResponse> responses = new HashMap<>();
     private RuntimeException sessionFailure;
@@ -49,6 +60,7 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
         try {
             cluster = AeronCluster.connect(clusterContext(productLine, hostnames, egressHostname,
                     responseTimeout, mediaDriver, this));
+            keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
         } catch (RuntimeException exception) {
             if (closeMediaDriver) {
                 mediaDriver.close();
@@ -68,6 +80,7 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
         this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
         this.closeMediaDriver = closeMediaDriver;
         this.cluster = Objects.requireNonNull(cluster, "cluster");
+        this.keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
     }
 
     public static SurprisingAeronClient connect(ProductLine productLine, List<String> hostnames) {
@@ -83,8 +96,49 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
             throw new IllegalArgumentException("responseTimeout must be positive");
         }
         MediaDriver mediaDriver = newMediaDriver();
-        return new SurprisingAeronClient(productLine, hostnames, egressHostname, responseTimeout,
-                mediaDriver, true);
+        FutureTask<SurprisingAeronClient> connection = new FutureTask<>(
+                () -> new SurprisingAeronClient(productLine, hostnames, egressHostname,
+                        responseTimeout, mediaDriver, true));
+        Thread connector = new Thread(connection, "surprising-aeron-connect-" + productLine.topicSegment());
+        connector.setDaemon(true);
+        connector.start();
+        try {
+            return connection.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (java.util.concurrent.TimeoutException exception) {
+            closeMediaDriverBounded(mediaDriver);
+            connection.cancel(true);
+            throw new io.aeron.exceptions.TimeoutException(
+                    "timed out connecting to Aeron Cluster productLine=" + productLine);
+        } catch (InterruptedException exception) {
+            closeMediaDriverBounded(mediaDriver);
+            connection.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted connecting to Aeron Cluster", exception);
+        } catch (ExecutionException exception) {
+            closeMediaDriverBounded(mediaDriver);
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("failed connecting to Aeron Cluster", cause);
+        } catch (RuntimeException exception) {
+            closeMediaDriverBounded(mediaDriver);
+            throw exception;
+        }
+    }
+
+    private static void closeMediaDriverBounded(MediaDriver mediaDriver) {
+        Thread closer = new Thread(mediaDriver::close, "surprising-aeron-media-driver-close");
+        closer.setDaemon(true);
+        closer.start();
+        try {
+            closer.join(250L);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     static SurprisingAeronClient connect(
@@ -131,12 +185,13 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
     }
 
     static MediaDriver newMediaDriver() {
-        return newMediaDriver(null);
+        return newMediaDriver("surprising-aeron-client-" + ProcessHandle.current().pid()
+                + '-' + MEDIA_DRIVER_SEQUENCE.incrementAndGet());
     }
 
     static MediaDriver newMediaDriver(String aeronDirectoryName) {
         MediaDriver.Context context = new MediaDriver.Context()
-                .threadingMode(ThreadingMode.SHARED)
+                .threadingMode(clientThreadingMode())
                 .dirDeleteOnStart(true)
                 .dirDeleteOnShutdown(true);
         if (aeronDirectoryName != null && !aeronDirectoryName.isBlank()) {
@@ -145,31 +200,32 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
         return MediaDriver.launchEmbedded(context);
     }
 
-    public CoreResponse submit(CoreMessage message) {
-        if (message.header().productLine() != productLine) {
-            throw new IllegalArgumentException("client and message product line differ");
+    static ThreadingMode clientThreadingMode() {
+        String configured = System.getProperty("surprising.aeron.client.threading-mode");
+        if (configured == null || configured.isBlank()) {
+            configured = System.getenv().getOrDefault("AERON_CLIENT_THREADING_MODE", "DEDICATED");
         }
-        byte[] encoded = CoreMessageCodec.encode(message);
-        UnsafeBuffer buffer = new UnsafeBuffer(encoded);
+        try {
+            return ThreadingMode.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                    "surprising.aeron.client.threading-mode must be a valid Aeron ThreadingMode: " + configured,
+                    exception);
+        }
+    }
+
+    public CoreResponse submit(CoreMessage message) {
         long deadline = System.nanoTime() + responseTimeout.toNanos();
         idleStrategy.reset();
-        while (true) {
-            long offerResult = cluster.offer(buffer, 0, encoded.length);
-            if (offerResult >= 0) {
-                break;
-            }
-            if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
-                throw resultUnknown(message, "Aeron Cluster publication is no longer writable: " + offerResult);
-            }
-            pollAndCheckSession();
-            if (System.nanoTime() >= deadline) {
-                throw resultUnknown(message, "timed out while offering command to Aeron Cluster");
-            }
-            idleStrategy.idle();
+        long offerResult = offer(message);
+        if (offerResult <= 0) {
+            CoreCommandOutcome.NotAccepted rejected = CoreCommandOutcome.notAccepted(offerResult);
+            throw new IllegalStateException("Aeron command was not accepted: " + rejected.reason()
+                    + " (offer=" + rejected.rawOfferResult() + ')');
         }
         while (System.nanoTime() < deadline) {
             pollAndCheckSession();
-            CoreResponse response = responses.remove(message.header().correlationId());
+            CoreResponse response = takeResponse(message.header().correlationId());
             if (response != null) {
                 return response;
             }
@@ -179,12 +235,57 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
     }
 
     public long trySubmit(CoreMessage message) {
+        return offer(message);
+    }
+
+    @Override
+    public long offer(CoreMessage message) {
         if (message.header().productLine() != productLine) {
             throw new IllegalArgumentException("client and message product line differ");
         }
         byte[] encoded = CoreMessageCodec.encode(message);
-        cluster.pollEgress();
         return cluster.offer(new UnsafeBuffer(encoded), 0, encoded.length);
+    }
+
+    @Override
+    public int pollEgress(int fragmentLimit) {
+        return pollEgressBounded(fragmentLimit, cluster::pollEgress);
+    }
+
+    static int pollEgressBounded(int fragmentLimit, IntSupplier poller) {
+        if (fragmentLimit <= 0) {
+            throw new IllegalArgumentException("fragmentLimit must be positive");
+        }
+        Objects.requireNonNull(poller, "poller");
+        int workCount = 0;
+        int remainingFragments = fragmentLimit;
+        while (remainingFragments >= AERON_EGRESS_POLL_LIMIT) {
+            int polled = poller.getAsInt();
+            if (polled < 0) {
+                throw new IllegalStateException("Aeron egress poll returned invalid fragment count: " + polled);
+            }
+            workCount += polled;
+            remainingFragments -= AERON_EGRESS_POLL_LIMIT;
+            if (polled < AERON_EGRESS_POLL_LIMIT) {
+                break;
+            }
+        }
+        return workCount;
+    }
+
+    @Override
+    public CoreResponse takeResponse(long correlationId) {
+        return responses.remove(correlationId);
+    }
+
+    @Override
+    public RuntimeException sessionFailure() {
+        return sessionFailure;
+    }
+
+    @Override
+    public boolean keepAlive() {
+        return cluster.sendKeepAlive();
     }
 
     @Override
@@ -237,12 +338,30 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
     @Override
     public void close() {
         try {
+            if (keepAliveExecutor != null) {
+                keepAliveExecutor.shutdownNow();
+            }
             cluster.close();
         } finally {
             if (closeMediaDriver) {
                 mediaDriver.close();
             }
         }
+    }
+
+    private ScheduledExecutorService startKeepAlive() {
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "surprising-aeron-client-keepalive-" + productLine.topicSegment());
+            thread.setDaemon(true);
+            return thread;
+        });
+        executor.scheduleAtFixedRate(() -> {
+            try {
+                cluster.sendKeepAlive();
+            } catch (RuntimeException ignored) {
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+        return executor;
     }
 
     private void pollAndCheckSession() {
@@ -257,12 +376,13 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
                 + "; retry or query with the same commandId=" + message.header().commandId());
     }
 
-    static final class AsyncConnection implements AutoCloseable, EgressListener {
+    static final class AsyncConnection implements AeronClientPool.Session, EgressListener {
 
         private final ProductLine productLine;
         private final Duration responseTimeout;
         private final MediaDriver mediaDriver;
         private final AeronCluster.AsyncConnect connection;
+        private final boolean closeMediaDriver;
         private final AtomicBoolean closed = new AtomicBoolean();
         private volatile SurprisingAeronClient client;
 
@@ -272,9 +392,20 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
                 String egressHostname,
                 Duration responseTimeout,
                 MediaDriver mediaDriver) {
+            this(productLine, hostnames, egressHostname, responseTimeout, mediaDriver, false);
+        }
+
+        private AsyncConnection(
+                ProductLine productLine,
+                List<String> hostnames,
+                String egressHostname,
+                Duration responseTimeout,
+                MediaDriver mediaDriver,
+                boolean closeMediaDriver) {
             this.productLine = Objects.requireNonNull(productLine, "productLine");
             this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
             this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
+            this.closeMediaDriver = closeMediaDriver;
             this.connection = AeronCluster.asyncConnect(clusterContext(productLine, hostnames, egressHostname,
                     responseTimeout, mediaDriver, this));
         }
@@ -288,9 +419,40 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
             if (connected == null) {
                 return null;
             }
-            current = new SurprisingAeronClient(productLine, responseTimeout, mediaDriver, false, connected);
+            current = new SurprisingAeronClient(productLine, responseTimeout, mediaDriver,
+                    closeMediaDriver, connected);
             client = current;
             return current;
+        }
+
+        @Override
+        public long offer(CoreMessage message) {
+            SurprisingAeronClient current = poll();
+            return current == null ? Publication.NOT_CONNECTED : current.offer(message);
+        }
+
+        @Override
+        public int pollEgress(int fragmentLimit) {
+            SurprisingAeronClient current = poll();
+            return current == null ? 0 : current.pollEgress(fragmentLimit);
+        }
+
+        @Override
+        public CoreResponse takeResponse(long correlationId) {
+            SurprisingAeronClient current = client;
+            return current == null ? null : current.takeResponse(correlationId);
+        }
+
+        @Override
+        public RuntimeException sessionFailure() {
+            SurprisingAeronClient current = client;
+            return current == null ? null : current.sessionFailure();
+        }
+
+        @Override
+        public boolean keepAlive() {
+            SurprisingAeronClient current = poll();
+            return current != null && current.keepAlive();
         }
 
         @Override
@@ -303,6 +465,9 @@ public final class SurprisingAeronClient implements AutoCloseable, EgressListene
                 connection.close();
             } else {
                 current.close();
+            }
+            if (closeMediaDriver) {
+                mediaDriver.close();
             }
         }
 

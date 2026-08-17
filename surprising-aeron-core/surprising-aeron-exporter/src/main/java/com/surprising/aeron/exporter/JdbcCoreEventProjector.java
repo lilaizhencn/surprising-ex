@@ -7,10 +7,13 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.product.api.ProductLine;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.Objects;
+import java.util.UUID;
 import javax.sql.DataSource;
 
 public final class JdbcCoreEventProjector {
@@ -100,9 +103,24 @@ public final class JdbcCoreEventProjector {
                 export_sequence = ?, updated_at_epoch_ms = ?
             WHERE product_line = ? AND asset = ? AND export_sequence < ?
             """;
-    private static final String EVENT_EXISTS = """
-            SELECT 1 FROM core_event_projection
+    private static final String LOCK_WATERMARK = """
+            SELECT last_export_sequence FROM core_projection_watermark
+            WHERE product_line = ? FOR UPDATE
+            """;
+    private static final String SELECT_EVENT_PAYLOAD = """
+            SELECT raw_event FROM core_event_projection
             WHERE product_line = ? AND export_sequence = ?
+            """;
+    private static final String INSERT_AUDIT = """
+            INSERT INTO core_websocket_audit_projection (
+                product_line, export_sequence, event_id, command_id, event_type,
+                user_id, occurred_at_epoch_ms, raw_event
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+    private static final String UPDATE_WATERMARK = """
+            UPDATE core_projection_watermark
+            SET last_export_sequence = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE product_line = ? AND last_export_sequence = ?
             """;
 
     private final DataSource dataSource;
@@ -120,14 +138,31 @@ public final class JdbcCoreEventProjector {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
             try {
+                long lastExportSequence = lockWatermark(connection, productLine);
+                byte[] rawMessage = CoreMessageCodec.encode(message);
+                if (event.exportSequence() <= lastExportSequence) {
+                    if (isIdenticalEvent(connection, productLine, event, rawMessage)) {
+                        connection.commit();
+                        return false;
+                    }
+                    throw sequenceFailure(productLine, lastExportSequence, event.exportSequence(),
+                            event.exportSequence() == lastExportSequence
+                                    ? "conflicting duplicate" : "reordered event");
+                }
+                if (event.exportSequence() != Math.incrementExact(lastExportSequence)) {
+                    throw sequenceFailure(productLine, lastExportSequence, event.exportSequence(), "sequence gap");
+                }
                 insertEvent(connection, productLine, message, event);
+                insertAudit(connection, productLine, message, event, rawMessage);
                 insertFacts(connection, productLine, message, event);
+                updateWatermark(connection, productLine, lastExportSequence, event.exportSequence());
                 connection.commit();
                 return true;
-            } catch (SQLException exception) {
-                connection.rollback();
-                if ("23505".equals(exception.getSQLState()) && eventExists(connection, productLine, event)) {
-                    return false;
+            } catch (SQLException | RuntimeException exception) {
+                try {
+                    connection.rollback();
+                } catch (SQLException rollbackFailure) {
+                    exception.addSuppressed(rollbackFailure);
                 }
                 throw exception;
             } finally {
@@ -136,14 +171,57 @@ public final class JdbcCoreEventProjector {
         }
     }
 
-    private static boolean eventExists(Connection connection, ProductLine productLine,
-                                       CoreExportEvent event) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(EVENT_EXISTS)) {
+    private static long lockWatermark(Connection connection, ProductLine productLine) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(LOCK_WATERMARK)) {
+            statement.setString(1, productLine.name());
+            try (var result = statement.executeQuery()) {
+                if (!result.next()) throw new SQLException("projection watermark row is missing");
+                return result.getLong(1);
+            }
+        }
+    }
+
+    private static boolean isIdenticalEvent(Connection connection, ProductLine productLine,
+                                            CoreExportEvent event, byte[] rawMessage) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(SELECT_EVENT_PAYLOAD)) {
             statement.setString(1, productLine.name());
             statement.setLong(2, event.exportSequence());
             try (var result = statement.executeQuery()) {
-                return result.next();
+                return result.next() && Arrays.equals(result.getBytes(1), rawMessage);
             }
+        }
+    }
+
+    private static SQLException sequenceFailure(ProductLine productLine, long current, long received,
+                                                String reason) {
+        return new SQLException("projection " + reason + " for " + productLine
+                + ": watermark=" + current + ", received=" + received, "23000");
+    }
+
+    private static void insertAudit(Connection connection, ProductLine productLine, CoreMessage message,
+                                    CoreExportEvent event, byte[] rawMessage) throws SQLException {
+        UUID eventId = UUID.nameUUIDFromBytes((productLine.name() + ':' + event.exportSequence())
+                .getBytes(StandardCharsets.UTF_8));
+        try (PreparedStatement statement = connection.prepareStatement(INSERT_AUDIT)) {
+            statement.setString(1, productLine.name());
+            statement.setLong(2, event.exportSequence());
+            statement.setObject(3, eventId);
+            statement.setObject(4, event.commandId());
+            statement.setString(5, event.commandType().name());
+            statement.setLong(6, event.userId());
+            statement.setLong(7, message.header().submittedAtEpochMillis());
+            statement.setBytes(8, rawMessage);
+            if (statement.executeUpdate() != 1) throw new SQLException("websocket audit was not inserted");
+        }
+    }
+
+    private static void updateWatermark(Connection connection, ProductLine productLine,
+                                        long current, long next) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(UPDATE_WATERMARK)) {
+            statement.setLong(1, next);
+            statement.setString(2, productLine.name());
+            statement.setLong(3, current);
+            if (statement.executeUpdate() != 1) throw new SQLException("projection watermark was not advanced");
         }
     }
 

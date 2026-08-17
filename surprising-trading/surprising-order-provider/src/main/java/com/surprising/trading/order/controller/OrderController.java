@@ -23,9 +23,11 @@ import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.TestOrderResponse;
+import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.AlgoOrderService;
 import com.surprising.trading.order.service.CancelAllAfterService;
 import com.surprising.trading.order.service.OrderService;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -55,7 +57,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH)
-    public OrderResponse place(@RequestBody PlaceOrderRequest request) {
+    public OrderResponse place(@Valid @RequestBody PlaceOrderRequest request) {
         try {
             return orderService.place(request);
         } catch (IllegalArgumentException ex) {
@@ -71,7 +73,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch")
-    public OrderBatchResponse placeBatch(@RequestBody BatchPlaceOrderRequest request) {
+    public OrderBatchResponse placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request) {
         try {
             return orderService.placeBatch(request);
         } catch (IllegalArgumentException ex) {
@@ -82,7 +84,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/test")
-    public TestOrderResponse test(@RequestBody PlaceOrderRequest request) {
+    public TestOrderResponse test(@Valid @RequestBody PlaceOrderRequest request) {
         try {
             return orderService.test(request);
         } catch (IllegalArgumentException ex) {
@@ -91,7 +93,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/amend")
-    public AmendOrderResponse amend(@RequestBody AmendOrderRequest request) {
+    public AmendOrderResponse amend(@Valid @RequestBody AmendOrderRequest request) {
         try {
             return orderService.amend(request);
         } catch (IllegalArgumentException ex) {
@@ -102,7 +104,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-amend")
-    public AmendOrderBatchResponse amendBatch(@RequestBody BatchAmendOrdersRequest request) {
+    public AmendOrderBatchResponse amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request) {
         try {
             return orderService.amendBatch(request);
         } catch (IllegalArgumentException ex) {
@@ -111,7 +113,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/close-position")
-    public OrderResponse closePosition(@RequestBody ClosePositionRequest request) {
+    public OrderResponse closePosition(@Valid @RequestBody ClosePositionRequest request) {
         try {
             return orderService.closePosition(request);
         } catch (IllegalArgumentException ex) {
@@ -133,7 +135,7 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-cancel")
-    public OrderBatchResponse cancelBatch(@RequestBody BatchCancelOrdersRequest request) {
+    public OrderBatchResponse cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request) {
         try {
             return orderService.cancelBatch(request);
         } catch (IllegalArgumentException ex) {
@@ -210,11 +212,17 @@ public class OrderController {
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/{orderId}")
     public OrderResponse get(@RequestParam("userId") long userId,
-                             @PathVariable("orderId") long orderId) {
+                             @PathVariable("orderId") long orderId,
+                             @RequestParam(value = "minExportSequence", required = false)
+                             Long minExportSequence) {
         try {
-            return orderService.get(userId, orderId);
+            return orderService.get(userId, orderId, minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ProjectionLagException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
@@ -222,11 +230,17 @@ public class OrderController {
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/by-client-order-id")
     public OrderResponse getByClientOrderId(@RequestParam("userId") long userId,
-                                            @RequestParam("clientOrderId") String clientOrderId) {
+                                            @RequestParam("clientOrderId") String clientOrderId,
+                                            @RequestParam(value = "minExportSequence", required = false)
+                                            Long minExportSequence) {
         try {
-            return orderService.getByClientOrderId(userId, clientOrderId);
+            return orderService.getByClientOrderId(userId, clientOrderId, minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ProjectionLagException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
@@ -236,11 +250,17 @@ public class OrderController {
     public OrderQueryResponse openOrders(@RequestParam("userId") long userId,
                                          @RequestParam(value = "symbol", required = false) String symbol,
                                          @RequestParam(value = "limit", defaultValue = "100") int limit,
-                                         @RequestParam(value = "cursor", required = false) String cursor) {
+                                         @RequestParam(value = "cursor", required = false) String cursor,
+                                         @RequestParam(value = "minExportSequence", required = false)
+                                         Long minExportSequence) {
         try {
-            return orderService.openOrders(userId, symbol, limit, cursor);
+            return orderService.openOrders(userId, symbol, limit, cursor, minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ProjectionLagException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         }
     }
 
@@ -250,11 +270,19 @@ public class OrderController {
                                             @RequestParam(value = "limit", defaultValue = "100") int limit,
                                             @RequestParam(value = "orderId", required = false) Long orderId,
                                             @RequestParam(value = "startTime", required = false) Long startTime,
-                                            @RequestParam(value = "endTime", required = false) Long endTime) {
+                                            @RequestParam(value = "endTime", required = false) Long endTime,
+                                            @RequestParam(value = "cursor", required = false) String cursor,
+                                            @RequestParam(value = "minExportSequence", required = false)
+                                            Long minExportSequence) {
         try {
-            return orderService.historyOrders(userId, symbol, limit, orderId, startTime, endTime);
+            return orderService.historyOrders(userId, symbol, limit, orderId, startTime, endTime, cursor,
+                    minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ProjectionLagException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         }
     }
 }

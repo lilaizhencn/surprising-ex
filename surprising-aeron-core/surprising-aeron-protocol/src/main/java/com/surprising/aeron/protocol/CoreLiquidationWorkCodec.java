@@ -1,5 +1,6 @@
 package com.surprising.aeron.protocol;
 
+import com.surprising.product.api.ProductLine;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -7,34 +8,59 @@ import java.util.List;
 
 public final class CoreLiquidationWorkCodec {
 
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
     private static final int MAX_ACTIONS = 1_000;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreLiquidationWorkCodec() {
     }
 
-    public static byte[] encodeQuery(int limit) {
-        if (limit < 1 || limit > MAX_ACTIONS) throw new IllegalArgumentException("invalid liquidation work limit");
+    public static byte[] encodeQuery(ProductLine productLine, CoreLiquidationWorkView.Purpose purpose,
+                                     long afterLiquidationId, int maxItems, int maxBytes) {
+        return encodeQuery(new CoreLiquidationWorkView.Query(productLine, purpose, afterLiquidationId,
+                maxItems, maxBytes));
+    }
+
+    public static byte[] encodeQuery(CoreLiquidationWorkView.Query query) {
         Writer writer = new Writer();
         writer.intValue(VERSION);
-        writer.intValue(limit);
+        writer.byteValue(ProductLineWireCode.encode(query.productLine()));
+        writer.byteValue(query.purpose().ordinal());
+        writer.longValue(query.afterLiquidationId());
+        writer.intValue(query.maxItems());
+        writer.intValue(query.maxBytes());
         return writer.toByteArray();
     }
 
-    public static int decodeQuery(byte[] encoded) {
+    public static CoreLiquidationWorkView.Query decodeQuery(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version();
-        int limit = reader.intValue();
-        if (limit < 1 || limit > MAX_ACTIONS) throw new ProtocolException("invalid liquidation work limit");
+        ProductLine productLine = ProductLineWireCode.decode(reader.byteValue());
+        int purposeCode = reader.byteValue();
+        if (purposeCode >= CoreLiquidationWorkView.Purpose.values().length) {
+            throw new ProtocolException("invalid liquidation work purpose");
+        }
+        CoreLiquidationWorkView.Purpose purpose = CoreLiquidationWorkView.Purpose.values()[purposeCode];
+        long cursor = reader.nonNegativeLong("afterLiquidationId");
+        int maxItems = reader.intValue();
+        int maxBytes = reader.intValue();
         reader.requireConsumed();
-        return limit;
+        try {
+            return new CoreLiquidationWorkView.Query(productLine, purpose, cursor, maxItems, maxBytes);
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException(exception.getMessage());
+        }
     }
 
     public static byte[] encodeWork(CoreLiquidationWorkView work) {
-        if (work.actions().size() > MAX_ACTIONS) throw new IllegalArgumentException("too many liquidation actions");
+        if (work.actions().size() + work.resolutions().size() > MAX_ACTIONS) {
+            throw new IllegalArgumentException("too many liquidation work items");
+        }
         Writer writer = new Writer();
         writer.intValue(VERSION);
+        writer.byteValue(ProductLineWireCode.encode(work.productLine()));
+        writer.longValue(work.nextCursorLiquidationId());
+        writer.byteValue(work.complete() ? 1 : 0);
         writer.byteValue(work.riskScanPending() ? 1 : 0);
         if (work.riskScanPending()) {
             writer.text(work.riskScanContinuation().symbol());
@@ -56,12 +82,29 @@ public final class CoreLiquidationWorkCodec {
             writer.text(action.status());
             writer.longValue(action.cursorOrderId());
         }
+        writer.intValue(work.resolutions().size());
+        for (CoreLiquidationWorkView.Resolution resolution : work.resolutions()) {
+            writer.longValue(resolution.liquidationId());
+            writer.longValue(resolution.userId());
+            writer.text(resolution.symbol());
+            writer.text(resolution.asset());
+            writer.intValue(resolution.marginMode().wireCode());
+            writer.intValue(resolution.positionSide().wireCode());
+            writer.longValue(resolution.instrumentVersion());
+            writer.longValue(resolution.triggerPriceSequence());
+            writer.longValue(resolution.signedQuantitySteps());
+            writer.longValue(resolution.deficitUnits());
+            writer.byteValue(resolution.purpose().ordinal());
+        }
         return writer.toByteArray();
     }
 
     public static CoreLiquidationWorkView decodeWork(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version();
+        ProductLine productLine = ProductLineWireCode.decode(reader.byteValue());
+        long nextCursor = reader.nonNegativeLong("nextCursorLiquidationId");
+        boolean complete = reader.booleanValue();
         boolean pending = reader.booleanValue();
         CoreRiskScanContinuation continuation = pending
                 ? reader.riskScanContinuation() : null;
@@ -78,9 +121,34 @@ public final class CoreLiquidationWorkCodec {
                     reader.positiveLong("markPriceTicks"), reader.text(),
                     reader.nonNegativeLong("cursorOrderId")));
         }
+        int resolutionCount = reader.intValue();
+        if (resolutionCount < 0 || resolutionCount > MAX_ACTIONS - count) {
+            throw new ProtocolException("invalid liquidation resolution count");
+        }
+        List<CoreLiquidationWorkView.Resolution> resolutions = new ArrayList<>(resolutionCount);
+        for (int index = 0; index < resolutionCount; index++) {
+            long liquidationId = reader.positiveLong("liquidationId");
+            long userId = reader.positiveLong("userId");
+            String symbol = reader.text();
+            String asset = reader.text();
+            CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
+            CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
+            long instrumentVersion = reader.positiveLong("instrumentVersion");
+            long triggerPriceSequence = reader.positiveLong("triggerPriceSequence");
+            long signedQuantitySteps = reader.nonZeroLong("signedQuantitySteps");
+            long deficitUnits = reader.positiveLong("deficitUnits");
+            int purposeCode = reader.byteValue();
+            if (purposeCode <= CoreLiquidationWorkView.Purpose.EXECUTION.ordinal()
+                    || purposeCode >= CoreLiquidationWorkView.Purpose.values().length) {
+                throw new ProtocolException("invalid liquidation resolution purpose");
+            }
+            resolutions.add(new CoreLiquidationWorkView.Resolution(liquidationId, userId, symbol, asset,
+                    marginMode, positionSide, instrumentVersion, triggerPriceSequence, signedQuantitySteps,
+                    deficitUnits, CoreLiquidationWorkView.Purpose.values()[purposeCode]));
+        }
         reader.requireConsumed();
         try {
-            return new CoreLiquidationWorkView(continuation, actions);
+            return new CoreLiquidationWorkView(productLine, nextCursor, complete, continuation, actions, resolutions);
         } catch (IllegalArgumentException exception) {
             throw new ProtocolException(exception.getMessage());
         }

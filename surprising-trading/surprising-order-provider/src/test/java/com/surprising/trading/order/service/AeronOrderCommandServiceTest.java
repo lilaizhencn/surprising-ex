@@ -1,9 +1,7 @@
 package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -70,6 +68,7 @@ class AeronOrderCommandServiceTest {
     void setUp() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAeron().setNodeId(3);
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         service = new AeronOrderCommandService(aeron, new AeronOrderIdGenerator(properties), instrumentRules,
                 markPrices, properties);
     }
@@ -125,11 +124,13 @@ class AeronOrderCommandServiceTest {
                 new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test")).orderId())
                 .isPositive();
 
-        verify(aeron, never()).order(eq(1001L), org.mockito.ArgumentMatchers.anyLong());
+        verify(aeron, times(1)).command(eq(CoreMessageType.PLACE_ORDER),
+                org.mockito.ArgumentMatchers.any(UUID.class), eq(1001L),
+                org.mockito.ArgumentMatchers.any(byte[].class));
     }
 
     @Test
-    void clientOrderIdCommandIdentityIsStableOnlyForTheSameIntent() {
+    void clientOrderIdCommandIdentityIsStableAcrossChangedPayloads() {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-identity", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
@@ -154,7 +155,7 @@ class AeronOrderCommandServiceTest {
         verify(aeron, times(3)).command(eq(CoreMessageType.PLACE_ORDER), commandIds.capture(), eq(1001L),
                 org.mockito.ArgumentMatchers.any(byte[].class));
         assertThat(commandIds.getAllValues().get(0)).isEqualTo(commandIds.getAllValues().get(1));
-        assertThat(commandIds.getAllValues().get(0)).isNotEqualTo(commandIds.getAllValues().get(2));
+        assertThat(commandIds.getAllValues().get(0)).isEqualTo(commandIds.getAllValues().get(2));
     }
 
     @Test
@@ -172,6 +173,26 @@ class AeronOrderCommandServiceTest {
         verify(aeron).command(eq(CoreMessageType.CANCEL_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), payload.capture());
         assertThat(TradingCommandCodec.decodeCancelOrder(payload.getValue()).orderId()).isEqualTo(99);
+    }
+
+    @Test
+    void lifecycleOpenOrdersUsesAuthorityQueryAndRejectsCrossProductLineResults() {
+        when(aeron.lifecycleOpenOrders("BTC-USDT", 1000))
+                .thenReturn(List.of(orderView(91, new PlaceOrderRequest(1001, "client-91", "BTC-USDT",
+                        OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS,
+                        PositionSide.NET, false, false))));
+
+        assertThat(service.lifecycleOpenOrders("BTC-USDT", 1000)).hasSize(1);
+        verify(aeron).lifecycleOpenOrders("BTC-USDT", 1000);
+
+        when(aeron.lifecycleOpenOrders("BTC-USDT", 1))
+                .thenReturn(List.of(orderView(ProductLine.OPTION, 92, new PlaceOrderRequest(1001, "client-92",
+                        "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000, 2,
+                        MarginMode.CROSS, PositionSide.NET, false, false))));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.lifecycleOpenOrders("BTC-USDT", 1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("product line");
     }
 
     @Test
@@ -244,7 +265,9 @@ class AeronOrderCommandServiceTest {
         assertThat(command.quantitySteps()).isEqualTo(4L);
         assertThat(command.timeInForce()).isEqualTo(CoreTimeInForce.GTX);
         assertThat(command.postOnly()).isTrue();
-        verify(aeron, never()).order(anyLong(), anyLong());
+        verify(aeron, times(1)).command(eq(CoreMessageType.AMEND_ORDER),
+                org.mockito.ArgumentMatchers.any(UUID.class), eq(1001L),
+                org.mockito.ArgumentMatchers.any(byte[].class));
     }
 
     private static InstrumentRule perpetualRule() {
@@ -255,7 +278,11 @@ class AeronOrderCommandServiceTest {
     }
 
     private static CoreOrderStateView orderView(long orderId, PlaceOrderRequest request) {
-        return new CoreOrderStateView(orderId, ProductLine.LINEAR_PERPETUAL, request.userId(), request.symbol(), 7,
+        return orderView(ProductLine.LINEAR_PERPETUAL, orderId, request);
+    }
+
+    private static CoreOrderStateView orderView(ProductLine productLine, long orderId, PlaceOrderRequest request) {
+        return new CoreOrderStateView(orderId, productLine, request.userId(), request.symbol(), 7,
                 CoreOrderSide.valueOf(request.side().name()), request.priceTicks(), request.quantitySteps(),
                 0, request.quantitySteps(), request.reduceOnly(), CoreMarginMode.valueOf(request.marginMode().name()),
                 CorePositionSide.valueOf(request.positionSide().name()), CoreOrderType.valueOf(request.orderType().name()),

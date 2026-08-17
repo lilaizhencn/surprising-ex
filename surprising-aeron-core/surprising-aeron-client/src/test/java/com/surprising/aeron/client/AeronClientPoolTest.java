@@ -10,6 +10,7 @@ import com.surprising.product.api.ProductLine;
 import io.aeron.driver.MediaDriver;
 import java.lang.reflect.InvocationTargetException;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -17,7 +18,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadPoolExecutor;
 import org.junit.jupiter.api.Test;
 
 class AeronClientPoolTest {
@@ -62,13 +62,12 @@ class AeronClientPoolTest {
     }
 
     @Test
-    void connectionExecutorUsesDirectBackpressure() throws Exception {
+    void hasNoRequestOrConnectionExecutor() {
+        assertThat(Arrays.stream(AeronClientPool.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
+                .doesNotContain("commandExecutor", "connectionExecutor");
         try (AeronClientPool pool = pool(2)) {
-            var field = AeronClientPool.class.getDeclaredField("connectionExecutor");
-            field.setAccessible(true);
-            var executor = (ThreadPoolExecutor) field.get(pool);
-            assertThat(executor.getQueue()).isInstanceOf(java.util.concurrent.SynchronousQueue.class);
-            assertThat(executor.getQueue().remainingCapacity()).isEqualTo(0);
+            assertThat(pool.agentThreadCount()).isEqualTo(1);
+            assertThat(pool.configuredSessionCount()).isEqualTo(3);
         }
     }
 
@@ -123,13 +122,10 @@ class AeronClientPoolTest {
     }
 
     @Test
-    void commandExecutorUsesBoundedBackpressure() throws Exception {
+    void publicPoolUsesFixedBoundedMailboxes() {
         try (AeronClientPool pool = pool(2)) {
-            var field = AeronClientPool.class.getDeclaredField("commandExecutor");
-            field.setAccessible(true);
-            var executor = (ThreadPoolExecutor) field.get(pool);
-            assertThat(executor.getQueue()).isInstanceOf(java.util.concurrent.ArrayBlockingQueue.class);
-            assertThat(executor.getQueue().remainingCapacity()).isEqualTo(8);
+            assertThat(pool.commandMailboxCapacity()).isEqualTo(256);
+            assertThat(pool.controlMailboxCapacity()).isEqualTo(64);
         }
     }
 

@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.product.api.ProductLine;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -30,12 +33,13 @@ class CoreExportCodecTest {
                 List.of(liquidation), List.of(treasury));
         CoreMessage message = new CoreMessage(new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION,
                 WireMessageKind.EXPORT_EVENT, CoreMessageType.CORE_EVENT, commandId, ProductLine.SPOT,
-                CommandSource.GATEWAY, 1, 7, 17, 19, 23), CoreExportCodec.encodeEvent(event));
+                CoreRoute.DEFAULT, CommandSource.GATEWAY, 1, 7, 17, 19, 23), CoreExportCodec.encodeEvent(event));
 
         CoreExportEvent restored = CoreExportCodec.decodeEvent(message.payload());
         List<CoreMessage> batch = CoreExportCodec.decodeBatch(CoreExportCodec.encodeBatch(List.of(message)));
+        CoreExportStatus status = new CoreExportStatus(6, 8, 1, 256, 1_000_000, 64L * 1024 * 1024);
         CoreExportBatch batchWithStatus = CoreExportCodec.decodeBatchResponse(
-                CoreExportCodec.encodeBatchWithStatus(6, List.of(message)));
+                CoreExportCodec.encodeBatchWithStatus(status, List.of(message)));
 
         assertThat(restored.exportSequence()).isEqualTo(7);
         assertThat(restored.commandPayload()).containsExactly(1, 2, 3);
@@ -46,12 +50,13 @@ class CoreExportCodecTest {
         assertThat(restored.changedLiquidations()).containsExactly(liquidation);
         assertThat(restored.changedTreasuryAssets()).containsExactly(treasury);
         assertThat(batch).containsExactly(message);
+        assertThat(batch.getFirst().header().route()).isEqualTo(CoreRoute.DEFAULT);
         assertThat(batchWithStatus.acknowledgedSequence()).isEqualTo(6);
         assertThat(batchWithStatus.events()).containsExactly(message);
         assertThat(CoreExportCodec.decodeAck(CoreExportCodec.encodeAck(new AckExportCommand(7))))
                 .isEqualTo(new AckExportCommand(7));
-        CoreExportStatus status = new CoreExportStatus(6, 8, 1, 256, 1_000_000, 64L * 1024 * 1024);
         assertThat(CoreExportCodec.decodeStatus(CoreExportCodec.encodeStatus(status))).isEqualTo(status);
+        assertThat(batchWithStatus.status()).isEqualTo(status);
     }
 
     @Test
@@ -62,5 +67,70 @@ class CoreExportCodecTest {
                 .isInstanceOf(ProtocolException.class);
         assertThatThrownBy(() -> CoreExportCodec.decodeBatchQuery(new byte[]{0, 0, 0, 0}))
                 .isInstanceOf(ProtocolException.class);
+    }
+
+    @Test
+    void batchResponseCarriesCompletePostQueryStatus() {
+        CoreExportStatus expected = new CoreExportStatus(12, 17, 4, 1_024,
+                1_000_000, 64L * 1024 * 1024);
+
+        CoreExportBatch actual = CoreExportCodec.decodeBatchResponse(
+                CoreExportCodec.encodeBatchWithStatus(expected, List.of()));
+
+        assertThat(actual.status()).isEqualTo(expected);
+        assertThat(actual.events()).isEmpty();
+    }
+
+    @Test
+    void rejectsMalformedStatusBearingBatchResponses() {
+        CoreExportStatus status = new CoreExportStatus(0, 1, 0, 0, 1_000_000, 64L * 1024 * 1024);
+        byte[] encoded = CoreExportCodec.encodeBatchWithStatus(status, List.of());
+
+        assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(
+                Arrays.copyOf(encoded, CoreExportCodec.BATCH_STATUS_FIXED_LENGTH)))
+                .isInstanceOf(ProtocolException.class);
+        assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(
+                Arrays.copyOf(encoded, encoded.length + 1)))
+                .isInstanceOf(ProtocolException.class);
+
+        byte[] invalidStatus = encoded.clone();
+        ByteBuffer.wrap(invalidStatus).order(ByteOrder.LITTLE_ENDIAN).putInt(20, -1);
+        assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(invalidStatus))
+                .isInstanceOf(ProtocolException.class);
+    }
+
+    @Test
+    void enforcesCompleteStatusBearingResponseMaximumAtBoundaryAndPlusOne() {
+        CoreExportStatus status = new CoreExportStatus(0, 2, 1, 64, 1_000_000, 64L * 1024 * 1024);
+        int maximumInnerBatchLength = CoreExportCodec.MAX_BATCH_ENCODED_LENGTH
+                - CoreExportCodec.BATCH_STATUS_FIXED_LENGTH;
+        CoreMessage maximumMessage = messageForBatchLength(maximumInnerBatchLength);
+        byte[] exact = CoreExportCodec.encodeBatchWithStatus(status, List.of(maximumMessage));
+
+        assertThat(exact).hasSize(CoreExportCodec.MAX_BATCH_ENCODED_LENGTH);
+        assertThat(CoreExportCodec.decodeBatchResponse(exact).events()).containsExactly(maximumMessage);
+
+        byte[] oversizedInnerBatch = CoreExportCodec.encodeBatch(
+                List.of(messageForBatchLength(maximumInnerBatchLength + 1)));
+        byte[] oversized = withStatusHeader(status, oversizedInnerBatch);
+        assertThat(oversized).hasSize(CoreExportCodec.MAX_BATCH_ENCODED_LENGTH + 1);
+        assertThatThrownBy(() -> CoreExportCodec.decodeBatchResponse(oversized))
+                .isInstanceOf(ProtocolException.class);
+    }
+
+    private static CoreMessage messageForBatchLength(int batchLength) {
+        int payloadLength = batchLength - Integer.BYTES * 2 - CoreProtocol.HEADER_LENGTH;
+        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 1, 1, 0, 1, 1),
+                new byte[payloadLength]);
+        assertThat(CoreExportCodec.encodeBatch(List.of(message))).hasSize(batchLength);
+        return message;
+    }
+
+    private static byte[] withStatusHeader(CoreExportStatus status, byte[] batch) {
+        byte[] empty = CoreExportCodec.encodeBatchWithStatus(status, List.of());
+        byte[] encoded = Arrays.copyOf(empty, CoreExportCodec.BATCH_STATUS_FIXED_LENGTH + batch.length);
+        System.arraycopy(batch, 0, encoded, CoreExportCodec.BATCH_STATUS_FIXED_LENGTH, batch.length);
+        return encoded;
     }
 }

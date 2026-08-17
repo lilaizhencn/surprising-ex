@@ -68,6 +68,8 @@ public class LiquidationProperties {
         private long delayMs = 25;
         private int workBatchSize = 256;
         private int riskScanBatchSize = ContinueRiskScanCommand.DEFAULT_MAX_USERS;
+        private int maxPagesPerRun = 8;
+        private int maxWorkBytes = 1_048_576;
 
         public long getDelayMs() { return delayMs; }
         public void setDelayMs(long value) {
@@ -87,6 +89,20 @@ public class LiquidationProperties {
                 throw new IllegalArgumentException("coordinator.risk-scan-batch-size must be in [1,4096]");
             }
             riskScanBatchSize = value;
+        }
+        public int getMaxPagesPerRun() { return maxPagesPerRun; }
+        public void setMaxPagesPerRun(int value) {
+            if (value < 1 || value > 1_000) {
+                throw new IllegalArgumentException("coordinator.max-pages-per-run must be in [1,1000]");
+            }
+            maxPagesPerRun = value;
+        }
+        public int getMaxWorkBytes() { return maxWorkBytes; }
+        public void setMaxWorkBytes(int value) {
+            if (value < 256 || value > 1_048_576) {
+                throw new IllegalArgumentException("coordinator.max-work-bytes must be in [256,1048576]");
+            }
+            maxWorkBytes = value;
         }
     }
 
