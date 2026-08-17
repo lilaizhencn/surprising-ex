@@ -463,6 +463,9 @@ public final class W5FaultQaMain {
             long last = Math.addExact(first, count - 1L);
             System.out.printf("CORE_EVENT_BATCH=APPLIED reason=%s firstSequence=%d lastSequence=%d count=%d%n",
                     reason, first, last, count);
+            CoreExportStatus after = exportStatus(core);
+            System.out.printf("CORE_EXPORT_STATUS_AFTER reason=%s acknowledged=%d next=%d pending=%d%n",
+                    reason, after.acknowledgedSequence(), after.nextSequence(), after.pendingCount());
             return new SequenceRange(first, last);
         }
 
