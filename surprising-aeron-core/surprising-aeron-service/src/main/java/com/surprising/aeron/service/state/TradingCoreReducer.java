@@ -1548,28 +1548,37 @@ public final class TradingCoreReducer {
         user = canceled.user(user.userId());
         position = user.positions().get(positionKey);
         AssetBalance balance = requireBalance(user, instrument.settleAsset());
-        if (position.positionMarginUnits() > 0) {
-            balance = balance.release(position.positionMarginUnits());
-        }
+        long currentAbs = Math.absExact(position.signedQuantitySteps());
+        long closeQuantity = liquidation.closeQuantitySteps();
+        long remainingAbs = Math.subtractExact(currentAbs, closeQuantity);
+        long releasedMargin = position.positionMarginUnits() == 0 ? 0
+                : proportional(position.positionMarginUnits(), closeQuantity, currentAbs);
         long pnl = instrument.contractType().isOption() ? 0
-                : CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
+                : CoreContractMath.pnlUnits(instrument,
+                position.signedQuantitySteps() > 0 ? closeQuantity : Math.negateExact(closeQuantity),
                 position.entryPriceTicks(), command.executionPriceTicks());
-        CashResult cash = applyCash(balance, pnl);
-        long uncovered = pnl < 0 ? Math.subtractExact(Math.negateExact(pnl),
-                Math.negateExact(Math.min(0, cash.appliedDelta()))) : 0;
         long feeDue = Math.negateExact(CoreContractMath.feeDeltaUnits(instrument,
                 command.executionPriceTicks(), liquidation.closeQuantitySteps(), command.liquidationFeeRatePpm()));
-        CashResult feeCash = applyCash(cash.balance(), Math.negateExact(feeDue));
-        long collectedFee = Math.negateExact(feeCash.appliedDelta());
+        LiquidationCashResult cash = applyLiquidationCash(balance, liquidation.marginMode(), releasedMargin, pnl,
+                feeDue);
+        long uncovered = pnl < 0 ? Math.subtractExact(Math.negateExact(pnl),
+                Math.negateExact(Math.min(0, cash.appliedDelta()))) : 0;
+        long collectedFee = cash.collectedFeeUnits();
         CoreTreasuryState treasury = canceled.treasuryState()
                 .adjustInsurance(instrument.settleAsset(),
                         Math.addExact(Math.negateExact(cash.appliedDelta()), collectedFee));
         Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
-        balances.put(instrument.settleAsset(), feeCash.balance());
+        balances.put(instrument.settleAsset(), cash.balance());
         Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
+        long nextQuantity = remainingAbs == 0 ? 0
+                : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
+        long nextEntryValue = remainingAbs == 0 ? 0
+                : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         positions.put(positionKey, new CorePositionState(instrument.symbol(), instrument.settleAsset(),
-                position.marginMode(), position.positionSide(), 0, 0, 0, 0,
-                Math.addExact(position.realizedPnlUnits(), pnl), 0));
+                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
+                nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
+                Math.addExact(position.realizedPnlUnits(), pnl),
+                Math.subtractExact(position.positionMarginUnits(), releasedMargin)));
         CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
                 Math.incrementExact(user.revision()), balances, user.reservations(), positions, user.positionMode());
         Map<Long, CoreUserState> users = StateMapSupport.delta(canceled.users());
@@ -2067,6 +2076,37 @@ public final class TradingCoreReducer {
                 Math.negateExact(debit));
     }
 
+    private static LiquidationCashResult applyLiquidationCash(AssetBalance balance, CoreMarginMode marginMode,
+                                                              long releasedMargin, long pnl, long feeDue) {
+        AssetBalance settled = balance;
+        long appliedPnl;
+        long isolatedFeeCapacity;
+        if (marginMode == CoreMarginMode.ISOLATED) {
+            if (pnl < 0) {
+                long loss = Math.negateExact(pnl);
+                long consumedMargin = Math.min(releasedMargin, loss);
+                if (consumedMargin > 0) settled = settled.consumeLocked(consumedMargin);
+                long remainingMargin = Math.subtractExact(releasedMargin, consumedMargin);
+                if (remainingMargin > 0) settled = settled.release(remainingMargin);
+                appliedPnl = Math.negateExact(consumedMargin);
+                isolatedFeeCapacity = remainingMargin;
+            } else {
+                if (releasedMargin > 0) settled = settled.release(releasedMargin);
+                if (pnl > 0) settled = settled.credit(pnl);
+                appliedPnl = pnl;
+                isolatedFeeCapacity = Math.addExact(releasedMargin, pnl);
+            }
+            long collectedFee = Math.min(feeDue, isolatedFeeCapacity);
+            if (collectedFee > 0) settled = settled.adjustAvailable(Math.negateExact(collectedFee));
+            return new LiquidationCashResult(settled, appliedPnl, collectedFee);
+        }
+        if (releasedMargin > 0) settled = settled.release(releasedMargin);
+        CashResult pnlCash = applyCash(settled, pnl);
+        CashResult feeCash = applyCash(pnlCash.balance(), Math.negateExact(feeDue));
+        return new LiquidationCashResult(feeCash.balance(), pnlCash.appliedDelta(),
+                Math.negateExact(feeCash.appliedDelta()));
+    }
+
     private static long proportional(long units, long part, long total) {
         return part == total ? units : Math.multiplyExact(units, part) / total;
     }
@@ -2078,6 +2118,9 @@ public final class TradingCoreReducer {
     }
 
     private record CashResult(AssetBalance balance, long appliedDelta) {
+    }
+
+    private record LiquidationCashResult(AssetBalance balance, long appliedDelta, long collectedFeeUnits) {
     }
 
     private static CoreUserState releaseTerminalReservation(CoreUserState user, long orderId) {

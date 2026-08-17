@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.aeron.client.AeronClientPool;
+import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreLeverageView;
 import com.surprising.aeron.protocol.CoreOrderStateView;
@@ -13,6 +14,7 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import jakarta.annotation.PreDestroy;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -22,10 +24,26 @@ public class OrderAeronGateway implements AutoCloseable {
     private final AeronClientPool clients;
 
     public OrderAeronGateway(TradingOrderProperties properties) {
+        this(createClients(properties));
+    }
+
+    OrderAeronGateway(AeronClientPool clients) {
+        this.clients = Objects.requireNonNull(clients, "clients");
+    }
+
+    private static AeronClientPool createClients(TradingOrderProperties properties) {
         TradingOrderProperties.Aeron aeron = properties.getAeron();
-        this.clients = new AeronClientPool("order", properties.getKafka().getProductLine(), aeron.getHostnames(),
+        return new AeronClientPool("order", properties.getKafka().getProductLine(), aeron.getHostnames(),
                 aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
                 "order-" + properties.getKafka().getProductLine().name() + "-node-" + aeron.getNodeId());
+    }
+
+    public CoreCommandOutcome commandOutcome(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+        return clients.commandOutcome(type, commandId, userId, payload);
+    }
+
+    public CoreResponse commandResult(UUID commandId) {
+        return clients.commandResult(Objects.requireNonNull(commandId, "commandId"), 0L);
     }
 
     public CoreResponse command(CoreMessageType type, UUID commandId, long userId, byte[] payload) {

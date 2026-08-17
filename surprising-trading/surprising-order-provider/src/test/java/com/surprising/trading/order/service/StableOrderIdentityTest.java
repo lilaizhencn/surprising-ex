@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreCommandResultView;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -51,10 +52,10 @@ class StableOrderIdentityTest {
         properties.getAeron().setNodeId(3);
         when(rules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
         when(marks.latestMarkPriceTicks("BTC-USDT", 7, 5_000)).thenReturn(OptionalLong.of(60_000));
-        when(aeron.command(eq(CoreMessageType.PLACE_ORDER), any(UUID.class), eq(1001L), any(byte[].class)))
+        when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), any(UUID.class), eq(1001L), any(byte[].class)))
                 .thenAnswer(invocation -> {
                     PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
-                    return commandResponse(command, "stable-client");
+                    return new CoreCommandOutcome.Terminal(commandResponse(command, "stable-client"));
                 });
 
         AeronOrderCommandService first = service(aeron, rules, marks, properties);
@@ -68,7 +69,7 @@ class StableOrderIdentityTest {
 
         ArgumentCaptor<UUID> commandIds = ArgumentCaptor.forClass(UUID.class);
         ArgumentCaptor<byte[]> payloads = ArgumentCaptor.forClass(byte[].class);
-        verify(aeron, times(2)).command(eq(CoreMessageType.PLACE_ORDER), commandIds.capture(), eq(1001L),
+        verify(aeron, times(2)).commandOutcome(eq(CoreMessageType.PLACE_ORDER), commandIds.capture(), eq(1001L),
                 payloads.capture());
         assertThat(commandIds.getAllValues().get(0)).isEqualTo(commandIds.getAllValues().get(1));
         assertThat(TradingCommandCodec.decodePlaceOrder(payloads.getAllValues().get(0)).orderId())

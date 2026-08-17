@@ -3,16 +3,26 @@ package com.surprising.trading.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 
+import com.surprising.aeron.client.CoreCommandOutcome;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AdminCancelOrdersResponse;
+import com.surprising.trading.api.model.BatchCancelOrdersRequest;
+import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.ClosePositionRequest;
@@ -32,7 +42,10 @@ import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.ValidationResult;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -134,18 +147,20 @@ class OrderServiceTest {
     @Test
     void adminCancelSelectsOpenOrdersFromProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
-        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
-        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
-        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, null, "BTC-USDT", null, 10, null))
-                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
-        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+        List<OrderResponse> open = openOrders(123);
+        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, null, "BTC-USDT", null, 123, null))
+                .thenReturn(ProjectionReadResult.ok(open, null, false, 12L, 0L));
+        stubCancelBatches();
 
         AdminCancelOrdersResponse result = service.adminCancelOrders(
-                new AdminBatchCancelOrdersRequest(null, "BTC-USDT", 10, "risk"));
+                new AdminBatchCancelOrdersRequest(null, "BTC-USDT", 123, "risk"));
 
-        assertThat(result.canceled()).isEqualTo(1);
-        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, null, "BTC-USDT", null, 10, null);
-        verify(aeronOrders).cancel(1001L, 91L);
+        assertThat(result.requested()).isEqualTo(123);
+        assertThat(result.canceled()).isEqualTo(123);
+        assertThat(result.skipped()).isZero();
+        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, null, "BTC-USDT", null, 123, null);
+        verify(aeronOrders, times(3)).cancelBatchCommand(anyString(), anyList());
+        verify(aeronOrders, never()).cancel(anyLong(), anyLong());
     }
 
     @Test
@@ -214,32 +229,44 @@ class OrderServiceTest {
     @Test
     void cancelOpenOrdersSelectsFromProjectionAndSendsOnlyCancelCommandToAeron() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
-        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
-        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
+        List<OrderResponse> open = openOrders(123);
         when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 1000, null))
-                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
-        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+                .thenReturn(ProjectionReadResult.ok(open, null, false, 12L, 0L));
+        stubCancelBatches();
 
-        OrderBatchResponse result = service.cancelOpenOrders(
+        OrderBatchResponse first = service.cancelOpenOrders(
+                new com.surprising.trading.api.model.CancelOpenOrdersRequest(1001L, "BTC-USDT", 1000));
+        OrderBatchResponse second = service.cancelOpenOrders(
                 new com.surprising.trading.api.model.CancelOpenOrdersRequest(1001L, "BTC-USDT", 1000));
 
-        assertThat(result.completed()).isEqualTo(1);
-        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 1000, null);
-        verify(aeronOrders).cancel(1001L, 91L);
+        assertThat(first.completed()).isEqualTo(123);
+        assertThat(first.results()).extracting(OrderBatchItemResponse::index)
+                .containsExactlyElementsOf(java.util.stream.IntStream.range(0, 123).boxed().toList());
+        assertThat(first.results().getFirst().order().orderId()).isEqualTo(10_000L);
+        assertThat(first.results().getLast().order().orderId()).isEqualTo(10_122L);
+        assertThat(second).isEqualTo(first);
+        verify(projection, times(2)).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 1000, null);
+        ArgumentCaptor<String> batchKeys = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<List> batchOrders = ArgumentCaptor.forClass(List.class);
+        verify(aeronOrders, times(6)).cancelBatchCommand(batchKeys.capture(), batchOrders.capture());
+        assertThat(batchKeys.getAllValues().subList(0, 3))
+                .containsExactlyElementsOf(batchKeys.getAllValues().subList(3, 6));
+        assertThat(batchOrders.getAllValues().subList(0, 3).stream()
+                .map(List::size).toList()).containsExactly(50, 50, 23);
+        verify(aeronOrders, never()).cancel(anyLong(), anyLong());
     }
 
     @Test
     void lifecycleCancellationUsesAeronAuthorityInsteadOfStaleProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
-        OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
-        OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
-        when(aeronOrders.lifecycleOpenOrders("BTC-USDT", 1000)).thenReturn(java.util.List.of(open));
-        when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
+        when(aeronOrders.lifecycleOpenOrders("BTC-USDT", 123)).thenReturn(openOrders(123));
+        stubCancelBatches();
 
-        assertThat(service.requestLifecycleCancellation("BTC-USDT", 1000)).isEqualTo(1);
+        assertThat(service.requestLifecycleCancellation("BTC-USDT", 123)).isEqualTo(123);
 
-        verify(aeronOrders).lifecycleOpenOrders("BTC-USDT", 1000);
-        verify(aeronOrders).cancel(1001L, 91L);
+        verify(aeronOrders).lifecycleOpenOrders("BTC-USDT", 123);
+        verify(aeronOrders, times(3)).cancelBatchCommand(anyString(), anyList());
+        verify(aeronOrders, never()).cancel(anyLong(), anyLong());
         verifyNoInteractions(projection);
     }
 
@@ -307,5 +334,51 @@ class OrderServiceTest {
         return new OrderResponse(orderId, 1001L, clientOrderId, "BTC-USDT", 7L, OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000L, 10L, 0L, 10L, MarginMode.CROSS,
                 PositionSide.NET, 100L, 200L, true, false, status, null, now, now);
+    }
+
+    private List<OrderResponse> openOrders(int count) {
+        return java.util.stream.IntStream.range(0, count)
+                .mapToObj(index -> response(10_000L + index, "client-" + index, OrderStatus.ACCEPTED))
+                .toList();
+    }
+
+    private void stubCancelBatches() {
+        when(aeronOrders.cancelBatchCommand(anyString(), anyList())).thenAnswer(invocation -> {
+            String batchKey = invocation.getArgument(0);
+            List<CancelOrderRequest> requests = invocation.getArgument(1);
+            return new AeronOrderCommandService.CommandExecution(
+                    UUID.nameUUIDFromBytes(batchKey.getBytes(StandardCharsets.UTF_8)),
+                    requests.stream().map(CancelOrderRequest::orderId).toList(),
+                    new CoreCommandOutcome.Terminal(new CoreResponse(
+                            ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                            1L, 1L, 17L, new byte[0])),
+                    AeronOrderCommandService.CommandKind.CANCEL_BATCH);
+        });
+        when(aeronOrders.receipt(any(AeronOrderCommandService.CommandExecution.class)))
+                .thenAnswer(invocation -> {
+                    AeronOrderCommandService.CommandExecution execution = invocation.getArgument(0);
+                    List<OrderBatchItemResponse> items = java.util.stream.IntStream
+                            .range(0, execution.prospectiveOrderIds().size())
+                            .mapToObj(index -> new OrderBatchItemResponse(index, true, "completed",
+                                    response(execution.prospectiveOrderIds().get(index),
+                                            "client-" + execution.prospectiveOrderIds().get(index),
+                                            OrderStatus.CANCELED)))
+                            .toList();
+                    OrderBatchResponse aggregate = new OrderBatchResponse(items.size(), items.size(), 0, items);
+                    return new OrderCommandReceipt(execution.commandId(), "TERMINAL", "NONE", "completed",
+                            OrderCommandReceipt.commandResultUrl(execution.commandId()),
+                            execution.prospectiveOrderIds(), 1L, aggregate, null);
+                });
+    }
+
+    private OrderBatchResponse canceledBatch(BatchCancelOrdersRequest request) {
+        List<OrderBatchItemResponse> results = java.util.stream.IntStream.range(0, request.orders().size())
+                .mapToObj(index -> {
+                    CancelOrderRequest cancel = request.orders().get(index);
+                    return new OrderBatchItemResponse(index, true, "completed",
+                            response(cancel.orderId(), "client-" + cancel.orderId(), OrderStatus.CANCELED));
+                })
+                .toList();
+        return new OrderBatchResponse(results.size(), results.size(), 0, results);
     }
 }
