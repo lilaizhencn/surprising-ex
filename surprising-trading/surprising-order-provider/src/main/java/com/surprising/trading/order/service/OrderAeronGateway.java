@@ -13,6 +13,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -23,6 +24,7 @@ public class OrderAeronGateway implements AutoCloseable {
 
     private final AeronClientPool clients;
 
+    @Autowired
     public OrderAeronGateway(TradingOrderProperties properties) {
         this(createClients(properties));
     }
