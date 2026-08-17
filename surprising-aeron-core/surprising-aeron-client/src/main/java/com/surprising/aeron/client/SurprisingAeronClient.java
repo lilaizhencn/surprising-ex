@@ -139,13 +139,27 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
 
     static MediaDriver newMediaDriver(String aeronDirectoryName) {
         MediaDriver.Context context = new MediaDriver.Context()
-                .threadingMode(ThreadingMode.SHARED)
+                .threadingMode(clientThreadingMode())
                 .dirDeleteOnStart(true)
                 .dirDeleteOnShutdown(true);
         if (aeronDirectoryName != null && !aeronDirectoryName.isBlank()) {
             context.aeronDirectoryName(aeronDirectoryName);
         }
         return MediaDriver.launchEmbedded(context);
+    }
+
+    static ThreadingMode clientThreadingMode() {
+        String configured = System.getProperty("surprising.aeron.client.threading-mode");
+        if (configured == null || configured.isBlank()) {
+            configured = System.getenv().getOrDefault("AERON_CLIENT_THREADING_MODE", "SHARED");
+        }
+        try {
+            return ThreadingMode.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                    "surprising.aeron.client.threading-mode must be a valid Aeron ThreadingMode: " + configured,
+                    exception);
+        }
     }
 
     public CoreResponse submit(CoreMessage message) {
