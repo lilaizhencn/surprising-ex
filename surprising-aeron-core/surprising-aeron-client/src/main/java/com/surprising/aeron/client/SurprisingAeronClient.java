@@ -100,17 +100,17 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         try {
             return connection.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (java.util.concurrent.TimeoutException exception) {
-            mediaDriver.close();
+            closeMediaDriverBounded(mediaDriver);
             connection.cancel(true);
             throw new io.aeron.exceptions.TimeoutException(
                     "timed out connecting to Aeron Cluster productLine=" + productLine);
         } catch (InterruptedException exception) {
-            mediaDriver.close();
+            closeMediaDriverBounded(mediaDriver);
             connection.cancel(true);
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted connecting to Aeron Cluster", exception);
         } catch (ExecutionException exception) {
-            mediaDriver.close();
+            closeMediaDriverBounded(mediaDriver);
             Throwable cause = exception.getCause();
             if (cause instanceof RuntimeException runtimeException) {
                 throw runtimeException;
@@ -120,8 +120,19 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             }
             throw new IllegalStateException("failed connecting to Aeron Cluster", cause);
         } catch (RuntimeException exception) {
-            mediaDriver.close();
+            closeMediaDriverBounded(mediaDriver);
             throw exception;
+        }
+    }
+
+    private static void closeMediaDriverBounded(MediaDriver mediaDriver) {
+        Thread closer = new Thread(mediaDriver::close, "surprising-aeron-media-driver-close");
+        closer.setDaemon(true);
+        closer.start();
+        try {
+            closer.join(250L);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
         }
     }
 
