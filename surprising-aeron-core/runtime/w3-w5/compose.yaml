@@ -71,11 +71,11 @@ services:
     command: ["-Dsurprising.aeron.product-line=${PRODUCT_LINE}", "-Dsurprising.aeron.node-id=0", "-Dsurprising.aeron.hostnames=node0,node1,node2", "-Dsurprising.aeron.data-dir=/var/lib/surprising/aeron", "-jar", "/opt/surprising/service.jar"]
     volumes: [node0-data:/var/lib/surprising/aeron]
     ports:
-      - "127.0.0.1:21001:21001/udp"
-      - "127.0.0.1:21002:21002/udp"
-      - "127.0.0.1:21003:21003/udp"
-      - "127.0.0.1:21004:21004/udp"
-      - "127.0.0.1:21005:21005/udp"
+      - "127.0.0.1:${CORE_NODE0_ARCHIVE_PORT:?CORE_NODE0_ARCHIVE_PORT is required}:${CORE_NODE0_ARCHIVE_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE0_CLIENT_PORT:?CORE_NODE0_CLIENT_PORT is required}:${CORE_NODE0_CLIENT_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE0_MEMBER_PORT:?CORE_NODE0_MEMBER_PORT is required}:${CORE_NODE0_MEMBER_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE0_LOG_PORT:?CORE_NODE0_LOG_PORT is required}:${CORE_NODE0_LOG_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE0_TRANSFER_PORT:?CORE_NODE0_TRANSFER_PORT is required}:${CORE_NODE0_TRANSFER_PORT}/udp"
 
   node1:
     <<: *core-common
@@ -83,11 +83,11 @@ services:
     command: ["-Dsurprising.aeron.product-line=${PRODUCT_LINE}", "-Dsurprising.aeron.node-id=1", "-Dsurprising.aeron.hostnames=node0,node1,node2", "-Dsurprising.aeron.data-dir=/var/lib/surprising/aeron", "-jar", "/opt/surprising/service.jar"]
     volumes: [node1-data:/var/lib/surprising/aeron]
     ports:
-      - "127.0.0.1:21101:21101/udp"
-      - "127.0.0.1:21102:21102/udp"
-      - "127.0.0.1:21103:21103/udp"
-      - "127.0.0.1:21104:21104/udp"
-      - "127.0.0.1:21105:21105/udp"
+      - "127.0.0.1:${CORE_NODE1_ARCHIVE_PORT:?CORE_NODE1_ARCHIVE_PORT is required}:${CORE_NODE1_ARCHIVE_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE1_CLIENT_PORT:?CORE_NODE1_CLIENT_PORT is required}:${CORE_NODE1_CLIENT_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE1_MEMBER_PORT:?CORE_NODE1_MEMBER_PORT is required}:${CORE_NODE1_MEMBER_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE1_LOG_PORT:?CORE_NODE1_LOG_PORT is required}:${CORE_NODE1_LOG_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE1_TRANSFER_PORT:?CORE_NODE1_TRANSFER_PORT is required}:${CORE_NODE1_TRANSFER_PORT}/udp"
 
   node2:
     <<: *core-common
@@ -95,11 +95,11 @@ services:
     command: ["-Dsurprising.aeron.product-line=${PRODUCT_LINE}", "-Dsurprising.aeron.node-id=2", "-Dsurprising.aeron.hostnames=node0,node1,node2", "-Dsurprising.aeron.data-dir=/var/lib/surprising/aeron", "-jar", "/opt/surprising/service.jar"]
     volumes: [node2-data:/var/lib/surprising/aeron]
     ports:
-      - "127.0.0.1:21201:21201/udp"
-      - "127.0.0.1:21202:21202/udp"
-      - "127.0.0.1:21203:21203/udp"
-      - "127.0.0.1:21204:21204/udp"
-      - "127.0.0.1:21205:21205/udp"
+      - "127.0.0.1:${CORE_NODE2_ARCHIVE_PORT:?CORE_NODE2_ARCHIVE_PORT is required}:${CORE_NODE2_ARCHIVE_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE2_CLIENT_PORT:?CORE_NODE2_CLIENT_PORT is required}:${CORE_NODE2_CLIENT_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE2_MEMBER_PORT:?CORE_NODE2_MEMBER_PORT is required}:${CORE_NODE2_MEMBER_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE2_LOG_PORT:?CORE_NODE2_LOG_PORT is required}:${CORE_NODE2_LOG_PORT}/udp"
+      - "127.0.0.1:${CORE_NODE2_TRANSFER_PORT:?CORE_NODE2_TRANSFER_PORT is required}:${CORE_NODE2_TRANSFER_PORT}/udp"
 
 networks:
   runtime:

@@ -24,6 +24,19 @@ expect_refusal() {
 }
 
 bash -n "$RUNNER" "$SCRIPT_DIR/../scenarios/common.sh" "$SCRIPT_DIR/../scenarios/w4-six-line.sh"
+
+for line in SPOT LINEAR_PERPETUAL INVERSE_PERPETUAL LINEAR_DELIVERY INVERSE_DELIVERY OPTION; do
+  output="$(RUN_ID="$RUN_ID-$line" PRODUCT_LINE="$line" WALLET_ENABLED=false W4_STATIC_ONLY=true \
+    RUNTIME_ROOT="$TEST_ROOT/ports-$line" "$RUNNER" dry-run)"
+  case "$line" in
+    SPOT) base=20000 ;; LINEAR_PERPETUAL) base=21000 ;; INVERSE_PERPETUAL) base=22000 ;;
+    LINEAR_DELIVERY) base=23000 ;; INVERSE_DELIVERY) base=24000 ;; OPTION) base=25000 ;;
+  esac
+  grep -q "core.node0.client=$((base + 2))" <<<"$output"
+  grep -q "core.node1.client=$((base + 102))" <<<"$output"
+  grep -q "core.node2.client=$((base + 202))" <<<"$output"
+done
+
 expect_refusal WALLET_REFUSED env RUN_ID="$RUN_ID-wallet" PRODUCT_LINE=LINEAR_PERPETUAL \
   WALLET_ENABLED=true W4_STATIC_ONLY=true RUNTIME_ROOT="$TEST_ROOT/wallet" "$RUNNER" scenario w4-six-line
 expect_refusal PRODUCT_LINES_REFUSED env RUN_ID="$RUN_ID-order" PRODUCT_LINE=LINEAR_PERPETUAL \

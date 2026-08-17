@@ -67,8 +67,34 @@ initialize_names() {
   COMPOSE_PROJECT_NAME="surprising-w3w5-$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]')"
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME//_/-}"
   POSTGRES_DB="surprising_${RUN_ID//[^a-zA-Z0-9]/_}"
+  initialize_core_ports
   export RUN_ID PRODUCT_LINE POSTGRES_PORT KAFKA_PORT POSTGRES_USER POSTGRES_PASSWORD
   export POSTGRES_DB COMPOSE_PROJECT_NAME
+  export CORE_NODE0_ARCHIVE_PORT CORE_NODE0_CLIENT_PORT CORE_NODE0_MEMBER_PORT CORE_NODE0_LOG_PORT CORE_NODE0_TRANSFER_PORT
+  export CORE_NODE1_ARCHIVE_PORT CORE_NODE1_CLIENT_PORT CORE_NODE1_MEMBER_PORT CORE_NODE1_LOG_PORT CORE_NODE1_TRANSFER_PORT
+  export CORE_NODE2_ARCHIVE_PORT CORE_NODE2_CLIENT_PORT CORE_NODE2_MEMBER_PORT CORE_NODE2_LOG_PORT CORE_NODE2_TRANSFER_PORT
+}
+
+initialize_core_ports() {
+  local product_index
+  case "$PRODUCT_LINE" in
+    SPOT) product_index=0 ;;
+    LINEAR_PERPETUAL) product_index=1 ;;
+    INVERSE_PERPETUAL) product_index=2 ;;
+    LINEAR_DELIVERY) product_index=3 ;;
+    INVERSE_DELIVERY) product_index=4 ;;
+    OPTION) product_index=5 ;;
+    *) fail "PRODUCT_LINE_REFUSED unsupported=$PRODUCT_LINE" ;;
+  esac
+  local product_base=$((20000 + product_index * 1000)) node node_base
+  for node in 0 1 2; do
+    node_base=$((product_base + node * 100))
+    printf -v "CORE_NODE${node}_ARCHIVE_PORT" '%d' "$((node_base + 1))"
+    printf -v "CORE_NODE${node}_CLIENT_PORT" '%d' "$((node_base + 2))"
+    printf -v "CORE_NODE${node}_MEMBER_PORT" '%d' "$((node_base + 3))"
+    printf -v "CORE_NODE${node}_LOG_PORT" '%d' "$((node_base + 4))"
+    printf -v "CORE_NODE${node}_TRANSFER_PORT" '%d' "$((node_base + 5))"
+  done
 }
 
 compose() {
@@ -103,10 +129,20 @@ port_lines() {
   for index in "${!HTTP_SERVICES[@]}"; do
     printf '%s=%s\n' "${HTTP_SERVICES[$index]}" "${HTTP_PORTS[$index]}"
   done
-  printf '%s\n' \
-    'core.node0.archive=21001' 'core.node0.client=21002' 'core.node0.member=21003' 'core.node0.log=21004' 'core.node0.transfer=21005' \
-    'core.node1.archive=21101' 'core.node1.client=21102' 'core.node1.member=21103' 'core.node1.log=21104' 'core.node1.transfer=21105' \
-    'core.node2.archive=21201' 'core.node2.client=21202' 'core.node2.member=21203' 'core.node2.log=21204' 'core.node2.transfer=21205'
+  local node port_name port
+  for node in 0 1 2; do
+    for port_name in archive client member log transfer; do
+      case "${node}:${port_name}" in
+        0:archive) port="$CORE_NODE0_ARCHIVE_PORT" ;; 0:client) port="$CORE_NODE0_CLIENT_PORT" ;;
+        0:member) port="$CORE_NODE0_MEMBER_PORT" ;; 0:log) port="$CORE_NODE0_LOG_PORT" ;; 0:transfer) port="$CORE_NODE0_TRANSFER_PORT" ;;
+        1:archive) port="$CORE_NODE1_ARCHIVE_PORT" ;; 1:client) port="$CORE_NODE1_CLIENT_PORT" ;;
+        1:member) port="$CORE_NODE1_MEMBER_PORT" ;; 1:log) port="$CORE_NODE1_LOG_PORT" ;; 1:transfer) port="$CORE_NODE1_TRANSFER_PORT" ;;
+        2:archive) port="$CORE_NODE2_ARCHIVE_PORT" ;; 2:client) port="$CORE_NODE2_CLIENT_PORT" ;;
+        2:member) port="$CORE_NODE2_MEMBER_PORT" ;; 2:log) port="$CORE_NODE2_LOG_PORT" ;; 2:transfer) port="$CORE_NODE2_TRANSFER_PORT" ;;
+      esac
+      printf 'core.node%s.%s=%s\n' "$node" "$port_name" "$port"
+    done
+  done
 }
 
 service_lines() {
