@@ -680,6 +680,7 @@ public final class AeronClientPool implements AutoCloseable {
             Session current = lane.session;
             if (current == null) {
                 request.notAccepted(CoreCommandOutcome.notAccepted(Publication.NOT_CONNECTED));
+                lane.reconnectLater();
                 return;
             }
             long offerResult;
@@ -701,7 +702,8 @@ public final class AeronClientPool implements AutoCloseable {
                 }
             } else {
                 request.notAccepted(CoreCommandOutcome.notAccepted(offerResult));
-                if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
+                if (offerResult == Publication.NOT_CONNECTED || offerResult == Publication.CLOSED
+                        || offerResult == Publication.MAX_POSITION_EXCEEDED) {
                     closeSession(lane);
                 }
             }

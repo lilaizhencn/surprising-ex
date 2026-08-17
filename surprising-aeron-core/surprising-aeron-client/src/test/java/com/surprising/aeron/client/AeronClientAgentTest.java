@@ -194,6 +194,29 @@ class AeronClientAgentTest {
     }
 
     @Test
+    void reopensSessionWhenPublicationIsNotConnected() throws Exception {
+        AtomicInteger opened = new AtomicInteger();
+        CountDownLatch secondSession = new CountDownLatch(1);
+        AeronClientPool.SessionFactory factory = () -> {
+            int index = opened.incrementAndGet();
+            if (index == 1) {
+                return session(message -> Publication.NOT_CONNECTED);
+            }
+            if (index >= 3) {
+                secondSession.countDown();
+            }
+            return session(message -> Publication.NOT_CONNECTED);
+        };
+
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), factory)) {
+            pool.commandOutcomeAsync(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 9, new byte[0])
+                    .get(2, TimeUnit.SECONDS);
+            assertThat(secondSession.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(opened.get()).isGreaterThanOrEqualTo(3);
+        }
+    }
+
+    @Test
     void keepsEveryFixedSessionAliveWhileIdle() throws Exception {
         CountDownLatch keepAlives = new CountDownLatch(2);
         AeronClientPool.SessionFactory factory = () -> new AeronClientPool.Session() {
