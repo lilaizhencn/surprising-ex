@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -37,6 +38,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
     private final AtomicBoolean draining = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
 
+    @Autowired
     public MarkPriceCorePublisher(MarkPriceProperties properties) {
         this(new AeronClientPool("price-mark", properties.getKafka().getProductLine(),
                 properties.getAeron().getHostnames(), properties.getAeron().getEgressHostname(),
