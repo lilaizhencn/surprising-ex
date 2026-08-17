@@ -702,8 +702,7 @@ public final class AeronClientPool implements AutoCloseable {
                 }
             } else {
                 request.notAccepted(CoreCommandOutcome.notAccepted(offerResult));
-                if (offerResult == Publication.NOT_CONNECTED || offerResult == Publication.CLOSED
-                        || offerResult == Publication.MAX_POSITION_EXCEEDED) {
+                if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
                     closeSession(lane);
                 }
             }
