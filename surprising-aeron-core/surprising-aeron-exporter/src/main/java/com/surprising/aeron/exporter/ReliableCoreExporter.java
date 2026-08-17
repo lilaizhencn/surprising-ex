@@ -28,6 +28,7 @@ public final class ReliableCoreExporter {
     private final CoreExportSink sink;
     private final int batchSize;
     private final ExporterMetrics metrics;
+    private final UUID queryEpoch = UUID.randomUUID();
     private final AtomicLong correlations = new AtomicLong();
 
     public ReliableCoreExporter(
@@ -142,7 +143,7 @@ public final class ReliableCoreExporter {
 
     private CoreMessage query(CoreMessageType type, byte[] payload) {
         long correlation = correlations.incrementAndGet();
-        UUID queryId = UUID.nameUUIDFromBytes((productLine + ":query:" + correlation)
+        UUID queryId = UUID.nameUUIDFromBytes((productLine + ":query:" + queryEpoch + ':' + correlation)
                 .getBytes(StandardCharsets.UTF_8));
         return new CoreMessage(CoreMessageHeader.query(type, queryId, productLine,
                 CommandSource.OPERATIONS, SOURCE_ID, 0, 0,
