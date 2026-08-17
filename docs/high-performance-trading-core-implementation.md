@@ -192,19 +192,19 @@ available + locked = accountTotal
 
 ### 3.6 首轮性能热点逐项追踪
 
-下面的表保留最初源码审计中已经确认的每一个热点，不以归并编号替代原始问题。后续实现必须在“状态”列写入证据，不能只把它标记为“已有优化”。
+下面的表保留最初源码审计中已经确认的每一个热点，不以归并编号替代原始问题。`IMPLEMENTED` 表示热路径已满足目标，允许在 snapshot、恢复、审计或兼容构造器中保留冷路径遍历；`PARTIAL` 只表示仍有明确的热路径/状态容器优化遗留。后续实现必须在“状态”列写入证据，不能只把它标记为“已有优化”。
 
 | 原始热点 | 归并问题 | 目标方案 | 当前状态 |
 | --- | --- | --- | --- |
-| `TradingCoreReducer.java:478` 每次下单复制完整 `orders` | S01/S06/S09 | `TradingCoreRuntime` 只修改变更订单，`CommandDelta` 携带 changed order IDs；禁止全量 map 复制 | `PARTIAL`，仍有 immutable state shell |
-| `TradingCoreReducer.java:1492` 修改用户复制完整 `users` | S06 | 单写 runtime 的用户实体/分片 mutable store，余额、持仓只更新 affected user | `PARTIAL` |
-| `TradingCoreState.java:30` 新状态复制并排序全部 users/orders | S02 | canonical constructor 不再负责热路径全量排序；全量排序只允许 snapshot/audit | `PARTIAL` |
-| `TradingCoreState.java:43` 构造时遍历订单重建 `clientOrderIndex` | S03 | index 由命令显式增量维护，缺失时 fail-closed，不隐式扫描 | `PARTIAL` |
-| `TradingCoreReducer.java:534` 无成交的 `applyMatches` 仍复制 users/orders/book | S09 | matcher result 为空时只提交订单状态和 delta，不复制无关实体；业务状态与唯一 matcher 同一 transition | `PARTIAL` |
-| `TradingCoreState.java:156` 已应用订单再次遍历全部 orders 写提交元数据 | S05/H02 | `CommandDelta` 在 mutation 时记录 changed entities，stamp/export/response 复用同一事实 | `PARTIAL` |
-| `CoreProbeState.java:416` Export 前扫描全部 users/orders 计算变更集合 | H02 | export 只消费 `CoreCommandDelta`，变更集合缺失时直接拒绝提交 | `PARTIAL` |
-| `TradingCoreState.java:169` `businessStateHash()` 全量遍历业务状态 | H01 | 热路径使用增量 rolling hash；全量 hash 改名并限制在 snapshot/replay/audit | `PARTIAL`，已有 rolling hash 但 full hash API 仍存在 |
-| `CoreProbeState.java:441` `stateHash()` 再次调用 business hash | H03 | 状态 hash、业务 hash、命令摘要分离；查询不得污染提交 hash | `PARTIAL` |
+| `TradingCoreReducer.java:478` 每次下单复制完整 `orders` | S01/S06/S09 | `TradingCoreRuntime` 只修改变更订单，`CommandDelta` 携带 changed order IDs；禁止全量 map 复制 | `PARTIAL`：热路径已使用 persistent `DeltaMap`，但仍保留 immutable state shell；后续可再评估 mutable entity store |
+| `TradingCoreReducer.java:1492` 修改用户复制完整 `users` | S06 | 单写 runtime 的用户实体/分片 mutable store，余额、持仓只更新 affected user | `PARTIAL`：用户及其 balances/reservations/positions 仍是 immutable record + delta map，未完成 mutable entity store |
+| `TradingCoreState.java:30` 新状态复制并排序全部 users/orders | S02 | canonical constructor 不再负责热路径全量排序；全量排序只允许 snapshot/audit | `IMPLEMENTED`：权威 transition 使用 delta 只校验 changed keys；完整排序仅发生在非 delta 的冷路径 |
+| `TradingCoreState.java:43` 构造时遍历订单重建 `clientOrderIndex` | S03 | index 由命令显式增量维护，缺失时 fail-closed，不隐式扫描 | `IMPLEMENTED`：权威 transition 缺失 index 直接拒绝；兼容构造器的派生只属于冷路径 |
+| `TradingCoreReducer.java:534` 无成交的 `applyMatches` 仍复制 users/orders/book | S09 | matcher result 为空时只提交订单状态和 delta，不复制无关实体；业务状态与唯一 matcher 同一 transition | `IMPLEMENTED`：非即时空成交直接复用原状态，其余路径使用 delta；exchange-core 是唯一可执行 book |
+| `TradingCoreState.java:156` 已应用订单再次遍历全部 orders 写提交元数据 | S05/H02 | `CommandDelta` 在 mutation 时记录 changed entities，stamp/export/response 复用同一事实 | `IMPLEMENTED`：`stampOrderChanges` 的权威调用传入 changed order IDs，空集合不扫描订单 |
+| `CoreProbeState.java:416` Export 前扫描全部 users/orders 计算变更集合 | H02 | export 只消费 `CoreCommandDelta`，变更集合缺失时直接拒绝提交 | `IMPLEMENTED`：export 直接消费 command accumulators/delta，缺失 changed IDs fail-closed |
+| `TradingCoreState.java:169` `businessStateHash()` 全量遍历业务状态 | H01 | 热路径使用增量 rolling hash；全量 hash 改名并限制在 snapshot/replay/audit | `IMPLEMENTED`：热路径使用 `RollingBusinessStateHash`；`fullBusinessStateHash()` 仅保留为包内冷路径校验入口 |
+| `CoreProbeState.java:441` `stateHash()` 再次调用 business hash | H03 | 业务 hash 与完整复制状态 hash 分离；完整 hash 可包含 export/idempotency 元数据，查询不得改变 hash | `IMPLEMENTED`：`stateHash()` 使用缓存的 rolling business hash，查询不重算也不修改状态；export/idempotency 字段属于完整副本一致性 hash |
 | `DeterministicExchangeCoreAdapter.java` 同步 facade / `submitCommandAsyncFullResponse(...).join()` | M01 | 只保留结构化异步结果和 continuation；调用层不等待 ring future | `IMPLEMENTED`，Core owner 由 timer continuation 按序接收结果；恢复与离线工具同样使用显式 drain |
 | `CoreBookState` 与 exchange-core 同时保存活动盘口 | S08/M02 | exchange-core 是唯一可执行 book；外层只保留业务活动订单索引和恢复校验 | `IMPLEMENTED`，`CoreBookState` 与生产 replay/rebuild 已删除 |
 | Risk Provider 与 Core 各自维护预警/强平阈值 | D05/H01 | Instrument 参数进入 Core；Risk 只展示 Core snapshot；动态阈值必须是版本化 Core RiskPolicy | `IMPLEMENTED`，当前 Core policy version 1 |
@@ -681,7 +681,7 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 | --- | --- | --- | --- | --- |
 | P0 文档/基线 | `DONE` | 规格、问题追踪、所有权、验收/回滚规则、脚本矩阵 | 本文档、README、基线约束和 Core-only canonical wrappers 已同步 | provider/API 全链路仍需按各产品线接入真实运行实例；不影响 P1 代码门禁 |
 | P1 正确性/单往返 | `DONE` | 失败回滚、稳定 lane、结果未知、fee/instrument version gate、直接响应 | Core 回滚护栏、bounded client、`COMMAND_RESULT_QUERY` 结果核验、native GTX 测试 | 无；source epoch 采用进程 epoch 编码 sourceId 的简单方案，不另建 registry |
-| P2 Runtime/O(delta) | `DONE` | 单写 runtime、持久化 delta entity store、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime`、DeltaMap lineage、各类派生 index、Core service 121 tests 和运行时 smoke | 仅允许 snapshot/audit/恢复冷路径全量 materialize；历史实体 compaction 仍按运行手册执行 |
+| P2 Runtime/O(delta) | `DONE` | 单写 runtime、持久化 delta entity store、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime`、DeltaMap lineage、各类派生 index、Core service 121 tests 和运行时 smoke；热点逐项状态见第 3.1/3.3 节 | 热路径已无隐式全量 constructor/diff/hash；用户/订单 immutable state shell 仍是可选的后续性能优化；历史实体 compaction 仍按运行手册执行 |
 | P3 唯一盘口/恢复 | `DONE` | exchange-core 唯一 executable book、结构化 adapter、Aeron 托管 matcher snapshot、无逐单恢复 | fork 302 tests；六个 ProductLine 原生 FIFO restore；snapshot round-trip、损坏/版本/SHA/registry/订单集合不一致均 fail-closed；`CoreBookState` 和生产 rebuild 已删除 | 真实三 Member election、冷恢复和长时容量仍属于 P6 上线门禁 |
 | P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；详见 `.omo/evidence/w4-core-baseline-20260817.md` | 真实 provider API 对四类业务线逐项执行下单/触发/强平/资金费/交割/行权门禁；Provider 资金对账和 cursor 重启验证 |
 | P5 导出/查询/外围 | `DONE` | 一次编码 outbox、带 cursor 的批量 ACK、projection、查询旁路、慢连接隔离 | `w5-export-final-1315` 通过 Kafka/PG 故障恢复、重复/乱序、Gateway/WebSocket offset、Core 独立和资金门禁；`w5-isolation-final-1345` 通过 PG 恢复、投影缺口回放、慢客户端隔离和清理 | 生产规模容量和长时 soak 属于 P6，不阻塞本阶段功能出口 |
@@ -784,5 +784,6 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 - W5 Aeron 线程模式 A/B 和完整 `LINEAR_PERPETUAL` 导出/投影故障门禁记录在 `.omo/evidence/w5-aeron-threading-ab-20260817.md`；`w5-export-final-1315` 已通过 Kafka/PG/Exporter/Projector/Gateway/WebSocket、重复乱序、Core 独立裁决和资金门禁，`W5_EXPORT_PROJECTION=PASS`。隔离复跑因 Docker Desktop 停止未完成，不影响已通过的功能门禁。
 - `CoreInMemoryBenchmark 200 20`：`PASS`，本轮测得约 18.3 orders/s、p50 6.4ms、p95 301ms；该结果包含 exchange-core ring/future 和 export/hash 成本，不能作为百万级容量结论，后续 P3/P5 仍需基准拆分和真实集群压测。
 - W4 执行记录：六条 ProductLine Core-only 基线逐条通过；隔离 W4 静态检查通过，但真实门禁因 Provider-to-Core 生命周期、cursor 重启/缺口、PostgreSQL 投影选择和 maker/用户/Treasury 对账入口未接通而 fail-closed。详见 `.omo/evidence/w4-core-baseline-20260817.md`；不能据此标记 P4 `DONE`。
+- 技术遗留复核：`TradingCoreReducer` 的下单/成交路径、`TradingCoreState` 的 delta lineage、`CoreCommandDelta`、`RollingBusinessStateHash` 和 `CoreProbeState` 已逐项核对。S02/S03/S05/H01/H02/H03 的 `PARTIAL` 原状态属于文档滞后，已更新为 `IMPLEMENTED`；S01/S06 仍为真实遗留，因为用户/订单实体继续使用 immutable record + persistent `DeltaMap`，尚未改为 mutable entity store。相关 reducer/state-map 测试已覆盖 delta、changed keys、显式 client-order index 和 rolling hash。
 - canonical wrappers：`bash -n scripts/*.sh` 全部通过；SPOT `integration-smoke.sh` 返回 `spotMatchSmoke=PASS`、`status=OK`、`exportStatus=PASS`；SPOT `live-runtime-trading-reconciliation.sh` 返回 `status=OK` 和 `exportStatus=PASS`；SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery matrix 均生成 node stop/rejoin/cold restart 相同 hash、`ROLE_EVIDENCE=PASS`、`EXPORT_FAILURE=PASS` 和 `FUNDS_DIFFERENCE=0` 的 manifest；六条产品线各执行 20 秒 fresh `run-product-line-capacity.sh`，均返回 `capacity=PASS` 且 0 failures/fundsDiff=0；`PRODUCT_LINE=SPOT scripts/kafka-trading-smoke.sh` 返回 `kafkaTradingSmoke=PASS productLine=SPOT scope=CORE_INPUT_EXPORT_BRIDGE`。这些是 Core-only/受控本地证据，真实 API/provider/做市/Kafka 集群全链路、生产网络/磁盘故障、长时容量和 projection lag 仍不能由上述结果代替。
 - 逐条命令、输出和边界记录在 `.omo/evidence/manual-qa-canonical-core-20260815.md`。
