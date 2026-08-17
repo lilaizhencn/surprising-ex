@@ -41,6 +41,7 @@ public class ExternalSpotPriceClient {
         this.requestPermits = new Semaphore(Math.max(1, properties.getHttp().getMaxConcurrentRequests()));
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(properties.getHttp().getConnectTimeout())
+                .proxy(properties.getHttp().proxySelector())
                 .build();
     }
 

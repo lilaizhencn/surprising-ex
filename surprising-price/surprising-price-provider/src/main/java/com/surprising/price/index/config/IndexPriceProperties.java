@@ -4,6 +4,8 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.net.ProxySelector;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -220,6 +222,9 @@ public class IndexPriceProperties {
         private Duration requestTimeout = Duration.ofSeconds(3);
         private int maxConcurrentRequests = 32;
         private String userAgent = "surprising-index-price/1.0";
+        private boolean proxyEnabled;
+        private String proxyHost = "127.0.0.1";
+        private int proxyPort = 7897;
 
         public Duration getConnectTimeout() {
             return connectTimeout;
@@ -251,6 +256,40 @@ public class IndexPriceProperties {
 
         public void setUserAgent(String userAgent) {
             this.userAgent = userAgent;
+        }
+
+        public boolean isProxyEnabled() {
+            return proxyEnabled;
+        }
+
+        public void setProxyEnabled(boolean proxyEnabled) {
+            this.proxyEnabled = proxyEnabled;
+        }
+
+        public String getProxyHost() {
+            return proxyHost;
+        }
+
+        public void setProxyHost(String proxyHost) {
+            this.proxyHost = proxyHost;
+        }
+
+        public int getProxyPort() {
+            return proxyPort;
+        }
+
+        public void setProxyPort(int proxyPort) {
+            this.proxyPort = proxyPort;
+        }
+
+        public ProxySelector proxySelector() {
+            if (!proxyEnabled) {
+                return ProxySelector.getDefault();
+            }
+            if (proxyHost == null || proxyHost.isBlank() || proxyPort < 1 || proxyPort > 65535) {
+                throw new IllegalStateException("invalid external HTTP proxy configuration");
+            }
+            return ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort));
         }
     }
 

@@ -58,6 +58,9 @@ surprising:
         request-timeout: 3s
         max-concurrent-requests: 32
         user-agent: surprising-price/1.0
+        proxy-enabled: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_ENABLED:false}
+        proxy-host: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_HOST:127.0.0.1}
+        proxy-port: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT:7897}
       web-socket:
         enabled: true
         refresh-delay-ms: 30000

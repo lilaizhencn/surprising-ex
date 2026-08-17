@@ -19,6 +19,10 @@ Funding/Liquidation/Insurance/ADL、Gateway，全部就绪后最后启动 Maker�
 `ProductTopicNames` 源码顺序派生；Kafka 禁止自动建 Topic。`run` 在前台保持该栈并通过 trap 做相同的
 精确清理。
 
+真实运行中 migration 只负责建表和约束。`Instrument Provider` 健康后，运行束会先通过正式管理 API 写入当前产品线
+的 `W4-BOOTSTRAP-*` 合约，并立即读取一次管理查询确认 PostgreSQL 与 Instrument 快照可读，然后才启动 Price
+Provider。该 bootstrap 只属于本次带标签的运行数据库，清理时随运行卷处理；生产默认的空快照 fail-closed 行为不变。
+
 `smoke` 使用真实 PostgreSQL/Kafka/Core 容器和轻量本地健康进程验证同一启动顺序、readiness、标签、
 manifest 与清理路径；它不会把这些健康进程当作真实业务服务。短验证命令为：
 

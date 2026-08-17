@@ -60,6 +60,7 @@ import org.springframework.stereotype.Component;
         this.latestSourceQuoteStore = latestSourceQuoteStore;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(properties.getHttp().getConnectTimeout())
+                .proxy(properties.getHttp().proxySelector())
                 .build();
     }
 

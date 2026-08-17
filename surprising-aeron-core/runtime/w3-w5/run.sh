@@ -16,10 +16,10 @@ KAFKA_PORT="${KAFKA_PORT:-29092}"
 POSTGRES_USER="${POSTGRES_USER:-surprising}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-surprising-local-only}"
 
-readonly PROCESS_SERVICES=(exporter projector instrument price order matching trigger risk funding liquidation insurance adl gateway maker)
-readonly HTTP_SERVICES=(instrument price order matching trigger risk funding liquidation insurance adl gateway maker)
+readonly PROCESS_SERVICES=(exporter projector instrument price account order matching trigger risk funding liquidation insurance adl gateway maker)
+readonly HTTP_SERVICES=(instrument price account order matching trigger risk funding liquidation insurance adl gateway maker)
 readonly HTTP_PORTS=(
-  "${INSTRUMENT_PORT:-9080}" "${PRICE_PORT:-9082}" "${ORDER_PORT:-9084}"
+  "${INSTRUMENT_PORT:-9080}" "${PRICE_PORT:-9082}" "${ACCOUNT_PORT:-9086}" "${ORDER_PORT:-9084}"
   "${MATCHING_PORT:-9085}" "${TRIGGER_PORT:-9095}" "${RISK_PORT:-9087}"
   "${FUNDING_PORT:-9089}" "${LIQUIDATION_PORT:-9088}" "${INSURANCE_PORT:-9090}"
   "${ADL_PORT:-9091}" "${GATEWAY_PORT:-9094}" "${MAKER_PORT:-9096}"
@@ -37,14 +37,19 @@ require_boolean() {
 validate_context() {
   [[ -n "$RUN_ID" ]] || fail 'RUN_ID_REQUIRED'
   [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] || fail "INVALID_RUN_ID runId=$RUN_ID"
-  [[ "$PRODUCT_LINE" == 'LINEAR_PERPETUAL' ]] || fail "PRODUCT_LINE_REFUSED expected=LINEAR_PERPETUAL actual=${PRODUCT_LINE:-unset}"
+  case "$PRODUCT_LINE" in
+    SPOT|LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION) ;;
+    *) fail "PRODUCT_LINE_REFUSED unsupported=${PRODUCT_LINE:-unset}" ;;
+  esac
   require_boolean WALLET_ENABLED "$WALLET_ENABLED"
   [[ "$WALLET_ENABLED" == false ]] || fail 'WALLET_REFUSED wallet must remain absent'
   require_boolean TASK_RUN_FRESH "$TASK_RUN_FRESH"
   [[ -f "$COMPOSE_FILE" && -x "$COMMON_SCRIPT" ]] || fail 'RUNTIME_BUNDLE_INCOMPLETE'
   [[ -f "$PRODUCT_TOPIC_SOURCE" ]] || fail "PRODUCT_TOPIC_SOURCE_MISSING path=$PRODUCT_TOPIC_SOURCE"
-  MAIN_WORKTREE="$(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')"
-  [[ "$REPO_ROOT" != "$MAIN_WORKTREE" ]] || fail "MAIN_WORKTREE_REFUSED path=$REPO_ROOT"
+  if [[ "${W4_STATIC_ONLY:-false}" != true ]]; then
+    MAIN_WORKTREE="$(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')"
+    [[ "$REPO_ROOT" != "$MAIN_WORKTREE" ]] || fail "MAIN_WORKTREE_REFUSED path=$REPO_ROOT"
+  fi
 }
 
 initialize_names() {
@@ -71,13 +76,25 @@ compose() {
 }
 
 topic_list() {
-  awk -v prefix='surprising.linear-perp' '
+  awk -v prefix="surprising.$(topic_segment)" '
     /return topic\("/ {
       value=$0; sub(/^.*return topic\("/, "", value); sub(/"\).*$/, "", value);
       print prefix "." value ".v1"
     }
     /return INSTRUMENT_EVENTS_TOPIC/ { print "surprising.instrument.events.v1" }
   ' "$PRODUCT_TOPIC_SOURCE"
+}
+
+topic_segment() {
+  case "$PRODUCT_LINE" in
+    SPOT) printf 'spot' ;;
+    LINEAR_PERPETUAL) printf 'linear-perp' ;;
+    INVERSE_PERPETUAL) printf 'inverse-perp' ;;
+    LINEAR_DELIVERY) printf 'linear-delivery' ;;
+    INVERSE_DELIVERY) printf 'inverse-delivery' ;;
+    OPTION) printf 'option' ;;
+    *) fail "PRODUCT_LINE_REFUSED unsupported=$PRODUCT_LINE" ;;
+  esac
 }
 
 port_lines() {
@@ -94,7 +111,7 @@ port_lines() {
 
 service_lines() {
   printf '%s\n' postgres kafka migrations core-node0 core-node1 core-node2 \
-    exporter projector instrument price order matching trigger risk funding liquidation insurance adl gateway maker
+    exporter projector instrument price account order matching trigger risk funding liquidation insurance adl gateway maker
 }
 
 assert_lock_available() {
@@ -331,11 +348,62 @@ port_owned_by_process_tree() {
   return 1
 }
 
+seed_instrument_snapshot() {
+  local symbol="W4-BOOTSTRAP-${PRODUCT_LINE}-BTC-USDT"
+  local instrument_port="${INSTRUMENT_PORT:-9080}"
+  local contract_type instrument_type quote_asset settle_asset expiry_json settlement_json
+  local reduce_only="false" funding_interval=0 interest_rate=0 funding_cap=0 funding_floor=0
+  local min_sources=1 brackets='[]' underlying_json=null strike_json=null option_type_json=null option_style_json=null
+  case "$PRODUCT_LINE" in
+    SPOT)
+      contract_type=SPOT; instrument_type=SPOT; quote_asset=USDT; settle_asset=USDT
+      ;;
+    LINEAR_PERPETUAL|INVERSE_PERPETUAL)
+      contract_type="$PRODUCT_LINE"; instrument_type=PERPETUAL
+      quote_asset=USDT; settle_asset=USDT; reduce_only="true"
+      [[ "$PRODUCT_LINE" == INVERSE_PERPETUAL ]] && quote_asset=USD && settle_asset=BTC
+      funding_interval=8; interest_rate=100; funding_cap=3000; funding_floor=-3000
+      min_sources=2
+      brackets='[{"bracketNo":1,"notionalFloorUnits":0,"notionalCapUnits":5000000000000,"maxLeveragePpm":100000000,"initialMarginRatePpm":10000,"maintenanceMarginRatePpm":5000}]'
+      ;;
+    LINEAR_DELIVERY|INVERSE_DELIVERY)
+      contract_type="$PRODUCT_LINE"; instrument_type=DELIVERY
+      quote_asset=USDT; settle_asset=USDT; reduce_only="true"; min_sources=2
+      [[ "$PRODUCT_LINE" == INVERSE_DELIVERY ]] && quote_asset=USD && settle_asset=BTC
+      expiry_json='"2030-01-01T00:00:00Z"'; settlement_json='"CASH"'
+      underlying_json='"BTC-USDT"'; strike_json=100; option_type_json='"CALL"'; option_style_json='"EUROPEAN"'
+      brackets='[{"bracketNo":1,"notionalFloorUnits":0,"notionalCapUnits":5000000000000,"maxLeveragePpm":100000000,"initialMarginRatePpm":10000,"maintenanceMarginRatePpm":5000}]'
+      ;;
+    OPTION)
+      contract_type=VANILLA_OPTION; instrument_type=OPTION
+      quote_asset=USDT; settle_asset=USDT; reduce_only="true"; min_sources=2
+      expiry_json='"2030-01-01T00:00:00Z"'; settlement_json='"CASH"'
+      brackets='[{"bracketNo":1,"notionalFloorUnits":0,"notionalCapUnits":5000000000000,"maxLeveragePpm":100000000,"initialMarginRatePpm":10000,"maintenanceMarginRatePpm":5000}]'
+      ;;
+    *) fail "BOOTSTRAP_PRODUCT_LINE_REFUSED line=$PRODUCT_LINE" ;;
+  esac
+  expiry_json="${expiry_json:-null}"
+  settlement_json="${settlement_json:-null}"
+  local sources='[{"source":"BOOTSTRAP-A","enabled":true,"baseUrl":"https://api.exchange.coinbase.com","path":"/products/BTC-USD/ticker","sourceSymbol":"BTC-USD","parser":"COINBASE_TICKER","quoteCurrency":"USD","targetQuoteCurrency":"USDT","conversionBaseUrl":null,"conversionPath":null,"conversionParser":null,"conversionMode":null,"conversionOperation":null,"fallbackWeightMultiplierPpm":500000,"websocketEnabled":false,"websocketUrl":null,"websocketSubscribeMessage":null,"websocketParser":null,"weightPpm":500000}'
+  if (( min_sources == 2 )); then
+    sources+=',{"source":"BOOTSTRAP-B","enabled":true,"baseUrl":"https://api.exchange.coinbase.com","path":"/products/BTC-USD/ticker","sourceSymbol":"BTC-USD","parser":"COINBASE_TICKER","quoteCurrency":"USD","targetQuoteCurrency":"USDT","conversionBaseUrl":null,"conversionPath":null,"conversionParser":null,"conversionMode":null,"conversionOperation":null,"fallbackWeightMultiplierPpm":500000,"websocketEnabled":false,"websocketUrl":null,"websocketSubscribeMessage":null,"websocketParser":null,"weightPpm":500000}'
+  fi
+  sources+=']'
+  local body="{\"symbol\":\"$symbol\",\"instrumentType\":\"$instrument_type\",\"contractType\":\"$contract_type\",\"baseAsset\":\"BTC\",\"quoteAsset\":\"$quote_asset\",\"settleAsset\":\"$settle_asset\",\"contractMultiplierPpm\":1000000,\"contractValueAsset\":\"$settle_asset\",\"priceTickUnits\":1,\"quantityStepUnits\":1,\"minQuantitySteps\":1,\"maxQuantitySteps\":100000,\"minNotionalUnits\":1,\"maxNotionalUnits\":1000000000000,\"notionalMultiplierUnits\":1,\"pricePrecision\":2,\"quantityPrecision\":3,\"supportedOrderTypes\":[\"LIMIT\"],\"supportedTimeInForce\":[\"GTC\",\"IOC\"],\"postOnlyEnabled\":true,\"reduceOnlyEnabled\":$reduce_only,\"marketOrderEnabled\":false,\"maxLeveragePpm\":100000000,\"initialMarginRatePpm\":10000,\"maintenanceMarginRatePpm\":5000,\"makerFeeRatePpm\":200,\"takerFeeRatePpm\":500,\"maxPositionNotionalUnits\":25000000000000,\"userOpenInterestLimitRatePpm\":0,\"userOpenInterestLimitFloorUnits\":1,\"fundingIntervalHours\":$funding_interval,\"interestRatePpm\":$interest_rate,\"fundingRateCapPpm\":$funding_cap,\"fundingRateFloorPpm\":$funding_floor,\"impactNotionalUnits\":1000000000000,\"minValidIndexSources\":$min_sources,\"expiryTime\":$expiry_json,\"deliveryTime\":$expiry_json,\"underlyingSymbol\":$underlying_json,\"strikePriceUnits\":$strike_json,\"optionType\":$option_type_json,\"optionExerciseStyle\":$option_style_json,\"settlementMethod\":$settlement_json,\"status\":\"TRADING\",\"effectiveTime\":null,\"riskLimitBrackets\":$brackets,\"indexSources\":$sources}"
+  curl --fail --silent --show-error --retry 10 --retry-delay 1 --max-time 20 \
+    -H 'Content-Type: application/json' -X POST \
+    --data "$body" "http://127.0.0.1:${instrument_port}/api/v1/instruments/admin/upsert" >/dev/null
+  curl --fail --silent --show-error --retry 10 --retry-delay 1 --max-time 10 \
+    "http://127.0.0.1:${instrument_port}/api/v1/instruments/admin/$symbol?productLine=$PRODUCT_LINE" >/dev/null
+  printf 'BOOTSTRAP=instrument productLine=%s symbol=%s\n' "$PRODUCT_LINE" "$symbol"
+}
+
 jar_path() {
   case "$1" in
     exporter|projector) printf '%s/surprising-aeron-core/surprising-aeron-exporter/target/surprising-aeron-exporter.jar' "$REPO_ROOT" ;;
     instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    account) printf '%s/surprising-account/surprising-account-provider/target/surprising-account-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     order) printf '%s/surprising-trading/surprising-order-provider/target/surprising-order-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     matching) printf '%s/surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     trigger) printf '%s/surprising-trading/surprising-trigger-provider/target/surprising-trigger-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
@@ -382,6 +450,16 @@ start_process_stack() {
       continue
     fi
     jar="$(jar_path "$service")"
+    if [[ "$service" == instrument ]]; then
+      start_owned_process "$service" "$port" env PRODUCT_LINE="$PRODUCT_LINE" SERVER_PORT="${port:-0}" \
+        KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" SPRING_KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" \
+        SPRING_DATASOURCE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/$POSTGRES_DB" SPRING_DATASOURCE_USERNAME="$POSTGRES_USER" SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD" \
+        AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-localhost,localhost,localhost}" \
+        AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-localhost}" \
+        "$java_bin" "${java_options[@]}" -jar "$jar"
+      seed_instrument_snapshot
+      continue
+    fi
     if [[ "$service" == projector ]]; then
       main_class=com.surprising.aeron.exporter.ProjectionMain
       start_owned_process "$service" '' env PRODUCT_LINE="$PRODUCT_LINE" KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" \
@@ -391,6 +469,9 @@ start_process_stack() {
       start_owned_process "$service" "$port" env PRODUCT_LINE="$PRODUCT_LINE" SERVER_PORT="${port:-0}" \
         KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" SPRING_KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" \
         SPRING_DATASOURCE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/$POSTGRES_DB" SPRING_DATASOURCE_USERNAME="$POSTGRES_USER" SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD" \
+        AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-localhost,localhost,localhost}" \
+        AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-localhost}" \
+        SURPRISING_TRADING_ORDER_RISK_LIMIT_PRICE_PROTECTION_ENABLED="${SURPRISING_TRADING_ORDER_RISK_LIMIT_PRICE_PROTECTION_ENABLED:-false}" \
         "$java_bin" "${java_options[@]}" -jar "$jar"
     fi
   done
@@ -471,7 +552,7 @@ print_dry_run() {
   assert_pid_ownership
   assert_ports_free
   printf 'DRY_RUN=PASS\nRUN_ID=%s\nPRODUCT_LINE=%s\nCOMPOSE_PROJECT=%s\n' "$RUN_ID" "$PRODUCT_LINE" "$COMPOSE_PROJECT_NAME"
-  printf 'TOPIC_PREFIX=surprising.linear-perp\n[topics]\n'; topic_list
+  printf 'TOPIC_PREFIX=surprising.%s\n[topics]\n' "$(topic_segment)"; topic_list
   printf '[services]\n'; service_lines
   printf '[ports]\n'; port_lines
   printf 'MAKER_POSITION=LAST\nWALLET=ABSENT\nMUTATION=NONE\n'
@@ -512,5 +593,18 @@ case "$command_name" in
     print_status
     down_internal
     ;;
-  *) fail "USAGE command=$command_name expected=up,status,run,down,dry-run,smoke" ;;
+  line-up)
+    up_internal real
+    ;;
+  scenario)
+    scenario_name="${2:-}"
+    case "$scenario_name" in
+      w4-six-line|w4-faults)
+        W4_RUNNER="$SCRIPT_DIR/run.sh" W4_SCENARIO="$scenario_name" \
+          bash "$SCRIPT_DIR/scenarios/w4-six-line.sh"
+        ;;
+      *) fail "UNKNOWN_SCENARIO scenario=$scenario_name" ;;
+    esac
+    ;;
+  *) fail "USAGE command=$command_name expected=up,line-up,status,run,down,dry-run,smoke,scenario" ;;
 esac

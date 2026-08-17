@@ -742,6 +742,23 @@ mvn -pl :surprising-funding-provider,:surprising-liquidation,:surprising-insuran
 打印并校验目标。`aeron-core-tool.sh` 只接受白名单产品线，并把探针、资金对账、容量和 exporter 演练绑定到
 同一产品线的 compose project；`fresh` 是唯一允许删除该产品线卷的显式动作。
 
+### 18.5 增量 JAR 构建规则（本轮实施）
+
+构建不得默认执行根目录 `mvn package`。`scripts/build-incremental.sh` 根据模块路径或 artifactId 生成受影响模块闭包：
+先纳入修改模块及其聚合子模块，再沿 Maven POM 依赖反向查找所有下游消费者，最后使用 Maven `-am` 补齐上游依赖。
+因此 API、协议或共享 parent 变更会有证据地扩大构建范围，单个 Provider 变更不会触发无关产品线 JAR 重建。
+
+```bash
+scripts/build-incremental.sh surprising-trading/surprising-order-provider
+scripts/build-incremental.sh :surprising-aeron-client :surprising-aeron-tools
+scripts/build-incremental.sh --changed --dry-run
+scripts/build-incremental.sh --with-tests :surprising-aeron-service
+```
+
+脚本默认执行 `package -DskipTests`，只生成计划中模块的 JAR；`--with-tests` 才运行受影响测试，`--goal install` 才写入
+本地 Maven 仓库。`--changed` 会忽略文档、脚本、报告、日志和构建产物；根 `pom.xml` 或 `surprising-parent/pom.xml`
+改变时安全地选择全部 reactor 模块。脚本输出 `incrementalBuild=PLAN` 和最终模块列表，便于在部署/压测前审计。
+
 本轮已经落地的护栏和增量改造：
 
 1. `CoreProbeState.completeMatching` 在 matcher 结果与业务状态应用不一致时抛出 `FatalMatchingDivergence`，成员进入 sticky fail-closed 并停止继续裁决；不再尝试进程内恢复或异步重建 exchange-core。

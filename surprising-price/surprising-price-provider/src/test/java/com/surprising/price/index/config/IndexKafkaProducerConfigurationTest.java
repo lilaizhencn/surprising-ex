@@ -3,6 +3,7 @@ package com.surprising.price.index.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.product.api.ProductLine;
+import java.net.URI;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -29,6 +30,19 @@ class IndexKafkaProducerConfigurationTest {
 
         assertThat(properties.getKafka().getPriceEventsTopic())
                 .isEqualTo("surprising.linear-delivery.price.events.v1");
+    }
+
+    @Test
+    void configuresOptionalExternalHttpProxy() {
+        IndexPriceProperties properties = new IndexPriceProperties();
+        properties.getHttp().setProxyEnabled(true);
+        properties.getHttp().setProxyHost("127.0.0.1");
+        properties.getHttp().setProxyPort(7897);
+
+        var proxy = properties.getHttp().proxySelector().select(URI.create("https://api.example.com")).getFirst();
+
+        assertThat(proxy.type()).isEqualTo(java.net.Proxy.Type.HTTP);
+        assertThat(proxy.address().toString()).isEqualTo("/127.0.0.1:7897");
     }
 
     @Test

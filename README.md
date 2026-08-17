@@ -106,6 +106,31 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 mvn -pl surprising-aeron-core/surprising-aeron-service -am test
 ```
 
+### 增量 JAR 构建
+
+不要直接执行根目录 `mvn package`。使用 `scripts/build-incremental.sh` 指定修改的模块；脚本会读取 Maven reactor
+依赖关系，同时加入所有直接或间接依赖该模块的下游消费者，最后交给 Maven `-am` 补齐必要的上游模块。没有受影响的
+模块时不会启动 Maven，也不会删除其他模块的 `target/`。
+
+```bash
+# 只改了一个模块，默认跳过测试并生成受影响模块的 JAR
+scripts/build-incremental.sh surprising-trading/surprising-order-provider
+
+# 也可以使用 artifactId 或多个模块
+scripts/build-incremental.sh :surprising-aeron-client :surprising-aeron-tools
+
+# 从当前工作区变更自动解析模块；文档、脚本、报告和日志不会触发 Maven
+scripts/build-incremental.sh --changed
+
+# 先查看计划，不执行构建；需要测试时显式打开
+scripts/build-incremental.sh --changed --dry-run
+scripts/build-incremental.sh --with-tests :surprising-aeron-service
+```
+
+源码或模块 `pom.xml` 变化只会构建影响闭包；根 `pom.xml`、`surprising-parent/pom.xml` 或共享公共 API 变化会安全地
+扩大范围，这是依赖传播而不是无条件全量构建。`package` 是默认目标；需要发布到本地仓库时显式使用
+`--goal install`。脚本默认 `-DskipTests`，跨账户、撮合、风控或协议变更必须使用 `--with-tests` 执行受影响模块测试。
+
 matching 使用 `exchange.core2:exchange-core:0.5.15-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
 以下 JVM 参数：
 

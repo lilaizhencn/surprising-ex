@@ -260,7 +260,7 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 
 ```bash
 mvn -pl :surprising-price -am test
-mvn -pl :surprising-price -am -DskipTests package
+scripts/build-incremental.sh :surprising-price-provider
 ```
 
 外部源快速检查：
