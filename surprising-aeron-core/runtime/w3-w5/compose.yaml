@@ -18,7 +18,7 @@ x-core-common: &core-common
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:18
     restart: "no"
     networks: [runtime]
     labels: *runtime-labels
@@ -29,7 +29,7 @@ services:
     ports:
       - "127.0.0.1:${POSTGRES_PORT:?POSTGRES_PORT is required}:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 1s

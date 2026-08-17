@@ -96,7 +96,7 @@ public final class SurprisingClusterNode {
     static ThreadingMode coreThreadingMode() {
         String configured = System.getProperty("surprising.aeron.core.threading-mode");
         if (configured == null || configured.isBlank()) {
-            configured = System.getenv().getOrDefault("AERON_CORE_THREADING_MODE", "SHARED");
+            configured = System.getenv().getOrDefault("AERON_CORE_THREADING_MODE", "DEDICATED");
         }
         try {
             return ThreadingMode.valueOf(configured.trim().toUpperCase(Locale.ROOT));

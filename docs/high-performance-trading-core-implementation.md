@@ -761,6 +761,7 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 36. Aeron trigger 的 mark-price、trigger-price、维护和持仓归零扫描统一使用降序 triggerOrderId 的有界分页；每页使用上页最后 ID 作为 before cursor，异常 cursor 立即停止并记录，达到页数上限显式告警，不再只扫描第一页或无界追赶。
 37. Core 为 `ResultUnknownException` 增加显式只读 `COMMAND_RESULT_QUERY` 协议；结果查询返回原命令的 `commandStatus/resultCode/appliedCommandCount/stateHash/data`，未知 commandId fail-closed，不改变命令重放和幂等语义。
 38. `SurprisingClusteredService` 使用有界 pending matching、Cluster timer continuation 和按序完成栅栏；普通下单/撤单/改单、盘口查询、强平、结算以及标记价触发的子单都先提交 exchange-core 异步命令，owner 线程不等待 ring future。存在 pending matching 时 snapshot 明确拒绝，不保存或恢复后重新提交未决命令；落后的结果不会越过前序命令。
+39. W5 真实运行 A/B 复现嵌入式 Aeron `ThreadingMode.SHARED` 下三个 Core MediaDriver 在正常运行阶段停止心跳；同机切换 Core 和客户端到 `DEDICATED` 后超过相同窗口并连续完成五次状态查询。Core 和客户端默认固定为 `DEDICATED`，仅保留显式环境变量/系统属性用于受控诊断；W5 本地编排升级到 PostgreSQL 18 的新版数据目录布局。
 
 仍未宣称完成的交付物：
 
@@ -780,6 +781,7 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 - 本轮通过 `PRODUCT_LINE=LINEAR_PERPETUAL scripts/aeron-core-local.sh up` + `smoke` 观察到 `derivativeSmoke=PASS productLine=LINEAR_PERPETUAL longUser=6100005001 shortUser=7100005001 usdtTotal=2000 fundingNet=0`，随后用同一入口 `down` 清理容器和网络。
 - 本轮通过 `PRODUCT_LINE=LINEAR_PERPETUAL scripts/aeron-core-local.sh fresh` + `status` + `smoke` 观察到三节点均 `Up`，并得到 `derivativeSmoke=PASS productLine=LINEAR_PERPETUAL longUser=6100005001 shortUser=7100005001 usdtTotal=2000 fundingNet=0`；随后使用同一入口 `down` 清理容器和网络，保留数据卷。
 - 多个三节点集群并行运行会耗尽 Docker `/dev/shm`，表现为客户端 `ResultUnknown`；停止其他集群后同一 LINEAR_DELIVERY 门禁稳定通过。这是测试环境容量门禁，不能当成业务失败或生产容量结论。
+- W5 Aeron 线程模式 A/B、运行窗口、五次查询和清理结果记录在 `.omo/evidence/w5-aeron-threading-ab-20260817.md`；该证据只关闭 MediaDriver 心跳根因，不替代 Gateway schema、Kafka/PG、Projection 和慢 WebSocket 客户端的完整 W5 门禁。
 - `CoreInMemoryBenchmark 200 20`：`PASS`，本轮测得约 18.3 orders/s、p50 6.4ms、p95 301ms；该结果包含 exchange-core ring/future 和 export/hash 成本，不能作为百万级容量结论，后续 P3/P5 仍需基准拆分和真实集群压测。
 - canonical wrappers：`bash -n scripts/*.sh` 全部通过；SPOT `integration-smoke.sh` 返回 `spotMatchSmoke=PASS`、`status=OK`、`exportStatus=PASS`；SPOT `live-runtime-trading-reconciliation.sh` 返回 `status=OK` 和 `exportStatus=PASS`；SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery matrix 均生成 node stop/rejoin/cold restart 相同 hash、`ROLE_EVIDENCE=PASS`、`EXPORT_FAILURE=PASS` 和 `FUNDS_DIFFERENCE=0` 的 manifest；六条产品线各执行 20 秒 fresh `run-product-line-capacity.sh`，均返回 `capacity=PASS` 且 0 failures/fundsDiff=0；`PRODUCT_LINE=SPOT scripts/kafka-trading-smoke.sh` 返回 `kafkaTradingSmoke=PASS productLine=SPOT scope=CORE_INPUT_EXPORT_BRIDGE`。这些是 Core-only/受控本地证据，真实 API/provider/做市/Kafka 集群全链路、生产网络/磁盘故障、长时容量和 projection lag 仍不能由上述结果代替。
 - 逐条命令、输出和边界记录在 `.omo/evidence/manual-qa-canonical-core-20260815.md`。
