@@ -67,6 +67,7 @@ import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderCommandReceipt;
+import com.surprising.trading.api.model.OrderCommandResult;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -94,8 +95,14 @@ import java.util.Optional;
 import java.util.zip.CRC32;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 class MarketMakerServiceTest {
+
+    private static final ObjectMapper ORDER_OBJECT_MAPPER = JsonMapper.builder()
+            .findAndAddModules()
+            .build();
 
     @AfterEach
     void clearProductLineContext() {
@@ -186,6 +193,7 @@ class MarketMakerServiceTest {
         OrderResponse staleBid = order(7L, 900001L, prefix + "b0-1", OrderSide.BUY,
                 49_000L, 10L, OrderStatus.ACCEPTED);
         Fixtures fixtures = new Fixtures(List.of(staleBid));
+        fixtures.orderRpc.jsonRoundTripReceipts = true;
         MarketMakerService service = fixtures.service();
 
         service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
@@ -552,6 +560,7 @@ class MarketMakerServiceTest {
         private final List<ProductLine> productLinesDuringOpenOrders = new ArrayList<>();
         private final List<BatchPlaceOrderRequest> batchPlaceRequests = new ArrayList<>();
         private boolean batchSupported = true;
+        private boolean jsonRoundTripReceipts;
         private int openOrdersCalls;
         private int cancelBatchCalls;
 
@@ -629,10 +638,19 @@ class MarketMakerServiceTest {
             return terminal(new OrderBatchResponse(results.size(), results.size(), 0, results));
         }
 
-        private OrderCommandReceipt terminal(Object result) {
+        private OrderCommandReceipt terminal(OrderCommandResult result) {
             UUID commandId = UUID.nameUUIDFromBytes(("fake:" + result).getBytes(StandardCharsets.UTF_8));
-            return new OrderCommandReceipt(commandId, "TERMINAL", "NONE", "completed",
+            OrderCommandReceipt receipt = new OrderCommandReceipt(commandId, "TERMINAL", "NONE", "completed",
                     OrderCommandReceipt.commandResultUrl(commandId), List.of(), null, result, null);
+            if (!jsonRoundTripReceipts) {
+                return receipt;
+            }
+            try {
+                return ORDER_OBJECT_MAPPER.readValue(ORDER_OBJECT_MAPPER.writeValueAsString(receipt),
+                        OrderCommandReceipt.class);
+            } catch (Exception ex) {
+                throw new AssertionError("maker receipt JSON round-trip failed", ex);
+            }
         }
 
         @Override

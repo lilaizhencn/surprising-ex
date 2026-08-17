@@ -12,7 +12,7 @@ public record OrderCommandReceipt(
         String commandResultUrl,
         List<Long> prospectiveOrderIds,
         Long requiredExportSequence,
-        Object result,
+        OrderCommandResult result,
         Long rawOfferResult) {
 
     public OrderCommandReceipt {

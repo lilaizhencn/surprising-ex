@@ -36,6 +36,7 @@ import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderCommandReceipt;
+import com.surprising.trading.api.model.OrderCommandResult;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
@@ -1116,7 +1117,8 @@ public class MarketMakerService {
     }
 
     private <T> T receiptResult(OrderCommandReceipt receipt, Class<T> type) {
-        return receipt != null && type.isInstance(receipt.result()) ? type.cast(receipt.result()) : null;
+        OrderCommandResult result = receipt == null ? null : receipt.result();
+        return result != null && type.isInstance(result) ? type.cast(result) : null;
     }
 
     private String receiptMessage(OrderCommandReceipt receipt) {

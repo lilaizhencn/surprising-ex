@@ -4,5 +4,5 @@ public record AmendOrderResponse(
         OrderResponse originalOrder,
         OrderResponse replacementOrder,
         boolean cancelRequested,
-        String message) {
+        String message) implements OrderCommandResult {
 }
