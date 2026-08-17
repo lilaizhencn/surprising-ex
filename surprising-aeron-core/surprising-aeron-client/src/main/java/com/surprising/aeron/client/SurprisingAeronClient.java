@@ -21,6 +21,7 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntSupplier;
+import java.util.concurrent.TimeUnit;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
@@ -88,8 +89,26 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             throw new IllegalArgumentException("responseTimeout must be positive");
         }
         MediaDriver mediaDriver = newMediaDriver();
-        return new SurprisingAeronClient(productLine, hostnames, egressHostname, responseTimeout,
-                mediaDriver, true);
+        AsyncConnection connection = new AsyncConnection(productLine, hostnames, egressHostname,
+                responseTimeout, mediaDriver, true);
+        long deadline = System.nanoTime() + responseTimeout.toNanos();
+        try {
+            while (System.nanoTime() < deadline) {
+                SurprisingAeronClient connected = connection.poll();
+                if (connected != null) {
+                    return connected;
+                }
+                TimeUnit.MILLISECONDS.sleep(1);
+            }
+            throw new io.aeron.exceptions.TimeoutException(
+                    "timed out connecting to Aeron Cluster productLine=" + productLine);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted connecting to Aeron Cluster", exception);
+        } catch (RuntimeException exception) {
+            connection.close();
+            throw exception;
+        }
     }
 
     static SurprisingAeronClient connect(
@@ -315,6 +334,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         private final Duration responseTimeout;
         private final MediaDriver mediaDriver;
         private final AeronCluster.AsyncConnect connection;
+        private final boolean closeMediaDriver;
         private final AtomicBoolean closed = new AtomicBoolean();
         private volatile SurprisingAeronClient client;
 
@@ -324,9 +344,20 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
                 String egressHostname,
                 Duration responseTimeout,
                 MediaDriver mediaDriver) {
+            this(productLine, hostnames, egressHostname, responseTimeout, mediaDriver, false);
+        }
+
+        private AsyncConnection(
+                ProductLine productLine,
+                List<String> hostnames,
+                String egressHostname,
+                Duration responseTimeout,
+                MediaDriver mediaDriver,
+                boolean closeMediaDriver) {
             this.productLine = Objects.requireNonNull(productLine, "productLine");
             this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
             this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
+            this.closeMediaDriver = closeMediaDriver;
             this.connection = AeronCluster.asyncConnect(clusterContext(productLine, hostnames, egressHostname,
                     responseTimeout, mediaDriver, this));
         }
@@ -340,7 +371,8 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             if (connected == null) {
                 return null;
             }
-            current = new SurprisingAeronClient(productLine, responseTimeout, mediaDriver, false, connected);
+            current = new SurprisingAeronClient(productLine, responseTimeout, mediaDriver,
+                    closeMediaDriver, connected);
             client = current;
             return current;
         }
@@ -385,6 +417,9 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
                 connection.close();
             } else {
                 current.close();
+            }
+            if (closeMediaDriver) {
+                mediaDriver.close();
             }
         }
 
