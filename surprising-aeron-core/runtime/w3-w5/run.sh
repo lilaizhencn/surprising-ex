@@ -232,6 +232,15 @@ mark_ready() {
 
 run_migrations() {
   local migration
+  if [[ -f "$REPO_ROOT/init.sql" ]]; then
+    compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      < "$REPO_ROOT/init.sql" >/dev/null
+  fi
+  for migration in "$REPO_ROOT"/migrations/*.sql; do
+    [[ -e "$migration" ]] || continue
+    compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      < "$migration" >/dev/null
+  done
   for migration in "$REPO_ROOT"/surprising-aeron-core/surprising-aeron-exporter/src/main/resources/db/migration/*.sql; do
     compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" < "$migration" >/dev/null
   done
