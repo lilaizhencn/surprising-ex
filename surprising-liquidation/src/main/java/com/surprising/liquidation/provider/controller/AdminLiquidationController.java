@@ -4,6 +4,7 @@ import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.provider.service.LiquidationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -33,6 +34,13 @@ public class AdminLiquidationController {
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
+    }
+
+    @PostMapping("/run-cycle")
+    public LiquidationService.WorkCycle runCycle(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
+        requireAdmin(adminUserId);
+        return liquidationService.processWork();
     }
 
     private void requireAdmin(String adminUserId) {

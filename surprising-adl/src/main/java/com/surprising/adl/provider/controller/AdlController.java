@@ -65,6 +65,13 @@ public class AdlController {
         }
     }
 
+    @PostMapping("/admin/run-cycle")
+    public AdlService.AdlCycle runCycle(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
+        requireAdmin(adminUserId);
+        return adlService.processResidualDeficits();
+    }
+
     @GetMapping("/admin/events")
     public AdlEventQueryResponse adminEvents(@RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
                                              @RequestParam(required = false) Long userId,

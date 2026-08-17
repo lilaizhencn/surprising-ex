@@ -43,16 +43,18 @@ public class AdlService {
         this.sequences = sequences;
     }
 
-    public void processResidualDeficits() {
-        if (!properties.getScanner().isEnabled()) return;
+    public synchronized AdlCycle processResidualDeficits() {
+        if (!properties.getScanner().isEnabled()) return AdlCycle.disabled();
         CoreLiquidationWorkView work = aeron.resolutionWork(CoreLiquidationWorkView.Purpose.ADL, 0,
                 properties.getScanner().getBatchSize(), 1_048_576);
         requireOwnedWork(work);
+        int executed = 0;
         for (CoreLiquidationWorkView.Resolution resolution : work.resolutions()) {
-            process(new CoreAdlLiquidationProjection(resolution.liquidationId(), resolution.userId(),
+            executed += process(new CoreAdlLiquidationProjection(resolution.liquidationId(), resolution.userId(),
                     resolution.symbol(), resolution.asset(), resolution.signedQuantitySteps(),
                     resolution.deficitUnits()));
         }
+        return new AdlCycle(true, work.resolutions().size(), executed);
     }
 
     private void requireOwnedWork(CoreLiquidationWorkView work) {
@@ -65,7 +67,7 @@ public class AdlService {
         }
     }
 
-    private void process(CoreAdlLiquidationProjection liquidation) {
+    private int process(CoreAdlLiquidationProjection liquidation) {
         long remaining = liquidation.deficitUnits();
         int max = Math.max(1, properties.getScanner().getMaxDeleveragesPerDeficit());
         int candidateLimit = Math.min(1000, max * Math.max(1, properties.getScanner().getCandidateMultiplier()));
@@ -95,6 +97,7 @@ public class AdlService {
                     covered, remaining, Instant.now());
             executed++;
         }
+        return executed;
     }
 
     public AdlQueueQueryResponse queue(String asset, int limit) {
@@ -185,5 +188,11 @@ public class AdlService {
 
     private String accountType() {
         return properties.getKafka().getAccountType();
+    }
+
+    public record AdlCycle(boolean enabled, int resolutions, int executed) {
+        static AdlCycle disabled() {
+            return new AdlCycle(false, 0, 0);
+        }
     }
 }

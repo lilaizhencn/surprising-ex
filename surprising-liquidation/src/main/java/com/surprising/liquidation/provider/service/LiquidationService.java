@@ -27,7 +27,7 @@ public class LiquidationService {
         this.projections = projections;
     }
 
-    public WorkCycle processWork() {
+    public synchronized WorkCycle processWork() {
         if (!properties.getExecution().isEnabled()) return new WorkCycle(false, 0, 0, 0, 0, 0);
         long feeRatePpm = properties.getExecution().getLiquidationFeeRatePpm();
         long cursor = 0;

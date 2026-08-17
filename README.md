@@ -84,6 +84,20 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。入口层边界由源码审查和
 对应 Maven 测试维护。
 
+生命周期 Provider 还提供受保护的单周期运维入口，便于真实门禁和故障恢复演练；请求必须由 Gateway
+注入非空 `X-Admin-User-Id`，资金/持仓变更仍只由 Aeron Core 原子执行：
+
+| Provider | 单周期入口 | 说明 |
+|---|---|---|
+| funding | `POST /api/v1/funding/admin/run-cycle` | 有界资金费 continuation |
+| liquidation | `POST /api/v1/admin/liquidations/run-cycle` | 有界强平 work/action 批次 |
+| insurance | `POST /api/v1/insurance/admin/run-cycle` | Core 选择的保险覆盖批次 |
+| adl | `POST /api/v1/adl/admin/run-cycle` | Core 选择的 ADL 批次 |
+
+定时任务与 HTTP 入口调用同一 Service 方法并串行化；重复请求不会绕过 Core cursor 或在 PostgreSQL
+中直接修改在线余额。接口返回已处理数量和失败/未完成数量，便于记录 `ProductLine`、Core sequence
+和资金对账证据。
+
 ## 构建与本地验证
 
 要求 JDK 25。基础设施启动、数据库初始化、Topic 创建和三节点部署入口正在重新整理；当前优先执行受影响模块测试：

@@ -53,19 +53,24 @@ import java.util.UUID;
     }
 
     @Transactional
-    public void coverDeficits() {
+    public synchronized CoverageCycle coverDeficits() {
         if (!properties.getCoverage().isEnabled()) {
-            return;
+            return CoverageCycle.disabled();
         }
         int batchSize = properties.getCoverage().getBatchSize();
         CoreLiquidationWorkView work = aeron.resolutionWork(CoreLiquidationWorkView.Purpose.INSURANCE,
                 0, batchSize, 1_048_576);
         requireOwnedWork(work);
+        int covered = 0;
         for (CoreLiquidationWorkView.Resolution resolution : work.resolutions()) {
-            coverDeficit(new com.surprising.insurance.provider.model.CoreLiquidationProjection(
+            if (coverDeficit(new com.surprising.insurance.provider.model.CoreLiquidationProjection(
                     resolution.liquidationId(), resolution.userId(), resolution.asset(),
-                    resolution.deficitUnits()));
+                    resolution.deficitUnits()))) {
+                covered++;
+            }
         }
+        return new CoverageCycle(true, work.resolutions().size(), covered,
+                work.resolutions().size() - covered);
     }
 
     private void requireOwnedWork(CoreLiquidationWorkView work) {
@@ -261,5 +266,11 @@ import java.util.UUID;
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         return limit;
+    }
+
+    public record CoverageCycle(boolean enabled, int resolutions, int covered, int unresolved) {
+        static CoverageCycle disabled() {
+            return new CoverageCycle(false, 0, 0, 0);
+        }
     }
 }

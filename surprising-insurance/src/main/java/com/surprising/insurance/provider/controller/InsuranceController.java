@@ -39,6 +39,13 @@ public class InsuranceController {
         return insuranceService.adjustFund(request);
     }
 
+    @PostMapping("/admin/run-cycle")
+    public InsuranceService.CoverageCycle runCycle(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
+        requireAdmin(adminUserId);
+        return insuranceService.coverDeficits();
+    }
+
     @GetMapping("/balances")
     public InsuranceFundBalanceQueryResponse balances(@RequestParam(required = false) String asset) {
         return insuranceService.balances(asset);
@@ -113,5 +120,11 @@ public class InsuranceController {
             Boolean coverageEnabled,
             Long scanDelayMs,
             Integer batchSize) {
+    }
+
+    private void requireAdmin(String adminUserId) {
+        if (adminUserId == null || adminUserId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin identity header is required");
+        }
     }
 }

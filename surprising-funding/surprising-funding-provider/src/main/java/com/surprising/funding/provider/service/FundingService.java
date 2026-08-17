@@ -88,11 +88,16 @@ public class FundingService {
         }
     }
 
-    public void settleDueRates() {
-        if (!properties.getSettlement().isEnabled()) return;
+    public synchronized SettlementCycle settleDueRates() {
+        if (!properties.getSettlement().isEnabled()) return SettlementCycle.disabled();
         Instant now = Instant.now();
+        int dueRates = 0;
+        int settledRates = 0;
+        int pages = 0;
+        int failedRates = 0;
         for (FundingRateResponse rate : latestFundingRateCache.duePredictions(now).stream()
                 .limit(properties.getSettlement().getBatchSize()).toList()) {
+            dueRates++;
             if (!ownsSymbol(rate.symbol())) continue;
             try {
                 FundingSettlementRepository.CoreSettlement settlement = settlementRepository.reserveCore(rate);
@@ -117,6 +122,7 @@ public class FundingService {
                             TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
                                     settlement.settlementId(), rate.symbol(), settlement.instrumentVersion(),
                                     rate.fundingRatePpm(), cursor, ApplyFundingCommand.DEFAULT_MAX_USERS)));
+                    pages++;
                     CoreFundingProgressView progress = decodeProgressOrQuery(rate.symbol(), settlement, response);
                     if (progress == null) {
                         throw new IllegalStateException("Aeron funding progress is required");
@@ -133,11 +139,14 @@ public class FundingService {
                 if (!complete) continue;
                 rateRepository.saveFinal(rate);
                 latestFundingRateCache.removeIfCurrent(rate);
+                settledRates++;
             } catch (Exception exception) {
+                failedRates++;
                 log.error("Aeron funding settlement failed symbol={} fundingTime={}: {}",
                         rate.symbol(), rate.fundingTime(), exception.getMessage(), exception);
             }
         }
+        return new SettlementCycle(true, dueRates, settledRates, pages, failedRates);
     }
 
     private CoreFundingProgressView decodeProgressOrQuery(
@@ -216,6 +225,12 @@ public class FundingService {
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
         return normalized;
+    }
+
+    public record SettlementCycle(boolean enabled, int dueRates, int settledRates, int pages, int failedRates) {
+        static SettlementCycle disabled() {
+            return new SettlementCycle(false, 0, 0, 0, 0);
+        }
     }
 
     private int normalizeLimit(int limit) {
