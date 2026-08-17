@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.aeron.protocol.CoreBookLevelView;
@@ -29,9 +30,28 @@ import com.surprising.trading.matching.config.MatchingProperties;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletionException;
 import org.junit.jupiter.api.Test;
 
 class CoreMarketDataProjectionTest {
+
+    @Test
+    void retriesInitialProjectionWhileAeronConnects() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getAeron().setResponseTimeout(java.time.Duration.ofSeconds(1));
+        MatchingAeronGateway gateway = mock(MatchingAeronGateway.class);
+        var notConnected = new CoreCommandOutcome.NotAcceptedException(new CoreCommandOutcome.NotAccepted(
+                CoreCommandOutcome.NotAcceptedReason.NOT_CONNECTED, -1));
+        when(gateway.orderBookProjection())
+                .thenThrow(new CompletionException(notConnected))
+                .thenReturn(new CoreOrderBookView(0, List.of()));
+        CoreMarketDataProjection projection = new CoreMarketDataProjection(properties, gateway,
+                ignored -> { }, ignored -> { }, new LatestPublicTradeCache());
+
+        projection.initialize();
+
+        assertThat(projection.appliedExportSequence()).isZero();
+    }
 
     @Test
     void bootstrapsFromAeronAndAppliesContiguousCoreEvents() {

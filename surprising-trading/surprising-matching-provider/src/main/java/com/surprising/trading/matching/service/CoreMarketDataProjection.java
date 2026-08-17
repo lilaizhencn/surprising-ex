@@ -1,6 +1,7 @@
 package com.surprising.trading.matching.service;
 
 import com.surprising.aeron.protocol.CoreExportCodec;
+import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
@@ -26,6 +27,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.locks.LockSupport;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -58,11 +61,36 @@ public class CoreMarketDataProjection {
 
     @PostConstruct
     public synchronized void initialize() {
-        var bootstrap = aeronGateway.orderBookProjection();
+        var bootstrap = loadBootstrap();
         books.clear();
         bootstrap.levels().forEach(level -> adjustLevel(normalizeSymbol(level.symbol()), level.side(),
                 level.priceTicks(), level.quantitySteps(), level.orderCount()));
         appliedExportSequence = bootstrap.exportSequence();
+    }
+
+    private com.surprising.aeron.protocol.CoreOrderBookView loadBootstrap() {
+        long deadline = System.nanoTime() + properties.getAeron().getResponseTimeout().toNanos();
+        while (true) {
+            try {
+                return aeronGateway.orderBookProjection();
+            } catch (CompletionException ex) {
+                if (!notConnected(ex) || System.nanoTime() >= deadline) {
+                    throw ex;
+                }
+                LockSupport.parkNanos(25_000_000L);
+            }
+        }
+    }
+
+    private static boolean notConnected(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof CoreCommandOutcome.NotAcceptedException rejected) {
+                return rejected.rejection().reason() == CoreCommandOutcome.NotAcceptedReason.NOT_CONNECTED;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     @KafkaListener(topics = "#{__listener.coreEventsTopic()}", groupId = "#{__listener.groupId()}",
