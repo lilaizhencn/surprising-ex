@@ -194,6 +194,7 @@ verify_topics() {
         else if ($field ~ /^PartitionCount:/) { partitions=$field; sub(/^PartitionCount:/, "", partitions) }
       }
       if (topic == "" || partitions !~ /^[0-9]+$/) exit 2
+      if (topic == "__consumer_offsets") next
       print topic "\t" partitions
       summaries++
     }
