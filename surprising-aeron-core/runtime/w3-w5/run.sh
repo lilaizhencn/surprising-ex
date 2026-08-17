@@ -361,7 +361,12 @@ preflight_real_artifacts() {
 }
 
 start_process_stack() {
-  local mode="$1" index service port jar main_class
+  local mode="$1" index service port jar main_class java_bin
+  local -a java_options=(
+    --add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+    --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
+  )
+  java_bin="${JAVA_HOME:+$JAVA_HOME/bin/}java"
   for index in "${!PROCESS_SERVICES[@]}"; do
     service="${PROCESS_SERVICES[$index]}"
     port=''
@@ -381,12 +386,12 @@ start_process_stack() {
       main_class=com.surprising.aeron.exporter.ProjectionMain
       start_owned_process "$service" '' env PRODUCT_LINE="$PRODUCT_LINE" KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" \
         DATABASE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/$POSTGRES_DB" DATABASE_USER="$POSTGRES_USER" DATABASE_PASSWORD="$POSTGRES_PASSWORD" \
-        "${JAVA_HOME:+$JAVA_HOME/bin/}java" -cp "$jar" "$main_class"
+        "$java_bin" "${java_options[@]}" -cp "$jar" "$main_class"
     else
       start_owned_process "$service" "$port" env PRODUCT_LINE="$PRODUCT_LINE" SERVER_PORT="${port:-0}" \
         KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" SPRING_KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" \
         SPRING_DATASOURCE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/$POSTGRES_DB" SPRING_DATASOURCE_USERNAME="$POSTGRES_USER" SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD" \
-        "${JAVA_HOME:+$JAVA_HOME/bin/}java" -jar "$jar"
+        "$java_bin" "${java_options[@]}" -jar "$jar"
     fi
   done
 }
