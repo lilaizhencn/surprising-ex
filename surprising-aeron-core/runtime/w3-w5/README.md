@@ -14,7 +14,7 @@ RUN_ID=my-linear-perp PRODUCT_LINE=LINEAR_PERPETUAL WALLET_ENABLED=false ./run.s
 ```
 
 `up` 是真实运行入口：要求 `surprising/aeron-core:local` 和各模块已经由 JDK 25 打包，启动 PostgreSQL、
-Kafka、迁移、三个 Core Member、Exporter/Projector、Instrument/Price/Order/Matching/Trigger/Risk/
+Kafka、Gateway 最小运行 schema、Exporter/Projector、三个 Core Member、Instrument/Price/Order/Matching/Trigger/Risk/
 Funding/Liquidation/Insurance/ADL、Gateway，全部就绪后最后启动 Maker。Topic 列表在每次运行时从
 `ProductTopicNames` 源码顺序派生；Kafka 禁止自动建 Topic。`run` 在前台保持该栈并通过 trap 做相同的
 精确清理。

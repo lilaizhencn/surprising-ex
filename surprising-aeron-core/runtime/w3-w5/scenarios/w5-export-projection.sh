@@ -66,6 +66,7 @@ export SURPRISING_WEBSOCKET_SESSION_SEND_TIMEOUT=200ms
 JAVA_CANDIDATES=()
 [[ -n "${JAVA_HOME:-}" ]] && JAVA_CANDIDATES+=("$JAVA_HOME")
 JAVA_CANDIDATES+=(
+  /opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
   /Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home
   /Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home
 )
@@ -153,6 +154,13 @@ topic_list() {
 
 run_migrations() {
   local migration
+  compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    < "$RUNTIME_DIR/gateway-schema.sql" >/dev/null
+  compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -c "SELECT to_regclass('public.gateway_product_transfers') AS gateway_product_transfers, to_regclass('public.gateway_product_transfer_events') AS gateway_product_transfer_events" \
+    | rg -q 'gateway_product_transfers.*gateway_product_transfer_events' \
+    || fail GATEWAY_SCHEMA_READINESS_FAILED
+  mark_ready gateway-schema
   for migration in "$REPO_ROOT"/surprising-aeron-core/surprising-aeron-exporter/src/main/resources/db/migration/*.sql; do
     compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" < "$migration" >/dev/null
   done
