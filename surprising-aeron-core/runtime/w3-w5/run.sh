@@ -334,18 +334,18 @@ port_owned_by_process_tree() {
 jar_path() {
   case "$1" in
     exporter|projector) printf '%s/surprising-aeron-core/surprising-aeron-exporter/target/surprising-aeron-exporter.jar' "$REPO_ROOT" ;;
-    instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    order) printf '%s/surprising-trading/surprising-order-provider/target/surprising-order-provider-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    matching) printf '%s/surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    trigger) printf '%s/surprising-trading/surprising-trigger-provider/target/surprising-trigger-provider-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    risk) printf '%s/surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    funding) printf '%s/surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    liquidation) printf '%s/surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    insurance) printf '%s/surprising-insurance/target/surprising-insurance-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    adl) printf '%s/surprising-adl/target/surprising-adl-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
-    maker) printf '%s/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT.jar' "$REPO_ROOT" ;;
+    instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    order) printf '%s/surprising-trading/surprising-order-provider/target/surprising-order-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    matching) printf '%s/surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    trigger) printf '%s/surprising-trading/surprising-trigger-provider/target/surprising-trigger-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    risk) printf '%s/surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    funding) printf '%s/surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    liquidation) printf '%s/surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    insurance) printf '%s/surprising-insurance/target/surprising-insurance-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    adl) printf '%s/surprising-adl/target/surprising-adl-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    maker) printf '%s/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     *) fail "UNKNOWN_SERVICE service=$1" ;;
   esac
 }
