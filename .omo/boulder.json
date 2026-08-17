@@ -1,0 +1,14 @@
+{
+  "session_id": "codex:w3-w5-production-closure-20260816",
+  "work_id": "w3-w5-production-closure",
+  "status": "active",
+  "plan_path": ".omo/plans/w3-w5-production-closure.md",
+  "baseline_sha": "7e78e04ae4dac16d364117392f960a65a4f4db2d",
+  "task_branch": "codex/w3-w5-production-closure",
+  "task_worktree": "/Users/atomex/Desktop/surprising/w3-w5-production-closure-worktree",
+  "protected_main_worktree": "/Users/atomex/Desktop/surprising/surprising-ex",
+  "protected_index_blob": "d0e0f6d9441319c6d9ce9cf4229f31c5b9f47dbf",
+  "current_task": 1,
+  "total_tasks": 18,
+  "final_gates": 5
+}

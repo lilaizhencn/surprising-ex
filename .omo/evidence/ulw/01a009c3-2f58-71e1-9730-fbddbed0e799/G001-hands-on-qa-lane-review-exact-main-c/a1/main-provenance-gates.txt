@@ -1,0 +1,324 @@
+SURFACE=terminal CLI/Maven main provenance and whole-JAR digest gate
+INVOCATION=JAVA_HOME=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home PATH=... mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests validate
+MAIN_HEAD=18f62de4e16a1493079b918a8b37c7357dd66d1d
+MAIN_TREE=cebc4b2a116c5352f89d8cd767ac1086ec2e3d30
+AD_BEFORE=
+---MAVEN_VALIDATE---
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] Surprising Parent                                                  [pom]
+[INFO] surprising-product-api                                             [jar]
+[INFO] surprising-aeron-protocol                                          [jar]
+[INFO] surprising-instrument                                              [pom]
+[INFO] surprising-instrument-api                                          [jar]
+[INFO] surprising-aeron-service                                           [jar]
+[INFO] 
+[INFO] ------------------< com.surprising:surprising-parent >------------------
+[INFO] Building Surprising Parent 1.0.0-SNAPSHOT                          [1/6]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-parent ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] ---------------< com.surprising:surprising-product-api >----------------
+[INFO] Building surprising-product-api 1.0.0-SNAPSHOT                     [2/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-product-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-protocol >--------------
+[INFO] Building surprising-aeron-protocol 1.0.0-SNAPSHOT                  [3/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] ----------------< com.surprising:surprising-instrument >----------------
+[INFO] Building surprising-instrument 1.0.0-SNAPSHOT                      [4/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-instrument-api >--------------
+[INFO] Building surprising-instrument-api 1.0.0-SNAPSHOT                  [5/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-service >---------------
+[INFO] Building surprising-aeron-service 1.0.0-SNAPSHOT                   [6/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-service ---
+[INFO] 
+[INFO] --- antrun:3.2.0:run (verify-exchange-core-artifact) @ surprising-aeron-service ---
+[INFO] Executing tasks
+[INFO] Executed tasks
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for Surprising Parent 1.0.0-SNAPSHOT:
+[INFO] 
+[INFO] Surprising Parent .................................. SUCCESS [  0.354 s]
+[INFO] surprising-product-api ............................. SUCCESS [  0.056 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.029 s]
+[INFO] surprising-instrument .............................. SUCCESS [  0.009 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  0.211 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [  0.679 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  3.066 s
+[INFO] Finished at: 2026-08-16T17:02:26+08:00
+[INFO] ------------------------------------------------------------------------
+VALIDATE_EXIT=0
+---PINNED_ARTIFACT---
+ed2dbcf86f2ebf6c1b2bd5642e7585ce5568104da9b61f3649a5a506cd37931f  /Users/atomex/.m2/repository/exchange/core2/exchange-core/0.5.13-emporia/exchange-core-0.5.13-emporia.jar
+EMBEDDED_PROVENANCE=
+fork.git.sha=0511efca1458e9733d7911732ccab1fd83fc373b
+fork.git.dirty=false
+---EXACT_MAIN_PRODUCTION_STATIC_SURFACE---
+fromSnapshotOnly:
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:380:                : InitialStateConfiguration.fromSnapshotOnly(
+native_snapshot_and_active_order_index:
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:38:import com.surprising.aeron.service.state.ActiveOrderIndex;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:50:import com.surprising.aeron.service.matching.MatcherSnapshot;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:95:    private final ActiveOrderIndex activeOrderIndex;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:139:            MatcherSnapshot matcherSnapshot) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:162:        this.activeOrderIndex = runtime.activeOrdersForConstruction();
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:187:            MatcherSnapshot matcherSnapshot) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:206:            MatcherSnapshot matcherSnapshot) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:1138:        var page = activeOrderIndex.page(userId, symbol, cursorOrderId, maxOrders);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:1468:                                positionUserIndex.users(command.symbol()), pending.command().header().commandId(), activeOrderIndex);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:1707:                positionUserIndex.users(command.symbol()), pending.command().header().commandId(), activeOrderIndex);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:1814:        MatcherSnapshot matcherSnapshot = matchingAdapter
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:1815:                .snapshotAsync(snapshotId, appliedCommandCount, tradingState, activeOrderIndex.orders())
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:2009:        return (userId == 0 ? activeOrderIndex.ids() : activeOrderIndex.ids(userId)).stream()
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:12:import com.surprising.aeron.service.matching.MatcherSnapshot;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:13:import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:37:    static byte[] encode(CoreProbeState state, MatcherSnapshot matcherSnapshot) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:43:        byte[] matcherState = MatcherSnapshotCodec.encode(matcherSnapshot);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:67:        buffer.putInt(MatcherSnapshot.ROUTE_VERSION);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:133:        if (shardCode != 0 || routeVersion != MatcherSnapshot.ROUTE_VERSION) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:181:        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(encodedMatcherState);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:226:        if (shardCode != 0 || routeVersion != MatcherSnapshot.ROUTE_VERSION) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreStateSnapshotCodec.java:299:        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(encodedMatcherState);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:4:import com.surprising.aeron.service.matching.MatcherSnapshot;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:9:import com.surprising.aeron.service.state.ActiveOrderIndex;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:29:    private final ActiveOrderIndex activeOrders;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:44:            MatcherSnapshot matcherSnapshot) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:51:        this.activeOrders = new ActiveOrderIndex(initialState);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:161:    public ActiveOrderIndex activeOrders() {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:166:    ActiveOrderIndex activeOrdersForConstruction() {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:84:            MatcherSnapshot snapshot) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:246:    public CompletableFuture<MatcherSnapshot> snapshotAsync(
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:268:                                return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:269:                                        MatcherSnapshot.ROUTE_VERSION, snapshotId, coreSequence, matcherSequence,
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:271:                                        MatcherSnapshot.symbolRegistryHash(symbols),
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:272:                                        MatcherSnapshot.userRegistryHash(users),
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:273:                                        MatcherSnapshot.instrumentRegistryHash(state),
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:274:                                        MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:275:                                        MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.MATCHER_CONFIG_HASH,
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:377:    private void start(MatcherSnapshot snapshot) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java:15:public record MatcherSnapshot(
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java:37:    public static final int ROUTE_VERSION = 1;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java:38:    public static final String FORK_GIT_SHA = "0511efca1458e9733d7911732ccab1fd83fc373b";
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java:39:    public static final String ARTIFACT_SHA256 =
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java:44:    public MatcherSnapshot {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java:46:                || routeVersion != ROUTE_VERSION || snapshotId <= 0 || coreSequence < 0
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java:47:                || matcherSequence < 0 || !FORK_GIT_SHA.equals(forkGitSha)
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java:48:                || !ARTIFACT_SHA256.equals(artifactSha256)
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshotCodec.java:24:public final class MatcherSnapshotCodec {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshotCodec.java:32:    private MatcherSnapshotCodec() {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshotCodec.java:35:    public static byte[] encode(MatcherSnapshot snapshot) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshotCodec.java:92:    public static MatcherSnapshot decode(byte[] encoded) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshotCodec.java:165:            return new MatcherSnapshot(productLine, coreShardId, routeVersion, snapshotId, coreSequence,
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:15:public final class ActiveOrderIndex {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:23:    public ActiveOrderIndex(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:128:                .filter(ActiveOrderIndex::isActive)
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1310:                                                              ActiveOrderIndex activeOrderIndex) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1347:            selectedOrders = activeOrderIndex == null
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1351:                    : activeOrderIndex.ids(instrument.symbol()).stream().map(state::order)
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1356:            LifecycleOrderChunk orderChunk = selectLifecycleOrders(state, activeOrderIndex, instrument.symbol(),
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1499:                                                              ActiveOrderIndex activeOrderIndex,
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1501:        if (activeOrderIndex == null) activeOrderIndex = new ActiveOrderIndex(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1502:        ActiveOrderIndex.Page page = activeOrderIndex.page(0, symbol, cursorOrderId, maxOrders);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1852:                                                ActiveOrderIndex activeOrderIndex) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1853:        List<CoreOrderState> openOrders = activeOrderIndex == null
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1858:                : activeOrderIndex.ids(symbol).stream().map(state::order)
+forbidden_production_replay_rebuild_resubmit_search:
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:703:                ? new com.surprising.aeron.protocol.CoreBookStateQuery("", 1_000)
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:1744:        var view = new com.surprising.aeron.protocol.CoreBookStateView(
+derived_index_rebuild_search:
+fatal: could not open 'surprising-gateway/src/main/java/com/surprising/websocket/provider/WebSocketRuntimeHints.java' for reading: No such file or directory
+---CORRECTED_GATE_AND_UNRELATED_AD_PRESERVATION---
+MAIN_HEAD=18f62de4e16a1493079b918a8b37c7357dd66d1d
+MAIN_TREE=cebc4b2a116c5352f89d8cd767ac1086ec2e3d30
+STATUS_BEFORE=1 AD N... 000000 100644 000000 0000000000000000000000000000000000000000 d0e0f6d9441319c6d9ce9cf4229f31c5b9f47dbf surprising-gateway/src/main/java/com/surprising/websocket/provider/WebSocketRuntimeHints.java
+AD_INDEX_BEFORE=d0e0f6d9441319c6d9ce9cf4229f31c5b9f47dbf
+AD_WORKTREE_BEFORE=absent
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] Surprising Parent                                                  [pom]
+[INFO] surprising-product-api                                             [jar]
+[INFO] surprising-aeron-protocol                                          [jar]
+[INFO] surprising-instrument                                              [pom]
+[INFO] surprising-instrument-api                                          [jar]
+[INFO] surprising-aeron-service                                           [jar]
+[INFO] 
+[INFO] ------------------< com.surprising:surprising-parent >------------------
+[INFO] Building Surprising Parent 1.0.0-SNAPSHOT                          [1/6]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-parent ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] ---------------< com.surprising:surprising-product-api >----------------
+[INFO] Building surprising-product-api 1.0.0-SNAPSHOT                     [2/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-product-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-protocol >--------------
+[INFO] Building surprising-aeron-protocol 1.0.0-SNAPSHOT                  [3/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] ----------------< com.surprising:surprising-instrument >----------------
+[INFO] Building surprising-instrument 1.0.0-SNAPSHOT                      [4/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-instrument-api >--------------
+[INFO] Building surprising-instrument-api 1.0.0-SNAPSHOT                  [5/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-service >---------------
+[INFO] Building surprising-aeron-service 1.0.0-SNAPSHOT                   [6/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-service ---
+[INFO] 
+[INFO] --- antrun:3.2.0:run (verify-exchange-core-artifact) @ surprising-aeron-service ---
+[INFO] Executing tasks
+[INFO] Executed tasks
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for Surprising Parent 1.0.0-SNAPSHOT:
+[INFO] 
+[INFO] Surprising Parent .................................. SUCCESS [  0.347 s]
+[INFO] surprising-product-api ............................. SUCCESS [  0.055 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.029 s]
+[INFO] surprising-instrument .............................. SUCCESS [  0.009 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  0.235 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [  0.655 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  3.080 s
+[INFO] Finished at: 2026-08-16T17:03:15+08:00
+[INFO] ------------------------------------------------------------------------
+VALIDATE_EXIT=0
+ACTUAL_JAR_SHA=ed2dbcf86f2ebf6c1b2bd5642e7585ce5568104da9b61f3649a5a506cd37931f
+PROVENANCE=fork.git.sha=0511efca1458e9733d7911732ccab1fd83fc373b
+fork.git.dirty=false
+---EXACT_MAIN_STATIC_PROOF---
+snapshot_only:
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:380:                : InitialStateConfiguration.fromSnapshotOnly(
+no production replay/resubmit:
+native matcher + exact active-order reconciliation references:
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:38:import com.surprising.aeron.service.state.ActiveOrderIndex;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:95:    private final ActiveOrderIndex activeOrderIndex;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:1138:        var page = activeOrderIndex.page(userId, symbol, cursorOrderId, maxOrders);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:1815:                .snapshotAsync(snapshotId, appliedCommandCount, tradingState, activeOrderIndex.orders())
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java:2009:        return (userId == 0 ? activeOrderIndex.ids() : activeOrderIndex.ids(userId)).stream()
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:9:import com.surprising.aeron.service.state.ActiveOrderIndex;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:29:    private final ActiveOrderIndex activeOrders;
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:51:        this.activeOrders = new ActiveOrderIndex(initialState);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:161:    public ActiveOrderIndex activeOrders() {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/TradingCoreRuntime.java:166:    ActiveOrderIndex activeOrdersForConstruction() {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:246:    public CompletableFuture<MatcherSnapshot> snapshotAsync(
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java:380:                : InitialStateConfiguration.fromSnapshotOnly(
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:15:public final class ActiveOrderIndex {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:23:    public ActiveOrderIndex(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:128:                .filter(ActiveOrderIndex::isActive)
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1310:                                                              ActiveOrderIndex activeOrderIndex) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1351:                    : activeOrderIndex.ids(instrument.symbol()).stream().map(state::order)
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1499:                                                              ActiveOrderIndex activeOrderIndex,
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1501:        if (activeOrderIndex == null) activeOrderIndex = new ActiveOrderIndex(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1502:        ActiveOrderIndex.Page page = activeOrderIndex.page(0, symbol, cursorOrderId, maxOrders);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1852:                                                ActiveOrderIndex activeOrderIndex) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java:1858:                : activeOrderIndex.ids(symbol).stream().map(state::order)
+derived-index rebuild references:
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:24:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:110:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ActiveOrderIndex.java:123:    public void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/AdlPositionIndex.java:15:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/AdlPositionIndex.java:26:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/AdlPositionIndex.java:39:    public void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/AlgoOrderIndex.java:25:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/AlgoOrderIndex.java:61:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/AlgoOrderIndex.java:74:    public void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/CancelAllAfterIndex.java:17:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/CancelAllAfterIndex.java:46:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/CancelAllAfterIndex.java:59:    public void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/LiquidationIndex.java:16:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/LiquidationIndex.java:31:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/LiquidationIndex.java:44:    public void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/OpenInterestIndex.java:14:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/OpenInterestIndex.java:29:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/OpenInterestIndex.java:42:    public void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PositionUserIndex.java:15:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PositionUserIndex.java:26:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PositionUserIndex.java:43:    public void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RiskSnapshotIndex.java:16:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RiskSnapshotIndex.java:31:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RiskSnapshotIndex.java:44:    public void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:37:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:83:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:112:    private void rebuild(TradingCoreState state) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:113:        rebuildMap(users, state.users());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:114:        rebuildMap(orders, state.orders());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:115:        rebuildMap(instruments, state.instruments());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:116:        rebuildMap(leverages, state.leverages());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:117:        rebuildMap(algoOrders, state.algoOrders());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:118:        rebuildMap(timers, state.cancelAllAfterTimers());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:119:        rebuildMap(clientOrderIndex, state.clientOrderIndex());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:120:        rebuildMap(triggers, state.triggerOrders());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:121:        rebuildMap(markPrices, state.riskState().markPrices());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:122:        rebuildMap(riskSnapshots, state.riskState().snapshots());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:123:        rebuildMap(liquidations, state.riskState().liquidations());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:124:        rebuildMap(riskScans, state.riskState().scans());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:125:        rebuildMap(feeBalances, state.treasuryState().feeBalances());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:126:        rebuildMap(insuranceBalances, state.treasuryState().insuranceBalances());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:127:        rebuildMap(insuranceDeficits, state.treasuryState().insuranceDeficits());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:128:        rebuildMap(fundingSettlements, state.treasuryState().fundingSettlements());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:129:        rebuildMap(lifecycleSettlements, state.treasuryState().lifecycleSettlements());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:130:        rebuildMap(fundingProgress, state.treasuryState().fundingProgress());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:131:        rebuildMap(lifecycleProgress, state.treasuryState().lifecycleProgress());
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:134:    private static <K, V> void rebuildMap(Aggregate target, Map<K, V> values) {
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RollingBusinessStateHash.java:142:            rebuildMap(target, after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TriggerOrderIndex.java:32:        rebuild(state);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TriggerOrderIndex.java:274:            rebuild(after);
+18f62de4e16a1493079b918a8b37c7357dd66d1d:surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TriggerOrderIndex.java:293:    public void rebuild(TradingCoreState state) {
+STATUS_AFTER=1 AD N... 000000 100644 000000 0000000000000000000000000000000000000000 d0e0f6d9441319c6d9ce9cf4229f31c5b9f47dbf surprising-gateway/src/main/java/com/surprising/websocket/provider/WebSocketRuntimeHints.java
+AD_INDEX_AFTER=d0e0f6d9441319c6d9ce9cf4229f31c5b9f47dbf
+AD_WORKTREE_AFTER=absent
+PROVENANCE_GATE_AND_AD_VERDICT=PASS
+cleanup: no server/tmux/browser/port/container/temp runtime was started; standard Maven target output retained; unrelated Gateway AD index/worktree state unchanged.

@@ -1,0 +1,1328 @@
+SURFACE=terminal CLI/Maven JUnit main exact-SHA focused service scenarios
+INVOCATION=JAVA_HOME=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home PATH="$JAVA_HOME/bin:$PATH" mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=... -Dsurefire.failIfNoSpecifiedTests=false test
+MAIN_HEAD=18f62de4e16a1493079b918a8b37c7357dd66d1d
+MAIN_TREE=cebc4b2a116c5352f89d8cd767ac1086ec2e3d30
+JAVA_HOME=/Library/Java/JavaVirtualMachines/ibm-semeru-open-25.jdk/Contents/Home
+openjdk version "21.0.10" 2026-01-20 LTS
+OpenJDK Runtime Environment Microsoft-13106400 (build 21.0.10+7-LTS)
+OpenJDK 64-Bit Server VM Microsoft-13106400 (build 21.0.10+7-LTS, mixed mode, sharing)
+---HIGH_RISK---
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] Surprising Parent                                                  [pom]
+[INFO] surprising-product-api                                             [jar]
+[INFO] surprising-aeron-protocol                                          [jar]
+[INFO] surprising-instrument                                              [pom]
+[INFO] surprising-instrument-api                                          [jar]
+[INFO] surprising-aeron-service                                           [jar]
+[INFO] 
+[INFO] ------------------< com.surprising:surprising-parent >------------------
+[INFO] Building Surprising Parent 1.0.0-SNAPSHOT                          [1/6]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-parent ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] ---------------< com.surprising:surprising-product-api >----------------
+[INFO] Building surprising-product-api 1.0.0-SNAPSHOT                     [2/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-product-api ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-product-api ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/src/main/resources
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-product-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-product-api ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-product-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-product-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-protocol >--------------
+[INFO] Building surprising-aeron-protocol 1.0.0-SNAPSHOT                  [3/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-aeron-protocol ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/resources
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-aeron-protocol ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-aeron-protocol ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-aeron-protocol ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] ----------------< com.surprising:surprising-instrument >----------------
+[INFO] Building surprising-instrument 1.0.0-SNAPSHOT                      [4/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-instrument-api >--------------
+[INFO] Building surprising-instrument-api 1.0.0-SNAPSHOT                  [5/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-instrument-api ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/src/main/resources
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-instrument-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-instrument-api ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-instrument-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-service >---------------
+[INFO] Building surprising-aeron-service 1.0.0-SNAPSHOT                   [6/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-service ---
+[INFO] 
+[INFO] --- antrun:3.2.0:run (verify-exchange-core-artifact) @ surprising-aeron-service ---
+[INFO] Executing tasks
+[INFO] Executed tasks
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-aeron-service ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/resources
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-aeron-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-aeron-service ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-aeron-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-aeron-service ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest
+SLF4J(W): No SLF4J providers were found.
+SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::arrayBaseOffset has been called by com.lmax.disruptor.RingBufferFields (file:/Users/atomex/.m2/repository/com/lmax/disruptor/3.4.2/disruptor-3.4.2.jar)
+WARNING: Please consider reporting this to the maintainers of class com.lmax.disruptor.RingBufferFields
+WARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::loadLibrary has been called by net.jpountz.util.Native in an unnamed module (file:/Users/atomex/.m2/repository/at/yawk/lz4/lz4-java/1.10.1/lz4-java-1.10.1.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+8月 16, 2026 4:53:31 下午 net.openhft.chronicle.core.internal.cleaner.ReflectionBasedByteBufferCleanerService <clinit>
+WARNING: Make sure you have set the command line option "--illegal-access=permit --add-exports java.base/jdk.internal.ref=ALL-UNNAMED" to enable ReflectionBasedByteBufferCleanerService
+net.openhft.chronicle.core.Jvm: Unable to determine max direct memory, will always report 0, java.lang.IllegalAccessException: class net.openhft.chronicle.core.Jvm$MaxMemoryHolder cannot access a member of class jdk.internal.misc.VM (in module java.base) with modifiers "private static"
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.213 s -- in com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest
+[INFO] Running com.surprising.aeron.service.CoreProbeStateTest
+8月 16, 2026 4:53:32 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=mark-price symbol=BTC-USDT batchSize=1,024 elapsedMicros=15,305 pendingSymbolsBefore=0 pendingSymbolsAfter=1
+8月 16, 2026 4:53:32 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=38,931 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=mark-price symbol=BTC-USDT batchSize=1,024 elapsedMicros=698 pendingSymbolsBefore=0 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=15,796 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,594 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=4,223 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,533 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,755 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,738 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,426 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=8,977 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,784 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,444 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,198 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,854 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,269 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,334 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:33 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=14,139 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=18,544 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,019 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,262 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=17,529 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=14,839 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=18,742 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,572 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,764 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=18,703 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,840 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=13,048 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=15,519 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=7,218 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,219 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,405 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,214 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,146 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,338 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,620 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=17,964 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,507 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,780 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,608 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,335 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,005 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,675 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,497 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,026 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,212 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,484 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:34 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,147 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,464 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,099 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,551 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,325 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,789 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,658 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=13,510 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,369 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,496 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,381 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,262 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=6,655 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,026 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,245 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,437 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,929 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,345 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,507 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,190 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,039 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,317 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,377 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,554 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,348 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,036 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,126 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,257 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,539 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,342 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,479 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,461 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=8,124 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,253 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,579 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,422 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:35 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=13,193 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,197 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,548 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,041 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=5,570 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,190 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=27,982 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,271 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,958 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,170 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,963 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,817 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,092 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=11,378 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,309 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,882 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,106 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,970 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,205 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=10,535 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,211 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,850 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,262 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,249 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:36 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,857 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,204 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,206 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,149 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,827 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,412 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,112 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,821 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,837 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,219 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,748 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,938 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=7,581 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,822 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,904 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=10,991 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,910 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,655 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=10,319 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,705 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=4,408 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,210 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,874 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,205 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 4:53:37 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=mark-price symbol=BTC-USDT batchSize=1,024 elapsedMicros=390 pendingSymbolsBefore=0 pendingSymbolsAfter=1
+[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 9.176 s -- in com.surprising.aeron.service.CoreProbeStateTest
+[INFO] Running com.surprising.aeron.service.SurprisingClusteredServiceTest
+Aeron core role productLine=SPOT role=LEADER
+Aeron core role productLine=SPOT role=LEADER
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.841 s -- in com.surprising.aeron.service.SurprisingClusteredServiceTest
+[INFO] Running com.surprising.aeron.service.CoreMatchingStateTest
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 15.82 s -- in com.surprising.aeron.service.CoreMatchingStateTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 53, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for Surprising Parent 1.0.0-SNAPSHOT:
+[INFO] 
+[INFO] Surprising Parent .................................. SUCCESS [  0.363 s]
+[INFO] surprising-product-api ............................. SUCCESS [  0.580 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.095 s]
+[INFO] surprising-instrument .............................. SUCCESS [  0.007 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  0.251 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [ 30.543 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  33.533 s
+[INFO] Finished at: 2026-08-16T16:53:57+08:00
+[INFO] ------------------------------------------------------------------------
+HIGH_RISK_EXIT=0
+---BOUNDARY_AND_INDEXES---
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] Surprising Parent                                                  [pom]
+[INFO] surprising-product-api                                             [jar]
+[INFO] surprising-aeron-protocol                                          [jar]
+[INFO] surprising-instrument                                              [pom]
+[INFO] surprising-instrument-api                                          [jar]
+[INFO] surprising-aeron-service                                           [jar]
+[INFO] 
+[INFO] ------------------< com.surprising:surprising-parent >------------------
+[INFO] Building Surprising Parent 1.0.0-SNAPSHOT                          [1/6]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-parent ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] ---------------< com.surprising:surprising-product-api >----------------
+[INFO] Building surprising-product-api 1.0.0-SNAPSHOT                     [2/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-product-api ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-product-api ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/src/main/resources
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-product-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-product-api ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-product-api/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-product-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-product-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-protocol >--------------
+[INFO] Building surprising-aeron-protocol 1.0.0-SNAPSHOT                  [3/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-aeron-protocol ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/resources
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-aeron-protocol ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-aeron-protocol ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-aeron-protocol ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] ----------------< com.surprising:surprising-instrument >----------------
+[INFO] Building surprising-instrument 1.0.0-SNAPSHOT                      [4/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-instrument-api >--------------
+[INFO] Building surprising-instrument-api 1.0.0-SNAPSHOT                  [5/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-instrument-api ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/src/main/resources
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-instrument-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-instrument-api ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-instrument/surprising-instrument-api/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-instrument-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-service >---------------
+[INFO] Building surprising-aeron-service 1.0.0-SNAPSHOT                   [6/6]
+[INFO]   from /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-service ---
+[INFO] 
+[INFO] --- antrun:3.2.0:run (verify-exchange-core-artifact) @ surprising-aeron-service ---
+[INFO] Executing tasks
+[INFO] Executed tasks
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-aeron-service ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/resources
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-aeron-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-aeron-service ---
+[INFO] skip non existing resourceDirectory /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-aeron-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-aeron-service ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.surprising.aeron.service.matching.SymbolMatchingLanesTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.186 s -- in com.surprising.aeron.service.matching.SymbolMatchingLanesTest
+[INFO] Running com.surprising.aeron.service.state.CoreLifecycleStateTest
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.273 s -- in com.surprising.aeron.service.state.CoreLifecycleStateTest
+[INFO] Running com.surprising.aeron.service.state.CoreRiskStateTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.970 s -- in com.surprising.aeron.service.state.CoreRiskStateTest
+[INFO] Running com.surprising.aeron.service.state.TradingCoreReducerTest
+[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.119 s -- in com.surprising.aeron.service.state.TradingCoreReducerTest
+[INFO] Running com.surprising.aeron.service.state.TradingStateSnapshotCodecTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.023 s -- in com.surprising.aeron.service.state.TradingStateSnapshotCodecTest
+[INFO] Running com.surprising.aeron.service.state.ActiveOrderIndexTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.032 s -- in com.surprising.aeron.service.state.ActiveOrderIndexTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 55, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for Surprising Parent 1.0.0-SNAPSHOT:
+[INFO] 
+[INFO] Surprising Parent .................................. SUCCESS [  0.374 s]
+[INFO] surprising-product-api ............................. SUCCESS [  0.637 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.089 s]
+[INFO] surprising-instrument .............................. SUCCESS [  0.007 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  0.226 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [  5.035 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  8.210 s
+[INFO] Finished at: 2026-08-16T16:54:09+08:00
+[INFO] ------------------------------------------------------------------------
+BOUNDARY_EXIT=0
+---POST_STATUS---
+1 AD N... 000000 100644 000000 0000000000000000000000000000000000000000 d0e0f6d9441319c6d9ce9cf4229f31c5b9f47dbf surprising-gateway/src/main/java/com/surprising/websocket/provider/WebSocketRuntimeHints.java
+? .omo/evidence/manual-qa-native-snapshot-20260816/clean-testcase-report-evidence.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/clean-worktree-integrity.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/exact-commit-contract-evidence.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/fork-artifact-content-comparison.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/product-line-and-summary-evidence.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/qa-cleanup-receipt.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/qa-exact-sha-source-report-audit.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/qa-final-exact-sha-integrity.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/qa-post-run-original-path-state.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/repository-state-evidence.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/six-product-line-report-jdk25.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/source-line-evidence.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/testcase-report-evidence.txt
+? .omo/evidence/manual-qa-native-snapshot-20260816/w1-w2-native-snapshot-migration-exact-b64ad006-33a9f135-manual-qa.md
+? .omo/evidence/manual-qa-native-snapshot-20260816/w1-w2-native-snapshot-migration-manual-qa.md
+? .omo/evidence/security-reliability-gate-review.md
+? .omo/evidence/ulw/01a009c3-2f58-71e1-9730-fbddbed0e799/G001-hands-on-qa-lane-review-exact-main-c/a1/main-focused-runtime.txt
+? .omo/evidence/w1-w2-goal-constraint-verification-gate-review.md
+? .omo/evidence/w1-w2-native-exchange-core-snapshot-migration-code-review.md
+? .omo/evidence/w1-w2-native-exchange-core-snapshot-migration-gate-review.md
+? .omo/evidence/w1-w2-native-snapshot-migration-gate-review.md
+? .omo/evidence/w1-w2-review-18f62de4.md
+? .omo/evidence/w1-w2-review-b64ad006.md
+? .omo/evidence/w1-w2-single-book-snapshot-code-review.md
+? .omo/plans/w1-w2-single-book-snapshot.md
+? .omo/ulw-loop/01a009c3-2f58-71e1-9730-fbddbed0e799/brief.md
+? .omo/ulw-loop/01a009c3-2f58-71e1-9730-fbddbed0e799/goals.json
+? .omo/ulw-loop/01a009c3-2f58-71e1-9730-fbddbed0e799/ledger.jsonl
+cleanup: no server, tmux, browser, port, container, or temp runtime was started; Maven target artifacts remain as pre-existing/standard build output.
+---EXPLICIT_JDK25_CHECK---
+openjdk version "25.0.2" 2026-01-20 LTS
+IBM Semeru Runtime Open Edition 25.0.2.1 (build 25.0.2+10-LTS)
+Eclipse OpenJ9 VM 25.0.2.1 (build 25.0.2+10-openj9-0.57.0, JRE 25 Mac OS X amd64-64-Bit Compressed References 20260120_170 (JIT enabled, AOT enabled)
+OpenJ9   - f0754f4102
+OMR      - c8ee95c0c
+JCL      - 655fe37ecfb based on jdk-25.0.2+10)
+---CLEAN_EXACT_MAIN_GIT_CLONE_RERUN---
+SURFACE=terminal CLI/Maven isolated full-Git-clone exact-main focused tests and provenance gate
+INVOCATION=git clone --no-local source <tmp>; checkout 18f62...; JDK25 Maven focused test + validate
+Cloning into '/tmp/surprising-main-clone18f62.GqVgp8/repo'...
+HEAD is now at 18f62de4 build(core): verify fork source provenance
+CLONE_HEAD=18f62de4e16a1493079b918a8b37c7357dd66d1d
+CLONE_TREE=cebc4b2a116c5352f89d8cd767ac1086ec2e3d30
+CLONE_STATUS=[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] Surprising Parent                                                  [pom]
+[INFO] surprising-product-api                                             [jar]
+[INFO] surprising-aeron-protocol                                          [jar]
+[INFO] surprising-instrument                                              [pom]
+[INFO] surprising-instrument-api                                          [jar]
+[INFO] surprising-aeron-service                                           [jar]
+[INFO] 
+[INFO] ------------------< com.surprising:surprising-parent >------------------
+[INFO] Building Surprising Parent 1.0.0-SNAPSHOT                          [1/6]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-parent ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] ---------------< com.surprising:surprising-product-api >----------------
+[INFO] Building surprising-product-api 1.0.0-SNAPSHOT                     [2/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-product-api ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-product-api ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/src/main/resources
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-product-api ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 5 source files with javac [debug parameters release 25] to target/classes
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-product-api ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-product-api ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 4 source files with javac [debug parameters release 25] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-product-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-protocol >--------------
+[INFO] Building surprising-aeron-protocol 1.0.0-SNAPSHOT                  [3/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-aeron-protocol ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/src/main/resources
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-aeron-protocol ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 99 source files with javac [debug parameters release 25] to target/classes
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-aeron-protocol ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-aeron-protocol ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 14 source files with javac [debug parameters release 25] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] ----------------< com.surprising:surprising-instrument >----------------
+[INFO] Building surprising-instrument 1.0.0-SNAPSHOT                      [4/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-instrument-api >--------------
+[INFO] Building surprising-instrument-api 1.0.0-SNAPSHOT                  [5/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-instrument-api ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/src/main/resources
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-instrument-api ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 27 source files with javac [debug parameters release 25] to target/classes
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-instrument-api ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-instrument-api ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 4 source files with javac [debug parameters release 25] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-service >---------------
+[INFO] Building surprising-aeron-service 1.0.0-SNAPSHOT                   [6/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-service ---
+[INFO] 
+[INFO] --- antrun:3.2.0:run (verify-exchange-core-artifact) @ surprising-aeron-service ---
+[INFO] Executing tasks
+[INFO] Executed tasks
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-aeron-service ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/src/main/resources
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-aeron-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 55 source files with javac [debug parameters release 25] to target/classes
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-aeron-service ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-aeron-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 18 source files with javac [debug parameters release 25] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-aeron-service ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::arrayBaseOffset has been called by com.lmax.disruptor.RingBufferFields (file:/Users/atomex/.m2/repository/com/lmax/disruptor/3.4.2/disruptor-3.4.2.jar)
+WARNING: Please consider reporting this to the maintainers of class com.lmax.disruptor.RingBufferFields
+WARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release
+SLF4J(W): No SLF4J providers were found.
+SLF4J(W): Defaulting to no-operation (NOP) logger implementation
+SLF4J(W): See https://www.slf4j.org/codes.html#noProviders for further details.
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::loadLibrary has been called by net.jpountz.util.Native in an unnamed module (file:/Users/atomex/.m2/repository/at/yawk/lz4/lz4-java/1.10.1/lz4-java-1.10.1.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+8月 16, 2026 5:04:43 下午 net.openhft.chronicle.core.internal.cleaner.ReflectionBasedByteBufferCleanerService <clinit>
+WARNING: Make sure you have set the command line option "--illegal-access=permit --add-exports java.base/jdk.internal.ref=ALL-UNNAMED" to enable ReflectionBasedByteBufferCleanerService
+net.openhft.chronicle.core.Jvm: Unable to determine max direct memory, will always report 0, java.lang.IllegalAccessException: class net.openhft.chronicle.core.Jvm$MaxMemoryHolder cannot access a member of class jdk.internal.misc.VM (in module java.base) with modifiers "private static"
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.389 s -- in com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest
+[INFO] Running com.surprising.aeron.service.CoreProbeStateTest
+8月 16, 2026 5:04:44 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=mark-price symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,916 pendingSymbolsBefore=0 pendingSymbolsAfter=1
+8月 16, 2026 5:04:44 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=19,691 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=mark-price symbol=BTC-USDT batchSize=1,024 elapsedMicros=823 pendingSymbolsBefore=0 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,200 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=5,422 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,695 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,505 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,832 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,348 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,999 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=13,328 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,054 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,734 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=14,619 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,886 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,695 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,017 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,592 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,272 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,100 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,342 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=10,802 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:46 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,536 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,720 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,915 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,259 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,190 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,616 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,843 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,807 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,644 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,445 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,206 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,987 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,134 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,482 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,009 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,388 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,242 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,350 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,318 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,535 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,436 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,841 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,206 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,509 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=7,432 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,160 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,360 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,060 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,843 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,495 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=14,488 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,311 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:47 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=14,671 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=11,269 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,028 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,466 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,137 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=12,914 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,058 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,237 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,375 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,693 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=4,306 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,611 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,871 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,524 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,474 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,474 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,397 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,003 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,141 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,968 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,335 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,257 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,282 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,985 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,530 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,134 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:48 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,922 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,071 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,036 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,240 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,170 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,279 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,471 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,997 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,178 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,442 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,051 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,238 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,950 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,306 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,920 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,868 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,802 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,271 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,912 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,878 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,403 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,170 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,212 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,874 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:49 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,921 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,141 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,844 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,140 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,217 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,826 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,265 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,004 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,935 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,378 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,280 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=3,007 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,868 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,938 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,435 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,120 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,013 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,338 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,679 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,323 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,882 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,199 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,170 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,881 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=1,882 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,169 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,210 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=continuation symbol=BTC-USDT batchSize=1,024 elapsedMicros=2,232 pendingSymbolsBefore=1 pendingSymbolsAfter=1
+8月 16, 2026 5:04:50 下午 com.surprising.aeron.service.CoreProbeState logRiskScan
+INFO: risk scan operation=mark-price symbol=BTC-USDT batchSize=1,024 elapsedMicros=384 pendingSymbolsBefore=0 pendingSymbolsAfter=1
+[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 9.423 s -- in com.surprising.aeron.service.CoreProbeStateTest
+[INFO] Running com.surprising.aeron.service.SurprisingClusteredServiceTest
+Aeron core role productLine=SPOT role=LEADER
+Aeron core role productLine=SPOT role=LEADER
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.977 s -- in com.surprising.aeron.service.SurprisingClusteredServiceTest
+[INFO] Running com.surprising.aeron.service.CoreMatchingStateTest
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 15.07 s -- in com.surprising.aeron.service.CoreMatchingStateTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 53, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for Surprising Parent 1.0.0-SNAPSHOT:
+[INFO] 
+[INFO] Surprising Parent .................................. SUCCESS [  0.354 s]
+[INFO] surprising-product-api ............................. SUCCESS [  2.537 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  2.391 s]
+[INFO] surprising-instrument .............................. SUCCESS [  0.007 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  1.213 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [ 35.452 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  43.623 s
+[INFO] Finished at: 2026-08-16T17:05:10+08:00
+[INFO] ------------------------------------------------------------------------
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] Surprising Parent                                                  [pom]
+[INFO] surprising-product-api                                             [jar]
+[INFO] surprising-aeron-protocol                                          [jar]
+[INFO] surprising-instrument                                              [pom]
+[INFO] surprising-instrument-api                                          [jar]
+[INFO] surprising-aeron-service                                           [jar]
+[INFO] 
+[INFO] ------------------< com.surprising:surprising-parent >------------------
+[INFO] Building Surprising Parent 1.0.0-SNAPSHOT                          [1/6]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-parent ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] ---------------< com.surprising:surprising-product-api >----------------
+[INFO] Building surprising-product-api 1.0.0-SNAPSHOT                     [2/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-product-api ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-product-api ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/src/main/resources
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-product-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-product-api ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-product-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-product-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-protocol >--------------
+[INFO] Building surprising-aeron-protocol 1.0.0-SNAPSHOT                  [3/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-aeron-protocol ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/src/main/resources
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-aeron-protocol ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-aeron-protocol ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-aeron-protocol ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] ----------------< com.surprising:surprising-instrument >----------------
+[INFO] Building surprising-instrument 1.0.0-SNAPSHOT                      [4/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-instrument-api >--------------
+[INFO] Building surprising-instrument-api 1.0.0-SNAPSHOT                  [5/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-instrument-api ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/src/main/resources
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-instrument-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-instrument-api ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-instrument-api ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-service >---------------
+[INFO] Building surprising-aeron-service 1.0.0-SNAPSHOT                   [6/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-service ---
+[INFO] 
+[INFO] --- antrun:3.2.0:run (verify-exchange-core-artifact) @ surprising-aeron-service ---
+[INFO] Executing tasks
+[INFO] Executed tasks
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ surprising-aeron-service ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/src/main/resources
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ surprising-aeron-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-aeron-service ---
+[INFO] skip non existing resourceDirectory /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-aeron-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-aeron-service ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.surprising.aeron.service.matching.SymbolMatchingLanesTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.195 s -- in com.surprising.aeron.service.matching.SymbolMatchingLanesTest
+[INFO] Running com.surprising.aeron.service.state.CoreLifecycleStateTest
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.309 s -- in com.surprising.aeron.service.state.CoreLifecycleStateTest
+[INFO] Running com.surprising.aeron.service.state.CoreRiskStateTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.106 s -- in com.surprising.aeron.service.state.CoreRiskStateTest
+[INFO] Running com.surprising.aeron.service.state.TradingCoreReducerTest
+[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.117 s -- in com.surprising.aeron.service.state.TradingCoreReducerTest
+[INFO] Running com.surprising.aeron.service.state.TradingStateSnapshotCodecTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in com.surprising.aeron.service.state.TradingStateSnapshotCodecTest
+[INFO] Running com.surprising.aeron.service.state.ActiveOrderIndexTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.034 s -- in com.surprising.aeron.service.state.ActiveOrderIndexTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 55, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for Surprising Parent 1.0.0-SNAPSHOT:
+[INFO] 
+[INFO] Surprising Parent .................................. SUCCESS [  0.339 s]
+[INFO] surprising-product-api ............................. SUCCESS [  0.628 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.107 s]
+[INFO] surprising-instrument .............................. SUCCESS [  0.009 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  0.249 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [  5.672 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  8.912 s
+[INFO] Finished at: 2026-08-16T17:05:22+08:00
+[INFO] ------------------------------------------------------------------------
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] Surprising Parent                                                  [pom]
+[INFO] surprising-product-api                                             [jar]
+[INFO] surprising-aeron-protocol                                          [jar]
+[INFO] surprising-instrument                                              [pom]
+[INFO] surprising-instrument-api                                          [jar]
+[INFO] surprising-aeron-service                                           [jar]
+[INFO] 
+[INFO] ------------------< com.surprising:surprising-parent >------------------
+[INFO] Building Surprising Parent 1.0.0-SNAPSHOT                          [1/6]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-parent ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] ---------------< com.surprising:surprising-product-api >----------------
+[INFO] Building surprising-product-api 1.0.0-SNAPSHOT                     [2/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-product-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-product-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-protocol >--------------
+[INFO] Building surprising-aeron-protocol 1.0.0-SNAPSHOT                  [3/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-protocol/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-protocol ---
+[INFO] 
+[INFO] ----------------< com.surprising:surprising-instrument >----------------
+[INFO] Building surprising-instrument 1.0.0-SNAPSHOT                      [4/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-instrument-api >--------------
+[INFO] Building surprising-instrument-api 1.0.0-SNAPSHOT                  [5/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-instrument/surprising-instrument-api/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-instrument-api ---
+[INFO] 
+[INFO] --------------< com.surprising:surprising-aeron-service >---------------
+[INFO] Building surprising-aeron-service 1.0.0-SNAPSHOT                   [6/6]
+[INFO]   from /private/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (require-jdk-25) @ surprising-aeron-service ---
+[INFO] 
+[INFO] --- antrun:3.2.0:run (verify-exchange-core-artifact) @ surprising-aeron-service ---
+[INFO] Executing tasks
+[INFO] Executed tasks
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for Surprising Parent 1.0.0-SNAPSHOT:
+[INFO] 
+[INFO] Surprising Parent .................................. SUCCESS [  0.346 s]
+[INFO] surprising-product-api ............................. SUCCESS [  0.053 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.036 s]
+[INFO] surprising-instrument .............................. SUCCESS [  0.009 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  0.254 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [  0.626 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  3.091 s
+[INFO] Finished at: 2026-08-16T17:05:29+08:00
+[INFO] ------------------------------------------------------------------------
+CLONE_HIGH_EXIT=0
+CLONE_BOUNDARY_EXIT=0
+CLONE_VALIDATE_EXIT=0
+---CLONE_SUREFIRE_COUNTS---
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreLifecycleStateTest.txt:4:Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.309 s -- in com.surprising.aeron.service.state.CoreLifecycleStateTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.TradingCoreReducerTest.txt:4:Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.117 s -- in com.surprising.aeron.service.state.TradingCoreReducerTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.ActiveOrderIndexTest.txt:4:Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.034 s -- in com.surprising.aeron.service.state.ActiveOrderIndexTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.SurprisingClusteredServiceTest.txt:4:Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.977 s -- in com.surprising.aeron.service.SurprisingClusteredServiceTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.matching.SymbolMatchingLanesTest.txt:4:Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.195 s -- in com.surprising.aeron.service.matching.SymbolMatchingLanesTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.TradingStateSnapshotCodecTest.txt:4:Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in com.surprising.aeron.service.state.TradingStateSnapshotCodecTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.CoreProbeStateTest.txt:4:Tests run: 27, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 9.423 s -- in com.surprising.aeron.service.CoreProbeStateTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest.txt:4:Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.389 s -- in com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.CoreMatchingStateTest.txt:4:Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 15.07 s -- in com.surprising.aeron.service.CoreMatchingStateTest
+/tmp/surprising-main-clone18f62.GqVgp8/repo/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.CoreRiskStateTest.txt:4:Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.106 s -- in com.surprising.aeron.service.state.CoreRiskStateTest
+---CLONE_VALIDATE_RESULT---
+CLEAN_EXACT_MAIN_VERDICT=PASS
+cleanup: removed QA-only exact-main clone /tmp/surprising-main-clone18f62.GqVgp8; no server/tmux/browser/port/container remained; original main worktree and Gateway AD state were not modified.

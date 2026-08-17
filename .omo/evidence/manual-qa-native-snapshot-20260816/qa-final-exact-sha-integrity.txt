@@ -1,0 +1,51 @@
+FINAL_EXACT_SHA_INTEGRITY
+MAIN_DETACHED_SHA=b64ad00615965172f042bd49c38ffe0a0075fb76
+MAIN_TREE=4ab84b63a9165a94a847cb1d90d4451bc6ff8319
+FORK_DETACHED_SHA=33a9f135c4e2396aaac0f28fad2afbc1350b7a3c
+FORK_TREE=7746db924f55fa8a3593f3570a1cd915454ed246
+MAIN_EXACT_DIFF_CHECK=
+FORK_EXACT_DIFF_CHECK=
+MAIN_ORIGINAL_HEAD=b64ad00615965172f042bd49c38ffe0a0075fb76
+MAIN_ORIGINAL_STATUS=
+## codex/aeron-unified-core...origin/codex/aeron-unified-core [ahead 2]
+ M README.md
+ M surprising-aeron-core/README.md
+ M surprising-aeron-core/surprising-aeron-service/pom.xml
+ M surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatcherSnapshot.java
+AD surprising-gateway/src/main/java/com/surprising/websocket/provider/WebSocketRuntimeHints.java
+ M surprising-parent/pom.xml
+?? .omo/evidence/manual-qa-native-snapshot-20260816/
+?? .omo/evidence/security-reliability-gate-review.md
+?? .omo/evidence/w1-w2-goal-constraint-verification-gate-review.md
+?? .omo/evidence/w1-w2-native-exchange-core-snapshot-migration-code-review.md
+?? .omo/evidence/w1-w2-native-exchange-core-snapshot-migration-gate-review.md
+?? .omo/evidence/w1-w2-native-snapshot-migration-gate-review.md
+?? .omo/evidence/w1-w2-review-b64ad006.md
+?? .omo/evidence/w1-w2-single-book-snapshot-code-review.md
+?? .omo/plans/w1-w2-single-book-snapshot.md
+?? surprising-aeron-core/surprising-aeron-service/.factorypath
+GATEWAY_AD_STATUS=
+AD surprising-gateway/src/main/java/com/surprising/websocket/provider/WebSocketRuntimeHints.java
+FORK_ORIGINAL_HEAD=0511efca1458e9733d7911732ccab1fd83fc373b
+FORK_ORIGINAL_STATUS=
+## master...origin/master
+FORK_ARTIFACT_SHA=
+e7eb6b3cb292a605c30cb1fc224ced5cde7f1f5481306dbf01e76299a860f66d  /tmp/w1w2-qa-fork-33a9f135/target/exchange-core-0.5.12-emporia.jar
+MAVEN_ARTIFACT_SHA=
+e7eb6b3cb292a605c30cb1fc224ced5cde7f1f5481306dbf01e76299a860f66d  /Users/atomex/.m2/repository/exchange/core2/exchange-core/0.5.12-emporia/exchange-core-0.5.12-emporia.jar
+ACTIVE_QA_PROCESSES=
+57367 /bin/zsh -c set -o pipefail\012EVIDENCE=/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816\012MAIN=/tmp/w1w2-qa-main-b64ad006\012FORK=/tmp/w1w2-qa-fork-33a9f135\012{\012  printf 'FINAL_EXACT_SHA_INTEGRITY\n'\012  printf 'MAIN_DETACHED_SHA='; git -C "$MAIN" rev-parse HEAD\012  printf 'MAIN_TREE='; git -C "$MAIN" rev-parse 'HEAD^{tree}'\012  printf 'FORK_DETACHED_SHA='; git -C "$FORK" rev-parse HEAD\012  printf 'FORK_TREE='; git -C "$FORK" rev-parse 'HEAD^{tree}'\012  printf 'MAIN_EXACT_DIFF_CHECK=\n'\012  git -C "$MAIN" diff --check HEAD^ HEAD\012  printf 'FORK_EXACT_DIFF_CHECK=\n'\012  git -C "$FORK" diff --check HEAD^ HEAD\012  printf 'MAIN_ORIGINAL_HEAD='; git rev-parse HEAD\012  printf 'MAIN_ORIGINAL_STATUS=\n'\012  git status --short --branch\012  printf 'GATEWAY_AD_STATUS=\n'\012  git status --short -- surprising-gateway/src/main/java/com/surprising/websocket/provider/WebSocketRuntimeHints.java\012  printf 'FORK_ORIGINAL_HEAD='; git -C /Users/atomex/Desktop/exchange-core-lilaizhencn rev-parse HEAD\012  printf 'FORK_ORIGINAL_STATUS=\n'\012  git -C /Users/atomex/Desktop/exchange-core-lilaizhencn status --short --branch\012  printf 'FORK_ARTIFACT_SHA=\n'\012  shasum -a 256 "$FORK/target/exchange-core-0.5.12-emporia.jar"\012  printf 'MAVEN_ARTIFACT_SHA=\n'\012  shasum -a 256 "$HOME/.m2/repository/exchange/core2/exchange-core/0.5.12-emporia/exchange-core-0.5.12-emporia.jar"\012  printf 'ACTIVE_QA_PROCESSES=\n'\012  ps -axo pid=,command= | rg 'w1w2-qa-(main-b64ad006|fork-33a9f135)' || true\012  printf 'FOCUSED_MAIN_LOG_COUNTS=\n'\012  rg 'Tests run:|TEST_EXIT_CODE=' "$EVIDENCE/qa-main-native-restore-failure-safety-b64ad006-jdk25.log"\012  printf 'FOCUSED_FORK_LOG_COUNTS=\n'\012  rg 'Tests run:|TEST_EXIT_CODE=' "$EVIDENCE/qa-fork-open-order-native-33a9f135-jdk25.log"\012} 2>&1 | tee "$EVIDENCE/qa-final-exact-sha-integrity.txt"\012exit ${pipestatus[1]}
+57368 /bin/zsh -c set -o pipefail\012EVIDENCE=/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816\012MAIN=/tmp/w1w2-qa-main-b64ad006\012FORK=/tmp/w1w2-qa-fork-33a9f135\012{\012  printf 'FINAL_EXACT_SHA_INTEGRITY\n'\012  printf 'MAIN_DETACHED_SHA='; git -C "$MAIN" rev-parse HEAD\012  printf 'MAIN_TREE='; git -C "$MAIN" rev-parse 'HEAD^{tree}'\012  printf 'FORK_DETACHED_SHA='; git -C "$FORK" rev-parse HEAD\012  printf 'FORK_TREE='; git -C "$FORK" rev-parse 'HEAD^{tree}'\012  printf 'MAIN_EXACT_DIFF_CHECK=\n'\012  git -C "$MAIN" diff --check HEAD^ HEAD\012  printf 'FORK_EXACT_DIFF_CHECK=\n'\012  git -C "$FORK" diff --check HEAD^ HEAD\012  printf 'MAIN_ORIGINAL_HEAD='; git rev-parse HEAD\012  printf 'MAIN_ORIGINAL_STATUS=\n'\012  git status --short --branch\012  printf 'GATEWAY_AD_STATUS=\n'\012  git status --short -- surprising-gateway/src/main/java/com/surprising/websocket/provider/WebSocketRuntimeHints.java\012  printf 'FORK_ORIGINAL_HEAD='; git -C /Users/atomex/Desktop/exchange-core-lilaizhencn rev-parse HEAD\012  printf 'FORK_ORIGINAL_STATUS=\n'\012  git -C /Users/atomex/Desktop/exchange-core-lilaizhencn status --short --branch\012  printf 'FORK_ARTIFACT_SHA=\n'\012  shasum -a 256 "$FORK/target/exchange-core-0.5.12-emporia.jar"\012  printf 'MAVEN_ARTIFACT_SHA=\n'\012  shasum -a 256 "$HOME/.m2/repository/exchange/core2/exchange-core/0.5.12-emporia/exchange-core-0.5.12-emporia.jar"\012  printf 'ACTIVE_QA_PROCESSES=\n'\012  ps -axo pid=,command= | rg 'w1w2-qa-(main-b64ad006|fork-33a9f135)' || true\012  printf 'FOCUSED_MAIN_LOG_COUNTS=\n'\012  rg 'Tests run:|TEST_EXIT_CODE=' "$EVIDENCE/qa-main-native-restore-failure-safety-b64ad006-jdk25.log"\012  printf 'FOCUSED_FORK_LOG_COUNTS=\n'\012  rg 'Tests run:|TEST_EXIT_CODE=' "$EVIDENCE/qa-fork-open-order-native-33a9f135-jdk25.log"\012} 2>&1 | tee "$EVIDENCE/qa-final-exact-sha-integrity.txt"\012exit ${pipestatus[1]}
+FOCUSED_MAIN_LOG_COUNTS=
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.299 s -- in com.surprising.aeron.service.matching.SymbolMatchingLanesTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.985 s -- in com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest
+[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 13.10 s -- in com.surprising.aeron.service.CoreProbeStateTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.285 s -- in com.surprising.aeron.service.SurprisingClusteredServiceTest
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 23.17 s -- in com.surprising.aeron.service.CoreMatchingStateTest
+[INFO] Tests run: 56, Failures: 0, Errors: 0, Skipped: 0
+TEST_EXIT_CODE=0
+FOCUSED_FORK_LOG_COUNTS=
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.152 s -- in exchange.core2.core.common.OpenOrdersReportResultTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.299 s -- in exchange.core2.tests.integration.InMemorySerializationProcessorTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
+TEST_EXIT_CODE=0

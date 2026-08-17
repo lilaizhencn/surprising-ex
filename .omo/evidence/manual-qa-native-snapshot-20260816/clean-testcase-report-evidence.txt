@@ -1,0 +1,54 @@
+WORKTREE=/tmp/w1w2-native-qa-main-39d9149
+EXPECTED_COMMIT=39d9149de35797503d751ee2c32838fc58096286
+=== six FIFO cases ===
+name="preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine)[1]"
+name="preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine)[2]"
+name="preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine)[3]"
+name="preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine)[4]"
+name="preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine)[5]"
+name="preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine)[6]"
+=== high-risk cases ===
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.CoreProbeStateTest.xml:name="snapshotChecksumRejectsCorruption"
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.CoreProbeStateTest.xml:name="rejectsSnapshotWhileMatchingPending"
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.CoreProbeStateTest.xml:name="failsClosedWithoutRetryOnMatcherDivergence"
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.SurprisingClusteredServiceTest.xml:name="propagatesFatalMatcherDivergenceFromSnapshotCallback"
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.SurprisingClusteredServiceTest.xml:name="doesNotReplaceStateAfterCorruptSnapshot"
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.SurprisingClusteredServiceTest.xml:name="retriesTimerSchedulingUntilAeronBackpressureClears"
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest.xml:name="nativeSnapshotRoundTripRestoresTheOnlyExecutableBook"
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest.xml:name="restoreFailsClosedWhenCoreMetadataDoesNotMatchNativeOpenOrders"
+/tmp/w1w2-native-qa-main-39d9149/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest.xml:name="matcherSnapshotCodecRejectsCorruption"
+=== summaries ===
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:158:[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.809 s -- in com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:426:[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 12.62 s -- in com.surprising.aeron.service.CoreProbeStateTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:430:[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.283 s -- in com.surprising.aeron.service.SurprisingClusteredServiceTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:432:[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 16.99 s -- in com.surprising.aeron.service.CoreMatchingStateTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:436:[INFO] Tests run: 52, Failures: 0, Errors: 0, Skipped: 0
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:448:[INFO] BUILD SUCCESS
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:453:STANDARD_REACTOR_EXIT_CODE=0
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:699:[INFO] BUILD SUCCESS
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:751:[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.106 s -- in com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1019:[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 8.778 s -- in com.surprising.aeron.service.CoreProbeStateTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1023:[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.005 s -- in com.surprising.aeron.service.SurprisingClusteredServiceTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1025:[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 11.37 s -- in com.surprising.aeron.service.CoreMatchingStateTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1029:[INFO] Tests run: 52, Failures: 0, Errors: 0, Skipped: 0
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1032:[INFO] BUILD SUCCESS
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1037:CLEAN_HIGH_RISK_EXIT_CODE=0
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1069:[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.431 s -- in com.surprising.aeron.service.state.CoreLifecycleStateTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1071:[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.998 s -- in com.surprising.aeron.service.state.CoreRiskStateTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1073:[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.124 s -- in com.surprising.aeron.service.state.TradingCoreReducerTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1075:[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in com.surprising.aeron.service.state.TradingStateSnapshotCodecTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1079:[INFO] Tests run: 50, Failures: 0, Errors: 0, Skipped: 0
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1082:[INFO] BUILD SUCCESS
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-main-exact-jdk25.log:1087:CLEAN_BOUNDARY_EXIT_CODE=0
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:94:[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in exchange.core2.core.common.SymbolTypeTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:172:[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.787 s -- in exchange.core2.tests.integration.DmaOrderLifecycleTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:194:[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.112 s -- in exchange.core2.tests.integration.InMemorySerializationProcessorTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:406:[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.759 s -- in exchange.core2.tests.integration.ProductionSimulationTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:472:[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.329 s -- in exchange.core2.tests.integration.ProductionSimulationAccountingTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:528:[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.031 s -- in exchange.core2.tests.integration.MatchingOnlyDmaTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:571:[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in exchange.core2.tests.integration.DmaAdvancedOrdersTest
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:973:[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.464 s -- in exchange.core2.tests.RunCukesDirectLatencyTests
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:1295:[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.348 s -- in exchange.core2.tests.RunCukeNaiveTests
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:1797:[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.354 s -- in exchange.core2.tests.RunCukesDirectThroughputTests
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:1804:[INFO] BUILD SUCCESS
+/Users/atomex/Desktop/surprising/surprising-ex/.omo/evidence/manual-qa-native-snapshot-20260816/clean-fork-exact-jdk25.log:1809:CLEAN_FORK_EXIT_CODE=0

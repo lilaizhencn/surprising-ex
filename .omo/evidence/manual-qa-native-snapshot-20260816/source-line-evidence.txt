@@ -1,0 +1,633 @@
+=== CoreStateSnapshotCodec.java (exact commit) ===
+    20	import com.surprising.aeron.protocol.CoreMessage;
+    21	import com.surprising.aeron.protocol.CoreMessageCodec;
+    22	
+    23	final class CoreStateSnapshotCodec {
+    24	
+    25	    private static final int MAGIC = 0x5358534E;
+    26	    private static final int VERSION = 6;
+    27	    private static final int FIXED_LENGTH = 48;
+    28	    private static final int SOURCE_SEQUENCE_LENGTH = 24;
+    29	    private static final int RESULT_LENGTH = 40;
+    30	    private static final int EXPORT_FIXED_LENGTH = 20;
+    31	    private static final int CHECKSUM_LENGTH = Long.BYTES;
+    32	
+    33	    private CoreStateSnapshotCodec() {
+    34	    }
+    35	
+    36	    static byte[] encode(CoreProbeState state, MatcherSnapshot matcherSnapshot) {
+    37	        if (!state.pendingMatching().isEmpty()) {
+    38	            throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
+    39	        }
+    40	        matcherSnapshot.verifyCoreState(state.tradingState(), state.appliedCommandCount());
+    41	        byte[] tradingState = TradingStateSnapshotCodec.encode(state.tradingState());
+    42	        byte[] matcherState = MatcherSnapshotCodec.encode(matcherSnapshot);
+    43	        java.util.ArrayList<byte[]> pendingEvents = new java.util.ArrayList<>(state.exportState().pendingCount());
+    44	        for (CoreMessage event : state.exportState().pendingEvents()) {
+    45	            pendingEvents.add(CoreMessageCodec.encode(event));
+    46	        }
+    47	        long exportLength = EXPORT_FIXED_LENGTH;
+    48	        for (byte[] event : pendingEvents) {
+    49	            exportLength = Math.addExact(exportLength, Math.addExact(Integer.BYTES, event.length));
+    50	        }
+    51	        int snapshotLength = Math.toIntExact(Math.addExact(Math.addExact(Math.addExact(
+    52	                Math.addExact((long) FIXED_LENGTH,
+    53	                        Math.multiplyExact((long) state.lastSourceSequences().size(), SOURCE_SEQUENCE_LENGTH)),
+    54	                Math.multiplyExact((long) state.commandResults().size(), RESULT_LENGTH)),
+    55	                exportLength), Math.addExact(Math.addExact(matcherState.length, tradingState.length), CHECKSUM_LENGTH)));
+    56	        ByteBuffer buffer = ByteBuffer.allocate(snapshotLength)
+    57	                .order(ByteOrder.LITTLE_ENDIAN);
+    58	        buffer.putInt(MAGIC);
+    59	        buffer.putShort((short) VERSION);
+    60	        buffer.put((byte) ProductLineWireCode.encode(state.productLine()));
+    61	        buffer.put((byte) 0);
+    62	        buffer.putInt(MatcherSnapshot.ROUTE_VERSION);
+    63	        buffer.putLong(state.appliedCommandCount());
+    64	        buffer.putLong(state.probeValue());
+    65	        buffer.putInt(state.commandResults().size());
+    66	        buffer.putInt(state.lastSourceSequences().size());
+    67	        buffer.putInt(tradingState.length);
+    68	        buffer.putInt(matcherState.length);
+    69	        buffer.putInt(0);
+    70	        state.lastSourceSequences().forEach((sourceKey, sequence) -> {
+    71	            buffer.putInt(sourceKey.source().wireCode());
+    72	            buffer.putInt(0);
+    73	            buffer.putLong(sourceKey.sourceId());
+    74	            buffer.putLong(sequence);
+    75	        });
+    76	        state.commandResults().forEach((commandId, result) -> {
+    77	            buffer.putLong(commandId.getMostSignificantBits());
+    78	            buffer.putLong(commandId.getLeastSignificantBits());
+    79	            buffer.putInt(result.status().wireCode());
+    80	            buffer.putInt(result.resultCode().wireCode());
+    81	            buffer.putLong(result.appliedCommandCount());
+    82	            buffer.putLong(result.stateHash());
+    83	        });
+    84	        buffer.putLong(state.exportState().acknowledgedSequence());
+    85	        buffer.putLong(state.exportState().nextSequence());
+    86	        buffer.putInt(state.exportState().pendingCount());
+    87	        pendingEvents.forEach(encoded -> {
+    88	            buffer.putInt(encoded.length);
+    89	            buffer.put(encoded);
+    90	        });
+    91	        buffer.put(matcherState);
+    92	        buffer.put(tradingState);
+    93	        CRC32C checksum = new CRC32C();
+    94	        checksum.update(buffer.array(), 0, buffer.position());
+    95	        buffer.putLong(checksum.getValue());
+    96	        return buffer.array();
+    97	    }
+    98	
+    99	    static CoreSnapshotManifest manifest(byte[] snapshot, ProductLine expectedProductLine) {
+   100	        if (snapshot == null || snapshot.length < FIXED_LENGTH) {
+   101	            throw new ProtocolException("snapshot shorter than fixed header");
+   102	        }
+   103	        ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
+   104	        if (buffer.getInt() != MAGIC) {
+   105	            throw new ProtocolException("invalid snapshot magic");
+   106	        }
+   107	        int version = Short.toUnsignedInt(buffer.getShort());
+   108	        if (version != VERSION) {
+   109	            throw new ProtocolException("unsupported snapshot version: " + version);
+   110	        }
+   111	        if (snapshot.length < FIXED_LENGTH + EXPORT_FIXED_LENGTH + CHECKSUM_LENGTH) {
+   112	            throw new ProtocolException("snapshot manifest is truncated");
+   113	        }
+   114	        long storedChecksum = ByteBuffer.wrap(snapshot, snapshot.length - CHECKSUM_LENGTH, CHECKSUM_LENGTH)
+   115	                .order(ByteOrder.LITTLE_ENDIAN).getLong();
+   116	        CRC32C checksum = new CRC32C();
+   117	        checksum.update(snapshot, 0, snapshot.length - CHECKSUM_LENGTH);
+   118	        if (storedChecksum != checksum.getValue()) {
+   119	            throw new ProtocolException("snapshot checksum mismatch");
+   120	        }
+   121	        ProductLine productLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.get()));
+   122	        int shardCode = Byte.toUnsignedInt(buffer.get());
+   123	        int routeVersion = buffer.getInt();
+   124	        if (productLine != expectedProductLine) {
+   125	            throw new ProtocolException("snapshot product line mismatch: " + productLine);
+=== TradingStateSnapshotCodec.java (exact commit) ===
+    20	import java.util.UUID;
+    21	
+    22	public final class TradingStateSnapshotCodec {
+    23	
+    24	    private static final int VERSION = 19;
+    25	    private static final int MAX_TEXT_BYTES = 64;
+    26	
+    27	    private TradingStateSnapshotCodec() {
+    28	    }
+    29	
+    30	    public static byte[] encode(TradingCoreState state) {
+    31	        Writer writer = new Writer();
+    32	        writer.intValue(VERSION);
+    33	        writer.intValue(ProductLineWireCode.encode(state.productLine()));
+    34	        writer.longValue(state.revision());
+    35	        writer.intValue(state.users().size());
+    36	        for (CoreUserState user : state.users().values()) {
+    37	            writer.longValue(user.userId());
+    38	            writer.longValue(user.revision());
+    39	            writer.intValue(user.positionMode().wireCode());
+    40	            writer.intValue(user.balances().size());
+    41	            user.balances().values().forEach(balance -> {
+    42	                writer.text(balance.asset());
+    43	                writer.longValue(balance.availableUnits());
+    44	                writer.longValue(balance.lockedUnits());
+    45	            });
+    46	            writer.intValue(user.reservations().size());
+    47	            user.reservations().values().forEach(reservation -> {
+    48	                writer.longValue(reservation.orderId());
+    49	                writer.text(reservation.symbol());
+    50	                writer.longValue(reservation.instrumentVersion());
+    51	                writer.intValue(reservation.kind().wireCode());
+    52	                writer.text(reservation.asset());
+    53	                writer.longValue(reservation.reservedUnits());
+    54	                writer.longValue(reservation.releasedUnits());
+    55	                writer.longValue(reservation.consumedUnits());
+    56	                writer.longValue(reservation.orderQuantitySteps());
+    57	            });
+    58	            writer.intValue(user.positions().size());
+    59	            user.positions().values().forEach(position -> {
+    60	                writer.text(position.symbol());
+=== MatcherSnapshot.java (exact commit) ===
+    35	
+    36	    public static final String CORE_SHARD_ID = "default";
+    37	    public static final int ROUTE_VERSION = 1;
+    38	    public static final String FORK_GIT_SHA = "9819b9fea48b8b962bdef6bfcf67ed5f5a04981f";
+    39	    public static final String ARTIFACT_SHA256 =
+    40	            "b2ee6f235f9dbde4d2a37e407a8a855938b0f7cc0622ea28cb6e778552ff934a";
+    41	    public static final long MATCHER_CONFIG_HASH = hashText(
+    42	            "matching=1;risk=1;wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED");
+    43	
+    44	    public MatcherSnapshot {
+    45	        if (productLine == null || !CORE_SHARD_ID.equals(coreShardId)
+    46	                || routeVersion != ROUTE_VERSION || snapshotId <= 0 || coreSequence < 0
+    47	                || matcherSequence < 0 || !FORK_GIT_SHA.equals(forkGitSha)
+    48	                || !ARTIFACT_SHA256.equals(artifactSha256)
+    49	                || matcherConfigHash != MATCHER_CONFIG_HASH || symbols == null || users == null
+    50	                || modules == null || modules.isEmpty()) {
+    51	            throw new IllegalArgumentException("invalid matcher snapshot manifest");
+    52	        }
+    53	        symbols = Collections.unmodifiableMap(new TreeMap<>(symbols));
+    54	        users = Collections.unmodifiableSet(new TreeSet<>(users));
+    55	        modules = List.copyOf(modules);
+    56	        if (symbols.values().stream().anyMatch(symbolId -> symbolId == null || symbolId <= 0)
+    57	                || new java.util.HashSet<>(symbols.values()).size() != symbols.size()
+    58	                || users.stream().anyMatch(userId -> userId == null || userId <= 0)) {
+    59	            throw new IllegalArgumentException("invalid matcher registries");
+    60	        }
+    61	        if (symbolRegistryHash != symbolRegistryHash(symbols)
+    62	                || userRegistryHash != userRegistryHash(users)) {
+    63	            throw new IllegalArgumentException("matcher registry hash mismatch");
+    64	        }
+    65	        boolean matching = false;
+    66	        boolean risk = false;
+    67	        long maximumModuleSequence = Long.MIN_VALUE;
+    68	        for (SerializedModule module : modules) {
+    69	            if (module.snapshotId() != snapshotId || module.sequence() < 0 || module.sequence() > matcherSequence
+    70	                    || module.instanceId() != 0) {
+    71	                throw new IllegalArgumentException("matcher snapshot module watermark mismatch");
+    72	            }
+    73	            maximumModuleSequence = Math.max(maximumModuleSequence, module.sequence());
+    74	            if (module.type() == SerializedModuleType.MATCHING_ENGINE_ROUTER) {
+    75	                if (matching) throw new IllegalArgumentException("duplicate matching module");
+    76	                matching = true;
+    77	            } else if (module.type() == SerializedModuleType.RISK_ENGINE) {
+    78	                if (risk) throw new IllegalArgumentException("duplicate risk module");
+    79	                risk = true;
+    80	            }
+    81	        }
+    82	        if (!matching || !risk || modules.size() != 2 || maximumModuleSequence != matcherSequence) {
+    83	            throw new IllegalArgumentException("incomplete matcher snapshot modules");
+    84	        }
+    85	    }
+    86	
+    87	    public void verifyCoreState(TradingCoreState state, long expectedCoreSequence) {
+    88	        if (state == null || state.productLine() != productLine || coreSequence != expectedCoreSequence
+    89	                || coreBusinessStateHash != state.businessStateHash()
+    90	                || instrumentRegistryHash != instrumentRegistryHash(state)
+    91	                || activeOrderHash != activeOrderHash(state)) {
+    92	            throw new IllegalStateException("Core and matcher snapshot manifests do not match");
+    93	        }
+    94	    }
+    95	
+    96	    public static long symbolRegistryHash(Map<String, Integer> symbols) {
+    97	        long hash = offset();
+    98	        for (Map.Entry<String, Integer> entry : new TreeMap<>(symbols).entrySet()) {
+    99	            hash = mix(hash, entry.getKey());
+   100	            hash = mix(hash, entry.getValue());
+   101	        }
+   102	        return hash;
+   103	    }
+   104	
+   105	    public static long userRegistryHash(Set<Long> users) {
+=== DeterministicExchangeCoreAdapter.java (exact commit) ===
+    78	    }
+    79	
+    80	    public DeterministicExchangeCoreAdapter(
+    81	            TradingCoreState state,
+    82	            long coreSequence,
+    83	            MatcherSnapshot snapshot) {
+    84	        if (snapshot == null) {
+    85	            throw new IllegalArgumentException("matcher snapshot is required");
+    86	        }
+    87	        try {
+    88	            snapshot.verifyCoreState(state, coreSequence);
+    89	            serializationProcessor.importSnapshot(snapshot.modules());
+    90	            snapshot.symbols().forEach((symbol, symbolId) -> {
+    91	                String previous = symbolNames.put(symbolId, symbol);
+    92	                if (previous != null && !previous.equals(symbol)) {
+    93	                    throw new IllegalArgumentException("matcher symbol registry collision");
+    94	                }
+    95	                symbols.put(symbol, symbolId);
+    96	            });
+    97	            users.addAll(snapshot.users());
+    98	            start(snapshot);
+    99	            reconcileOpenOrdersAsync(state, coreSequence, snapshot.snapshotId(), "matcher restore").join();
+   100	            StateHashes restoredHashes = currentStateHashesAsync().join();
+   101	            if (restoredHashes.engineHash() != snapshot.engineStateHash()
+   102	                    || restoredHashes.bookHash() != snapshot.bookStateHash()) {
+   103	                throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
+   104	                        snapshot.snapshotId(), "restored exchange-core state hash mismatch");
+   105	            }
+   106	        } catch (RuntimeException exception) {
+   107	            stop();
+   108	            Throwable cause = unwrap(exception);
+   109	            if (cause instanceof FatalMatchingDivergenceException divergence) throw divergence;
+   110	            throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
+   111	                    snapshot.snapshotId(), "native snapshot validation failed", cause);
+   112	        }
+   113	    }
+   114	
+   115	    public CompletableFuture<CoreMatchingResult> placeAsync(long userId, PlaceOrderCommand command) {
+   116	        return matchingLanes.enqueue(command.symbol(), () -> placeUnlanedAsync(userId, command));
+   240	
+   241	    public CompletableFuture<Integer> orderBooksStateHashAsync() {
+   242	        return matchingLanes.barrier(() -> currentStateHashesAsync().thenApply(StateHashes::bookHash));
+   243	    }
+   244	
+   245	    public CompletableFuture<MatcherSnapshot> snapshotAsync(
+   246	            long snapshotId,
+   247	            long coreSequence,
+   248	            TradingCoreState state) {
+   249	        if (snapshotId <= 0 || coreSequence < 0 || state == null) {
+   250	            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher snapshot request"));
+   251	        }
+   252	        return matchingLanes.barrier(() -> reconcileOpenOrdersAsync(state, coreSequence, snapshotId,
+   253	                "matcher snapshot").thenCompose(ignored -> currentStateHashesAsync()).thenCompose(hashes ->
+   254	                api.submitCommandAsync(ApiPersistState.builder().dumpId(snapshotId).build())
+   255	                        .thenApply(result -> {
+   256	                            if (result != CommandResultCode.SUCCESS) {
+   257	                                throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence,
+   258	                                        snapshotId, "exchange-core persist failed: " + result);
+   259	                            }
+   260	                            try {
+   261	                                List<InMemorySerializationProcessor.SerializedModule> modules =
+   262	                                        serializationProcessor.exportSnapshot(snapshotId);
+   263	                                long matcherSequence = modules.stream()
+   264	                                        .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence)
+   265	                                        .max().orElseThrow();
+   266	                                return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
+   267	                                        MatcherSnapshot.ROUTE_VERSION, snapshotId, coreSequence, matcherSequence,
+   268	                                        state.businessStateHash(), hashes.engineHash(), hashes.bookHash(),
+   269	                                        MatcherSnapshot.symbolRegistryHash(symbols),
+   270	                                        MatcherSnapshot.userRegistryHash(users),
+   271	                                        MatcherSnapshot.instrumentRegistryHash(state),
+   272	                                        MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
+   273	                                        MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.MATCHER_CONFIG_HASH,
+   274	                                        symbols, users, modules);
+   275	                            } finally {
+   276	                                serializationProcessor.removeSnapshot(snapshotId);
+   277	                            }
+   278	                        })));
+   279	    }
+   280	
+   281	    private CompletableFuture<Void> reconcileOpenOrdersAsync(
+   282	            TradingCoreState state,
+   283	            long coreSequence,
+   284	            long snapshotId,
+   285	            String operation) {
+   286	        return api.processReport(new OpenOrdersReportQuery(), 0).thenAccept(report -> {
+   287	            Map<Long, ReconciledOrder> expected = new TreeMap<>();
+   288	            for (CoreOrderState order : state.orders().values()) {
+   289	                if (order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN) continue;
+   290	                Integer symbolId = symbols.get(order.symbol());
+   291	                if (symbolId == null) {
+   292	                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+   293	                            "Core open order references an unregistered matcher symbol");
+   294	                }
+   295	                expected.put(order.orderId(), new ReconciledOrder(symbolId, order.orderId(), order.userId(),
+   296	                        order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
+   297	                        order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
+   298	                        order.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : order.priceTicks()));
+   299	            }
+   300	            Map<Long, ReconciledOrder> actual = new TreeMap<>();
+   301	            for (OpenOrdersReportResult.OpenOrder order : report.getOrders()) {
+   302	                ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
+   303	                        order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
+   304	                if (actual.put(order.orderId(), reconciled) != null) {
+   305	                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+   306	                            "exchange-core returned duplicate open order ID " + order.orderId());
+   307	                }
+   308	            }
+   309	            if (!expected.equals(actual)) {
+   310	                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+   311	                        "Core OPEN orders do not exactly match exchange-core open orders"
+   312	                                + " (expected=" + expected.size() + ", actual=" + actual.size() + ')');
+   313	            }
+   314	        });
+   315	    }
+   316	
+   317	    private CompletableFuture<StateHashes> currentStateHashesAsync() {
+   318	        return api.processReport(new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0)
+   319	                .thenApply(report -> new StateHashes(report.getStateHash(), report.getHashCodes().entrySet().stream()
+   320	                        .filter(entry -> entry.getKey().submodule
+   360	            throw new IllegalArgumentException("instrument is required");
+   361	        }
+   362	        return ensureSymbolAsync(instrument.symbol());
+   363	    }
+   364	
+   365	    private void start() {
+   366	        start(null);
+   367	    }
+   368	
+   369	    private void start(MatcherSnapshot snapshot) {
+   370	        InitialStateConfiguration initialState = snapshot == null
+   371	                ? InitialStateConfiguration.cleanStart("aeron-authoritative-book")
+   372	                : InitialStateConfiguration.fromSnapshotOnly(
+   373	                        "aeron-authoritative-book", snapshot.snapshotId(), 0);
+   374	        ExchangeConfiguration configuration = ExchangeConfiguration.defaultBuilder()
+   375	                .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
+   376	                        .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.MATCHING_ONLY)
+   377	                        .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
+   378	                        .build())
+   379	                .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
+   380	                        .matchingEnginesNum(1).riskEnginesNum(1).waitStrategy(CoreWaitStrategy.BUSY_SPIN).build())
+   381	                .initStateCfg(initialState)
+   382	                .serializationCfg(SerializationConfiguration.builder()
+   383	                        .enableJournaling(false)
+   384	                        .serializationProcessorFactory(ignored -> serializationProcessor)
+   385	                        .build())
+   386	                .build();
+   387	        core = ExchangeCore.builder().exchangeConfiguration(configuration).resultsConsumer((command, sequence) -> {
+   388	        }).build();
+   389	        core.startup();
+   390	        api = core.getApi();
+=== SurprisingClusteredService.java (exact commit) ===
+    40	        this.productLine = productLine;
+    41	        this.state = new CoreProbeState(productLine);
+    42	    }
+    43	
+    44	    @Override
+    45	    public void onStart(Cluster cluster, Image snapshotImage) {
+    46	        this.cluster = cluster;
+    47	        pendingEgress.clear();
+    48	        pendingClients.clear();
+    49	        idleStrategy = cluster.idleStrategy();
+    50	        role.set(cluster.role());
+    51	        System.out.printf("Aeron core role productLine=%s role=%s%n", productLine, cluster.role());
+    52	        if (snapshotImage != null) {
+    53	            loadSnapshot(snapshotImage);
+    54	        }
+    55	        schedulePendingMatchingTimers();
+    56	    }
+    57	
+    58	    @Override
+    59	    public void onSessionMessage(
+    60	            ClientSession session,
+--
+    76	        if (matchingSequence > 0) {
+    77	            if (session != null) {
+    78	                pendingClients.computeIfAbsent(matchingSequence, ignored -> new ArrayDeque<>())
+    79	                        .addLast(new PendingClient(session, request));
+    80	            }
+    81	            scheduleMatchingTimer(matchingSequence);
+    82	            return;
+    83	        }
+    84	        long querySequence = state.querySequence(request.header().commandId());
+    85	        if (querySequence != 0) {
+    86	            if (session != null) {
+    87	                pendingClients.computeIfAbsent(querySequence, ignored -> new ArrayDeque<>())
+    88	                        .addLast(new PendingClient(session, request));
+    89	            }
+    90	            scheduleMatchingTimer(querySequence);
+    91	            return;
+    92	        }
+    93	        if (session != null) {
+    94	            CoreMessage response = new CoreMessage(request.header().response(responseType(request)),
+    95	                    CoreProtocol.responsePayload(result));
+    96	            offer(session, CoreMessageCodec.encode(response));
+    97	        }
+    98	    }
+    99	
+   100	    @Override
+   101	    public void onTakeSnapshot(ExclusivePublication snapshotPublication) {
+   102	        byte[] snapshot = state.snapshot(Math.max(1, cluster.logPosition()));
+   103	        org.agrona.concurrent.UnsafeBuffer buffer = new org.agrona.concurrent.UnsafeBuffer(snapshot);
+   104	        idleStrategy.reset();
+   105	        int offset = 0;
+   106	        while (offset < snapshot.length) {
+   107	            int chunkLength = Math.min(snapshotPublication.maxPayloadLength(), snapshot.length - offset);
+   108	            while (snapshotPublication.offer(buffer, offset, chunkLength) < 0) {
+   109	                idleStrategy.idle();
+   110	            }
+   111	            offset += chunkLength;
+   112	        }
+   113	    }
+   114	
+   115	    @Override
+   116	    public void onRoleChange(Cluster.Role newRole) {
+   117	        role.set(newRole);
+   118	        System.out.printf("Aeron core role-change productLine=%s role=%s%n", productLine, newRole);
+   119	        schedulePendingMatchingTimers();
+   120	    }
+   121	
+   122	    @Override
+   123	    public int doBackgroundWork(long nowNs) {
+   124	        int work = 0;
+--
+   137	    }
+   138	
+   139	    @Override
+   140	    public void onSessionOpen(ClientSession session, long timestamp) {
+   141	        pendingEgress.put(session.id(), new PendingEgress(session));
+   142	        schedulePendingMatchingTimers();
+   143	    }
+   144	
+   145	    @Override
+   146	    public void onSessionClose(ClientSession session, long timestamp, CloseReason closeReason) {
+   147	        pendingEgress.remove(session.id());
+--
+   150	    @Override
+   151	    public void onTimerEvent(long correlationId, long timestamp) {
+   152	        if (correlationId < 0) {
+   153	            CoreResponse queryResult = state.takeQueryResult(correlationId);
+   154	            if (queryResult == null) {
+   155	                scheduleMatchingTimer(correlationId);
+   156	                return;
+   157	            }
+   158	            ArrayDeque<PendingClient> clients = pendingClients.remove(correlationId);
+   159	            if (clients != null) {
+   160	                for (PendingClient pendingClient : clients) {
+--
+   170	        if (matchingResult == null) {
+   171	            state.markMatchingTimeout(correlationId, timestamp);
+   172	            matchingResult = state.takeMatchingResult(correlationId);
+   173	        }
+   174	        if (matchingResult == null) {
+   175	            scheduleMatchingTimer(correlationId);
+   176	            return;
+   177	        }
+   178	        CoreResponse result = state.completeMatching(correlationId, matchingResult, timestamp,
+   179	                cluster == null ? 0 : cluster.logPosition());
+   180	        if (result == null) {
+   181	            scheduleMatchingTimer(correlationId);
+   182	            return;
+   183	        }
+   184	        ArrayDeque<PendingClient> clients = pendingClients.remove(correlationId);
+   185	        if (clients != null) {
+   186	            for (PendingClient pendingClient : clients) {
+--
+   188	                CoreMessage response = new CoreMessage(pendingClient.request().header().response(
+   189	                        responseType(pendingClient.request())), CoreProtocol.responsePayload(result));
+   190	                offer(pendingClient.session(), CoreMessageCodec.encode(response));
+   191	            }
+   192	        }
+   193	        schedulePendingMatchingTimers();
+   194	    }
+   195	
+   196	    CoreProbeState state() {
+   197	        return state;
+   198	    }
+   199	
+   200	    private void loadSnapshot(Image snapshotImage) {
+   201	        ByteArrayOutputStream snapshot = new ByteArrayOutputStream();
+   202	        FragmentAssembler assembler = new FragmentAssembler((buffer, offset, length, header) -> {
+   203	            byte[] data = new byte[length];
+   204	            buffer.getBytes(offset, data);
+   205	            snapshot.writeBytes(data);
+   206	        });
+   207	        while (!snapshotImage.isEndOfStream()) {
+   208	            int fragments = snapshotImage.poll(assembler, 10);
+   209	            idleStrategy.idle(fragments);
+   210	        }
+   211	        if (snapshot.size() == 0) {
+   212	            throw new IllegalStateException("incomplete Aeron core snapshot");
+   213	        }
+   214	        restoreSnapshot(snapshot.toByteArray());
+   215	    }
+   216	
+   217	    void restoreSnapshot(byte[] snapshot) {
+   218	        CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot);
+   219	        state.close();
+   220	        state = restored;
+   221	    }
+   222	
+   223	    private void offer(ClientSession session, byte[] encoded) {
+   224	        PendingEgress egress = pendingEgress.computeIfAbsent(session.id(), id -> new PendingEgress(session));
+   225	        if (!egress.queue.isEmpty()) {
+--
+   265	        private PendingEgress(ClientSession session) {
+   266	            this.session = session;
+   267	        }
+   268	    }
+   269	
+   270	    private void schedulePendingMatchingTimers() {
+   271	        if (cluster == null) return;
+   272	        for (long sequence : state.pendingMatching().keySet()) {
+   273	            scheduleMatchingTimer(sequence);
+   274	        }
+   275	    }
+   276	
+   277	    private void scheduleMatchingTimer(long sequence) {
+   278	        if (cluster == null || sequence == 0) return;
+   279	        long delay = Math.max(1L, cluster.timeUnit().convert(MATCHING_TIMER_DELAY_MS,
+   280	                java.util.concurrent.TimeUnit.MILLISECONDS));
+   281	        long deadline = cluster.time() + delay;
+   282	        idleStrategy.reset();
+   283	        while (!cluster.scheduleTimer(sequence, deadline)) {
+   284	            idleStrategy.idle();
+   285	        }
+   286	    }
+   287	
+   288	    private record PendingClient(ClientSession session, CoreMessage request) {
+=== high-risk tests (exact commit) ===
+--- surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapterTest.java
+    50	    }
+    51	
+    52	    @Test
+    53	    void nativeSnapshotRoundTripRestoresTheOnlyExecutableBook() {
+    54	        TradingCoreState state = stateWithOpenBid(100);
+    55	        MatcherSnapshot snapshot;
+    56	        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+--
+    77	    }
+    78	
+    79	    @Test
+    80	    void restoreFailsClosedWhenCoreMetadataDoesNotMatchNativeOpenOrders() {
+    81	        TradingCoreState original = stateWithOpenBid(100);
+    82	        MatcherSnapshot snapshot;
+    83	        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+--
+    99	    }
+   100	
+   101	    @Test
+   102	    void matcherSnapshotCodecRejectsCorruption() {
+   103	        TradingCoreState state = stateWithOpenBid(100);
+   104	        byte[] encoded;
+   105	        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+--- surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/CoreProbeStateTest.java
+   320	    }
+   321	
+   322	    @Test
+   323	    void rejectsSnapshotWhileMatchingPending() {
+   324	        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+   325	            applySpotInstrument(state);
+   326	            state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+--
+   340	    }
+   341	
+   342	    @Test
+   343	    void failsClosedWithoutRetryOnMatcherDivergence() {
+   344	        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+   345	            applySpotInstrument(state);
+   346	            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+--
+   730	    }
+   731	
+   732	    @Test
+   733	    void snapshotChecksumRejectsCorruption() {
+   734	        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+   735	        state.apply(command(UUID.randomUUID(), 1, 7));
+   736	        byte[] snapshot = state.snapshot();
+--- surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/CoreMatchingStateTest.java
+   263	    }
+   264	
+   265	    @ParameterizedTest
+   266	    @MethodSource("allProductLines")
+   267	    void preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine productLine) {
+   268	        try (CoreProbeState state = new CoreProbeState(productLine)) {
+   269	            applyInstrument(state);
+   270	            ReservationKind reservationKind = productLine == ProductLine.SPOT
+--- surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/SurprisingClusteredServiceTest.java
+    35	class SurprisingClusteredServiceTest {
+    36	
+    37	    @Test
+    38	    void doesNotReplaceStateAfterCorruptSnapshot() {
+    39	        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+    40	        try {
+    41	            CoreProbeState before = service.state();
+--
+    52	    }
+    53	
+    54	    @Test
+    55	    void propagatesFatalMatcherDivergenceFromSnapshotCallback() {
+    56	        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+    57	        service.onStart(cluster(), null);
+    58	        try {
+--
+    71	    }
+    72	
+    73	    @Test
+    74	    void retriesTimerSchedulingUntilAeronBackpressureClears() {
+    75	        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+    76	        AtomicInteger attempts = new AtomicInteger();
+    77	        try {
