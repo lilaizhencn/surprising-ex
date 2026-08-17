@@ -171,10 +171,14 @@ assert_ports_free() {
     port="${entry#*=}"
     [[ "$port" =~ ^[0-9]+$ ]] || fail "INVALID_PORT value=$port"
     (( port > 0 && port < 65536 )) || fail "INVALID_PORT value=$port"
-    if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    if [[ "$entry" == core.* ]]; then
+      if lsof -nP -iUDP:"$port" >/dev/null 2>&1; then
+        fail "PORT_OCCUPIED port=$port protocol=udp"
+      fi
+    elif lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
       fail "PORT_OCCUPIED port=$port"
     fi
-  done < <(port_lines | grep -v '^core\.')
+  done < <(port_lines)
 }
 
 container_ids() {
