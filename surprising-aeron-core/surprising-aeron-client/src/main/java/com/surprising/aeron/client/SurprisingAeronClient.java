@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.function.IntSupplier;
 import java.util.concurrent.TimeUnit;
 import org.agrona.DirectBuffer;
@@ -89,24 +91,36 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             throw new IllegalArgumentException("responseTimeout must be positive");
         }
         MediaDriver mediaDriver = newMediaDriver();
-        AsyncConnection connection = new AsyncConnection(productLine, hostnames, egressHostname,
-                responseTimeout, mediaDriver, true);
-        long deadline = System.nanoTime() + responseTimeout.toNanos();
+        FutureTask<SurprisingAeronClient> connection = new FutureTask<>(
+                () -> new SurprisingAeronClient(productLine, hostnames, egressHostname,
+                        responseTimeout, mediaDriver, true));
+        Thread connector = new Thread(connection, "surprising-aeron-connect-" + productLine.topicSegment());
+        connector.setDaemon(true);
+        connector.start();
         try {
-            while (System.nanoTime() < deadline) {
-                SurprisingAeronClient connected = connection.poll();
-                if (connected != null) {
-                    return connected;
-                }
-                TimeUnit.MILLISECONDS.sleep(1);
-            }
+            return connection.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (java.util.concurrent.TimeoutException exception) {
+            mediaDriver.close();
+            connection.cancel(true);
             throw new io.aeron.exceptions.TimeoutException(
                     "timed out connecting to Aeron Cluster productLine=" + productLine);
         } catch (InterruptedException exception) {
+            mediaDriver.close();
+            connection.cancel(true);
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted connecting to Aeron Cluster", exception);
+        } catch (ExecutionException exception) {
+            mediaDriver.close();
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("failed connecting to Aeron Cluster", cause);
         } catch (RuntimeException exception) {
-            connection.close();
+            mediaDriver.close();
             throw exception;
         }
     }
