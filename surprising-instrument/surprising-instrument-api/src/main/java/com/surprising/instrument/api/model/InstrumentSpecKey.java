@@ -1,5 +1,6 @@
-package com.surprising.product.api;
+package com.surprising.instrument.api.model;
 
+import com.surprising.product.api.ProductLine;
 import java.util.Locale;
 
 /**

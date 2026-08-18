@@ -2,7 +2,7 @@ package com.surprising.instrument.api.cache;
 
 import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.instrument.api.model.InstrumentResponse;
-import com.surprising.product.api.InstrumentSpecKey;
+import com.surprising.instrument.api.model.InstrumentSpecKey;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.ArrayList;

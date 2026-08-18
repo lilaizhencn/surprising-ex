@@ -1,8 +1,9 @@
-package com.surprising.product.api;
+package com.surprising.instrument.api.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 
 class InstrumentSpecKeyTest {
