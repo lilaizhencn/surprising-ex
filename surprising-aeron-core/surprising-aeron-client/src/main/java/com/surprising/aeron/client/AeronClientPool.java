@@ -51,6 +51,9 @@ public final class AeronClientPool implements AutoCloseable {
         int pollEgress(int fragmentLimit);
         CoreResponse takeResponse(long correlationId);
         RuntimeException sessionFailure();
+        default boolean connected() {
+            return true;
+        }
         boolean keepAlive();
         @Override
         void close();
@@ -217,7 +220,7 @@ public final class AeronClientPool implements AutoCloseable {
             offerResult = request.admissionFuture.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException exception) {
             if (request.cancelBeforeOffer()) {
-                return TryCommandResult.BUSY;
+                return agent.sessionConnected() ? TryCommandResult.BUSY : TryCommandResult.NOT_READY;
             }
             offerResult = request.admissionFuture.join();
         } catch (InterruptedException exception) {
@@ -471,7 +474,7 @@ public final class AeronClientPool implements AutoCloseable {
         private final AtomicLong nextCorrelation = new AtomicLong();
         private final Map<Long, Request> pending = new LinkedHashMap<>();
         private final Set<Long> claimedCorrelations = ConcurrentHashMap.newKeySet();
-        private Session session;
+        private volatile Session session;
         private long reconnectAtNanos;
         private long reconnectMillis = MIN_RECONNECT_MILLIS;
         private long keepAliveAtNanos;
@@ -480,6 +483,11 @@ public final class AeronClientPool implements AutoCloseable {
             this.mailbox = new ArrayBlockingQueue<>(mailboxCapacity);
             this.maxInFlight = maxInFlight;
             this.sourceId = sourceId;
+        }
+
+        private boolean sessionConnected() {
+            Session current = session;
+            return current != null && current.connected();
         }
 
         private Request commandRequest(
@@ -518,6 +526,7 @@ public final class AeronClientPool implements AutoCloseable {
                 request.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
                 return true;
             }
+            request.startQueueTimeout(responseTimeout.toNanos());
             if (!mailbox.offer(request)) {
                 request.releaseCorrelation();
                 return false;
@@ -583,6 +592,7 @@ public final class AeronClientPool implements AutoCloseable {
                     }
                     for (AgentLane lane : lanes) {
                         worked |= admitQueued(lane);
+                        expireQueued(lane);
                         expireAdmitted(lane);
                     }
                     if (!worked) {
@@ -683,7 +693,7 @@ public final class AeronClientPool implements AutoCloseable {
             boolean worked = false;
             while (true) {
                 Request next = lane.mailbox.peek();
-                if (next == null || lane.session == null
+                if (next == null || lane.session == null || !lane.session.connected()
                         || (!next.oneWay && lane.pending.size() >= lane.maxInFlight)) {
                     return worked;
                 }
@@ -752,6 +762,20 @@ public final class AeronClientPool implements AutoCloseable {
                 lane.pending.clear();
                 closeSession(lane);
             }
+        }
+
+        private void expireQueued(AgentLane lane) {
+            long now = System.nanoTime();
+            long rejection = lane.session == null || !lane.session.connected()
+                    ? Publication.NOT_CONNECTED
+                    : Publication.BACK_PRESSURED;
+            lane.mailbox.removeIf(request -> {
+                if (!request.queueExpired(now)) {
+                    return false;
+                }
+                request.notAccepted(CoreCommandOutcome.notAccepted(rejection));
+                return true;
+            });
         }
 
         private void dispatchResponses(Session session, Map<Long, Request> pending) {
@@ -894,6 +918,7 @@ public final class AeronClientPool implements AutoCloseable {
         private Runnable correlationRelease = () -> { };
         private boolean offering;
         private boolean cancelled;
+        private long queueDeadlineNanos;
         private long deadlineNanos;
 
         private Request(CoreMessage message, UUID operationId, boolean oneWay,
@@ -924,6 +949,16 @@ public final class AeronClientPool implements AutoCloseable {
 
         private synchronized void prepareForRetry() {
             offering = false;
+        }
+
+        private synchronized void startQueueTimeout(long timeoutNanos) {
+            if (queueDeadlineNanos == 0) {
+                queueDeadlineNanos = Math.addExact(System.nanoTime(), timeoutNanos);
+            }
+        }
+
+        private synchronized boolean queueExpired(long now) {
+            return !offering && !cancelled && queueDeadlineNanos != 0 && now >= queueDeadlineNanos;
         }
 
         private boolean isQuery() {

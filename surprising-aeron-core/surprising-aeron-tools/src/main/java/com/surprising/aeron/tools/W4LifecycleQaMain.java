@@ -18,6 +18,8 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskQueryCodec;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
@@ -345,7 +347,6 @@ public final class W4LifecycleQaMain {
                 long seller = user(110 + optionTypeOffset(optionType) + moneynessOffset(moneyness));
                 int optionCode = optionType.equals("CALL") ? 0 : 1;
                 long settlementPrice = optionSettlementPrice(optionType, moneyness);
-                long optionCash = optionCash(optionType, settlementPrice);
                 setupInstrument(symbol, ContractType.VANILLA_OPTION, optionCode, STRIKE,
                         2_000_000_000_000L);
                 adjust(buyer, "USDT", 2_000);
@@ -356,7 +357,7 @@ public final class W4LifecycleQaMain {
                 place(buyer, order(110 + optionTypeOffset(optionType) + moneynessOffset(moneyness)),
                         symbol, CoreOrderSide.BUY, CoreMarginMode.CROSS,
                         ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 2);
-                settle(symbol, settlementPrice, optionCash,
+                settle(symbol, settlementPrice, settlementPrice,
                         2_000L + optionTypeOffset(optionType) + moneynessOffset(moneyness));
                 readSettlementProgress(symbol);
                 runProviderCycles(symbol, buyer);
@@ -555,12 +556,12 @@ public final class W4LifecycleQaMain {
                         settlementId, symbol, VERSION, 10_000, 0, 256)));
     }
 
-    private void settle(String symbol, long price, long optionCash, long settlementId) {
+    private void settle(String symbol, long price, long underlyingSettlementPrice, long settlementId) {
         request("instrument", "POST", "/api/v1/instruments/admin/" + symbol + "/status"
                         + "?productLine=" + productLine + "&status=SETTLING", null, Map.of());
         request("instrument", "POST", "/api/v1/instruments/admin/" + symbol + "/settlement"
                         + "?productLine=" + productLine + "&settlementPriceTicks=" + price
-                        + "&underlyingSettlementPriceUnits=" + optionCash, null, Map.of());
+                        + "&underlyingSettlementPriceUnits=" + underlyingSettlementPrice, null, Map.of());
         providerBoundaryObserved = true;
         for (int attempt = 0; attempt < 20; attempt++) {
             try {
@@ -831,11 +832,47 @@ public final class W4LifecycleQaMain {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, commandId, productLine,
                 CommandSource.OPERATIONS, sourceId, currentSequence, userId,
                 System.currentTimeMillis(), currentSequence), payload);
-        var response = client.submit(message);
+        CoreResponse response;
+        try {
+            response = client.submit(message);
+        } catch (ResultUnknownException exception) {
+            response = awaitCommandResult(commandId, userId, type);
+        }
         if (response.commandStatus() != ResponseStatus.APPLIED
                 && response.commandStatus() != ResponseStatus.DUPLICATE) {
             throw new IllegalStateException(type + " rejected result=" + response.resultCode());
         }
+    }
+
+    private CoreResponse awaitCommandResult(UUID commandId, long userId, CoreMessageType commandType) {
+        for (int attempt = 1; attempt <= 40; attempt++) {
+            long correlation = nextSequence();
+            CoreMessage query = new CoreMessage(CoreMessageHeader.query(
+                    CoreMessageType.COMMAND_RESULT_QUERY,
+                    UUID.nameUUIDFromBytes((productLine + ":command-result:" + correlation + ':' + commandId)
+                            .getBytes(StandardCharsets.UTF_8)),
+                    productLine, CommandSource.OPERATIONS, sourceId, 0, userId,
+                    System.currentTimeMillis(), correlation),
+                    CoreStateQueryCodec.encodeCommandResultQuery(commandId));
+            try {
+                CoreResponse response = client.submit(query);
+                if (response.status() == ResponseStatus.OK) {
+                    return response;
+                }
+                if (response.resultCode() != CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION) {
+                    throw new IllegalStateException(commandType + " result query rejected result="
+                            + response.resultCode());
+                }
+            } catch (ResultUnknownException ignored) {
+            }
+            try {
+                Thread.sleep(100L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("W4 command result wait interrupted", interrupted);
+            }
+        }
+        throw new IllegalStateException(commandType + " result remains unknown commandId=" + commandId);
     }
 
     private byte[] query(CoreMessageType type, long userId, byte[] payload) {
@@ -934,12 +971,6 @@ public final class W4LifecycleQaMain {
             case "PUT:OTM" -> 120;
             default -> throw new IllegalArgumentException("invalid option moneyness");
         };
-    }
-
-    private static long optionCash(String optionType, long settlementPrice) {
-        return optionType.equals("CALL")
-                ? Math.max(settlementPrice - STRIKE, 0)
-                : Math.max(STRIKE - settlementPrice, 0);
     }
 
     private static int optionTypeOffset(String optionType) {

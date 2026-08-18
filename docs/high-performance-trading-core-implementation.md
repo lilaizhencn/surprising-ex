@@ -711,7 +711,7 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 | P1 正确性/单往返 | `DONE` | 失败回滚、稳定 lane、结果未知、fee/instrument version gate、直接响应 | Core 回滚护栏、bounded client、`COMMAND_RESULT_QUERY` 结果核验、native GTX 测试 | 无；source epoch 采用进程 epoch 编码 sourceId 的简单方案，不另建 registry |
 | P2 Runtime/O(delta) | `DONE` | 单写 runtime、持久化 delta entity store、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime`、DeltaMap lineage、各类派生 index、Core service 121 tests 和运行时 smoke；热点逐项状态见第 3.1/3.3 节 | 热路径已无隐式全量 constructor/diff/hash；用户/订单 immutable state shell 仍是可选的后续性能优化；历史实体 compaction 仍按运行手册执行 |
 | P3 唯一盘口/恢复 | `DONE` | exchange-core 唯一 executable book、结构化 adapter、Aeron 托管 matcher snapshot、无逐单恢复 | fork 302 tests；六个 ProductLine 原生 FIFO restore；snapshot round-trip、损坏/版本/SHA/registry/订单集合不一致均 fail-closed；`CoreBookState` 和生产 rebuild 已删除 | 真实三 Member election、冷恢复和长时容量仍属于 P6 上线门禁 |
-| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 已通过宿主机三节点 Cluster 的真实 HTTP/做市/结算/资金守恒门禁 | SPOT、两条永续和 OPTION 仍需逐条执行真实 Provider 门禁；cursor 重启/缺口仍需验证 |
+| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已通过宿主机三节点 Cluster 的真实 HTTP/做市/结算/资金守恒门禁 | SPOT 和两条永续仍需逐条执行真实 Provider 门禁；cursor 重启/缺口仍需验证 |
 | P5 导出/查询/外围 | `DONE` | 一次编码 outbox、带 cursor 的批量 ACK、projection、查询旁路、慢连接隔离 | `w5-export-final-1315` 通过 Kafka/PG 故障恢复、重复/乱序、Gateway/WebSocket offset、Core 独立和资金门禁；`w5-isolation-final-1345` 通过 PG 恢复、投影缺口回放、慢客户端隔离和清理 | 生产规模容量和长时 soak 属于 P6，不阻塞本阶段功能出口 |
 | P6 HA/压测/扩容 | `IN_PROGRESS` | leader/follower/cold recovery、单线容量、manifest、runbook | SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery manifest 通过；六条产品线均有 20 秒 capacity PASS 和角色日志 | 长时稳定容量报告、完整 CPU/GC/Aeron/export lag 指标和扩容结论 |
 
@@ -775,6 +775,19 @@ W4 已改用 W5 验证过的宿主机三节点 Aeron Cluster，Docker 只复用�
 - W4 reconciliation manifest 记录每个参与用户的余额、预留和持仓，资金差异失败不再只有聚合数字。
 
 此前 `w4-inverse-delivery-final1` 的 `difference=-91` 发生在旧结算等待语义下：驱动查到 progress 后立即对账，但没有要求分块结算完成。当前驱动等待 Instrument 结算事件被 Account Provider 回调到 Core，并确认 `complete=true && ordersComplete=true` 后才查询和对账。没有通过扩大用户集合、修改期初资金或放宽 `FUNDS_DIFFERENCE=0` 消除失败。
+
+### 18.3.4 W4 OPTION/Aeron 超时闭环（2026-08-18）
+
+OPTION 真实门禁最初停在已受理 Aeron 请求的结果未知超时。修复保持资金状态边界不变：Aeron 客户端在异步会话真正连接前不发送排队请求，排队和已受理请求分别有界超时；只读 Risk 查询允许在 `ResultUnknown`/`NOT_CONNECTED` 后使用新查询命令重试，Account 结算命令则只用原 `commandId` 查询结果，绝不重复提交资金命令。
+
+生命周期 Kafka 消费改用单并发、逐记录 ACK、无限固定退避的专用失败关闭工厂，避免单分区 OPTION 行权事件被通用双并发批量 listener 反复 rebalance。Account 将 `OptionExerciseEvent.underlyingSettlementPriceUnits` 作为 Core 的 `settlementPriceTicks`，Core 依据权威 instrument 独立计算每张合约行权现金；事件中的现金值只用于一致性载荷，不再把零价格提交给异步 matcher 并导致 Cluster fatal divergence。
+
+真实运行 `w4-option-final11` 返回：
+
+- `W4_MANIFEST=REAL_PASS`，六行 `CALL/PUT × ITM/ATM/OTM` 全部通过，跨产品线 topic 拒绝通过。
+- ITM 买卖双方分别产生 `+40/-40`，ATM/OTM 为零行权现金；所有参与账户持仓归零、锁定余额归零。
+- `FUNDS_DIFFERENCE=0`、`maker=OBSERVED`、`wallet=ABSENT`、`W4_SIX_LINE=PASS`、`cleanup=PASS`。
+- Account 定向测试 `ExpiringContractSettlementConsumerTest`、`ExpiringContractSettlementFanoutServiceTest`、`AccountAeronGatewayTest` 共 10 个测试通过；Aeron client 及 Risk gateway 的定向超时测试此前已通过。
 
 ### 18.4 Canonical 测试脚本矩阵
 
@@ -878,7 +891,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 - 多个三节点集群并行运行会耗尽 Docker `/dev/shm`，表现为客户端 `ResultUnknown`；停止其他集群后同一 LINEAR_DELIVERY 门禁稳定通过。这是测试环境容量门禁，不能当成业务失败或生产容量结论。
 - W5 Aeron 线程模式 A/B 和完整 `LINEAR_PERPETUAL` 导出/投影故障门禁记录在 `.omo/evidence/w5-aeron-threading-ab-20260817.md`；`w5-export-final-1315` 已通过 Kafka/PG/Exporter/Projector/Gateway/WebSocket、重复乱序、Core 独立裁决和资金门禁，`W5_EXPORT_PROJECTION=PASS`。隔离复跑因 Docker Desktop 停止未完成，不影响已通过的功能门禁。
 - `CoreInMemoryBenchmark 200 20`：`PASS`，本轮测得约 18.3 orders/s、p50 6.4ms、p95 301ms；该结果包含 exchange-core ring/future 和 export/hash 成本，不能作为百万级容量结论，后续 P3/P5 仍需基准拆分和真实集群压测。
-- W4 执行记录：六条 ProductLine Core-only 基线逐条通过；隔离 W4 静态检查通过。本轮已补齐 Funding、Liquidation、Insurance、ADL 的受保护 Provider cycle 入口和有界结果，但真实门禁仍因 HTTP/做市/用户资金与 Treasury 对账、cursor 重启/缺口及交割/期权 provider 场景未完成而 fail-closed。详见 `.omo/evidence/w4-core-baseline-20260817.md`；不能据此标记 P4 `DONE`。
+- W4 执行记录：六条 ProductLine Core-only 基线逐条通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已完成真实 HTTP、做市、用户资金与 Treasury 对账门禁，其中 OPTION 使用 `w4-option-final11` 验证六种行权组合且 `FUNDS_DIFFERENCE=0`。SPOT、两条永续及 cursor 重启/缺口仍待真实验证，因此 P4 保持 `PARTIAL`。
 - 技术遗留复核：`TradingCoreReducer` 的下单/成交路径、`TradingCoreState` 的 delta lineage、`CoreCommandDelta`、`RollingBusinessStateHash` 和 `CoreProbeState` 已逐项核对。S02/S03/S05/H01/H02/H03 的 `PARTIAL` 原状态属于文档滞后，已更新为 `IMPLEMENTED`；S01/S06 仍为真实遗留，因为用户/订单实体继续使用 immutable record + persistent `DeltaMap`，尚未改为 mutable entity store。相关 reducer/state-map 测试已覆盖 delta、changed keys、显式 client-order index 和 rolling hash。
 - canonical wrappers：`bash -n scripts/*.sh` 全部通过；SPOT `integration-smoke.sh` 返回 `spotMatchSmoke=PASS`、`status=OK`、`exportStatus=PASS`；SPOT `live-runtime-trading-reconciliation.sh` 返回 `status=OK` 和 `exportStatus=PASS`；SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery matrix 均生成 node stop/rejoin/cold restart 相同 hash、`ROLE_EVIDENCE=PASS`、`EXPORT_FAILURE=PASS` 和 `FUNDS_DIFFERENCE=0` 的 manifest；六条产品线各执行 20 秒 fresh `run-product-line-capacity.sh`，均返回 `capacity=PASS` 且 0 failures/fundsDiff=0；`PRODUCT_LINE=SPOT scripts/kafka-trading-smoke.sh` 返回 `kafkaTradingSmoke=PASS productLine=SPOT scope=CORE_INPUT_EXPORT_BRIDGE`。这些是 Core-only/受控本地证据，真实 API/provider/做市/Kafka 集群全链路、生产网络/磁盘故障、长时容量和 projection lag 仍不能由上述结果代替。
 - 逐条命令、输出和边界记录在 `.omo/evidence/manual-qa-canonical-core-20260815.md`。

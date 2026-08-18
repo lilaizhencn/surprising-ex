@@ -194,6 +194,58 @@ class AeronClientAgentTest {
     }
 
     @Test
+    void boundsQueuedQueryWhenSessionsCannotOpen() {
+        try (AeronClientPool pool = pool(Duration.ofMillis(50), () -> {
+            throw new IllegalStateException("cluster unavailable");
+        })) {
+            org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(1), () ->
+                    org.assertj.core.api.Assertions.assertThatThrownBy(() -> pool.query(
+                                    CoreMessageType.USER_STATE_QUERY, UUID.randomUUID(), 9, new byte[0]))
+                            .isInstanceOf(java.util.concurrent.CompletionException.class)
+                            .cause()
+                            .isInstanceOfSatisfying(CoreCommandOutcome.NotAcceptedException.class,
+                                    exception -> assertThat(exception.rejection().reason())
+                                            .isEqualTo(CoreCommandOutcome.NotAcceptedReason.NOT_CONNECTED)));
+        }
+    }
+
+    @Test
+    void waitsForAsyncSessionConnectionBeforeOfferingQueuedRequest() throws Exception {
+        AtomicBoolean connected = new AtomicBoolean();
+        AtomicInteger polls = new AtomicInteger();
+        AtomicInteger offers = new AtomicInteger();
+        AeronClientPool.Session session = new AeronClientPool.Session() {
+            @Override public long offer(CoreMessage message) {
+                if (!connected.get()) {
+                    throw new AssertionError("request offered before async session connected");
+                }
+                offers.incrementAndGet();
+                return Publication.BACK_PRESSURED;
+            }
+            @Override public int pollEgress(int fragmentLimit) {
+                if (polls.incrementAndGet() >= 5) {
+                    connected.set(true);
+                }
+                return 0;
+            }
+            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            @Override public RuntimeException sessionFailure() { return null; }
+            @Override public boolean connected() { return connected.get(); }
+            @Override public boolean keepAlive() { return connected.get(); }
+            @Override public void close() { }
+        };
+
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session)) {
+            CoreCommandOutcome outcome = pool.commandOutcomeAsync(CoreMessageType.APPLY_MARK_PRICE,
+                    UUID.randomUUID(), 9, new byte[0]).get(2, TimeUnit.SECONDS);
+
+            assertThat(outcome).isEqualTo(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+            assertThat(polls.get()).isGreaterThanOrEqualTo(5);
+            assertThat(offers).hasValue(1);
+        }
+    }
+
+    @Test
     void reopensSessionWhenPublicationIsNotConnected() throws Exception {
         AtomicInteger opened = new AtomicInteger();
         CountDownLatch secondSession = new CountDownLatch(1);

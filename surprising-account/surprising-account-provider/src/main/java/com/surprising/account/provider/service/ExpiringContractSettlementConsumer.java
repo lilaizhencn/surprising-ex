@@ -4,7 +4,6 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
-import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,13 +34,7 @@ public class ExpiringContractSettlementConsumer {
             topics = "#{__listener.deliverySettlementsTopic()}",
             groupId = "#{__listener.groupId()}",
             autoStartup = "#{__listener.deliverySettlementsListenerEnabled()}",
-            containerFactory = "accountKafkaListenerContainerFactory")
-    public void onDeliverySettlements(List<ConsumerRecord<String, String>> records) {
-        for (ConsumerRecord<String, String> record : records) {
-            onDeliverySettlement(record);
-        }
-    }
-
+            containerFactory = "accountInstrumentLifecycleKafkaListenerContainerFactory")
     public void onDeliverySettlement(ConsumerRecord<String, String> record) {
         try {
             DeliverySettlementEvent event = objectMapper.readValue(record.value(), DeliverySettlementEvent.class);
@@ -60,13 +53,7 @@ public class ExpiringContractSettlementConsumer {
             topics = "#{__listener.optionExercisesTopic()}",
             groupId = "#{__listener.groupId()}",
             autoStartup = "#{__listener.optionExercisesListenerEnabled()}",
-            containerFactory = "accountKafkaListenerContainerFactory")
-    public void onOptionExercises(List<ConsumerRecord<String, String>> records) {
-        for (ConsumerRecord<String, String> record : records) {
-            onOptionExercise(record);
-        }
-    }
-
+            containerFactory = "accountInstrumentLifecycleKafkaListenerContainerFactory")
     public void onOptionExercise(ConsumerRecord<String, String> record) {
         try {
             OptionExerciseEvent event = objectMapper.readValue(record.value(), OptionExerciseEvent.class);

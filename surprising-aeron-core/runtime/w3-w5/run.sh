@@ -436,8 +436,11 @@ seed_instrument_snapshot() {
       ;;
     OPTION)
       contract_type=VANILLA_OPTION; instrument_type=OPTION
+      symbol="BTC-USDT-OPTION-SEED"
       quote_asset=USDT; settle_asset=USDT; reduce_only="true"; min_sources=2
       expiry_json='"2030-01-01T00:00:00Z"'; settlement_json='"CASH"'
+      underlying_json='"BTC-USDT"'; strike_json=100
+      option_type_json='"CALL"'; option_style_json='"EUROPEAN"'
       brackets='[{"bracketNo":1,"notionalFloorUnits":0,"notionalCapUnits":5000000000000,"maxLeveragePpm":100000000,"initialMarginRatePpm":10000,"maintenanceMarginRatePpm":5000}]'
       ;;
     *) fail "BOOTSTRAP_PRODUCT_LINE_REFUSED line=$PRODUCT_LINE" ;;
@@ -449,6 +452,12 @@ seed_instrument_snapshot() {
     sources+=',{"source":"BOOTSTRAP-B","enabled":true,"baseUrl":"https://api.exchange.coinbase.com","path":"/products/BTC-USD/ticker","sourceSymbol":"BTC-USD","parser":"COINBASE_TICKER","quoteCurrency":"USD","targetQuoteCurrency":"USDT","conversionBaseUrl":null,"conversionPath":null,"conversionParser":null,"conversionMode":null,"conversionOperation":null,"fallbackWeightMultiplierPpm":500000,"websocketEnabled":false,"websocketUrl":null,"websocketSubscribeMessage":null,"websocketParser":null,"weightPpm":500000}'
   fi
   sources+=']'
+  if [[ "$PRODUCT_LINE" == OPTION ]]; then
+    local underlying_body="{\"symbol\":\"BTC-USDT\",\"instrumentType\":\"SPOT\",\"contractType\":\"SPOT\",\"baseAsset\":\"BTC\",\"quoteAsset\":\"USDT\",\"settleAsset\":\"USDT\",\"contractMultiplierPpm\":1000000,\"contractValueAsset\":\"USDT\",\"priceTickUnits\":1,\"quantityStepUnits\":1,\"minQuantitySteps\":1,\"maxQuantitySteps\":100000,\"minNotionalUnits\":1,\"maxNotionalUnits\":1000000000000,\"notionalMultiplierUnits\":1,\"pricePrecision\":2,\"quantityPrecision\":3,\"supportedOrderTypes\":[\"LIMIT\"],\"supportedTimeInForce\":[\"GTC\",\"IOC\"],\"postOnlyEnabled\":true,\"reduceOnlyEnabled\":false,\"marketOrderEnabled\":false,\"maxLeveragePpm\":100000000,\"initialMarginRatePpm\":10000,\"maintenanceMarginRatePpm\":5000,\"makerFeeRatePpm\":200,\"takerFeeRatePpm\":500,\"maxPositionNotionalUnits\":25000000000000,\"userOpenInterestLimitRatePpm\":0,\"userOpenInterestLimitFloorUnits\":1,\"fundingIntervalHours\":0,\"interestRatePpm\":0,\"fundingRateCapPpm\":0,\"fundingRateFloorPpm\":0,\"impactNotionalUnits\":1000000000000,\"minValidIndexSources\":1,\"expiryTime\":null,\"deliveryTime\":null,\"underlyingSymbol\":null,\"strikePriceUnits\":null,\"optionType\":null,\"optionExerciseStyle\":null,\"settlementMethod\":null,\"status\":\"TRADING\",\"effectiveTime\":null,\"riskLimitBrackets\":[],\"indexSources\":$sources}"
+    curl --fail-with-body --silent --show-error --retry 10 --retry-delay 1 --max-time 20 \
+      -H 'Content-Type: application/json' -X POST \
+      --data "$underlying_body" "http://127.0.0.1:${instrument_port}/api/v1/instruments/admin/upsert" --output /dev/stderr
+  fi
   local body="{\"symbol\":\"$symbol\",\"instrumentType\":\"$instrument_type\",\"contractType\":\"$contract_type\",\"baseAsset\":\"BTC\",\"quoteAsset\":\"$quote_asset\",\"settleAsset\":\"$settle_asset\",\"contractMultiplierPpm\":1000000,\"contractValueAsset\":\"$settle_asset\",\"priceTickUnits\":1,\"quantityStepUnits\":1,\"minQuantitySteps\":1,\"maxQuantitySteps\":100000,\"minNotionalUnits\":1,\"maxNotionalUnits\":1000000000000,\"notionalMultiplierUnits\":1,\"pricePrecision\":2,\"quantityPrecision\":3,\"supportedOrderTypes\":[\"LIMIT\"],\"supportedTimeInForce\":[\"GTC\",\"IOC\"],\"postOnlyEnabled\":true,\"reduceOnlyEnabled\":$reduce_only,\"marketOrderEnabled\":false,\"maxLeveragePpm\":100000000,\"initialMarginRatePpm\":10000,\"maintenanceMarginRatePpm\":5000,\"makerFeeRatePpm\":200,\"takerFeeRatePpm\":500,\"maxPositionNotionalUnits\":25000000000000,\"userOpenInterestLimitRatePpm\":0,\"userOpenInterestLimitFloorUnits\":1,\"fundingIntervalHours\":$funding_interval,\"interestRatePpm\":$interest_rate,\"fundingRateCapPpm\":$funding_cap,\"fundingRateFloorPpm\":$funding_floor,\"impactNotionalUnits\":1000000000000,\"minValidIndexSources\":$min_sources,\"expiryTime\":$expiry_json,\"deliveryTime\":$expiry_json,\"underlyingSymbol\":$underlying_json,\"strikePriceUnits\":$strike_json,\"optionType\":$option_type_json,\"optionExerciseStyle\":$option_style_json,\"settlementMethod\":$settlement_json,\"status\":\"TRADING\",\"effectiveTime\":null,\"riskLimitBrackets\":$brackets,\"indexSources\":$sources}"
   curl --fail-with-body --silent --show-error --retry 10 --retry-delay 1 --max-time 20 \
     -H 'Content-Type: application/json' -X POST \

@@ -450,6 +450,11 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         }
 
         @Override
+        public boolean connected() {
+            return client != null;
+        }
+
+        @Override
         public boolean keepAlive() {
             SurprisingAeronClient current = poll();
             return current != null && current.keepAlive();

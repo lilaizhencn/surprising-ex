@@ -66,7 +66,7 @@ class ExpiringContractSettlementFanoutServiceTest {
                 eq(0L), payload.capture());
         assertThat(TradingCommandCodec.decodeSettleInstrument(payload.getValue())).isEqualTo(
                 new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(),
-                        "BTC-USDT-260925-70000-C", 6, 0, 1_000));
+                        "BTC-USDT-260925-70000-C", 6, 71_000_000, 1_000));
     }
 
     @Test
