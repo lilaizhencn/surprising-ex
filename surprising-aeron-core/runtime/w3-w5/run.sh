@@ -16,19 +16,18 @@ KAFKA_PORT="${KAFKA_PORT:-29092}"
 POSTGRES_USER="${POSTGRES_USER:-surprising}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-surprising-local-only}"
 
-readonly PROCESS_SERVICES=(exporter projector instrument price account command matching risk funding liquidation insurance adl gateway maker)
-readonly HTTP_SERVICES=(instrument price account command matching risk funding liquidation insurance adl gateway maker)
+readonly PROCESS_SERVICES=(exporter projector instrument price account command matching derivatives-lifecycle funding gateway maker)
+readonly HTTP_SERVICES=(instrument price account command matching derivatives-lifecycle funding gateway maker)
 readonly HTTP_PORTS=(
   "${INSTRUMENT_PORT:-9080}" "${PRICE_PORT:-9082}" "${ACCOUNT_PORT:-9086}" "${COMMAND_PORT:-9084}"
-  "${MATCHING_PORT:-9085}" "${RISK_PORT:-9087}"
-  "${FUNDING_PORT:-9089}" "${LIQUIDATION_PORT:-9088}" "${INSURANCE_PORT:-9090}"
-  "${ADL_PORT:-9091}" "${GATEWAY_PORT:-9094}" "${MAKER_PORT:-9096}"
+  "${MATCHING_PORT:-9085}" "${DERIVATIVES_LIFECYCLE_PORT:-9087}"
+  "${FUNDING_PORT:-9089}" "${GATEWAY_PORT:-9094}" "${MAKER_PORT:-9096}"
 )
 
 service_enabled() {
   case "$1" in
     funding) [[ "$PRODUCT_LINE" == LINEAR_PERPETUAL || "$PRODUCT_LINE" == INVERSE_PERPETUAL ]] ;;
-    liquidation|insurance|adl) [[ "$PRODUCT_LINE" != SPOT ]] ;;
+    derivatives-lifecycle) [[ "$PRODUCT_LINE" != SPOT ]] ;;
     *) return 0 ;;
   esac
 }
@@ -161,7 +160,7 @@ port_lines() {
 
 service_lines() {
   printf '%s\n' postgres kafka migrations core-node0 core-node1 core-node2 \
-    exporter projector instrument price account command matching risk funding liquidation insurance adl gateway maker
+    exporter projector instrument price account command matching derivatives-lifecycle funding gateway maker
 }
 
 assert_lock_available() {
@@ -483,11 +482,8 @@ jar_path() {
     account) printf '%s/surprising-account/surprising-account-provider/target/surprising-account-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     command) printf '%s/surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     matching) printf '%s/surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
-    risk) printf '%s/surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/target/surprising-derivatives-lifecycle-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     funding) printf '%s/surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
-    liquidation) printf '%s/surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
-    insurance) printf '%s/surprising-insurance/target/surprising-insurance-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
-    adl) printf '%s/surprising-adl/target/surprising-adl-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     maker) printf '%s/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     *) fail "UNKNOWN_SERVICE service=$1" ;;

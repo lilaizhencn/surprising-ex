@@ -937,3 +937,11 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 - 技术遗留复核：`TradingCoreReducer` 的下单/成交路径、`TradingCoreState` 的 delta lineage、`CoreCommandDelta`、`RollingBusinessStateHash` 和 `CoreProbeState` 已逐项核对。S02/S03/S05/H01/H02/H03 的 `PARTIAL` 原状态属于文档滞后，已更新为 `IMPLEMENTED`；S01/S06 仍为真实遗留，因为用户/订单实体继续使用 immutable record + persistent `DeltaMap`，尚未改为 mutable entity store。相关 reducer/state-map 测试已覆盖 delta、changed keys、显式 client-order index 和 rolling hash。
 - canonical wrappers：`bash -n scripts/*.sh` 全部通过；SPOT `integration-smoke.sh` 返回 `spotMatchSmoke=PASS`、`status=OK`、`exportStatus=PASS`；SPOT `live-runtime-trading-reconciliation.sh` 返回 `status=OK` 和 `exportStatus=PASS`；SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery matrix 均生成 node stop/rejoin/cold restart 相同 hash、`ROLE_EVIDENCE=PASS`、`EXPORT_FAILURE=PASS` 和 `FUNDS_DIFFERENCE=0` 的 manifest；六条产品线各执行 20 秒 fresh `run-product-line-capacity.sh`，均返回 `capacity=PASS` 且 0 failures/fundsDiff=0；`PRODUCT_LINE=SPOT scripts/kafka-trading-smoke.sh` 返回 `kafkaTradingSmoke=PASS productLine=SPOT scope=CORE_INPUT_EXPORT_BRIDGE`。这些是 Core-only/受控本地证据，真实 API/provider/做市/Kafka 集群全链路、生产网络/磁盘故障、长时容量和 projection lag 仍不能由上述结果代替。
 - 逐条命令、输出和边界记录在 `.omo/evidence/manual-qa-canonical-core-20260815.md`。
+
+### 19.1 Risk/Liquidation/Insurance/ADL 合并（2026-08-18）
+
+四组 Risk/Liquidation/Insurance/ADL 源码已迁入 `surprising-derivatives-lifecycle`：每条 ProductLine 只启动一个生命周期 JVM（端口 `9087`），保留原有 `/api/v1/risk`、`/api/v1/liquidations`、`/api/v1/insurance` 和 `/api/v1/adl` 路径。业务配置和 Kafka group-id 仍按领域隔离，但 Aeron client pool、数据库/健康检查配置、Instrument snapshot cache/initializer 已统一为一份；状态边界和 Core 裁决权不变。
+
+新项目直接编译四组源码，通过 fully-qualified Bean name 避免领域组件同名冲突，并排除四个旧 Application 类，确保不会重复创建 Spring Context、Feign 注册或 Aeron 客户端。旧模块不再作为生命周期 JAR 依赖；运行脚本和 W5 构建脚本只构建、启动统一 JAR；Funding 保持独立。
+
+验证：`mvn -pl surprising-derivatives-lifecycle -am -DskipTests package` 通过；启动脚本已统一使用 JDK 25 Aeron `--add-exports` 参数。真实六产品线生命周期门禁仍需按既定单产品线顺序执行，不能以本次构建替代资金守恒验证。

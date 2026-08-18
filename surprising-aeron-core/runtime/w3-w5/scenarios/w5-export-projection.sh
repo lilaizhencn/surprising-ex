@@ -366,11 +366,8 @@ MAVEN_MODULES=(
   surprising-price/surprising-price-provider
   surprising-trading/surprising-command-provider
   surprising-trading/surprising-matching-provider
-  surprising-risk/surprising-risk-provider
+  surprising-derivatives-lifecycle
   surprising-funding/surprising-funding-provider
-  surprising-liquidation
-  surprising-insurance
-  surprising-adl
   surprising-gateway
   surprising-maker
 )
@@ -404,11 +401,8 @@ surprising-instrument/surprising-instrument-provider/target/surprising-instrumen
 surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar|surprising-price-provider.jar
 surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT-exec.jar|surprising-command-provider.jar
 surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar|surprising-matching-provider.jar
-surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT-exec.jar|surprising-risk-provider.jar
+surprising-derivatives-lifecycle/target/surprising-derivatives-lifecycle-1.0.0-SNAPSHOT-exec.jar|surprising-derivatives-lifecycle.jar
 surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar|surprising-funding-provider.jar
-surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT-exec.jar|surprising-liquidation.jar
-surprising-insurance/target/surprising-insurance-1.0.0-SNAPSHOT-exec.jar|surprising-insurance.jar
-surprising-adl/target/surprising-adl-1.0.0-SNAPSHOT-exec.jar|surprising-adl.jar
 surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar|surprising-gateway.jar
 surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar|surprising-maker.jar
 EOF
@@ -419,11 +413,8 @@ BOOT_JAR_SPECS=(
   "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT.jar|surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar"
   "surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT.jar|surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT-exec.jar"
   "surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT.jar|surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar"
-  "surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT.jar|surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT-exec.jar"
+  "surprising-derivatives-lifecycle/target/surprising-derivatives-lifecycle-1.0.0-SNAPSHOT.jar|surprising-derivatives-lifecycle/target/surprising-derivatives-lifecycle-1.0.0-SNAPSHOT-exec.jar"
   "surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT.jar|surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar"
-  "surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT.jar|surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT-exec.jar"
-  "surprising-insurance/target/surprising-insurance-1.0.0-SNAPSHOT.jar|surprising-insurance/target/surprising-insurance-1.0.0-SNAPSHOT-exec.jar"
-  "surprising-adl/target/surprising-adl-1.0.0-SNAPSHOT.jar|surprising-adl/target/surprising-adl-1.0.0-SNAPSHOT-exec.jar"
   "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT.jar|surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar"
   "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT.jar|surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar"
 )

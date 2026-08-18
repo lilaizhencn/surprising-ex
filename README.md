@@ -34,7 +34,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
   Insurance Treasury 全部由 Aeron 校验并原子提交。
 - 保证金率、risk brackets、杠杆和持仓上限只由 Instrument Provider 版本化下发到 `CoreInstrumentState`；
   Core 是唯一计算/执行来源，Risk Provider 只查询并展示 Core 风险快照，不再维护本地保证金阈值副本。
-- `surprising-liquidation` 是无状态协调器：查询 Aeron Liquidation Work 后，将有序 action 和精确 Risk Scan
+- `surprising-derivatives-lifecycle` 是无状态生命周期协调器：统一承载 Risk、Liquidation、Insurance 和 ADL，查询 Aeron 状态后提交有序工作；四类 API 路径保持独立。
   continuation 合并为一次 `EXECUTE_LIQUIDATION_BATCH`，按 `productLine + canonical payload` 生成稳定 `commandId`。
   Core 共享最多 1,024 笔撤单预算并持久化 cursor；provider 正常周期不逐 action 往返、不单独续跑 Risk Scan，也不维护
   Redis 队列或 PostgreSQL 强平事务。
@@ -65,11 +65,11 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | `surprising-price` | 独立指数价、标记价和汇率服务 |
 | `surprising-trading` | Provider/API 边界；最终订单、条件单、算法单和 exchange-core 裁决由 Aeron Core 完成 |
 | `surprising-account` | 余额、账本、账户指令、结算、持仓和保证金 |
-| `surprising-risk` | Core 风险快照查询和投影 API，不维护保证金/强平裁决副本 |
-| `surprising-liquidation` | 强平 API 和独立强平服务 |
+| `surprising-risk` | Core 风险快照查询和投影 API；Provider 由统一生命周期进程承载 |
+| `surprising-liquidation` | 强平 API；Provider 由统一生命周期进程承载 |
 | `surprising-funding` | 资金费 API 和独立资金费服务 |
-| `surprising-insurance` | 保险基金 API 和独立保险基金服务 |
-| `surprising-adl` | ADL API 和独立自动减仓服务 |
+| `surprising-insurance` | 保险基金 API；Provider 由统一生命周期进程承载 |
+| `surprising-adl` | ADL API；Provider 由统一生命周期进程承载 |
 | `surprising-candlestick` | Kafka Streams + RocksDB K 线 |
 | `surprising-gateway` | REST gateway、WebSocket fanout 和统一对外入口 |
 | `surprising-maker` | 内部做市和交易链路压测 |
@@ -167,11 +167,8 @@ Chronicle 版本由父 POM 的 BOM 统一管理，避免旧版在 JDK 25 中触�
 | command | 9084 |
 | matching | 9085 |
 | account | 9086 |
-| risk | 9087 |
-| liquidation | 9088 |
+| derivatives-lifecycle（risk/liquidation/insurance/adl） | 9087 |
 | funding | 9089 |
-| insurance | 9090 |
-| adl | 9091 |
 | websocket | 9097 |
 | gateway | 9094 |
 | market-maker | 9096 |

@@ -310,7 +310,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       liquidation:
-        base-url: ${GATEWAY_ROUTE_LIQUIDATION_BASE_URL:http://localhost:9088}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/liquidations
         private-route: true
         product-routes:
@@ -344,7 +344,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_FUNDING_OPTION_BASE_URL:}
       insurance:
-        base-url: ${GATEWAY_ROUTE_INSURANCE_BASE_URL:http://localhost:9090}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/insurance
         private-route: true
         product-routes:
@@ -361,7 +361,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       adl:
-        base-url: ${GATEWAY_ROUTE_ADL_BASE_URL:http://localhost:9091}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/adl
         private-route: true
         product-routes:
@@ -612,7 +612,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       liquidation:
-        base-url: ${GATEWAY_ROUTE_LIQUIDATION_BASE_URL:http://localhost:9088}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/liquidations
         private-route: true
         product-routes:
@@ -629,7 +629,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL:}
       liquidation-admin:
-        base-url: ${GATEWAY_ROUTE_LIQUIDATION_BASE_URL:http://localhost:9088}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/admin/liquidations
         private-route: true
         product-routes:
@@ -663,7 +663,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_FUNDING_OPTION_BASE_URL:}
       insurance:
-        base-url: ${GATEWAY_ROUTE_INSURANCE_BASE_URL:http://localhost:9090}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/insurance
         private-route: true
         product-routes:
@@ -680,7 +680,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       insurance-admin:
-        base-url: ${GATEWAY_ROUTE_INSURANCE_BASE_URL:http://localhost:9090}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/insurance/admin
         private-route: true
         product-routes:
@@ -697,7 +697,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       adl:
-        base-url: ${GATEWAY_ROUTE_ADL_BASE_URL:http://localhost:9091}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/adl
         private-route: true
         product-routes:

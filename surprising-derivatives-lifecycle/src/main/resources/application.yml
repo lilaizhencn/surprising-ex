@@ -1,0 +1,107 @@
+server:
+  port: ${DERIVATIVES_LIFECYCLE_PORT:9087}
+
+spring:
+  application:
+    name: surprising-derivatives-lifecycle
+  task:
+    scheduling:
+      pool:
+        size: ${DERIVATIVES_LIFECYCLE_SCHEDULING_POOL_SIZE:6}
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/surprising_exchange?reWriteBatchedInserts=true}
+    username: ${SPRING_DATASOURCE_USERNAME:surprising}
+    password: ${SPRING_DATASOURCE_PASSWORD:surprising}
+    hikari:
+      maximum-pool-size: ${DERIVATIVES_LIFECYCLE_DB_POOL_SIZE:32}
+      minimum-idle: 4
+      connection-timeout: 3000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  risk:
+    product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+    aeron:
+      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+      client-connections: ${AERON_CLIENT_CONNECTIONS:2}
+    calculation:
+      scan-delay-ms: 1000
+      max-mark-age: 10s
+      scan-batch-size: 500
+  liquidation:
+    product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+    aeron:
+      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+      client-connections: ${AERON_CLIENT_CONNECTIONS:2}
+    coordinator:
+      delay-ms: 25
+      work-batch-size: 256
+      risk-scan-batch-size: 1024
+      max-pages-per-run: ${LIQUIDATION_MAX_PAGES_PER_RUN:8}
+      max-work-bytes: ${LIQUIDATION_MAX_WORK_BYTES:1048576}
+    execution:
+      enabled: true
+      liquidation-fee-rate-ppm: 3000
+  insurance:
+    aeron:
+      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+      client-connections: ${AERON_CLIENT_CONNECTIONS:2}
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+      group-id: surprising-insurance-v1
+      liquidation-fee-events-topic: surprising.account.liquidation-fee.events.v1
+      concurrency: 2
+      max-poll-records: 500
+    coverage:
+      scan-delay-ms: 1000
+      batch-size: 100
+  adl:
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+      position-risk-events-topic: surprising.risk.position.events.v1
+      group-id: surprising-adl-risk-index-${HOSTNAME:${random.uuid}}
+    redis-index:
+      key-prefix: surprising:adl:v1
+      ready-ttl-ms: 30000
+    scanner:
+      scan-delay-ms: 1000
+      min-deficit-age-ms: 10000
+      max-mark-age-ms: 5000
+      batch-size: 50
+      max-deleverages-per-deficit: 20
+      candidate-multiplier: 5
+    aeron:
+      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+      client-connections: ${AERON_CLIENT_CONNECTIONS:2}
+  price:
+    consumer:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
+      topic: surprising.perp.price.events.v1
+      group-id: surprising-adl-mark-price-${HOSTNAME:${random.uuid}}
+      max-age: 5s
+      allowed-future-skew: 1s
+      concurrency: 1
+      max-poll-records: 500
+
+  clients:
+    derivatives-lifecycle:
+      base-url: http://localhost:${DERIVATIVES_LIFECYCLE_PORT:9087}

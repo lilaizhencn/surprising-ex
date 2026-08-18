@@ -51,11 +51,11 @@ curl 'http://localhost:9094/api/v1/admin/system/health' \
 | `trading-market` | `http://localhost:9085/api/v1/trading/market` | 否 |
 | `trading-trigger` | `http://localhost:9084/api/v1/trading/trigger-orders` | 是 |
 | `account` | `http://localhost:9086/api/v1/accounts` | 是 |
-| `risk` | `http://localhost:9088/api/v1/risk` | 是 |
-| `liquidation` | `http://localhost:9088/api/v1/liquidations` | 是 |
+| `risk` | `http://localhost:9087/api/v1/risk` | 是 |
+| `liquidation` | `http://localhost:9087/api/v1/liquidations` | 是 |
 | `funding` | `http://localhost:9089/api/v1/funding` | 否 |
-| `insurance` | `http://localhost:9090/api/v1/insurance` | 是 |
-| `adl` | `http://localhost:9091/api/v1/adl` | 是 |
+| `insurance` | `http://localhost:9087/api/v1/insurance` | 是 |
+| `adl` | `http://localhost:9087/api/v1/adl` | 是 |
 | `market-maker` | `http://localhost:9096/api/v1/market-maker` | 是 |
 | `wallet` | `http://localhost:8002/wallet/v1` | 是 |
 

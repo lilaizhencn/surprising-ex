@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-risk-provider",
+        name = "surprising-derivatives-lifecycle",
         contextId = "riskRpcApi",
         path = RiskApiPaths.RISK_BASE_PATH,
         url = "${surprising.clients.risk.base-url:http://localhost:9087}")
