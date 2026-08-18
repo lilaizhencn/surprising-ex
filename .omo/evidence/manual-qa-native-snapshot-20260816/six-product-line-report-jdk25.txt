@@ -1,5 +1,0 @@
-SOURCE: target/surefire-reports/com.surprising.aeron.service.CoreMatchingStateTest.xml
-rg: surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.CoreMatchingStateTest.xml: IO error for operation on surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.CoreMatchingStateTest.xml: No such file or directory (os error 2)
---- test summary ---
-rg: surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.CoreMatchingStateTest.xml: IO error for operation on surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.CoreMatchingStateTest.xml: No such file or directory (os error 2)
-COMMAND_EXIT_CODE=

@@ -1,6 +1,0 @@
-MAIN_WORKTREE=/tmp/w1w2-native-qa-main-39d9149
-39d9149de35797503d751ee2c32838fc58096286
-## HEAD (no branch)
-FORK_WORKTREE=/tmp/w1w2-native-qa-fork-9819b9
-9819b9fea48b8b962bdef6bfcf67ed5f5a04981f
-## HEAD (no branch)

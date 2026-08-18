@@ -1,4 +1,0 @@
-git_diff_check_exit=0
-ec0aff73eef1fb1ef41f4f84dc688bb190428806ae9ada4c58647a71a3646239  .omo/evidence/task-1-protocol.log
-e1b999ae43b98fbaedf8458b69b6aba58a9faf2ff11b50fde602594a3dc8b4e5  .omo/evidence/task-1-protocol-error.log
-000f5451be5cbe8dbfcdcd8e4b9a2a4f419a9c6c5cc0ceb0abba23c2bf0b991c  .omo/evidence/task-1-protocol-full.log
