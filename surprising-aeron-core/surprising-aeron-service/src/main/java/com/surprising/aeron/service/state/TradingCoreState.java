@@ -511,6 +511,11 @@ public record TradingCoreState(
         requireLineage("lifecycle settlements", before.treasuryState.lifecycleSettlements(), treasuryState.lifecycleSettlements());
         requireLineage("funding progress", before.treasuryState.fundingProgress(), treasuryState.fundingProgress());
         requireLineage("lifecycle progress", before.treasuryState.lifecycleProgress(), treasuryState.lifecycleProgress());
+        for (Long userId : StateMapSupport.changedKeys(users)) {
+            CoreUserState previous = before.users.get(userId);
+            CoreUserState current = users.get(userId);
+            if (previous != null && current != null) current.requireIncrementalLineage(previous);
+        }
     }
 
     private static void requireLineage(String name, Map<?, ?> before, Map<?, ?> after) {

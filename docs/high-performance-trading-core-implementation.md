@@ -162,7 +162,7 @@ available + locked = accountTotal
 | S03 | `✅ 已完成` | `clientOrderIndex == null` 时重新遍历全部订单构建索引 | `TradingCoreState` 构造器、`replaceUser`/`adjustBalance` 调用链 | 权威 transition 缺失 index 时 fail-closed，不再隐式扫描 |
 | S04 | `✅ 已完成` | timers、triggers、algo map 每次构造仍全量排序/校验 | `TradingCoreState` 构造器 | 热路径改为 delta 和增量索引，完整校验只在冷路径执行 |
 | S05 | `✅ 已完成` | `stampOrderChanges` 未知变更集时复制并比较全部 orders | `TradingCoreState.stampOrderChanges` | 权威调用显式传递 changed order IDs，空集合不扫描 |
-| S06 | `🟡 部分完成` | 用户内部 balances/reservations/positions 以及 risk/treasury 嵌套对象反复复制 | 各 immutable record 构造器 | 已通过 delta 降低整图复制；immutable entity shell 仍可继续优化 |
+| S06 | `✅ 已完成` | 用户内部 balances/reservations/positions 以及 risk/treasury 嵌套对象反复复制 | 各状态实体构造器 | Risk/Treasury 已按 changed keys 校验；用户状态使用直接 delta lineage 和增量 explained-lock 聚合，mutation 不再遍历完整余额、预留和持仓集合 |
 | S07 | `🟡 部分完成` | 终态 order、algo、trigger、liquidation 主体长期留在热 map | `TradingCoreState` | 已有 export ACK 后清理边界；长期 retention/compaction 仍待 P6 运行门禁 |
 | S08 | `✅ 已完成` | W1/W2 前 `CoreBookState` 与 exchange-core 同时保存活动盘口 | 已删除 `CoreBookState`、priority codec/hash 和所有生产引用 | exchange-core 已是唯一 FIFO/book 权威 |
 | S09 | `✅ 已完成` | applyMatches 曾因构造器、索引、验证触发全量工作 | `TradingCoreReducer.applyMatches` + `TradingCoreState` | 空成交复用原状态，其余路径使用 delta |
@@ -227,8 +227,8 @@ available + locked = accountTotal
 
 | 原始热点 | 归并问题 | 目标方案 | 当前状态 |
 | --- | --- | --- | --- |
-| `TradingCoreReducer.java:478` 每次下单复制完整 `orders` | S01/S06/S09 | `TradingCoreRuntime` 只修改变更订单，`CommandDelta` 携带 changed order IDs；禁止全量 map 复制 | `PARTIAL`：热路径已使用 persistent `DeltaMap`，但仍保留 immutable state shell；后续可再评估 mutable entity store |
-| `TradingCoreReducer.java:1492` 修改用户复制完整 `users` | S06 | 单写 runtime 的用户实体/分片 mutable store，余额、持仓只更新 affected user | `PARTIAL`：用户及其 balances/reservations/positions 仍是 immutable record + delta map，未完成 mutable entity store |
+| `TradingCoreReducer.java:478` 每次下单复制完整 `orders` | S01/S06/S09 | `TradingCoreRuntime` 只修改变更订单，`CommandDelta` 携带 changed order IDs；禁止全量 map 复制 | `PARTIAL`：热路径已使用 persistent `DeltaMap` 且用户嵌套状态已增量化；剩余项仅为 S01 的长链 compaction 容量门禁 |
+| `TradingCoreReducer.java:1492` 修改用户复制完整 `users` | S06 | 单写 runtime 只更新 affected user 及其 changed balances/reservations/positions | `IMPLEMENTED`：用户外层和三个嵌套 map 均要求直接 delta lineage；派生锁按 changed keys 增减，不再复制或扫描完整用户状态 |
 | `TradingCoreState.java:30` 新状态复制并排序全部 users/orders | S02 | canonical constructor 不再负责热路径全量排序；全量排序只允许 snapshot/audit | `IMPLEMENTED`：权威 transition 使用 delta 只校验 changed keys；完整排序仅发生在非 delta 的冷路径 |
 | `TradingCoreState.java:43` 构造时遍历订单重建 `clientOrderIndex` | S03 | index 由命令显式增量维护，缺失时 fail-closed，不隐式扫描 | `IMPLEMENTED`：权威 transition 缺失 index 直接拒绝；兼容构造器的派生只属于冷路径 |
 | `TradingCoreReducer.java:534` 无成交的 `applyMatches` 仍复制 users/orders/book | S09 | matcher result 为空时只提交订单状态和 delta，不复制无关实体；业务状态与唯一 matcher 同一 transition | `IMPLEMENTED`：非即时空成交直接复用原状态，其余路径使用 delta；exchange-core 是唯一可执行 book |
@@ -967,6 +967,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 38. `SurprisingClusteredService` 使用有界 pending matching、Cluster timer continuation 和按序完成栅栏；普通下单/撤单/改单、盘口查询、强平、结算以及标记价触发的子单都先提交 exchange-core 异步命令，owner 线程不等待 ring future。存在 pending matching 时 snapshot 明确拒绝，不保存或恢复后重新提交未决命令；落后的结果不会越过前序命令。
 39. W5 真实运行 A/B 复现嵌入式 Aeron `ThreadingMode.SHARED` 下三个 Core MediaDriver 在正常运行阶段停止心跳；同机切换 Core 和客户端到 `DEDICATED` 后超过相同窗口并连续完成五次状态查询。Core 和客户端默认固定为 `DEDICATED`，仅保留显式环境变量/系统属性用于受控诊断；直连客户端增加后台 keep-alive，避免导出器或故障驱动在 Kafka/PG 等外围等待期间丢失 Aeron 会话；W5 本地编排升级到 PostgreSQL 18 的新版数据目录布局。
 40. D06 删除普通/Algo 共用的 `AeronOrderIdGenerator` 和条件单 `AeronTriggerOrderIdGenerator`。普通单、条件单、Algo 父单使用互相隔离的稳定身份命名空间；Algo 子单继续使用稳定父单 ID 与 slice index。Provider 以零时间创建模板提交，Product Core 用首次应用命令的 Cluster 时间写入 `startAt/nextSliceAt/createdAt/updatedAt`，命令结果账本和 snapshot 恢复后重复提交返回原状态，载荷变化返回 `IDEMPOTENCY_CONFLICT`。当前没有真正无业务键的系统订单创建流，因此不新增无消费者的通用 Core sequence；费率管理配置要求调用方显式提供 `feeScheduleId`，不再误用订单 ID 生成器。
+41. `CoreUserState` 保留不可变快照外壳，但所有生产 mutation 统一经 `transition` 更新。余额、预留、持仓必须直接继承上一版本 DeltaMap；预留剩余锁和仓位保证金按 changed keys 更新派生的 per-asset explained-lock，不再在每次下单、成交、撤单、平仓或结算时遍历用户全部嵌套集合。冷启动和 snapshot decode 仍执行完整重建校验。
 
 仍未宣称完成的交付物：
 
@@ -989,7 +990,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 - W5 Aeron 线程模式 A/B 和完整 `LINEAR_PERPETUAL` 导出/投影故障门禁记录在 `.omo/evidence/w5-aeron-threading-ab-20260817.md`；`w5-export-final-1315` 已通过 Kafka/PG/Exporter/Projector/Gateway/WebSocket、重复乱序、Core 独立裁决和资金门禁，`W5_EXPORT_PROJECTION=PASS`。隔离复跑因 Docker Desktop 停止未完成，不影响已通过的功能门禁。
 - `CoreInMemoryBenchmark 200 20`：`PASS`，本轮测得约 18.3 orders/s、p50 6.4ms、p95 301ms；该结果包含 exchange-core ring/future 和 export/hash 成本，不能作为生产容量结论，后续 P6 仍需分阶段基准、真实集群长时压测和完整资源指标。
 - W4 执行记录：六条 ProductLine Core-only 基线逐条通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已完成真实 HTTP、做市、用户资金与 Treasury 对账门禁，其中 OPTION 使用 `w4-option-final11` 验证六种行权组合且 `FUNDS_DIFFERENCE=0`。SPOT、两条永续及 cursor 重启/缺口仍待真实验证，因此 P4 保持 `PARTIAL`。
-- 技术遗留复核：`TradingCoreReducer` 的下单/成交路径、`TradingCoreState` 的 delta lineage、`CoreCommandDelta`、`RollingBusinessStateHash` 和 `CoreProbeState` 已逐项核对。S02/S03/S05/H01/H02/H03 的 `PARTIAL` 原状态属于文档滞后，已更新为 `IMPLEMENTED`；S01/S06 仍为真实遗留，因为用户/订单实体继续使用 immutable record + persistent `DeltaMap`，尚未改为 mutable entity store。相关 reducer/state-map 测试已覆盖 delta、changed keys、显式 client-order index 和 rolling hash。
+- 技术遗留复核：`TradingCoreReducer` 的下单/成交路径、`TradingCoreState` 的 delta lineage、`CoreCommandDelta`、`RollingBusinessStateHash` 和 `CoreProbeState` 已逐项核对。S02/S03/S05/S06/H01/H02/H03 已更新为 `IMPLEMENTED`；S06 采用不可变快照外壳加直接 delta lineage，而不是引入复杂的全局 mutable entity store。S01 仍需用长链 compaction 容量门禁收口。相关 reducer/state-map 测试已覆盖 delta、changed keys、显式 client-order index 和 rolling hash。
 - canonical wrappers：`bash -n scripts/*.sh` 全部通过；SPOT `integration-smoke.sh` 返回 `spotMatchSmoke=PASS`、`status=OK`、`exportStatus=PASS`；SPOT `live-runtime-trading-reconciliation.sh` 返回 `status=OK` 和 `exportStatus=PASS`；SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery matrix 均生成 node stop/rejoin/cold restart 相同 hash、`ROLE_EVIDENCE=PASS`、`EXPORT_FAILURE=PASS` 和 `FUNDS_DIFFERENCE=0` 的 manifest；六条产品线各执行 20 秒 fresh `run-product-line-capacity.sh`，均返回 `capacity=PASS` 且 0 failures/fundsDiff=0；`PRODUCT_LINE=SPOT scripts/kafka-trading-smoke.sh` 返回 `kafkaTradingSmoke=PASS productLine=SPOT scope=CORE_INPUT_EXPORT_BRIDGE`。这些是 Core-only/受控本地证据，真实 API/provider/做市/Kafka 集群全链路、生产网络/磁盘故障、长时容量和 projection lag 仍不能由上述结果代替。
 - 逐条命令、输出和边界记录在 `.omo/evidence/manual-qa-canonical-core-20260815.md`。
 
@@ -1063,3 +1064,19 @@ PostgreSQL sequence 或无消费者的通用 Core sequence。
 定向验证：`CoreAlgoOrderCodecTest`、`CoreTriggerOrderCodecTest` 共 6 项通过；`CoreProbeStateTest` 30 项通过，
 覆盖 Cluster 时间物化、重复结果、snapshot 恢复和载荷冲突；Trading Provider 的身份、Algo、Trigger、Fee、普通单和
 批量单相关 25 项测试通过。改动未触及撮合、余额、持仓或结算算法，因此本阶段未重复执行六产品线资金门禁。
+
+### 19.6 S06 用户嵌套状态增量化（2026-08-18）
+
+`CoreUserState` 从每次构造都遍历全部 balances、reservations、positions 并重新汇总锁定资金，改为保留不可变
+快照语义的增量 transition。每个生产 mutation 必须提供上一用户版本的直接 DeltaMap 子状态；非直接父链立即
+fail-closed，避免静默退化成全量复制或在派生索引中形成状态分叉。
+
+用户状态新增不对外暴露、不单独序列化的 per-asset explained-lock 派生聚合。订单预留新增、更新、释放和删除只
+增减对应订单资产，仓位保证金变化只增减对应持仓资产；余额锁校验只检查本次变化资产。snapshot decode 仍从完整
+预留和仓位冷构造该聚合，因此 wire 格式、业务 hash、恢复结果和原 `CoreUserState` 值相等语义不变。Risk 与
+Treasury 已有的 changed-key 校验保持不变，不引入第二套 mutable 权威状态。
+
+定向验证：JDK 25 下运行 `CoreUserStateTest`、`StateMapSupportTest`、`TradingCoreReducerTest`、
+`TradingStateSnapshotCodecTest` 和 `CoreProbeStateTest`，共 68 项通过。覆盖预留新增/释放/删除、仓位保证金减少、
+锁定余额不足拒绝、非直接 lineage 拒绝、嵌套 DeltaMap 父链和 snapshot 值语义。本次属于内存数据结构优化，未改动
+协议、撮合算法、资金公式或产品线配置，因此不重复运行六产品线真实集群门禁；P6 容量与长稳测试仍单独执行。
