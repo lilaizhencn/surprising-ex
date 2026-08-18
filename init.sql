@@ -4184,4 +4184,359 @@ INSERT INTO surprising_schema_metadata (baseline_version, postgres_version)
 VALUES ('2026.08.18', current_setting('server_version'))
 ON CONFLICT (baseline_version) DO NOTHING;
 
+-- 11. Database catalog documentation and shared domain constraints.
+-- PostgreSQL stores descriptions through COMMENT ON rather than inline column syntax.
+
+DO $$
+DECLARE
+    item RECORD;
+    table_description TEXT;
+    column_description TEXT;
+    constraint_name TEXT;
+BEGIN
+    FOR item IN
+        SELECT c.relname AS table_name
+          FROM pg_class c
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+         ORDER BY c.relname
+    LOOP
+        table_description := CASE
+            WHEN item.table_name = 'instruments' THEN '合约版本主表；Instrument Provider 的 PostgreSQL 配置权威。'
+            WHEN item.table_name = 'instrument_current_versions' THEN 'symbol 当前生效版本指针。'
+            WHEN item.table_name = 'instrument_product_current_versions' THEN '按产品线隔离的 symbol 当前版本指针。'
+            WHEN item.table_name = 'surprising_schema_metadata' THEN '数据库首发基线版本和 PostgreSQL 版本记录。'
+            WHEN item.table_name LIKE 'instrument_%' THEN '合约配置、风险档位、指数源或生命周期审计数据。'
+            WHEN item.table_name LIKE 'price_%' THEN '指数价、标记价、汇率或行情处理状态的历史数据。'
+            WHEN item.table_name LIKE 'candlestick_%' THEN 'K 线聚合结果和查询投影。'
+            WHEN item.table_name LIKE 'trading_%' THEN '交易配置、订单、成交或交易审计投影；不作为 Aeron 在线状态权威。'
+            WHEN item.table_name LIKE 'account_%' THEN '账户历史、审计或对账投影；不作为 Aeron 在线资金权威。'
+            WHEN item.table_name LIKE 'funding_%' THEN '资金费率、结算和支付历史投影。'
+            WHEN item.table_name LIKE 'risk_%' THEN '风险快照、强平候选或风险审计投影。'
+            WHEN item.table_name LIKE 'liquidation_%' THEN '强平执行和人工操作历史。'
+            WHEN item.table_name LIKE 'insurance_%' THEN '保险基金余额、流水和亏损覆盖历史。'
+            WHEN item.table_name LIKE 'adl_%' THEN '自动减仓事件、执行 Saga 和审计历史。'
+            WHEN item.table_name LIKE 'market_maker_%' THEN '做市策略租约、覆盖配置和运行审计。'
+            WHEN item.table_name LIKE 'gateway_%' THEN 'Gateway 用户、安全、钱包、合规、通知或管理审计数据。'
+            WHEN item.table_name LIKE 'core_%' THEN 'Aeron Core Export 经 Kafka 投影的历史、审计或查询数据。'
+            ELSE format('Surprising Exchange 业务表：%s。', item.table_name)
+        END;
+        EXECUTE format('COMMENT ON TABLE %I.%I IS %L', 'public', item.table_name, table_description);
+    END LOOP;
+
+    FOR item IN
+        SELECT c.relname AS table_name,
+               a.attname AS column_name,
+               format_type(a.atttypid, a.atttypmod) AS data_type
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+         ORDER BY c.relname, a.attnum
+    LOOP
+        column_description := CASE item.column_name
+            WHEN 'product_line' THEN '产品线代码；限定为 SPOT、两类永续、两类交割或 OPTION。'
+            WHEN 'symbol' THEN '交易标的或合约的全局唯一代码。'
+            WHEN 'version' THEN '配置或业务对象版本号；新版本必须单调递增。'
+            WHEN 'instrument_version' THEN '命令、订单、持仓或事件绑定的合约版本号。'
+            WHEN 'instrument_type' THEN '产品大类：现货、永续、交割或期权。'
+            WHEN 'contract_type' THEN '精确合约类型及正向/反向计价方式。'
+            WHEN 'base_asset' THEN '交易对基础资产代码。'
+            WHEN 'quote_asset' THEN '交易对报价资产代码。'
+            WHEN 'settle_asset' THEN '资金、盈亏和费用的结算资产代码。'
+            WHEN 'asset' THEN '资产代码。'
+            WHEN 'margin_asset' THEN '保证金资产代码。'
+            WHEN 'contract_value_asset' THEN '合约面值计价资产。'
+            WHEN 'underlying_symbol' THEN '期权或衍生品关联的标的 symbol。'
+            WHEN 'status' THEN '当前业务状态；允许值由所在表的 CHECK 约束限定。'
+            WHEN 'side' THEN '订单或仓位方向。'
+            WHEN 'taker_side' THEN '成交中吃单方的买卖方向。'
+            WHEN 'position_side' THEN '持仓方向：NET、LONG 或 SHORT。'
+            WHEN 'margin_mode' THEN '保证金模式：CROSS 或 ISOLATED。'
+            WHEN 'account_type' THEN '产品账户类型，用于资金和风险隔离。'
+            WHEN 'order_type' THEN '订单类型。'
+            WHEN 'time_in_force' THEN '订单有效方式。'
+            WHEN 'settlement_method' THEN '到期结算方式。'
+            WHEN 'option_type' THEN '期权方向：CALL 或 PUT。'
+            WHEN 'option_exercise_style' THEN '期权行权风格。'
+            WHEN 'price_ticks' THEN '按合约 price_tick_units 量化后的整数价格。'
+            WHEN 'mark_price_ticks' THEN '按合约精度量化后的标记价格。'
+            WHEN 'execution_price_ticks' THEN '实际执行或强平成交价格 tick。'
+            WHEN 'entry_price_ticks' THEN '持仓平均开仓价格 tick。'
+            WHEN 'strike_price_units' THEN '期权行权价的最小精度整数值。'
+            WHEN 'quantity_steps' THEN '按 quantity_step_units 量化后的订单或成交数量。'
+            WHEN 'signed_quantity_steps' THEN '带多空符号的持仓数量 step。'
+            WHEN 'close_quantity_steps' THEN '本次关闭或强平的数量 step。'
+            WHEN 'executed_quantity_steps' THEN '已经成交的数量 step。'
+            WHEN 'remaining_quantity_steps' THEN '尚未成交的数量 step。'
+            WHEN 'amount_units' THEN '资产最小精度整数金额；正负含义由业务事件决定。'
+            WHEN 'available_units' THEN '可用余额的最小精度整数值。'
+            WHEN 'locked_units' THEN '已锁定余额的最小精度整数值。'
+            WHEN 'reserved_units' THEN '订单或业务流程预占的最小精度整数金额。'
+            WHEN 'deficit_units' THEN '尚未覆盖亏损的最小精度整数金额。'
+            WHEN 'fee_units' THEN '手续费的最小精度整数金额。'
+            WHEN 'position_margin_units' THEN '持仓保证金的最小精度整数金额。'
+            WHEN 'realized_pnl_units' THEN '已实现盈亏的最小精度整数金额。'
+            WHEN 'unrealized_pnl_units' THEN '未实现盈亏的最小精度整数金额。'
+            WHEN 'notional_units' THEN '名义价值的最小精度整数金额。'
+            WHEN 'maker_fee_rate_ppm' THEN '挂单方手续费率，单位 ppm（一百万分之一）。'
+            WHEN 'taker_fee_rate_ppm' THEN '吃单方手续费率，单位 ppm（一百万分之一）。'
+            WHEN 'funding_rate_ppm' THEN '资金费率，单位 ppm（一百万分之一）。'
+            WHEN 'initial_margin_rate_ppm' THEN '初始保证金率，单位 ppm。'
+            WHEN 'maintenance_margin_rate_ppm' THEN '维持保证金率，单位 ppm。'
+            WHEN 'liquidation_fee_rate_ppm' THEN '强平手续费率，单位 ppm。'
+            WHEN 'max_leverage_ppm' THEN '最大杠杆倍数，使用 ppm 定点表示。'
+            WHEN 'weight_ppm' THEN '指数源权重，单位 ppm。'
+            WHEN 'command_id' THEN '跨重试保持不变的幂等命令 UUID。'
+            WHEN 'client_order_id' THEN '用户侧订单幂等标识。'
+            WHEN 'order_id' THEN '系统订单唯一标识。'
+            WHEN 'user_id' THEN '用户唯一标识；系统账户的取值规则由业务模块定义。'
+            WHEN 'event_id' THEN '不可变业务事件唯一标识。'
+            WHEN 'trace_id' THEN '跨服务请求链路追踪标识。'
+            WHEN 'reference_id' THEN '外部或跨账本业务引用标识。'
+            WHEN 'idempotency_key' THEN '调用方提供的幂等键。'
+            WHEN 'request_fingerprint' THEN '规范化请求内容的指纹，用于检测幂等键冲突。'
+            WHEN 'export_sequence' THEN 'Aeron Core Export 在产品线内连续递增的序列号。'
+            WHEN 'source_sequence' THEN '事件源在 source_id 范围内单调递增的序列号。'
+            WHEN 'cluster_position' THEN 'Aeron Cluster Log 中提交该状态的逻辑位置。'
+            WHEN 'revision' THEN '业务实体修订号；每次权威变更递增。'
+            WHEN 'cache_revision' THEN '缓存或查询投影修订号。'
+            WHEN 'created_at' THEN '记录创建时间，带时区。'
+            WHEN 'updated_at' THEN '记录最后更新时间，带时区。'
+            WHEN 'effective_time' THEN '配置或规则开始生效的时间。'
+            WHEN 'expiry_time' THEN '合约停止交易或期权到期的时间。'
+            WHEN 'delivery_time' THEN '交割或现金结算执行时间。'
+            WHEN 'event_time' THEN '业务事件实际发生时间。'
+            WHEN 'occurred_at_epoch_ms' THEN '业务事件发生时间，Unix epoch 毫秒。'
+            WHEN 'projected_at' THEN '异步投影写入 PostgreSQL 的时间。'
+            WHEN 'published_at' THEN '事件成功发布到 Kafka 的时间；NULL 表示待发布。'
+            WHEN 'payload' THEN '结构化业务事件 JSON 载荷。'
+            WHEN 'raw_event' THEN '未经转换的 Core Export 二进制事件。'
+            WHEN 'raw_order_state' THEN '订单状态的版本化二进制快照。'
+            WHEN 'raw_user_delta' THEN '用户状态增量的版本化二进制载荷。'
+            WHEN 'error_code' THEN '稳定的机器可读错误代码。'
+            WHEN 'error_message' THEN '用于审计和排障的错误说明。'
+            ELSE CASE
+                WHEN item.column_name = 'id' THEN '表内记录的自增主键。'
+                WHEN item.column_name IN ('action', 'action_type') THEN '本条审计或业务记录执行的动作类型。'
+                WHEN item.column_name IN ('adjustment_kind', 'category', 'note_type', 'rule_type', 'source_type') THEN
+                    format('`%s` 的业务分类。', item.column_name)
+                WHEN item.column_name IN ('admin_username', 'requester_username', 'approver_username', 'username') THEN
+                    format('执行或关联该操作的%s。', item.column_name)
+                WHEN item.column_name IN ('admin_reason', 'decision_reason', 'last_error', 'reason', 'reject_reason',
+                                          'rejection_reason', 'skipped_reason') THEN
+                    format('该记录的%s说明，用于审计和排障。', item.column_name)
+                WHEN item.column_name IN ('aggregate_type', 'command_type', 'event_type', 'reference_type') THEN
+                    format('用于路由和反序列化的%s。', item.column_name)
+                WHEN item.column_name IN ('amount', 'price', 'price1', 'price2', 'rate', 'funding_rate',
+                                          'index_price', 'mark_price', 'open_price', 'high_price', 'low_price',
+                                          'close_price', 'ask_price', 'bid_price', 'best_ask_price',
+                                          'best_bid_price', 'last_trade_price', 'base_volume', 'quote_volume',
+                                          'basis_average', 'usdt_value') THEN
+                    format('`%s` 的十进制定点值；精度由对应合约或资产配置决定。', item.column_name)
+                WHEN item.column_name IN ('ask_levels', 'bid_levels', 'order_levels') THEN
+                    format('`%s` 的结构化盘口档位数据。', item.column_name)
+                WHEN item.column_name IN ('attempts', 'bracket_no', 'execution_index', 'payment_index',
+                                          'priority', 'risk_score', 'scan_batch_size', 'sequence',
+                                          'sequence_value', 'submitted_orders', 'canceled_orders',
+                                          'rejected_orders', 'min_valid_index_sources') THEN
+                    format('`%s` 对应的非负序号、次数或数量。', item.column_name)
+                WHEN item.column_name IN ('baseline_version', 'postgres_version') THEN
+                    format('初始化基线记录的%s。', item.column_name)
+                WHEN item.column_name IN ('base_currency', 'quote_currency', 'target_quote_currency', 'asset_symbol') THEN
+                    format('`%s` 使用的标准资产代码。', item.column_name)
+                WHEN item.column_name IN ('base_url', 'conversion_base_url', 'websocket_url', 'target_uri') THEN
+                    format('`%s` 的外部服务连接地址。', item.column_name)
+                WHEN item.column_name IN ('body', 'calculation_inputs', 'request_payload', 'result_payload',
+                                          'submitted_documents', 'wallet_response') THEN
+                    format('`%s` 的结构化 JSON 内容。', item.column_name)
+                WHEN item.column_name IN ('body_sha256', 'business_state_hash', 'code_hash', 'payload_sha256',
+                                          'request_body_sha256', 'request_sha256', 'sha256') THEN
+                    format('`%s` 的完整性或一致性校验摘要。', item.column_name)
+                WHEN item.column_name IN ('channel', 'component', 'destination', 'module', 'service', 'topic',
+                                          'transport', 'provider') THEN
+                    format('事件、调用或配置使用的%s标识。', item.column_name)
+                WHEN item.column_name IN ('clamp_high', 'clamp_low', 'configured_weight', 'effective_weight',
+                                          'total_configured_weight') THEN
+                    format('指数源聚合计算使用的 `%s` 权重或边界值。', item.column_name)
+                WHEN item.column_name IN ('conversion_mode', 'conversion_operation', 'margin_mode',
+                                          'position_mode', 'scan_margin_mode', 'target_margin_mode',
+                                          'maker_margin_mode', 'taker_margin_mode') THEN
+                    format('`%s` 的处理模式。', item.column_name)
+                WHEN item.column_name IN ('conversion_parser', 'parser', 'websocket_parser') THEN
+                    format('解析 `%s` 外部响应时使用的解析器类型。', item.column_name)
+                WHEN item.column_name IN ('conversion_path', 'path', 'request_path') THEN
+                    format('调用或取值使用的 `%s` 路径。', item.column_name)
+                WHEN item.column_name IN ('country', 'document_type', 'kyc_level', 'applicant_type') THEN
+                    format('KYC/合规流程记录的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('description', 'label', 'summary', 'title') THEN
+                    format('面向管理端或用户展示的%s文本。', item.column_name)
+                WHEN item.column_name IN ('email', 'phone', 'ip_address', 'request_ip', 'user_agent') THEN
+                    format('安全审计或用户资料中的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('enabled', 'post_only', 'reduce_only', 'scan_completed', 'success',
+                                          'maker_order_completed', 'taker_order_completed') THEN
+                    format('`%s` 的布尔开关或完成状态。', item.column_name)
+                WHEN item.column_name IN ('event_key', 'reference_key', 'external_reference', 'provider_reference',
+                                          'source_reference', 'spot_debit_reference') THEN
+                    format('跨系统关联和幂等处理使用的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('file_size', 'funding_interval_hours', 'basis_window_seconds',
+                                          'time_until_funding_seconds', 'duration_ms', 'latency_millis',
+                                          'scan_delay_ms') THEN
+                    format('`%s` 的非负度量值，单位由字段名定义。', item.column_name)
+                WHEN item.column_name IN ('http_method', 'content_type', 'query_string') THEN
+                    format('HTTP 请求审计记录中的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('ip_allowlist', 'permissions', 'admin_roles', 'supported_order_types',
+                                          'supported_time_in_force') THEN
+                    format('授权或能力控制使用的 `%s` 集合。', item.column_name)
+                WHEN item.column_name IN ('lease_until') THEN '租约失效时间；超过该时间后其他实例可接管。'
+                WHEN item.column_name IN ('maker_instrument_version', 'taker_instrument_version') THEN
+                    format('成交%s侧订单绑定的合约配置版本。', item.column_name)
+                WHEN item.column_name IN ('maker_position_side', 'taker_position_side', 'scan_position_side',
+                                          'target_position_side') THEN
+                    format('`%s` 对应的持仓方向。', item.column_name)
+                WHEN item.column_name IN ('target_side') THEN 'ADL 或强平目标用户的买卖方向。'
+                WHEN item.column_name IN ('object_key', 'original_filename', 'document_type') THEN
+                    format('上传文档在对象存储或原始请求中的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('password_hash', 'token_hash', 'secret_ciphertext',
+                                          'totp_secret_ciphertext', 'api_key') THEN
+                    format('安全凭据 `%s` 的哈希、密文或公开标识；不得存储明文秘密。', item.column_name)
+                WHEN item.column_name IN ('participant_role') THEN '本次成交结算参与方角色：maker 或 taker。'
+                WHEN item.column_name IN ('period') THEN 'K 线周期代码，例如 1m、5m 或 1h。'
+                WHEN item.column_name IN ('sequence_name') THEN '业务序列名称；在所属序列表内唯一。'
+                WHEN item.column_name IN ('severity') THEN '风险标签严重级别，用于告警和处置优先级。'
+                WHEN item.column_name IN ('chain') THEN '充提资产所在的区块链网络代码。'
+                WHEN item.column_name IN ('permission_code', 'role_code', 'rule_code', 'scene_code',
+                                          'tag_code', 'tier_code') THEN
+                    format('供程序稳定引用的 `%s` 唯一代码。', item.column_name)
+                WHEN item.column_name IN ('permission_name', 'role_name', 'rule_name', 'source_name') THEN
+                    format('`%s` 的可读名称。', item.column_name)
+                WHEN item.column_name IN ('price_precision', 'quantity_precision') THEN
+                    format('`%s` 的小数位数。', item.column_name)
+                WHEN item.column_name IN ('purpose', 'visibility') THEN
+                    format('数据或配置的 `%s` 使用范围。', item.column_name)
+                WHEN item.column_name IN ('reservation_account_type', 'source_account_type', 'target_account_type') THEN
+                    format('资金预占或划转使用的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('reservation_asset') THEN '订单资金预占使用的资产代码。'
+                WHEN item.column_name IN ('result', 'result_code') THEN
+                    format('命令、调用或投影处理的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('source', 'source_partition', 'source_offset', 'source_symbol') THEN
+                    format('来源系统定位、去重或回放使用的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('to_address') THEN '链上提现的目标地址。'
+                WHEN item.column_name IN ('websocket_subscribe_message') THEN '连接外部 WebSocket 后发送的订阅消息。'
+                WHEN item.column_name IN ('created_at_epoch_ms', 'updated_at_epoch_ms') THEN
+                    format('`%s`，Unix epoch 毫秒。', item.column_name)
+                WHEN item.column_name LIKE '%\_id' ESCAPE '\' THEN
+                    format('`%s` 对应业务对象的唯一标识。', item.column_name)
+                WHEN item.column_name LIKE '%\_units' ESCAPE '\' THEN
+                    format('`%s` 的最小精度整数值，禁止使用浮点数。', item.column_name)
+                WHEN item.column_name LIKE '%\_ppm' ESCAPE '\' THEN
+                    format('`%s` 的 ppm 定点值（一百万分之一）。', item.column_name)
+                WHEN item.column_name LIKE '%\_steps' ESCAPE '\' THEN
+                    format('`%s` 的离散数量 step。', item.column_name)
+                WHEN item.column_name LIKE '%\_ticks' ESCAPE '\' THEN
+                    format('`%s` 的离散价格 tick。', item.column_name)
+                WHEN item.column_name LIKE '%\_count' ESCAPE '\' THEN
+                    format('`%s` 的累计数量或本批次数量。', item.column_name)
+                WHEN item.column_name LIKE '%\_sequence' ESCAPE '\' THEN
+                    format('`%s` 的单调序列号。', item.column_name)
+                WHEN item.column_name LIKE '%\_revision' ESCAPE '\' THEN
+                    format('`%s` 的状态修订号。', item.column_name)
+                WHEN item.column_name LIKE '%\_at' ESCAPE '\' OR item.column_name LIKE '%\_time' ESCAPE '\' THEN
+                    format('`%s` 对应的业务时间。', item.column_name)
+                WHEN item.column_name LIKE '%\_enabled' ESCAPE '\' OR item.column_name LIKE 'is\_%' ESCAPE '\' THEN
+                    format('`%s` 功能开关或布尔状态。', item.column_name)
+                WHEN item.column_name LIKE '%\_status' ESCAPE '\' THEN
+                    format('`%s` 业务状态；允许值由所在表约束限定。', item.column_name)
+                ELSE format('表 `%s` 的 `%s` 业务属性，存储类型为 %s。',
+                            item.table_name, item.column_name, item.data_type)
+            END
+        END;
+        EXECUTE format('COMMENT ON COLUMN %I.%I.%I IS %L',
+                       'public', item.table_name, item.column_name, column_description);
+    END LOOP;
+
+    FOR item IN
+        SELECT c.relname AS table_name, a.attname AS column_name
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND a.attname = 'product_line'
+    LOOP
+        constraint_name := left(item.table_name || '_product_line_domain_ck', 63);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conrelid = format('%I.%I', 'public', item.table_name)::regclass
+               AND conname = constraint_name
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE %I.%I ADD CONSTRAINT %I CHECK (%I IN (%L,%L,%L,%L,%L,%L))',
+                'public', item.table_name, constraint_name, item.column_name,
+                'SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION');
+        END IF;
+    END LOOP;
+
+    FOR item IN
+        SELECT c.relname AS table_name, a.attname AS column_name
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND a.atttypid IN ('int2'::regtype, 'int4'::regtype, 'int8'::regtype)
+           AND (a.attname IN ('version', 'instrument_version')
+                OR a.attname ~ '(_sequence|_revision|_count)$'
+                OR a.attname IN ('sequence', 'revision', 'attempts', 'cluster_position'))
+    LOOP
+        constraint_name := left(item.table_name || '_' || item.column_name, 50)
+                           || '_' || substr(md5(item.table_name || '.' || item.column_name), 1, 8)
+                           || '_ck';
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conrelid = format('%I.%I', 'public', item.table_name)::regclass
+               AND conname = constraint_name
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE %I.%I ADD CONSTRAINT %I CHECK (%I %s)',
+                'public', item.table_name, constraint_name, item.column_name,
+                CASE WHEN item.column_name IN ('version', 'instrument_version')
+                     THEN '> 0' ELSE '>= 0' END);
+        END IF;
+    END LOOP;
+
+    IF EXISTS (
+        SELECT 1
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+          LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND d.description IS NULL
+    ) THEN
+        RAISE EXCEPTION 'schema documentation gate failed: uncommented columns remain';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+          JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND d.description LIKE '表 `%` 的 `%` 业务属性，存储类型为 %'
+    ) THEN
+        RAISE EXCEPTION 'schema documentation gate failed: generic column descriptions remain';
+    END IF;
+END $$;
+
 COMMIT;

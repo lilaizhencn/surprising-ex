@@ -11,5 +11,6 @@
 5. Do not place destructive data cleanup, environment-specific seed data, passwords, roles, database creation, or ownership changes in migrations.
 6. Online trading state remains authoritative in Aeron Core. PostgreSQL migrations may evolve configuration, history, audit and projection schemas only.
 7. Validate every new migration against a database created from the current `init.sql`, then validate application startup and projector compatibility.
+8. Every new table and column must have a meaningful PostgreSQL `COMMENT`; every domain with a finite value set must have a `CHECK`, and relationships must use explicit `PK`/`FK`/`UNIQUE` constraints.
 
 The dated SQL files that predated the first release were folded into `init.sql` on 2026-08-18. They are intentionally not retained as upgrade steps because no production database has ever applied them.
