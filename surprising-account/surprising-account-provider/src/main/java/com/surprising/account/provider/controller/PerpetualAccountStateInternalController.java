@@ -4,6 +4,7 @@ import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.service.AccountAeronGateway;
+import com.surprising.aeron.protocol.CoreReservationView;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionMode;
@@ -47,7 +48,7 @@ public class PerpetualAccountStateInternalController {
                     value.symbol(), value.marginAsset(), MarginMode.valueOf(value.marginMode().name()),
                     PositionSide.valueOf(value.positionSide().name()), value.positionMarginUnits())).toList();
             var locks = state.reservations().stream().collect(java.util.stream.Collectors.groupingBy(
-                    value -> value.asset(), java.util.TreeMap::new,
+                            CoreReservationView::asset, java.util.TreeMap::new,
                     java.util.stream.Collectors.summingLong(value -> Math.subtractExact(value.reservedUnits(),
                             Math.addExact(value.releasedUnits(), value.consumedUnits())))))
                     .entrySet().stream().map(entry -> new PerpetualAccountStateUpdatedEvent.OrderLock(

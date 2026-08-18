@@ -398,13 +398,13 @@ public final class AeronClientPool implements AutoCloseable {
     }
 
     private static CoreResponse requireTerminal(CoreCommandOutcome outcome) {
-        if (outcome instanceof CoreCommandOutcome.Terminal terminal) {
-            return terminal.response();
+        if (outcome instanceof CoreCommandOutcome.Terminal(CoreResponse response)) {
+            return response;
         }
-        if (outcome instanceof CoreCommandOutcome.ResultUnknown unknown) {
-            throw new ResultUnknownException(unknown.originalCommandId(),
+        if (outcome instanceof CoreCommandOutcome.ResultUnknown(UUID originalCommandId)) {
+            throw new ResultUnknownException(originalCommandId,
                     "Aeron command was admitted but its result is unknown; query with the same commandId="
-                            + unknown.originalCommandId());
+                            + originalCommandId);
         }
         throw new CoreCommandOutcome.NotAcceptedException((CoreCommandOutcome.NotAccepted) outcome);
     }
