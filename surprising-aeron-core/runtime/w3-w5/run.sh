@@ -16,11 +16,11 @@ KAFKA_PORT="${KAFKA_PORT:-29092}"
 POSTGRES_USER="${POSTGRES_USER:-surprising}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-surprising-local-only}"
 
-readonly PROCESS_SERVICES=(exporter projector instrument price account order matching trigger risk funding liquidation insurance adl gateway maker)
-readonly HTTP_SERVICES=(instrument price account order matching trigger risk funding liquidation insurance adl gateway maker)
+readonly PROCESS_SERVICES=(exporter projector instrument price account command matching risk funding liquidation insurance adl gateway maker)
+readonly HTTP_SERVICES=(instrument price account command matching risk funding liquidation insurance adl gateway maker)
 readonly HTTP_PORTS=(
-  "${INSTRUMENT_PORT:-9080}" "${PRICE_PORT:-9082}" "${ACCOUNT_PORT:-9086}" "${ORDER_PORT:-9084}"
-  "${MATCHING_PORT:-9085}" "${TRIGGER_PORT:-9095}" "${RISK_PORT:-9087}"
+  "${INSTRUMENT_PORT:-9080}" "${PRICE_PORT:-9082}" "${ACCOUNT_PORT:-9086}" "${COMMAND_PORT:-9084}"
+  "${MATCHING_PORT:-9085}" "${RISK_PORT:-9087}"
   "${FUNDING_PORT:-9089}" "${LIQUIDATION_PORT:-9088}" "${INSURANCE_PORT:-9090}"
   "${ADL_PORT:-9091}" "${GATEWAY_PORT:-9094}" "${MAKER_PORT:-9096}"
 )
@@ -57,7 +57,9 @@ validate_context() {
   if [[ "${W4_STATIC_ONLY:-false}" != true ]]; then
     MAIN_WORKTREE="${RUNTIME_MAIN_WORKTREE:-${W4_MAIN_WORKTREE:-$(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')}}"
     [[ -d "$MAIN_WORKTREE" ]] || fail "MAIN_WORKTREE_MISSING path=$MAIN_WORKTREE"
-    [[ "$REPO_ROOT" != "$MAIN_WORKTREE" ]] || fail "MAIN_WORKTREE_REFUSED path=$REPO_ROOT"
+    if [[ "$REPO_ROOT" == "$MAIN_WORKTREE" && "${RUNTIME_ALLOW_CURRENT_WORKTREE:-false}" != true ]]; then
+      fail "MAIN_WORKTREE_REFUSED path=$REPO_ROOT"
+    fi
   fi
 }
 
@@ -159,7 +161,7 @@ port_lines() {
 
 service_lines() {
   printf '%s\n' postgres kafka migrations core-node0 core-node1 core-node2 \
-    exporter projector instrument price account order matching trigger risk funding liquidation insurance adl gateway maker
+    exporter projector instrument price account command matching risk funding liquidation insurance adl gateway maker
 }
 
 assert_lock_available() {
@@ -479,9 +481,8 @@ jar_path() {
     instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     account) printf '%s/surprising-account/surprising-account-provider/target/surprising-account-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
-    order) printf '%s/surprising-trading/surprising-order-provider/target/surprising-order-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    command) printf '%s/surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     matching) printf '%s/surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
-    trigger) printf '%s/surprising-trading/surprising-trigger-provider/target/surprising-trigger-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     risk) printf '%s/surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     funding) printf '%s/surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     liquidation) printf '%s/surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;

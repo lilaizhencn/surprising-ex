@@ -35,7 +35,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-order-provider",
+        name = "surprising-command-provider",
         contextId = "orderRpcApi",
         path = TradingApiPaths.ORDER_BASE_PATH,
         url = "${surprising.clients.order.base-url:http://localhost:9084}")

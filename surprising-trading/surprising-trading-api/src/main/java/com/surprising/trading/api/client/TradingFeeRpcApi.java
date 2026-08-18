@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-order-provider",
+        name = "surprising-command-provider",
         contextId = "tradingFeeRpcApi",
         path = TradingApiPaths.INTERNAL_FEE_BASE_PATH,
         url = "${surprising.clients.order.base-url:http://localhost:9084}")

@@ -364,9 +364,8 @@ MAVEN_MODULES=(
   surprising-aeron-core/surprising-aeron-tools
   surprising-instrument/surprising-instrument-provider
   surprising-price/surprising-price-provider
-  surprising-trading/surprising-order-provider
+  surprising-trading/surprising-command-provider
   surprising-trading/surprising-matching-provider
-  surprising-trading/surprising-trigger-provider
   surprising-risk/surprising-risk-provider
   surprising-funding/surprising-funding-provider
   surprising-liquidation
@@ -403,9 +402,8 @@ surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar|s
 surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar|surprising-aeron-service.jar
 surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar|surprising-instrument-provider.jar
 surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar|surprising-price-provider.jar
-surprising-trading/surprising-order-provider/target/surprising-order-provider-1.0.0-SNAPSHOT-exec.jar|surprising-order-provider.jar
+surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT-exec.jar|surprising-command-provider.jar
 surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar|surprising-matching-provider.jar
-surprising-trading/surprising-trigger-provider/target/surprising-trigger-provider-1.0.0-SNAPSHOT-exec.jar|surprising-trigger-provider.jar
 surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT-exec.jar|surprising-risk-provider.jar
 surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar|surprising-funding-provider.jar
 surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT-exec.jar|surprising-liquidation.jar
@@ -419,9 +417,8 @@ EOF
 BOOT_JAR_SPECS=(
   "surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT.jar|surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar"
   "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT.jar|surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar"
-  "surprising-trading/surprising-order-provider/target/surprising-order-provider-1.0.0-SNAPSHOT.jar|surprising-trading/surprising-order-provider/target/surprising-order-provider-1.0.0-SNAPSHOT-exec.jar"
+  "surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT.jar|surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT-exec.jar"
   "surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT.jar|surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar"
-  "surprising-trading/surprising-trigger-provider/target/surprising-trigger-provider-1.0.0-SNAPSHOT.jar|surprising-trading/surprising-trigger-provider/target/surprising-trigger-provider-1.0.0-SNAPSHOT-exec.jar"
   "surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT.jar|surprising-risk/surprising-risk-provider/target/surprising-risk-provider-1.0.0-SNAPSHOT-exec.jar"
   "surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT.jar|surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar"
   "surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT.jar|surprising-liquidation/target/surprising-liquidation-1.0.0-SNAPSHOT-exec.jar"

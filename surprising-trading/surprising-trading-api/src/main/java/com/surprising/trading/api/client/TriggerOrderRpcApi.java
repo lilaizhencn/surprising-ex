@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-trigger-provider",
+        name = "surprising-command-provider",
         contextId = "triggerOrderRpcApi",
         path = TradingApiPaths.TRIGGER_ORDER_BASE_PATH,
         url = "${surprising.clients.trigger.base-url:http://localhost:9084}")

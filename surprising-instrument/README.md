@@ -14,7 +14,7 @@ Surprising Exchange 产品基础配置模块。它是现货、永续、交割和
 - 价格/数量规则：tick size、step size、最小/最大下单数量、notional 限制、精度。
 - 下单规则：支持的订单类型、time in force、post-only、reduce-only、market order 开关。
 - 风险规则：最大杠杆、初始保证金率、维持保证金率、风险限额档位。
-- 交易手续费默认配置：maker/taker 费率使用 ppm。正数表示向用户收费，负数表示返佣；用户/VIP/做市/活动覆盖由 order provider 的 `trading_fee_schedules` 解析后写入订单快照。
+- 交易手续费默认配置：maker/taker 费率使用 ppm。正数表示向用户收费，负数表示返佣；用户/VIP/做市/活动覆盖由 command provider 的 `trading_fee_schedules` 解析后写入订单快照。
 - 资金费率配置：永续产品的 funding interval、interest rate、cap/floor、impact notional。
 - 生命周期字段：交割和期权产品的到期时间、交割时间、结算方式、标的 symbol、行权价、期权类型和行权风格。
 - 指数价格成分源：外部现货源 REST/WS 配置、权重、USD/USDT 换算规则。
@@ -34,7 +34,7 @@ instrument 配置按 exchange-core 友好的 long 单位保存：
 - `notional_multiplier_units`：`LINEAR_PERPETUAL` 表示每个 `priceTick * quantityStep` 对应的结算资产最小单位；`INVERSE_PERPETUAL` 表示每个合约 step 的报价币面值单位。
 - `contract_type` 不只是展示字段，账户、风控、资金费、强平和 ADL 的公式都会按它分支。
 - `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后写入 `trading_orders` 快照；账户结算按订单快照写入 `TRADE_FEE` ledger。正数扣用户余额，负数给用户返佣。默认 BTC/ETH 合约为 maker `200 ppm`、taker `500 ppm`。
-- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`：单用户动态持仓量上限配置。order provider 使用 `max(平台 OI notional * rate, floor)` 并再受 `max_position_notional_units` 限制。默认 BTC/ETH 为 `300000 ppm`，固定下限 `25000000000000`，即 250,000 USDT。
+- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`：单用户动态持仓量上限配置。command provider 使用 `max(平台 OI notional * rate, floor)` 并再受 `max_position_notional_units` 限制。默认 BTC/ETH 为 `300000 ppm`，固定下限 `25000000000000`，即 250,000 USDT。
 - `*_rate_ppm`、`max_leverage_ppm`、`weight_ppm`：费率、杠杆、权重统一使用 ppm。
 
 `surprising-instrument-api` 同时提供 `PerpetualContractMath`，作为线性/反向合约 notional、未实现 PnL、每 step notional 和维持保证金的共享 long 公式实现。risk、funding、liquidation、ADL 应调用这个共享 math，不要在各自 SQL 里重复实现合约公式。
@@ -161,7 +161,7 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 - Instrument 是全系统唯一产品配置源，不要在撮合、风控、行情服务里再维护第二套 symbol 规则。
 - 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过 `instrument_symbol_sequences` 保证同 symbol 版本号单调递增。
 - instrument 版本、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
-- 到期版本进入 `SETTLING` 后，order provider 先排空订单；Aeron Core 内的条件单状态随核心状态机一起收敛，account 再核对预占、成交消耗和释放。只有相同版本的 `ORDER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
+- 到期版本进入 `SETTLING` 后，command provider 先排空订单；Aeron Core 内的条件单状态随核心状态机一起收敛，account 再核对预占、成交消耗和释放。只有相同版本的 `ORDER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
 - 生命周期清理确认使用共享 topic `surprising.instrument.lifecycle-drain.v1`，以 symbol 为 key；重复确认按 `(symbol, instrument_version, component)` 幂等。
 - Instrument Service 才负责聚合主表、当前版本指针、风险档位、指数源和资产精度；单表 Repository 不执行跨表 JOIN。
 - 下游核心服务启动时加载快照，运行中消费 Kafka 增量事件；不要在每笔请求、撮合或风控计算时查询主库。

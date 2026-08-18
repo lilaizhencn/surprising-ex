@@ -151,7 +151,7 @@ public final class W4LifecycleQaMain {
             requireHttp("risk", "GET", "/actuator/health", null);
             return;
         }
-        for (String service : List.of("instrument", "account", "order", "risk", "maker")) {
+        for (String service : List.of("instrument", "account", "command", "risk", "maker")) {
             requireHttp(service, "GET", "/actuator/health", null);
         }
         if (productLine == ProductLine.LINEAR_PERPETUAL || productLine == ProductLine.INVERSE_PERPETUAL) {
@@ -164,7 +164,7 @@ public final class W4LifecycleQaMain {
     private Map<String, String> providerUrls() {
         Map<String, String> urls = new LinkedHashMap<>();
         Map<String, Integer> ports = Map.of(
-                "instrument", 9080, "price", 9082, "order", 9084, "risk", 9087,
+                "instrument", 9080, "price", 9082, "command", 9084, "risk", 9087,
                 "funding", 9089, "liquidation", 9088, "insurance", 9090,
                 "adl", 9091, "account", 9086, "maker", 9096);
         for (var entry : ports.entrySet()) {
@@ -482,7 +482,7 @@ public final class W4LifecycleQaMain {
         RuntimeException last = null;
         for (int attempt = 1; attempt <= 20; attempt++) {
             try {
-                response = request("order", "POST", "/api/v1/trading/orders", body, Map.of());
+                response = request("command", "POST", "/api/v1/trading/orders", body, Map.of());
                 last = null;
                 break;
             } catch (IllegalStateException exception) {
@@ -525,7 +525,7 @@ public final class W4LifecycleQaMain {
         }
         String commandId = jsonString(response, "\"commandId\":\"");
         for (int attempt = 1; attempt <= 40; attempt++) {
-            response = request("order", "GET", "/api/v1/trading/orders/commands/" + commandId,
+            response = request("command", "GET", "/api/v1/trading/orders/commands/" + commandId,
                     null, Map.of());
             if (response.contains("\"outcome\":\"TERMINAL\"")) {
                 return response;
@@ -776,7 +776,7 @@ public final class W4LifecycleQaMain {
                 String path = "/api/v1/trading/orders/" + order.orderId()
                         + "?userId=" + order.userId() + "&minExportSequence=" + order.requiredExportSequence();
                 try {
-                    String response = request("order", "GET", path, null, Map.of());
+                    String response = request("command", "GET", path, null, Map.of());
                     String status = jsonString(response, "\"status\":\"");
                     if ("REJECTED".equals(status)) {
                         throw new IllegalStateException("spot order rejected after command acceptance: " + response);

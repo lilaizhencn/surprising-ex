@@ -13,14 +13,13 @@
 7. Instrument
 8. Price
 9. Account
-10. Order
+10. Trading Command
 11. Matching
-12. Trigger
-13. Risk
-14. Funding（仅两条永续）
-15. Liquidation、Insurance、ADL（现货跳过）
-16. Gateway
-17. Maker（最后启动）
+12. Risk
+13. Funding（仅两条永续）
+14. Liquidation、Insurance、ADL（现货跳过）
+15. Gateway
+16. Maker（最后启动）
 
 运行方式：
 

@@ -7,7 +7,7 @@ Surprising Exchange 合约指数价格和标记价格模块。
 
 - `surprising-price-api`：RPC 合约和 Kafka 事件模型。
 - `surprising-price-provider`：在同一进程内完成外部现货源采集、指数价格、标记价格和法币汇率服务。
-- `surprising-price-consumer`：供 account/order/trigger/funding/maker/ADL 等下游消费标记价格的共享缓存适配层。
+- `surprising-price-consumer`：供 account/command/funding/maker/ADL 等下游消费标记价格的共享缓存适配层。
 
 ## 架构
 

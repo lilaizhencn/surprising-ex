@@ -148,7 +148,7 @@ surprising:
         target-prefix: /api/v1/accounts
         private-route: true
       trading-trigger:
-        base-url: http://surprising-trigger:9095
+        base-url: http://surprising-command:9084
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
 ```

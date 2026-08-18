@@ -1,13 +1,12 @@
 # surprising-trading
 
 
-Surprising Exchange 现货、永续、交割和期权交易模块。当前已实现独立的 `surprising-order-provider`、`surprising-trigger-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、Core 幂等状态、产品线 Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
+Surprising Exchange 现货、永续、交割和期权交易模块。当前已实现统一的 `surprising-command-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、Core 幂等状态、产品线 Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
 
 ## 模块
 
 - `surprising-trading-api`：订单 RPC 合约、DTO、Kafka command/event 模型。
-- `surprising-order-provider`：订单入口 provider。
-- `surprising-trigger-provider`：止盈止损条件单 provider。
+- `surprising-command-provider`：统一订单和止盈止损条件单入口 provider。
 - `surprising-matching-provider`：基于 `exchange-core` 的撮合 provider。
 
 ## long 定点数模型
@@ -38,7 +37,7 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前已实
 ```text
 client / internal gateway
   -> POST /api/v1/trading/orders
-  -> surprising-order-provider
+  -> surprising-command-provider
   -> surprising.<product-segment>.order.user.commands.v1（key = PRODUCT_LINE:userId）
   -> 用户分区单写入消费者
   -> 用户分区 WAL/RocksDB 顺序追加订单事实
@@ -58,7 +57,7 @@ client / internal gateway
 ```text
 client / internal gateway
   -> POST /api/v1/trading/trigger-orders
-  -> surprising-trigger-provider
+  -> surprising-command-provider
   -> Aeron Core CoreTriggerOrderState
   -> Core 接收 APPLY_MARK_PRICE 并按增量索引触发
   -> Core 原子创建 reduce-only 子订单并撮合
@@ -127,7 +126,7 @@ Topic 路由，再统一追加到用户分区 WAL/RocksDB，由 `OrderUserStateS
 
 ## 普通订单改单
 
-- 普通订单改单在 order-provider 中使用 cancel-replace 语义，不修改 exchange-core。
+- 普通订单改单在 command provider 中使用 cancel-replace 语义，不修改 exchange-core。
 - 只允许改单开放的 `LIMIT` 订单，订单状态必须是 `ACCEPTED` 或 `PARTIALLY_FILLED`。
 - 可修改 `priceTicks`、未成交 `quantitySteps`、挂单 `timeInForce`（`GTC`/`GTX`）和 `postOnly`。
 - 不允许修改 `side`、`symbol`、`orderType`、`marginMode`、`positionSide` 或 `reduceOnly`。
@@ -140,13 +139,13 @@ Topic 路由，再统一追加到用户分区 WAL/RocksDB，由 `OrderUserStateS
 
 - `countdownMs=0` 关闭倒计时。
 - 正数 `countdownMs` 会刷新用户级倒计时；传 `symbol` 时只作用于该交易对，不传则作用于全部 symbol。
-- 倒计时到期后，order-provider 复用现有 `cancel-open` 路径撤用户开放普通单，并调用 trigger-provider 撤 pending TP/SL 条件单。
+- 倒计时到期后，command provider 复用现有 `cancel-open` 路径撤用户开放普通单，并在进程内撤 pending TP/SL 条件单。
 - timer 状态保存在订单用户分区的本地 WAL/RocksDB；数据库不参与倒计时、到期判断或撤单裁决。
   数据库若配置了订单投影，只用于后台查询和审计，投影落后不会影响倒计时执行。
 
 ## 算法单
 
-`TWAP` 和 `ICEBERG` 在 order-provider 中作为 exchange-core 之前的算法单层实现。父算法单不会进入实时订单簿；被调度出来的子单是普通 order-provider 订单，继续走撮合、账户结算、风控、强平检查和 WebSocket fanout。
+`TWAP` 和 `ICEBERG` 在 command provider 中作为 exchange-core 之前的算法单层实现。父算法单不会进入实时订单簿；被调度出来的子单是普通 command provider 订单，继续走撮合、账户结算、风控、强平检查和 WebSocket fanout。
 
 - `TWAP` 要求 `durationSeconds >= intervalSeconds`，并校验 `childQuantitySteps` 能在配置时间内完成目标数量。子单使用 IOC；`priceTicks=0` 会生成 MARKET IOC 子单，正数价格会生成 LIMIT IOC 子单。
 - `ICEBERG` 要求正数限价，`timeInForce` 必须为 `GTC` 或 `GTX`。它同一时间只保留一笔可见子单，前一片成交或取消后再放出下一片。
@@ -171,11 +170,11 @@ REST 接口：
 - 标记价格由 price-provider 通过单写入 Aeron `APPLY_MARK_PRICE` 命令送入 Core。Core 按 symbol 的价格范围索引只取 crossing candidates，不做全量条件单扫描。
 - 触发方向由平仓方向和条件单类型自动推导：多仓止盈是 `SELL + TAKE_PROFIT`，采样标记价大于等于触发价时触发；多仓止损是 `SELL + STOP_LOSS`，采样标记价小于等于触发价时触发。空仓平仓用 `BUY`，方向相反。
 - `TRAILING_STOP` 要求执行单为 `MARKET`，`callbackRatePpm` 在 `[1000, 100000]`（`0.1%` 到 `10%`），`activationPriceTicks` 可选。SELL 追踪止损激活后维护每次标记价更新的最高价，从最高价回撤达到回调比例时触发；BUY 追踪止损维护最低价，反弹达到回调比例时触发。水位和状态只由 Core 维护。
-- trigger provider 不消费价格或持仓 Kafka 事件，也不维护条件单副本；Core 直接校验价格 sequence、过期时间、追踪水位和触发条件。
-- 多个 trigger-provider 节点可以同时运行，用户查询和撤单通过 Aeron Core 按用户边界执行；`TRIGGERING` 的重试和投影由 Core 状态机负责。
+- command provider 不消费价格或持仓 Kafka 事件，也不维护条件单副本；Core 直接校验价格 sequence、过期时间、追踪水位和触发条件。
+- 多个 command provider 节点可以同时运行，用户查询和撤单通过 Aeron Core 按用户边界执行；`TRIGGERING` 的重试和投影由 Core 状态机负责。
 - 静态 `TAKE_PROFIT`/`STOP_LOSS`、追踪止损都进入 Core 的增量 symbol/position/OCO 索引。索引更新随 Core 状态转换完成，标记价命令只访问命中的价格范围，不使用 Redis 或数据库锁抢单。
-- 触发裁决、过期、OCO 和子订单创建都在 Aeron Core 内完成；trigger provider 只负责 API 到 Core 的命令和查询转发。
-- 触发后的真实子订单继续走 Core 撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。trigger provider 不直接修改余额或持仓。
+- 触发裁决、过期、OCO 和子订单创建都在 Aeron Core 内完成；command provider 只负责 API 到 Core 的命令和查询转发。
+- 触发后的真实子订单继续走 Core 撮合、账户、手续费、PnL、风控、强平和 WebSocket 链路。command provider 不直接修改余额或持仓。
 - `MARKET` 触发执行要求 `priceTicks=0` 且 `timeInForce` 为 `IOC` 或 `FOK`。静态 TP/SL 也可用 `LIMIT` 执行且要求 `priceTicks > 0`；触发执行不支持 `GTX`。
 - 可选 `ocoGroupId` 支持成对 TP/SL 互撤。Core 在同一个命令状态转换内通过 OCO 索引取消其它 pending sibling，再生成 reduce-only 平仓单。
 - 持仓完全归零时，Core 直接按用户、symbol、margin、position-side 的 position 索引取消 pending 条件单；不会扫描全量条件单，`TRIGGERING` 状态不会被抢撤。
@@ -227,7 +226,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 ## TraceId 链路追踪
 
 - 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。
-- `surprising-order-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command/export 元数据。
+- `surprising-command-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command/export 元数据。
 - Core command、Core Export 和 WebSocket 事件会携带同一个 traceId，查询投影不参与在线裁决。
 - matching projection 必须沿用 Core Export 的 traceId，不能重新生成或把投影 trace 当裁决身份。
 - `surprising-account-provider` 会把 `MatchTradeEvent.traceId` 写入 `PositionUpdatedEvent`，这样私有 WebSocket 持仓推送也能和订单入口、撮合审计行关联。
@@ -235,7 +234,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 
 ## 保证金冻结
 
-普通开仓/挂单由 `surprising-order-provider` 完成规则校验和保证金计算，再把带不可变预占快照的下单命令提交给 Aeron Core：
+普通开仓/挂单由 `surprising-command-provider` 完成规则校验和保证金计算，再把带不可变预占快照的下单命令提交给 Aeron Core：
 
 - 从 instrument 当前版本读取 `contract_type`、`initial_margin_rate_ppm`、`notional_multiplier_units`、`price_tick_units`、`settle_asset` 和资产 scale。
 - 在 Java `OrderMarginMath` 中换算 `initialMarginUnits`：输入和输出都是 long ticks/steps/asset units，中间乘除使用精确整数计算，溢出会拒绝而不是回绕。
@@ -254,7 +253,7 @@ matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。�
 - 待平数量聚合使用 checked long addition；如果溢出，会拒绝订单或回滚强平事务，不能静默扩大可平容量。
 - 校验使用 Aeron Core 用户状态快照中的 `positionRevision`、订单 revision 和本地未成交索引，多节点
   通过用户 key 串行更新；快照未就绪时失败关闭，不使用数据库行锁猜测可平数量。
-- 持仓被成交、强平或 ADL 改变后，order-provider 消费 Core Export 发布的完整持仓状态事件，并在同一订单用户
+- 持仓被成交、强平或 ADL 改变后，command provider 消费 Core Export 发布的完整持仓状态事件，并在同一订单用户
   分区 WAL 中撤销事件发生前创建且反向、版本不一致或超过新持仓容量的订单。它忽略事件之后创建的
   订单，避免延迟快照误撤重开仓位的新平仓单。
 
@@ -515,22 +514,20 @@ brew services start kafka
 psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
 # Topic 初始化命令待验证脚本重新整理后补回
 mvn -pl :surprising-instrument-provider -am spring-boot:run
-mvn -pl :surprising-order-provider -am spring-boot:run
-mvn -pl :surprising-trigger-provider -am spring-boot:run
+mvn -pl :surprising-command-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
 mvn -pl :surprising-matching-provider -am spring-boot:run
 ```
 
 端口：
 
-- `9084`：order-provider，普通订单入口。
+- `9084`：command provider，普通订单和止盈止损条件单统一入口。
 - `9085`：撮合服务。
-- `9095`：trigger-provider，止盈止损条件单服务。
 
 ## 生产注意事项
 
-- `surprising-order-provider` 和 `surprising-trigger-provider` 独立部署。普通订单、撮合、账户结算和条件单热路径只依赖 Aeron Core 与内存状态；trigger provider 不连接 PostgreSQL、Redis 或价格/持仓 Kafka，也不保留数据库回退链路。不要做每个 symbol 一个 worker。
-- `surprising-matching-provider` 独立于 order/trigger，但只维护可重建的行情与成交查询投影，不持有可执行订单簿。
+- `surprising-command-provider` 单独部署。普通订单、撮合、账户结算和条件单热路径只依赖 Aeron Core 与内存状态，不连接 PostgreSQL、Redis 或价格/持仓 Kafka，也不保留数据库回退链路。不要做每个 symbol 一个 worker。
+- `surprising-matching-provider` 独立于 command provider，但只维护可重建的行情与成交查询投影，不持有可执行订单簿。
 - Aeron Core 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.15-emporia` 传递依赖 Chronicle/OpenHFT，
   父 POM 固定 fork Git SHA、整包 SHA-256 和 JDK 25 可用的 2026.x BOM；service Maven `validate`
   同时验证 whole dependency JAR 与内嵌 provenance。
@@ -542,7 +539,7 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 - 下单冻结保证金时还会校验投影后的持仓敞口：当前持仓 + 同方向未完成非 reduce-only 委托 + 本次委托，用这个投影值检查 `max_position_notional_units`、动态平台 OI 限额和命中的 `instrument_risk_brackets.notional_cap_units`；纯减仓单按减仓后的投影校验，不会简单用当前敞口加本单 notional 误拒。
 - 动态单用户持仓量限额已实现：account 根据 Core Export 的结算事实把 OI 投影到 64 个 `trading_symbol_open_interest_shards`，`trading_symbol_open_interest` 视图向读端聚合 long/short 和 `open_quantity_steps=max(long_quantity_steps, short_quantity_steps)`；order 入口按当前价格折算平台 OI notional，并使用 `min(max_position_notional_units, max(openInterestNotional * user_open_interest_limit_rate_ppm / 1_000_000, user_open_interest_limit_floor_units))` 作为每个用户的有效持仓上限。默认 BTC/ETH 为 30% 平台 OI，固定下限 250,000 USDT。生产需要定期用 Core Export/用户状态快照重建核对分片，`account_positions` 只作为对账投影，尤其在人工修数或灾备恢复之后。
 - 用户主动平仓应使用 `reduceOnly=true`；强平订单由 liquidation provider 复核风险后生成，不走用户订单入口校验。
-- 止盈止损触发后一定通过 order-provider 提交 reduce-only 平仓单。WebSocket 客户端会在普通私有订单/成交/持仓频道收到触发后生成的真实订单和成交。
+- 止盈止损触发后一定通过 command provider 提交 reduce-only 平仓单。WebSocket 客户端会在普通私有订单/成交/持仓频道收到触发后生成的真实订单和成交。
 - outbox 是至少一次投递；下游撮合和推送必须幂等。
 - matching result 通过 `commandId` 幂等，成交通过 `tradeId` 幂等。
 - Aeron Member 的 matcher/Core 任一一致性门禁失败必须关闭成员，由 Cluster 选主或从配对 snapshot 恢复；
@@ -552,9 +549,7 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 ## 验证
 
 ```bash
-mvn -pl :surprising-order-provider -am test
-mvn -pl :surprising-order-provider -am test
+mvn -pl :surprising-command-provider -am test
 mvn -pl :surprising-matching-provider -am test
-mvn -pl :surprising-trigger-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'
 ```

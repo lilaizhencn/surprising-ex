@@ -9,7 +9,7 @@ readonly TEST_RUN_ID=spot-fixed-test
 readonly POSTGRES_PORT=25432
 readonly KAFKA_PORT=29092
 readonly START_COMMAND=line-up
-readonly START_ORDER='postgres,kafka,migrations,core-node0,core-node1,core-node2,exporter,projector,instrument,price,account,order,matching,trigger,risk,gateway,maker'
+readonly START_ORDER='postgres,kafka,migrations,core-node0,core-node1,core-node2,exporter,projector,instrument,price,account,command,matching,risk,gateway,maker'
 readonly MAIN_WORKTREE="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 readonly TOOL_JAR="$MAIN_WORKTREE/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar"
 readonly TEST_ROOT="${TMPDIR:-/tmp}/surprising-product-line-tests/spot"
@@ -18,7 +18,7 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@25
 runtime() {
   local run_id="$1" fresh="$2" command="$3"
   RUN_ID="$run_id" PRODUCT_LINE="$PRODUCT_LINE" WALLET_ENABLED=false TASK_RUN_FRESH="$fresh" \
-    POSTGRES_PORT="$POSTGRES_PORT" KAFKA_PORT="$KAFKA_PORT" RUNTIME_MAIN_WORKTREE="$MAIN_WORKTREE" "$RUNNER" "$command"
+    POSTGRES_PORT="$POSTGRES_PORT" KAFKA_PORT="$KAFKA_PORT" RUNTIME_MAIN_WORKTREE="$MAIN_WORKTREE" RUNTIME_ALLOW_CURRENT_WORKTREE=true "$RUNNER" "$command"
 }
 
 run_test() {
