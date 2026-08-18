@@ -789,31 +789,32 @@ OPTION 真实门禁最初停在已受理 Aeron 请求的结果未知超时。修
 - `FUNDS_DIFFERENCE=0`、`maker=OBSERVED`、`wallet=ABSENT`、`W4_SIX_LINE=PASS`、`cleanup=PASS`。
 - Account 定向测试 `ExpiringContractSettlementConsumerTest`、`ExpiringContractSettlementFanoutServiceTest`、`AccountAeronGatewayTest` 共 10 个测试通过；Aeron client 及 Risk gateway 的定向超时测试此前已通过。
 
-### 18.3.5 W4 固定产品线测试入口（2026-08-18）
+### 18.3.5 固定产品线独立测试入口（2026-08-18）
 
 为避免每次测试临时修改产品线、端口或启动参数，新增六个独立、固定配置的入口，均位于
 `surprising-aeron-core/runtime/w3-w5/product-lines/`：
 
 | 产品线 | 脚本 | 固定运行 ID |
 | --- | --- | --- |
-| SPOT | `spot.sh` | `w4-spot-fixed` |
-| LINEAR_PERPETUAL | `linear-perpetual.sh` | `w4-linear-perpetual-fixed` |
-| INVERSE_PERPETUAL | `inverse-perpetual.sh` | `w4-inverse-perpetual-fixed` |
-| LINEAR_DELIVERY | `linear-delivery.sh` | `w4-linear-delivery-fixed` |
-| INVERSE_DELIVERY | `inverse-delivery.sh` | `w4-inverse-delivery-fixed` |
-| OPTION | `option.sh` | `w4-option-fixed` |
+| SPOT | `spot.sh` | `spot-fixed` |
+| LINEAR_PERPETUAL | `linear-perpetual.sh` | `linear-perpetual-fixed` |
+| INVERSE_PERPETUAL | `inverse-perpetual.sh` | `inverse-perpetual-fixed` |
+| LINEAR_DELIVERY | `linear-delivery.sh` | `linear-delivery-fixed` |
+| INVERSE_DELIVERY | `inverse-delivery.sh` | `inverse-delivery-fixed` |
+| OPTION | `option.sh` | `option-fixed` |
 
 每个脚本只接受 `start`、`test`、`stop` 三个动作；省略动作等同于 `test`。脚本固定使用
 PostgreSQL `25432`、Kafka `29092`、JDK 25（`/opt/homebrew/opt/openjdk@25`）、
-`/private/tmp/surprising-w4-current.RDN7eY` 主 worktree 和 `WALLET_ENABLED=false`，不读取外部
-`PRODUCT_LINE`、`PRODUCT_LINES` 或动态端口覆盖。`test` 使用全新隔离运行，结束后由现有
-`run.sh` 清理并生成 manifest；`start` 保留运行态供人工检查，必须用同一脚本的 `stop` 清理。
+当前仓库主 worktree 和 `WALLET_ENABLED=false`，不读取外部产品线或动态端口覆盖。`test` 使用
+该产品线固定测试运行 ID，结束后由现有 `run.sh` 清理并生成独立 manifest；`start` 保留运行态供
+人工检查，必须用同一脚本的 `stop` 清理。
 
 服务启动顺序固定为：PostgreSQL → Kafka → migrations（`gateway-schema.sql`、根初始化、版本迁移）
 → Aeron Cluster `node0/node1/node2` → Exporter → Projector → Instrument → Price → Account →
 Order → Matching → Trigger → Risk →（永续 Funding）→（交割/期权/永续 Liquidation、Insurance、ADL）
 → Gateway → Maker。现货不启动 Funding、Liquidation、Insurance、ADL；wallet 永不启动。六个脚本
-共享 `run.sh` 的唯一编排实现，因此启动、清理、ownership lock 和失败回收语义保持一致。
+分别直接调用 `run.sh` 的启动和清理命令，再调用单产品线生命周期驱动；不存在聚合场景、产品线循环或
+跨产品线选择参数。启动、清理、ownership lock 和失败回收语义仍由唯一运行时入口保持一致。
 
 只执行一条产品线：
 
@@ -827,7 +828,7 @@ cd surprising-aeron-core/runtime/w3-w5/product-lines
 ./option.sh test
 ```
 
-脚本的语法和非法动作拒绝检查已通过；真实 W4 门禁仍按产品线逐条执行，不以一次多产品线运行结果
+脚本的语法和非法动作拒绝检查已通过；真实门禁仍按产品线逐条执行，不以一次多产品线运行结果
 替代单产品线资金、生命周期和恢复证据。
 
 ### 18.4 Canonical 测试脚本矩阵

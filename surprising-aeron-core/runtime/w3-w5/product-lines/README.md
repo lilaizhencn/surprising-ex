@@ -1,6 +1,6 @@
-# 固定产品线 W4 测试脚本
+# 固定产品线独立测试脚本
 
-每个脚本只对应一条产品线，参数、端口、运行 ID、钱包开关和主 worktree 均写死，不读取 `PRODUCT_LINE`、`PRODUCT_LINES` 或动态端口覆盖。
+每个脚本只对应一条产品线，参数、端口、运行 ID、钱包开关和主 worktree 均固定，不读取外部产品线或动态端口覆盖。每个脚本独立完成启动、生命周期测试、manifest 校验和清理，不调用聚合场景。
 
 六个脚本共用 `../run.sh` 的唯一启动实现，实际启动顺序固定为：
 
@@ -33,4 +33,4 @@
 ./option.sh test
 ```
 
-`start` 只启动固定产品线，`stop` 只清理对应运行。`test` 使用全新、带标签的 PostgreSQL/Kafka/Aeron 资源，完成后自动清理并生成 W4 manifest；wallet 永不启动。
+`start` 只启动固定产品线，`stop` 只清理对应运行。`test` 使用全新、带标签的 PostgreSQL/Kafka/Aeron 资源，完成后自动清理并生成该产品线独立 manifest；wallet 永不启动。

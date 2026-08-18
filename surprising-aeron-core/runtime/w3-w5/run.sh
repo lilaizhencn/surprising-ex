@@ -55,7 +55,7 @@ validate_context() {
   [[ -f "$COMPOSE_FILE" && -x "$COMMON_SCRIPT" ]] || fail 'RUNTIME_BUNDLE_INCOMPLETE'
   [[ -f "$PRODUCT_TOPIC_SOURCE" ]] || fail "PRODUCT_TOPIC_SOURCE_MISSING path=$PRODUCT_TOPIC_SOURCE"
   if [[ "${W4_STATIC_ONLY:-false}" != true ]]; then
-    MAIN_WORKTREE="${W4_MAIN_WORKTREE:-$(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')}"
+    MAIN_WORKTREE="${RUNTIME_MAIN_WORKTREE:-${W4_MAIN_WORKTREE:-$(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')}}"
     [[ -d "$MAIN_WORKTREE" ]] || fail "MAIN_WORKTREE_MISSING path=$MAIN_WORKTREE"
     [[ "$REPO_ROOT" != "$MAIN_WORKTREE" ]] || fail "MAIN_WORKTREE_REFUSED path=$REPO_ROOT"
   fi
@@ -751,15 +751,5 @@ case "$command_name" in
   line-up)
     up_internal real
     ;;
-  scenario)
-    scenario_name="${2:-}"
-    case "$scenario_name" in
-      w4-six-line|w4-faults)
-        W4_RUNNER="$SCRIPT_DIR/run.sh" W4_SCENARIO="$scenario_name" \
-          bash "$SCRIPT_DIR/scenarios/w4-six-line.sh"
-        ;;
-      *) fail "UNKNOWN_SCENARIO scenario=$scenario_name" ;;
-    esac
-    ;;
-  *) fail "USAGE command=$command_name expected=up,line-up,status,run,down,dry-run,smoke,scenario" ;;
+  *) fail "USAGE command=$command_name expected=up,line-up,status,run,down,dry-run,smoke" ;;
 esac
