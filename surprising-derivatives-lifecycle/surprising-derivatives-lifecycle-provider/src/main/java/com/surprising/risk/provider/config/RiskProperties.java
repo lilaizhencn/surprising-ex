@@ -59,29 +59,14 @@ public class RiskProperties {
     }
 
     public static class Calculation {
-        private boolean enabled = true;
-        private long scanDelayMs = 1000L;
         private Duration maxMarkAge = Duration.ofSeconds(10);
-        private int scanBatchSize = 500;
 
-        public boolean isEnabled() { return enabled; }
-        public void setEnabled(boolean value) { enabled = value; }
-        public long getScanDelayMs() { return scanDelayMs; }
-        public void setScanDelayMs(long value) {
-            if (value < 0) throw new IllegalArgumentException("scanDelayMs must be non-negative");
-            scanDelayMs = value;
-        }
         public Duration getMaxMarkAge() { return maxMarkAge; }
         public void setMaxMarkAge(Duration value) {
             if (value == null || value.isZero() || value.isNegative()) {
                 throw new IllegalArgumentException("maxMarkAge must be positive");
             }
             maxMarkAge = value;
-        }
-        public int getScanBatchSize() { return scanBatchSize; }
-        public void setScanBatchSize(int value) {
-            if (value < 1 || value > 10_000) throw new IllegalArgumentException("scanBatchSize must be in [1,10000]");
-            scanBatchSize = value;
         }
     }
 }

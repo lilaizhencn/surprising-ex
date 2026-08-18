@@ -2535,43 +2535,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS risk_liquidation_candidates_active_uidx
 CREATE INDEX IF NOT EXISTS risk_liquidation_candidates_status_idx
     ON risk_liquidation_candidates (product_line, status, event_time ASC);
 
-CREATE TABLE IF NOT EXISTS risk_admin_rule_overrides (
-    rule_code                    TEXT PRIMARY KEY,
-    rule_name                    TEXT NOT NULL,
-    rule_type                    TEXT NOT NULL,
-    enabled                      BOOLEAN NOT NULL DEFAULT TRUE,
-    scan_delay_ms                BIGINT,
-    scan_batch_size              INTEGER,
-    admin_user_id                TEXT NOT NULL,
-    reason                       TEXT NOT NULL,
-    created_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT risk_admin_rule_overrides_code_check CHECK (rule_code ~ '^[A-Z0-9_.:-]{2,96}$'),
-    CONSTRAINT risk_admin_rule_overrides_type_check CHECK (
-        rule_type IN ('GLOBAL_MARGIN', 'SCAN_CONTROL')
-    ),
-    CONSTRAINT risk_admin_rule_overrides_scan_delay_check CHECK (
-        scan_delay_ms IS NULL OR scan_delay_ms >= 0
-    ),
-    CONSTRAINT risk_admin_rule_overrides_batch_check CHECK (
-        scan_batch_size IS NULL OR scan_batch_size BETWEEN 1 AND 10000
-    ),
-    CONSTRAINT risk_admin_rule_overrides_admin_present CHECK (length(admin_user_id) > 0),
-    CONSTRAINT risk_admin_rule_overrides_reason_present CHECK (length(reason) BETWEEN 1 AND 500)
-);
-
-ALTER TABLE risk_admin_rule_overrides
-    DROP CONSTRAINT IF EXISTS risk_admin_rule_overrides_margin_check,
-    DROP CONSTRAINT IF EXISTS risk_admin_rule_overrides_liquidation_check,
-    DROP CONSTRAINT IF EXISTS risk_admin_rule_overrides_margin_order_check;
-
-ALTER TABLE risk_admin_rule_overrides
-    DROP COLUMN IF EXISTS warning_margin_ratio_ppm,
-    DROP COLUMN IF EXISTS liquidation_margin_ratio_ppm;
-
-CREATE INDEX IF NOT EXISTS risk_admin_rule_overrides_type_idx
-    ON risk_admin_rule_overrides (rule_type, updated_at DESC);
-
 CREATE TABLE IF NOT EXISTS risk_outbox_events (
     id                  BIGINT PRIMARY KEY,
     topic               TEXT NOT NULL,

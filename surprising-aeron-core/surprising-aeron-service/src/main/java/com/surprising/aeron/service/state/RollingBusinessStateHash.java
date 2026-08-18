@@ -29,11 +29,13 @@ public final class RollingBusinessStateHash {
     private final int productLine;
     private long revision;
     private long nextLiquidationId;
+    private long riskScanControlHash;
 
     private RollingBusinessStateHash(TradingCoreState state) {
         productLine = state.productLine().ordinal();
         revision = state.revision();
         nextLiquidationId = state.riskState().nextLiquidationId();
+        riskScanControlHash = stable(state.riskState().scanControl());
         rebuild(state);
     }
 
@@ -63,6 +65,7 @@ public final class RollingBusinessStateHash {
             updateMap(liquidations, before.riskState().liquidations(), after.riskState().liquidations());
             updateMap(riskScans, before.riskState().scans(), after.riskState().scans());
             nextLiquidationId = after.riskState().nextLiquidationId();
+            riskScanControlHash = stable(after.riskState().scanControl());
         }
         if (before.treasuryState() != after.treasuryState()) {
             var beforeTreasury = before.treasuryState();
@@ -80,6 +83,7 @@ public final class RollingBusinessStateHash {
     public void restore(TradingCoreState state) {
         revision = state.revision();
         nextLiquidationId = state.riskState().nextLiquidationId();
+        riskScanControlHash = stable(state.riskState().scanControl());
         rebuild(state);
     }
 
@@ -100,6 +104,7 @@ public final class RollingBusinessStateHash {
         hash = mixAggregate(hash, "liquidations", liquidations);
         hash = mixAggregate(hash, "riskScans", riskScans);
         hash = CoreStateHash.mix(hash, nextLiquidationId);
+        hash = CoreStateHash.mix(hash, riskScanControlHash);
         hash = mixAggregate(hash, "feeBalances", feeBalances);
         hash = mixAggregate(hash, "insuranceBalances", insuranceBalances);
         hash = mixAggregate(hash, "insuranceDeficits", insuranceDeficits);

@@ -5,6 +5,7 @@ import com.surprising.risk.provider.service.RiskService;
 import com.surprising.risk.provider.service.RiskService.RiskRuleResponse;
 import com.surprising.risk.provider.service.RiskService.RiskRuleUpdateCommand;
 import com.surprising.risk.provider.service.RiskService.RiskRulesResponse;
+import com.surprising.risk.provider.service.RiskAeronGateway.RiskScanControlConflictException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -40,6 +41,8 @@ public class AdminRiskController {
             @RequestBody RiskRuleUpdateCommand request) {
         try {
             return riskService.updateRiskRule(ruleCode, requireAdmin(adminUserId), request);
+        } catch (RiskScanControlConflictException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

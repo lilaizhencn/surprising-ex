@@ -10,6 +10,7 @@ import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.product.api.ProductLine;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
@@ -21,8 +22,9 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 19;
+    private static final int VERSION = 20;
     private static final int MAX_TEXT_BYTES = 64;
+    private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
     private TradingStateSnapshotCodec() {
     }
@@ -192,6 +194,15 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(scan.triggerOcoCursor());
         });
         writer.longValue(state.riskState().nextLiquidationId());
+        CoreRiskScanControlView scanControl = state.riskState().scanControl();
+        writer.longValue(scanControl.version());
+        writer.auditText(scanControl.ruleName());
+        writer.byteValue(scanControl.enabled() ? 1 : 0);
+        writer.longValue(scanControl.scanDelayMs());
+        writer.intValue(scanControl.scanBatchSize());
+        writer.auditText(scanControl.updatedBy());
+        writer.auditText(scanControl.reason());
+        writer.longValue(scanControl.updatedAtEpochMillis());
         writeUnits(writer, state.treasuryState().feeBalances());
         writeUnits(writer, state.treasuryState().insuranceBalances());
         writeUnits(writer, state.treasuryState().insuranceDeficits());
@@ -476,8 +487,13 @@ public final class TradingStateSnapshotCodec {
                     reader.nonNegativeLong("trigger OCO cursor"));
             putUnique(scans, scanSymbol, scan);
         }
+        long nextLiquidationId = reader.positiveLong("next liquidation id");
+        CoreRiskScanControlView scanControl = new CoreRiskScanControlView(
+                reader.positiveLong("risk scan control version"), reader.auditText(), reader.booleanValue(),
+                reader.nonNegativeLong("risk scan delay"), reader.intValue(), reader.auditText(), reader.auditText(),
+                reader.nonNegativeLong("risk scan control updated time"));
         CoreRiskState riskState = new CoreRiskState(marks, risks, liquidations, scans,
-                reader.positiveLong("next liquidation id"));
+                nextLiquidationId, scanControl);
         Map<String, Long> feeBalances = readUnits(reader, "fee balances");
         Map<String, Long> insuranceBalances = readUnits(reader, "insurance balances");
         Map<String, Long> insuranceDeficits = readUnits(reader, "insurance deficits");
@@ -618,6 +634,15 @@ public final class TradingStateSnapshotCodec {
             output.writeBytes(bytes);
         }
 
+        void auditText(String value) {
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            if (bytes.length == 0 || bytes.length > MAX_AUDIT_TEXT_BYTES) {
+                throw new IllegalArgumentException("invalid snapshot audit text length");
+            }
+            intValue(bytes.length);
+            output.writeBytes(bytes);
+        }
+
         void bytes(byte[] value) {
             if (value == null || value.length == 0 || value.length > 65_536) {
                 throw new IllegalArgumentException("invalid snapshot payload length");
@@ -703,6 +728,17 @@ public final class TradingStateSnapshotCodec {
             int length = count("optional text");
             if (length > MAX_TEXT_BYTES) {
                 throw new ProtocolException("invalid optional snapshot text length: " + length);
+            }
+            require(length);
+            String value = new String(input, offset, length, StandardCharsets.UTF_8);
+            offset += length;
+            return value;
+        }
+
+        String auditText() {
+            int length = count("audit text");
+            if (length == 0 || length > MAX_AUDIT_TEXT_BYTES) {
+                throw new ProtocolException("invalid snapshot audit text length: " + length);
             }
             require(length);
             String value = new String(input, offset, length, StandardCharsets.UTF_8);

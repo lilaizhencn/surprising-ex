@@ -1,8 +1,10 @@
 package com.surprising.risk.provider.service;
 
 import com.surprising.aeron.protocol.CoreBalanceView;
+import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
 import com.surprising.aeron.protocol.CoreUserStateView;
+import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.api.model.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
@@ -14,8 +16,6 @@ import com.surprising.risk.api.model.RiskPositionSnapshotResponse;
 import com.surprising.risk.api.model.RiskStatus;
 import com.surprising.risk.provider.config.RiskProperties;
 import com.surprising.risk.provider.repository.CoreRiskLiquidationProjectionRepository;
-import com.surprising.risk.provider.repository.RiskRuleRepository;
-import com.surprising.risk.provider.repository.RiskRuleRepository.RiskRuleOverride;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
@@ -35,14 +35,12 @@ public class RiskService {
     private final RiskProperties properties;
     private final RiskAeronGateway aeron;
     private final CoreRiskLiquidationProjectionRepository liquidations;
-    private final RiskRuleRepository rules;
 
     public RiskService(RiskProperties properties, RiskAeronGateway aeron,
-                       CoreRiskLiquidationProjectionRepository liquidations, RiskRuleRepository rules) {
+                       CoreRiskLiquidationProjectionRepository liquidations) {
         this.properties = properties;
         this.aeron = aeron;
         this.liquidations = liquidations;
-        this.rules = rules;
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String accountType, String settleAsset) {
@@ -104,14 +102,11 @@ public class RiskService {
     }
 
     public RiskRulesResponse riskRules() {
-        List<RiskRuleOverride> overrides = rules.findAll();
-        RiskRuleOverride scan = override(overrides, "RISK_SCAN_CONTROL");
+        CoreRiskScanControlView scan = aeron.riskScanControl();
         return new RiskRulesResponse(2, List.of(
                 new RiskRuleResponse("GLOBAL_MARGIN_POLICY", "Core instrument risk policy",
-                        "CORE_INSTRUMENT_RISK_POLICY", true, null, null, "core", null, null, null),
-                rule("RISK_SCAN_CONTROL", "Aeron risk scan control", "SCAN_CONTROL",
-                        scan == null ? properties.getCalculation().isEnabled() : scan.enabled(),
-                        properties.getCalculation().getScanDelayMs(), properties.getCalculation().getScanBatchSize(), scan)));
+                        "CORE_INSTRUMENT_RISK_POLICY", null, true, null, null, "core", null, null, null),
+                ruleFrom(scan)));
     }
 
     public RiskRuleResponse updateRiskRule(String ruleCode, String adminUserId, RiskRuleUpdateCommand command) {
@@ -120,26 +115,26 @@ public class RiskService {
         if (command == null) throw new IllegalArgumentException("request is required");
         String reason = requireText(command.reason(), "reason");
         if (reason.length() > 500) throw new IllegalArgumentException("reason must be at most 500 characters");
-        Instant now = Instant.now();
-        RiskRuleOverride saved;
         if ("GLOBAL_MARGIN_POLICY".equals(code)) {
             throw new IllegalArgumentException(
                     "margin policy is owned by versioned Aeron Core instrument state");
         } else if ("RISK_SCAN_CONTROL".equals(code)) {
-            boolean enabled = command.enabled() == null ? properties.getCalculation().isEnabled() : command.enabled();
-            long delay = nonNegative(command.scanDelayMs() == null ? properties.getCalculation().getScanDelayMs()
-                    : command.scanDelayMs(), "scanDelayMs");
-            int batch = bounded(command.scanBatchSize() == null ? properties.getCalculation().getScanBatchSize()
-                    : command.scanBatchSize(), 1, 10_000, "scanBatchSize");
-            properties.getCalculation().setEnabled(enabled);
-            properties.getCalculation().setScanDelayMs(delay);
-            properties.getCalculation().setScanBatchSize(batch);
-            saved = rules.upsert(code, ruleName(command.ruleName(), "Aeron risk scan control"), "SCAN_CONTROL",
-                    enabled, delay, batch, admin, reason, now);
+            if (command.expectedVersion() == null || command.expectedVersion() <= 0) {
+                throw new IllegalArgumentException("expectedVersion must be positive");
+            }
+            CoreRiskScanControlView current = aeron.riskScanControl();
+            var update = new UpdateRiskScanControlCommand(command.expectedVersion(),
+                    ruleName(command.ruleName(), current.ruleName()),
+                    command.enabled() == null ? current.enabled() : command.enabled(),
+                    nonNegative(command.scanDelayMs() == null ? current.scanDelayMs() : command.scanDelayMs(),
+                            "scanDelayMs"),
+                    bounded(command.scanBatchSize() == null ? current.scanBatchSize() : command.scanBatchSize(),
+                            1, 4_096, "scanBatchSize"),
+                    admin, reason);
+            return ruleFrom(aeron.updateRiskScanControl(update));
         } else {
             throw new IllegalArgumentException("unsupported risk rule: " + ruleCode);
         }
-        return ruleFrom(saved);
     }
 
     private LiquidationCandidateResponse enrich(LiquidationCandidateResponse candidate) {
@@ -231,27 +226,18 @@ public class RiskService {
         if (value < min || value > max) throw new IllegalArgumentException(field + " must be between " + min + " and " + max);
         return value;
     }
-    private static RiskRuleOverride override(List<RiskRuleOverride> values, String code) {
-        return values.stream().filter(value -> value.ruleCode().equals(code)).findFirst().orElse(null);
-    }
-    private static RiskRuleResponse rule(String code, String name, String type, boolean enabled,
-                                         Long delay, Integer batch,
-                                         RiskRuleOverride override) {
-        return new RiskRuleResponse(code, name, type, enabled, delay, batch,
-                override == null ? "runtime" : "override", override == null ? null : override.adminUserId(),
-                override == null ? null : override.reason(), override == null ? null : override.updatedAt());
-    }
-    private static RiskRuleResponse ruleFrom(RiskRuleOverride value) {
-        return new RiskRuleResponse(value.ruleCode(), value.ruleName(), value.ruleType(), value.enabled(),
-                value.scanDelayMs(),
-                value.scanBatchSize(), "override", value.adminUserId(), value.reason(), value.updatedAt());
+    private static RiskRuleResponse ruleFrom(CoreRiskScanControlView value) {
+        return new RiskRuleResponse("RISK_SCAN_CONTROL", value.ruleName(), "SCAN_CONTROL", value.version(),
+                value.enabled(), value.scanDelayMs(), value.scanBatchSize(), "AERON_CORE",
+                value.updatedBy(), value.reason(),
+                value.updatedAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(value.updatedAtEpochMillis()));
     }
 
     public record RiskRulesResponse(int ruleCount, List<RiskRuleResponse> rules) {}
-    public record RiskRuleResponse(String ruleCode, String ruleName, String ruleType, boolean enabled,
+    public record RiskRuleResponse(String ruleCode, String ruleName, String ruleType, Long version, boolean enabled,
                                    Long scanDelayMs,
                                    Integer scanBatchSize, String source, String adminUserId, String reason,
                                    Instant updatedAt) {}
-    public record RiskRuleUpdateCommand(String ruleName, Boolean enabled, Long scanDelayMs, Integer scanBatchSize,
-                                        String reason) {}
+    public record RiskRuleUpdateCommand(Long expectedVersion, String ruleName, Boolean enabled,
+                                        Long scanDelayMs, Integer scanBatchSize, String reason) {}
 }

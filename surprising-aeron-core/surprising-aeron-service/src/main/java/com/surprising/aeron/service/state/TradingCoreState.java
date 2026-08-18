@@ -379,6 +379,15 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, scan.triggerOcoCursor());
         }
         hash = CoreStateHash.mix(hash, riskState.nextLiquidationId());
+        var scanControl = riskState.scanControl();
+        hash = CoreStateHash.mix(hash, scanControl.version());
+        hash = CoreStateHash.mix(hash, scanControl.ruleName());
+        hash = CoreStateHash.mix(hash, scanControl.enabled());
+        hash = CoreStateHash.mix(hash, scanControl.scanDelayMs());
+        hash = CoreStateHash.mix(hash, scanControl.scanBatchSize());
+        hash = CoreStateHash.mix(hash, scanControl.updatedBy());
+        hash = CoreStateHash.mix(hash, scanControl.reason());
+        hash = CoreStateHash.mix(hash, scanControl.updatedAtEpochMillis());
         for (Map.Entry<String, Long> entry : treasuryState.feeBalances().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());

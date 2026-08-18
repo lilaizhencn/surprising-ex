@@ -1,6 +1,5 @@
 package com.surprising.liquidation.provider.config;
 
-import com.surprising.aeron.protocol.ContinueRiskScanCommand;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.List;
@@ -67,7 +66,6 @@ public class LiquidationProperties {
     public static class Coordinator {
         private long delayMs = 25;
         private int workBatchSize = 256;
-        private int riskScanBatchSize = ContinueRiskScanCommand.DEFAULT_MAX_USERS;
         private int maxPagesPerRun = 8;
         private int maxWorkBytes = 1_048_576;
 
@@ -82,13 +80,6 @@ public class LiquidationProperties {
                 throw new IllegalArgumentException("coordinator.work-batch-size must be in [1,1000]");
             }
             workBatchSize = value;
-        }
-        public int getRiskScanBatchSize() { return riskScanBatchSize; }
-        public void setRiskScanBatchSize(int value) {
-            if (value < 1 || value > 4_096) {
-                throw new IllegalArgumentException("coordinator.risk-scan-batch-size must be in [1,4096]");
-            }
-            riskScanBatchSize = value;
         }
         public int getMaxPagesPerRun() { return maxPagesPerRun; }
         public void setMaxPagesPerRun(int value) {

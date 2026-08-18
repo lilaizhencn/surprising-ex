@@ -81,7 +81,7 @@ processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期。旧�
   service 的 Maven `validate` 同时校验 provenance 与整包 hash。
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
 - `CoreState v6` 是唯一外层快照，配对保存 Core 状态和 exchange-core 的 `MATCHING_ENGINE_ROUTER/0`、
-  `RISK_ENGINE/0`；`TradingState v19` 不含盘口。三个 Member 必须运行完全相同的 fork、配置和 schema。
+  `RISK_ENGINE/0`；`TradingState v20` 不含盘口，并包含版本化 Risk Scan Control。三个 Member 必须运行完全相同的 fork、配置和 schema。
 - capture 在 `SymbolMatchingLanes.barrier` 内等待全部 lane 和 callback；pending matching 存在时拒绝发布。
 - Aeron fragment 在复制前执行 64 MiB 外层上限；matcher envelope 为 48 MiB、单个原生 module 为 32 MiB，
   超限时 fail closed。修改这些上限必须同步默认 heap 并完成目标活动订单规模的快照容量测试。
@@ -89,5 +89,7 @@ processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期。旧�
   再以 O(活动订单数) 一次报告逐字段核对 OPEN 订单，全部通过后才允许服务启动完成。
 - snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；没有 clean-start fallback、订单回放、
   隐藏 FIFO、matcher journal 或跨 Member 部分恢复。
-- 由于 v6/v19 不兼容未发布的 v5/v18，首次切换必须使用全新 Cluster 并保留旧二进制和旧 Archive 供诊断。
+- 由于 v6/v20 不兼容未发布的 v6/v19 及更早格式，首次切换必须使用全新 Cluster 并保留旧二进制和旧 Archive 供诊断。
   v6 接受命令后禁止二进制回滚读取新状态，只能用固定制品向前恢复。
+- `UPDATE_RISK_SCAN_CONTROL` 使用乐观版本检查，`RISK_SCAN_CONTROL_QUERY` 返回当前版本、启停、续跑间隔、
+  批次上限和审计元数据；状态随 Cluster Log/Archive 与 `TradingState v20` snapshot 恢复。

@@ -9,6 +9,8 @@ import com.surprising.aeron.protocol.CoreLiquidationProgressCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
+import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchAction;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
@@ -60,9 +62,10 @@ public class LiquidationAeronGateway implements AutoCloseable {
                         action.instrumentVersion(), action.triggerPriceSequence(), action.markPriceTicks(),
                         action.cursorOrderId()))
                 .toList();
+        boolean continueRiskScan = work.riskScanPending() && maxRiskScanUsers > 0;
         var command = new ExecuteLiquidationBatchCommand(actions, ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,
-                liquidationFeeRatePpm, work.riskScanContinuation(),
-                work.riskScanPending() ? maxRiskScanUsers : 0);
+                liquidationFeeRatePpm, continueRiskScan ? work.riskScanContinuation() : null,
+                continueRiskScan ? maxRiskScanUsers : 0);
         byte[] payload = TradingCommandCodec.encodeExecuteLiquidationBatch(command);
         var response = clients.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, stableBatchCommandId(payload), 0,
                 payload);
@@ -70,6 +73,14 @@ public class LiquidationAeronGateway implements AutoCloseable {
             throw new IllegalStateException(response.resultCode() + ": Aeron liquidation batch rejected");
         }
         return CoreLiquidationBatchResultCodec.decode(response.data());
+    }
+
+    public CoreRiskScanControlView riskScanControl() {
+        var response = clients.query(CoreMessageType.RISK_SCAN_CONTROL_QUERY, UUID.randomUUID(), 0, new byte[0]);
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode() + ": Aeron risk scan control query failed");
+        }
+        return CoreRiskScanControlCodec.decodeView(response.data());
     }
 
     public void continueRiskScan(int maxUsers) {

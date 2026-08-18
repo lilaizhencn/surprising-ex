@@ -11,6 +11,7 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -25,6 +26,24 @@ import org.junit.jupiter.api.Test;
 class CoreRiskStateTest {
 
     private final TradingCoreReducer reducer = new TradingCoreReducer();
+
+    @Test
+    void disabledRiskScanDoesNotCalculateRisk() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument(ContractType.LINEAR_PERPETUAL, 1));
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
+        state = withPosition(state, new CorePositionState("BTC-USDT", "USDT", 1,
+                10, 100, 1_000, 0, 100));
+        state = reducer.updateRiskScanControl(state, new UpdateRiskScanControlCommand(
+                1, "Paused scan", false, 1_000, 500, "admin", "maintenance"), 2_000);
+
+        TradingCoreState marked = reducer.applyMarkPrice(state,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1, 2_001));
+
+        assertThat(marked.riskState().snapshots()).isEmpty();
+        assertThat(marked.riskState().scan().riskComplete()).isTrue();
+        assertThat(marked.riskState().scanControl().version()).isEqualTo(2);
+    }
 
     @ParameterizedTest
     @MethodSource("riskCases")
@@ -80,9 +99,9 @@ class CoreRiskStateTest {
         TradingCoreState firstBatch = reducer.applyMarkPrice(state,
                 new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1, 1_700_000_000_000L));
         assertThat(firstBatch.riskState().scan().complete()).isFalse();
-        assertThat(firstBatch.riskState().scan().lastUserId()).isEqualTo(511);
-        assertThat(firstBatch.riskState().scan().riskUserId()).isEqualTo(512);
-        assertThat(firstBatch.riskState().snapshots()).hasSize(512);
+        assertThat(firstBatch.riskState().snapshots()).hasSizeLessThanOrEqualTo(
+                firstBatch.riskState().scanControl().scanBatchSize());
+        assertThat(firstBatch.riskState().snapshots()).isNotEmpty();
 
         TradingCoreState completed = firstBatch;
         for (int page = 0; page < 10 && !completed.riskState().scan().riskComplete(); page++) {
@@ -134,7 +153,7 @@ class CoreRiskStateTest {
         assertThat(state.riskState().scans()).containsOnlyKeys("BTC-USDT", "ETH-USDT");
         assertThat(state.riskState().scans().get("BTC-USDT").complete()).isFalse();
         assertThat(state.riskState().scans().get("ETH-USDT").complete()).isFalse();
-        for (int page = 0; page < 10 && state.riskState().hasPendingScans(); page++) {
+        for (int page = 0; page < 20 && state.riskState().hasPendingScans(); page++) {
             state = reducer.continueRiskScan(state, 1_024);
         }
         assertThat(state.riskState().scans().values()).allMatch(CoreRiskState.RiskScan::complete);

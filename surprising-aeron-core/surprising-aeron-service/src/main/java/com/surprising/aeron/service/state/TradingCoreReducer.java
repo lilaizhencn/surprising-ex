@@ -16,6 +16,8 @@ import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
+import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
+import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
@@ -31,8 +33,6 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class TradingCoreReducer {
-
-    private static final int DEFAULT_RISK_SCAN_BATCH_SIZE = 1_024;
 
     public TradingCoreState upsertTriggerOrder(TradingCoreState state, long userId,
                                                CoreTriggerOrderStateView view) {
@@ -869,17 +869,19 @@ public final class TradingCoreReducer {
         long scanStart = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.scanStartPriceSequence() : command.priceSequence();
         long lastUserId = currentScan != null && !currentScan.riskComplete() ? currentScan.lastUserId() : 0;
+        CoreRiskScanControlView scanControl = state.riskState().scanControl();
         scans.put(instrument.symbol(), new CoreRiskState.RiskScan(instrument.symbol(), command.priceSequence(),
-                scanStart, lastUserId, false));
+                scanStart, lastUserId, !scanControl.enabled()));
         CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
-                state.riskState().liquidations(), scans, state.riskState().nextLiquidationId());
+                state.riskState().liquidations(), scans, state.riskState().nextLiquidationId(), scanControl);
         TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
                 state.instruments(), risk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
-        return continueRiskScan(withMark, DEFAULT_RISK_SCAN_BATCH_SIZE,
-                positionUserIndex, liquidationIndex);
+        return scanControl.enabled()
+                ? continueRiskScan(withMark, scanControl.scanBatchSize(), positionUserIndex, liquidationIndex)
+                : withMark;
     }
 
     public TradingCoreState continueRiskScan(TradingCoreState state, int maxUsers) {
@@ -897,6 +899,9 @@ public final class TradingCoreReducer {
         if (maxUsers <= 0 || maxUsers > 4096) {
             throw new IllegalArgumentException("invalid risk scan batch size");
         }
+        CoreRiskScanControlView scanControl = state.riskState().scanControl();
+        if (!scanControl.enabled()) return state;
+        maxUsers = Math.min(maxUsers, scanControl.scanBatchSize());
         CoreRiskState.RiskScan scan = state.riskState().scans().values().stream()
                 .filter(value -> !value.riskComplete()).findFirst().orElse(null);
         if (scan == null) {
@@ -951,12 +956,32 @@ public final class TradingCoreReducer {
                 : progress;
         scans.put(scan.symbol(), nextScan);
         CoreRiskState nextRisk = new CoreRiskState(state.riskState().markPrices(), snapshots, liquidations,
-                scans, nextLiquidationId);
+                scans, nextLiquidationId, scanControl);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
                 state.instruments(), nextRisk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
+    }
+
+    public TradingCoreState updateRiskScanControl(TradingCoreState state,
+                                                  UpdateRiskScanControlCommand command,
+                                                  long updatedAtEpochMillis) {
+        CoreRiskScanControlView current = state.riskState().scanControl();
+        if (command.expectedVersion() != current.version()) {
+            throw new CoreStateRejectedException("STALE_RISK_SCAN_CONTROL_VERSION",
+                    "risk scan control version does not match");
+        }
+        CoreRiskScanControlView updated = new CoreRiskScanControlView(
+                Math.incrementExact(current.version()), command.ruleName(), command.enabled(),
+                command.scanDelayMs(), command.scanBatchSize(), command.adminUserId(), command.reason(),
+                Math.max(0, updatedAtEpochMillis));
+        CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
+                state.riskState().liquidations(), state.riskState().scans(),
+                state.riskState().nextLiquidationId(), updated);
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
+                state.users(), state.orders(), state.instruments(), risk, state.treasuryState(), state.leverages(),
+                state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(), state.triggerOrders());
     }
 
     private long updateIsolatedRisk(TradingCoreState state, CoreUserState user, CorePositionState position,
@@ -1462,7 +1487,8 @@ public final class TradingCoreReducer {
         Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(canceled.riskState().liquidations());
         liquidations.put(command.liquidationId(), liquidation.ordered(nextCursorOrderId));
         CoreRiskState risk = new CoreRiskState(canceled.riskState().markPrices(), canceled.riskState().snapshots(),
-                liquidations, canceled.riskState().scans(), canceled.riskState().nextLiquidationId());
+                liquidations, canceled.riskState().scans(), canceled.riskState().nextLiquidationId(),
+                canceled.riskState().scanControl());
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), canceled.users(),
                 canceled.orders(), canceled.instruments(), risk, canceled.treasuryState(),
                 canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(),
@@ -1600,7 +1626,8 @@ public final class TradingCoreReducer {
         liquidations.put(liquidation.liquidationId(), liquidation.executed(uncovered,
                 command.executionPriceTicks(), command.liquidationFeeRatePpm(), collectedFee));
         CoreRiskState risk = new CoreRiskState(canceled.riskState().markPrices(), canceled.riskState().snapshots(),
-                liquidations, canceled.riskState().scans(), canceled.riskState().nextLiquidationId());
+                liquidations, canceled.riskState().scans(), canceled.riskState().nextLiquidationId(),
+                canceled.riskState().scanControl());
         return new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
                 canceled.orders(), canceled.instruments(), risk, treasury,
                 canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(), canceled.clientOrderIndex(),
@@ -1643,7 +1670,8 @@ public final class TradingCoreReducer {
         Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(state.riskState().liquidations());
         liquidations.put(liquidation.liquidationId(), liquidation.canceled());
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
-                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
+                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(),
+                state.riskState().scanControl());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
                 state.instruments(), risk, state.treasuryState(),
@@ -1702,7 +1730,8 @@ public final class TradingCoreReducer {
                 ? liquidation.withStatus(nextStatus) : liquidation.covered(command.coveredUnits(), nextStatus);
         liquidations.put(liquidation.liquidationId(), nextLiquidation);
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
-                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
+                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(),
+                state.riskState().scanControl());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(), state.instruments(), risk, treasury,
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
@@ -1788,7 +1817,8 @@ public final class TradingCoreReducer {
         Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(state.riskState().liquidations());
         liquidations.put(liquidation.liquidationId(), liquidation.covered(command.coveredUnits(), nextStatus));
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
-                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
+                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(),
+                state.riskState().scanControl());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 state.orders(), state.instruments(), risk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),

@@ -27,6 +27,8 @@ import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreExportCodec;
+import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
+import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -35,6 +37,39 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class CoreProbeStateTest {
+
+    @Test
+    void riskScanControlIsVersionedDeduplicatedAndSnapshotRecovered() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        var defaultQuery = state.apply(query(CoreMessageType.RISK_SCAN_CONTROL_QUERY, 0, new byte[0]));
+        var initial = CoreRiskScanControlCodec.decodeView(defaultQuery.data());
+        long initialHash = state.tradingState().businessStateHash();
+        UUID commandId = UUID.randomUUID();
+        String reason = "审".repeat(500);
+        byte[] payload = CoreRiskScanControlCodec.encodeCommand(new UpdateRiskScanControlCommand(
+                initial.version(), "Production scan", false, 250, 384, "admin-7", reason));
+        CoreMessage update = tradingCommand(CoreMessageType.UPDATE_RISK_SCAN_CONTROL, commandId, 1, payload);
+
+        CoreResponse applied = state.apply(update);
+        var updated = CoreRiskScanControlCodec.decodeView(applied.data());
+        CoreResponse stale = state.apply(tradingCommand(CoreMessageType.UPDATE_RISK_SCAN_CONTROL,
+                UUID.randomUUID(), 2, payload));
+        CoreResponse duplicate = state.apply(update);
+        CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot());
+        var recovered = CoreRiskScanControlCodec.decodeView(
+                restored.apply(query(CoreMessageType.RISK_SCAN_CONTROL_QUERY, 0, new byte[0])).data());
+
+        assertThat(initial.version()).isEqualTo(1);
+        assertThat(applied.status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(updated.version()).isEqualTo(2);
+        assertThat(updated.updatedBy()).isEqualTo("admin-7");
+        assertThat(updated.reason()).isEqualTo(reason);
+        assertThat(state.tradingState().businessStateHash()).isNotEqualTo(initialHash);
+        assertThat(stale.resultCode()).isEqualTo(CoreResultCode.STALE_RISK_SCAN_CONTROL_VERSION);
+        assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+        assertThat(CoreRiskScanControlCodec.decodeView(duplicate.data())).isEqualTo(updated);
+        assertThat(recovered).isEqualTo(updated);
+    }
 
     @Test
     void appliesCommandOnceAndReturnsOriginalDuplicateResult() {
@@ -529,7 +564,7 @@ class CoreProbeStateTest {
         while (!state.tradingState().riskState().scan().complete()) {
             CoreMessage continuation = tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(),
                     sourceSequence++, TradingCommandCodec.encodeContinueRiskScan(
-                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(1_024)));
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(500)));
             CoreResponse continuationResponse = applyAndDrain(state, continuation);
             assertThat(continuationResponse.status())
                     .withFailMessage("continuation seq=%s result=%s scan=%s", sourceSequence,
@@ -579,7 +614,7 @@ class CoreProbeStateTest {
         while (!state.tradingState().riskState().scan().complete()) {
             var continuation = tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(), sourceSequence++,
                     TradingCommandCodec.encodeContinueRiskScan(
-                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(1_024)));
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(500)));
             assertThat(applyAndDrain(state, continuation).status()).isEqualTo(ResponseStatus.APPLIED);
         }
         assertThat(state.tradingState().triggerOrders().values().stream()

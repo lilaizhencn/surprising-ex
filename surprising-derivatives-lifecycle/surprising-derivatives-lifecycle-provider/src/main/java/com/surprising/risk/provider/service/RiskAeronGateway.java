@@ -5,12 +5,15 @@ import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreRiskQueryCodec;
+import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
+import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.risk.provider.config.RiskProperties;
+import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import jakarta.annotation.PreDestroy;
 import java.util.List;
 import java.util.UUID;
@@ -49,6 +52,29 @@ public class RiskAeronGateway implements AutoCloseable {
         return CoreStateQueryCodec.decodeUserState(response.data());
     }
 
+    public CoreRiskScanControlView riskScanControl() {
+        var response = query(CoreMessageType.RISK_SCAN_CONTROL_QUERY, 0);
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode() + ": Aeron risk scan control query failed");
+        }
+        return CoreRiskScanControlCodec.decodeView(response.data());
+    }
+
+    public CoreRiskScanControlView updateRiskScanControl(UpdateRiskScanControlCommand command) {
+        byte[] payload = CoreRiskScanControlCodec.encodeCommand(command);
+        var response = clients.command(CoreMessageType.UPDATE_RISK_SCAN_CONTROL,
+                UUID.nameUUIDFromBytes(payload), 0, payload);
+        if (response.commandStatus() == ResponseStatus.REJECTED
+                && response.resultCode() == CoreResultCode.STALE_RISK_SCAN_CONTROL_VERSION) {
+            throw new RiskScanControlConflictException("risk scan control version is stale");
+        }
+        if (response.commandStatus() != ResponseStatus.APPLIED
+                && response.commandStatus() != ResponseStatus.DUPLICATE) {
+            throw new IllegalStateException(response.resultCode() + ": Aeron risk scan control update failed");
+        }
+        return CoreRiskScanControlCodec.decodeView(response.data());
+    }
+
     private CoreResponse query(CoreMessageType type, long userId) {
         CompletionException last = null;
         for (int attempt = 1; attempt <= 3; attempt++) {
@@ -82,4 +108,10 @@ public class RiskAeronGateway implements AutoCloseable {
     @Override
     @PreDestroy
     public void close() { }
+
+    public static final class RiskScanControlConflictException extends RuntimeException {
+        public RiskScanControlConflictException(String message) {
+            super(message);
+        }
+    }
 }

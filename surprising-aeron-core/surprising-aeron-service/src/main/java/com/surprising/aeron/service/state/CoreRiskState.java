@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import java.util.Map;
 
 public record CoreRiskState(
@@ -7,11 +8,12 @@ public record CoreRiskState(
         Map<String, CoreRiskSnapshot> snapshots,
         Map<Long, CoreLiquidationState> liquidations,
         Map<String, RiskScan> scans,
-        long nextLiquidationId) {
+        long nextLiquidationId,
+        CoreRiskScanControlView scanControl) {
 
     public CoreRiskState {
         if (markPrices == null || snapshots == null || liquidations == null || scans == null
-                || nextLiquidationId <= 0) {
+                || nextLiquidationId <= 0 || scanControl == null) {
             throw new IllegalArgumentException("invalid risk state");
         }
         markPrices = immutableSorted(markPrices);
@@ -21,7 +23,15 @@ public record CoreRiskState(
     }
 
     public static CoreRiskState empty() {
-        return new CoreRiskState(Map.of(), Map.of(), Map.of(), Map.of(), 1);
+        return new CoreRiskState(Map.of(), Map.of(), Map.of(), Map.of(), 1, defaultScanControl());
+    }
+
+    public CoreRiskState(Map<String, CoreMarkPriceState> markPrices,
+                         Map<String, CoreRiskSnapshot> snapshots,
+                         Map<Long, CoreLiquidationState> liquidations,
+                         Map<String, RiskScan> scans,
+                         long nextLiquidationId) {
+        this(markPrices, snapshots, liquidations, scans, nextLiquidationId, defaultScanControl());
     }
 
     public CoreRiskState(Map<String, CoreMarkPriceState> markPrices,
@@ -31,7 +41,12 @@ public record CoreRiskState(
                          long nextLiquidationId) {
         this(markPrices, snapshots, liquidations,
                 scan == null || "-".equals(scan.symbol()) ? Map.of() : Map.of(scan.symbol(), scan),
-                nextLiquidationId);
+                nextLiquidationId, defaultScanControl());
+    }
+
+    public static CoreRiskScanControlView defaultScanControl() {
+        return new CoreRiskScanControlView(1, "Aeron risk scan control", true, 1_000L, 500,
+                "system", "default", 0);
     }
 
     public RiskScan scan() {

@@ -212,13 +212,16 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   `09e324685e9ae77244939c9f8c4044dc00dda4f03b98b60ff5d48f7e051e2d21`；fork 构建拒绝 dirty
   worktree，从已认证提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 provenance；
   Aeron service 的 Maven `validate` 阶段同时校验 provenance 与整包 hash。
-- `CoreState v6` 同时封装 Core 业务状态和 exchange-core 原生 `ME0/RE0`；`TradingState v19` 不包含盘口。
+- `CoreState v6` 同时封装 Core 业务状态和 exchange-core 原生 `ME0/RE0`；`TradingState v20` 不包含盘口，并持久化版本化 Risk Scan Control。
   恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，不允许 clean-start、活动订单回放或第二本 FIFO。
 - capture 在 symbol-lane barrier 内完成；存在 pending matching 时精确拒绝快照。恢复在开放流量前执行
   CRC32C、产品线/路由、fork/config、注册表、完整引擎哈希、盘口哈希和全部 OPEN 订单逐字段对账。
-- v5/v18 未发布兼容层。首次上线采用全体 Member 同版本的新 Cluster；检测到旧状态时只中止，不自动删除。
+- v6/v19 之前的未发布格式不提供兼容层。首次上线采用全体 Member 同版本的新 Cluster；检测到旧状态时只中止，不自动删除。
   v6 接受命令前可回退旧二进制及其保留的旧快照；v6 接受命令后只能保留数据并用上述精确制品向前恢复，
-  禁止新旧 Member 混跑或让旧二进制读取 v6/v19。
+  禁止新旧 Member 混跑或让旧二进制读取 v6/v20。
+- Risk Scan Control 的当前值仅存在于 Product Core 状态、Cluster Log/Archive 和 snapshot；Provider 通过
+  `RISK_SCAN_CONTROL_QUERY` 查询，并以 `expectedVersion` 提交更新。PostgreSQL 只通过 Core Export→Kafka
+  异步保留审计事实，不保存或覆盖当前配置。
 
 ## 文档
 

@@ -9,9 +9,11 @@ import org.springframework.stereotype.Service;
 public class LiquidationRuntimeConfigService {
 
     private final LiquidationProperties properties;
+    private final LiquidationAeronGateway aeron;
 
-    public LiquidationRuntimeConfigService(LiquidationProperties properties) {
+    public LiquidationRuntimeConfigService(LiquidationProperties properties, LiquidationAeronGateway aeron) {
         this.properties = properties;
+        this.aeron = aeron;
     }
 
     public Map<String, Object> current() {
@@ -21,7 +23,11 @@ public class LiquidationRuntimeConfigService {
         Map<String, Object> coordinator = new LinkedHashMap<>();
         coordinator.put("mode", "AERON_TAKEOVER");
         coordinator.put("workBatchSize", properties.getCoordinator().getWorkBatchSize());
-        coordinator.put("riskScanBatchSize", properties.getCoordinator().getRiskScanBatchSize());
+        var scanControl = aeron.riskScanControl();
+        coordinator.put("riskScanControlVersion", scanControl.version());
+        coordinator.put("riskScanEnabled", scanControl.enabled());
+        coordinator.put("riskScanDelayMs", scanControl.scanDelayMs());
+        coordinator.put("riskScanBatchSize", scanControl.scanBatchSize());
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("scope", properties.getProductLine().name());
         response.put("execution", execution);

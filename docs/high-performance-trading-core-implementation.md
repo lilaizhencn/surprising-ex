@@ -405,7 +405,7 @@ rollingHash = H(previousHash, coreSequence, commandDigest, deltaDigest)
 9. 恢复必须使用 fork 的 snapshot-only 初始化能力（`InitialStateConfiguration.fromSnapshotOnly` 或等价受测入口）加载 matcher bytes，禁止在正常 HA 恢复中 `cleanStart` 后逐单 place。Core 状态与 matcher 恢复到同一水位并通过 open-order set、book hash、资金和索引校验后才设置 `ready=true`。
 10. exchange-core command journal 保持关闭；Aeron Cluster Log/Archive 是 snapshot 水位之后的唯一命令恢复链。matcher snapshot 只是 Aeron 业务快照中的组成部分，不形成第二套独立提交或 fsync 权威。
 11. `TradingCoreState` 已删除 `CoreBookState`、priority map/hash/codec 和 adapter 的逐单 `rebuild` 生产路径。Core 只保留活动订单业务元数据和 `ActiveOrderIndex`，不保留 FIFO priority sequence。
-12. v6/v19 是未发布格式上的一次性不兼容升级，不提供在线双读或自动转换。首次上线必须创建全新 Cluster；旧二进制和旧 Archive 只保留离线诊断，生产故障恢复绝不退回 O(活动订单数) 命令回放。
+12. v6/v20 是未发布格式上的一次性不兼容升级，不提供在线双读或自动转换。首次上线必须创建全新 Cluster；旧二进制和旧 Archive 只保留离线诊断，生产故障恢复绝不退回 O(活动订单数) 命令回放。
 
 adapter 必须保持 `RiskProcessingMode.MATCHING_ONLY` 和禁用 exchange-core margin trading。exchange-core 的
 user/symbol registry 及随引擎存在的 risk module 都只是完成 matcher 命令所需的技术状态，业务余额、持仓、
@@ -558,7 +558,7 @@ SLO 约束下可用容量超过 70%、单 symbol 占 matcher CPU/队列时间的
 3. 实现 Aeron `ISerializationProcessor` bridge、snapshot barrier、配对 manifest 和 snapshot-only restore。
 4. 通过 FIFO、部分成交、撤改、GTX、损坏快照、Leader 切换和冷启动一致性测试。
 5. 删除 `CoreBookState` 及其 priority map/codec/hash，活动订单只由订单元数据和 `ActiveOrderIndex` 表达。
-6. 删除 `cleanStart + priorityOrder + placeAsync` 的生产恢复和异常 rebuild；v6/v19 首次上线使用全新 Cluster，不提供在线旧格式回放。
+6. 删除 `cleanStart + priorityOrder + placeAsync` 的生产恢复和异常 rebuild；v6/v20 首次上线使用全新 Cluster，不提供在线旧格式回放。
 
 ### P4：触发单、风险和长任务
 
@@ -596,7 +596,7 @@ WebSocket 慢连接隔离，以及第 1.0 节要求的 Gateway Auth Cluster/JWT 
 | W6 HA 与容量 | 三 Member 故障、冷恢复、磁盘/网络故障、24h soak、逐级容量与回滚演练 | 单产品线集成环境、manifest、runbook、监控告警 | RPO=0；恢复/SLO/资金门禁全通过；日常负载不超过 SLO-bound capacity 的 70% |
 
 W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snapshot 格式上重新执行受影响门禁。
-`CoreState v6` / `TradingState v19` 不兼容未发布的旧格式，不提供双读；首次切换使用全新 Cluster，
+`CoreState v6` / `TradingState v20` 不兼容未发布的旧格式，不提供双读；首次切换使用全新 Cluster，
 升级失败时仅允许在尚未接收 v6 命令前回退整套旧二进制和旧 Archive，绝不能混跑或双写两本 FIFO。
 
 ## 14. 文件级改造矩阵
@@ -713,13 +713,13 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 | P1 正确性/单往返 | `DONE` | 失败回滚、稳定 lane、结果未知、fee/instrument version gate、直接响应 | Core 回滚护栏、bounded client、`COMMAND_RESULT_QUERY` 结果核验、native GTX 测试 | 无；source epoch 采用进程 epoch 编码 sourceId 的简单方案，不另建 registry |
 | P2 Runtime/O(delta) | `DONE` | 单写 runtime、持久化 delta entity store、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime`、DeltaMap lineage、各类派生 index、Core service 121 tests 和运行时 smoke；热点逐项状态见第 3.1/3.3 节 | 热路径已无隐式全量 constructor/diff/hash；用户/订单 immutable state shell 仍是可选的后续性能优化；历史实体 compaction 仍按运行手册执行 |
 | P3 唯一盘口/恢复 | `DONE` | exchange-core 唯一 executable book、结构化 adapter、Aeron 托管 matcher snapshot、无逐单恢复 | fork 302 tests；六个 ProductLine 原生 FIFO restore；snapshot round-trip、损坏/版本/SHA/registry/订单集合不一致均 fail-closed；`CoreBookState` 和生产 rebuild 已删除 | 真实三 Member election、冷恢复和长时容量仍属于 P6 上线门禁 |
-| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已通过宿主机三节点 Cluster 的真实 HTTP/做市/结算/资金守恒门禁；在线余额、持仓、活动订单、触发单和生命周期执行已由 Core 裁决 | SPOT 和两条永续仍需逐条执行真实 Provider 门禁；cursor 重启/缺口仍需验证；Funding 在线编排仍依赖 PostgreSQL lease/sequence/settlement reservation，Risk scan control 仍有数据库配置路径 |
+| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已通过宿主机三节点 Cluster 的真实 HTTP/做市/结算/资金守恒门禁；在线余额、持仓、活动订单、触发单、Risk Scan Control 和生命周期执行已由 Core 裁决 | SPOT 和两条永续仍需逐条执行真实 Provider 门禁；cursor 重启/缺口仍需验证；Funding 在线编排仍依赖 PostgreSQL lease/sequence/settlement reservation |
 | P5 导出/查询/外围 | `PARTIAL` | 一次编码 outbox、带 cursor 的批量 ACK、projection、查询旁路、慢连接隔离、Gateway Auth Cluster | `w5-export-final-1315` 通过 Kafka/PG 故障恢复、重复/乱序、Gateway/WebSocket offset、Core 独立和资金门禁；`w5-isolation-final-1345` 通过 PG 恢复、投影缺口回放、慢客户端隔离和清理；活动订单/单笔订单已直接查询 Core | Gateway 用户、MFA、challenge、refresh session 仍由 JDBC repository 持有，Gateway Auth Cluster 未实现；Trading/Account/Lifecycle 等 Provider 的 Spring 构造图仍强制创建 JDBC 历史/投影 Bean，尚未通过 PostgreSQL 停止后的在线启动门禁 |
 | P6 HA/压测/扩容 | `IN_PROGRESS` | leader/follower/cold recovery、单线容量、manifest、runbook | SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery manifest 通过；六条产品线均有 20 秒 capacity PASS 和角色日志 | 先完成 P4/P5 出口；再完成六条线固定脚本真实 `test` 门禁、长时稳定容量、CPU/GC/Aeron/export/projection lag 指标、70% 生产容量线、扩容结论、24 小时 soak、网络/磁盘故障和生产 runbook；文档引用的 `.omo/evidence` 当前未纳入工作树，正式门禁证据需持久化到版本化报告目录 |
 
 ### 18.1.1 最新源码完成度复核（2026-08-18）
 
-以下结论以实施分支提交 `8d81475` 的源码和已记录运行证据为准。`DONE` 表示目标代码边界已经落地；
+以下结论以当前实施分支源码和已记录运行证据为准。`DONE` 表示目标代码边界已经落地；
 `PARTIAL` 表示部分功能已切到 Core，但启动构造图、在线编排或真实运行出口仍未满足；历史查询使用
 PostgreSQL 本身不算缺陷，前提是它不参与当前态查询和在线裁决。
 
@@ -728,7 +728,7 @@ PostgreSQL 本身不算缺陷，前提是它不参与当前态查询和在线裁
 | 唯一盘口与恢复 | `DONE` | exchange-core 是唯一 executable book；原生 matcher snapshot、Cluster Log/Archive、配对 manifest 和 fail-closed 恢复已落地 | 长时 election/cold recovery 容量证据归 P6 |
 | 账户当前态 | `DONE` | 余额、冻结、持仓、仓位模式和调整命令均走 Account Aeron gateway/Core；PostgreSQL 只用于账本、划转记录和后台审计查询 | 将历史查询 Bean 与在线 Provider 启动构造图解耦，归“运行时零数据库”出口 |
 | 订单与触发单当前态 | `DONE` | 单笔订单、clientOrderId、活动订单分页、批量撤单选择和生命周期撤单均直接查询/命令 Core；历史订单和后台筛选继续读异步 PostgreSQL 投影 | 将 fee snapshot 初始化及历史投影 Bean 改为可离线/可选依赖，证明 PostgreSQL 停止时 Provider 可启动和交易 |
-| Risk/Liquidation/Insurance/ADL | `PARTIAL` | 四域已合并为单一 Lifecycle Provider/API；风险快照、强平 work、保险基金、ADL queue 与资金变化由 Core 查询/命令裁决；未使用的 Insurance/ADL sequence 和 pending projection Repository、字段及构造注入已删除 | 将 Risk scan control 从 JDBC override 改为版本化 Core/显式离线配置；把仍在使用的历史查询 Repository 与在线执行构造图解耦，历史查询只能通过异步投影 |
+| Risk/Liquidation/Insurance/ADL | `PARTIAL` | 四域已合并为单一 Lifecycle Provider/API；风险快照、强平 work、保险基金、ADL queue、Risk Scan Control 与资金变化由 Core 查询/命令裁决；scan control 已具备乐观版本、Cluster Log/Archive、snapshot 恢复和异步审计 | 把仍在使用的历史查询 Repository 与在线执行构造图解耦，历史查询只能通过异步投影；完成 PostgreSQL 停止启动门禁 |
 | Funding | `PARTIAL` | 资金结算资金变化和 continuation progress 已进入 Core | `FundingService` 仍同步使用数据库 rate input、lease、sequence、settlement reservation 和 finalization；需迁移为 Core 状态/版本化输入，历史 rate/payment 查询再与在线服务解耦 |
 | Exporter/Projector/WebSocket | `DONE` | Exporter 仅 Aeron→Kafka，Projector 独立 Kafka→PostgreSQL；批量 ACK、重复/乱序、缺口恢复和慢客户端隔离门禁已通过 | 生产规模 lag、背压和长时故障指标归 P6 |
 | Gateway Auth | `NOT_STARTED` | 现有登录、MFA、challenge、refresh session 功能仍可通过 JDBC 工作 | 按第 1.0 节实现 Gateway Auth Cluster snapshot/JWT 边界，并验证数据库停止时登录态校验和会话恢复 |
@@ -747,7 +747,8 @@ PostgreSQL 本身不算缺陷，前提是它不参与当前态查询和在线裁
 - [x] `LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 真实 HTTP/做市/生命周期/资金守恒门禁。
 - [ ] SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL 真实 Provider 生命周期/资金守恒门禁。
 - [ ] 生命周期 cursor 在 leader restart、follower catch-up、缺口和重复回调场景下的恢复门禁。
-- [ ] Funding、Risk scan control、Trading fee snapshot 及仍在使用的历史查询 Repository 与各在线 Provider 构造图的 PostgreSQL 解耦。
+- [x] Risk Scan Control 当前值从 JDBC override 迁入版本化 Product Core 状态及 snapshot；PostgreSQL 仅保留 Kafka 异步审计事实。
+- [ ] Funding、Trading fee snapshot 及仍在使用的历史查询 Repository 与各在线 Provider 构造图的 PostgreSQL 解耦。
 - [ ] Gateway Auth Cluster、会话 snapshot/JWT 恢复和数据库停止门禁。
 - [ ] 六条产品线逐条执行固定脚本完整 `test`，保存可复核 manifest，而不是只保留启动/dry-run 结果。
 - [ ] 单产品线长时容量与分阶段边界报告：下单、撮合、风控扫描、强平、平仓、结算、标记价和整体 OPS。
@@ -790,7 +791,7 @@ mvn -pl :surprising-funding-provider,:surprising-derivatives-lifecycle-provider 
 
 此前表格中的“PostgreSQL 仅记录历史/投影”仍可能被误读为生命周期调用可以同步或异步直写数据库。本次明确修订为：Core 命令返回 `APPLIED` 即是在线业务完成条件，Provider 不写 PostgreSQL ledger、sequence、coverage 或 ADL event。`AeronLifecycleCoordinator.shared()` 提供跨 Funding/Liquidation/Insurance/ADL 的统一有界调度；保险覆盖、资金调整、清算费和 ADL 事实由 Core export event 进入 Kafka，再由独立 projector 幂等写历史库。
 
-本次已验证 `surprising-aeron-client` 与 `surprising-derivatives-lifecycle-provider` 增量构建通过；Risk/Liquidation/Insurance/ADL 源码和 API contract 已由统一模块拥有。这不是完整无数据库门禁：Funding 的费率输入/租约/sequence/settlement reservation、Trading fee snapshot、Risk scan control 以及在线 Provider 构造图仍含 JDBC 依赖。Instrument 配置继续按既定例外保留 PostgreSQL，但必须先版本化导入 Core；其余在线依赖必须迁移到 Core snapshot/query 或显式离线配置后，才能宣称审计 PostgreSQL 可停止。
+本次已验证 `surprising-aeron-client` 与 `surprising-derivatives-lifecycle-provider` 增量构建通过；Risk/Liquidation/Insurance/ADL 源码和 API contract 已由统一模块拥有。这不是完整无数据库门禁：Funding 的费率输入/租约/sequence/settlement reservation、Trading fee snapshot 以及在线 Provider 构造图仍含 JDBC 依赖。Instrument 配置继续按既定例外保留 PostgreSQL，但必须先版本化导入 Core；其余在线依赖必须迁移到 Core snapshot/query 或显式离线配置后，才能宣称审计 PostgreSQL 可停止。
 
 ### 18.3.2 审计导出链路边界（2026-08-18）
 
@@ -950,7 +951,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 26. 衍生品加仓保证金按目标仓位总初始保证金计算，扣除已有仓位、待成交挂单和将由平仓释放的保证金后冻结增量；成交时再次按实际成交后的目标仓位补足档位升级差额，反向开仓不会因先释放旧仓位而欠保证金。
 27. 风险扫描的标记价名义价值超过最高风险档位时，维持保证金使用最高档位的 `maintenanceMarginRatePpm` 继续计算；下单和仓位限额仍使用严格的档位上限拒绝，二者不混用。
 28. 强平与交割/行权结算的活动订单撤销统一使用 `cursor + maxOrders` 有界批次，单命令最多处理 1,024 笔订单；结算在订单阶段完成后再分页处理用户，强平在最后一批撤单后才执行资金结算。进度随 `CoreLiquidationState`、`CoreTreasuryState.LifecycleProgress` 和 snapshot 保存，Liquidation Provider 对不同 action 使用有界 `commandAsync` 并发，单 action 按 cursor 续跑，不建立业务重试队列。
-28. 杠杆设置和下单校验均使用对应风险档位的初始保证金率；Risk Provider 的规则 DTO、运行时配置请求和 `risk_admin_rule_overrides` 表不提供本地预警/强平保证金率字段，Core policy 仍是唯一裁决者。
+28. 杠杆设置和下单校验均使用对应风险档位的初始保证金率；Risk Scan Control 与 Instrument 风险档位保持独立，Core policy 仍是唯一裁决者，不存在 PostgreSQL override。
 29. matcher 恢复一次性导入原生 module bytes，不创建 place/cancel 命令对象；恢复后开放订单报告以 O(活动订单数) 单次遍历完成精确集合和字段对账，不排序、不重放。
 30. `TradingCoreState` 不再保存 `CoreBookState` 或 priority sequence。正常盘口查询来自 exchange-core，活动订单业务定位来自 `ActiveOrderIndex`，两者通过恢复 manifest、完整 engine/book hash 和精确 OPEN 集合互相校验。
 31. `TradingCoreState` canonical constructor 不再在缺少 `clientOrderIndex` 时隐式扫描全部订单；权威 transition 缺失索引直接 fail-closed，冷路径必须显式派生索引。
@@ -1023,4 +1024,21 @@ ADL event 和 risk projection Repository 保留为历史查询路径，本次未
 验证：JDK 25 下执行
 `mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am -DskipTests compile`
 通过，统一 Lifecycle Provider 的 52 个生产源码文件重新编译成功；全项目静态搜索不存在上述四个已删除类型的
-残余引用。本次只清理无使用依赖，不代表 Risk scan control 或整个 Provider 的 PostgreSQL 解耦已经完成。
+残余引用。本次只清理无使用依赖，不代表整个 Provider 的 PostgreSQL 解耦已经完成。
+
+### 19.4 Risk Scan Control 版本化 Core 状态（2026-08-18）
+
+Risk Scan Control 的权威当前值已从 `RiskRuleRepository`、`risk_admin_rule_overrides` 和 JVM 可变配置迁入
+Product Core。全新 Cluster 使用版本 `1` 的内置默认值（启用、`1000ms`、批次 `500`）；重启时从
+Cluster Log/Archive 与 `TradingState v20` snapshot 恢复。Provider 通过 `RISK_SCAN_CONTROL_QUERY` 读取，更新命令
+必须携带 `expectedVersion`、管理员和原因；成功后版本原子递增，旧版本返回
+`STALE_RISK_SCAN_CONTROL_VERSION` 并映射 HTTP 409，相同 command ID 保持幂等。
+
+Core 在标记价首批扫描、独立 continuation 和 liquidation batch continuation 三处共同执行启停与批次上限；
+Lifecycle Provider 只以单调时钟执行 `scanDelayMs` 调度，不持有另一份业务配置。更新事实仍由通用 Core Export
+携带原始 command payload 发布 Kafka，并由独立 projector 写 `core_event_projection`；在线查询和更新均不等待、
+不读取、也不写入 PostgreSQL。
+
+定向验证：`CoreRiskScanControlCodecTest` 2 项、`CoreProbeStateTest` 28 项通过；受默认批次变化影响的
+`CoreRiskStateTest#pendingRiskScansRemainIndependentAcrossSymbols` 已按有界分页重新验证通过；Lifecycle Provider
+及其直接依赖增量编译通过。完整六产品线真实 Provider 与 PostgreSQL 停止启动门禁仍按 P4/P5 后续出口执行。

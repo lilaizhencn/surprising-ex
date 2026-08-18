@@ -40,6 +40,8 @@ import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
+import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
+import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
 import com.surprising.aeron.service.state.OpenInterestIndex;
 import com.surprising.aeron.service.state.AlgoOrderIndex;
@@ -77,7 +79,6 @@ public final class CoreProbeState implements AutoCloseable {
     static final long MAX_RESULT_LEDGER_BYTES = 32L * 1024 * 1024;
     static final int MAX_STORED_RESPONSE_BYTES = Math.toIntExact(MAX_RESULT_LEDGER_BYTES);
     static final int MAX_SOURCE_SEQUENCES = 65_536;
-    private static final int DEFAULT_RISK_SCAN_BATCH_SIZE = 1_024;
     private static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
     private static final System.Logger LOG = System.getLogger(CoreProbeState.class.getName());
     private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
@@ -135,6 +136,7 @@ public final class CoreProbeState implements AutoCloseable {
     private CoreLiquidationProgressView commandLiquidationProgress;
     private CoreLiquidationBatchResultView commandLiquidationBatchResult;
     private CoreSettlementProgressView commandSettlementProgress;
+    private CoreRiskScanControlView commandRiskScanControl;
     private CoreCommandDelta commandDelta = CoreCommandDelta.empty();
 
     public CoreProbeState(ProductLine productLine) {
@@ -446,6 +448,12 @@ public final class CoreProbeState implements AutoCloseable {
                     com.surprising.aeron.protocol.CoreRiskQueryCodec.encode(views));
         }
         if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.RISK_SCAN_CONTROL_QUERY) {
+            if (message.payload().length != 0) return rejected(CoreResultCode.INVALID_COMMAND);
+            return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
+                    CoreRiskScanControlCodec.encodeView(tradingState.riskState().scanControl()));
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.OPEN_INTEREST_QUERY) {
             var views = openInterestIndex.totals().entrySet().stream()
                     .map(entry -> new com.surprising.aeron.protocol.CoreOpenInterestView(
@@ -651,11 +659,12 @@ public final class CoreProbeState implements AutoCloseable {
         commandLiquidationProgress = null;
         commandLiquidationBatchResult = null;
         commandSettlementProgress = null;
+        commandRiskScanControl = null;
         commandDelta = CoreCommandDelta.empty();
         resetChangeAccumulators();
         queuedMatching.clear();
         try {
-            status = applyCommand(message);
+            status = applyCommand(message, clusterTimestamp);
         } catch (CoreStateRejectedException exception) {
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.fromRejectionCode(exception.code());
@@ -781,6 +790,7 @@ public final class CoreProbeState implements AutoCloseable {
         commandLiquidationProgress = null;
         commandLiquidationBatchResult = null;
         commandSettlementProgress = null;
+        commandRiskScanControl = null;
         commandDelta = CoreCommandDelta.empty();
         resetChangeAccumulators();
         long sequence = Math.incrementExact(appliedCommandCount);
@@ -1139,6 +1149,7 @@ public final class CoreProbeState implements AutoCloseable {
         commandLiquidationProgress = null;
         commandLiquidationBatchResult = null;
         commandSettlementProgress = null;
+        commandRiskScanControl = null;
         commandDelta = CoreCommandDelta.empty();
         resetChangeAccumulators();
         try {
@@ -1297,6 +1308,11 @@ public final class CoreProbeState implements AutoCloseable {
     private void validatePendingLiquidationBatch(CoreMessage message) {
         var command = TradingCommandCodec.decodeExecuteLiquidationBatch(message.payload());
         if (command.riskScanContinuation() != null) {
+            var control = tradingState.riskState().scanControl();
+            if (!control.enabled() || command.maxRiskScanUsers() > control.scanBatchSize()) {
+                throw new CoreStateRejectedException("INVALID_COMMAND",
+                        "risk scan continuation exceeds current control");
+            }
             var scan = tradingState.riskState().scan();
             var continuation = command.riskScanContinuation();
             if (scan.riskComplete() || !scan.symbol().equals(continuation.symbol())
@@ -1750,6 +1766,7 @@ public final class CoreProbeState implements AutoCloseable {
         commandExecutions = List.of();
         commandLiquidationProgress = null;
         commandLiquidationBatchResult = null;
+        commandRiskScanControl = null;
         resetChangeAccumulators();
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
@@ -2288,7 +2305,7 @@ public final class CoreProbeState implements AutoCloseable {
         return Collections.unmodifiableMap(lastSourceSequences);
     }
 
-    private ResponseStatus applyCommand(CoreMessage message) {
+    private ResponseStatus applyCommand(CoreMessage message, long clusterTimestamp) {
         switch (message.header().messageType()) {
             case PROBE_INCREMENT -> probeValue = Math.addExact(
                     probeValue, CoreProtocol.decodeProbeDelta(message.payload()));
@@ -2315,7 +2332,7 @@ public final class CoreProbeState implements AutoCloseable {
                 long startedAt = System.nanoTime();
                 adoptState(tradingReducer.applyMarkPrice(tradingState, command, positionUserIndex, liquidationIndex));
                 initializeTriggerScan(command);
-                logRiskScan("mark-price", command.symbol(), DEFAULT_RISK_SCAN_BATCH_SIZE,
+                logRiskScan("mark-price", command.symbol(), tradingState.riskState().scanControl().scanBatchSize(),
                         pendingBefore, startedAt);
                 evaluateMarkPriceTriggers(command, message.header().commandId(), message.header().submittedAtEpochMillis());
             }
@@ -2338,6 +2355,11 @@ public final class CoreProbeState implements AutoCloseable {
                     TradingCommandCodec.decodeResolveLiquidation(message.payload())));
             case CONTINUE_RISK_SCAN -> {
                 var command = TradingCommandCodec.decodeContinueRiskScan(message.payload());
+                var control = tradingState.riskState().scanControl();
+                if (!control.enabled() || command.maxUsers() > control.scanBatchSize()) {
+                    throw new CoreStateRejectedException("INVALID_COMMAND",
+                            "risk scan continuation exceeds current control");
+                }
                 String symbol = tradingState.riskState().scan().symbol();
                 int pendingBefore = pendingRiskScanCount();
                 long startedAt = System.nanoTime();
@@ -2345,6 +2367,11 @@ public final class CoreProbeState implements AutoCloseable {
                         liquidationIndex));
                 evaluatePendingTriggerScan(symbol);
                 logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
+            }
+            case UPDATE_RISK_SCAN_CONTROL -> {
+                var command = CoreRiskScanControlCodec.decodeCommand(message.payload());
+                adoptState(tradingReducer.updateRiskScanControl(tradingState, command, clusterTimestamp));
+                commandRiskScanControl = tradingState.riskState().scanControl();
             }
             case ACK_EXPORT -> {
                 var acknowledgedTerminalOrderIds = exportState.acknowledge(
@@ -2548,7 +2575,7 @@ public final class CoreProbeState implements AutoCloseable {
         scans.put(scan.symbol(), scan);
         CoreRiskState risk = new CoreRiskState(tradingState.riskState().markPrices(),
                 tradingState.riskState().snapshots(), tradingState.riskState().liquidations(), scans,
-                tradingState.riskState().nextLiquidationId());
+                tradingState.riskState().nextLiquidationId(), tradingState.riskState().scanControl());
         adoptState(new TradingCoreState(tradingState.productLine(), Math.incrementExact(tradingState.revision()),
                 tradingState.users(), tradingState.orders(), tradingState.instruments(), risk,
                 tradingState.treasuryState(), tradingState.leverages(), tradingState.algoOrders(),
@@ -3030,6 +3057,9 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private byte[] commandResultData() {
+        if (commandRiskScanControl != null) {
+            return CoreRiskScanControlCodec.encodeView(commandRiskScanControl);
+        }
         if (commandFundingProgress != null) {
             return CoreFundingProgressCodec.encode(commandFundingProgress);
         }

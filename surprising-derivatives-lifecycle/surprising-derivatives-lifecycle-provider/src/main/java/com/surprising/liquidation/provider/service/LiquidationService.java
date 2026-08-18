@@ -12,6 +12,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -21,6 +22,7 @@ public class LiquidationService {
     private final LiquidationAeronGateway aeron;
     private final CoreLiquidationProjectionRepository projections;
     private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
+    private long nextRiskScanAtNanos;
     public LiquidationService(LiquidationProperties properties, LiquidationAeronGateway aeron,
                               CoreLiquidationProjectionRepository projections) {
         this.properties = properties;
@@ -42,13 +44,28 @@ public class LiquidationService {
         int pending = 0;
         int obsolete = 0;
         int processedOrders = 0;
+        boolean riskScanDecisionMade = false;
         for (int page = 0; page < properties.getCoordinator().getMaxPagesPerRun(); page++) {
             var work = aeron.work(cursor, properties.getCoordinator().getWorkBatchSize(),
                     properties.getCoordinator().getMaxWorkBytes());
             validateWork(work, cursor);
-            if (work.actions().isEmpty() && !work.riskScanPending()) break;
-            var result = aeron.executeBatch(work, feeRatePpm,
-                    properties.getCoordinator().getRiskScanBatchSize());
+            int riskScanBatchSize = 0;
+            long scanStartedAtNanos = 0;
+            long scanDelayMs = 0;
+            if (work.riskScanPending() && !riskScanDecisionMade) {
+                riskScanDecisionMade = true;
+                var control = aeron.riskScanControl();
+                scanStartedAtNanos = System.nanoTime();
+                if (control.enabled() && scanStartedAtNanos >= nextRiskScanAtNanos) {
+                    riskScanBatchSize = control.scanBatchSize();
+                    scanDelayMs = control.scanDelayMs();
+                }
+            }
+            if (work.actions().isEmpty() && riskScanBatchSize == 0) break;
+            var result = aeron.executeBatch(work, feeRatePpm, riskScanBatchSize);
+            if (riskScanBatchSize > 0) {
+                nextRiskScanAtNanos = deadline(scanStartedAtNanos, scanDelayMs);
+            }
             riskScanContinued |= result.riskScanContinuedUsers() > 0;
             offered = Math.addExact(offered, result.offeredActions());
             applied = Math.addExact(applied, result.appliedActions());
@@ -59,6 +76,15 @@ public class LiquidationService {
             cursor = work.nextCursorLiquidationId();
         }
         return new WorkCycle(riskScanContinued, offered, applied, pending, obsolete, processedOrders);
+    }
+
+    private static long deadline(long nowNanos, long delayMs) {
+        long delayNanos = TimeUnit.MILLISECONDS.toNanos(delayMs);
+        try {
+            return Math.addExact(nowNanos, delayNanos);
+        } catch (ArithmeticException ignored) {
+            return Long.MAX_VALUE;
+        }
     }
 
     private void validateWork(com.surprising.aeron.protocol.CoreLiquidationWorkView work, long requestedCursor) {

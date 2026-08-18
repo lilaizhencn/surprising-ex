@@ -35,9 +35,7 @@ surprising:
       response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
       client-connections: ${AERON_CLIENT_CONNECTIONS:2}
     calculation:
-      scan-delay-ms: 1000
       max-mark-age: 10s
-      scan-batch-size: 500
   liquidation:
     product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
     aeron:
@@ -48,7 +46,6 @@ surprising:
     coordinator:
       delay-ms: 25
       work-batch-size: 256
-      risk-scan-batch-size: 1024
       max-pages-per-run: ${LIQUIDATION_MAX_PAGES_PER_RUN:8}
       max-work-bytes: ${LIQUIDATION_MAX_WORK_BYTES:1048576}
     execution:
