@@ -6,7 +6,7 @@
 >
 > 目标：单写者、无锁热路径、减少复制、减少往返、内存裁决、高吞吐、可恢复、资金守恒；在线交易运行时不依赖 PostgreSQL。
 >
-> 基线提交：`221b7f005e75af43f76b19d71abde0b1a053312e`；实施分支：`codex/aeron-unified-core`；本次源码复核提交：`8d81475`。
+> 基线提交：`221b7f005e75af43f76b19d71abde0b1a053312e`；实施分支：`codex/aeron-unified-core`；完成状态以当前实施分支源码为准。
 > 当前文档阶段：`P0-DONE / P1-DONE / P2-DONE / P3-DONE / P4-PARTIAL / P5-PARTIAL / P6-IN_PROGRESS`。W1/W2 已完成：exchange-core 是唯一可执行盘口，Core 只保存订单业务元数据和必要索引，恢复只导入 Aeron 配对的原生 matcher snapshot。P5 的导出/投影故障门禁已完成，但 Gateway Auth Cluster 和在线 Provider 无数据库启动出口尚未完成，因此阶段总状态按完整目标回退为 `PARTIAL`。
 > 更新时间：2026-08-18
 
@@ -150,73 +150,76 @@ available + locked = accountTotal
 以下清单保留改造前的完整问题，便于后续阶段继续追踪。W1/W2 已将 exchange-core 升级并固定为
 `0.5.15-emporia`，删除第二本 FIFO 和生产逐单恢复；其余 P4-P6 项仍按状态表推进。
 
+完成状态统一为：`✅ 已完成` 表示代码边界已经落地并有对应测试；`🟡 部分完成` 表示主要链路已改但仍有明确技术出口；
+`⬜ 未完成` 表示尚未形成可验收实现。性能长稳、六产品线真实门禁等运行证据仍由 P4-P6 阶段表单独追踪。
+
 ### 3.1 状态复制、构造和历史增长
 
-| 编号 | 当前问题 | 位置/机制 | 影响 |
-| --- | --- | --- | --- |
-| S01 | Delta map 经过深度上限后 materialize | `StateMapSupport.delta` | 长链变成整图复制和 GC 峰值 |
-| S02 | `TradingCoreState` canonical constructor 对非 Delta users/orders 全量排序、校验 | `TradingCoreState` 构造器 | 每命令 O(U+O)，并非真正 O(delta) |
-| S03 | `clientOrderIndex == null` 时重新遍历全部订单构建索引 | `TradingCoreState` 构造器、`replaceUser`/`adjustBalance` 调用链 | 与业务无关的命令也变成 O(O) |
-| S04 | timers、triggers、algo map 每次构造仍全量排序/校验 | `TradingCoreState` 构造器 | 触发/定时命令放大分配 |
-| S05 | `stampOrderChanges` 未知变更集时复制并比较全部 orders | `TradingCoreState.stampOrderChanges` | commit metadata 产生二次 O(O) |
-| S06 | 用户内部 balances/reservations/positions 以及 book/risk/treasury 嵌套对象反复复制 | 各 immutable record 构造器 | 小改动变成多层对象树复制 |
-| S07 | 终态 order、algo、trigger、liquidation 主体长期留在热 map | `TradingCoreState` | 历史增长导致 snapshot、hash、查询持续变慢 |
-| S08 | W1/W2 前 `CoreBookState` 与 exchange-core 同时保存活动盘口 | 已删除 `CoreBookState`、priority codec/hash 和所有生产引用 | `DONE`：exchange-core 是唯一 FIFO/book 权威 |
-| S09 | applyMatches 在当前代码已使用 Delta，但构造器/索引/验证仍会触发全量工作 | `TradingCoreReducer.applyMatches` + `TradingCoreState` | 表面修复不等于端到端 O(delta) |
+| 编号 | 完成状态 | 基线问题 | 位置/机制 | 影响 |
+| --- | --- | --- | --- | --- |
+| S01 | `🟡 部分完成` | Delta map 经过深度上限后 materialize | `StateMapSupport.delta` | 热路径已使用 persistent DeltaMap；深链 materialize 和 compaction 仍需容量门禁 |
+| S02 | `✅ 已完成` | `TradingCoreState` canonical constructor 对非 Delta users/orders 全量排序、校验 | `TradingCoreState` 构造器 | 权威 transition 只校验 changed keys；全量排序仅保留在冷路径 |
+| S03 | `✅ 已完成` | `clientOrderIndex == null` 时重新遍历全部订单构建索引 | `TradingCoreState` 构造器、`replaceUser`/`adjustBalance` 调用链 | 权威 transition 缺失 index 时 fail-closed，不再隐式扫描 |
+| S04 | `✅ 已完成` | timers、triggers、algo map 每次构造仍全量排序/校验 | `TradingCoreState` 构造器 | 热路径改为 delta 和增量索引，完整校验只在冷路径执行 |
+| S05 | `✅ 已完成` | `stampOrderChanges` 未知变更集时复制并比较全部 orders | `TradingCoreState.stampOrderChanges` | 权威调用显式传递 changed order IDs，空集合不扫描 |
+| S06 | `🟡 部分完成` | 用户内部 balances/reservations/positions 以及 risk/treasury 嵌套对象反复复制 | 各 immutable record 构造器 | 已通过 delta 降低整图复制；immutable entity shell 仍可继续优化 |
+| S07 | `🟡 部分完成` | 终态 order、algo、trigger、liquidation 主体长期留在热 map | `TradingCoreState` | 已有 export ACK 后清理边界；长期 retention/compaction 仍待 P6 运行门禁 |
+| S08 | `✅ 已完成` | W1/W2 前 `CoreBookState` 与 exchange-core 同时保存活动盘口 | 已删除 `CoreBookState`、priority codec/hash 和所有生产引用 | exchange-core 已是唯一 FIFO/book 权威 |
+| S09 | `✅ 已完成` | applyMatches 曾因构造器、索引、验证触发全量工作 | `TradingCoreReducer.applyMatches` + `TradingCoreState` | 空成交复用原状态，其余路径使用 delta |
 
 ### 3.2 隐藏全量扫描
 
-| 编号 | 当前问题 | 影响 |
-| --- | --- | --- |
-| Q01 | `upsertTriggerOrder` 扫全部 trigger 查 client ID（基线问题；当前已由 `TriggerOrderIndex` 消除） | 触发单规模增大后下单成本线性增长 |
-| Q02 | `upsertAlgoOrder` 扫全部 algo 查 client ID | 同上 |
-| Q03 | `ensureLiquidation` 扫全部 liquidation 查用户/symbol/side | 强平计划重复检查变慢 |
-| Q04 | `adlCandidates` 扫全部 users/positions 并排序 | ADL 命令阻塞整条产品线 |
-| Q05 | cancel-all 先扫描 book/order 再逐单完整 cancel | O(K×O) 级联放大 |
-| Q06 | risk/funding/settlement continuation 依赖全量 values 列表 | 批量长任务可能接近 O(N²) |
-| Q07 | open-orders、trigger、algo、timer 查询在 Core 内扫描并排序业务全集 | 查询抢占写者，写延迟抖动 |
-| Q08 | `BOOK_STATE_QUERY` 请求 `Integer.MAX_VALUE` 深度并排序所有 symbol/level | 管理查询可造成巨大分配和长停顿 |
+| 编号 | 完成状态 | 基线问题 | 影响 |
+| --- | --- | --- | --- |
+| Q01 | `✅ 已完成` | `upsertTriggerOrder` 扫全部 trigger 查 client ID | 已由 `TriggerOrderIndex` 消除全量扫描 |
+| Q02 | `✅ 已完成` | `upsertAlgoOrder` 扫全部 algo 查 client ID | 已由 `AlgoOrderIndex` 增量维护 |
+| Q03 | `✅ 已完成` | `ensureLiquidation` 扫全部 liquidation 查用户/symbol/side | 已由 `LiquidationIndex` 增量定位 |
+| Q04 | `✅ 已完成` | `adlCandidates` 扫全部 users/positions 并排序 | ADL 候选改为有界索引查询与 continuation |
+| Q05 | `✅ 已完成` | cancel-all 先扫描 book/order 再逐单完整 cancel | 已使用活动订单索引、批量命令和有界 continuation |
+| Q06 | `✅ 已完成` | risk/funding/settlement continuation 依赖全量 values 列表 | 已使用确定性 cursor、增量索引和单批工作上限 |
+| Q07 | `✅ 已完成` | open-orders、trigger、algo、timer 查询在 Core 内扫描并排序业务全集 | 当前态查询已使用对应增量索引和有界分页 |
+| Q08 | `🟡 部分完成` | `BOOK_STATE_QUERY` 请求 `Integer.MAX_VALUE` 深度并排序所有 symbol/level | 深度已限制并改为异步 matcher 查询；空查询仍可覆盖全部 symbol |
 
 ### 3.3 哈希、导出和快照
 
-| 编号 | 当前问题 | 影响 |
-| --- | --- | --- |
-| H01 | `businessStateHash()` 保留全量重建入口 | 每次误用即 O(U+O+book+risk+treasury) |
-| H02 | export 通过 `changed*IdsSince` 反推变化，变更集合缺失时扫描全部实体 | 已知 delta 被重复发现 |
-| H03 | `stateHash()` 还要叠加 commandResults、export 状态 | 查询/导出命令污染热路径 |
-| H04 | export event 编码、digest、batch encode 存在重复工作 | CPU 和 byte[] 分配浪费 |
-| H05 | pending export queue 在 Core 状态内，满容量才拒绝 | 队列大时 snapshot 和复制变重；容量判断必须在变更前完成 |
-| H06 | snapshot 需要编码完整活动状态及 pending export | 大状态 snapshot 造成核心停顿，需要分片/低频处理 |
+| 编号 | 完成状态 | 基线问题 | 影响 |
+| --- | --- | --- | --- |
+| H01 | `✅ 已完成` | `businessStateHash()` 保留全量重建入口 | 热路径使用 `RollingBusinessStateHash`；全量入口仅用于冷路径校验 |
+| H02 | `✅ 已完成` | export 通过 `changed*IdsSince` 反推变化 | export 直接复用 `CommandDelta`，缺失变更集合时 fail-closed |
+| H03 | `✅ 已完成` | `stateHash()` 重算并叠加 commandResults、export 状态 | 当前使用缓存 rolling business hash，查询不修改状态 |
+| H04 | `✅ 已完成` | export event 编码、digest、batch encode 重复工作 | 已收敛为一次编码 outbox 和带 cursor 的批量 ACK |
+| H05 | `✅ 已完成` | pending export queue 满容量后才拒绝 | mutation 前完成容量门禁，积压通过 Exporter/Kafka 独立排空 |
+| H06 | `🟡 部分完成` | snapshot 编码完整活动状态及 pending export | 原生 matcher snapshot 和确定性恢复已完成；大状态停顿、容量与频率仍待 P6 验证 |
 
 ### 3.4 matcher、Aeron 和线程
 
-| 编号 | 当前问题 | 影响 |
-| --- | --- | --- |
-| M01 | place/cancel/replace 调用 `submitCommandAsyncFullResponse(...).join()` | 每命令同步跨 ring 等待，无法形成微批重叠 |
-| M02 | W1/W2 前 cancel/replace 失败会触发 `matchingAdapter.rebuild(before)` | `DONE`：生产 rebuild 已删除，异常进入 sticky fail-closed |
-| M03 | matcher 已变更后业务应用异常可能造成状态分叉 | `DONE`：该成员立即关闭并拒绝继续裁决，由一致快照/Cluster 恢复 |
-| M04 | W1/W2 前恢复按 open orders 逐单重放 | `DONE`：恢复使用 `fromSnapshotOnly` 导入原生 ME0/RE0 |
-| M05 | `orderBookLevels()` 查询所有 symbol、最大深度、逐个 join | 管理查询阻塞 matcher |
-| M06 | `ensureSymbol` 使用哈希但不检查碰撞（当前已增加稳定 registry 和确定性碰撞探测） | 碰撞会把不同 symbol 混入同一盘口 |
-| M07 | `ensureUser`/symbol 注册在首次交易同步 join | 首次请求有额外固定尾延迟 |
-| M08 | `AeronClientPool.commandAsync` 每命令创建 CompletableFuture 任务；slot 内仍同步等待 | 高频并发分配和线程池竞争 |
-| M09 | `SurprisingAeronClient.submit` offer/egress 是调用线程同步循环 | Gateway 线程被核心背压占用 |
-| M10 | sourceId 含进程 epoch，重启后身份改变 | 重放/重试的 sequence 语义不稳定 |
-| M11 | 同 user 的命令可能跨多个 client slot | 同用户顺序依赖上层运气 |
-| M12 | batch API 逐条调用同步单命令 | N 个命令变 N 次往返，无法原子微批 |
+| 编号 | 完成状态 | 基线问题 | 影响 |
+| --- | --- | --- | --- |
+| M01 | `✅ 已完成` | place/cancel/replace 同步跨 ring `join()` | Core owner 已使用结构化异步结果和 timer continuation |
+| M02 | `✅ 已完成` | cancel/replace 失败触发 `matchingAdapter.rebuild(before)` | 生产 rebuild 已删除，异常进入 sticky fail-closed |
+| M03 | `✅ 已完成` | matcher 已变更后业务异常造成状态分叉 | 成员立即失败关闭，并从一致 Cluster snapshot 恢复 |
+| M04 | `✅ 已完成` | 恢复按 open orders 逐单重放 | 使用 `fromSnapshotOnly` 导入原生 ME0/RE0 |
+| M05 | `🟡 部分完成` | `orderBookLevels()` 查询所有 symbol、最大深度、逐个 join | 已移除逐个同步 join 并限制深度；空查询覆盖全部 symbol 的容量边界仍待收口 |
+| M06 | `✅ 已完成` | `ensureSymbol` 哈希不检查碰撞 | 已增加稳定 registry 和确定性碰撞探测 |
+| M07 | `🟡 部分完成` | user/symbol 首次注册增加固定尾延迟 | 注册已确定性化并纳入恢复；首次注册容量尾延迟仍待 P6 量化 |
+| M08 | `🟡 部分完成` | Aeron client 每命令任务分配且 slot 内同步等待 | 同步等待已改为固定 agent 和异步 in-flight pipeline；每请求 Future/Request 分配仍存在 |
+| M09 | `✅ 已完成` | offer/egress 占用 Gateway 调用线程 | 已由固定 Aeron agent 和有界 mailbox 承担背压 |
+| M10 | `✅ 已完成` | sourceId 重启后的 sequence 语义不稳定 | 已采用进程 epoch 编码 sourceId，并以高水位阻止旧命令重放 |
+| M11 | `✅ 已完成` | 同 user 命令跨 client slot | client pool 按 userId 稳定映射 lane |
+| M12 | `✅ 已完成` | batch API 逐条同步调用 | 下单、撤单、改单和生命周期已具备批量协议与单次往返 |
 
 ### 3.5 数据库、触发单和外部边界
 
-| 编号 | 当前问题 | 影响 |
-| --- | --- | --- |
-| D01 | 触发单 API、价格触发和生命周期已统一通过 Aeron Core | Provider 不再有 JDBC/Redis/Kafka 第二裁决源 |
-| D02 | Core 在同一有序状态机内校验价格、创建 reduce-only 子订单并撮合 | 避免跨服务 claim/execute 往返和竞态 |
-| D03 | trading provider 只保留 Core 查询、命令转发和有界维护 | 数据库故障不改变在线触发裁决 |
-| D04 | `OrderFeeSnapshotLookup` 缺失用户费率时回退 instrument default | 可能产生错误手续费和资金对账差异 |
-| D05 | mark price、instrument、fee snapshot 如果陈旧/缺失没有严格版本门禁 | 交易规则不一致 |
-| D06 | 订单号生成器仅内存 AtomicReference，跨重启无持久 epoch/租约 | 节点重启或多实例配置错误可能冲突 |
-| D07 | 核心结果窗口只有 128，超窗重复请求的语义不够明确 | 客户端可能误把结果未知当失败/新命令 |
-| D08 | Export backlog 达上限后整条产品线拒绝命令 | 正确但需要明确告警、drain 和恢复协议，不能无限膨胀 |
+| 编号 | 完成状态 | 基线问题 | 影响 |
+| --- | --- | --- | --- |
+| D01 | `✅ 已完成` | 触发单曾存在 Provider/JDBC/Redis/Kafka 第二裁决源 | 触发单 API、价格触发和生命周期已统一通过 Aeron Core |
+| D02 | `✅ 已完成` | 触发执行存在跨服务 claim/execute 往返和竞态 | Core 在同一有序状态机内校验、创建 reduce-only 子订单并撮合 |
+| D03 | `✅ 已完成` | Trading Provider 可能参与在线触发裁决 | Provider 只保留 Core 查询、命令转发和有界维护 |
+| D04 | `⬜ 未完成` | `OrderFeeSnapshotLookup` 缺失用户费率时回退 instrument default | Trading fee snapshot 尚未完成 Core 状态化，仍可能造成资金对账差异 |
+| D05 | `🟡 部分完成` | mark price、instrument、fee snapshot 缺少统一严格版本门禁 | mark price、instrument、Risk Scan Control 已完成；fee snapshot 仍待迁移 |
+| D06 | `🟡 部分完成` | 订单号生成器仅内存 AtomicReference，跨重启无持久 epoch/租约 | 用户订单已使用稳定 client identity；Algo/系统订单仍使用节点时间序列生成器 |
+| D07 | `✅ 已完成` | 核心结果窗口过小且超窗重复语义不明确 | 已实现有界结果账本、`COMMAND_RESULT_QUERY` 和 source sequence 高水位 |
+| D08 | `✅ 已完成` | Export backlog 缺少明确 drain 和恢复协议 | 已实现 mutation 前背压、批量 ACK、Kafka/PG 故障恢复和监控边界 |
 
 ### 3.6 首轮性能热点逐项追踪
 
