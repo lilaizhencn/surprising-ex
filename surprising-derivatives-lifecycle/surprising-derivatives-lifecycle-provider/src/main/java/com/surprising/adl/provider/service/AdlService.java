@@ -9,8 +9,6 @@ import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.CoreAdlLiquidationProjection;
 import com.surprising.adl.provider.repository.AdlEventRepository;
-import com.surprising.adl.provider.repository.AdlSequenceRepository;
-import com.surprising.adl.provider.repository.CoreAdlProjectionRepository;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.client.AeronLifecycleCoordinator;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -29,18 +27,13 @@ import org.springframework.stereotype.Service;
 public class AdlService {
 
     private final AdlProperties properties;
-    private final CoreAdlProjectionRepository projections;
     private final AdlAeronGateway aeron;
     private final AdlEventRepository events;
-    private final AdlSequenceRepository sequences;
     private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
-    public AdlService(AdlProperties properties, CoreAdlProjectionRepository projections,
-                      AdlAeronGateway aeron, AdlEventRepository events, AdlSequenceRepository sequences) {
+    public AdlService(AdlProperties properties, AdlAeronGateway aeron, AdlEventRepository events) {
         this.properties = properties;
-        this.projections = projections;
         this.aeron = aeron;
         this.events = events;
-        this.sequences = sequences;
     }
 
     public synchronized AdlCycle processResidualDeficits() {

@@ -14,10 +14,8 @@ import com.surprising.insurance.api.model.InsuranceFundBalanceQueryResponse;
 import com.surprising.insurance.api.model.InsuranceFundBalanceResponse;
 import com.surprising.insurance.api.model.InsuranceLedgerQueryResponse;
 import com.surprising.insurance.provider.config.InsuranceProperties;
-import com.surprising.insurance.provider.repository.CoreInsuranceProjectionRepository;
 import com.surprising.insurance.provider.repository.InsuranceCoverageRepository;
 import com.surprising.insurance.provider.repository.InsuranceFundLedgerRepository;
-import com.surprising.insurance.provider.repository.InsuranceSequenceRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -31,23 +29,17 @@ import java.util.UUID;
     private static final String DEFAULT_ACCOUNT_TYPE = "USDT_PERPETUAL";
 
     private final InsuranceProperties properties;
-    private final InsuranceSequenceRepository sequenceRepository;
     private final InsuranceFundLedgerRepository ledgerRepository;
     private final InsuranceCoverageRepository coverageRepository;
-    private final CoreInsuranceProjectionRepository projectionRepository;
     private final InsuranceAeronGateway aeron;
     private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
     public InsuranceService(InsuranceProperties properties,
-                            InsuranceSequenceRepository sequenceRepository,
                             InsuranceFundLedgerRepository ledgerRepository,
                             InsuranceCoverageRepository coverageRepository,
-                            CoreInsuranceProjectionRepository projectionRepository,
                             InsuranceAeronGateway aeron) {
         this.properties = properties;
-        this.sequenceRepository = sequenceRepository;
         this.ledgerRepository = ledgerRepository;
         this.coverageRepository = coverageRepository;
-        this.projectionRepository = projectionRepository;
         this.aeron = aeron;
     }
 

@@ -728,7 +728,7 @@ PostgreSQL 本身不算缺陷，前提是它不参与当前态查询和在线裁
 | 唯一盘口与恢复 | `DONE` | exchange-core 是唯一 executable book；原生 matcher snapshot、Cluster Log/Archive、配对 manifest 和 fail-closed 恢复已落地 | 长时 election/cold recovery 容量证据归 P6 |
 | 账户当前态 | `DONE` | 余额、冻结、持仓、仓位模式和调整命令均走 Account Aeron gateway/Core；PostgreSQL 只用于账本、划转记录和后台审计查询 | 将历史查询 Bean 与在线 Provider 启动构造图解耦，归“运行时零数据库”出口 |
 | 订单与触发单当前态 | `DONE` | 单笔订单、clientOrderId、活动订单分页、批量撤单选择和生命周期撤单均直接查询/命令 Core；历史订单和后台筛选继续读异步 PostgreSQL 投影 | 将 fee snapshot 初始化及历史投影 Bean 改为可离线/可选依赖，证明 PostgreSQL 停止时 Provider 可启动和交易 |
-| Risk/Liquidation/Insurance/ADL | `PARTIAL` | 四域已合并为单一 Lifecycle Provider/API；风险快照、强平 work、保险基金、ADL queue 与资金变化由 Core 查询/命令裁决 | 移除未使用的 sequence/projection 构造依赖；将 Risk scan control 从 JDBC override 改为版本化 Core/显式离线配置；保留历史查询只能通过异步投影 |
+| Risk/Liquidation/Insurance/ADL | `PARTIAL` | 四域已合并为单一 Lifecycle Provider/API；风险快照、强平 work、保险基金、ADL queue 与资金变化由 Core 查询/命令裁决；未使用的 Insurance/ADL sequence 和 pending projection Repository、字段及构造注入已删除 | 将 Risk scan control 从 JDBC override 改为版本化 Core/显式离线配置；把仍在使用的历史查询 Repository 与在线执行构造图解耦，历史查询只能通过异步投影 |
 | Funding | `PARTIAL` | 资金结算资金变化和 continuation progress 已进入 Core | `FundingService` 仍同步使用数据库 rate input、lease、sequence、settlement reservation 和 finalization；需迁移为 Core 状态/版本化输入，历史 rate/payment 查询再与在线服务解耦 |
 | Exporter/Projector/WebSocket | `DONE` | Exporter 仅 Aeron→Kafka，Projector 独立 Kafka→PostgreSQL；批量 ACK、重复/乱序、缺口恢复和慢客户端隔离门禁已通过 | 生产规模 lag、背压和长时故障指标归 P6 |
 | Gateway Auth | `NOT_STARTED` | 现有登录、MFA、challenge、refresh session 功能仍可通过 JDBC 工作 | 按第 1.0 节实现 Gateway Auth Cluster snapshot/JWT 边界，并验证数据库停止时登录态校验和会话恢复 |
@@ -742,11 +742,12 @@ PostgreSQL 本身不算缺陷，前提是它不参与当前态查询和在线裁
 - [x] P0-P3：规范、单往返、O(delta) runtime、唯一 exchange-core 盘口和原生 snapshot 恢复。
 - [x] W5 导出/投影功能：Kafka/PG 故障隔离、批量 ACK、重复/乱序、缺口恢复、WebSocket offset 与慢客户端隔离。
 - [x] Trading、Derivatives Lifecycle、Market Data 三组 Provider/API 归并及旧运行入口清理。
+- [x] Lifecycle Provider 未使用的 Insurance/ADL sequence、pending projection Repository 和构造依赖清理。
 - [x] 六条产品线固定宿主机三节点 `DEDICATED` 启动脚本。
 - [x] `LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 真实 HTTP/做市/生命周期/资金守恒门禁。
 - [ ] SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL 真实 Provider 生命周期/资金守恒门禁。
 - [ ] 生命周期 cursor 在 leader restart、follower catch-up、缺口和重复回调场景下的恢复门禁。
-- [ ] Funding、Risk scan control、Trading fee snapshot 及各在线 Provider 构造图的 PostgreSQL 解耦。
+- [ ] Funding、Risk scan control、Trading fee snapshot 及仍在使用的历史查询 Repository 与各在线 Provider 构造图的 PostgreSQL 解耦。
 - [ ] Gateway Auth Cluster、会话 snapshot/JWT 恢复和数据库停止门禁。
 - [ ] 六条产品线逐条执行固定脚本完整 `test`，保存可复核 manifest，而不是只保留启动/dry-run 结果。
 - [ ] 单产品线长时容量与分阶段边界报告：下单、撮合、风控扫描、强平、平仓、结算、标记价和整体 OPS。
@@ -1010,3 +1011,16 @@ PostgreSQL 仍只承载 K 线历史和可重建查询投影，不进入撮合裁
 验证：`mvn -pl surprising-market-data/surprising-market-data-provider -am test` 通过，统一 Provider 迁移的
 27 个测试及受影响依赖共 162 个测试无失败；`GatewayProxyServiceTest` 28 个路由测试通过。该验证覆盖模块/API
 迁移与路由契约，不替代每条 ProductLine 的真实 Kafka Streams state-dir、Aeron 会话和公共行情端到端门禁。
+
+### 19.3 Lifecycle 未使用 JDBC 构造依赖清理（2026-08-18）
+
+`InsuranceService` 已移除未使用的 `InsuranceSequenceRepository` 与
+`CoreInsuranceProjectionRepository` 构造参数；`AdlService` 已移除未使用的
+`AdlSequenceRepository` 与 `CoreAdlProjectionRepository` 构造参数。四个无调用方的 Repository 类同步删除，
+避免 Spring 组件扫描继续创建无业务用途的 JDBC Bean。仍在使用的 liquidation、insurance ledger/coverage、
+ADL event 和 risk projection Repository 保留为历史查询路径，本次未将它们误删。
+
+验证：JDK 25 下执行
+`mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am -DskipTests compile`
+通过，统一 Lifecycle Provider 的 52 个生产源码文件重新编译成功；全项目静态搜索不存在上述四个已删除类型的
+残余引用。本次只清理无使用依赖，不代表 Risk scan control 或整个 Provider 的 PostgreSQL 解耦已经完成。
