@@ -791,8 +791,8 @@ OPTION 真实门禁最初停在已受理 Aeron 请求的结果未知超时。修
 
 ### 18.3.5 固定产品线独立测试入口（2026-08-18）
 
-为避免每次测试临时修改产品线、端口或启动参数，新增六个独立、固定配置的入口，均位于
-`surprising-aeron-core/runtime/w3-w5/product-lines/`：
+为避免每次测试临时修改产品线、端口或启动参数，六个独立、固定配置的入口已恢复到
+`scripts/`：
 
 | 产品线 | 脚本 | 固定运行 ID |
 | --- | --- | --- |
@@ -803,23 +803,16 @@ OPTION 真实门禁最初停在已受理 Aeron 请求的结果未知超时。修
 | INVERSE_DELIVERY | `inverse-delivery.sh` | `inverse-delivery-fixed` |
 | OPTION | `option.sh` | `option-fixed` |
 
-每个脚本只接受 `start`、`test`、`stop` 三个动作；省略动作等同于 `test`。脚本固定使用
-PostgreSQL `25432`、Kafka `29092`、JDK 25（`/opt/homebrew/opt/openjdk@25`）、
-当前仓库主 worktree 和 `WALLET_ENABLED=false`，不读取外部产品线或动态端口覆盖。`test` 使用
-该产品线固定测试运行 ID，结束后由现有 `run.sh` 清理并生成独立 manifest；`start` 保留运行态供
-人工检查，必须用同一脚本的 `stop` 清理。
-
-服务启动顺序固定为：PostgreSQL → Kafka → migrations（`gateway-schema.sql`、根初始化、版本迁移）
-→ Aeron Cluster `node0/node1/node2` → Exporter → Projector → Instrument → Price → Account →
-Trading Command → Market Data → Risk →（永续 Funding）→（交割/期权/永续 Liquidation、Insurance、ADL）
-→ Gateway → Maker。现货不启动 Funding、Liquidation、Insurance、ADL；wallet 永不启动。六个脚本
-分别直接调用 `run.sh` 的启动和清理命令，再调用单产品线生命周期驱动；不存在聚合场景、产品线循环或
-跨产品线选择参数。启动、清理、ownership lock 和失败回收语义仍由唯一运行时入口保持一致。
+每个脚本只接受 `start`、`test`、`stop` 三个动作；省略动作等同于 `test`。每个文件只声明自身
+`ProductLine` 和固定运行 ID，使用 JDK 25，并绑定独立的 Docker Compose project。`start`/`stop`
+只管理该产品线的三节点 Aeron Core；`test` 使用独立测试运行 ID，依次执行 fresh Core、产品线 smoke、
+Core probe 和 export status，完成后自动清理。当前恢复范围明确为 `CORE_ONLY`，不恢复已删除的旧
+`run.sh`、PostgreSQL/Kafka/Provider 聚合编排，也不把这些入口描述成真实 HTTP/做市资金门禁。
 
 只执行一条产品线：
 
 ```bash
-cd surprising-aeron-core/runtime/w3-w5/product-lines
+cd scripts
 ./spot.sh test
 ./linear-perpetual.sh test
 ./inverse-perpetual.sh test
