@@ -760,9 +760,8 @@ public final class TradingCoreReducer {
                 }
                 Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
                 reservations.remove(orderId);
-                users.put(user.userId(), new CoreUserState(user.productLine(), user.userId(),
-                        Math.incrementExact(user.revision()), user.balances(), reservations,
-                        user.positions(), user.positionMode()));
+                users.put(user.userId(), user.transition(Math.incrementExact(user.revision()),
+                        user.balances(), reservations, user.positions(), user.positionMode()));
             }
             orders.remove(orderId);
             if (!order.clientOrderId().isEmpty()) {
