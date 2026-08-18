@@ -49,4 +49,21 @@ class CoreTriggerOrderCodecTest {
                 CoreTriggerOrderCodec.encodeExecute(501, 8, 70_000, 1_700_000_000_001L)))
                 .containsExactly(501L, 8L, 70_000L, 1_700_000_000_001L);
     }
+
+    @Test
+    void materializesCreationTemplateWithClusterTime() {
+        CoreTriggerOrderStateView template = new CoreTriggerOrderStateView(501,
+                ProductLine.LINEAR_PERPETUAL, 1001, "tp-501", "", "BTC-USDT", CoreOrderSide.SELL,
+                CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0,
+                0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS,
+                CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "command-id",
+                0, 0, 0, 0, 1);
+
+        CoreTriggerOrderStateView decoded = CoreTriggerOrderCodec.decodeState(
+                CoreTriggerOrderCodec.encodeState(template));
+        CoreTriggerOrderStateView materialized = decoded.materializeCreation(1_700_000_000_000L);
+
+        assertThat(materialized.createdAtEpochMillis()).isEqualTo(1_700_000_000_000L);
+        assertThat(materialized.updatedAtEpochMillis()).isEqualTo(1_700_000_000_000L);
+    }
 }

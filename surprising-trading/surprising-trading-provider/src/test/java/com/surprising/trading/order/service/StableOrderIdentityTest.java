@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
@@ -44,6 +45,28 @@ import org.mockito.Mockito;
 class StableOrderIdentityTest {
 
     @Test
+    void specializedTradingIdentitiesAreStableAndNamespaced() {
+        ProductLine line = ProductLine.LINEAR_PERPETUAL;
+
+        assertThat(StableOrderIdentity.triggerOrderId(line, 1001, "client-1"))
+                .isEqualTo(StableOrderIdentity.triggerOrderId(line, 1001, "client-1"))
+                .isNotEqualTo(StableOrderIdentity.orderId(line, 1001, "client-1"));
+        assertThat(StableOrderIdentity.algoOrderId(line, 1001, "client-1"))
+                .isEqualTo(StableOrderIdentity.algoOrderId(line, 1001, "client-1"))
+                .isNotEqualTo(StableOrderIdentity.triggerOrderId(line, 1001, "client-1"));
+        assertThat(StableOrderIdentity.triggerCommandId(line, 1001, "client-1"))
+                .isEqualTo(StableOrderIdentity.triggerCommandId(line, 1001, "client-1"))
+                .isNotEqualTo(StableOrderIdentity.commandId(line, 1001, "client-1"));
+        assertThat(StableOrderIdentity.algoCommandId(line, 1001, "client-1"))
+                .isEqualTo(StableOrderIdentity.algoCommandId(line, 1001, "client-1"))
+                .isNotEqualTo(StableOrderIdentity.triggerCommandId(line, 1001, "client-1"));
+        assertThat(StableOrderIdentity.algoOrderId(ProductLine.SPOT, 1001, "client-1"))
+                .isNotEqualTo(StableOrderIdentity.algoOrderId(line, 1001, "client-1"));
+        assertThatThrownBy(() -> StableOrderIdentity.algoOrderId(line, 1001, " "))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void placeIdentitySurvivesProviderReconstruction() {
         OrderAeronGateway aeron = Mockito.mock(OrderAeronGateway.class);
         InstrumentRuleLookup rules = Mockito.mock(InstrumentRuleLookup.class);
@@ -78,7 +101,7 @@ class StableOrderIdentityTest {
 
     private static AeronOrderCommandService service(OrderAeronGateway aeron, InstrumentRuleLookup rules,
                                                     MarkPriceLookup marks, TradingOrderProperties properties) {
-        return new AeronOrderCommandService(aeron, new AeronOrderIdGenerator(properties), rules, marks, properties);
+        return new AeronOrderCommandService(aeron, rules, marks, properties);
     }
 
     private static PlaceOrderRequest request() {

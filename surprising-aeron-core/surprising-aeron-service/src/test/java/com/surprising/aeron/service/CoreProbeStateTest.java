@@ -39,6 +39,70 @@ import org.junit.jupiter.api.Test;
 class CoreProbeStateTest {
 
     @Test
+    void materializesStableTriggerCreationOnceAndReplaysItAfterRecovery() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2))));
+        UUID commandId = UUID.randomUUID();
+        var template = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(501,
+                ProductLine.SPOT, 1001, "tp-501", "", "BTC-USDT", CoreOrderSide.SELL,
+                com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                CoreMarginMode.CROSS, CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                "", commandId.toString(), 0, 0, 0, 0, 1);
+        CoreMessage command = tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, commandId, 2,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(template));
+
+        CoreResponse applied = state.apply(command, 5_000, 2);
+        CoreResponse duplicate = state.apply(command, 9_000, 3);
+        CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot());
+        CoreResponse recoveredDuplicate = restored.apply(command, 12_000, 4);
+        var persisted = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(applied.data()).getFirst();
+
+        assertThat(applied.status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+        assertThat(recoveredDuplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+        assertThat(duplicate.data()).isEqualTo(applied.data());
+        assertThat(recoveredDuplicate.data()).isEqualTo(applied.data());
+        assertThat(persisted.createdAtEpochMillis()).isEqualTo(5_000);
+        assertThat(persisted.updatedAtEpochMillis()).isEqualTo(5_000);
+    }
+
+    @Test
+    void materializesStableAlgoCreationOnceAndRejectsChangedRetryPayload() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        UUID commandId = UUID.randomUUID();
+        var template = new com.surprising.aeron.protocol.CoreAlgoOrderView(701, 1001, "algo-701", "BTC-USDT", 0,
+                CoreOrderSide.BUY, 0, 100, 25, 10, 40, CoreMarginMode.CROSS, CorePositionSide.NET,
+                false, false, CoreTimeInForce.IOC, 0, 0, "", commandId.toString(), 0, 0, 0, 0, 0, 1,
+                List.of(), 0, 0, 0);
+        CoreMessage command = tradingCommand(CoreMessageType.UPSERT_ALGO_ORDER, commandId, 1,
+                com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(template));
+
+        CoreResponse applied = state.apply(command, 5_000, 1);
+        CoreResponse duplicate = state.apply(command, 9_000, 2);
+        var changed = new com.surprising.aeron.protocol.CoreAlgoOrderView(701, 1001, "algo-701", "BTC-USDT", 0,
+                CoreOrderSide.BUY, 0, 200, 25, 10, 40, CoreMarginMode.CROSS, CorePositionSide.NET,
+                false, false, CoreTimeInForce.IOC, 0, 0, "", commandId.toString(), 0, 0, 0, 0, 0, 1,
+                List.of(), 0, 0, 0);
+        CoreResponse conflict = state.apply(tradingCommand(CoreMessageType.UPSERT_ALGO_ORDER, commandId, 2,
+                com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(changed)), 10_000, 3);
+        CoreMessage query = query(CoreMessageType.ALGO_ORDER_QUERY, 1001,
+                com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeQuery(1001, 701, "", 0, 1));
+        var persisted = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeList(state.apply(query).data()).getFirst();
+
+        assertThat(applied.status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+        assertThat(conflict.resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
+        assertThat(persisted.quantitySteps()).isEqualTo(100);
+        assertThat(persisted.startAtEpochMillis()).isEqualTo(5_000);
+        assertThat(persisted.createdAtEpochMillis()).isEqualTo(5_000);
+    }
+
+    @Test
     void riskScanControlIsVersionedDeduplicatedAndSnapshotRecovered() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         var defaultQuery = state.apply(query(CoreMessageType.RISK_SCAN_CONTROL_QUERY, 0, new byte[0]));

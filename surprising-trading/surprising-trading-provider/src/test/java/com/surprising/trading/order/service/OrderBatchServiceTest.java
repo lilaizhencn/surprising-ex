@@ -54,8 +54,7 @@ class OrderBatchServiceTest {
     void setUp() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        service = new AeronOrderCommandService(aeron, new AeronOrderIdGenerator(properties), instrumentRules,
-                markPrices, properties);
+        service = new AeronOrderCommandService(aeron, instrumentRules, markPrices, properties);
         when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
         when(aeron.commandOutcome(any(), any(), anyLong(), any(byte[].class)))
                 .thenReturn(new CoreCommandOutcome.Terminal(new CoreResponse(

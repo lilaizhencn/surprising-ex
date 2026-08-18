@@ -137,6 +137,7 @@ public final class CoreProbeState implements AutoCloseable {
     private CoreLiquidationBatchResultView commandLiquidationBatchResult;
     private CoreSettlementProgressView commandSettlementProgress;
     private CoreRiskScanControlView commandRiskScanControl;
+    private com.surprising.aeron.protocol.CoreTriggerOrderStateView commandTriggerOrderView;
     private CoreCommandDelta commandDelta = CoreCommandDelta.empty();
 
     public CoreProbeState(ProductLine productLine) {
@@ -640,6 +641,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (exportCommand && message.payload().length > CoreExportCodec.MAX_COMMAND_PAYLOAD) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
+        commandTriggerOrderView = null;
         if (isMatchingCommand(message.header().messageType())) {
             if (isOrderBatchCommand(message.header().messageType())) {
                 return beginOrderBatchMatching(message, clusterTimestamp, clusterPosition, sourceKey);
@@ -2405,16 +2407,18 @@ public final class CoreProbeState implements AutoCloseable {
                         TradingCommandCodec.decodeUpdateLeverage(message.payload())));
             }
             case UPSERT_ALGO_ORDER -> adoptState(tradingReducer.upsertAlgoOrder(tradingState,
-                    message.header().userId(), com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(message.payload()),
-                    algoOrderIndex));
+                    message.header().userId(), com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(message.payload())
+                            .materializeCreation(clusterTimestamp), algoOrderIndex));
             case UPDATE_CANCEL_ALL_AFTER -> adoptState(tradingReducer.updateCancelAllAfter(tradingState,
                     message.header().userId(),
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payload())));
             case PLACE_TRIGGER_ORDER -> {
-                var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payload());
+                var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payload())
+                        .materializeCreation(clusterTimestamp);
                 commandChangedTriggerOrderIds = List.of(trigger.triggerOrderId());
                 adoptState(tradingReducer.upsertTriggerOrder(tradingState, message.header().userId(), trigger,
                         triggerOrderIndex));
+                commandTriggerOrderView = tradingState.triggerOrders().get(trigger.triggerOrderId()).view();
             }
             case CANCEL_TRIGGER_ORDER -> {
                 long triggerOrderId = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payload());
@@ -3071,6 +3075,9 @@ public final class CoreProbeState implements AutoCloseable {
         }
         if (commandSettlementProgress != null) {
             return CoreSettlementProgressCodec.encode(commandSettlementProgress);
+        }
+        if (commandTriggerOrderView != null) {
+            return com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(List.of(commandTriggerOrderView));
         }
         if (commandOrderViews.isEmpty() && commandExecutions.isEmpty()) {
             return new byte[0];

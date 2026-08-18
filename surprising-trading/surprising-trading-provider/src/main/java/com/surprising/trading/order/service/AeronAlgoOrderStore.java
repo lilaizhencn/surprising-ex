@@ -36,8 +36,10 @@ public class AeronAlgoOrderStore {
 
     public AlgoOrderRecord upsert(AlgoOrderRecord record, List<Long> childOrderIds, long revision) {
         CoreAlgoOrderView view = view(record, childOrderIds, revision, 0, 0, 0);
-        UUID commandId = UUID.nameUUIDFromBytes(("ALGO:" + record.algoOrderId() + ':' + revision)
-                .getBytes(StandardCharsets.UTF_8));
+        UUID commandId = revision == 1
+                ? StableOrderIdentity.algoCommandId(record.productLine(), record.userId(), record.clientAlgoOrderId())
+                : UUID.nameUUIDFromBytes(("ALGO:" + record.algoOrderId() + ':' + revision)
+                        .getBytes(StandardCharsets.UTF_8));
         aeron.command(CoreMessageType.UPSERT_ALGO_ORDER, commandId, record.userId(), CoreAlgoOrderCodec.encode(view));
         CoreAlgoOrderView persisted = aeron.algoOrder(record.userId(), record.algoOrderId());
         if (persisted == null) throw new IllegalStateException("algo order missing after Aeron upsert");

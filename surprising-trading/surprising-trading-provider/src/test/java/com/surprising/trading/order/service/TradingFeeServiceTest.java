@@ -73,15 +73,12 @@ class TradingFeeServiceTest {
     void upsertSchedulePublishesLocalFactWithoutWritingDatabase() {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
-        AeronOrderIdGenerator idGenerator = mock(AeronOrderIdGenerator.class);
         FeeScheduleEventPublisher publisher = mock(FeeScheduleEventPublisher.class);
-        TradingFeeService service = service(feeRepository, instrumentRuleLookup, null, idGenerator,
-                publisher);
+        TradingFeeService service = service(feeRepository, instrumentRuleLookup, null, publisher);
         Instant effectiveTime = Instant.parse("2026-07-01T00:00:00Z");
-        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(null, ProductLine.LINEAR_PERPETUAL,
+        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(777L, ProductLine.LINEAR_PERPETUAL,
                 1001L, "BTC-USDT", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
                 FeeScheduleStatus.ACTIVE, effectiveTime, null);
-        when(idGenerator.next()).thenReturn(777L);
 
         FeeScheduleResponse response = service.upsertSchedule(request);
 
@@ -129,27 +126,25 @@ class TradingFeeServiceTest {
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
                                       ProductLine productLine) {
         return service(feeRepository, instrumentRuleLookup, feeSnapshotLookup,
-                mock(AeronOrderIdGenerator.class), mock(FeeScheduleEventPublisher.class), productLine);
+                mock(FeeScheduleEventPublisher.class), productLine);
     }
 
     private TradingFeeService service(OrderFeeRepository feeRepository,
                                       InstrumentRuleLookup instrumentRuleLookup,
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
-                                      AeronOrderIdGenerator idGenerator,
                                       FeeScheduleEventPublisher publisher) {
-        return service(feeRepository, instrumentRuleLookup, feeSnapshotLookup, idGenerator, publisher,
+        return service(feeRepository, instrumentRuleLookup, feeSnapshotLookup, publisher,
                 ProductLine.LINEAR_PERPETUAL);
     }
 
     private TradingFeeService service(OrderFeeRepository feeRepository,
                                       InstrumentRuleLookup instrumentRuleLookup,
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
-                                      AeronOrderIdGenerator idGenerator,
                                       FeeScheduleEventPublisher publisher,
                                       ProductLine productLine) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
-        return new TradingFeeService(feeRepository, idGenerator, instrumentRuleLookup,
+        return new TradingFeeService(feeRepository, instrumentRuleLookup,
                 feeSnapshotLookup, publisher, new FeeScheduleSnapshotCache(), properties);
     }
 }

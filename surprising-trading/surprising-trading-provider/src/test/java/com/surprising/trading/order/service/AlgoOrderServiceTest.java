@@ -37,12 +37,23 @@ class AlgoOrderServiceTest {
         }
     }
 
+    @Test
+    void rejectsMissingClientAlgoOrderIdBeforeCoreSubmission() {
+        AlgoOrderService service = service(ProductLine.LINEAR_PERPETUAL);
+
+        assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
+                1001L, " ", "BTC-USDT", AlgoOrderType.TWAP, OrderSide.BUY,
+                0L, 100L, 50L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
+                false, false, TimeInForce.IOC, null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("clientAlgoOrderId is required");
+    }
+
     private AlgoOrderService service(ProductLine line) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(line);
         properties.getAlgo().setMinDurationSeconds(1);
         properties.getAlgo().setMinIntervalSeconds(1);
-        return new AlgoOrderService(properties, mock(OrderService.class), mock(AeronAlgoOrderStore.class),
-                mock(AeronOrderIdGenerator.class));
+        return new AlgoOrderService(properties, mock(OrderService.class), mock(AeronAlgoOrderStore.class));
     }
 }

@@ -7,9 +7,7 @@ import com.surprising.aeron.protocol.CoreTriggerCondition;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
-import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AdminTriggerOrderTimelineEvent;
 import com.surprising.trading.api.model.AdminTriggerOrderTimelineResponse;
 import com.surprising.trading.api.model.BatchCancelTriggerOrdersRequest;
@@ -29,6 +27,7 @@ import com.surprising.trading.api.model.TriggerOrderQueryResponse;
 import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
+import com.surprising.trading.order.service.StableOrderIdentity;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -50,25 +49,25 @@ public class TriggerOrderService {
 
     private final TriggerProperties properties;
     private final TriggerOrderAeronGateway aeronGateway;
-    private final AeronTriggerOrderIdGenerator aeronOrderIds;
 
     public TriggerOrderService(TriggerProperties properties,
-                               TriggerOrderAeronGateway aeronGateway,
-                               AeronTriggerOrderIdGenerator aeronOrderIds) {
+                               TriggerOrderAeronGateway aeronGateway) {
         this.properties = properties;
         this.aeronGateway = aeronGateway;
-        this.aeronOrderIds = aeronOrderIds;
     }
 
     public TriggerOrderResponse place(PlaceTriggerOrderRequest request) {
         PlaceTriggerOrderRequest normalized = normalize(request);
-        long triggerOrderId = aeronOrderIds.next();
-        Instant now = Instant.now();
+        ProductLine productLine = currentProductLine();
+        long triggerOrderId = StableOrderIdentity.triggerOrderId(productLine, normalized.userId(),
+                normalized.clientTriggerOrderId());
+        UUID commandId = StableOrderIdentity.triggerCommandId(productLine, normalized.userId(),
+                normalized.clientTriggerOrderId());
         CoreTriggerOrderStateView view = new CoreTriggerOrderStateView(
                 triggerOrderId,
-                currentProductLine(),
+                productLine,
                 normalized.userId(),
-                emptyToNull(normalized.clientTriggerOrderId()),
+                normalized.clientTriggerOrderId(),
                 emptyToNull(normalized.ocoGroupId()),
                 normalized.symbol(),
                 CoreOrderSide.valueOf(normalized.side().name()),
@@ -91,20 +90,14 @@ public class TriggerOrderService {
                 0,
                 0,
                 "",
-                TraceContext.currentOrCreate(),
+                commandId.toString(),
                 normalized.expiresAt() == null ? 0 : normalized.expiresAt().toEpochMilli(),
                 0,
-                now.toEpochMilli(),
-                now.toEpochMilli(),
+                0,
+                0,
                 1);
-        String idempotencyKey = normalized.clientTriggerOrderId() == null
-                ? Long.toString(triggerOrderId)
-                : normalized.clientTriggerOrderId();
-        UUID commandId = UUID.nameUUIDFromBytes(("TRIGGER_PLACE:" + normalized.userId() + ':' + idempotencyKey)
-                .getBytes(StandardCharsets.UTF_8));
-        aeronGateway.command(CoreMessageType.PLACE_TRIGGER_ORDER, commandId, normalized.userId(),
-                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(view));
-        return TriggerOrderAeronGateway.response(view);
+        CoreTriggerOrderStateView persisted = aeronGateway.place(commandId, normalized.userId(), view);
+        return TriggerOrderAeronGateway.response(persisted);
     }
 
     public TriggerOrderBatchResponse placeBatch(BatchPlaceTriggerOrderRequest request) {
@@ -355,7 +348,8 @@ public class TriggerOrderService {
         validateTriggerPriceFields(request);
         validateExecutionOrder(request.orderType(), request.timeInForce(), request.priceTicks());
         String clientId = emptyToNull(request.clientTriggerOrderId());
-        if (clientId != null && clientId.length() > 64) throw new IllegalArgumentException("clientTriggerOrderId length must be <= 64");
+        if (clientId == null) throw new IllegalArgumentException("clientTriggerOrderId is required");
+        if (clientId.length() > 64) throw new IllegalArgumentException("clientTriggerOrderId length must be <= 64");
         String ocoId = emptyToNull(request.ocoGroupId());
         if (ocoId != null && ocoId.length() > 64) throw new IllegalArgumentException("ocoGroupId length must be <= 64");
         if (request.expiresAt() != null && !request.expiresAt().isAfter(Instant.now())) {

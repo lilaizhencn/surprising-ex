@@ -217,7 +217,7 @@ available + locked = accountTotal
 | D03 | `✅ 已完成` | Trading Provider 可能参与在线触发裁决 | Provider 只保留 Core 查询、命令转发和有界维护 |
 | D04 | `⬜ 未完成` | `OrderFeeSnapshotLookup` 缺失用户费率时回退 instrument default | Trading fee snapshot 尚未完成 Core 状态化，仍可能造成资金对账差异 |
 | D05 | `🟡 部分完成` | mark price、instrument、fee snapshot 缺少统一严格版本门禁 | mark price、instrument、Risk Scan Control 已完成；fee snapshot 仍待迁移 |
-| D06 | `🟡 部分完成` | 订单号生成器仅内存 AtomicReference，跨重启无持久 epoch/租约 | 用户订单已使用稳定 client identity；Algo/系统订单仍使用节点时间序列生成器 |
+| D06 | `✅ 已完成` | 订单号生成器仅内存 AtomicReference，跨重启无持久 epoch/租约 | 普通单、条件单和 Algo 父单均使用分类型稳定 client identity；创建时间由 Core Cluster 时间裁决，JVM 时间序列生成器已删除 |
 | D07 | `✅ 已完成` | 核心结果窗口过小且超窗重复语义不明确 | 已实现有界结果账本、`COMMAND_RESULT_QUERY` 和 source sequence 高水位 |
 | D08 | `✅ 已完成` | Export backlog 缺少明确 drain 和恢复协议 | 已实现 mutation 前背压、批量 ACK、Kafka/PG 故障恢复和监控边界 |
 
@@ -609,7 +609,7 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 | P0/P1 | `TradingCoreState.java`、`TradingCoreReducer.java`、`CoreProbeState.java` | 失败一致性、delta 传播、结果直接返回 |
 | P1 | `DeterministicExchangeCoreAdapter.java` | native GTX、结构化结果、稳定 registry、恢复 token |
 | P1 | `AeronClientPool.java`、`SurprisingAeronClient.java` | stable lane、bounded backpressure、egress dispatcher |
-| P1 | `AeronOrderIdGenerator.java`、订单 service | 稳定 order identity 和结果未知语义 |
+| P1 | `StableOrderIdentity.java`、普通/条件/Algo 订单 service | 分类型稳定 order identity、Core 创建时间和结果未知语义 |
 | P2 | `TradingCoreRuntime`（新类）及 state/index 包 | mutable single-writer runtime、增量索引 |
 | P2 | `StateMapSupport.java`、`TradingCoreState.java` | 删除隐式全量 materialize/constructor scan |
 | P3 | 已删除的 `CoreBookState.java`、snapshot codec、matching adapter | exchange-core 唯一盘口和 native restore |
@@ -966,6 +966,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 37. Core 为 `ResultUnknownException` 增加显式只读 `COMMAND_RESULT_QUERY` 协议；结果查询返回原命令的 `commandStatus/resultCode/appliedCommandCount/stateHash/data`，未知 commandId fail-closed，不改变命令重放和幂等语义。
 38. `SurprisingClusteredService` 使用有界 pending matching、Cluster timer continuation 和按序完成栅栏；普通下单/撤单/改单、盘口查询、强平、结算以及标记价触发的子单都先提交 exchange-core 异步命令，owner 线程不等待 ring future。存在 pending matching 时 snapshot 明确拒绝，不保存或恢复后重新提交未决命令；落后的结果不会越过前序命令。
 39. W5 真实运行 A/B 复现嵌入式 Aeron `ThreadingMode.SHARED` 下三个 Core MediaDriver 在正常运行阶段停止心跳；同机切换 Core 和客户端到 `DEDICATED` 后超过相同窗口并连续完成五次状态查询。Core 和客户端默认固定为 `DEDICATED`，仅保留显式环境变量/系统属性用于受控诊断；直连客户端增加后台 keep-alive，避免导出器或故障驱动在 Kafka/PG 等外围等待期间丢失 Aeron 会话；W5 本地编排升级到 PostgreSQL 18 的新版数据目录布局。
+40. D06 删除普通/Algo 共用的 `AeronOrderIdGenerator` 和条件单 `AeronTriggerOrderIdGenerator`。普通单、条件单、Algo 父单使用互相隔离的稳定身份命名空间；Algo 子单继续使用稳定父单 ID 与 slice index。Provider 以零时间创建模板提交，Product Core 用首次应用命令的 Cluster 时间写入 `startAt/nextSliceAt/createdAt/updatedAt`，命令结果账本和 snapshot 恢复后重复提交返回原状态，载荷变化返回 `IDEMPOTENCY_CONFLICT`。当前没有真正无业务键的系统订单创建流，因此不新增无消费者的通用 Core sequence；费率管理配置要求调用方显式提供 `feeScheduleId`，不再误用订单 ID 生成器。
 
 仍未宣称完成的交付物：
 
@@ -1045,3 +1046,20 @@ Lifecycle Provider 只以单调时钟执行 `scanDelayMs` 调度，不持有另�
 定向验证：`CoreRiskScanControlCodecTest` 2 项、`CoreProbeStateTest` 28 项通过；受默认批次变化影响的
 `CoreRiskStateTest#pendingRiskScansRemainIndependentAcrossSymbols` 已按有界分页重新验证通过；Lifecycle Provider
 及其直接依赖增量编译通过。完整六产品线真实 Provider 与 PostgreSQL 停止启动门禁仍按 P4/P5 后续出口执行。
+
+### 19.5 D06 稳定交易身份（2026-08-18）
+
+普通订单沿用既有稳定身份；条件单与 Algo 父单新增独立命名空间，分别要求
+`clientTriggerOrderId` 和 `clientAlgoOrderId`。相同 `ProductLine + userId + client key` 在 Provider 重启后生成
+相同业务 ID 和 command ID，不同订单类型不会因为复用同一客户端字符串发生身份碰撞。Algo 子单继续由稳定父单 ID
+和切片序号生成普通订单 `clientOrderId`。
+
+Provider 首次创建载荷不再写 JVM 当前时间；Product Core 在命令第一次应用时用 Cluster 时间物化创建时间，随后由
+结果账本、Cluster Log 和 snapshot 恢复。条件单 place 响应直接携带 Core 已物化状态，不增加一次同步查询；重复请求返回
+首次结果，复用 command ID 但改变业务载荷会以 `IDEMPOTENCY_CONFLICT` 失败关闭。两个 JVM 本地 AtomicReference
+生成器及普通订单 service 的无使用构造参数已删除。费率管理配置不是交易订单，改为显式正数 `feeScheduleId`，不引入
+PostgreSQL sequence 或无消费者的通用 Core sequence。
+
+定向验证：`CoreAlgoOrderCodecTest`、`CoreTriggerOrderCodecTest` 共 6 项通过；`CoreProbeStateTest` 30 项通过，
+覆盖 Cluster 时间物化、重复结果、snapshot 恢复和载荷冲突；Trading Provider 的身份、Algo、Trigger、Fee、普通单和
+批量单相关 25 项测试通过。改动未触及撮合、余额、持仓或结算算法，因此本阶段未重复执行六产品线资金门禁。

@@ -14,8 +14,12 @@ public final class StableOrderIdentity {
     public static final int IDENTITY_VERSION = 1;
     private static final String PLACE_ORDER_NAMESPACE = "place-order\u0000";
     private static final String REPLACEMENT_ORDER_NAMESPACE = "replacement-order\u0000";
+    private static final String TRIGGER_ORDER_NAMESPACE = "trigger-order\u0000";
+    private static final String ALGO_ORDER_NAMESPACE = "algo-order\u0000";
     private static final String COMMAND_NAMESPACE = "command\u0000";
     private static final String REPLACEMENT_COMMAND_NAMESPACE = "replacement-command\u0000";
+    private static final String TRIGGER_COMMAND_NAMESPACE = "trigger-command\u0000";
+    private static final String ALGO_COMMAND_NAMESPACE = "algo-command\u0000";
 
     private StableOrderIdentity() {
     }
@@ -29,6 +33,16 @@ public final class StableOrderIdentity {
                 REPLACEMENT_ORDER_NAMESPACE + requireKey(clientOrderId)));
     }
 
+    public static long triggerOrderId(ProductLine productLine, long userId, String clientTriggerOrderId) {
+        return positiveLong(tuple(productLine, userId,
+                TRIGGER_ORDER_NAMESPACE + requireKey(clientTriggerOrderId)));
+    }
+
+    public static long algoOrderId(ProductLine productLine, long userId, String clientAlgoOrderId) {
+        return positiveLong(tuple(productLine, userId,
+                ALGO_ORDER_NAMESPACE + requireKey(clientAlgoOrderId)));
+    }
+
     public static UUID commandId(ProductLine productLine, long userId, String clientRequestId) {
         return uuid(tuple(productLine, userId, COMMAND_NAMESPACE + requireKey(clientRequestId)));
     }
@@ -36,6 +50,16 @@ public final class StableOrderIdentity {
     public static UUID replacementCommandId(ProductLine productLine, long userId, String clientRequestId) {
         return uuid(tuple(productLine, userId,
                 REPLACEMENT_COMMAND_NAMESPACE + requireKey(clientRequestId)));
+    }
+
+    public static UUID triggerCommandId(ProductLine productLine, long userId, String clientTriggerOrderId) {
+        return uuid(tuple(productLine, userId,
+                TRIGGER_COMMAND_NAMESPACE + requireKey(clientTriggerOrderId)));
+    }
+
+    public static UUID algoCommandId(ProductLine productLine, long userId, String clientAlgoOrderId) {
+        return uuid(tuple(productLine, userId,
+                ALGO_COMMAND_NAMESPACE + requireKey(clientAlgoOrderId)));
     }
 
     private static byte[] tuple(ProductLine productLine, long userId, String clientKey) {

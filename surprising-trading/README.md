@@ -89,7 +89,7 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 - `trading_fee_schedules` 可配置用户全局或单 symbol 覆盖，`source_type` 支持 `USER_OVERRIDE`、`VIP`、`MARKET_MAKER`、`PROMOTION`、`RISK_OVERRIDE`。
   单 symbol 优先于用户全局，未匹配时使用当前 Instrument 默认费率。
 - 多个用户全局费率同时 active 时，source 优先级是 `RISK_OVERRIDE`、`USER_OVERRIDE`、`PROMOTION`、`MARKET_MAKER`、`VIP`，防止 VIP 费率覆盖风控、人工、活动或做市商费率。
-- 管理接口：`POST /api/v1/admin/trading/fees/schedules` 新增/更新费率，`POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` 禁用费率，
+- 管理接口：`POST /api/v1/admin/trading/fees/schedules` 新增/更新费率，请求必须显式携带正数 `feeScheduleId`；`POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` 禁用费率，
   `GET /api/v1/admin/trading/fees/schedules` 查询配置。查询支持 `limit/cursor/sort` 游标分页，排序白名单为 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`、`effectiveTime.desc`、`effectiveTime.asc`，响应保留 `schedules/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
 - 交易服务不再计算 30 日成交量、资产估值或自动 VIP 档位，也不再提供 `/fees/tiers` 系列接口。
   这些逻辑属于未来财务运营系统，必须消费事件投影并使用独立数据库；产出的最终费率通过明确的费率配置接口或事件进入交易服务。
@@ -151,7 +151,8 @@ Topic 路由，再统一追加到用户分区 WAL/RocksDB，由 `OrderUserStateS
 - `ICEBERG` 要求正数限价，`timeInForce` 必须为 `GTC` 或 `GTX`。它同一时间只保留一笔可见子单，前一片成交或取消后再放出下一片。
 - 活动算法单会阻断保证金模式和持仓模式切换，避免未来子单按旧模式假设继续发出。
 - 取消父算法单会同时取消活动子单；`cancel-open` 支持用户级和可选 symbol 级批量取消。
-- 算法单父指令、子单映射、进度和撤单状态都由 `OrderUserStateService` 写入同一用户分区 WAL；
+- `clientAlgoOrderId` 必填。父单身份由产品线、用户和该客户端业务键稳定确定；子单身份由父单和切片序号稳定确定。
+- 算法单父指令、子单映射、进度和撤单状态都由 Product Core 裁决并随 Cluster Log/快照恢复；
   `AlgoOrderService` 只负责参数校验和调度，不能通过数据库表补偿或重新拼装状态。
 
 REST 接口：
@@ -307,10 +308,12 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - `trading_orders_user_client_order_uidx` 保证同一用户 `clientOrderId` 幂等。
 - 下单插入只允许这个部分 `(userId, clientOrderId)` 唯一键冲突被幂等跳过。`orderId` 或其他唯一键冲突必须失败，不能被当成请求重放。
 - 幂等冲突发生在保证金冻结前；重复请求只返回已存在订单，不会创建新的 reservation 或重复锁定余额。
-- `orderId`、`eventId`、`commandId` 等订单事实 ID 在 JVM/WAL 内按节点和时间生成；数据库序列只允许
-  用于异步审计或管理配置，不参与订单状态裁决。
+- 普通订单、条件单和算法父单分别使用独立身份域，并由 `ProductLine + userId + client business key`
+  确定稳定的业务 ID 和首次创建 command ID；进程重启、并发重试和时钟回拨不会分配新订单。
+- 普通订单的 `clientOrderId`、条件单的 `clientTriggerOrderId` 和算法单的 `clientAlgoOrderId` 均为必填业务键。
+  首次创建时间由 Product Core 使用 Cluster 时间裁决并随快照恢复，Provider 不维护本地序列或时间 epoch。
 - 订单 Kafka 通知由本地事实状态同步发布；数据库投影不得反向驱动订单状态。
-- Core 的用户级 clientTriggerOrderId 索引保证同一用户条件单幂等。
+- Core 的用户级 `clientTriggerOrderId` 索引和稳定 command 指纹保证同一用户条件单幂等；相同身份但不同业务载荷会 fail-closed。
 - `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + symbol + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
 - 订单事实事件由用户分区 WAL/RocksDB 提交后直接发送 Kafka；数据库投影只按用户修订号异步替换，数据库不可用不会回滚订单状态。
 - HTTP、账户结果、撮合结果和只减仓清理都必须先写入 `order.user.commands.v1`；订单节点之间不能直接

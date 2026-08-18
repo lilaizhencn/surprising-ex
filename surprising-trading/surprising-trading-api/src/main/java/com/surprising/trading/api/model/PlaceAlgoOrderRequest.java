@@ -10,7 +10,7 @@ import java.time.Instant;
 
 public record PlaceAlgoOrderRequest(
         @Positive long userId,
-        @Size(max = 64) String clientAlgoOrderId,
+        @NotBlank @Size(max = 64) String clientAlgoOrderId,
         @NotBlank @Size(max = 64) String symbol,
         @NotNull AlgoOrderType algoType,
         @NotNull OrderSide side,

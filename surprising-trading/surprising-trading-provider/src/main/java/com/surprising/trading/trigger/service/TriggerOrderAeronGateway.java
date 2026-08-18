@@ -42,6 +42,12 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
         }
         return response;
     }
+    public CoreTriggerOrderStateView place(UUID id, long userId, CoreTriggerOrderStateView view) {
+        CoreResponse response = command(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,
+                CoreTriggerOrderCodec.encodeState(view));
+        return CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("Aeron trigger placement returned no state"));
+    }
     public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit) {
         return openOrders(userId, symbol, before, limit, null);
     }

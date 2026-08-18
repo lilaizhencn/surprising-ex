@@ -46,6 +46,9 @@ public final class TradingCoreReducer {
         if (view.userId() != userId || view.productLine() != state.productLine()) {
             throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
         }
+        if (view.clientTriggerOrderId().isBlank()) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
+        }
         CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(view.symbol()));
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
@@ -338,6 +341,9 @@ public final class TradingCoreReducer {
         requireUserId(userId);
         if (view.userId() != userId) {
             throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
+        }
+        if (view.clientAlgoOrderId().isBlank()) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "clientAlgoOrderId is required");
         }
         CoreAlgoOrderState next = CoreAlgoOrderState.from(view);
         CoreAlgoOrderState current = state.algoOrders().get(next.algoOrderId());

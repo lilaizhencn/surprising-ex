@@ -58,8 +58,8 @@ public class AeronOrderCommandService {
     private final MarkPriceLookup markPrices;
     private final TradingOrderProperties properties;
 
-    public AeronOrderCommandService(OrderAeronGateway aeron, AeronOrderIdGenerator orderIds,
-                                    InstrumentRuleLookup instrumentRules, MarkPriceLookup markPrices,
+    public AeronOrderCommandService(OrderAeronGateway aeron, InstrumentRuleLookup instrumentRules,
+                                    MarkPriceLookup markPrices,
                                     TradingOrderProperties properties) {
         this.aeron = aeron;
         this.instrumentRules = instrumentRules;

@@ -70,8 +70,7 @@ class AeronOrderCommandServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAeron().setNodeId(3);
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        service = new AeronOrderCommandService(aeron, new AeronOrderIdGenerator(properties), instrumentRules,
-                markPrices, properties);
+        service = new AeronOrderCommandService(aeron, instrumentRules, markPrices, properties);
     }
 
     @Test

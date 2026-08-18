@@ -1,7 +1,6 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.AlgoOrderBatchItemResponse;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
 import com.surprising.trading.api.model.AlgoOrderQueryResponse;
@@ -28,6 +27,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -45,33 +45,31 @@ public class AlgoOrderService {
     private final TradingOrderProperties properties;
     private final OrderService orderService;
     private final AeronAlgoOrderStore store;
-    private final AeronOrderIdGenerator ids;
 
     @Autowired
     public AlgoOrderService(TradingOrderProperties properties,
                             OrderService orderService,
-                            AeronAlgoOrderStore store,
-                            AeronOrderIdGenerator ids) {
+                            AeronAlgoOrderStore store) {
         this.properties = properties;
         this.orderService = orderService;
         this.store = store;
-        this.ids = ids;
     }
 
     public AlgoOrderResponse place(PlaceAlgoOrderRequest request) {
         PlaceAlgoOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
         requireLocalProductLine(productLine);
-        Instant now = Instant.now();
-        Instant startAt = normalized.startAt() == null || normalized.startAt().isBefore(now)
-                ? now : normalized.startAt();
+        long algoOrderId = StableOrderIdentity.algoOrderId(productLine, normalized.userId(),
+                normalized.clientAlgoOrderId());
+        UUID commandId = StableOrderIdentity.algoCommandId(productLine, normalized.userId(),
+                normalized.clientAlgoOrderId());
         AlgoOrderRecord record = new AlgoOrderRecord(
-                ids.next(), productLine, normalized.userId(), normalized.clientAlgoOrderId(),
+                algoOrderId, productLine, normalized.userId(), normalized.clientAlgoOrderId(),
                 normalized.symbol(), normalized.algoType(), normalized.side(), normalized.priceTicks(),
                 normalized.quantitySteps(), normalized.childQuantitySteps(), normalized.intervalSeconds(),
                 normalized.durationSeconds(), normalized.marginMode(), normalized.positionSide(), normalized.reduceOnly(),
                 normalized.postOnly(), normalized.timeInForce(), AlgoOrderStatus.PENDING, null, null,
-                TraceContext.currentOrCreate(), startAt, startAt, null, now, now);
+                commandId.toString(), normalized.startAt(), null, null, null, null);
         var persisted = store.upsert(record, List.of(), 1);
         AlgoOrderResponse response = store.response(store.get(persisted.userId(), persisted.algoOrderId()));
         return response;
@@ -305,7 +303,14 @@ public class AlgoOrderService {
         if (request.algoType() == AlgoOrderType.TWAP && postOnly) {
             throw new IllegalArgumentException("TWAP does not support postOnly");
         }
-        return new PlaceAlgoOrderRequest(request.userId(), emptyToNull(request.clientAlgoOrderId()), symbol,
+        String clientAlgoOrderId = emptyToNull(request.clientAlgoOrderId());
+        if (clientAlgoOrderId == null) {
+            throw new IllegalArgumentException("clientAlgoOrderId is required");
+        }
+        if (clientAlgoOrderId.length() > 64) {
+            throw new IllegalArgumentException("clientAlgoOrderId length must be <= 64");
+        }
+        return new PlaceAlgoOrderRequest(request.userId(), clientAlgoOrderId, symbol,
                 request.algoType(), request.side(), request.priceTicks(), request.quantitySteps(),
                 request.childQuantitySteps(), request.intervalSeconds(), request.durationSeconds(), marginMode,
                 positionSide, request.reduceOnly(), postOnly, tif, request.startAt());

@@ -12,6 +12,7 @@
 - **Instrument State**：由 Instrument 服务通过 PostgreSQL 管理的产品配置和生命周期状态；交易所需版本通过 Aeron command 导入 Product Core，命令执行不回查数据库。
 - **Risk Scan Control**：Product Core 内控制风险扫描启停、续跑间隔和单批工作上限的版本化策略；它不包含 Instrument 风险参数，也不由数据库配置覆盖。
 - **Trading Provider**：统一承载普通订单和触发订单 HTTP/API、校验、幂等和 Aeron 命令提交的交易入口服务；触发订单不再通过独立进程或 HTTP 回调调用普通订单服务。
+- **Trading Identity**：用户一次明确交易意图的稳定身份；相同用户意图的重试或进程重启仍指向同一订单，普通订单、条件单和算法父单属于不同身份域。
 
 ## Boundary
 

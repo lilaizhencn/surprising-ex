@@ -167,6 +167,9 @@ public class OrderFeeRepository {
         if (request == null) {
             throw new IllegalArgumentException("fee schedule request is required");
         }
+        if (request.feeScheduleId() == null || request.feeScheduleId() <= 0) {
+            throw new IllegalArgumentException("feeScheduleId must be positive");
+        }
         if (request.userId() <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
