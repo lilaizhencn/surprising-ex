@@ -45,6 +45,24 @@ class StateMapSupportTest {
     }
 
     @Test
+    void directDeltaLineageRequiresTheImmediateParent() {
+        NavigableMap<Long, String> base = StateMapSupport.freezeSorted(
+                new TreeMap<>(Map.of(1L, "one")));
+        NavigableMap<Long, String> first = StateMapSupport.delta(base);
+        first.put(2L, "two");
+        NavigableMap<Long, String> frozenFirst = StateMapSupport.freezeSorted(first);
+        NavigableMap<Long, String> second = StateMapSupport.delta(frozenFirst);
+        second.put(3L, "three");
+        NavigableMap<Long, String> frozenSecond = StateMapSupport.freezeSorted(second);
+
+        assertThat(StateMapSupport.isDirectDeltaOf(base, base)).isTrue();
+        assertThat(StateMapSupport.isDirectDeltaOf(base, frozenFirst)).isTrue();
+        assertThat(StateMapSupport.isDirectDeltaOf(frozenFirst, frozenSecond)).isTrue();
+        assertThat(StateMapSupport.isDirectDeltaOf(base, frozenSecond)).isFalse();
+        assertThat(StateMapSupport.isDirectDeltaOf(base, new TreeMap<>(base))).isFalse();
+    }
+
+    @Test
     void persistentPathCopiesKeepValuesWithoutPeriodicCompaction() {
         NavigableMap<Long, String> base = new TreeMap<>(Map.of(1L, "one"));
         NavigableMap<Long, String> previous = base;

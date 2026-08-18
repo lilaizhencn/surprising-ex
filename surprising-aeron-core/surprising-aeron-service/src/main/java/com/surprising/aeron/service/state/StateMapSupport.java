@@ -57,6 +57,18 @@ public final class StateMapSupport {
         return Set.of();
     }
 
+    static boolean isDirectDeltaOf(Map<?, ?> before, Map<?, ?> after) {
+        if (before == after) return true;
+        NavigableMap<?, ?> rawBefore = rawUntyped(before);
+        NavigableMap<?, ?> rawAfter = rawUntyped(after);
+        return rawAfter instanceof DeltaMap<?, ?> delta && delta.base() == rawBefore;
+    }
+
+    private static NavigableMap<?, ?> rawUntyped(Map<?, ?> values) {
+        if (values instanceof FrozenMap<?, ?> frozen) return frozen.raw();
+        return values instanceof NavigableMap<?, ?> navigable ? navigable : null;
+    }
+
     private static <K, V> NavigableMap<K, V> raw(Map<K, V> values) {
         if (values instanceof FrozenMap<?, ?> frozen) {
             return (NavigableMap<K, V>) frozen.raw();

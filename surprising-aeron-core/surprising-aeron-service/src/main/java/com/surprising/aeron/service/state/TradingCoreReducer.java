@@ -498,8 +498,8 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("POSITION_MODE_SWITCH_BLOCKED",
                     "open positions or orders block position mode update");
         }
-        CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
-                Math.incrementExact(user.revision()), user.balances(), user.reservations(), user.positions(),
+        CoreUserState nextUser = user.transition(Math.incrementExact(user.revision()),
+                user.balances(), user.reservations(), user.positions(),
                 command.positionMode());
         return replaceUser(state, nextUser, state.orders());
     }
@@ -544,8 +544,8 @@ public final class TradingCoreReducer {
         positions.put(key, new CorePositionState(position.symbol(), position.marginAsset(), position.marginMode(),
                 position.positionSide(), position.instrumentVersion(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin));
-        CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
-                Math.incrementExact(user.revision()), balances, user.reservations(), positions, user.positionMode());
+        CoreUserState nextUser = user.transition(Math.incrementExact(user.revision()),
+                balances, user.reservations(), positions, user.positionMode());
         return replaceUser(state, nextUser, state.orders());
     }
 
@@ -562,8 +562,7 @@ public final class TradingCoreReducer {
 
         Map<String, AssetBalance> balances = StateMapSupport.delta(currentUser.balances());
         balances.put(asset, nextBalance);
-        CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
-                Math.incrementExact(currentUser.revision()), balances,
+        CoreUserState nextUser = currentUser.transition(Math.incrementExact(currentUser.revision()), balances,
                 currentUser.reservations(), currentUser.positions(), currentUser.positionMode());
         return replaceUser(state, nextUser, state.orders());
     }
@@ -629,8 +628,8 @@ public final class TradingCoreReducer {
         balances.put(asset, nextBalance);
         Map<Long, OrderReservation> reservations = StateMapSupport.delta(currentUser.reservations());
         reservations.put(command.orderId(), reservation);
-        CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
-                Math.incrementExact(currentUser.revision()), balances, reservations, currentUser.positions(),
+        CoreUserState nextUser = currentUser.transition(Math.incrementExact(currentUser.revision()),
+                balances, reservations, currentUser.positions(),
                 currentUser.positionMode());
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         orders.put(order.orderId(), order);
@@ -672,8 +671,8 @@ public final class TradingCoreReducer {
         balances.put(nextBalance.asset(), nextBalance);
         Map<Long, OrderReservation> reservations = StateMapSupport.delta(currentUser.reservations());
         reservations.put(command.orderId(), nextReservation);
-        CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
-                Math.incrementExact(currentUser.revision()), balances, reservations, currentUser.positions(),
+        CoreUserState nextUser = currentUser.transition(Math.incrementExact(currentUser.revision()),
+                balances, reservations, currentUser.positions(),
                 currentUser.positionMode());
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         orders.put(command.orderId(), currentOrder.cancel());
@@ -700,8 +699,8 @@ public final class TradingCoreReducer {
         balances.put(balance.asset(), releaseUnits == 0 ? balance : balance.release(releaseUnits));
         Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
         reservations.remove(orderId);
-        CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
-                Math.incrementExact(user.revision()), balances, reservations, user.positions(), user.positionMode());
+        CoreUserState nextUser = user.transition(Math.incrementExact(user.revision()),
+                balances, reservations, user.positions(), user.positionMode());
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         orders.put(orderId, order.reject());
         return replaceUser(state, nextUser, orders, StateMapSupport.delta(state.clientOrderIndex()));
@@ -727,9 +726,8 @@ public final class TradingCoreReducer {
             }
             Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
             reservations.remove(orderId);
-            users.put(order.userId(), new CoreUserState(user.productLine(), user.userId(),
-                    Math.incrementExact(user.revision()), user.balances(), reservations, user.positions(),
-                    user.positionMode()));
+            users.put(order.userId(), user.transition(Math.incrementExact(user.revision()),
+                    user.balances(), reservations, user.positions(), user.positionMode()));
             changed = true;
         }
         if (!changed) return state;
@@ -1325,9 +1323,8 @@ public final class TradingCoreReducer {
             if (result.appliedDelta() != 0) {
                 Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
                 balances.put(instrument.settleAsset(), result.balance());
-                users.put(user.userId(), new CoreUserState(user.productLine(), user.userId(),
-                        Math.incrementExact(user.revision()), balances, user.reservations(), user.positions(),
-                        user.positionMode()));
+                users.put(user.userId(), user.transition(Math.incrementExact(user.revision()),
+                        balances, user.reservations(), user.positions(), user.positionMode()));
                 treasury = treasury.adjustInsurance(instrument.settleAsset(), Math.negateExact(result.appliedDelta()));
             }
             long debitRelief = Math.subtractExact(result.appliedDelta(), delta);
@@ -1512,9 +1509,8 @@ public final class TradingCoreReducer {
                         Math.addExact(position.realizedPnlUnits(), cashDelta), 0));
             }
             balances.put(instrument.settleAsset(), balance);
-            users.put(user.userId(), new CoreUserState(user.productLine(), user.userId(),
-                    Math.incrementExact(user.revision()), balances, user.reservations(), positions,
-                    user.positionMode()));
+            users.put(user.userId(), user.transition(Math.incrementExact(user.revision()),
+                    balances, user.reservations(), positions, user.positionMode()));
         }
         boolean complete = !chunked || !moreUsers;
         long nextCursorUserId = complete ? 0 : selectedUserIds.getLast();
@@ -1686,8 +1682,8 @@ public final class TradingCoreReducer {
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(), pnl),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin)));
-        CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
-                Math.incrementExact(user.revision()), balances, user.reservations(), positions, user.positionMode());
+        CoreUserState nextUser = user.transition(Math.incrementExact(user.revision()),
+                balances, user.reservations(), positions, user.positionMode());
         Map<Long, CoreUserState> users = StateMapSupport.delta(canceled.users());
         users.put(nextUser.userId(), nextUser);
         Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(canceled.riskState().liquidations());
@@ -1875,8 +1871,8 @@ public final class TradingCoreReducer {
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(), coverCapacity),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin)));
-        CoreUserState nextTarget = new CoreUserState(target.productLine(), target.userId(),
-                Math.incrementExact(target.revision()), balances, target.reservations(), positions,
+        CoreUserState nextTarget = target.transition(Math.incrementExact(target.revision()),
+                balances, target.reservations(), positions,
                 target.positionMode());
         Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
         users.put(nextTarget.userId(), nextTarget);
@@ -1999,9 +1995,8 @@ public final class TradingCoreReducer {
             if (releaseUnits != 0) balances.put(reservation.asset(), balance.release(releaseUnits));
             Map<Long, OrderReservation> reservations = StateMapSupport.delta(currentUser.reservations());
             reservations.put(currentOrder.orderId(), reservation.releaseAll());
-            users.put(currentUser.userId(), new CoreUserState(currentUser.productLine(), currentUser.userId(),
-                    Math.incrementExact(currentUser.revision()), balances, reservations, currentUser.positions(),
-                    currentUser.positionMode()));
+            users.put(currentUser.userId(), currentUser.transition(Math.incrementExact(currentUser.revision()),
+                    balances, reservations, currentUser.positions(), currentUser.positionMode()));
             orders.put(currentOrder.orderId(), currentOrder.cancel());
             changed = true;
         }
@@ -2086,8 +2081,8 @@ public final class TradingCoreReducer {
         }
         Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
         reservations.put(order.orderId(), reservation.consume(reservationDebit));
-        CoreUserState nextUser = new CoreUserState(user.productLine(), user.userId(),
-                Math.incrementExact(user.revision()), balances, reservations, user.positions(), user.positionMode());
+        CoreUserState nextUser = user.transition(Math.incrementExact(user.revision()),
+                balances, reservations, user.positions(), user.positionMode());
         return new SpotFillResult(nextUser, treasury.adjustFee(quoteAsset, Math.negateExact(feeDelta)));
     }
 
@@ -2187,8 +2182,8 @@ public final class TradingCoreReducer {
         reservations.put(order.orderId(), nextReservation);
         Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
         positions.put(positionKey, position);
-        return new DerivativeFillResult(new CoreUserState(user.productLine(), user.userId(),
-                Math.incrementExact(user.revision()), balances, reservations, positions, user.positionMode()), treasury);
+        return new DerivativeFillResult(user.transition(Math.incrementExact(user.revision()),
+                balances, reservations, positions, user.positionMode()), treasury);
     }
 
     private static CashResult applyCash(AssetBalance balance, long delta) {
@@ -2257,8 +2252,8 @@ public final class TradingCoreReducer {
         balances.put(reservation.asset(), requireBalance(user, reservation.asset()).release(releaseUnits));
         Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
         reservations.put(orderId, reservation.releaseAll());
-        return new CoreUserState(user.productLine(), user.userId(), Math.incrementExact(user.revision()),
-                balances, reservations, user.positions(), user.positionMode());
+        return user.transition(Math.incrementExact(user.revision()), balances, reservations,
+                user.positions(), user.positionMode());
     }
 
     private static OrderReservation requireReservation(CoreUserState user, long orderId) {
