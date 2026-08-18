@@ -20,7 +20,7 @@
     <dependencyManagement>
         <dependencies>
             <dependency><groupId>com.surprising</groupId><artifactId>surprising-funding-api</artifactId><version>${project.version}</version></dependency>
-            <dependency><groupId>com.surprising</groupId><artifactId>surprising-risk-api</artifactId><version>${project.version}</version></dependency>
+            <dependency><groupId>com.surprising</groupId><artifactId>surprising-derivatives-lifecycle-api</artifactId><version>${project.version}</version></dependency>
             <dependency><groupId>com.surprising</groupId><artifactId>surprising-instrument-api</artifactId><version>${project.version}</version></dependency>
             <dependency><groupId>com.surprising</groupId><artifactId>surprising-account-api</artifactId><version>${project.version}</version></dependency>
             <dependency><groupId>com.surprising</groupId><artifactId>surprising-trading-api</artifactId><version>${project.version}</version></dependency>

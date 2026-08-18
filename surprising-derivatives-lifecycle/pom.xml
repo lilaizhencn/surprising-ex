@@ -9,110 +9,11 @@
         <version>1.0.0-SNAPSHOT</version>
         <relativePath>../surprising-parent/pom.xml</relativePath>
     </parent>
-
     <artifactId>surprising-derivatives-lifecycle</artifactId>
+    <packaging>pom</packaging>
     <name>surprising-derivatives-lifecycle</name>
-    <description>Unified risk, liquidation, insurance and ADL lifecycle provider</description>
-
-    <dependencies>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-aeron-client</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-risk-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-trading-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-instrument-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-account-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-price-consumer</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-commons</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-context</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-openfeign</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.kafka</groupId>
-            <artifactId>spring-kafka</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>tools.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-jdbc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.surprising.derivatives.lifecycle.SurprisingDerivativesLifecycleApplication</mainClass>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.graalvm.buildtools</groupId>
-                <artifactId>native-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.surprising.derivatives.lifecycle.SurprisingDerivativesLifecycleApplication</mainClass>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
+    <modules>
+        <module>surprising-derivatives-lifecycle-api</module>
+        <module>surprising-derivatives-lifecycle-provider</module>
+    </modules>
 </project>

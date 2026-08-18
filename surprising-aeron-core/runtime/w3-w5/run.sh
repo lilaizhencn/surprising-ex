@@ -482,7 +482,7 @@ jar_path() {
     account) printf '%s/surprising-account/surprising-account-provider/target/surprising-account-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     command) printf '%s/surprising-trading/surprising-command-provider/target/surprising-command-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     matching) printf '%s/surprising-trading/surprising-matching-provider/target/surprising-matching-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
-    derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/target/surprising-derivatives-lifecycle-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
+    derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     funding) printf '%s/surprising-funding/surprising-funding-provider/target/surprising-funding-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     maker) printf '%s/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;

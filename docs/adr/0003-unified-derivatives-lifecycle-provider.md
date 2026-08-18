@@ -6,7 +6,7 @@ Accepted — 2026-08-18
 
 ## Decision
 
-Risk, Liquidation, Insurance and ADL source code is owned by one `surprising-derivatives-lifecycle` project and runs in one JVM per ProductLine on port `9087`. Their existing API contracts, routes and Kafka consumer group semantics remain compatible. The project contains the four domain packages and a single lifecycle application; the four legacy Provider modules are no longer runtime dependencies.
+Risk, Liquidation, Insurance and ADL source code is owned by one `surprising-derivatives-lifecycle` project and runs in one JVM per ProductLine on port `9087`. Their existing API contracts, routes and Kafka consumer group semantics remain compatible. The project contains one `surprising-derivatives-lifecycle-api` contract artifact and one `surprising-derivatives-lifecycle-provider` implementation artifact; the four legacy modules are deleted.
 
 ## Boundaries
 
@@ -18,4 +18,4 @@ Risk, Liquidation, Insurance and ADL source code is owned by one `surprising-der
 
 ## Operations
 
-Start `derivatives-lifecycle` instead of the four old processes. The lifecycle project owns one `DerivativesAeronClient`, one shared Instrument snapshot cache/initializer and one Spring health/database configuration. The old modules are not launched. Use the JDK 25 Aeron flags already emitted by `runtime/w3-w5/run.sh` (`--add-exports java.base/jdk.internal.misc=ALL-UNNAMED`).
+Build and start `surprising-derivatives-lifecycle-provider` instead of the four old processes. The lifecycle project owns one `DerivativesAeronClient`, one shared Instrument snapshot cache/initializer and one Spring health/database configuration. Use the JDK 25 Aeron flags already emitted by `runtime/w3-w5/run.sh` (`--add-exports java.base/jdk.internal.misc=ALL-UNNAMED`).

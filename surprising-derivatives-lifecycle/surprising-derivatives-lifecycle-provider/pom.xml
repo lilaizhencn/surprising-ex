@@ -3,37 +3,26 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-
     <parent>
         <groupId>com.surprising</groupId>
         <artifactId>surprising-parent</artifactId>
         <version>1.0.0-SNAPSHOT</version>
-        <relativePath>../surprising-parent/pom.xml</relativePath>
+        <relativePath>../../surprising-parent/pom.xml</relativePath>
     </parent>
 
-    <artifactId>surprising-gateway</artifactId>
-    <name>surprising-gateway</name>
-    <description>Frontend REST gateway for Surprising Exchange</description>
+    <artifactId>surprising-derivatives-lifecycle-provider</artifactId>
+    <name>surprising-derivatives-lifecycle</name>
+    <description>Unified risk, liquidation, insurance and ADL lifecycle provider</description>
 
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-product-api</artifactId>
+            <artifactId>surprising-derivatives-lifecycle-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-aeron-protocol</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-candlestick-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-price-api</artifactId>
+            <artifactId>surprising-aeron-client</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -43,56 +32,18 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-instrument-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-account-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-derivatives-lifecycle-api</artifactId>
+            <artifactId>surprising-price-consumer</artifactId>
             <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-funding-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>jakarta.validation</groupId>
-            <artifactId>jakarta.validation-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-websocket</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-jdbc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka-clients</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -103,12 +54,41 @@
             <artifactId>spring-cloud-context</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
         </dependency>
         <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -123,14 +103,14 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.surprising.gateway.provider.SurprisingGatewayApplication</mainClass>
+                    <mainClass>com.surprising.derivatives.lifecycle.SurprisingDerivativesLifecycleApplication</mainClass>
                 </configuration>
             </plugin>
             <plugin>
                 <groupId>org.graalvm.buildtools</groupId>
                 <artifactId>native-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.surprising.gateway.provider.SurprisingGatewayApplication</mainClass>
+                    <mainClass>com.surprising.derivatives.lifecycle.SurprisingDerivativesLifecycleApplication</mainClass>
                 </configuration>
             </plugin>
         </plugins>

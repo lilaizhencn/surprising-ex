@@ -21,11 +21,7 @@
         <module>surprising-price</module>
         <module>surprising-trading</module>
         <module>surprising-account</module>
-        <module>surprising-adl</module>
         <module>surprising-funding</module>
-        <module>surprising-insurance</module>
-        <module>surprising-liquidation</module>
-        <module>surprising-risk</module>
         <module>surprising-derivatives-lifecycle</module>
         <module>surprising-gateway</module>
         <module>surprising-maker</module>

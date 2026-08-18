@@ -65,11 +65,9 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | `surprising-price` | 独立指数价、标记价和汇率服务 |
 | `surprising-trading` | Provider/API 边界；最终订单、条件单、算法单和 exchange-core 裁决由 Aeron Core 完成 |
 | `surprising-account` | 余额、账本、账户指令、结算、持仓和保证金 |
-| `surprising-risk` | Core 风险快照查询和投影 API；Provider 由统一生命周期进程承载 |
-| `surprising-liquidation` | 强平 API；Provider 由统一生命周期进程承载 |
+| `surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api` | Risk、强平、保险、ADL 统一 API contracts |
+| `surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider` | Risk、强平、保险、ADL 统一 Provider/JVM |
 | `surprising-funding` | 资金费 API 和独立资金费服务 |
-| `surprising-insurance` | 保险基金 API；Provider 由统一生命周期进程承载 |
-| `surprising-adl` | ADL API；Provider 由统一生命周期进程承载 |
 | `surprising-candlestick` | Kafka Streams + RocksDB K 线 |
 | `surprising-gateway` | REST gateway、WebSocket fanout 和统一对外入口 |
 | `surprising-maker` | 内部做市和交易链路压测 |

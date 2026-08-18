@@ -742,8 +742,8 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 本轮验证命令（JDK 25）：
 
 ```text
-mvn -pl :surprising-funding-provider,:surprising-liquidation,:surprising-insurance,:surprising-adl -am -DskipTests compile
-mvn -pl :surprising-funding-provider,:surprising-liquidation,:surprising-insurance,:surprising-adl -am -Dtest=FundingServiceTest,LiquidationServiceTest,InsuranceServiceTest,AdlServiceTest -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl :surprising-funding-provider,:surprising-derivatives-lifecycle-provider -am -DskipTests compile
+mvn -pl :surprising-funding-provider,:surprising-derivatives-lifecycle-provider -am -Dtest=FundingServiceTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 结果：受影响模块编译通过，4 个 Provider service 测试类共 21 个测试通过。该结果只证明 Provider→Core 代码边界和有界 continuation，不等价于真实 HTTP、做市、用户资金和 Treasury 对账门禁；这些仍是 P4 的下一出口。
@@ -752,7 +752,7 @@ mvn -pl :surprising-funding-provider,:surprising-liquidation,:surprising-insuran
 
 此前表格中的“PostgreSQL 仅记录历史/投影”仍可能被误读为生命周期调用可以同步或异步直写数据库。本次明确修订为：Core 命令返回 `APPLIED` 即是在线业务完成条件，Provider 不写 PostgreSQL ledger、sequence、coverage 或 ADL event。`AeronLifecycleCoordinator.shared()` 提供跨 Funding/Liquidation/Insurance/ADL 的统一有界调度；保险覆盖、资金调整、清算费和 ADL 事实由 Core export event 进入 Kafka，再由独立 projector 幂等写历史库。
 
-本次已验证 `surprising-aeron-client`、`surprising-adl`、`surprising-insurance`、`surprising-liquidation` 增量构建通过；Insurance/ADL 定向测试已更新为验证“Core 不等待历史投影”。这不是完整无数据库门禁：Funding 的费率输入/租约、Price/Instrument 配置以及在线 Provider 构造图仍含 JDBC 依赖，必须在后续阶段迁移到 Core snapshot/query 或显式离线配置后，才能宣称 PostgreSQL 可完全停止。
+本次已验证 `surprising-aeron-client` 与 `surprising-derivatives-lifecycle-provider` 增量构建通过；Risk/Liquidation/Insurance/ADL 源码和 API contract 已由统一模块拥有。这不是完整无数据库门禁：Funding 的费率输入/租约、Price/Instrument 配置以及在线 Provider 构造图仍含 JDBC 依赖，必须在后续阶段迁移到 Core snapshot/query 或显式离线配置后，才能宣称 PostgreSQL 可完全停止。
 
 ### 18.3.2 审计导出链路边界（2026-08-18）
 
@@ -924,7 +924,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 
 - `mvn -pl surprising-aeron-core/surprising-aeron-service -am test`：service 95 个测试全部通过，包含异步下单和异步触发 continuation；`COMMAND_RESULT_QUERY` 覆盖超时后结果核验。
 - `bash -n scripts/aeron-core-local.sh`、未知 `PRODUCT_LINE` 拒绝和空集群 `status` 验证通过。
-- `mvn -f surprising-risk/surprising-risk-provider/pom.xml -am test`：Risk Provider 10 个测试全部通过，覆盖 Core 快照状态展示、本地保证金阈值更新拒绝和投影数据不回传。
+- `mvn -pl :surprising-derivatives-lifecycle-provider -am -DskipTests package`：统一 Provider 源码构建通过，覆盖四个领域的 Controller/Service/Repository 和单一生命周期入口。
 - `mvn -pl surprising-trading/surprising-command-provider -am test`：统一命令 Provider 138 个测试全部通过。
 - 三节点 compose 人工烟测：SPOT `spotMatchSmoke=PASS`；LINEAR_PERPETUAL `derivativeSmoke=PASS`；独立产品线门禁对 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`OPTION` 均报告 `fundsDiff=0 bookLevels=0`。
 - 本轮通过 `PRODUCT_LINE=SPOT scripts/aeron-core-local.sh up` + `smoke` 观察到 `spotMatchSmoke=PASS seller=6000003001 buyer=7000003001 btcTotal=5 usdtTotal=500`，随后用同一入口 `down` 清理容器和网络，未删除 volume。
