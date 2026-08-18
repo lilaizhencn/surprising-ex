@@ -176,6 +176,19 @@ class CoreLifecycleStateTest {
     }
 
     @Test
+    void settlementAcceptsNewerInstrumentLifecycleVersionWithoutReplacingOpenExecutionVersion() {
+        TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
+                ContractType.LINEAR_DELIVERY, 100, 10, 100);
+
+        TradingCoreState settled = reducer.settleInstrument(state,
+                new SettleInstrumentCommand(74, "BTC-USDT", 3, 120, 0));
+
+        assertThat(settled.instruments().get("BTC-USDT").version()).isEqualTo(1);
+        assertThat(settled.users().values()).allSatisfy(user ->
+                assertThat(user.positions().get("BTC-USDT").signedQuantitySteps()).isZero());
+    }
+
+    @Test
     void duplicateSettlementIsIdempotentAfterPositionsAndOrdersAreClosed() {
         TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
                 ContractType.LINEAR_DELIVERY, 100, 10, 100);

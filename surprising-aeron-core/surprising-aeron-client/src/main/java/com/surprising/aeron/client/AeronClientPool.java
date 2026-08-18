@@ -275,11 +275,34 @@ public final class AeronClientPool implements AutoCloseable {
         return request.queryFuture;
     }
 
+    private CompletableFuture<CoreResponse> enqueueOrdinaryQuery(
+            CoreMessageType type, UUID queryId, long userId, byte[] payload) {
+        Objects.requireNonNull(queryId, "queryId");
+        byte[] safePayload = requirePayload(payload);
+        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        Request request = agent.queryRequest(type, queryId, userId, safePayload);
+        if (!agent.enqueue(request)) {
+            request.notAccepted(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        }
+        return request.queryFuture;
+    }
+
     public CoreResponse query(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
         if (closed.get()) {
             throw new IllegalStateException("Aeron client pool is closed");
         }
-        return controlQueryAsync(type, queryId, userId, payload).join();
+        return queryAsync(type, queryId, userId, payload).join();
+    }
+
+    public CompletableFuture<CoreResponse> queryAsync(
+            CoreMessageType type, UUID queryId, long userId, byte[] payload) {
+        if (closed.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Aeron client pool is closed"));
+        }
+        return switch (CoreQueryClass.classify(type)) {
+            case RESERVED_CONTROL -> controlQueryAsync(type, queryId, userId, payload);
+            case ORDINARY_READ -> enqueueOrdinaryQuery(type, queryId, userId, payload);
+        };
     }
 
     public CoreResponse submitPrepared(CoreMessage message) {
@@ -660,7 +683,8 @@ public final class AeronClientPool implements AutoCloseable {
             boolean worked = false;
             while (true) {
                 Request next = lane.mailbox.peek();
-                if (next == null || (!next.oneWay && lane.pending.size() >= lane.maxInFlight)) {
+                if (next == null || lane.session == null
+                        || (!next.oneWay && lane.pending.size() >= lane.maxInFlight)) {
                     return worked;
                 }
                 Request request = lane.mailbox.poll();
@@ -701,8 +725,19 @@ public final class AeronClientPool implements AutoCloseable {
                     request.releaseCorrelation();
                 }
             } else {
+                if (offerResult == Publication.NOT_CONNECTED && request.isQuery()) {
+                    closeSession(lane);
+                    request.prepareForRetry();
+                    if (lane.mailbox.offer(request)) {
+                        return;
+                    }
+                    request.notAccepted(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+                    return;
+                }
                 request.notAccepted(CoreCommandOutcome.notAccepted(offerResult));
-                if (offerResult == Publication.CLOSED || offerResult == Publication.MAX_POSITION_EXCEEDED) {
+                if (offerResult == Publication.NOT_CONNECTED
+                        || offerResult == Publication.CLOSED
+                        || offerResult == Publication.MAX_POSITION_EXCEEDED) {
                     closeSession(lane);
                 }
             }
@@ -885,6 +920,14 @@ public final class AeronClientPool implements AutoCloseable {
             }
             offering = true;
             return true;
+        }
+
+        private synchronized void prepareForRetry() {
+            offering = false;
+        }
+
+        private boolean isQuery() {
+            return queryFuture != null;
         }
 
         private synchronized boolean cancelBeforeOffer() {

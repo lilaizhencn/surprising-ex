@@ -4,6 +4,7 @@ import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreLeverageView;
+import com.surprising.aeron.protocol.CoreOpenOrdersQuery;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -69,6 +70,49 @@ public class OrderAeronGateway implements AutoCloseable {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron user query failed");
         }
         return CoreStateQueryCodec.decodeUserState(response.data());
+    }
+
+    public CoreOrderStateView orderState(long userId, long orderId) {
+        if (userId < 0 || orderId <= 0) {
+            throw new IllegalArgumentException("userId must be non-negative and orderId must be positive");
+        }
+        CoreResponse response = clients.query(CoreMessageType.ORDER_STATE_QUERY, UUID.randomUUID(), userId,
+                TradingCommandCodec.encodeOrderStateQuery(orderId));
+        if (response.status() == ResponseStatus.REJECTED && response.resultCode() == CoreResultCode.ENTITY_NOT_FOUND) {
+            return null;
+        }
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode().name() + ": Aeron order query failed");
+        }
+        CoreOrderStateView order = CoreStateQueryCodec.decodeOrderState(response.data());
+        return userId == 0 || order.userId() == userId ? order : null;
+    }
+
+    public CoreOrderStateView orderStateByClientOrderId(long userId, String clientOrderId) {
+        if (userId <= 0 || clientOrderId == null || clientOrderId.isBlank()) {
+            throw new IllegalArgumentException("userId and clientOrderId are required");
+        }
+        CoreResponse response = clients.query(CoreMessageType.CLIENT_ORDER_STATE_QUERY, UUID.randomUUID(), userId,
+                CoreStateQueryCodec.encodeClientOrderStateQuery(clientOrderId.trim()));
+        if (response.status() == ResponseStatus.REJECTED && response.resultCode() == CoreResultCode.ENTITY_NOT_FOUND) {
+            return null;
+        }
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode().name() + ": Aeron client order query failed");
+        }
+        return CoreStateQueryCodec.decodeOrderState(response.data());
+    }
+
+    public List<CoreOrderStateView> openOrders(long userId, String symbol, long beforeOrderId, int limit) {
+        if (userId < 0 || beforeOrderId < 0 || limit < 1 || limit > 1_001) {
+            throw new IllegalArgumentException("invalid open orders query");
+        }
+        CoreResponse response = clients.query(CoreMessageType.USER_OPEN_ORDERS_QUERY, UUID.randomUUID(), userId,
+                CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(symbol, beforeOrderId, limit)));
+        if (response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException(response.resultCode().name() + ": Aeron open orders query failed");
+        }
+        return CoreStateQueryCodec.decodeOpenOrders(response.data()).orders();
     }
 
     public CoreLeverageView leverage(long userId, String symbol, com.surprising.aeron.protocol.CoreMarginMode mode) {

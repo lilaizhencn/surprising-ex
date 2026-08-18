@@ -32,7 +32,7 @@ public final class CoreAdlQueryCodec {
     public static byte[] encodeCandidates(List<CoreAdlCandidateView> candidates) {
         int length = Integer.BYTES;
         for (var value : candidates) {
-            length = Math.addExact(length, Integer.BYTES * 5 + Long.BYTES * 11
+            length = Math.addExact(length, Integer.BYTES * 4 + Long.BYTES * 11
                     + bytes(value.symbol()).length + bytes(value.asset()).length);
         }
         ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).putInt(candidates.size());

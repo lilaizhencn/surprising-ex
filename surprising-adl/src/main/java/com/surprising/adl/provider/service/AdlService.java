@@ -12,6 +12,7 @@ import com.surprising.adl.provider.repository.AdlEventRepository;
 import com.surprising.adl.provider.repository.AdlSequenceRepository;
 import com.surprising.adl.provider.repository.CoreAdlProjectionRepository;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
+import com.surprising.aeron.client.AeronLifecycleCoordinator;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
@@ -19,7 +20,6 @@ import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.trading.api.model.PositionSide;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -33,7 +33,7 @@ public class AdlService {
     private final AdlAeronGateway aeron;
     private final AdlEventRepository events;
     private final AdlSequenceRepository sequences;
-
+    private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
     public AdlService(AdlProperties properties, CoreAdlProjectionRepository projections,
                       AdlAeronGateway aeron, AdlEventRepository events, AdlSequenceRepository sequences) {
         this.properties = properties;
@@ -44,6 +44,10 @@ public class AdlService {
     }
 
     public synchronized AdlCycle processResidualDeficits() {
+        return lifecycleCoordinator.execute(this::processResidualDeficitsInternal);
+    }
+
+    private AdlCycle processResidualDeficitsInternal() {
         if (!properties.getScanner().isEnabled()) return AdlCycle.disabled();
         CoreLiquidationWorkView work = aeron.resolutionWork(CoreLiquidationWorkView.Purpose.ADL, 0,
                 properties.getScanner().getBatchSize(), 1_048_576);
@@ -84,7 +88,6 @@ public class AdlService {
                     Math.absExact(candidate.signedQuantitySteps()));
             long covered = Math.min(remaining, realized);
             if (closeSteps <= 0 || covered <= 0) continue;
-            long eventId = sequences.next("adl-execution");
             UUID commandId = UUID.nameUUIDFromBytes((properties.getKafka().getProductLine() + ":ADL:"
                     + liquidation.liquidationId() + ':' + candidate.userId() + ':' + candidate.symbol() + ':'
                     + candidate.markPriceSequence() + ':' + closeSteps).getBytes(StandardCharsets.UTF_8));
@@ -93,8 +96,6 @@ public class AdlService {
                     candidate.positionSide(), candidate.signedQuantitySteps(), candidate.entryPriceTicks(),
                     candidate.markPriceSequence(), closeSteps, covered)));
             remaining = Math.subtractExact(remaining, covered);
-            events.insertCompleted(eventId, accountType(), liquidation, candidate, closeSteps, realized,
-                    covered, remaining, Instant.now());
             executed++;
         }
         return executed;

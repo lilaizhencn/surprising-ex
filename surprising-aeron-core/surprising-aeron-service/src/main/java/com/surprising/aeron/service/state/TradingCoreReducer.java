@@ -1308,7 +1308,8 @@ public final class TradingCoreReducer {
                                                               Iterable<Long> indexedUserIds,
                                                               UUID chunkCommandId,
                                                               ActiveOrderIndex activeOrderIndex) {
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
+        CoreInstrumentState instrument = requireLifecycleInstrument(state, command.symbol(),
+                command.instrumentVersion());
         long previousSettlement = state.treasuryState().lifecycleSettlements()
                 .getOrDefault(instrument.symbol(), 0L);
         if (command.settlementId() < previousSettlement) {
@@ -1927,6 +1928,19 @@ public final class TradingCoreReducer {
         }
         if (instrument.version() != version) {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
+        }
+        return instrument;
+    }
+
+    private static CoreInstrumentState requireLifecycleInstrument(
+            TradingCoreState state, String symbol, long lifecycleVersion) {
+        CoreInstrumentState instrument = state.instruments().get(OrderReservation.normalizeSymbol(symbol));
+        if (instrument == null) {
+            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
+        }
+        if (lifecycleVersion < instrument.version()) {
+            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT",
+                    "instrument lifecycle version precedes execution version");
         }
         return instrument;
     }

@@ -25,6 +25,14 @@ readonly HTTP_PORTS=(
   "${ADL_PORT:-9091}" "${GATEWAY_PORT:-9094}" "${MAKER_PORT:-9096}"
 )
 
+service_enabled() {
+  case "$1" in
+    funding) [[ "$PRODUCT_LINE" == LINEAR_PERPETUAL || "$PRODUCT_LINE" == INVERSE_PERPETUAL ]] ;;
+    liquidation|insurance|adl) [[ "$PRODUCT_LINE" != SPOT ]] ;;
+    *) return 0 ;;
+  esac
+}
+
 fail() {
   printf 'ERROR=%s\n' "$*" >&2
   exit 2
@@ -47,7 +55,8 @@ validate_context() {
   [[ -f "$COMPOSE_FILE" && -x "$COMMON_SCRIPT" ]] || fail 'RUNTIME_BUNDLE_INCOMPLETE'
   [[ -f "$PRODUCT_TOPIC_SOURCE" ]] || fail "PRODUCT_TOPIC_SOURCE_MISSING path=$PRODUCT_TOPIC_SOURCE"
   if [[ "${W4_STATIC_ONLY:-false}" != true ]]; then
-    MAIN_WORKTREE="$(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')"
+    MAIN_WORKTREE="${W4_MAIN_WORKTREE:-$(git -C "$REPO_ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')}"
+    [[ -d "$MAIN_WORKTREE" ]] || fail "MAIN_WORKTREE_MISSING path=$MAIN_WORKTREE"
     [[ "$REPO_ROOT" != "$MAIN_WORKTREE" ]] || fail "MAIN_WORKTREE_REFUSED path=$REPO_ROOT"
   fi
 }
@@ -68,8 +77,11 @@ initialize_names() {
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME//_/-}"
   POSTGRES_DB="surprising_${RUN_ID//[^a-zA-Z0-9]/_}"
   initialize_core_ports
+  AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-127.0.0.1,127.0.0.1,127.0.0.1}"
+  AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-127.0.0.1}"
   export RUN_ID PRODUCT_LINE POSTGRES_PORT KAFKA_PORT POSTGRES_USER POSTGRES_PASSWORD
   export POSTGRES_DB COMPOSE_PROJECT_NAME
+  export AERON_CLUSTER_HOSTNAMES AERON_EGRESS_HOSTNAME
   export CORE_NODE0_ARCHIVE_PORT CORE_NODE0_CLIENT_PORT CORE_NODE0_MEMBER_PORT CORE_NODE0_LOG_PORT CORE_NODE0_TRANSFER_PORT
   export CORE_NODE1_ARCHIVE_PORT CORE_NODE1_CLIENT_PORT CORE_NODE1_MEMBER_PORT CORE_NODE1_LOG_PORT CORE_NODE1_TRANSFER_PORT
   export CORE_NODE2_ARCHIVE_PORT CORE_NODE2_CLIENT_PORT CORE_NODE2_MEMBER_PORT CORE_NODE2_LOG_PORT CORE_NODE2_TRANSFER_PORT
@@ -347,18 +359,27 @@ start_owned_process() {
   local name="$1" port="$2"
   shift 2
   local marker="surprising-w3w5:$RUN_ID:$name"
-  bash -c '
+  nohup bash -c '
     marker="$0"
     child=""
-    terminate() { [[ -z "$child" ]] || kill "$child" 2>/dev/null || true; [[ -z "$child" ]] || wait "$child" 2>/dev/null || true; exit 0; }
+    terminate() {
+      if [[ -n "$child" ]]; then
+        kill -TERM "$child" 2>/dev/null || true
+        child_deadline=$((SECONDS + 10))
+        while kill -0 "$child" 2>/dev/null && (( SECONDS < child_deadline )); do sleep 1; done
+        kill -KILL "$child" 2>/dev/null || true
+        wait "$child" 2>/dev/null || true
+      fi
+      exit 0
+    }
     trap terminate TERM INT
     "$@" & child=$!
     wait "$child"
-  ' "$marker" "$@" >"$LOG_DIR/$name.log" 2>&1 &
+  ' "$marker" "$@" >"$LOG_DIR/$name.log" 2>&1 < /dev/null &
   local pid=$!
   printf '%s\n' "$pid" > "$PID_DIR/$name.pid"
   if [[ -n "$port" ]]; then
-    local deadline=$((SECONDS + 30))
+    local deadline=$((SECONDS + ${PROCESS_READINESS_TIMEOUT_SECONDS:-90}))
     while ! port_owned_by_process_tree "$port" "$pid"; do
       kill -0 "$pid" 2>/dev/null || fail "PROCESS_EXITED service=$name log=$LOG_DIR/$name.log"
       (( SECONDS < deadline )) || fail "READINESS_TIMEOUT service=$name port=$port"
@@ -389,7 +410,7 @@ port_owned_by_process_tree() {
 }
 
 seed_instrument_snapshot() {
-  local symbol="W4-BOOTSTRAP-${PRODUCT_LINE}-BTC-USDT"
+  local symbol="BTC-USDT"
   local instrument_port="${INSTRUMENT_PORT:-9080}"
   local contract_type instrument_type quote_asset settle_asset expiry_json settlement_json
   local reduce_only="false" funding_interval=0 interest_rate=0 funding_cap=0 funding_floor=0
@@ -411,7 +432,6 @@ seed_instrument_snapshot() {
       quote_asset=USDT; settle_asset=USDT; reduce_only="true"; min_sources=2
       [[ "$PRODUCT_LINE" == INVERSE_DELIVERY ]] && quote_asset=USD && settle_asset=BTC
       expiry_json='"2030-01-01T00:00:00Z"'; settlement_json='"CASH"'
-      underlying_json='"BTC-USDT"'; strike_json=100; option_type_json='"CALL"'; option_style_json='"EUROPEAN"'
       brackets='[{"bracketNo":1,"notionalFloorUnits":0,"notionalCapUnits":5000000000000,"maxLeveragePpm":100000000,"initialMarginRatePpm":10000,"maintenanceMarginRatePpm":5000}]'
       ;;
     OPTION)
@@ -430,9 +450,9 @@ seed_instrument_snapshot() {
   fi
   sources+=']'
   local body="{\"symbol\":\"$symbol\",\"instrumentType\":\"$instrument_type\",\"contractType\":\"$contract_type\",\"baseAsset\":\"BTC\",\"quoteAsset\":\"$quote_asset\",\"settleAsset\":\"$settle_asset\",\"contractMultiplierPpm\":1000000,\"contractValueAsset\":\"$settle_asset\",\"priceTickUnits\":1,\"quantityStepUnits\":1,\"minQuantitySteps\":1,\"maxQuantitySteps\":100000,\"minNotionalUnits\":1,\"maxNotionalUnits\":1000000000000,\"notionalMultiplierUnits\":1,\"pricePrecision\":2,\"quantityPrecision\":3,\"supportedOrderTypes\":[\"LIMIT\"],\"supportedTimeInForce\":[\"GTC\",\"IOC\"],\"postOnlyEnabled\":true,\"reduceOnlyEnabled\":$reduce_only,\"marketOrderEnabled\":false,\"maxLeveragePpm\":100000000,\"initialMarginRatePpm\":10000,\"maintenanceMarginRatePpm\":5000,\"makerFeeRatePpm\":200,\"takerFeeRatePpm\":500,\"maxPositionNotionalUnits\":25000000000000,\"userOpenInterestLimitRatePpm\":0,\"userOpenInterestLimitFloorUnits\":1,\"fundingIntervalHours\":$funding_interval,\"interestRatePpm\":$interest_rate,\"fundingRateCapPpm\":$funding_cap,\"fundingRateFloorPpm\":$funding_floor,\"impactNotionalUnits\":1000000000000,\"minValidIndexSources\":$min_sources,\"expiryTime\":$expiry_json,\"deliveryTime\":$expiry_json,\"underlyingSymbol\":$underlying_json,\"strikePriceUnits\":$strike_json,\"optionType\":$option_type_json,\"optionExerciseStyle\":$option_style_json,\"settlementMethod\":$settlement_json,\"status\":\"TRADING\",\"effectiveTime\":null,\"riskLimitBrackets\":$brackets,\"indexSources\":$sources}"
-  curl --fail --silent --show-error --retry 10 --retry-delay 1 --max-time 20 \
+  curl --fail-with-body --silent --show-error --retry 10 --retry-delay 1 --max-time 20 \
     -H 'Content-Type: application/json' -X POST \
-    --data "$body" "http://127.0.0.1:${instrument_port}/api/v1/instruments/admin/upsert" >/dev/null
+    --data "$body" "http://127.0.0.1:${instrument_port}/api/v1/instruments/admin/upsert" --output /dev/stderr
   curl --fail --silent --show-error --retry 10 --retry-delay 1 --max-time 10 \
     "http://127.0.0.1:${instrument_port}/api/v1/instruments/admin/$symbol?productLine=$PRODUCT_LINE" >/dev/null
   printf 'BOOTSTRAP=instrument productLine=%s symbol=%s\n' "$PRODUCT_LINE" "$symbol"
@@ -440,6 +460,8 @@ seed_instrument_snapshot() {
 
 jar_path() {
   case "$1" in
+    core) printf '%s/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar' "$REPO_ROOT" ;;
+    tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$REPO_ROOT" ;;
     exporter|projector) printf '%s/surprising-aeron-core/surprising-aeron-exporter/target/surprising-aeron-exporter.jar' "$REPO_ROOT" ;;
     instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$REPO_ROOT" ;;
@@ -459,24 +481,97 @@ jar_path() {
 }
 
 preflight_real_artifacts() {
-  docker image inspect "surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}" >/dev/null 2>&1 || \
-    fail "CORE_IMAGE_MISSING image=surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}"
   local service jar
+  for service in core tools; do
+    jar="$(jar_path "$service")"
+    [[ -f "$jar" ]] || fail "SERVICE_ARTIFACT_MISSING service=$service path=$jar"
+  done
   for service in "${PROCESS_SERVICES[@]}"; do
+    service_enabled "$service" || continue
     jar="$(jar_path "$service")"
     [[ -f "$jar" ]] || fail "SERVICE_ARTIFACT_MISSING service=$service path=$jar"
   done
 }
 
-start_process_stack() {
-  local mode="$1" index service port jar main_class java_bin
+start_host_core() {
+  local node java_bin core_jar
   local -a java_options=(
     --add-opens java.base/jdk.internal.misc=ALL-UNNAMED
     --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
   )
   java_bin="${JAVA_HOME:+$JAVA_HOME/bin/}java"
+  core_jar="$(jar_path core)"
+  for node in 0 1 2; do
+    start_owned_process "core-node$node" '' env \
+      PRODUCT_LINE="$PRODUCT_LINE" \
+      AERON_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" \
+      AERON_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" \
+      "$java_bin" "${java_options[@]}" \
+      "-Dsurprising.aeron.product-line=$PRODUCT_LINE" \
+      "-Dsurprising.aeron.node-id=$node" \
+      "-Dsurprising.aeron.hostnames=$AERON_CLUSTER_HOSTNAMES" \
+      "-Dsurprising.aeron.data-dir=$RUN_DIR/aeron" \
+      -jar "$core_jar"
+  done
+}
+
+verify_host_core() {
+  local java_bin tools_jar attempt output status=1 deadline=$((SECONDS + 60))
+  local -a java_options=(
+    --add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+    --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
+  )
+  java_bin="${JAVA_HOME:+$JAVA_HOME/bin/}java"
+  tools_jar="$(jar_path tools)"
+  while (( SECONDS < deadline )); do
+    set +e
+    output="$("$java_bin" "${java_options[@]}" \
+      "-Dsurprising.aeron.product-line=$PRODUCT_LINE" \
+      "-Dsurprising.aeron.hostnames=$AERON_CLUSTER_HOSTNAMES" \
+      "-Dsurprising.aeron.egress-hostname=$AERON_EGRESS_HOSTNAME" \
+      -Dsurprising.aeron.probe-mode=query -Dsurprising.aeron.source-id=17017 \
+      -cp "$tools_jar" com.surprising.aeron.tools.ClusterProbeMain 2>&1)"
+    status=$?
+    set -e
+    printf '%s\n' "$output" >> "$LOG_DIR/core-probe.log"
+    if (( status == 0 )) && grep -q '^status=OK ' <<<"$output"; then
+      mark_ready core-cluster
+      printf 'CORE_CLUSTER=PASS productLine=%s hosts=%s egress=%s\n' \
+        "$PRODUCT_LINE" "$AERON_CLUSTER_HOSTNAMES" "$AERON_EGRESS_HOSTNAME"
+      return 0
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$output" >&2
+  fail "CORE_CONNECTIVITY_FAILED productLine=$PRODUCT_LINE log=$LOG_DIR/core-probe.log"
+}
+
+start_process_stack() {
+  local mode="$1" index service port jar main_class java_bin kafka_endpoint
+  local -a java_options=(
+    --add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+    --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
+  )
+  kafka_endpoint="127.0.0.1:$KAFKA_PORT"
+  local -a kafka_options=(
+    "KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SPRING_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_INSTRUMENT_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_ACCOUNT_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_PRICE_CONSUMER_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_PRICE_INDEX_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_PRICE_MARK_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_TRADING_MATCHING_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_FUNDING_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_INSURANCE_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+    "SURPRISING_ADL_KAFKA_BOOTSTRAP_SERVERS=$kafka_endpoint"
+  )
+  java_bin="${JAVA_HOME:+$JAVA_HOME/bin/}java"
   for index in "${!PROCESS_SERVICES[@]}"; do
     service="${PROCESS_SERVICES[$index]}"
+    service_enabled "$service" || continue
     port=''
     for http_index in "${!HTTP_SERVICES[@]}"; do
       [[ "${HTTP_SERVICES[$http_index]}" != "$service" ]] || port="${HTTP_PORTS[$http_index]}"
@@ -491,26 +586,32 @@ start_process_stack() {
     fi
     jar="$(jar_path "$service")"
     if [[ "$service" == instrument ]]; then
-      start_owned_process "$service" "$port" env PRODUCT_LINE="$PRODUCT_LINE" SERVER_PORT="${port:-0}" \
-        KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" SPRING_KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" \
+      start_owned_process "$service" "$port" env "${kafka_options[@]}" \
+        PRODUCT_LINE="$PRODUCT_LINE" SERVER_PORT="${port:-0}" \
         SPRING_DATASOURCE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/$POSTGRES_DB" SPRING_DATASOURCE_USERNAME="$POSTGRES_USER" SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD" \
-        AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-localhost,localhost,localhost}" \
-        AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-localhost}" \
+        AERON_CLUSTER_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" \
+        AERON_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" \
         "$java_bin" "${java_options[@]}" -jar "$jar"
       seed_instrument_snapshot
       continue
     fi
     if [[ "$service" == projector ]]; then
       main_class=com.surprising.aeron.exporter.ProjectionMain
-      start_owned_process "$service" '' env PRODUCT_LINE="$PRODUCT_LINE" KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" \
+      start_owned_process "$service" '' env PRODUCT_LINE="$PRODUCT_LINE" KAFKA_BOOTSTRAP_SERVERS="$kafka_endpoint" \
         DATABASE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/$POSTGRES_DB" DATABASE_USER="$POSTGRES_USER" DATABASE_PASSWORD="$POSTGRES_PASSWORD" \
         "$java_bin" "${java_options[@]}" -cp "$jar" "$main_class"
+    elif [[ "$service" == exporter ]]; then
+      main_class=com.surprising.aeron.exporter.ExporterMain
+      start_owned_process "$service" '' env PRODUCT_LINE="$PRODUCT_LINE" \
+        KAFKA_BOOTSTRAP_SERVERS="$kafka_endpoint" \
+        AERON_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" AERON_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" \
+        "$java_bin" "${java_options[@]}" -cp "$jar" "$main_class"
     else
-      start_owned_process "$service" "$port" env PRODUCT_LINE="$PRODUCT_LINE" SERVER_PORT="${port:-0}" \
-        KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" SPRING_KAFKA_BOOTSTRAP_SERVERS="127.0.0.1:$KAFKA_PORT" \
+      start_owned_process "$service" "$port" env "${kafka_options[@]}" \
+        PRODUCT_LINE="$PRODUCT_LINE" SERVER_PORT="${port:-0}" \
         SPRING_DATASOURCE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/$POSTGRES_DB" SPRING_DATASOURCE_USERNAME="$POSTGRES_USER" SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD" \
-        AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-localhost,localhost,localhost}" \
-        AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-localhost}" \
+        AERON_CLUSTER_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" \
+        AERON_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" \
         SURPRISING_TRADING_ORDER_RISK_LIMIT_PRICE_PROTECTION_ENABLED="${SURPRISING_TRADING_ORDER_RISK_LIMIT_PRICE_PROTECTION_ENABLED:-false}" \
         "$java_bin" "${java_options[@]}" -jar "$jar"
     fi
@@ -523,14 +624,15 @@ up_internal() {
   [[ "$mode" == fixture ]] || preflight_real_artifacts
   claim_runtime
   trap 'cleanup_after_failed_up' EXIT ERR INT TERM
-  compose up -d postgres kafka node0 node1 node2
+  compose up -d postgres kafka
   wait_container postgres; mark_ready postgres
   wait_container kafka; mark_ready kafka
   run_migrations
   create_topics
-  wait_container node0; mark_ready core-node0
-  wait_container node1; mark_ready core-node1
-  wait_container node2; mark_ready core-node2
+  if [[ "$mode" != fixture ]]; then
+    start_host_core
+    verify_host_core
+  fi
   start_process_stack "$mode"
   [[ "$(tail -1 "$READY_FILE" | cut -f2)" == maker ]] || fail 'MAKER_ORDER_VIOLATION'
   write_inventory "$RUN_DIR/ownership-live.txt"

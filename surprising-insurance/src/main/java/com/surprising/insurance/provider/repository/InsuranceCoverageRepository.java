@@ -34,12 +34,12 @@ public class InsuranceCoverageRepository {
                     coverage_id, account_type, user_id, asset, requested_units, covered_units,
                     remaining_deficit_units, reserve_command_id, finalize_command_id,
                     status, reason, completed_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AERON_LIQUIDATION_COVERAGE', ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AERON_LIQUIDATION_COVERAGE', ?, ?, ?)
                 ON CONFLICT (finalize_command_id) DO NOTHING
                 """, coverageId, accountType, deficit.userId(), deficit.asset(), deficit.deficitUnits(),
                 coveredUnits, remainingDeficit, "AERON:" + deficit.liquidationId(),
                 "AERON:" + deficit.liquidationId(), status, Timestamp.from(now), Timestamp.from(now),
-                Timestamp.from(now), Timestamp.from(now));
+                Timestamp.from(now));
         if (inserted != 0 && inserted != 1) {
             throw new IllegalStateException("failed to write Aeron insurance coverage audit");
         }

@@ -29,7 +29,15 @@ validate() {
   [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] || fail "INVALID_RUN_ID runId=$RUN_ID"
   (( ${#RUN_ID} <= 50 )) || fail 'RUN_ID_TOO_LONG_FOR_LINE_SCOPES'
   [[ "$PRODUCT_LINE" == LINEAR_PERPETUAL ]] || fail "PRODUCT_LINE_REFUSED expected=LINEAR_PERPETUAL actual=${PRODUCT_LINE:-unset}"
-  [[ "$PRODUCT_LINES" == "$REQUIRED_PRODUCT_LINES" ]] || fail "PRODUCT_LINES_REFUSED expected=$REQUIRED_PRODUCT_LINES actual=$PRODUCT_LINES"
+  local seen=',' line
+  IFS=',' read -r -a selected_lines <<< "$PRODUCT_LINES"
+  (( ${#selected_lines[@]} > 0 )) || fail 'PRODUCT_LINES_REQUIRED'
+  for line in "${selected_lines[@]}"; do
+    [[ "$line" =~ ^(SPOT|LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION)$ ]] \
+      || fail "PRODUCT_LINE_REFUSED line=$line"
+    [[ "$seen" != *",$line,"* ]] || fail "PRODUCT_LINE_DUPLICATE line=$line"
+    seen+="$line,"
+  done
   require_boolean WALLET_ENABLED "$WALLET_ENABLED"
   [[ "$WALLET_ENABLED" == false ]] || fail 'WALLET_REFUSED wallet must remain absent'
   require_boolean W4_STATIC_ONLY "$W4_STATIC_ONLY"
@@ -73,12 +81,17 @@ run_driver() {
   local java_bin="${JAVA_HOME:-}/bin/java"
   [[ -x "$java_bin" ]] || java_bin="$(command -v java || true)"
   [[ -n "$java_bin" && -x "$java_bin" ]] || fail 'JAVA_REQUIRED'
+  local -a java_options=(
+    --add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+    --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
+  )
   local tool_jar="${W4_TOOL_JAR:-$REPO_ROOT/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar}"
   [[ -f "$tool_jar" ]] || fail "TOOLS_JAR_MISSING path=$tool_jar"
-  PRODUCT_LINE="$line" WALLET_ENABLED=false "$java_bin" \
+  PRODUCT_LINE="$line" WALLET_ENABLED=false "$java_bin" "${java_options[@]}" \
     -Dsurprising.aeron.product-line="$line" \
     -Dsurprising.aeron.w4-manifest="$manifest" \
     -Dsurprising.aeron.w4-seed="$seed" \
+    -Dsurprising.aeron.w4-maker-user-id="${W4_MAKER_USER_ID:-900001}" \
     -Dsurprising.aeron.w4-mode="$mode" \
     -cp "$tool_jar" com.surprising.aeron.tools.W4LifecycleQaMain
 }
@@ -170,9 +183,16 @@ run_six_lines() {
   trap - EXIT
   local count
   count="$(find "$W4_RUN_DIR/manifests" -type f -name '*.manifest' | wc -l | tr -d ' ')"
-  [[ "$count" == 6 ]] || fail "MANIFEST_COUNT expected=6 actual=$count"
+  local expected_count="${#lines[@]}"
+  [[ "$count" == "$expected_count" ]] || fail "MANIFEST_COUNT expected=$expected_count actual=$count"
   local expected_names actual_names
-  expected_names='1-SPOT.manifest 2-LINEAR_PERPETUAL.manifest 3-INVERSE_PERPETUAL.manifest 4-LINEAR_DELIVERY.manifest 5-INVERSE_DELIVERY.manifest 6-OPTION.manifest'
+  expected_names=''
+  local expected_index=0
+  for line in "${lines[@]}"; do
+    expected_index=$((expected_index + 1))
+    expected_names+="${expected_index}-${line}.manifest "
+  done
+  expected_names="${expected_names% }"
   actual_names="$(find "$W4_RUN_DIR/manifests" -type f -name '*.manifest' -exec basename {} \; | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   [[ "$actual_names" == "$expected_names" ]] || fail "MANIFEST_ORDER expected=$expected_names actual=$actual_names"
   if [[ "$W4_STATIC_ONLY" == true ]]; then

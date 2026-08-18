@@ -1,5 +1,7 @@
 package com.surprising.aeron.tools;
 
+import com.surprising.aeron.client.AeronLifecycleCoordinator;
+import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -17,6 +19,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskQueryCodec;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
+import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
@@ -65,6 +68,7 @@ public final class W4LifecycleQaMain {
 
     private final ProductLine productLine;
     private final SurprisingAeronClient client;
+    private final AeronLifecycleCoordinator lifecycleCoordinator = new AeronLifecycleCoordinator();
     private final long seed;
     private final long sourceId;
     private final long makerUserId;
@@ -74,6 +78,7 @@ public final class W4LifecycleQaMain {
     private final Set<Long> participantUsers = new LinkedHashSet<>();
     private final Map<String, Long> expectedFunds = new LinkedHashMap<>();
     private final List<String> rows = new ArrayList<>();
+    private final List<SpotOrder> spotOrders = new ArrayList<>();
     private boolean reconciliationObserved;
     private boolean makerReconciliationObserved;
     private boolean providerBoundaryObserved;
@@ -224,6 +229,7 @@ public final class W4LifecycleQaMain {
             throw new IllegalStateException("W4_VERIFY_REQUIRES_REAL_RECONCILIATION");
         }
         if (!verifyOnly) {
+            seedMakerAccount();
             switch (productLine) {
                 case SPOT -> runSpot();
                 case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> runPerpetual();
@@ -238,6 +244,22 @@ public final class W4LifecycleQaMain {
         rows.add(productLine + ":SNAPSHOT_CONTINUATION");
     }
 
+    private void seedMakerAccount() {
+        if (makerUserId <= 0) {
+            throw new IllegalStateException("MAKER_USER_ID_REQUIRED");
+        }
+        adjust(makerUserId, settleAsset(), 1_000);
+        if (productLine == ProductLine.INVERSE_PERPETUAL || productLine == ProductLine.INVERSE_DELIVERY) {
+            long insuranceSeed = 2_000;
+            command(CoreMessageType.ADJUST_INSURANCE_FUND, 0,
+                    TradingCommandCodec.encodeAdjustInsuranceFund(
+                            new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(settleAsset(), insuranceSeed)));
+            expectedFunds.merge(settleAsset(), insuranceSeed, Math::addExact);
+            rows.add("INSURANCE_FUND_SEEDED");
+        }
+        rows.add("MAKER_ACCOUNT_SEEDED");
+    }
+
     private void runFaults() {
         requireProviderCapabilities("faults");
     }
@@ -248,11 +270,12 @@ public final class W4LifecycleQaMain {
         long seller = user(1);
         long buyer = user(2);
         adjust(seller, "BTC", 5);
-        adjust(buyer, "USDT", 500);
+        adjust(buyer, "USDT", 1_000);
         place(seller, order(1), symbol, CoreOrderSide.SELL, CoreMarginMode.CROSS,
                 ReservationKind.SPOT_ASSET, "BTC", 5, 5);
         place(buyer, order(2), symbol, CoreOrderSide.BUY, CoreMarginMode.CROSS,
                 ReservationKind.SPOT_ASSET, "USDT", 500, 5);
+        awaitSpotOrdersFilled();
         requireBookEmpty();
         reconcile();
         rows.add("SPOT:CONSERVATION");
@@ -306,7 +329,7 @@ public final class W4LifecycleQaMain {
                     marginMode, ReservationKind.DERIVATIVE_MARGIN, settleAsset(), 100, 10);
             place(buyer, order(31 + marginMode.ordinal() * 10), symbol, CoreOrderSide.BUY,
                     marginMode, ReservationKind.DERIVATIVE_MARGIN, settleAsset(), 100, 10);
-            settle(symbol, 120, 0, 1_000L + marginMode.ordinal());
+            settle(symbol, 110, 0, 1_000L + marginMode.ordinal());
             readSettlementProgress(symbol);
             runProviderCycles(symbol, buyer);
             requireBookEmpty();
@@ -346,9 +369,14 @@ public final class W4LifecycleQaMain {
     private void setupInstrument(String symbol, ContractType type, int optionCode,
                                  long strike, long expiry) {
         upsertInstrumentViaProvider(symbol, type, optionCode, strike, expiry);
+        upsertCoreInstrument(symbol, type, optionCode, strike, expiry, VERSION);
+    }
+
+    private void upsertCoreInstrument(String symbol, ContractType type, int optionCode,
+                                      long strike, long expiry, long version) {
         command(CoreMessageType.UPSERT_INSTRUMENT, 0,
                 TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
-                        symbol, VERSION, type.ordinal(), BASE_ASSET,
+                        symbol, version, type.ordinal(), BASE_ASSET,
                         type.isInverse() ? "USD" : "USDT", settleAsset(),
                         type.isInverse() ? 100 : 1, 1, type.isInverse() ? 100 : 1,
                         100_000, 100_000, 0, 0, expiry, optionCode, strike)));
@@ -410,11 +438,32 @@ public final class W4LifecycleQaMain {
 
     private void adjust(long userId, String asset, long units) {
         participantUsers.add(userId);
-        request("account", "POST", "/api/v1/admin/accounts/balance-adjustments",
-                "{\"userId\":" + userId + ",\"asset\":" + json(asset)
-                        + ",\"amountUnits\":" + units + ",\"referenceId\":"
-                        + json("w4-" + productLine + "-" + userId + "-" + asset + "-" + sequence)
-                        + ",\"reason\":\"w4-provider-qa\"}", adminHeaders());
+        String body = "{\"userId\":" + userId + ",\"asset\":" + json(asset)
+                + ",\"amountUnits\":" + units + ",\"referenceId\":"
+                + json("w4-" + productLine + "-" + userId + "-" + asset + "-" + sequence)
+                + ",\"reason\":\"w4-provider-qa\"}";
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            try {
+                request("account", "POST", "/api/v1/admin/accounts/balance-adjustments", body, adminHeaders());
+                last = null;
+                break;
+            } catch (IllegalStateException exception) {
+                last = exception;
+                if (!exception.getMessage().contains("HTTP_400") || attempt == 5) {
+                    throw exception;
+                }
+                try {
+                    Thread.sleep(250L * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("W4 balance adjustment retry interrupted", interrupted);
+                }
+            }
+        }
+        if (last != null) {
+            throw last;
+        }
         providerBoundaryObserved = true;
         expectedFunds.merge(asset, units, Math::addExact);
     }
@@ -423,13 +472,75 @@ public final class W4LifecycleQaMain {
                        CoreMarginMode marginMode, ReservationKind reservationKind,
                        String reservationAsset, long reservedUnits, long quantity) {
         participantUsers.add(userId);
-        request("order", "POST", "/api/v1/trading/orders",
-                "{\"userId\":" + userId + ",\"clientOrderId\":" + json("w4-" + orderId)
-                        + ",\"symbol\":" + json(symbol) + ",\"side\":" + json(side.name())
-                        + ",\"orderType\":\"LIMIT\",\"timeInForce\":\"GTC\",\"priceTicks\":100"
-                        + ",\"quantitySteps\":" + quantity + ",\"marginMode\":" + json(marginMode.name())
-                        + ",\"positionSide\":\"NET\",\"reduceOnly\":false,\"postOnly\":false}", Map.of());
+        String body = "{\"userId\":" + userId + ",\"clientOrderId\":" + json("w4-" + orderId)
+                + ",\"symbol\":" + json(symbol) + ",\"side\":" + json(side.name())
+                + ",\"orderType\":\"LIMIT\",\"timeInForce\":\"GTC\",\"priceTicks\":100"
+                + ",\"quantitySteps\":" + quantity + ",\"marginMode\":" + json(marginMode.name())
+                + ",\"positionSide\":\"NET\",\"reduceOnly\":false,\"postOnly\":false}";
+        String response = null;
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= 20; attempt++) {
+            try {
+                response = request("order", "POST", "/api/v1/trading/orders", body, Map.of());
+                last = null;
+                break;
+            } catch (IllegalStateException exception) {
+                last = exception;
+                if (!exception.getMessage().contains("HTTP_400") || attempt == 20) {
+                    throw exception;
+                }
+                try {
+                    Thread.sleep(100L * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("W4 instrument snapshot wait interrupted", interrupted);
+                }
+            }
+        }
+        if (last != null || response == null) {
+            throw last == null ? new IllegalStateException("W4 order response missing") : last;
+        }
+        String acceptedResponse = response;
+        response = awaitOrderResult(response);
+        System.out.printf("W4_ORDER_RESPONSE userId=%d orderId=%d side=%s body=%s%n",
+                userId, orderId, side, response);
+        if (!response.contains("\"outcome\":\"TERMINAL\"")
+                || !response.contains("\"code\":\"NONE\"")) {
+            throw new IllegalStateException("order command did not complete: " + response);
+        }
+        if (symbol.startsWith("W4-SPOT-")) {
+            String identityResponse = acceptedResponse.contains("\"prospectiveOrderIds\":[]")
+                    ? response : acceptedResponse;
+            spotOrders.add(new SpotOrder(userId, jsonLong(identityResponse, "\"prospectiveOrderIds\":[", ']'),
+                    jsonLong(response, "\"requiredExportSequence\":", ',')));
+        }
         providerBoundaryObserved = true;
+    }
+
+    private String awaitOrderResult(String initialResponse) {
+        String response = initialResponse;
+        if (response.contains("\"outcome\":\"TERMINAL\"")) {
+            return response;
+        }
+        String commandId = jsonString(response, "\"commandId\":\"");
+        for (int attempt = 1; attempt <= 40; attempt++) {
+            response = request("order", "GET", "/api/v1/trading/orders/commands/" + commandId,
+                    null, Map.of());
+            if (response.contains("\"outcome\":\"TERMINAL\"")) {
+                return response;
+            }
+            if (!response.contains("\"outcome\":\"RESULT_UNKNOWN\"")
+                    && !response.contains("\"outcome\":\"MATCHING_PENDING\"")) {
+                return response;
+            }
+            try {
+                Thread.sleep(250L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("W4 order result wait interrupted", interrupted);
+            }
+        }
+        return response;
     }
 
     private void applyMark(String symbol, long priceSequence, long price) {
@@ -445,28 +556,34 @@ public final class W4LifecycleQaMain {
     }
 
     private void settle(String symbol, long price, long optionCash, long settlementId) {
+        request("instrument", "POST", "/api/v1/instruments/admin/" + symbol + "/status"
+                        + "?productLine=" + productLine + "&status=SETTLING", null, Map.of());
         request("instrument", "POST", "/api/v1/instruments/admin/" + symbol + "/settlement"
                         + "?productLine=" + productLine + "&settlementPriceTicks=" + price
                         + "&underlyingSettlementPriceUnits=" + optionCash, null, Map.of());
         providerBoundaryObserved = true;
         for (int attempt = 0; attempt < 20; attempt++) {
             try {
-                readSettlementProgress(symbol);
-                return;
-            } catch (RuntimeException ignored) {
-                try {
-                    Thread.sleep(250L);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException("SETTLEMENT_WAIT_INTERRUPTED", ex);
+                CoreSettlementProgressView progress = readSettlementProgress(symbol);
+                if (progress.complete() && progress.ordersComplete()) {
+                    return;
                 }
+            } catch (RuntimeException ignored) {
+            }
+            try {
+                Thread.sleep(250L);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("SETTLEMENT_WAIT_INTERRUPTED", ex);
             }
         }
         throw new IllegalStateException("SETTLEMENT_PROVIDER_EVENT_TIMEOUT symbol=" + symbol);
     }
 
     private void runProviderCycles(String symbol, long userId) {
-        request("risk", "GET", "/api/v1/risk/account/latest?userId=" + userId, null, Map.of());
+        request("risk", "GET", "/api/v1/risk/account/latest?userId=" + userId
+                + "&accountType=" + productLine.accountTypeCode()
+                + "&settleAsset=" + settleAsset(), null, Map.of());
         request("maker", "POST", "/api/v1/market-maker/run-once",
                 "{\"strategyId\":null,\"symbol\":" + json(symbol)
                         + ",\"productLine\":" + json(productLine.name()) + "}", Map.of());
@@ -489,10 +606,27 @@ public final class W4LifecycleQaMain {
                     CoreLiquidationWorkView.Purpose.EXECUTION);
         }
         for (var action : work.actions()) {
-            command(CoreMessageType.EXECUTE_LIQUIDATION, action.userId(),
-                    TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
-                            action.liquidationId(), action.triggerPriceSequence(), action.markPriceTicks(), 100_000,
-                            action.cursorOrderId(), 1_024)));
+            byte[] payload = TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
+                    action.liquidationId(), action.triggerPriceSequence(), action.markPriceTicks(), 100_000,
+                    action.cursorOrderId(), 1_024));
+            lifecycleCoordinator.execute(() -> {
+                try {
+                    command(CoreMessageType.EXECUTE_LIQUIDATION, action.userId(), payload);
+                } catch (IllegalStateException exception) {
+                    if (!exception.getMessage().contains("LIQUIDATION_STATE_CONFLICT")) {
+                        throw exception;
+                    }
+                    CoreLiquidationWorkView refreshed = liquidationWork(symbol, 0,
+                            CoreLiquidationWorkView.Purpose.EXECUTION);
+                    boolean stillPending = refreshed.actions().stream()
+                            .anyMatch(candidate -> candidate.liquidationId() == action.liquidationId());
+                    if (stillPending) {
+                        throw exception;
+                    }
+                    rows.add(productLine + ":LIQUIDATION_WORK_ALREADY_APPLIED:" + action.liquidationId());
+                }
+                return null;
+            });
         }
         if (!work.actions().isEmpty() || !work.resolutions().isEmpty()) {
             rows.add(productLine + ":LIQUIDATION_WORK_APPLIED");
@@ -501,6 +635,10 @@ public final class W4LifecycleQaMain {
                 CoreLiquidationWorkView.Purpose.INSURANCE);
         CoreLiquidationWorkView adl = liquidationWork(symbol, 0,
                 CoreLiquidationWorkView.Purpose.ADL);
+        for (CoreLiquidationWorkView.Resolution resolution : insurance.resolutions()) {
+            expectedFunds.merge(resolution.asset(), Math.negateExact(resolution.deficitUnits()), Math::addExact);
+            rows.add(productLine + ":LIQUIDATION_LOSS_RECOGNIZED:" + resolution.deficitUnits());
+        }
         rows.add(productLine + ":INSURANCE_WORK_QUERY:" + insurance.resolutions().size());
         rows.add(productLine + ":ADL_WORK_QUERY:" + adl.resolutions().size());
     }
@@ -525,8 +663,8 @@ public final class W4LifecycleQaMain {
                 CoreStateQueryCodec.encodeFundingProgressQuery(symbol)));
     }
 
-    private void readSettlementProgress(String symbol) {
-        CoreSettlementProgressCodec.decode(query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, 0,
+    private CoreSettlementProgressView readSettlementProgress(String symbol) {
+        return CoreSettlementProgressCodec.decode(query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, 0,
                 CoreStateQueryCodec.encodeSettlementProgressQuery(symbol)));
     }
 
@@ -535,14 +673,21 @@ public final class W4LifecycleQaMain {
             throw new IllegalStateException("MAKER_USER_ID_REQUIRED");
         }
         Map<String, Long> actual = new LinkedHashMap<>();
+        Map<String, Long> users = new LinkedHashMap<>();
+        Map<String, Long> fees = new LinkedHashMap<>();
+        Map<String, Long> insurance = new LinkedHashMap<>();
+        Map<String, Long> deficits = new LinkedHashMap<>();
         Set<Long> reconciliationUsers = new LinkedHashSet<>(participantUsers);
         reconciliationUsers.add(makerUserId);
         for (long userId : reconciliationUsers) {
             CoreUserStateView state = CoreStateQueryCodec.decodeUserState(
                     query(CoreMessageType.USER_STATE_QUERY, userId, new byte[0]));
+            rows.add("USER_STATE userId=" + userId + " balances=" + state.balances()
+                    + " reservations=" + state.reservations() + " positions=" + state.positions());
             for (var balance : state.balances()) {
-                actual.merge(balance.asset(), Math.addExact(balance.availableUnits(), balance.lockedUnits()),
-                        Math::addExact);
+                long total = Math.addExact(balance.availableUnits(), balance.lockedUnits());
+                users.merge(balance.asset(), total, Math::addExact);
+                actual.merge(balance.asset(), total, Math::addExact);
             }
         }
         rows.add("USER_RECONCILIATION_OBSERVED");
@@ -550,6 +695,9 @@ public final class W4LifecycleQaMain {
         makerReconciliationObserved = true;
         for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
                 query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
+            fees.put(treasury.asset(), treasury.feeBalanceUnits());
+            insurance.put(treasury.asset(), treasury.insuranceBalanceUnits());
+            deficits.put(treasury.asset(), treasury.insuranceDeficitUnits());
             actual.merge(treasury.asset(), Math.subtractExact(
                     Math.addExact(treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()),
                     treasury.insuranceDeficitUnits()), Math::addExact);
@@ -560,7 +708,19 @@ public final class W4LifecycleQaMain {
             long difference = Math.subtractExact(actual.getOrDefault(asset, 0L),
                     expectedFunds.getOrDefault(asset, 0L));
             if (difference != 0) {
-                throw new IllegalStateException("FUNDS_DIFFERENCE asset=" + asset + " difference=" + difference);
+                throw new IllegalStateException("FUNDS_DIFFERENCE asset=" + asset
+                        + " expected=" + expectedFunds.getOrDefault(asset, 0L)
+                        + " actual=" + actual.getOrDefault(asset, 0L)
+                        + " difference=" + difference
+                        + " users=" + users.getOrDefault(asset, 0L)
+                        + " fees=" + fees.getOrDefault(asset, 0L)
+                        + " insurance=" + insurance.getOrDefault(asset, 0L)
+                        + " deficit=" + deficits.getOrDefault(asset, 0L)
+                        + " reconciliationUsers=" + reconciliationUsers);
+            }
+            if (deficits.getOrDefault(asset, 0L) != 0) {
+                throw new IllegalStateException("INSURANCE_DEFICIT_REMAINS asset=" + asset
+                        + " deficit=" + deficits.get(asset));
             }
         }
         rows.add("TREASURY_RECONCILIATION_OBSERVED");
@@ -584,11 +744,84 @@ public final class W4LifecycleQaMain {
     }
 
     private void requireBookEmpty() {
-        var book = CoreStateQueryCodec.decodeOrderBookView(
-                query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0]));
-        if (!book.levels().isEmpty()) {
-            throw new IllegalStateException("book is not empty levels=" + book.levels().size());
+        Instant deadline = Instant.now().plusSeconds(10);
+        int levels;
+        Object levelDetails = List.of();
+        do {
+            var book = CoreStateQueryCodec.decodeOrderBookView(
+                    query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0]));
+            levels = book.levels().size();
+            levelDetails = book.levels();
+            if (levels == 0) {
+                return;
+            }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("interrupted while waiting for the order book to settle", exception);
+            }
+        } while (Instant.now().isBefore(deadline));
+        if (levels != 0) {
+            throw new IllegalStateException("book is not empty levels=" + levels + " details=" + levelDetails);
         }
+    }
+
+    private void awaitSpotOrdersFilled() {
+        Instant deadline = Instant.now().plusSeconds(15);
+        while (Instant.now().isBefore(deadline)) {
+            boolean allFilled = true;
+            for (SpotOrder order : spotOrders) {
+                String path = "/api/v1/trading/orders/" + order.orderId()
+                        + "?userId=" + order.userId() + "&minExportSequence=" + order.requiredExportSequence();
+                try {
+                    String response = request("order", "GET", path, null, Map.of());
+                    String status = jsonString(response, "\"status\":\"");
+                    if ("REJECTED".equals(status)) {
+                        throw new IllegalStateException("spot order rejected after command acceptance: " + response);
+                    }
+                    if (!"FILLED".equals(status)) {
+                        allFilled = false;
+                    }
+                } catch (IllegalStateException exception) {
+                    if (!exception.getMessage().startsWith("HTTP_409")) {
+                        throw exception;
+                    }
+                    allFilled = false;
+                }
+            }
+            if (allFilled) {
+                rows.add("SPOT:FILL_CALLBACK_OBSERVED");
+                return;
+            }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("interrupted while waiting for spot fills", exception);
+            }
+        }
+        throw new IllegalStateException("spot fill callback timeout orders=" + spotOrders);
+    }
+
+    private static long jsonLong(String body, String prefix, char terminator) {
+        int start = body.indexOf(prefix);
+        if (start < 0) throw new IllegalStateException("missing JSON field " + prefix + " body=" + body);
+        start += prefix.length();
+        int end = body.indexOf(terminator, start);
+        if (end < 0) end = body.length();
+        return Long.parseLong(body.substring(start, end).replaceAll("[^0-9-].*", ""));
+    }
+
+    private static String jsonString(String body, String prefix) {
+        int start = body.indexOf(prefix);
+        if (start < 0) throw new IllegalStateException("missing JSON field " + prefix + " body=" + body);
+        start += prefix.length();
+        int end = body.indexOf('"', start);
+        return body.substring(start, end);
+    }
+
+    private record SpotOrder(long userId, long orderId, long requiredExportSequence) {
     }
 
     private void command(CoreMessageType type, long userId, byte[] payload) {
@@ -611,11 +844,26 @@ public final class W4LifecycleQaMain {
                 type, UUID.nameUUIDFromBytes((productLine + ":query:" + correlation + ':' + type)
                         .getBytes(StandardCharsets.UTF_8)), productLine, CommandSource.OPERATIONS,
                 sourceId, 0, userId, System.currentTimeMillis(), correlation), payload);
-        var response = client.submit(message);
-        if (response.status() != ResponseStatus.OK) {
-            throw new IllegalStateException(type + " query rejected result=" + response.resultCode());
+        ResultUnknownException last = null;
+        for (int attempt = 1; attempt <= 20; attempt++) {
+            try {
+                var response = client.submit(message);
+                if (response.status() != ResponseStatus.OK) {
+                    throw new IllegalStateException(type + " query rejected result=" + response.resultCode());
+                }
+                return response.data();
+            } catch (ResultUnknownException exception) {
+                last = exception;
+                if (attempt == 20) throw exception;
+                try {
+                    Thread.sleep(50L * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("W4 query retry interrupted", interrupted);
+                }
+            }
         }
-        return response.data();
+        throw last == null ? new IllegalStateException("W4 query did not execute") : last;
     }
 
     long nextSequence() {

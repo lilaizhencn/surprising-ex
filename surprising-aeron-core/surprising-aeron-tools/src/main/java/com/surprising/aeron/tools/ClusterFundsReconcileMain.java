@@ -1,7 +1,11 @@
 package com.surprising.aeron.tools;
 
-import com.surprising.aeron.client.AeronClientPool;
+import com.surprising.aeron.client.SurprisingAeronClient;
+import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreRiskQueryCodec;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
@@ -25,22 +29,35 @@ public final class ClusterFundsReconcileMain {
         List<String> hosts = Arrays.stream(value("AERON_HOSTNAMES", "localhost,localhost,localhost").split(","))
                 .map(String::trim).filter(host -> !host.isEmpty()).toList();
         Map<String, Long> actual = new LinkedHashMap<>();
-        try (var clients = new AeronClientPool("funds-reconcile", productLine, hosts,
-                value("AERON_EGRESS_HOSTNAME", "localhost"), Duration.ofSeconds(10), 16)) {
+        try (var client = SurprisingAeronClient.connect(productLine, hosts,
+                value("AERON_EGRESS_HOSTNAME", "localhost"), Duration.ofSeconds(10))) {
             for (long userId : userIds) {
-                var response = clients.query(CoreMessageType.USER_STATE_QUERY, UUID.randomUUID(), userId, new byte[0]);
+                var response = query(client, productLine, CoreMessageType.USER_STATE_QUERY, userId);
                 if (response.status() != ResponseStatus.OK) {
                     throw new IllegalStateException("user state query failed user=" + userId
                             + " result=" + response.resultCode());
                 }
                 var state = CoreStateQueryCodec.decodeUserState(response.data());
                 for (var balance : state.balances()) {
-                    actual.merge(balance.asset(), Math.addExact(balance.availableUnits(), balance.lockedUnits()),
-                            Math::addExact);
+                    long total = Math.addExact(balance.availableUnits(), balance.lockedUnits());
+                    actual.merge(balance.asset(), total, Math::addExact);
+                    System.out.printf("user=%d asset=%s available=%d locked=%d total=%d%n",
+                            userId, balance.asset(), balance.availableUnits(), balance.lockedUnits(), total);
+                }
+                for (var position : state.positions()) {
+                    System.out.printf("user=%d position=symbol:%s side:%s quantity=%d entry=%d margin=%d realized=%d%n",
+                            userId, position.symbol(), position.positionSide(), position.signedQuantitySteps(),
+                            position.entryPriceTicks(), position.positionMarginUnits(), position.realizedPnlUnits());
+                }
+                var risk = CoreRiskQueryCodec.decode(query(client, productLine,
+                        CoreMessageType.RISK_STATE_QUERY, userId).data());
+                for (var snapshot : risk) {
+                    System.out.printf("risk user=%d symbol=%s unrealized=%d equity=%d status=%s%n",
+                            userId, snapshot.symbol(), snapshot.unrealizedPnlUnits(), snapshot.equityUnits(),
+                            snapshot.status());
                 }
             }
-            var treasuryResponse = clients.query(CoreMessageType.TREASURY_STATE_QUERY, UUID.randomUUID(), 0,
-                    new byte[0]);
+            var treasuryResponse = query(client, productLine, CoreMessageType.TREASURY_STATE_QUERY, 0);
             if (treasuryResponse.status() != ResponseStatus.OK) {
                 throw new IllegalStateException("treasury query failed: " + treasuryResponse.resultCode());
             }
@@ -49,6 +66,9 @@ public final class ClusterFundsReconcileMain {
                         Math.addExact(treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()),
                         treasury.insuranceDeficitUnits());
                 actual.merge(treasury.asset(), economicBalance, Math::addExact);
+                System.out.printf("treasury asset=%s fees=%d insurance=%d deficit=%d economic=%d%n",
+                        treasury.asset(), treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits(),
+                        treasury.insuranceDeficitUnits(), economicBalance);
             }
         }
         for (var entry : expected.entrySet()) {
@@ -62,6 +82,15 @@ public final class ClusterFundsReconcileMain {
         }
         System.out.printf("fundsReconcile=PASS productLine=%s users=%d fundsDiff=0%n",
                 productLine, userIds.size());
+    }
+
+    private static com.surprising.aeron.protocol.CoreResponse query(
+            SurprisingAeronClient client, ProductLine productLine, CoreMessageType type, long userId) {
+        long correlation = System.nanoTime();
+        CoreMessage message = new CoreMessage(CoreMessageHeader.query(
+                type, UUID.randomUUID(), productLine, CommandSource.OPERATIONS,
+                0x46554E4453524543L, correlation, userId, correlation, correlation), new byte[0]);
+        return client.submit(message);
     }
 
     private static List<Long> parseUsers(String configured) {

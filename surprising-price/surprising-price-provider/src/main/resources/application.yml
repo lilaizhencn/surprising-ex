@@ -73,8 +73,8 @@ surprising:
         node-id:
         lease-duration: 15s
       aeron:
-        hostnames: [localhost, localhost, localhost]
-        egress-hostname: localhost
+        hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+        egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
         response-timeout: 5s
         client-connections: 1
       audit:

@@ -138,18 +138,15 @@ class OrderServiceTest {
     @Test
     void adminCancelUsesLocalPartitionAndProductLine() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
-        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null))
-                .thenReturn(ProjectionReadResult.ok(java.util.List.of(), null, false, 12L, 0L));
         assertThatThrownBy(() -> service.adminCancelOrders(new AdminBatchCancelOrdersRequest(
                 1001L, "BTC-USDT", 10, "risk"))).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    void adminCancelSelectsOpenOrdersFromProjection() {
+    void adminCancelSelectsOpenOrdersFromCore() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         List<OrderResponse> open = openOrders(123);
-        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, null, "BTC-USDT", null, 123, null))
-                .thenReturn(ProjectionReadResult.ok(open, null, false, 12L, 0L));
+        when(aeronOrders.openOrders(0, "BTC-USDT", 0, 123)).thenReturn(open);
         stubCancelBatches();
 
         AdminCancelOrdersResponse result = service.adminCancelOrders(
@@ -158,23 +155,22 @@ class OrderServiceTest {
         assertThat(result.requested()).isEqualTo(123);
         assertThat(result.canceled()).isEqualTo(123);
         assertThat(result.skipped()).isZero();
-        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, null, "BTC-USDT", null, 123, null);
+        verify(aeronOrders).openOrders(0, "BTC-USDT", 0, 123);
         verify(aeronOrders, times(3)).cancelBatchCommand(anyString(), anyList());
         verify(aeronOrders, never()).cancel(anyLong(), anyLong());
     }
 
     @Test
-    void adminSingleCancelUsesTheProductLineScopedProjectionOrder() {
+    void adminSingleCancelUsesTheProductLineScopedCoreOrder() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
         OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
-        when(projection.byOrder(ProductLine.LINEAR_PERPETUAL, (Long) null, 91L, null))
-                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
+        when(aeronOrders.orderState(0, 91L)).thenReturn(open);
         when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
 
         assertThat(service.adminCancelOrder(91L, "risk", ProductLine.LINEAR_PERPETUAL).orderId()).isEqualTo(91L);
 
-        verify(projection).byOrder(ProductLine.LINEAR_PERPETUAL, (Long) null, 91L, null);
+        verify(aeronOrders).orderState(0, 91L);
         verify(aeronOrders).cancel(1001L, 91L);
     }
 
@@ -189,27 +185,24 @@ class OrderServiceTest {
     }
 
     @Test
-    void readsProjectionAtRequiredExportSequenceWithoutAeron() {
-        OrderService service = service(ProductLine.LINEAR_PERPETUAL, null);
+    void currentOrderReadUsesCoreEvenWhenExportSequenceIsProvided() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
-        when(projection.byOrder(ProductLine.LINEAR_PERPETUAL, 1001L, 91L, 12L))
-                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 12L));
+        when(aeronOrders.orderState(1001L, 91L)).thenReturn(open);
 
         OrderResponse result = service.get(1001L, 91L, 12L);
 
         assertThat(result).isEqualTo(open);
-        verify(projection).byOrder(ProductLine.LINEAR_PERPETUAL, 1001L, 91L, 12L);
-        verifyNoInteractions(aeronOrders);
+        verify(aeronOrders).orderState(1001L, 91L);
+        verifyNoInteractions(projection);
     }
 
     @Test
-    void allOrdinaryOrderReadsUseProductLineAndUserScopedProjection() {
+    void currentReadsUseCoreWhileHistoryUsesProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
-        when(projection.byClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "client-91", null))
-                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
-        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null))
-                .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
+        when(aeronOrders.orderStateByClientOrderId(1001L, "client-91")).thenReturn(open);
+        when(aeronOrders.openOrders(1001L, "BTC-USDT", 0, 11)).thenReturn(java.util.List.of(open));
         when(projection.historyOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
                 null, null, null, null, null))
                 .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
@@ -219,19 +212,17 @@ class OrderServiceTest {
         assertThat(service.historyOrders(1001L, "BTC-USDT", 10, null, null, null).orders())
                 .containsExactly(open);
 
-        verify(projection).byClientOrderId(ProductLine.LINEAR_PERPETUAL, 1001L, "client-91", null);
-        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null);
+        verify(aeronOrders).orderStateByClientOrderId(1001L, "client-91");
+        verify(aeronOrders).openOrders(1001L, "BTC-USDT", 0, 11);
         verify(projection).historyOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", 10,
                 null, null, null, null, null);
-        verifyNoInteractions(aeronOrders);
     }
 
     @Test
-    void cancelOpenOrdersSelectsFromProjectionAndSendsOnlyCancelCommandToAeron() {
+    void cancelOpenOrdersSelectsFromCoreAndSendsOnlyCancelCommandToAeron() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         List<OrderResponse> open = openOrders(123);
-        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 1000, null))
-                .thenReturn(ProjectionReadResult.ok(open, null, false, 12L, 0L));
+        when(aeronOrders.openOrders(1001L, "BTC-USDT", 0, 1000)).thenReturn(open);
         stubCancelBatches();
 
         OrderBatchResponse first = service.cancelOpenOrders(
@@ -245,7 +236,7 @@ class OrderServiceTest {
         assertThat(first.results().getFirst().order().orderId()).isEqualTo(10_000L);
         assertThat(first.results().getLast().order().orderId()).isEqualTo(10_122L);
         assertThat(second).isEqualTo(first);
-        verify(projection, times(2)).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 1000, null);
+        verify(aeronOrders, times(2)).openOrders(1001L, "BTC-USDT", 0, 1000);
         ArgumentCaptor<String> batchKeys = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<List> batchOrders = ArgumentCaptor.forClass(List.class);
         verify(aeronOrders, times(6)).cancelBatchCommand(batchKeys.capture(), batchOrders.capture());
@@ -294,19 +285,17 @@ class OrderServiceTest {
     }
 
     @Test
-    void oversizedFirstProjectionRowPreservesContinuationCursorAtServiceBoundary() {
-        OrderService service = service(ProductLine.LINEAR_PERPETUAL, null);
-        String continuation = "eyJvcmRlciI6MTIzfQ";
-        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null))
-                .thenReturn(ProjectionReadResult.responseTooLarge(12L, 0L, continuation));
+    void currentOpenOrdersPaginatesWithCoreCursor() {
+        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
+        when(aeronOrders.openOrders(1001L, "BTC-USDT", 0, 3)).thenReturn(openOrders(3));
 
-        assertThatThrownBy(() -> service.openOrders(1001L, "BTC-USDT", 10))
-                .isInstanceOf(ProjectionReadResult.ResponseTooLargeException.class)
-                .satisfies(throwable -> assertThat(
-                        ((ProjectionReadResult.ResponseTooLargeException) throwable).nextCursor())
-                        .isEqualTo(continuation));
-        verify(projection).openOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT", null, 10, null);
-        verifyNoInteractions(aeronOrders);
+        OrderQueryResponse first = service.openOrders(1001L, "BTC-USDT", 2);
+
+        assertThat(first.orders()).hasSize(2);
+        assertThat(first.hasMore()).isTrue();
+        assertThat(first.nextCursor()).isNotBlank();
+        verify(aeronOrders).openOrders(1001L, "BTC-USDT", 0, 3);
+        verifyNoInteractions(projection);
     }
 
     private OrderService service(ProductLine productLine) {

@@ -29,7 +29,7 @@ management:
 surprising:
   insurance:
     aeron:
-      hostnames: ${AERON_HOSTNAMES:localhost,localhost,localhost}
+      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
       egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
       response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
       client-connections: ${AERON_CLIENT_CONNECTIONS:2}

@@ -1,6 +1,7 @@
 package com.surprising.funding.provider.service;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
+import com.surprising.aeron.client.AeronLifecycleCoordinator;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -44,7 +45,7 @@ public class FundingService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final FundingAeronGateway aeron;
     private final String nodeId;
-
+    private final AeronLifecycleCoordinator lifecycleCoordinator = new AeronLifecycleCoordinator();
     public FundingService(FundingProperties properties,
                           FundingLeaseRepository leaseRepository,
                           FundingSequenceRepository sequenceRepository,
@@ -89,6 +90,10 @@ public class FundingService {
     }
 
     public synchronized SettlementCycle settleDueRates() {
+        return lifecycleCoordinator.execute(this::settleDueRatesInternal);
+    }
+
+    private SettlementCycle settleDueRatesInternal() {
         if (!properties.getSettlement().isEnabled()) return SettlementCycle.disabled();
         Instant now = Instant.now();
         int dueRates = 0;

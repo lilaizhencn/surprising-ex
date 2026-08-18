@@ -1,6 +1,7 @@
 package com.surprising.liquidation.provider.service;
 
 import com.surprising.aeron.protocol.CoreLiquidationActionView;
+import com.surprising.aeron.client.AeronLifecycleCoordinator;
 import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
@@ -19,7 +20,7 @@ public class LiquidationService {
     private final LiquidationProperties properties;
     private final LiquidationAeronGateway aeron;
     private final CoreLiquidationProjectionRepository projections;
-
+    private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
     public LiquidationService(LiquidationProperties properties, LiquidationAeronGateway aeron,
                               CoreLiquidationProjectionRepository projections) {
         this.properties = properties;
@@ -28,6 +29,10 @@ public class LiquidationService {
     }
 
     public synchronized WorkCycle processWork() {
+        return lifecycleCoordinator.execute(this::processWorkInternal);
+    }
+
+    private WorkCycle processWorkInternal() {
         if (!properties.getExecution().isEnabled()) return new WorkCycle(false, 0, 0, 0, 0, 0);
         long feeRatePpm = properties.getExecution().getLiquidationFeeRatePpm();
         long cursor = 0;

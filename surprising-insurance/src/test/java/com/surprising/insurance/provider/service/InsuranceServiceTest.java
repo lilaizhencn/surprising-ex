@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -60,7 +61,7 @@ class InsuranceServiceTest {
     }
 
     @Test
-    void coversCoreSelectedDeficitWithOneAeronCommandAndSynchronousAudit() {
+    void coversCoreSelectedDeficitWithoutDirectDatabaseAuditWrites() {
         Fixture fixture = new Fixture(new InsuranceProperties());
         var deficit = new CoreLiquidationProjection(81, 4004, "USDT", 1_000);
         var resolution = new CoreLiquidationWorkView.Resolution(81, 4004, "BTC-USDT", "USDT",
@@ -78,10 +79,7 @@ class InsuranceServiceTest {
         fixture.service.coverDeficits();
 
         verify(fixture.aeron).command(eq(CoreMessageType.RESOLVE_LIQUIDATION), any(), any());
-        verify(fixture.coverageRepository).insertCompleted(eq(9501L), eq("USDT_PERPETUAL"), eq(deficit),
-                eq(600L), eq(400L), any(Instant.class));
-        verify(fixture.ledgerRepository).insert(eq(9502L), eq("USDT_PERPETUAL"), eq("USDT"), eq(-600L),
-                eq(0L), eq("DEFICIT_COVERAGE"), eq("81"), eq("COVER_LIQUIDATION_DEFICIT"), any());
+        verifyNoInteractions(fixture.coverageRepository, fixture.ledgerRepository, fixture.sequenceRepository);
     }
 
     @Test
@@ -97,6 +95,7 @@ class InsuranceServiceTest {
 
         assertThat(response.balanceUnits()).isEqualTo(1_500L);
         verify(fixture.aeron).command(eq(CoreMessageType.ADJUST_INSURANCE_FUND), any(), any());
+        verifyNoInteractions(fixture.ledgerRepository, fixture.sequenceRepository);
     }
 
     @Test

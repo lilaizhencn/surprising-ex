@@ -1,6 +1,7 @@
 package com.surprising.insurance.provider.service;
 
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
+import com.surprising.aeron.client.AeronLifecycleCoordinator;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
@@ -13,7 +14,6 @@ import com.surprising.insurance.api.model.InsuranceFundBalanceQueryResponse;
 import com.surprising.insurance.api.model.InsuranceFundBalanceResponse;
 import com.surprising.insurance.api.model.InsuranceLedgerQueryResponse;
 import com.surprising.insurance.provider.config.InsuranceProperties;
-import com.surprising.insurance.provider.model.InsuranceLedgerReference;
 import com.surprising.insurance.provider.repository.CoreInsuranceProjectionRepository;
 import com.surprising.insurance.provider.repository.InsuranceCoverageRepository;
 import com.surprising.insurance.provider.repository.InsuranceFundLedgerRepository;
@@ -22,7 +22,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
@@ -37,7 +36,7 @@ import java.util.UUID;
     private final InsuranceCoverageRepository coverageRepository;
     private final CoreInsuranceProjectionRepository projectionRepository;
     private final InsuranceAeronGateway aeron;
-
+    private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
     public InsuranceService(InsuranceProperties properties,
                             InsuranceSequenceRepository sequenceRepository,
                             InsuranceFundLedgerRepository ledgerRepository,
@@ -52,8 +51,11 @@ import java.util.UUID;
         this.aeron = aeron;
     }
 
-    @Transactional
     public synchronized CoverageCycle coverDeficits() {
+        return lifecycleCoordinator.execute(this::coverDeficitsInternal);
+    }
+
+    private CoverageCycle coverDeficitsInternal() {
         if (!properties.getCoverage().isEnabled()) {
             return CoverageCycle.disabled();
         }
@@ -83,14 +85,12 @@ import java.util.UUID;
         }
     }
 
-    @Transactional
     public InsuranceFundBalanceResponse adjustFund(InsuranceFundAdjustmentRequest request) {
         if (request.amountUnits() == 0) {
             throw new IllegalArgumentException("amountUnits must not be zero");
         }
         String asset = normalizeAsset(request.asset());
         String referenceId = normalizeReferenceId(request.referenceId());
-        String accountType = accountType();
         Instant now = Instant.now();
         long currentBalance = aeron.balance(asset);
         long nextBalance = Math.addExact(currentBalance, request.amountUnits());
@@ -100,40 +100,21 @@ import java.util.UUID;
                 TradingCommandCodec.encodeAdjustInsuranceFund(
                         new AdjustInsuranceFundCommand(asset, request.amountUnits())));
         long committedBalance = aeron.balance(asset);
-        boolean inserted = ledgerRepository.insert(sequenceRepository.next("insurance-ledger"),
-                accountType, asset, request.amountUnits(), committedBalance,
-                "FUND_ADJUSTMENT", referenceId, request.reason(), now);
-        if (!inserted) {
-            requireReferenceMatches("FUND_ADJUSTMENT", referenceId, accountType, asset,
-                    request.amountUnits(), request.reason());
-            return new InsuranceFundBalanceResponse(asset, committedBalance, now);
-        }
         return new InsuranceFundBalanceResponse(asset, committedBalance, now);
     }
 
-    @Transactional
     public void collectLiquidationFee(LiquidationFeeSettledEvent event) {
         if (event.amountUnits() <= 0) {
             throw new IllegalArgumentException("liquidation fee amountUnits must be positive");
         }
         String accountType = normalizeAccountType(event.accountType());
         requireProviderAccountType(accountType);
-        Instant now = event.eventTime() == null ? Instant.now() : event.eventTime();
         String referenceId = event.tradeId() + ":" + event.orderId();
         String asset = normalizeAsset(event.asset());
         UUID commandId = stableId("LIQUIDATION_FEE:" + properties.getKafka().getProductLine() + ':' + referenceId);
         aeron.command(CoreMessageType.ADJUST_INSURANCE_FUND, commandId,
                 TradingCommandCodec.encodeAdjustInsuranceFund(
                         new AdjustInsuranceFundCommand(asset, event.amountUnits())));
-        long nextBalance = aeron.balance(asset);
-        boolean inserted = ledgerRepository.insert(sequenceRepository.next("insurance-ledger"),
-                accountType, asset, event.amountUnits(), nextBalance,
-                "LIQUIDATION_FEE", referenceId, "COLLECT_LIQUIDATION_FEE", now);
-        if (!inserted) {
-            requireReferenceMatches("LIQUIDATION_FEE", referenceId, accountType, asset,
-                    event.amountUnits(), "COLLECT_LIQUIDATION_FEE");
-            return;
-        }
     }
 
     public InsuranceFundBalanceQueryResponse balances(String asset) {
@@ -177,48 +158,21 @@ import java.util.UUID;
     }
 
     private boolean coverDeficit(com.surprising.insurance.provider.model.CoreLiquidationProjection deficit) {
-        Instant now = Instant.now();
         long availableFund = aeron.balance(deficit.asset());
         long coverUnits = InsuranceMath.coverAmount(deficit.deficitUnits(), availableFund);
         if (coverUnits <= 0) {
             return false;
         }
-        long coverageId = sequenceRepository.next("insurance-coverage");
-        long remainingDeficit = Math.subtractExact(deficit.deficitUnits(), coverUnits);
         UUID commandId = stableId("INSURANCE_COVER:" + properties.getKafka().getProductLine() + ':'
                 + deficit.liquidationId() + ':' + deficit.deficitUnits());
         aeron.command(CoreMessageType.RESOLVE_LIQUIDATION, commandId,
                 TradingCommandCodec.encodeResolveLiquidation(new ResolveLiquidationCommand(
                         deficit.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE, coverUnits)));
-        long balance = aeron.balance(deficit.asset());
-        coverageRepository.insertCompleted(coverageId, accountType(), deficit, coverUnits, remainingDeficit, now);
-        boolean inserted = ledgerRepository.insert(sequenceRepository.next("insurance-ledger"), accountType(), deficit.asset(),
-                Math.negateExact(coverUnits), balance, "DEFICIT_COVERAGE", Long.toString(deficit.liquidationId()),
-                "COVER_LIQUIDATION_DEFICIT", now);
-        if (!inserted) {
-            requireReferenceMatches("DEFICIT_COVERAGE", Long.toString(deficit.liquidationId()), accountType(),
-                    deficit.asset(), Math.negateExact(coverUnits), "COVER_LIQUIDATION_DEFICIT");
-        }
         return true;
     }
 
     private static UUID stableId(String value) {
         return UUID.nameUUIDFromBytes(value.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private void requireReferenceMatches(String referenceType,
-                                         String referenceId,
-                                         String accountType,
-                                         String asset,
-                                         long amountUnits,
-                                         String reason) {
-        InsuranceLedgerReference existing = ledgerRepository
-                .findReference(referenceType, referenceId, accountType, asset)
-                .orElseThrow(() -> new IllegalStateException(
-                        "duplicate insurance reference but ledger missing"));
-        if (existing.amountUnits() != amountUnits || !Objects.equals(existing.reason(), reason)) {
-            throw new IllegalStateException("conflicting duplicate insurance fund reference " + referenceId);
-        }
     }
 
     private String accountType() {

@@ -1,7 +1,6 @@
 package com.surprising.aeron.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.product.api.ProductLine;
@@ -33,13 +32,13 @@ class CoreQueryClassTest {
     }
 
     @Test
-    void rejectsOrdinaryReadsBeforeTheyReachTheReservedMailbox() {
+    void routesOrdinaryReadsAwayFromTheReservedMailbox() {
         try (AeronClientPool pool = new AeronClientPool("query-class", ProductLine.SPOT,
                 List.of("localhost", "localhost", "localhost"), "localhost", Duration.ofSeconds(1),
                 "query-class", "epoch", AeronClientCapacity.defaults(),
                 () -> { throw new AssertionError("agents are paused"); }, false)) {
-            assertThatIllegalArgumentException().isThrownBy(() -> pool.query(CoreMessageType.USER_STATE_QUERY,
-                    UUID.randomUUID(), 1, new byte[0])).withMessageContaining("ordinary Core reads");
+            assertThat(pool.queryAsync(CoreMessageType.USER_STATE_QUERY,
+                    UUID.randomUUID(), 1, new byte[0])).isNotCompleted();
             assertThat(pool.controlQueryAsync(CoreMessageType.COMMAND_RESULT_QUERY, UUID.randomUUID(), 1,
                     new byte[0])).isNotCompleted();
         }
@@ -53,8 +52,8 @@ class CoreQueryClassTest {
                 () -> { throw new AssertionError("agents are paused"); }, false)) {
             assertThat(pool.lifecycleControlQueryAsync(CoreMessageType.USER_OPEN_ORDERS_QUERY,
                     UUID.randomUUID(), 0L, new byte[0])).isNotCompleted();
-            assertThatIllegalArgumentException().isThrownBy(() -> pool.query(CoreMessageType.USER_OPEN_ORDERS_QUERY,
-                    UUID.randomUUID(), 0L, new byte[0])).withMessageContaining("ordinary Core reads");
+            assertThat(pool.queryAsync(CoreMessageType.USER_OPEN_ORDERS_QUERY,
+                    UUID.randomUUID(), 0L, new byte[0])).isNotCompleted();
         }
     }
 }

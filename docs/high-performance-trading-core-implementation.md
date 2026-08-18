@@ -711,7 +711,7 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 | P1 正确性/单往返 | `DONE` | 失败回滚、稳定 lane、结果未知、fee/instrument version gate、直接响应 | Core 回滚护栏、bounded client、`COMMAND_RESULT_QUERY` 结果核验、native GTX 测试 | 无；source epoch 采用进程 epoch 编码 sourceId 的简单方案，不另建 registry |
 | P2 Runtime/O(delta) | `DONE` | 单写 runtime、持久化 delta entity store、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime`、DeltaMap lineage、各类派生 index、Core service 121 tests 和运行时 smoke；热点逐项状态见第 3.1/3.3 节 | 热路径已无隐式全量 constructor/diff/hash；用户/订单 immutable state shell 仍是可选的后续性能优化；历史实体 compaction 仍按运行手册执行 |
 | P3 唯一盘口/恢复 | `DONE` | exchange-core 唯一 executable book、结构化 adapter、Aeron 托管 matcher snapshot、无逐单恢复 | fork 302 tests；六个 ProductLine 原生 FIFO restore；snapshot round-trip、损坏/版本/SHA/registry/订单集合不一致均 fail-closed；`CoreBookState` 和生产 rebuild 已删除 | 真实三 Member election、冷恢复和长时容量仍属于 P6 上线门禁 |
-| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；Provider 已补齐受保护的 Aeron 生命周期 cycle 入口；详见 `.omo/evidence/w4-core-baseline-20260817.md` | 真实 provider API 对四类业务线逐项执行下单/触发/强平/资金费/交割/行权门禁；Provider 资金对账和 cursor 重启验证 |
+| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 已通过宿主机三节点 Cluster 的真实 HTTP/做市/结算/资金守恒门禁 | SPOT、两条永续和 OPTION 仍需逐条执行真实 Provider 门禁；cursor 重启/缺口仍需验证 |
 | P5 导出/查询/外围 | `DONE` | 一次编码 outbox、带 cursor 的批量 ACK、projection、查询旁路、慢连接隔离 | `w5-export-final-1315` 通过 Kafka/PG 故障恢复、重复/乱序、Gateway/WebSocket offset、Core 独立和资金门禁；`w5-isolation-final-1345` 通过 PG 恢复、投影缺口回放、慢客户端隔离和清理 | 生产规模容量和长时 soak 属于 P6，不阻塞本阶段功能出口 |
 | P6 HA/压测/扩容 | `IN_PROGRESS` | leader/follower/cold recovery、单线容量、manifest、runbook | SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery manifest 通过；六条产品线均有 20 秒 capacity PASS 和角色日志 | 长时稳定容量报告、完整 CPU/GC/Aeron/export lag 指标和扩容结论 |
 
@@ -764,6 +764,17 @@ mvn -pl :surprising-funding-provider,:surprising-liquidation,:surprising-insuran
 - Kafka 或 PostgreSQL 停止时，只增加 export/projection lag，不改变订单、撮合、资金、风险或生命周期结果。
 
 运行编排中的 `exporter` 与 `projector` 是两个独立进程；`DATABASE_URL` 仅注入 `projector`，用于明确禁止 exporter 直连数据库。
+
+### 18.3.3 W4 交割产品线真实门禁（2026-08-18）
+
+W4 已改用 W5 验证过的宿主机三节点 Aeron Cluster，Docker 只复用隔离的 PostgreSQL 与 Kafka。每次只启动一条产品线的必要 Provider，做市进程保持运行，wallet 不启动。
+
+- `LINEAR_DELIVERY`：运行 `w4-linear-delivery-final9`，返回 `W4_MANIFEST=REAL_PASS`、`FUNDS_DIFFERENCE=0`、`maker=OBSERVED`、`cleanup=PASS`。
+- `INVERSE_DELIVERY`：修复完成游标等待后运行 `w4-inverse-delivery-complete1`，返回 `W4_MANIFEST=REAL_PASS`、`FUNDS_DIFFERENCE=0`、`W4_SIX_LINE=PASS`、`cleanup=PASS`。
+- 逆向交割两组 CROSS/ISOLATED 多空在 `100 -> 110` 结算时分别产生 `+91/-91`，结算后持仓归零、锁定余额为零；用户余额、手续费、保险基金合计守恒。
+- W4 reconciliation manifest 记录每个参与用户的余额、预留和持仓，资金差异失败不再只有聚合数字。
+
+此前 `w4-inverse-delivery-final1` 的 `difference=-91` 发生在旧结算等待语义下：驱动查到 progress 后立即对账，但没有要求分块结算完成。当前驱动等待 Instrument 结算事件被 Account Provider 回调到 Core，并确认 `complete=true && ordersComplete=true` 后才查询和对账。没有通过扩大用户集合、修改期初资金或放宽 `FUNDS_DIFFERENCE=0` 消除失败。
 
 ### 18.4 Canonical 测试脚本矩阵
 

@@ -325,6 +325,24 @@ public class AeronOrderCommandService {
                 .toList();
     }
 
+    public OrderResponse orderState(long userId, long orderId) {
+        return toOrder(aeron.orderState(userId, orderId));
+    }
+
+    public OrderResponse orderStateByClientOrderId(long userId, String clientOrderId) {
+        return toOrder(aeron.orderStateByClientOrderId(userId, clientOrderId));
+    }
+
+    public List<OrderResponse> openOrders(long userId, String symbol, long beforeOrderId, int limit) {
+        return aeron.openOrders(userId, symbol, beforeOrderId, limit).stream()
+                .map(AeronOrderCommandService::toOrder)
+                .toList();
+    }
+
+    private static OrderResponse toOrder(CoreOrderStateView view) {
+        return view == null ? null : requireOrder(view, "order query returned no order");
+    }
+
     private long matchingPriceTicks(com.surprising.trading.api.model.PlaceOrderRequest request, long version) {
         if (request.orderType() == OrderType.LIMIT) return request.priceTicks();
         long mark = markPrices.latestMarkPriceTicks(request.symbol(), version,

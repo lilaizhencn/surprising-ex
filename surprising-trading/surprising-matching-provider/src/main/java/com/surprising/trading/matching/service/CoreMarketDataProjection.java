@@ -2,6 +2,7 @@ package com.surprising.trading.matching.service;
 
 import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.client.CoreCommandOutcome;
+import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
@@ -69,12 +70,12 @@ public class CoreMarketDataProjection {
     }
 
     private com.surprising.aeron.protocol.CoreOrderBookView loadBootstrap() {
-        long deadline = System.nanoTime() + properties.getAeron().getResponseTimeout().toNanos();
+        long deadline = System.nanoTime() + properties.getAeron().getBootstrapTimeout().toNanos();
         while (true) {
             try {
                 return aeronGateway.orderBookProjection();
             } catch (CompletionException ex) {
-                if (!notConnected(ex) || System.nanoTime() >= deadline) {
+                if (!retryableBootstrapFailure(ex) || System.nanoTime() >= deadline) {
                     throw ex;
                 }
                 LockSupport.parkNanos(25_000_000L);
@@ -82,9 +83,12 @@ public class CoreMarketDataProjection {
         }
     }
 
-    private static boolean notConnected(Throwable throwable) {
+    private static boolean retryableBootstrapFailure(Throwable throwable) {
         Throwable current = throwable;
         while (current != null) {
+            if (current instanceof ResultUnknownException) {
+                return true;
+            }
             if (current instanceof CoreCommandOutcome.NotAcceptedException rejected) {
                 return rejected.rejection().reason() == CoreCommandOutcome.NotAcceptedReason.NOT_CONNECTED;
             }

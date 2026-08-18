@@ -199,6 +199,7 @@ public class MatchingProperties {
         private List<String> hostnames = List.of("localhost", "localhost", "localhost");
         private String egressHostname = "localhost";
         private Duration responseTimeout = Duration.ofSeconds(5);
+        private Duration bootstrapTimeout = Duration.ofSeconds(45);
 
         public List<String> getHostnames() { return hostnames; }
         public void setHostnames(List<String> hostnames) {
@@ -219,6 +220,13 @@ public class MatchingProperties {
                 throw new IllegalArgumentException("Aeron response timeout must be positive");
             }
             responseTimeout = value;
+        }
+        public Duration getBootstrapTimeout() { return bootstrapTimeout; }
+        public void setBootstrapTimeout(Duration value) {
+            if (value == null || value.isZero() || value.isNegative()) {
+                throw new IllegalArgumentException("Aeron bootstrap timeout must be positive");
+            }
+            bootstrapTimeout = value;
         }
     }
 }

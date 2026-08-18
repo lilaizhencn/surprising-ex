@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.surprising.aeron.client.CoreCommandOutcome;
+import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.aeron.protocol.CoreBookLevelView;
@@ -44,6 +45,22 @@ class CoreMarketDataProjectionTest {
                 CoreCommandOutcome.NotAcceptedReason.NOT_CONNECTED, -1));
         when(gateway.orderBookProjection())
                 .thenThrow(new CompletionException(notConnected))
+                .thenReturn(new CoreOrderBookView(0, List.of()));
+        CoreMarketDataProjection projection = new CoreMarketDataProjection(properties, gateway,
+                ignored -> { }, ignored -> { }, new LatestPublicTradeCache());
+
+        projection.initialize();
+
+        assertThat(projection.appliedExportSequence()).isZero();
+    }
+
+    @Test
+    void retriesInitialProjectionWhenAdmittedQueryResultIsUnknown() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getAeron().setBootstrapTimeout(java.time.Duration.ofSeconds(1));
+        MatchingAeronGateway gateway = mock(MatchingAeronGateway.class);
+        when(gateway.orderBookProjection())
+                .thenThrow(new CompletionException(new ResultUnknownException(UUID.randomUUID(), "unknown")))
                 .thenReturn(new CoreOrderBookView(0, List.of()));
         CoreMarketDataProjection projection = new CoreMarketDataProjection(properties, gateway,
                 ignored -> { }, ignored -> { }, new LatestPublicTradeCache());

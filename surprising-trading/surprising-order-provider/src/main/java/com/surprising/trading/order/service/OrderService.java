@@ -38,7 +38,9 @@ import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,6 +52,7 @@ import org.springframework.stereotype.Service;
 public class OrderService {
 
     private static final int MAX_CANCEL_BATCH_SIZE = 50;
+    private static final String ACTIVE_ORDER_CURSOR_PREFIX = "core-open:v1:";
 
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
@@ -285,7 +288,7 @@ public class OrderService {
         }
         String symbol = request.symbol() == null || request.symbol().isBlank()
                 ? null : normalizeSymbol(request.symbol());
-        List<OrderResponse> open = projectionOpenOrders(currentProductLine(), request.userId(), symbol, limit);
+        List<OrderResponse> open = activeOpenOrders(currentProductLine(), request.userId(), symbol, limit);
         requireAeron();
         List<CancelOrderRequest> requests = open.stream()
                 .map(order -> new CancelOrderRequest(request.userId(), order.orderId()))
@@ -302,8 +305,9 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         requireOrderId(orderId);
-        return singleProjection(requireProjection().byOrder(currentProductLine(), userId, orderId,
-                minExportSequence), "order not found: " + orderId);
+        OrderResponse current = requireAeron().orderState(userId, orderId);
+        if (current == null) throw new IllegalStateException("order not found: " + orderId);
+        return current;
     }
 
     public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
@@ -315,8 +319,9 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         String normalized = normalizeClientOrderId(clientOrderId);
-        return singleProjection(requireProjection().byClientOrderId(currentProductLine(), userId, normalized,
-                minExportSequence), "order not found: " + normalized);
+        OrderResponse current = requireAeron().orderStateByClientOrderId(userId, normalized);
+        if (current == null) throw new IllegalStateException("order not found: " + normalized);
+        return current;
     }
 
     public OrderQueryResponse openOrders(long userId, String symbol, int limit) {
@@ -336,16 +341,21 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
-        return toQueryResponse(requireProjection().openOrders(currentProductLine(), userId, normalizedSymbol,
-                cursor, limit, minExportSequence), "createdAt.desc", limit);
+        long beforeOrderId = decodeActiveOrderCursor(cursor);
+        List<OrderResponse> orders = requireAeron().openOrders(userId, normalizedSymbol, beforeOrderId, limit + 1);
+        boolean hasMore = orders.size() > limit;
+        if (hasMore) orders = new ArrayList<>(orders.subList(0, limit));
+        String nextCursor = hasMore && !orders.isEmpty()
+                ? encodeActiveOrderCursor(orders.getLast().orderId()) : null;
+        return new OrderQueryResponse(orders.size(), orders, nextCursor, hasMore, "createdAt.desc", limit);
     }
 
-    private List<OrderResponse> projectionOpenOrders(ProductLine productLine, Long userId, String symbol,
-                                                     int limit) {
+    private List<OrderResponse> activeOpenOrders(ProductLine productLine, Long userId, String symbol,
+                                                 int limit) {
         if (productLine != currentProductLine()) {
             throw new IllegalArgumentException("product line does not match this order core");
         }
-        return readyProjection(requireProjection().openOrders(productLine, userId, symbol, null, limit, null));
+        return requireAeron().openOrders(userId == null ? 0 : userId, symbol, 0, limit);
     }
 
     public OrderQueryResponse historyOrders(long userId,
@@ -435,8 +445,8 @@ public class OrderService {
         requireOrderId(orderId);
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
         requireCurrentProductLine(resolved);
-        OrderResponse selected = singleProjection(requireProjection().byOrder(resolved, (Long) null, orderId, null),
-                "order not found: " + orderId);
+        OrderResponse selected = requireAeron().orderState(0, orderId);
+        if (selected == null) throw new IllegalStateException("order not found: " + orderId);
         requireAeron();
         OrderResponse canceled = aeronOrders.cancel(selected.userId(), selected.orderId());
         boolean requested = cancelSucceeded(canceled.status());
@@ -464,7 +474,7 @@ public class OrderService {
         String reason = adminCancelReason(request == null ? null : request.reason());
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
         requireCurrentProductLine(resolved);
-        List<OrderResponse> selected = projectionOpenOrders(resolved, userId, symbol, limit);
+        List<OrderResponse> selected = activeOpenOrders(resolved, userId, symbol, limit);
         requireAeron();
         List<CancelOrderRequest> requests = selected.stream()
                 .map(order -> new CancelOrderRequest(order.userId(), order.orderId()))
@@ -499,7 +509,7 @@ public class OrderService {
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
         ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
-        List<OrderResponse> orders = projectionOpenOrders(resolvedProductLine, userId, normalizedSymbol, limit);
+        List<OrderResponse> orders = activeOpenOrders(resolvedProductLine, userId, normalizedSymbol, limit);
         long quantity = orders.stream().mapToLong(OrderResponse::remainingQuantitySteps).sum();
         int buys = (int) orders.stream().filter(order -> order.side() == OrderSide.BUY).count();
         return new AdminCancelOrdersPreviewResponse(userId, normalizedSymbol, orders.size(), orders.size(),
@@ -797,6 +807,28 @@ public class OrderService {
     private void requireOrderId(long orderId) {
         if (orderId <= 0) {
             throw new IllegalArgumentException("orderId must be positive");
+        }
+    }
+
+    private static String encodeActiveOrderCursor(long orderId) {
+        if (orderId <= 0) throw new IllegalArgumentException("invalid active order cursor");
+        String value = ACTIVE_ORDER_CURSOR_PREFIX + orderId;
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static long decodeActiveOrderCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) return 0;
+        try {
+            String value = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+            if (!value.startsWith(ACTIVE_ORDER_CURSOR_PREFIX)) {
+                throw new IllegalArgumentException("invalid active order cursor");
+            }
+            long orderId = Long.parseLong(value.substring(ACTIVE_ORDER_CURSOR_PREFIX.length()));
+            if (orderId <= 0) throw new IllegalArgumentException("invalid active order cursor");
+            return orderId;
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("invalid active order cursor", exception);
         }
     }
 
