@@ -4,7 +4,7 @@
 >
 > 适用范围：Aeron Cluster、交易核心、exchange-core 0.5.15-emporia、账户资金、订单、风险、触发单、导出、查询、Gateway 和四类业务线（六个 `ProductLine` 变体）。
 >
-> 目标：单写者、无锁热路径、减少复制、减少往返、内存裁决、高吞吐、可恢复、资金守恒。
+> 目标：单写者、无锁热路径、减少复制、减少往返、内存裁决、高吞吐、可恢复、资金守恒；在线交易运行时不依赖 PostgreSQL。
 >
 > 基线提交：`221b7f005e75af43f76b19d71abde0b1a053312e`；实施分支：`codex/aeron-unified-core`。
 > 当前文档阶段：`P3-DONE / P4-PARTIAL / P5-DONE / P6-IN_PROGRESS`。W1/W2 已完成：exchange-core 是唯一可执行盘口，Core 只保存订单业务元数据和必要索引，恢复只导入 Aeron 配对的原生 matcher snapshot。
@@ -34,10 +34,38 @@ ProductExecutionCore（单写者、无锁、内存状态）
         +-- CommandDelta：权威响应、滚动哈希和复制导出事实
         |
         +--> Aeron 响应（一次命令往返）
-        +--> 异步 Kafka/Exporter -> PostgreSQL、WebSocket、行情和查询投影
+        +--> Aeron subscription -> WebSocket、行情和只读查询索引
+        +--> replicated outbox -> Audit Exporter -> Kafka
+                                             +--> History Projector -> PostgreSQL
 ```
 
-数据库、Redis、Kafka、HTTP、外部价格服务和系统时钟都不能参与下单、撤单、改单、撮合、资金预留、成交结算、强平和触发单执行的同步裁决。普通交易和触发单热路径均只依赖 Cluster 内存状态；数据库只保留历史、报表、投影和对账职责。
+PostgreSQL、Redis、Kafka、HTTP、外部价格服务和系统时钟都不能参与下单、撤单、改单、撮合、资金预留、成交结算、强平和触发单执行的同步裁决。预先导入 Instrument 版本后，交易进程必须在审计 PostgreSQL、Kafka 和 Valkey 全部不可用时继续完成交易、查询、风控和恢复。交易状态只存在于 Aeron Cluster 的内存状态、Cluster Log、Archive 和快照中。Instrument 保持既有 PostgreSQL 管理逻辑；历史 PostgreSQL 只能由 Kafka projector 异步写入。
+
+### 1.0 交易主链路数据库零依赖边界（强约束）
+
+> **本次决策修订（2026-08-18）**：目标是交易命令和当前态查询不依赖数据库，不是删除 Instrument 的 PostgreSQL。当前代码尚未完全达到该目标；以下边界是必须完成的目标状态，不应将现有 W4 验证误称为脱库门禁。详见 `docs/adr/0001-aeron-authoritative-without-database.md`。
+
+“交易主链路不依赖数据库”不是把 JDBC 查询从热路径挪到 Provider，而是交易命令完成条件不得包含数据库读写：
+
+| 范围 | 权威来源 | PostgreSQL 依赖 |
+| --- | --- | --- |
+| 余额、冻结、持仓、活动订单、未成交单 | ProductExecutionCore 状态机 | 禁止 |
+| 风控、标记价、强平、ADL、保险、资金费、交割/行权 | 同一 ProductExecutionCore 事件与状态 | 禁止 |
+| 订单/持仓/资金查询、撤单、止盈止损操作 | Aeron Query/Command + 内存只读索引 | 禁止 |
+| 用户和会话 | Gateway Auth Cluster 的状态快照；访问令牌使用签名 JWT | 禁止 |
+| instrument 配置与生命周期管理 | Instrument 服务 + PostgreSQL；版本化 Aeron command 导入 Core | 保持既有逻辑；不参与单笔交易裁决 |
+| 事件回放、崩溃恢复 | Aeron Cluster Log + Archive + snapshot manifest | 禁止 |
+| 历史、报表、审计、对账导出 | Core outbox -> Kafka exporter -> Kafka projector | 仅 projector 异步写入 |
+
+因此，所有参与订单、资金、风险和生命周期裁决的 `JdbcTemplate`、JPA、数据库 lease/sequence/projection repository 必须从交易 Provider 的构造图中移除。Instrument 数据访问保持不变。需要历史数据的接口读取 PostgreSQL 投影，但写入只能发生在独立 projector；Exporter 本身不持有 DataSource。
+
+实施顺序必须先完成运行时脱库，再做压测：
+
+1. 为每个 ProductLine 建立 Cluster 内的 funding、insurance、liquidation、ADL、trigger 和 account state command/query；Provider 只做调度、协议转换和订阅。
+2. 将余额、持仓、活动订单、未完成触发单和生命周期进度从 JDBC repository 迁移到 Core snapshot 状态，并为每类状态增加恢复后的 invariant 校验。
+3. 将 Risk、Maker、Funding、Insurance、Liquidation 的交易运行配置改为 `DB_REQUIRED=false`；Instrument 的数据库连接 Bean 保持不变。
+4. Exporter 只发布 Kafka，独立 projector 消费 Kafka 并幂等写 PostgreSQL，禁止在线请求同步调用两者。
+5. 预先完成 Instrument 初始化后，停止审计 PostgreSQL、Kafka、Valkey，执行六条产品线的资金、订单、风控、强平和恢复门禁；通过后才开始单产品线压测。
 
 exchange-core 是唯一盘口权威。项目不得再维护一份价格桶、FIFO、剩余量排序或第二本可执行 book。外层核心只保留订单业务元数据、资金预留、必要的活动订单索引和恢复校验信息。
 
@@ -719,6 +747,23 @@ mvn -pl :surprising-funding-provider,:surprising-liquidation,:surprising-insuran
 ```
 
 结果：受影响模块编译通过，4 个 Provider service 测试类共 21 个测试通过。该结果只证明 Provider→Core 代码边界和有界 continuation，不等价于真实 HTTP、做市、用户资金和 Treasury 对账门禁；这些仍是 P4 的下一出口。
+
+### 18.3.1 无数据库运行时修订（2026-08-18）
+
+此前表格中的“PostgreSQL 仅记录历史/投影”仍可能被误读为生命周期调用可以同步或异步直写数据库。本次明确修订为：Core 命令返回 `APPLIED` 即是在线业务完成条件，Provider 不写 PostgreSQL ledger、sequence、coverage 或 ADL event。`AeronLifecycleCoordinator.shared()` 提供跨 Funding/Liquidation/Insurance/ADL 的统一有界调度；保险覆盖、资金调整、清算费和 ADL 事实由 Core export event 进入 Kafka，再由独立 projector 幂等写历史库。
+
+本次已验证 `surprising-aeron-client`、`surprising-adl`、`surprising-insurance`、`surprising-liquidation` 增量构建通过；Insurance/ADL 定向测试已更新为验证“Core 不等待历史投影”。这不是完整无数据库门禁：Funding 的费率输入/租约、Price/Instrument 配置以及在线 Provider 构造图仍含 JDBC 依赖，必须在后续阶段迁移到 Core snapshot/query 或显式离线配置后，才能宣称 PostgreSQL 可完全停止。
+
+### 18.3.2 审计导出链路边界（2026-08-18）
+
+审计 exporter 不直接写 PostgreSQL。链路固定为 `Aeron Core -> KafkaCoreExportSink -> ProductLine Kafka topic -> KafkaProjectionWorker -> JdbcCoreEventProjector -> PostgreSQL`：
+
+- `ExporterMain` 只连接 Aeron、发布 Core export event 到 Kafka；它不创建 `DataSource`。
+- `ProjectionMain` 才是可选的 PostgreSQL 投影消费者，从 Kafka topic 消费并幂等写历史表。
+- Core、Provider、Gateway 和做市进程不调用 `JdbcCoreEventProjector`，也不等待投影 ACK。
+- Kafka 或 PostgreSQL 停止时，只增加 export/projection lag，不改变订单、撮合、资金、风险或生命周期结果。
+
+运行编排中的 `exporter` 与 `projector` 是两个独立进程；`DATABASE_URL` 仅注入 `projector`，用于明确禁止 exporter 直连数据库。
 
 ### 18.4 Canonical 测试脚本矩阵
 

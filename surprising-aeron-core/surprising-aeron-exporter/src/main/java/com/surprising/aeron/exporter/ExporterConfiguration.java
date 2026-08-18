@@ -50,18 +50,6 @@ final class ExporterConfiguration {
         return value("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092");
     }
 
-    static String databaseUrl() {
-        return value("DATABASE_URL", "jdbc:postgresql://localhost:5432/postgres");
-    }
-
-    static String databaseUser() {
-        return value("DATABASE_USER", "postgres");
-    }
-
-    static String databasePassword() {
-        return value("DATABASE_PASSWORD", "postgres");
-    }
-
     static String inputTopics() {
         return required("CORE_INPUT_TOPICS");
     }

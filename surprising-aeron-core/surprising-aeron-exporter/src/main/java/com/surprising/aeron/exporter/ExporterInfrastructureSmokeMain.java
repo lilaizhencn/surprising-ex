@@ -46,8 +46,8 @@ public final class ExporterInfrastructureSmokeMain {
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
-        var dataSource = new DriverManagerDataSource(ExporterConfiguration.databaseUrl(),
-                ExporterConfiguration.databaseUser(), ExporterConfiguration.databasePassword());
+        var dataSource = new DriverManagerDataSource(ProjectionConfiguration.databaseUrl(),
+                ProjectionConfiguration.databaseUser(), ProjectionConfiguration.databasePassword());
         var projector = new JdbcCoreEventProjector(dataSource);
         boolean consumed = false;
         try (var consumer = new KafkaConsumer<String, byte[]>(consumerProperties)) {

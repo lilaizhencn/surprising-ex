@@ -32,8 +32,8 @@ public final class ProjectionMain {
             Runtime.getRuntime().addShutdownHook(shutdown);
             consumer.subscribe(List.of(KafkaCoreExportSink.topic(productLine)));
             var projector = new JdbcCoreEventProjector(new DriverManagerDataSource(
-                    ExporterConfiguration.databaseUrl(), ExporterConfiguration.databaseUser(),
-                    ExporterConfiguration.databasePassword()));
+                    ProjectionConfiguration.databaseUrl(), ProjectionConfiguration.databaseUser(),
+                    ProjectionConfiguration.databasePassword()));
             var worker = new KafkaProjectionWorker(productLine, consumer, projector);
             System.out.printf("Core projection started productLine=%s%n", productLine);
             try {

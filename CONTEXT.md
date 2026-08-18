@@ -1,0 +1,16 @@
+# Surprising-EX Domain Context
+
+## Canonical terms
+
+- **Product Core**：一条产品线的唯一确定性状态机，包含账户、余额、冻结、持仓、活动订单、订单簿、风险、资金费、保险基金、强平、ADL、触发单和结算状态。
+- **User State**：用户在 Product Core 内的可用余额、冻结余额、持仓、活动订单和未完成生命周期工作；它不是数据库查询结果。
+- **Book State**：exchange-core 维护的价格时间优先订单簿；不存在第二本可执行订单簿。
+- **Core Fact**：Product Core 裁决后产生的不可变事件事实，按 Aeron Cluster position 排序并写入 Cluster Log/Archive。
+- **Online Query**：通过 Aeron command/query 从内存状态读取当前数据，不访问 PostgreSQL、Valkey 或 Kafka。
+- **Audit Exporter**：从 Product Core 的 replicated outbox 读取 Core Fact 并发布到 Kafka 的独立进程；它不连接 PostgreSQL。
+- **History Projector**：消费 Kafka 审计 topic 并幂等写入 PostgreSQL 的独立进程；它不是交易裁决来源。
+- **Instrument State**：由 Instrument 服务通过 PostgreSQL 管理的产品配置和生命周期状态；交易所需版本通过 Aeron command 导入 Product Core，命令执行不回查数据库。
+
+## Boundary
+
+在线交易当前态的唯一权威是 Aeron Cluster 的确定性状态、Cluster Log、Archive 和快照。PostgreSQL 不参与同步交易裁决，但继续服务 Instrument 管理以及 Kafka 历史投影。审计链路固定为 Product Core -> Audit Exporter -> Kafka -> History Projector -> PostgreSQL。
