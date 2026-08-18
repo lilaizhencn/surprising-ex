@@ -208,7 +208,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_LEVERAGE_OPTION_BASE_URL:http://localhost:9084}
       trading-market:
-        base-url: http://localhost:9085
+        base-url: http://localhost:9081
         target-prefix: /api/v1/trading/market
         private-route: false
         product-routes:
@@ -225,22 +225,22 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trades:
-        base-url: http://localhost:9085
+        base-url: http://localhost:9081
         target-prefix: /api/v1/trading/market
         private-route: true
         product-routes:
           SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_SPOT_BASE_URL:http://localhost:9085}
+            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_SPOT_BASE_URL:http://localhost:9081}
           LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_LINEAR_PERPETUAL_BASE_URL:http://localhost:9085}
+            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_LINEAR_PERPETUAL_BASE_URL:http://localhost:9081}
           INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_INVERSE_PERPETUAL_BASE_URL:http://localhost:9085}
+            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_INVERSE_PERPETUAL_BASE_URL:http://localhost:9081}
           LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_LINEAR_DELIVERY_BASE_URL:http://localhost:9085}
+            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_LINEAR_DELIVERY_BASE_URL:http://localhost:9081}
           INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_INVERSE_DELIVERY_BASE_URL:http://localhost:9085}
+            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_INVERSE_DELIVERY_BASE_URL:http://localhost:9081}
           OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_OPTION_BASE_URL:http://localhost:9085}
+            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_OPTION_BASE_URL:http://localhost:9081}
       trading-trigger:
         base-url: ${GATEWAY_ROUTE_TRADING_COMMAND_BASE_URL:http://localhost:9084}
         target-prefix: /api/v1/trading/trigger-orders
@@ -527,7 +527,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-market:
-        base-url: http://localhost:9085
+        base-url: http://localhost:9081
         target-prefix: /api/v1/trading/market
         private-route: true
         product-routes:

@@ -1,13 +1,13 @@
 # surprising-trading
 
 
-Surprising Exchange 现货、永续、交割和期权交易模块。当前已实现统一的 `surprising-command-provider` 和 `surprising-matching-provider`：订单入口、止盈止损条件单、instrument 规则校验、Core 幂等状态、产品线 Kafka 撮合命令发布、exchange-core 真实订单簿撮合、撮合结果和成交事件输出。
+Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surprising-command-provider` 负责订单入口、止盈止损条件单和 instrument 规则校验；Aeron Core 负责幂等状态、exchange-core 真实订单簿撮合、资金与持仓原子裁决。行情查询投影已迁入 `surprising-market-data-provider`。
 
 ## 模块
 
 - `surprising-trading-api`：订单 RPC 合约、DTO、Kafka command/event 模型。
 - `surprising-command-provider`：统一订单和止盈止损条件单入口 provider。
-- `surprising-matching-provider`：基于 `exchange-core` 的撮合 provider。
+- `surprising-market-data-provider`（位于 `surprising-market-data`）：Aeron Core 行情与公共成交的可重建查询投影。
 
 ## long 定点数模型
 
@@ -45,7 +45,7 @@ client / internal gateway
   -> surprising.<product-segment>.order.user.command.results.v1
   -> Aeron Core 订单命令（预占由 Core 原子裁决）
   -> surprising.<product-segment>.order.commands.v1
-  -> surprising-matching-provider / exchange-core
+  -> Aeron Core / exchange-core
   -> MatchResultEvent / MatchTradeEvent
   -> 可靠资金链路：match.results.v1 + account.user.commands.v1
   -> 内存公共行情链路：match.trades.v1 + orderbook.depth.v1
@@ -263,7 +263,7 @@ matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。�
 未命中时直接拒绝下单，不在下单线程回查数据库。数据库仅是订单/杠杆异步投影和审计来源，不能作为账户
 Core 状态的恢复源。
 
-`surprising-matching-provider` 在撮合拒绝时发布释放命令；订单用户分区按未成交比例追加终态事实，
+Aeron Core 在撮合拒绝时产生释放事实；订单用户分区按未成交比例追加终态事实，
 Aeron Core reducer 按实际成交价计算开仓保证金，把这部分从订单预占迁移到持仓保证金，并释放委托价改善
 或市价风险边界多冻结的差额。数据库只接收账户和订单完整快照投影。线性合约市价单即使是 SELL
 也故意按上边界冻结，因为 SELL 市价单可能吃到高于 mark 的买一挂单。平仓成交释放旧持仓保证金，
@@ -344,7 +344,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 每个 `ProductLine` 的 Aeron Core 内嵌一个 fork exchange-core；它是该产品线唯一价格树、FIFO 和可执行盘口。
 `TradingCoreState` 只保存 `CoreOrderState` 业务元数据、资金预留和 `ActiveOrderIndex` 等必要索引，
-不保存 `CoreBookState`、价格桶或 priority sequence。`surprising-matching-provider` 只负责行情/成交查询投影，
+不保存 `CoreBookState`、价格桶或 priority sequence。`surprising-market-data-provider` 只负责行情/成交查询投影，
 不持有、恢复或裁决第二个 exchange-core。
 
 命令在 Core 单写 transition 内按以下顺序执行：
@@ -387,7 +387,7 @@ exchange-core 内的 user/symbol/risk module 只是 matcher 技术状态，随�
 公共 REST 快照接口：
 
 ```bash
-curl 'http://localhost:9085/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50'
+curl 'http://localhost:9081/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50'
 curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
 ```
 
@@ -516,18 +516,18 @@ psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f in
 mvn -pl :surprising-instrument-provider -am spring-boot:run
 mvn -pl :surprising-command-provider -am spring-boot:run
 JAVA_TOOL_OPTIONS="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED" \
-mvn -pl :surprising-matching-provider -am spring-boot:run
+mvn -pl :surprising-market-data-provider -am spring-boot:run
 ```
 
 端口：
 
 - `9084`：command provider，普通订单和止盈止损条件单统一入口。
-- `9085`：撮合服务。
+- `9081`：统一 Market Data Provider，提供撮合行情投影和 K 线查询。
 
 ## 生产注意事项
 
 - `surprising-command-provider` 单独部署。普通订单、撮合、账户结算和条件单热路径只依赖 Aeron Core 与内存状态，不连接 PostgreSQL、Redis 或价格/持仓 Kafka，也不保留数据库回退链路。不要做每个 symbol 一个 worker。
-- `surprising-matching-provider` 独立于 command provider，但只维护可重建的行情与成交查询投影，不持有可执行订单簿。
+- `surprising-market-data-provider` 独立于 command provider，但只维护可重建的行情、成交和 K 线查询投影，不持有可执行订单簿。
 - Aeron Core 使用 JDK 25 运行。`exchange.core2:exchange-core:0.5.15-emporia` 传递依赖 Chronicle/OpenHFT，
   父 POM 固定 fork Git SHA、整包 SHA-256 和 JDK 25 可用的 2026.x BOM；service Maven `validate`
   同时验证 whole dependency JAR 与内嵌 provenance。
@@ -550,6 +550,6 @@ mvn -pl :surprising-matching-provider -am spring-boot:run
 
 ```bash
 mvn -pl :surprising-command-provider -am test
-mvn -pl :surprising-matching-provider -am test
+mvn -pl :surprising-market-data-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'
 ```

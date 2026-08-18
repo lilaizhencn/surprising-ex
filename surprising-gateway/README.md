@@ -48,7 +48,7 @@ curl 'http://localhost:9094/api/v1/admin/system/health' \
 | `price-fx` | `http://localhost:9082/api/v1/price/fx` | 否 |
 | `price-mark` | `http://localhost:9082/api/v1/price/mark` | 否 |
 | `trading` | `http://localhost:9084/api/v1/trading/orders` | 是 |
-| `trading-market` | `http://localhost:9085/api/v1/trading/market` | 否 |
+| `trading-market` | `http://localhost:9081/api/v1/trading/market` | 否 |
 | `trading-trigger` | `http://localhost:9084/api/v1/trading/trigger-orders` | 是 |
 | `account` | `http://localhost:9086/api/v1/accounts` | 是 |
 | `risk` | `http://localhost:9087/api/v1/risk` | 是 |
@@ -140,7 +140,7 @@ surprising:
       read-timeout: 30s
     routes:
       candlestick:
-        base-url: http://surprising-candlestick:9081
+        base-url: http://surprising-market-data:9081
         target-prefix: /api/v1/candlestick
         private-route: false
       account:

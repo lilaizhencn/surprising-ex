@@ -11,32 +11,22 @@
         <relativePath>../surprising-parent/pom.xml</relativePath>
     </parent>
 
-    <artifactId>surprising-trading</artifactId>
+    <artifactId>surprising-market-data</artifactId>
     <packaging>pom</packaging>
-    <name>surprising-trading</name>
-    <description>Perpetual trading order entry and matching services</description>
+    <name>surprising-market-data</name>
+    <description>Unified matching projection and candlestick market-data modules</description>
 
     <modules>
-        <module>surprising-trading-api</module>
-        <module>surprising-command-provider</module>
+        <module>surprising-market-data-api</module>
+        <module>surprising-market-data-provider</module>
     </modules>
 
     <dependencyManagement>
         <dependencies>
             <dependency>
                 <groupId>com.surprising</groupId>
-                <artifactId>surprising-product-api</artifactId>
+                <artifactId>surprising-market-data-api</artifactId>
                 <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.surprising</groupId>
-                <artifactId>surprising-trading-api</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>exchange.core2</groupId>
-                <artifactId>exchange-core</artifactId>
-                <version>${exchange-core.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

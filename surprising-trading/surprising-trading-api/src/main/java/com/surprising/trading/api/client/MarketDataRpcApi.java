@@ -12,10 +12,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-matching-provider",
+        name = "surprising-market-data-provider",
         contextId = "marketDataRpcApi",
         path = TradingApiPaths.MARKET_BASE_PATH,
-        url = "${surprising.clients.matching.base-url:http://localhost:9085}")
+        url = "${surprising.clients.matching.base-url:http://localhost:9081}")
 public interface MarketDataRpcApi {
 
     @GetMapping("/orderbook")

@@ -85,7 +85,7 @@ surprising:
     mark-price:
       base-url: http://localhost:9082
     matching:
-      base-url: http://localhost:9085
+      base-url: http://localhost:9081
     order:
       base-url: http://localhost:9084
   market-maker:

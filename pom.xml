@@ -17,7 +17,7 @@
         <module>surprising-product-api</module>
         <module>surprising-aeron-core</module>
         <module>surprising-instrument</module>
-        <module>surprising-candlestick</module>
+        <module>surprising-market-data</module>
         <module>surprising-price</module>
         <module>surprising-trading</module>
         <module>surprising-account</module>

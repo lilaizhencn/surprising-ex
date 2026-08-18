@@ -6,34 +6,22 @@
 
     <parent>
         <groupId>com.surprising</groupId>
-        <artifactId>surprising-parent</artifactId>
+        <artifactId>surprising-market-data</artifactId>
         <version>1.0.0-SNAPSHOT</version>
-        <relativePath>../surprising-parent/pom.xml</relativePath>
     </parent>
 
-    <artifactId>surprising-gateway</artifactId>
-    <name>surprising-gateway</name>
-    <description>Frontend REST gateway for Surprising Exchange</description>
+    <artifactId>surprising-market-data-provider</artifactId>
+    <name>surprising-market-data-provider</name>
+    <description>Unified Aeron market projection and Kafka Streams candlestick provider</description>
 
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-product-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-aeron-protocol</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
             <artifactId>surprising-market-data-api</artifactId>
-            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-price-api</artifactId>
+            <artifactId>surprising-product-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -43,56 +31,22 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-account-api</artifactId>
+            <artifactId>surprising-aeron-protocol</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-derivatives-lifecycle-api</artifactId>
+            <artifactId>surprising-aeron-client</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-funding-api</artifactId>
+            <artifactId>surprising-instrument-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>jakarta.validation</groupId>
-            <artifactId>jakarta.validation-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-websocket</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-jdbc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka-clients</artifactId>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -103,12 +57,41 @@
             <artifactId>spring-cloud-context</artifactId>
         </dependency>
         <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
         </dependency>
         <dependency>
-            <groupId>tools.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-streams</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -123,14 +106,14 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.surprising.gateway.provider.SurprisingGatewayApplication</mainClass>
+                    <mainClass>com.surprising.marketdata.SurprisingMarketDataApplication</mainClass>
                 </configuration>
             </plugin>
             <plugin>
                 <groupId>org.graalvm.buildtools</groupId>
                 <artifactId>native-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.surprising.gateway.provider.SurprisingGatewayApplication</mainClass>
+                    <mainClass>com.surprising.marketdata.SurprisingMarketDataApplication</mainClass>
                 </configuration>
             </plugin>
         </plugins>

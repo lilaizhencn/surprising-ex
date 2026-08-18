@@ -68,7 +68,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | `surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api` | Risk、强平、保险、ADL 统一 API contracts |
 | `surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider` | Risk、强平、保险、ADL 统一 Provider/JVM |
 | `surprising-funding` | 资金费 API 和独立资金费服务 |
-| `surprising-candlestick` | Kafka Streams + RocksDB K 线 |
+| `surprising-market-data/surprising-market-data-api` | K 线查询 contract 与共享 DTO |
+| `surprising-market-data/surprising-market-data-provider` | Matching Aeron 行情投影与 Kafka Streams + RocksDB K 线统一 Provider/JVM |
 | `surprising-gateway` | REST gateway、WebSocket fanout 和统一对外入口 |
 | `surprising-maker` | 内部做市和交易链路压测 |
 
@@ -160,10 +161,9 @@ Chronicle 版本由父 POM 的 BOM 统一管理，避免旧版在 JDK 25 中触�
 | Provider | 端口 |
 |---|---:|
 | instrument | 9080 |
-| candlestick | 9081 |
+| market-data（matching projection/candlestick） | 9081 |
 | price-provider（index/mark/fx） | 9082 |
 | command | 9084 |
-| matching | 9085 |
 | account | 9086 |
 | derivatives-lifecycle（risk/liquidation/insurance/adl） | 9087 |
 | funding | 9089 |

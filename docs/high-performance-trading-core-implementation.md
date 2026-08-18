@@ -811,7 +811,7 @@ PostgreSQL `25432`、Kafka `29092`、JDK 25（`/opt/homebrew/opt/openjdk@25`）�
 
 服务启动顺序固定为：PostgreSQL → Kafka → migrations（`gateway-schema.sql`、根初始化、版本迁移）
 → Aeron Cluster `node0/node1/node2` → Exporter → Projector → Instrument → Price → Account →
-Trading Command → Matching → Risk →（永续 Funding）→（交割/期权/永续 Liquidation、Insurance、ADL）
+Trading Command → Market Data → Risk →（永续 Funding）→（交割/期权/永续 Liquidation、Insurance、ADL）
 → Gateway → Maker。现货不启动 Funding、Liquidation、Insurance、ADL；wallet 永不启动。六个脚本
 分别直接调用 `run.sh` 的启动和清理命令，再调用单产品线生命周期驱动；不存在聚合场景、产品线循环或
 跨产品线选择参数。启动、清理、ownership lock 和失败回收语义仍由唯一运行时入口保持一致。
@@ -945,3 +945,19 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 新项目直接编译四组源码，通过 fully-qualified Bean name 避免领域组件同名冲突，并排除四个旧 Application 类，确保不会重复创建 Spring Context、Feign 注册或 Aeron 客户端。旧模块不再作为生命周期 JAR 依赖；运行脚本和 W5 构建脚本只构建、启动统一 JAR；Funding 保持独立。
 
 验证：`mvn -pl surprising-derivatives-lifecycle -am -DskipTests package` 通过；启动脚本已统一使用 JDK 25 Aeron `--add-exports` 参数。真实六产品线生命周期门禁仍需按既定单产品线顺序执行，不能以本次构建替代资金守恒验证。
+
+### 19.2 Matching/Candlestick 合并（2026-08-18）
+
+Matching 行情投影与 Candlestick 已迁入 `surprising-market-data`。`surprising-market-data-api` 是唯一新增
+API 子模块，继续承载原 K 线 contract；`surprising-market-data-provider` 直接编译两组 Provider 源码，不依赖
+旧 Provider artifact。旧 `surprising-candlestick` 与 `surprising-matching-provider` 模块已经从 reactor 删除。
+
+统一 Provider 按 ProductLine 独立部署，HTTP/Actuator/数据源只保留一份并使用端口 `9081`。外部
+`/api/v1/candlestick` 与 `/api/v1/trading/market` 路径保持不变，Gateway、做市与 Feign 调用已统一改到
+`9081`。Matching 的 Aeron client、非阻塞 Kafka publisher 与 Candlestick 的 Kafka Streams
+application-id/RocksDB/changelog 状态仍按职责隔离；合并 JVM 没有改变 Aeron Core 的唯一订单簿和资金裁决权。
+PostgreSQL 仍只承载 K 线历史和可重建查询投影，不进入撮合裁决。
+
+验证：`mvn -pl surprising-market-data/surprising-market-data-provider -am test` 通过，统一 Provider 迁移的
+27 个测试及受影响依赖共 162 个测试无失败；`GatewayProxyServiceTest` 28 个路由测试通过。该验证覆盖模块/API
+迁移与路由契约，不替代每条 ProductLine 的真实 Kafka Streams state-dir、Aeron 会话和公共行情端到端门禁。
