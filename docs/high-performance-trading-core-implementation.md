@@ -804,10 +804,28 @@ OPTION 真实门禁最初停在已受理 Aeron 请求的结果未知超时。修
 | OPTION | `option.sh` | `option-fixed` |
 
 每个脚本只接受 `start`、`test`、`stop` 三个动作；省略动作等同于 `test`。每个文件只声明自身
-`ProductLine` 和固定运行 ID，使用 JDK 25，并绑定独立的 Docker Compose project。`start`/`stop`
-只管理该产品线的三节点 Aeron Core；`test` 使用独立测试运行 ID，依次执行 fresh Core、产品线 smoke、
-Core probe 和 export status，完成后自动清理。当前恢复范围明确为 `CORE_ONLY`，不恢复已删除的旧
-`run.sh`、PostgreSQL/Kafka/Provider 聚合编排，也不把这些入口描述成真实 HTTP/做市资金门禁。
+`ProductLine`、固定运行 ID、固定启动顺序和 JDK 25。运行器固定采用 W5 已验证的宿主机三节点
+Aeron Cluster，三个节点都使用 `DEDICATED` threading mode 和该运行 ID 的独立数据目录；不再在
+Provider 联调时尝试 Docker Aeron 或临时切换连接方式。macOS 上进程由 `launchctl` 托管，脚本退出后
+节点和 Provider 继续存活，`stop` 只清理由当前运行 ID 创建的进程。
+
+`start` 按 Instrument、三节点 Core、Exporter、Projector、Price、Account、Trading、合并后的
+Market Data、按产品线启用的 Derivatives Lifecycle/Funding、Gateway、Maker 顺序启动，并逐个检查
+Core probe 或 `/actuator/health`。PostgreSQL 18、Kafka 和 Valkey 复用本机已有实例，不创建临时
+中间件；数据库只执行幂等 baseline/migration，交易热路径权威状态仍在 Core。价格外部 HTTP 固定走
+本机 Clash Verge `127.0.0.1:7897`，Wallet 固定不启动。
+
+产品线差异固定为：SPOT 不启动 Derivatives Lifecycle 和 Funding；两条永续同时启动统一的
+Derivatives Lifecycle 与 Funding；两条交割和 OPTION 只启动统一的 Derivatives Lifecycle。
+`test` 使用独立测试运行 ID 和 fresh Core 数据，执行 `ProductLineLifecycleQaMain` 的真实 HTTP、做市、
+生命周期和资金/Treasury 对账门禁，要求 manifest 同时包含 `TEST_STATUS=PASS` 与
+`FUNDS_DIFFERENCE=0`，完成后自动清理。旧 `runtime/w3-w5/run.sh` 不作为运行依赖。
+
+固定拓扑落地后已执行两条代表性真实启动验证：SPOT 的 12 个进程和 LINEAR_PERPETUAL 的 14 个
+进程均完成启动、跨命令 `status` 和定向 `stop`；后者覆盖统一 Derivatives Lifecycle 与 Funding。
+验证过程中修复了合并模块使用全限定 Bean 名生成器后 `markPriceConsumerProperties` 名称丢失的问题，
+统一 Lifecycle 现可直接从固定脚本启动。其余四条线完成脚本语法、非法动作拒绝和固定拓扑 dry-run；
+本次不重复执行六条完整业务门禁。
 
 只执行一条产品线：
 
@@ -826,12 +844,13 @@ cd scripts
 
 ### 18.4 Canonical 测试脚本矩阵
 
-当前工作树已恢复 `scripts/aeron-core-local.sh` 作为本地 Core 启停入口；`up/down` 默认保留卷，重复 smoke 需要清理历史 source sequence 时显式使用 `fresh`。其余入口已补齐为显式产品线的 Core-only wrappers；这些脚本不会伪装成已经接入的 HTTP provider 或做市进程，真实 provider/做市部署由各自运行编排负责。
-脚本仍必须遵守只跑一条产品线、不启动 wallet、不把数据库作为运行时权威的约束。脚本只允许调用当前内存 Core 流程；不提供缺少当前 Core 行为的入口别名。脚本名称和职责固定如下：
+`scripts/aeron-core-local.sh` 继续保留为 Core-only Docker smoke 工具，但六条固定产品线脚本统一调用
+`scripts/start-product-line-providers.sh` 的宿主机最终拓扑，不再复用 Docker smoke 连接方式。脚本仍
+必须遵守只跑一条产品线、不启动 Wallet、不把数据库作为交易运行时权威的约束。脚本名称和职责固定如下：
 
 | 脚本 | 作用 | 约束 |
 | --- | --- | --- |
-| `scripts/start-product-line-providers.sh` | 只启动当前产品线的 Core runtime；外部 provider 由部署编排启动 | 不启动 wallet；脚本输出 `AERON_CORE`，不虚报 provider 已运行 |
+| `scripts/start-product-line-providers.sh` | 启动当前产品线宿主机三节点 Core、最终合并 Provider、Exporter/Projector、Gateway 和 Maker | 固定 JDK 25 + DEDICATED；复用本机 PostgreSQL/Kafka/Valkey；不启动 Wallet |
 | `scripts/product-line-api-flow-smoke.sh` | 运行当前产品线现有 Core smoke，覆盖对应产品线已实现的下单/撤单/撮合/资金与持仓门禁 | 只走当前内存核心和 Core query；未实现的强平/生命周期场景不得伪造为通过 |
 | `scripts/product-line-funds-reconcile.sh` | 按显式用户范围核对 Core 用户余额与 Treasury 聚合资产 | 当前工具报告 Core balance/treasury `fundsDiff=0`；成交、手续费、资金费、强平、交割/行权逐笔流水需接入对应 export 投影后才可宣称完整账账对平 |
 | `scripts/live-runtime-trading-reconciliation.sh` | 运行时 Core probe 与 exporter 状态对账；外部投影/WebSocket 接入后再扩展其 lag 采样 | 当前只报告 Core state hash、applied command 和 export cursor，不虚报未接入投影指标 |

@@ -8,7 +8,7 @@ import java.util.Locale;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
-@Component
+@Component("markPriceConsumerProperties")
 @ConfigurationProperties(prefix = "surprising.price.consumer")
 public class MarkPriceConsumerProperties {
 

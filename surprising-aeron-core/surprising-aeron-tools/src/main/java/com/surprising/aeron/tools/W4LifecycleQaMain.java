@@ -165,11 +165,15 @@ public final class W4LifecycleQaMain {
         Map<String, String> urls = new LinkedHashMap<>();
         Map<String, Integer> ports = Map.of(
                 "instrument", 9080, "price", 9082, "trading", 9084, "risk", 9087,
-                "funding", 9089, "liquidation", 9088, "insurance", 9090,
-                "adl", 9091, "account", 9086, "maker", 9096);
+                "funding", 9089, "liquidation", 9087, "insurance", 9087,
+                "adl", 9087, "account", 9086, "maker", 9096);
         for (var entry : ports.entrySet()) {
             String envName = "W4_" + entry.getKey().toUpperCase() + "_URL";
             String configured = System.getenv(envName);
+            if ((configured == null || configured.isBlank())
+                    && List.of("risk", "liquidation", "insurance", "adl").contains(entry.getKey())) {
+                configured = System.getenv("W4_DERIVATIVES_LIFECYCLE_URL");
+            }
             urls.put(entry.getKey(), (configured == null || configured.isBlank())
                     ? "http://127.0.0.1:" + entry.getValue() : configured.trim());
         }
