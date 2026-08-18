@@ -18,10 +18,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-command-provider",
+        name = "surprising-trading-provider",
         contextId = "tradingFeeAdminRpcApi",
         path = TradingApiPaths.ADMIN_FEE_BASE_PATH,
-        url = "${surprising.clients.order.base-url:http://localhost:9084}")
+        url = "${surprising.clients.trading.base-url:http://localhost:9084}")
 public interface TradingFeeAdminRpcApi {
 
     @PostMapping("/schedules")

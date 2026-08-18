@@ -3,12 +3,12 @@ server:
 
 spring:
   application:
-    name: surprising-command-provider
+    name: surprising-trading-provider
   task:
     scheduling:
       pool:
         size: 8
-      thread-name-prefix: trading-command-scheduler-
+      thread-name-prefix: trading-scheduler-
       shutdown:
         await-termination: true
         await-termination-period: 10s
@@ -37,7 +37,7 @@ surprising:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
       topic: surprising.perp.price.events.v1
-      group-id: surprising-command-mark-price-${HOSTNAME:${random.uuid}}
+      group-id: surprising-trading-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 15s
       allowed-future-skew: 1s
       concurrency: 1
@@ -53,7 +53,7 @@ surprising:
         egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
         response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
         client-connections: ${AERON_CLIENT_CONNECTIONS:4}
-        node-id: ${COMMAND_NODE_ID:0}
+        node-id: ${TRADING_NODE_ID:0}
       event-publish:
         send-timeout: 3s
       risk:

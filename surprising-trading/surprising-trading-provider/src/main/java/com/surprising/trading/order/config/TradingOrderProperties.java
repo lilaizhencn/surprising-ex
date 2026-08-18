@@ -97,7 +97,7 @@ public class TradingOrderProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         /** 结果广播消费组的实例唯一标识；每个订单节点必须使用不同值。 */
-        private String clientId = "command-provider-" + java.util.UUID.randomUUID();
+        private String clientId = "trading-provider-" + java.util.UUID.randomUUID();
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         private ProductLine productLine;
         private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";

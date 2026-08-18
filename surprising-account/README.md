@@ -22,7 +22,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - Repository 只负责账本、审计和投影表的查询或幂等追加，不负责余额、冻结资金和持仓裁决。
 - `AccountService` 的余额、产品余额和持仓接口通过 `AccountAeronGateway` 读取 Aeron Core 用户状态；`AccountQueryService` 只查询账本、划转和管理员调整记录。
 - `AccountCommandGateway` 将余额调整、仓位模式和逐仓保证金调整编码为 Aeron Core Command；成功后再读取 Core 状态返回结果。
-- 交易命令由 command provider 直接提交 Aeron Core，Core 负责订单预占、释放、成交和用户资金状态变更；账户 Provider 不维护第二套可变余额状态。
+- 交易命令由 trading provider 直接提交 Aeron Core，Core 负责订单预占、释放、成交和用户资金状态变更；账户 Provider 不维护第二套可变余额状态。
 - 账户启动时通过 Instrument 内部聚合 RPC 加载本产品线完整 JVM 快照，并消费
   `surprising.instrument.events.v1` 增量更新；账户运行时只从本地快照取得合约正文、结算资产与精度。
 - 账户状态快照通过内部 RPC/Kafka 提供给 order、risk、liquidation 和 WebSocket 等下游，缓存只作为读模型，不能参与资金裁决。
@@ -51,13 +51,13 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 ## 资金命令与结算
 
 - 余额调整、保证金调整、仓位模式调整和其他账户写操作通过 `AccountAeronGateway` 提交 Aeron Core Command。
-- command provider 通过 Aeron Core 提交下单、撤单和改单；Core 负责订单预占、释放、成交、手续费、资金费、强平和结算对用户状态的修改。
+- trading provider 通过 Aeron Core 提交下单、撤单和改单；Core 负责订单预占、释放、成交、手续费、资金费、强平和结算对用户状态的修改。
 - Core reducer 只在有序的 Aeron Cluster 日志中处理一次，`CoreUserState` 同时维护 `availableUnits`、`lockedUnits`、订单预占、持仓和持仓保证金。
 - 成交的 taker/maker 两侧、翻仓、平仓和强平都在 Core 内完成资金守恒校验；数据库不参与在线事务，也不重新计算资金规则。
 - 成交、资金费、余额调整和其他净权益变化由 Core Export 生成不可变事实，账本投影器异步写入 `account_ledger_entries` 或 `account_product_ledger_entries`。
 - 订单预占和释放、可用余额与冻结余额之间的转移属于 Core 状态变化，不要求数据库余额表写入；`balance_after_units` 只能作为账本事实快照。
 - 账本和管理员调整使用业务引用幂等；重复投影内容必须一致，冲突必须停住，不能静默覆盖历史事实。
-- 账户状态快照通过内部 RPC/Kafka 提供给 order、risk、liquidation 和 WebSocket 等查询下游；条件单由 Aeron Core 直接读取同一份账户状态，不再由 command provider 消费账户快照。任何 JVM/Redis 快照都只是读模型，不是资金权威。
+- 账户状态快照通过内部 RPC/Kafka 提供给 order、risk、liquidation 和 WebSocket 等查询下游；条件单由 Aeron Core 直接读取同一份账户状态，不再由 trading provider 消费账户快照。任何 JVM/Redis 快照都只是读模型，不是资金权威。
 - `account_trade_settlement_sides`、`account_commands` 等数据库表只用于异步审计、投影和对账。任何数据库投影失败都不能回滚或改写已经提交的 Core 状态。
 
 ## 接口
@@ -209,9 +209,9 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 - `trading_orders`、`account_positions`、`account_position_margins` 中的预占和持仓字段是投影/审计快照，不能作为实时资金来源。
 - 用户逐仓保证金调整按 `referenceId` 幂等，并由 Aeron Core 把可用余额转入或从持仓保证金释放；`account_ledger_entries.reference_type = POSITION_MARGIN_ADJUSTMENT` 只记录审计事实。
 - 平仓成交按平仓数量比例释放持仓保证金。这条链路必须保持 long-only，并与 exchange-core 的 ticks/steps 一致。
-- reduce-only 剪枝不是撮合层或账户表写入功能；command provider 按用户消费持仓事件，在自己的事务里锁定相关订单并发布按 symbol 分区的 cancel command。多节点部署时必须共享 PostgreSQL，并使用同一个 Kafka consumer group。
+- reduce-only 剪枝不是撮合层或账户表写入功能；trading provider 按用户消费持仓事件，在自己的事务里锁定相关订单并发布按 symbol 分区的 cancel command。多节点部署时必须共享 PostgreSQL，并使用同一个 Kafka consumer group。
 - reduce-only 剪枝遇到 `Long.MIN_VALUE` 这类不可能的 signed quantity 必须 fail-fast，不能让容量数学回绕后基于负绝对值错误撤单或保留挂单。
-- 如果出现订单预占快照缺失或订单保证金核算不平，要检查 command provider 是否漏写 `trading_orders.reserved_units` 快照、matching 是否丢失快照字段，以及 `account_trade_settlement_sides` 的消费/释放审计值。
+- 如果出现订单预占快照缺失或订单保证金核算不平，要检查 trading provider 是否漏写 `trading_orders.reserved_units` 快照、matching 是否丢失快照字段，以及 `account_trade_settlement_sides` 的消费/释放审计值。
 - 已实现亏损可以扣 `availableUnits` 和由持仓保证金支撑的 `lockedUnits`，但不能扣未成交订单冻结；该状态转移必须由 Core reducer 原子完成，数据库只接收投影。
 - 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。matching 会把订单接受时的不可变费率快照写入 `MatchTradeEvent`；account 结算直接使用命令快照，不查询 `trading_orders`，也不能按当前用户等级重算。
 - 亏空和权益结算由 Core reducer 维护；异步数据库投影不能增加 `SELECT ... FOR UPDATE`、余额表 UPDATE 或更新后回查，否则会把数据库重新带回资金热路径。

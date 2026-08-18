@@ -242,7 +242,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_TRADES_OPTION_BASE_URL:http://localhost:9081}
       trading-trigger:
-        base-url: ${GATEWAY_ROUTE_TRADING_COMMAND_BASE_URL:http://localhost:9084}
+        base-url: ${GATEWAY_ROUTE_TRADING_PROVIDER_BASE_URL:http://localhost:9084}
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
         product-routes:
@@ -544,7 +544,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trigger:
-        base-url: ${GATEWAY_ROUTE_TRADING_COMMAND_BASE_URL:http://localhost:9084}
+        base-url: ${GATEWAY_ROUTE_TRADING_PROVIDER_BASE_URL:http://localhost:9084}
         target-prefix: /api/v1/admin/trading/trigger-orders
         private-route: true
         product-routes:

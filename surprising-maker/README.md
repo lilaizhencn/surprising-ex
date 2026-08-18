@@ -86,7 +86,7 @@ surprising:
       base-url: http://localhost:9082
     matching:
       base-url: http://localhost:9081
-    order:
+    trading:
       base-url: http://localhost:9084
   market-maker:
     engine:
@@ -174,7 +174,7 @@ surprising:
 7. 按库存偏移和库存上限调整报价数量和方向。
 8. 首次读取开放订单后在本地缓存；缓存更新由下单、批量撤单结果和短周期 REST 对账共同驱动。撤单结果不完整或请求超时时，保留未确认订单，不在同一轮重复补单。
 9. 每轮先撤旧单再补缺口，撤单和补单共享操作预算，避免深度配置或异常订单导致订单服务突发压力。
-10. 把本轮 traceId 透传给 command provider，后续订单事件、撮合事件、账户结算、风控事件和私有 WebSocket 推送都可以关联排查。
+10. 把本轮 traceId 透传给 trading provider，后续订单事件、撮合事件、账户结算、风控事件和私有 WebSocket 推送都可以关联排查。
 
 参考市场校准在 `websocket-enabled=true` 时优先维护 WebSocket 本地订单簿；没有新鲜流式盘口时，回退 REST 深度快照。内置解析器覆盖 Binance depth stream、OKX books 和 Bybit V5 orderbook 消息，足够让压测时的本地盘口档位、档间距和每档数量跟随主流交易所深度；生产前仍需要补一轮启用流式 source 的长时间真实进程压测证据。
 

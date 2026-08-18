@@ -211,7 +211,7 @@ available + locked = accountTotal
 | --- | --- | --- |
 | D01 | 触发单 API、价格触发和生命周期已统一通过 Aeron Core | Provider 不再有 JDBC/Redis/Kafka 第二裁决源 |
 | D02 | Core 在同一有序状态机内校验价格、创建 reduce-only 子订单并撮合 | 避免跨服务 claim/execute 往返和竞态 |
-| D03 | command provider 只保留 Core 查询、命令转发和有界维护 | 数据库故障不改变在线触发裁决 |
+| D03 | trading provider 只保留 Core 查询、命令转发和有界维护 | 数据库故障不改变在线触发裁决 |
 | D04 | `OrderFeeSnapshotLookup` 缺失用户费率时回退 instrument default | 可能产生错误手续费和资金对账差异 |
 | D05 | mark price、instrument、fee snapshot 如果陈旧/缺失没有严格版本门禁 | 交易规则不一致 |
 | D06 | 订单号生成器仅内存 AtomicReference，跨重启无持久 epoch/租约 | 节点重启或多实例配置错误可能冲突 |
@@ -860,7 +860,7 @@ cd surprising-aeron-core/runtime/w3-w5/product-lines
 因此 API、协议或共享 parent 变更会有证据地扩大构建范围，单个 Provider 变更不会触发无关产品线 JAR 重建。
 
 ```bash
-scripts/build-incremental.sh surprising-trading/surprising-command-provider
+scripts/build-incremental.sh surprising-trading/surprising-trading-provider
 scripts/build-incremental.sh :surprising-aeron-client :surprising-aeron-tools
 scripts/build-incremental.sh --changed --dry-run
 scripts/build-incremental.sh --with-tests :surprising-aeron-service
@@ -925,7 +925,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 - `mvn -pl surprising-aeron-core/surprising-aeron-service -am test`：service 95 个测试全部通过，包含异步下单和异步触发 continuation；`COMMAND_RESULT_QUERY` 覆盖超时后结果核验。
 - `bash -n scripts/aeron-core-local.sh`、未知 `PRODUCT_LINE` 拒绝和空集群 `status` 验证通过。
 - `mvn -pl :surprising-derivatives-lifecycle-provider -am -DskipTests package`：统一 Provider 源码构建通过，覆盖四个领域的 Controller/Service/Repository 和单一生命周期入口。
-- `mvn -pl surprising-trading/surprising-command-provider -am test`：统一命令 Provider 138 个测试全部通过。
+- `mvn -pl surprising-trading/surprising-trading-provider -am test`：统一 Trading Provider 138 个测试全部通过。
 - 三节点 compose 人工烟测：SPOT `spotMatchSmoke=PASS`；LINEAR_PERPETUAL `derivativeSmoke=PASS`；独立产品线门禁对 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`OPTION` 均报告 `fundsDiff=0 bookLevels=0`。
 - 本轮通过 `PRODUCT_LINE=SPOT scripts/aeron-core-local.sh up` + `smoke` 观察到 `spotMatchSmoke=PASS seller=6000003001 buyer=7000003001 btcTotal=5 usdtTotal=500`，随后用同一入口 `down` 清理容器和网络，未删除 volume。
 - 本轮通过 `PRODUCT_LINE=LINEAR_PERPETUAL scripts/aeron-core-local.sh up` + `smoke` 观察到 `derivativeSmoke=PASS productLine=LINEAR_PERPETUAL longUser=6100005001 shortUser=7100005001 usdtTotal=2000 fundingNet=0`，随后用同一入口 `down` 清理容器和网络。

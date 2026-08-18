@@ -130,7 +130,7 @@ mvn -pl surprising-aeron-core/surprising-aeron-service -am test
 
 ```bash
 # 只改了一个模块，默认跳过测试并生成受影响模块的 JAR
-scripts/build-incremental.sh surprising-trading/surprising-command-provider
+scripts/build-incremental.sh surprising-trading/surprising-trading-provider
 
 # 也可以使用 artifactId 或多个模块
 scripts/build-incremental.sh :surprising-aeron-client :surprising-aeron-tools
@@ -163,7 +163,7 @@ Chronicle 版本由父 POM 的 BOM 统一管理，避免旧版在 JDK 25 中触�
 | instrument | 9080 |
 | market-data（matching projection/candlestick） | 9081 |
 | price-provider（index/mark/fx） | 9082 |
-| command | 9084 |
+| trading-provider | 9084 |
 | account | 9086 |
 | derivatives-lifecycle（risk/liquidation/insurance/adl） | 9087 |
 | funding | 9089 |

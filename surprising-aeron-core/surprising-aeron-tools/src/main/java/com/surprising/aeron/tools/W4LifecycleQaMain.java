@@ -151,7 +151,7 @@ public final class W4LifecycleQaMain {
             requireHttp("risk", "GET", "/actuator/health", null);
             return;
         }
-        for (String service : List.of("instrument", "account", "command", "risk", "maker")) {
+        for (String service : List.of("instrument", "account", "trading", "risk", "maker")) {
             requireHttp(service, "GET", "/actuator/health", null);
         }
         if (productLine == ProductLine.LINEAR_PERPETUAL || productLine == ProductLine.INVERSE_PERPETUAL) {
@@ -164,7 +164,7 @@ public final class W4LifecycleQaMain {
     private Map<String, String> providerUrls() {
         Map<String, String> urls = new LinkedHashMap<>();
         Map<String, Integer> ports = Map.of(
-                "instrument", 9080, "price", 9082, "command", 9084, "risk", 9087,
+                "instrument", 9080, "price", 9082, "trading", 9084, "risk", 9087,
                 "funding", 9089, "liquidation", 9088, "insurance", 9090,
                 "adl", 9091, "account", 9086, "maker", 9096);
         for (var entry : ports.entrySet()) {

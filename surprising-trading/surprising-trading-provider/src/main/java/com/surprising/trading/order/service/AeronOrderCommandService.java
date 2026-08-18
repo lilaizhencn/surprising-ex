@@ -208,7 +208,7 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest request = requests.get(index);
             OrderFeeSnapshot fee = fees.get(index);
             if (requireProductLine(fee.productLine()) != productLine) {
-                throw new IllegalArgumentException("batch fee product line does not match command provider");
+                throw new IllegalArgumentException("batch fee product line does not match trading provider");
             }
             String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
             long orderId = StableOrderIdentity.orderId(productLine, userId, clientOrderId);
@@ -496,7 +496,7 @@ public class AeronOrderCommandService {
 
     private static ProductLine requireProductLine(ProductLine productLine) {
         if (productLine == null) {
-            throw new IllegalStateException("command provider product line is required");
+            throw new IllegalStateException("trading provider product line is required");
         }
         return productLine;
     }

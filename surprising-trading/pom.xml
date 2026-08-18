@@ -18,7 +18,7 @@
 
     <modules>
         <module>surprising-trading-api</module>
-        <module>surprising-command-provider</module>
+        <module>surprising-trading-provider</module>
     </modules>
 
     <dependencyManagement>

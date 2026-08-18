@@ -1,4 +1,4 @@
-package com.surprising.trading.command;
+package com.surprising.trading;
 
 import com.surprising.trading.order.OrderRuntimeHints;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -17,9 +17,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @EnableConfigurationProperties({TradingOrderProperties.class, TriggerProperties.class})
 @ImportRuntimeHints(OrderRuntimeHints.class)
-public class SurprisingTradingCommandApplication {
+public class SurprisingTradingApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(SurprisingTradingCommandApplication.class, args);
+        SpringApplication.run(SurprisingTradingApplication.class, args);
     }
 }

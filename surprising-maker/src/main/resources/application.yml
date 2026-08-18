@@ -52,7 +52,7 @@ surprising:
       base-url: http://localhost:9080
     matching:
       base-url: http://localhost:9081
-    order:
+    trading:
       base-url: http://localhost:9084
   market-maker:
     engine:

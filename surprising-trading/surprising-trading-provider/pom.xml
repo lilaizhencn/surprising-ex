@@ -10,9 +10,9 @@
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>surprising-command-provider</artifactId>
-    <name>surprising-command-provider</name>
-    <description>Unified order and trigger command provider</description>
+    <artifactId>surprising-trading-provider</artifactId>
+    <name>surprising-trading-provider</name>
+    <description>Unified trading provider for order and trigger commands</description>
 
     <dependencies>
         <dependency>
@@ -89,14 +89,14 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.surprising.trading.command.SurprisingTradingCommandApplication</mainClass>
+                    <mainClass>com.surprising.trading.SurprisingTradingApplication</mainClass>
                 </configuration>
             </plugin>
             <plugin>
                 <groupId>org.graalvm.buildtools</groupId>
                 <artifactId>native-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.surprising.trading.command.SurprisingTradingCommandApplication</mainClass>
+                    <mainClass>com.surprising.trading.SurprisingTradingApplication</mainClass>
                     <buildArgs><buildArg>-H:DeadlockWatchdogInterval=60</buildArg></buildArgs>
                 </configuration>
             </plugin>
