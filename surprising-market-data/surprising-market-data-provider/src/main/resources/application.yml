@@ -84,7 +84,7 @@ surprising:
         max-poll-records: ${MATCHING_MAX_POLL_RECORDS:1024}
       market-data:
         enabled: true
-        depth-levels: 50
+        depth-levels: 30
         batch-size: 512
         max-in-flight: 256
         publish-delay-ms: 5

@@ -245,7 +245,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     }
 
     private void requireBookEmpty() {
-        var book = CoreStateQueryCodec.decodeOrderBookView(query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0]));
+        var book = OrderBookBootstrapLoader.load((type, payload) -> query(type, 0, payload));
         if (!book.levels().isEmpty()) {
             throw new IllegalStateException("lifecycle book is not empty levels=" + book.levels().size());
         }

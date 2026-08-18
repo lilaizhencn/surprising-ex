@@ -73,6 +73,28 @@ class CoreStateQueryCodecTest {
         CoreOrderBookQuery query = new CoreOrderBookQuery(" btc-usdt ", 25);
         assertThat(CoreStateQueryCodec.decodeOrderBookQuery(
                 CoreStateQueryCodec.encodeOrderBookQuery(query))).isEqualTo(query);
+        assertThat(new CoreOrderBookQuery("BTC-USDT", 0).depth()).isEqualTo(30);
+        assertThatThrownBy(() -> new CoreOrderBookQuery("", 30))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CoreOrderBookQuery("BTC-USDT", 101))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void roundTripsOrderBookBootstrapPage() {
+        CoreOrderBookBootstrapQuery first = new CoreOrderBookBootstrapQuery("", "", 10, 0);
+        assertThat(CoreStateQueryCodec.decodeOrderBookBootstrapQuery(
+                CoreStateQueryCodec.encodeOrderBookBootstrapQuery(first))).isEqualTo(first);
+
+        String snapshotId = "00000000-0000-0000-0000-000000000001";
+        CoreOrderBookBootstrapPage page = new CoreOrderBookBootstrapPage(snapshotId, 19,
+                "BTC-USDT", false,
+                List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 10, 4, 2)));
+        assertThat(CoreStateQueryCodec.decodeOrderBookBootstrapPage(
+                CoreStateQueryCodec.encodeOrderBookBootstrapPage(page))).isEqualTo(page);
+
+        assertThatThrownBy(() -> new CoreOrderBookBootstrapQuery("", "BTC-USDT", 10, 30))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

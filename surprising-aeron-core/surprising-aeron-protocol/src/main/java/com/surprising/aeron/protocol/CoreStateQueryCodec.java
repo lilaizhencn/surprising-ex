@@ -321,6 +321,65 @@ public final class CoreStateQueryCodec {
         return query;
     }
 
+    public static byte[] encodeOrderBookBootstrapQuery(CoreOrderBookBootstrapQuery query) {
+        Writer writer = new Writer();
+        writer.intValue(1);
+        writer.optionalText(query.snapshotId());
+        writer.optionalText(query.symbolCursor());
+        writer.intValue(query.limit());
+        writer.intValue(query.depth());
+        return writer.toByteArray();
+    }
+
+    public static CoreOrderBookBootstrapQuery decodeOrderBookBootstrapQuery(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        reader.version(1);
+        CoreOrderBookBootstrapQuery query = new CoreOrderBookBootstrapQuery(
+                reader.optionalText(), reader.optionalText(), reader.intValue(), reader.intValue());
+        reader.requireConsumed();
+        return query;
+    }
+
+    public static byte[] encodeOrderBookBootstrapPage(CoreOrderBookBootstrapPage page) {
+        Writer writer = new Writer();
+        writer.intValue(1);
+        writer.text(page.snapshotId());
+        writer.longValue(page.exportSequence());
+        writer.optionalText(page.nextSymbolCursor());
+        writer.intValue(page.complete() ? 1 : 0);
+        writer.intValue(page.levels().size());
+        for (CoreBookLevelView level : page.levels()) {
+            writer.text(level.symbol());
+            writer.intValue(level.side().wireCode());
+            writer.longValue(level.priceTicks());
+            writer.longValue(level.quantitySteps());
+            writer.longValue(level.orderCount());
+        }
+        return writer.toByteArray();
+    }
+
+    public static CoreOrderBookBootstrapPage decodeOrderBookBootstrapPage(byte[] encoded) {
+        Reader reader = new Reader(encoded);
+        reader.version(1);
+        String snapshotId = reader.text();
+        long exportSequence = reader.nonNegativeLong("exportSequence");
+        String nextSymbolCursor = reader.optionalText();
+        int completeCode = reader.intValue();
+        if (completeCode != 0 && completeCode != 1) {
+            throw new ProtocolException("invalid order-book bootstrap completion flag");
+        }
+        boolean complete = completeCode == 1;
+        int count = reader.count("levels");
+        List<CoreBookLevelView> levels = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            levels.add(new CoreBookLevelView(reader.text(), CoreOrderSide.fromWireCode(reader.intValue()),
+                    reader.positiveLong("priceTicks"), reader.positiveLong("quantitySteps"),
+                    reader.positiveLong("orderCount")));
+        }
+        reader.requireConsumed();
+        return new CoreOrderBookBootstrapPage(snapshotId, exportSequence, nextSymbolCursor, complete, levels);
+    }
+
     public static CoreOrderBookView decodeOrderBookView(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version(VERSION);

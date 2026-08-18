@@ -11,6 +11,8 @@ import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreCommandResultView;
 import com.surprising.aeron.protocol.CoreExecutionView;
 import com.surprising.aeron.protocol.CoreOrderStateView;
+import com.surprising.aeron.protocol.CoreOrderBookBootstrapPage;
+import com.surprising.aeron.protocol.CoreOrderBookBootstrapQuery;
 import com.surprising.aeron.protocol.CorePositionView;
 import com.surprising.aeron.protocol.CoreReservationView;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -60,6 +62,7 @@ import com.surprising.aeron.service.state.CoreRiskState;
 import com.surprising.aeron.service.state.StateMapSupport;
 import com.surprising.aeron.service.state.TerminalPruneBatch;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
+import com.surprising.aeron.service.matching.BookBootstrapSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -70,6 +73,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.TreeMap;
+import java.util.NavigableMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -80,6 +85,9 @@ public final class CoreProbeState implements AutoCloseable {
     static final long MAX_RESULT_LEDGER_BYTES = 32L * 1024 * 1024;
     static final int MAX_STORED_RESPONSE_BYTES = Math.toIntExact(MAX_RESULT_LEDGER_BYTES);
     static final int MAX_SOURCE_SEQUENCES = 65_536;
+    static final int MAX_BOOK_RESPONSE_LEVELS = 10_000;
+    static final int MAX_BOOK_RESPONSE_BYTES = 1024 * 1024;
+    private static final int MAX_BOOK_BOOTSTRAP_SNAPSHOTS = 4;
     private static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
     private static final System.Logger LOG = System.getLogger(CoreProbeState.class.getName());
     private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
@@ -96,10 +104,11 @@ public final class CoreProbeState implements AutoCloseable {
     private final List<CoreMessage> queuedMatching = new ArrayList<>();
     private final Map<Long, com.surprising.aeron.service.matching.CoreMatchingResult> completedMatching
             = new ConcurrentHashMap<>();
-    private final Map<Long, List<com.surprising.aeron.protocol.CoreBookLevelView>> completedBookQueries
+    private final Map<Long, CompletedBookQuery> completedBookQueries
             = new ConcurrentHashMap<>();
     private final Map<Long, Boolean> failedQueries = new ConcurrentHashMap<>();
     private final Map<UUID, Long> queryIds = new ConcurrentHashMap<>();
+    private final LinkedHashMap<String, BookBootstrapSession> bookBootstrapSessions = new LinkedHashMap<>();
     private final TradingCoreReducer tradingReducer;
     private final DeterministicExchangeCoreAdapter matchingAdapter;
     private final PositionUserIndex positionUserIndex;
@@ -385,6 +394,14 @@ public final class CoreProbeState implements AutoCloseable {
                 && message.header().messageType() == CoreMessageType.BOOK_STATE_QUERY) {
             try {
                 return beginBookQuery(message);
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.ORDER_BOOK_BOOTSTRAP_QUERY) {
+            try {
+                return beginBookBootstrapQuery(message);
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -1129,16 +1146,40 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private CoreResponse beginBookQuery(CoreMessage message) {
-        var query = message.payload().length == 0
-                ? new com.surprising.aeron.protocol.CoreOrderBookQuery("", 1_000)
-                : CoreStateQueryCodec.decodeOrderBookQuery(message.payload());
+        if (message.payload().length == 0) {
+            throw new IllegalArgumentException("single-symbol book query payload is required");
+        }
+        var query = CoreStateQueryCodec.decodeOrderBookQuery(message.payload());
         long queryId = nextAsyncQueryId++;
         matchingAdapter.orderBookLevelsAsync(query.symbol(), query.depth()).whenComplete((levels, failure) -> {
             if (failure != null) {
                 failedQueries.put(queryId, true);
                 return;
             }
-            completedBookQueries.put(queryId, levels);
+            completedBookQueries.put(queryId, CompletedBookQuery.single(levels));
+        });
+        queryIds.put(message.header().commandId(), queryId);
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
+                appliedCommandCount, cachedBusinessStateHash);
+    }
+
+    private CoreResponse beginBookBootstrapQuery(CoreMessage message) {
+        CoreOrderBookBootstrapQuery query = CoreStateQueryCodec.decodeOrderBookBootstrapQuery(message.payload());
+        if (!query.snapshotId().isEmpty()) {
+            BookBootstrapSession session = bookBootstrapSessions.get(query.snapshotId());
+            if (session == null || session.depth() != query.depth()) {
+                return rejected(CoreResultCode.BOOK_BOOTSTRAP_CURSOR_INVALID);
+            }
+            return bootstrapPageResponse(session, query);
+        }
+        long queryId = nextAsyncQueryId++;
+        matchingAdapter.orderBookBootstrapAsync(query.depth()).whenComplete((snapshot, failure) -> {
+            if (failure != null) {
+                failedQueries.put(queryId, true);
+                return;
+            }
+            completedBookQueries.put(queryId, CompletedBookQuery.bootstrap(
+                    message.header().commandId().toString(), query, snapshot));
         });
         queryIds.put(message.header().commandId(), queryId);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
@@ -2212,13 +2253,50 @@ public final class CoreProbeState implements AutoCloseable {
             queryIds.values().removeIf(value -> value == queryId);
             return rejected(CoreResultCode.MATCHING_REJECTED);
         }
-        List<com.surprising.aeron.protocol.CoreBookLevelView> levels = completedBookQueries.remove(queryId);
-        if (levels == null) return null;
-        var view = new com.surprising.aeron.protocol.CoreOrderBookView(
-                Math.decrementExact(exportState.nextSequence()), levels);
+        CompletedBookQuery completed = completedBookQueries.remove(queryId);
+        if (completed == null) return null;
         queryIds.values().removeIf(value -> value == queryId);
-        return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
-                CoreStateQueryCodec.encodeOrderBookView(view));
+        long exportSequence = Math.decrementExact(exportState.nextSequence());
+        if (completed.bootstrapSnapshot() == null) {
+            var view = new com.surprising.aeron.protocol.CoreOrderBookView(exportSequence, completed.levels());
+            byte[] encoded = CoreStateQueryCodec.encodeOrderBookView(view);
+            return boundedBookResponse(completed.levels().size(), encoded);
+        }
+        BookBootstrapSession session = BookBootstrapSession.create(completed.snapshotId(), exportSequence,
+                completed.bootstrapQuery().depth(), completed.bootstrapSnapshot());
+        while (bookBootstrapSessions.size() >= MAX_BOOK_BOOTSTRAP_SNAPSHOTS) {
+            bookBootstrapSessions.remove(bookBootstrapSessions.keySet().iterator().next());
+        }
+        bookBootstrapSessions.put(session.snapshotId(), session);
+        return bootstrapPageResponse(session, completed.bootstrapQuery());
+    }
+
+    private CoreResponse bootstrapPageResponse(BookBootstrapSession session, CoreOrderBookBootstrapQuery query) {
+        if (!query.symbolCursor().isEmpty() && !session.symbols().containsKey(query.symbolCursor())) {
+            return rejected(CoreResultCode.BOOK_BOOTSTRAP_CURSOR_INVALID);
+        }
+        List<String> symbols = session.symbols().tailMap(query.symbolCursor(), false).keySet().stream()
+                .limit(query.limit()).toList();
+        int expectedLevels = 0;
+        for (String symbol : symbols) {
+            expectedLevels = Math.addExact(expectedLevels, session.symbols().get(symbol).size());
+        }
+        List<com.surprising.aeron.protocol.CoreBookLevelView> levels = new ArrayList<>(expectedLevels);
+        for (String symbol : symbols) levels.addAll(session.symbols().get(symbol));
+        boolean complete = symbols.isEmpty()
+                || session.symbols().higherKey(symbols.getLast()) == null;
+        String nextCursor = complete ? "" : symbols.getLast();
+        CoreOrderBookBootstrapPage page = new CoreOrderBookBootstrapPage(session.snapshotId(),
+                session.exportSequence(), nextCursor, complete, levels);
+        byte[] encoded = CoreStateQueryCodec.encodeOrderBookBootstrapPage(page);
+        return boundedBookResponse(levels.size(), encoded);
+    }
+
+    private CoreResponse boundedBookResponse(int levelCount, byte[] encoded) {
+        if (levelCount > MAX_BOOK_RESPONSE_LEVELS || encoded.length > MAX_BOOK_RESPONSE_BYTES) {
+            return rejected(CoreResultCode.BOOK_QUERY_RESPONSE_TOO_LARGE);
+        }
+        return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash, encoded);
     }
 
     public int pendingMatchingCount() {
@@ -3291,6 +3369,49 @@ public final class CoreProbeState implements AutoCloseable {
 
     private static CoreResultCode matchingPendingCode() {
         return CoreResultCode.fromWireCode(MATCHING_PENDING_WIRE_CODE);
+    }
+
+    private record CompletedBookQuery(
+            List<com.surprising.aeron.protocol.CoreBookLevelView> levels,
+            String snapshotId,
+            CoreOrderBookBootstrapQuery bootstrapQuery,
+            BookBootstrapSnapshot bootstrapSnapshot) {
+
+        private static CompletedBookQuery single(
+                List<com.surprising.aeron.protocol.CoreBookLevelView> levels) {
+            return new CompletedBookQuery(List.copyOf(levels), "", null, null);
+        }
+
+        private static CompletedBookQuery bootstrap(
+                String snapshotId,
+                CoreOrderBookBootstrapQuery query,
+                BookBootstrapSnapshot snapshot) {
+            return new CompletedBookQuery(List.of(), snapshotId, query, snapshot);
+        }
+    }
+
+    private record BookBootstrapSession(
+            String snapshotId,
+            long exportSequence,
+            int depth,
+            NavigableMap<String, List<com.surprising.aeron.protocol.CoreBookLevelView>> symbols) {
+
+        private static BookBootstrapSession create(
+                String snapshotId,
+                long exportSequence,
+                int depth,
+                BookBootstrapSnapshot snapshot) {
+            NavigableMap<String, List<com.surprising.aeron.protocol.CoreBookLevelView>> grouped = new TreeMap<>();
+            for (String symbol : snapshot.symbols()) grouped.put(symbol, new ArrayList<>());
+            for (com.surprising.aeron.protocol.CoreBookLevelView level : snapshot.levels()) {
+                List<com.surprising.aeron.protocol.CoreBookLevelView> levels = grouped.get(level.symbol());
+                if (levels == null) throw new IllegalStateException("bootstrap level references unknown symbol");
+                levels.add(level);
+            }
+            grouped.replaceAll((symbol, levels) -> List.copyOf(levels));
+            return new BookBootstrapSession(snapshotId, exportSequence, depth,
+                    Collections.unmodifiableNavigableMap(grouped));
+        }
     }
 
     private enum OrderBatchKind {

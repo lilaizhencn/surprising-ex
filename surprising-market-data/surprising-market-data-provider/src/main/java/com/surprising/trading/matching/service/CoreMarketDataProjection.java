@@ -28,7 +28,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.locks.LockSupport;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -74,7 +73,7 @@ public class CoreMarketDataProjection {
         while (true) {
             try {
                 return aeronGateway.orderBookProjection();
-            } catch (CompletionException ex) {
+            } catch (RuntimeException ex) {
                 if (!retryableBootstrapFailure(ex) || System.nanoTime() >= deadline) {
                     throw ex;
                 }
@@ -87,6 +86,9 @@ public class CoreMarketDataProjection {
         Throwable current = throwable;
         while (current != null) {
             if (current instanceof ResultUnknownException) {
+                return true;
+            }
+            if (current instanceof MatchingAeronGateway.BootstrapCursorInvalidException) {
                 return true;
             }
             if (current instanceof CoreCommandOutcome.NotAcceptedException rejected) {
@@ -161,8 +163,8 @@ public class CoreMarketDataProjection {
 
     public synchronized OrderBookSnapshotResponse snapshot(String symbol, int requestedDepth) {
         String normalized = normalizeSymbol(symbol);
-        if (requestedDepth <= 0 || requestedDepth > 500) {
-            throw new IllegalArgumentException("depth must be in [1, 500]");
+        if (requestedDepth <= 0 || requestedDepth > 100) {
+            throw new IllegalArgumentException("depth must be in [1, 100]");
         }
         MutableBook book = books.get(normalized);
         List<OrderBookLevel> bids = book == null ? List.of() : levels(book.bids, requestedDepth);

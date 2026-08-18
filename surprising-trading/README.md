@@ -377,8 +377,10 @@ exchange-core 内的 user/symbol/risk module 只是 matcher 技术状态，随�
 
 ### 盘口深度
 
-每个成功的 exchange-core 命令改变盘口后，Core Event 驱动 matching projection 获取有界 `BOOK_STATE_QUERY`
-并把完整 `SNAPSHOT` 交给独立公共行情 publisher：
+matching projection 启动时通过内部 `ORDER_BOOK_BOOTSTRAP_QUERY` 以固定 snapshotId、exportSequence 和
+`symbolCursor + limit` 分页恢复全市场盘口；运行期间消费连续 Core Event 增量维护各 symbol，并把完整
+`SNAPSHOT` 交给独立公共行情 publisher。普通 `BOOK_STATE_QUERY` 必须指定单个 symbol，只占用对应 matching
+lane，默认深度 30、最大 100，不允许空 symbol 扫描全市场：
 
 - 每个 symbol 有独立的 latest-only 槽位，热点 symbol 不会覆盖其他 symbol 的快照；
 - 某个 symbol 有一条快照正在发送时，后续新快照只覆盖该 symbol 唯一的待发送槽位，过时的中间状态直接丢弃，不形成积压；
@@ -390,8 +392,8 @@ exchange-core 内的 user/symbol/risk module 只是 matcher 技术状态，随�
 公共 REST 快照接口：
 
 ```bash
-curl 'http://localhost:9081/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=50'
-curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50'
+curl 'http://localhost:9081/api/v1/trading/market/orderbook?symbol=BTC-USDT&depth=30'
+curl 'http://localhost:9094/api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=30'
 ```
 
 深度事件只是行情 fanout，不是账户或订单状态权威。Aeron Core 是订单、资金和实时订单簿事实源；

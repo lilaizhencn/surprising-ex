@@ -145,7 +145,7 @@ public class MatchingProperties {
 
     public static class MarketData {
         private boolean enabled = true;
-        private int depthLevels = 50;
+        private int depthLevels = 30;
         private int batchSize = 512;
         private int maxInFlight = 256;
         private long publishDelayMs = 5;
@@ -159,7 +159,10 @@ public class MatchingProperties {
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public int getDepthLevels() { return depthLevels; }
-        public void setDepthLevels(int value) { depthLevels = positive(value, "depth levels"); }
+        public void setDepthLevels(int value) {
+            depthLevels = positive(value, "depth levels");
+            if (depthLevels > 100) throw new IllegalArgumentException("depth levels must not exceed 100");
+        }
         public int getBatchSize() { return batchSize; }
         public void setBatchSize(int value) { batchSize = positive(value, "batch size"); }
         public int getMaxInFlight() { return maxInFlight; }

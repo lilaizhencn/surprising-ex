@@ -178,7 +178,7 @@ available + locked = accountTotal
 | Q05 | `✅ 已完成` | cancel-all 先扫描 book/order 再逐单完整 cancel | 已使用活动订单索引、批量命令和有界 continuation |
 | Q06 | `✅ 已完成` | risk/funding/settlement continuation 依赖全量 values 列表 | 已使用确定性 cursor、增量索引和单批工作上限 |
 | Q07 | `✅ 已完成` | open-orders、trigger、algo、timer 查询在 Core 内扫描并排序业务全集 | 当前态查询已使用对应增量索引和有界分页 |
-| Q08 | `🟡 部分完成` | `BOOK_STATE_QUERY` 请求 `Integer.MAX_VALUE` 深度并排序所有 symbol/level | 深度已限制并改为异步 matcher 查询；空查询仍可覆盖全部 symbol |
+| Q08 | `✅ 已完成` | `BOOK_STATE_QUERY` 请求 `Integer.MAX_VALUE` 深度并排序所有 symbol/level | 在线查询强制单 symbol、默认 30/最大 100 档；全市场恢复使用固定快照会话和 symbol cursor 分页 |
 
 ### 3.3 哈希、导出和快照
 
@@ -199,7 +199,7 @@ available + locked = accountTotal
 | M02 | `✅ 已完成` | cancel/replace 失败触发 `matchingAdapter.rebuild(before)` | 生产 rebuild 已删除，异常进入 sticky fail-closed |
 | M03 | `✅ 已完成` | matcher 已变更后业务异常造成状态分叉 | 成员立即失败关闭，并从一致 Cluster snapshot 恢复 |
 | M04 | `✅ 已完成` | 恢复按 open orders 逐单重放 | 使用 `fromSnapshotOnly` 导入原生 ME0/RE0 |
-| M05 | `🟡 部分完成` | `orderBookLevels()` 查询所有 symbol、最大深度、逐个 join | 已移除逐个同步 join 并限制深度；空查询覆盖全部 symbol 的容量边界仍待收口 |
+| M05 | `✅ 已完成` | `orderBookLevels()` 查询所有 symbol、最大深度、逐个 join | 单 symbol 查询只进入对应 matching lane；全市场 bootstrap 独立为内部固定快照分页协议，响应具备档位/字节硬上限 |
 | M06 | `✅ 已完成` | `ensureSymbol` 哈希不检查碰撞 | 已增加稳定 registry 和确定性碰撞探测 |
 | M07 | `🟡 部分完成` | user/symbol 首次注册增加固定尾延迟 | 注册已确定性化并纳入恢复；首次注册容量尾延迟仍待 P6 量化 |
 | M08 | `🟡 部分完成` | Aeron client 每命令任务分配且 slot 内同步等待 | 同步等待已改为固定 agent 和异步 in-flight pipeline；每请求 Future/Request 分配仍存在 |
@@ -936,7 +936,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 8. reducer 的未修改 leverage/algo/timer/trigger map 统一以 delta 传递；TradingCoreState、CoreTreasuryState 的 delta 分支只校验 changed keys，避免无关命令在状态构造器内全量遍历。
 9. matcher 启动恢复导入 Aeron 配对快照中的原生 `ME0/RE0`，以 `InitialStateConfiguration.fromSnapshotOnly` 启动；规范化 symbol/user registry、配置、完整引擎 hash、book hash 和 OPEN 订单逐字段对账全部通过后才开放流量。
 10. `EXECUTE_TRIGGER_ORDER` 已成为单一 Core 命令：Core 内完成 claim、instrument 版本/费率快照门禁、资金预留、exchange-core 撮合、成交应用和 trigger complete；触发命中不再同步往返 `OrderRpcApi`。触发单入 Core 时固化 instrument version 与 maker/taker fee，版本漂移 fail-closed；Aeron placement 使用 `instrumentVersion=0` 让 Core 从唯一 `CoreInstrumentState` 补齐费率快照，不再同步调用 `TradingFeeRpcApi`。
-11. `BOOK_STATE_QUERY` 支持 symbol/depth 有界协议查询；空 payload 使用默认深度，深度上限为 1000，adapter 不再请求 `Integer.MAX_VALUE`。
+11. 在线 `BOOK_STATE_QUERY` 强制指定 symbol，深度 `0` 使用默认 30，最大 100；查询只进入该 symbol 的 matching lane。空 payload 和空 symbol 直接拒绝，不再隐式查询全市场。
 12. 导出队列容量预检按最大协议事件预留字节，在命令改动业务状态前拒绝无法容纳的事件；不会把导出编码失败留到成交后再回滚。
 13. `AeronClientPool.commandAsync` 使用有界队列和 `AbortPolicy`，客户端饱和时显式背压，不再创建无界任务队列。
 14. `TradingCoreRuntime` 现在统一持有 active-order、algo、cancel-all timer、liquidation、ADL position、position/open-interest/trigger 派生索引；`CoreProbeState` 的 algo/timer/open-order/ADL/liquidation 查询和风险清算查重使用这些索引，索引在同一 transition 内增量更新。
@@ -968,6 +968,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 39. W5 真实运行 A/B 复现嵌入式 Aeron `ThreadingMode.SHARED` 下三个 Core MediaDriver 在正常运行阶段停止心跳；同机切换 Core 和客户端到 `DEDICATED` 后超过相同窗口并连续完成五次状态查询。Core 和客户端默认固定为 `DEDICATED`，仅保留显式环境变量/系统属性用于受控诊断；直连客户端增加后台 keep-alive，避免导出器或故障驱动在 Kafka/PG 等外围等待期间丢失 Aeron 会话；W5 本地编排升级到 PostgreSQL 18 的新版数据目录布局。
 40. D06 删除普通/Algo 共用的 `AeronOrderIdGenerator` 和条件单 `AeronTriggerOrderIdGenerator`。普通单、条件单、Algo 父单使用互相隔离的稳定身份命名空间；Algo 子单继续使用稳定父单 ID 与 slice index。Provider 以零时间创建模板提交，Product Core 用首次应用命令的 Cluster 时间写入 `startAt/nextSliceAt/createdAt/updatedAt`，命令结果账本和 snapshot 恢复后重复提交返回原状态，载荷变化返回 `IDEMPOTENCY_CONFLICT`。当前没有真正无业务键的系统订单创建流，因此不新增无消费者的通用 Core sequence；费率管理配置要求调用方显式提供 `feeScheduleId`，不再误用订单 ID 生成器。
 41. `CoreUserState` 保留不可变快照外壳，但所有生产 mutation 统一经 `transition` 更新。余额、预留、持仓必须直接继承上一版本 DeltaMap；预留剩余锁和仓位保证金按 changed keys 更新派生的 per-asset explained-lock，不再在每次下单、成交、撤单、平仓或结算时遍历用户全部嵌套集合。冷启动和 snapshot decode 仍执行完整重建校验。
+42. M05/Q08 将在线单 symbol 盘口和全市场恢复查询拆开。`ORDER_BOOK_BOOTSTRAP_QUERY` 首次在全局 matcher barrier 内建立固定盘口快照，后续页只读取该 snapshotId 对应的不可变结果，并使用 `symbolCursor + limit` 分页；最多保留 4 个内部会话。单页最多 10,000 档、编码后最多 1 MiB，超限返回 `BOOK_QUERY_RESPONSE_TOO_LARGE`。行情启动与压测/验收工具继续拥有完整全市场查询入口，但普通在线查询不能调用空 symbol 扫描全市场。
 
 仍未宣称完成的交付物：
 
@@ -1080,3 +1081,20 @@ Treasury 已有的 changed-key 校验保持不变，不引入第二套 mutable �
 `TradingStateSnapshotCodecTest` 和 `CoreProbeStateTest`，共 68 项通过。覆盖预留新增/释放/删除、仓位保证金减少、
 锁定余额不足拒绝、非直接 lineage 拒绝、嵌套 DeltaMap 父链和 snapshot 值语义。本次属于内存数据结构优化，未改动
 协议、撮合算法、资金公式或产品线配置，因此不重复运行六产品线真实集群门禁；P6 容量与长稳测试仍单独执行。
+
+### 19.7 M05 盘口查询隔离与全市场分页（2026-08-18）
+
+在线 `BOOK_STATE_QUERY` 不再接受空 payload 或空 symbol，深度默认 30、最大 100。adapter 使用 symbol lane 执行
+exchange-core L2 查询，只等待同一交易对在先命令，不再通过 global barrier 阻塞其他交易对。单 symbol 结果按实际
+ask/bid 数量一次性预分配，不再每处理一个 symbol 就复制已有结果列表。
+
+全市场完整盘口迁入内部 `ORDER_BOOK_BOOTSTRAP_QUERY`。第一页在 matcher barrier 内并发请求已注册 symbol 并建立
+固定 snapshot；响应返回 snapshotId、同一 exportSequence 和下一 symbolCursor。后续页只从该不可变会话读取，确保
+行情服务启动恢复不会把不同市场时刻的页面拼在一起。limit 默认 20、最大 50，Core 最多保留 4 个会话；单页最多
+10,000 档且编码后最多 1 MiB，非法/淘汰 cursor 和响应超限均显式拒绝。该协议不暴露为用户 REST：仅由 Market Data
+启动恢复及显式压测、验收工具使用，因此仍保留全市场完整订单簿能力而不进入普通在线查询热路径。
+
+Market Data 的公共盘口默认深度同步降为 30、最大 100，启动时逐页拉取固定 bootstrap snapshot，之后继续按连续
+Core Export 增量维护。五个 Cluster 容量/验收工具已统一迁移到分页 loader。JDK 25 定向运行协议 codec、query
+class、单/全市场 adapter、symbol lane、Core 异步查询、行情投影、Kafka depth publisher 和分页工具共 65 项测试，
+全部通过；该改动只调整只读盘口查询与投影 bootstrap，不改变订单、撮合、资金或持仓裁决。

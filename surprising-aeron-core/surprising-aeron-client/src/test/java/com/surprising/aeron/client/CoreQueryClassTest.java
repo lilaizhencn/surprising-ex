@@ -23,6 +23,8 @@ class CoreQueryClassTest {
                 .isEqualTo(CoreQueryClass.RESERVED_CONTROL);
         assertThat(CoreQueryClass.classify(CoreMessageType.BOOK_STATE_QUERY))
                 .isEqualTo(CoreQueryClass.RESERVED_CONTROL);
+        assertThat(CoreQueryClass.classify(CoreMessageType.ORDER_BOOK_BOOTSTRAP_QUERY))
+                .isEqualTo(CoreQueryClass.RESERVED_CONTROL);
         assertThat(CoreQueryClass.classify(CoreMessageType.USER_STATE_QUERY))
                 .isEqualTo(CoreQueryClass.ORDINARY_READ);
         assertThat(CoreQueryClass.classify(CoreMessageType.ORDER_STATE_QUERY))

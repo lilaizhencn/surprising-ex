@@ -20,8 +20,8 @@ public interface MarketDataRpcApi {
 
     @GetMapping("/orderbook")
     OrderBookSnapshotResponse orderBook(@RequestParam("symbol") @NotBlank String symbol,
-                                        @RequestParam(value = "depth", defaultValue = "50")
-                                        @Min(1) @Max(200) int depth);
+                                        @RequestParam(value = "depth", defaultValue = "30")
+                                        @Min(1) @Max(100) int depth);
 
     @GetMapping("/latest-trade")
     PublicTradeEvent latestTrade(@RequestParam("symbol") @NotBlank String symbol);
