@@ -66,7 +66,7 @@ case "$tool" in
       -Dsurprising.aeron.capacity-warmup-seconds="${CAPACITY_WARMUP_SECONDS:-5}" \
       -Dsurprising.aeron.capacity-workers="${CAPACITY_WORKERS:-4}" \
       -Dsurprising.aeron.capacity-connections="${CAPACITY_CONNECTIONS:-4}" \
-      -Dsurprising.aeron.capacity-user-count="${CAPACITY_USER_COUNT:-8}" \
+      -Dsurprising.aeron.capacity-user-count="${CAPACITY_USER_COUNT:-100}" \
       -Dsurprising.aeron.capacity-async-in-flight="${CAPACITY_ASYNC_IN_FLIGHT:-1}" \
       -Dsurprising.aeron.capacity-offered-commands-per-second="${CAPACITY_OFFERED_COMMANDS_PER_SECOND:-0}" \
       "$@"

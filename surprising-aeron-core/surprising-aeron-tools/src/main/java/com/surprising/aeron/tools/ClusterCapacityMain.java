@@ -112,7 +112,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         long seed = positiveLong("surprising.aeron.capacity-seed", 9901);
         int workers = positiveInt("surprising.aeron.capacity-workers", 4);
         int connections = positiveInt("surprising.aeron.capacity-connections", workers);
-        int userCount = positiveInt("surprising.aeron.capacity-user-count", workers * 2);
+        int userCount = positiveInt("surprising.aeron.capacity-user-count", 100);
         if ((userCount & 1) != 0) throw new IllegalArgumentException("capacity-user-count must be even");
         int asyncInFlight = positiveInt("surprising.aeron.capacity-async-in-flight", 1);
         int warmupSeconds = nonNegativeInt("surprising.aeron.capacity-warmup-seconds", 5);

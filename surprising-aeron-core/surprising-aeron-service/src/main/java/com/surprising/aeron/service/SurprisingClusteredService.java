@@ -26,7 +26,7 @@ import org.agrona.concurrent.IdleStrategy;
 public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
-    private static final long MATCHING_TIMER_DELAY_MS = 1;
+    private static final long MATCHING_TIMER_DELAY_MS = 10;
 
     private final ProductLine productLine;
     private final AtomicReference<Cluster.Role> role = new AtomicReference<>();
