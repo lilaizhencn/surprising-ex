@@ -44,6 +44,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     private final ScheduledExecutorService keepAliveExecutor;
     private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
     private final Map<Long, CoreResponse> responses = new HashMap<>();
+    private UnsafeBuffer ingressBuffer = new UnsafeBuffer(new byte[CoreProtocol.HEADER_LENGTH]);
     private RuntimeException sessionFailure;
 
     private SurprisingAeronClient(
@@ -239,12 +240,24 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
-    public long offer(CoreMessage message) {
+    public synchronized long offer(CoreMessage message) {
         if (message.header().productLine() != productLine) {
             throw new IllegalArgumentException("client and message product line differ");
         }
-        byte[] encoded = CoreMessageCodec.encode(message);
-        return cluster.offer(new UnsafeBuffer(encoded), 0, encoded.length);
+        int encodedLength = CoreMessageCodec.encodedLength(message);
+        if (ingressBuffer.capacity() < encodedLength) {
+            ingressBuffer = new UnsafeBuffer(new byte[grownCapacity(ingressBuffer.capacity(), encodedLength)]);
+        }
+        CoreMessageCodec.encode(message, ingressBuffer.byteArray());
+        return cluster.offer(ingressBuffer, 0, encodedLength);
+    }
+
+    private static int grownCapacity(int currentCapacity, int requiredCapacity) {
+        int capacity = Math.max(currentCapacity, CoreProtocol.HEADER_LENGTH);
+        while (capacity < requiredCapacity) {
+            capacity = Math.multiplyExact(capacity, 2);
+        }
+        return capacity;
     }
 
     @Override

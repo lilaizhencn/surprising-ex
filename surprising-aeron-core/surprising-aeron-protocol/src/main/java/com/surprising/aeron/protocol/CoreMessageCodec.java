@@ -2,6 +2,7 @@ package com.surprising.aeron.protocol;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Objects;
 import java.util.UUID;
 
 public final class CoreMessageCodec {
@@ -12,13 +13,27 @@ public final class CoreMessageCodec {
     }
 
     public static byte[] encode(CoreMessage message) {
-        byte[] payload = message.payload();
-        if (payload.length > MAX_PAYLOAD_LENGTH) {
+        byte[] encoded = new byte[encodedLength(message)];
+        encode(message, encoded);
+        return encoded;
+    }
+
+    public static int encodedLength(CoreMessage message) {
+        Objects.requireNonNull(message, "message");
+        int payloadLength = message.payloadLength();
+        if (payloadLength > MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("message payload is too large");
         }
+        return CoreProtocol.HEADER_LENGTH + payloadLength;
+    }
+
+    public static int encode(CoreMessage message, byte[] destination) {
+        int encodedLength = encodedLength(message);
+        if (destination == null || destination.length < encodedLength) {
+            throw new IllegalArgumentException("destination is smaller than encoded message");
+        }
         CoreMessageHeader header = message.header();
-        ByteBuffer buffer = ByteBuffer.allocate(CoreProtocol.HEADER_LENGTH + payload.length)
-                .order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer buffer = ByteBuffer.wrap(destination, 0, encodedLength).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(CoreProtocol.MAGIC);
         buffer.putShort((short) header.schemaVersion());
         buffer.put((byte) header.kind().wireCode());
@@ -35,9 +50,9 @@ public final class CoreMessageCodec {
         buffer.putLong(header.userId());
         buffer.putLong(header.submittedAtEpochMillis());
         buffer.putLong(header.correlationId());
-        buffer.putInt(payload.length);
-        buffer.put(payload);
-        return buffer.array();
+        buffer.putInt(message.payloadLength());
+        message.copyPayloadTo(destination, CoreProtocol.HEADER_LENGTH);
+        return encodedLength;
     }
 
     public static CoreMessage decode(byte[] encoded) {

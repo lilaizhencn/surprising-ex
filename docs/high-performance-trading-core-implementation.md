@@ -202,7 +202,7 @@ available + locked = accountTotal
 | M05 | `✅ 已完成` | `orderBookLevels()` 查询所有 symbol、最大深度、逐个 join | 单 symbol 查询只进入对应 matching lane；全市场 bootstrap 独立为内部固定快照分页协议，响应具备档位/字节硬上限 |
 | M06 | `✅ 已完成` | `ensureSymbol` 哈希不检查碰撞 | 已增加稳定 registry 和确定性碰撞探测 |
 | M07 | `🟡 部分完成` | user/symbol 首次注册增加固定尾延迟 | 注册已确定性化并纳入恢复；首次注册容量尾延迟仍待 P6 量化 |
-| M08 | `🟡 部分完成` | Aeron client 每命令任务分配且 slot 内同步等待 | 同步等待已改为固定 agent 和异步 in-flight pipeline；每请求 Future/Request 分配仍存在 |
+| M08 | `✅ 已完成` | Aeron client 每命令任务分配且 slot 内同步等待 | 固定 agent 使用有界可复用 Request slot；高频 one-way/batch 使用 admission callback 且标记价格链路已迁移，不创建 Future；终态命令和查询仅保留兼容 Future；Request correlation 使用 lane 管理的普通状态；ingress 直接编码到按 session 复用的 Agrona `UnsafeBuffer` |
 | M09 | `✅ 已完成` | offer/egress 占用 Gateway 调用线程 | 已由固定 Aeron agent 和有界 mailbox 承担背压 |
 | M10 | `✅ 已完成` | sourceId 重启后的 sequence 语义不稳定 | 已采用进程 epoch 编码 sourceId，并以高水位阻止旧命令重放 |
 | M11 | `✅ 已完成` | 同 user 命令跨 client slot | client pool 按 userId 稳定映射 lane |

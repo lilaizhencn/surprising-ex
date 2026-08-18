@@ -33,6 +33,8 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
     private final Transport transport;
     private final ExecutorService executor;
     private final ConcurrentHashMap<String, MarkPriceEvent> pendingBySymbol = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, MarkPriceEvent> inFlightByCommandId = new ConcurrentHashMap<>();
+    private final AeronClientPool.CommandAdmissionCallback admissionCallback = this::onAdmission;
     private final AtomicLong publishGeneration = new AtomicLong();
     private final AtomicLong nextFailureLogNanos = new AtomicLong();
     private final AtomicBoolean draining = new AtomicBoolean();
@@ -54,7 +56,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
 
     private MarkPriceCorePublisher(AeronClientPool clients) {
         this.clients = Objects.requireNonNull(clients, "clients");
-        this.transport = event -> sendOnce(clients, event);
+        this.transport = null;
         this.executor = newExecutor();
     }
 
@@ -90,6 +92,18 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
         try {
             for (Map.Entry<String, MarkPriceEvent> entry : pendingBySymbol.entrySet()) {
                 MarkPriceEvent event = entry.getValue();
+                if (clients != null) {
+                    try {
+                        if (!sendAsync(event) && shouldLogFailure()) {
+                            log.warn("Mark price remains pending symbol={} sequence={} pendingSymbols={}",
+                                    event.symbol(), event.sequence(), pendingBySymbol.size());
+                        }
+                    } catch (RuntimeException exception) {
+                        log.error("Failed to send mark price to Aeron symbol={} sequence={}",
+                                event.symbol(), event.sequence(), exception);
+                    }
+                    continue;
+                }
                 boolean sent;
                 try {
                     sent = transport.trySend(event);
@@ -113,14 +127,38 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
         }
     }
 
-    private static boolean sendOnce(AeronClientPool clients, MarkPriceEvent event) {
+    private boolean sendAsync(MarkPriceEvent event) {
         byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                 event.symbol(), event.instrumentVersion(), event.markPriceTicks(), event.sequence(),
                 Objects.requireNonNull(event.publishedAt(), "mark price publishedAt is required").toEpochMilli()));
-        UUID commandId = UUID.nameUUIDFromBytes(("MARK_PRICE:" + event.symbol() + ':' + event.sequence())
+        UUID commandId = markPriceCommandId(event);
+        if (inFlightByCommandId.putIfAbsent(commandId, event) != null) {
+            return true;
+        }
+        boolean queued = clients.commandOneWay(CoreMessageType.APPLY_MARK_PRICE, commandId, 0, payload,
+                admissionCallback);
+        if (!queued) {
+            inFlightByCommandId.remove(commandId, event);
+        }
+        return queued;
+    }
+
+    private void onAdmission(UUID commandId, AeronClientPool.TryCommandResult result) {
+        MarkPriceEvent event = inFlightByCommandId.remove(commandId);
+        if (event == null) {
+            return;
+        }
+        if (result == AeronClientPool.TryCommandResult.SENT) {
+            pendingBySymbol.remove(event.symbol(), event);
+        } else if (shouldLogFailure()) {
+            log.warn("Mark price Aeron admission failed symbol={} sequence={} result={}",
+                    event.symbol(), event.sequence(), result);
+        }
+    }
+
+    private static UUID markPriceCommandId(MarkPriceEvent event) {
+        return UUID.nameUUIDFromBytes(("MARK_PRICE:" + event.symbol() + ':' + event.sequence())
                 .getBytes(StandardCharsets.UTF_8));
-        return clients.tryCommandOnce(CoreMessageType.APPLY_MARK_PRICE, commandId, 0, payload)
-                == AeronClientPool.TryCommandResult.SENT;
     }
 
     private static ExecutorService newExecutor() {

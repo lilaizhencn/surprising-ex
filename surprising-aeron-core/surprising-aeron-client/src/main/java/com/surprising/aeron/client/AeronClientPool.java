@@ -46,6 +46,11 @@ public final class AeronClientPool implements AutoCloseable {
         CLOSED
     }
 
+    @FunctionalInterface
+    public interface CommandAdmissionCallback {
+        void onAdmission(UUID commandId, TryCommandResult result);
+    }
+
     interface Session extends AutoCloseable {
         long offer(CoreMessage message);
         int pollEgress(int fragmentLimit);
@@ -187,11 +192,15 @@ public final class AeronClientPool implements AutoCloseable {
             return CompletableFuture.completedFuture(CoreCommandOutcome.notAccepted(Publication.CLOSED));
         }
         AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
-        Request request = agent.commandRequest(type, commandId, userId, safePayload, false);
-        if (!agent.enqueue(request)) {
-            request.notAccepted(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        Request request = agent.commandOutcomeRequest(type, commandId, userId, safePayload);
+        if (request == null) {
+            return CompletableFuture.completedFuture(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
         }
-        return request.commandFuture;
+        CompletableFuture<CoreCommandOutcome> future = request.commandFuture;
+        if (!agent.enqueue(request)) {
+            agent.rejectUnqueued(request, CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        }
+        return future;
     }
 
     public CoreResponse command(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
@@ -200,7 +209,24 @@ public final class AeronClientPool implements AutoCloseable {
 
     public CompletableFuture<CoreResponse> commandAsync(
             CoreMessageType type, UUID commandId, long userId, byte[] payload) {
-        return commandOutcomeAsync(type, commandId, userId, payload).thenApply(AeronClientPool::requireTerminal);
+        requireKind(type, WireMessageKind.COMMAND, "command");
+        Objects.requireNonNull(commandId, "commandId");
+        byte[] safePayload = requirePayload(payload);
+        if (closed.get()) {
+            return CompletableFuture.failedFuture(
+                    new CoreCommandOutcome.NotAcceptedException(CoreCommandOutcome.notAccepted(Publication.CLOSED)));
+        }
+        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        Request request = agent.commandResponseRequest(type, commandId, userId, safePayload);
+        if (request == null) {
+            return CompletableFuture.failedFuture(new CoreCommandOutcome.NotAcceptedException(
+                    CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED)));
+        }
+        CompletableFuture<CoreResponse> future = request.responseFuture;
+        if (!agent.enqueue(request)) {
+            agent.rejectUnqueued(request, CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        }
+        return future;
     }
 
     public TryCommandResult tryCommandOnce(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
@@ -211,29 +237,86 @@ public final class AeronClientPool implements AutoCloseable {
             return TryCommandResult.CLOSED;
         }
         AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
-        Request request = agent.commandRequest(type, commandId, userId, safePayload, true);
+        Request request = agent.oneWayFutureRequest(type, commandId, userId, safePayload);
+        if (request == null) {
+            return TryCommandResult.BACK_PRESSURED;
+        }
+        CompletableFuture<Long> admissionFuture = request.admissionFuture;
+        long requestGeneration = request.generation();
         if (!agent.enqueue(request)) {
+            agent.recycleUnqueued(request);
             return TryCommandResult.BACK_PRESSURED;
         }
         long offerResult;
         try {
-            offerResult = request.admissionFuture.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
+            offerResult = admissionFuture.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException exception) {
-            if (request.cancelBeforeOffer()) {
+            if (request.cancelBeforeOffer(requestGeneration)) {
                 return agent.sessionConnected() ? TryCommandResult.BUSY : TryCommandResult.NOT_READY;
             }
-            offerResult = request.admissionFuture.join();
+            offerResult = admissionFuture.join();
         } catch (InterruptedException exception) {
-            boolean cancelled = request.cancelBeforeOffer();
+            boolean cancelled = request.cancelBeforeOffer(requestGeneration);
             Thread.currentThread().interrupt();
             if (cancelled) {
                 return TryCommandResult.BUSY;
             }
-            offerResult = request.admissionFuture.join();
+            offerResult = admissionFuture.join();
         } catch (java.util.concurrent.ExecutionException exception) {
             return TryCommandResult.UNAVAILABLE;
         }
         return mapTryCommandResult(offerResult);
+    }
+
+    public boolean commandOneWay(
+            CoreMessageType type,
+            UUID commandId,
+            long userId,
+            byte[] payload,
+            CommandAdmissionCallback callback) {
+        requireKind(type, WireMessageKind.COMMAND, "command");
+        Objects.requireNonNull(commandId, "commandId");
+        Objects.requireNonNull(callback, "callback");
+        byte[] safePayload = requirePayload(payload);
+        if (closed.get()) {
+            callback.onAdmission(commandId, TryCommandResult.CLOSED);
+            return true;
+        }
+        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        Request request = agent.oneWayCallbackRequest(type, commandId, userId, safePayload, callback);
+        if (request == null) {
+            return false;
+        }
+        if (!agent.enqueue(request)) {
+            agent.recycleUnqueued(request);
+            return false;
+        }
+        return true;
+    }
+
+    public int commandBatchOneWay(
+            CoreMessageType type,
+            UUID[] commandIds,
+            long[] userIds,
+            byte[][] payloads,
+            int offset,
+            int length,
+            CommandAdmissionCallback callback) {
+        Objects.requireNonNull(commandIds, "commandIds");
+        Objects.requireNonNull(userIds, "userIds");
+        Objects.requireNonNull(payloads, "payloads");
+        if (offset < 0 || length < 0 || offset > commandIds.length - length
+                || offset > userIds.length - length || offset > payloads.length - length) {
+            throw new IndexOutOfBoundsException("invalid command batch range");
+        }
+        int accepted = 0;
+        for (int index = offset; index < offset + length; index++) {
+            if (!commandOneWay(type, commandIds[index], userIds[index], payloads[index], callback)) {
+                break;
+            }
+            accepted++;
+        }
+        return accepted;
     }
 
     public CompletableFuture<CoreResponse> controlQueryAsync(
@@ -272,10 +355,15 @@ public final class AeronClientPool implements AutoCloseable {
         Objects.requireNonNull(queryId, "queryId");
         byte[] safePayload = requirePayload(payload);
         Request request = reservedControlAgent.queryRequest(type, queryId, userId, safePayload);
-        if (!reservedControlAgent.enqueue(request)) {
-            request.notAccepted(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        if (request == null) {
+            return CompletableFuture.failedFuture(new CoreCommandOutcome.NotAcceptedException(
+                    CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED)));
         }
-        return request.queryFuture;
+        CompletableFuture<CoreResponse> future = request.responseFuture;
+        if (!reservedControlAgent.enqueue(request)) {
+            reservedControlAgent.rejectUnqueued(request, CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        }
+        return future;
     }
 
     private CompletableFuture<CoreResponse> enqueueOrdinaryQuery(
@@ -284,10 +372,15 @@ public final class AeronClientPool implements AutoCloseable {
         byte[] safePayload = requirePayload(payload);
         AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
         Request request = agent.queryRequest(type, queryId, userId, safePayload);
-        if (!agent.enqueue(request)) {
-            request.notAccepted(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        if (request == null) {
+            return CompletableFuture.failedFuture(new CoreCommandOutcome.NotAcceptedException(
+                    CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED)));
         }
-        return request.queryFuture;
+        CompletableFuture<CoreResponse> future = request.responseFuture;
+        if (!agent.enqueue(request)) {
+            agent.rejectUnqueued(request, CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        }
+        return future;
     }
 
     public CoreResponse query(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
@@ -318,22 +411,33 @@ public final class AeronClientPool implements AutoCloseable {
         }
         Request request;
         AgentLane lane;
+        boolean commandRequest;
         if (message.header().kind() == WireMessageKind.COMMAND) {
-            request = Request.command(message, message.header().commandId(), false);
+            commandRequest = true;
             lane = commandAgents[Math.floorMod(Long.hashCode(message.header().sourceId()), commandAgents.length)];
+            request = lane.preparedRequest(message, RequestMode.COMMAND_OUTCOME);
         } else if (message.header().kind() == WireMessageKind.QUERY) {
+            commandRequest = false;
             requireReservedControl(message.header().messageType());
-            request = Request.query(message, message.header().commandId());
             lane = reservedControlAgent;
+            request = lane.preparedRequest(message, RequestMode.QUERY);
         } else {
             throw new IllegalArgumentException("prepared message must be a command or reserved control query");
         }
-        if (!lane.enqueue(request)) {
-            request.notAccepted(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        if (request == null) {
+            throw new CoreCommandOutcome.NotAcceptedException(
+                    CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
         }
-        return request.commandFuture == null
-                ? awaitPrepared(request, request.queryFuture)
-                : requireTerminal(awaitPrepared(request, request.commandFuture));
+        CompletableFuture<CoreCommandOutcome> commandFuture = request.commandFuture;
+        CompletableFuture<CoreResponse> responseFuture = request.responseFuture;
+        long requestGeneration = request.generation();
+        UUID operationId = message.header().commandId();
+        if (!lane.enqueue(request)) {
+            lane.rejectUnqueued(request, CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
+        }
+        return commandRequest
+                ? requireTerminal(awaitPrepared(request, requestGeneration, operationId, commandFuture))
+                : awaitPrepared(request, requestGeneration, operationId, responseFuture);
     }
 
     public CoreResponse commandResult(UUID commandId, long userId) {
@@ -409,16 +513,17 @@ public final class AeronClientPool implements AutoCloseable {
         throw new CoreCommandOutcome.NotAcceptedException((CoreCommandOutcome.NotAccepted) outcome);
     }
 
-    private static <T> T awaitPrepared(Request request, CompletableFuture<T> future) {
+    private static <T> T awaitPrepared(
+            Request request, long requestGeneration, UUID operationId, CompletableFuture<T> future) {
         try {
             return future.get();
         } catch (InterruptedException exception) {
-            boolean cancelled = request.cancelBeforeOffer();
+            boolean cancelled = request.cancelBeforeOffer(requestGeneration);
             Thread.currentThread().interrupt();
             if (cancelled) {
                 throw new IllegalStateException("Interrupted before prepared Aeron request admission", exception);
             }
-            throw new ResultUnknownException(request.operationId,
+            throw new ResultUnknownException(operationId,
                     "Interrupted after prepared Aeron request admission; result is unknown");
         } catch (ExecutionException exception) {
             if (exception.getCause() instanceof RuntimeException runtimeException) {
@@ -457,7 +562,7 @@ public final class AeronClientPool implements AutoCloseable {
     }
 
     private static byte[] requirePayload(byte[] payload) {
-        return Objects.requireNonNull(payload, "payload").clone();
+        return Objects.requireNonNull(payload, "payload");
     }
 
     private static long stableLong(String value) {
@@ -468,6 +573,7 @@ public final class AeronClientPool implements AutoCloseable {
 
     private final class AgentLane {
         private final ArrayBlockingQueue<Request> mailbox;
+        private final ArrayBlockingQueue<Request> availableRequests;
         private final int maxInFlight;
         private final long sourceId;
         private final AtomicLong nextSequence = new AtomicLong();
@@ -481,6 +587,10 @@ public final class AeronClientPool implements AutoCloseable {
 
         private AgentLane(int mailboxCapacity, int maxInFlight, long sourceId) {
             this.mailbox = new ArrayBlockingQueue<>(mailboxCapacity);
+            this.availableRequests = new ArrayBlockingQueue<>(mailboxCapacity + maxInFlight);
+            for (int index = 0; index < mailboxCapacity + maxInFlight; index++) {
+                availableRequests.add(new Request(this));
+            }
             this.maxInFlight = maxInFlight;
             this.sourceId = sourceId;
         }
@@ -490,23 +600,61 @@ public final class AeronClientPool implements AutoCloseable {
             return current != null && current.connected();
         }
 
-        private Request commandRequest(
-                CoreMessageType type, UUID commandId, long userId, byte[] payload, boolean oneWay) {
+        private Request commandOutcomeRequest(
+                CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+            return commandRequest(type, commandId, userId, payload, RequestMode.COMMAND_OUTCOME, null);
+        }
+
+        private Request commandResponseRequest(
+                CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+            return commandRequest(type, commandId, userId, payload, RequestMode.COMMAND_RESPONSE, null);
+        }
+
+        private Request oneWayFutureRequest(
+                CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+            return commandRequest(type, commandId, userId, payload, RequestMode.ONE_WAY_FUTURE, null);
+        }
+
+        private Request oneWayCallbackRequest(CoreMessageType type, UUID commandId, long userId, byte[] payload,
+                                              CommandAdmissionCallback callback) {
+            return commandRequest(type, commandId, userId, payload, RequestMode.ONE_WAY_CALLBACK, callback);
+        }
+
+        private Request commandRequest(CoreMessageType type, UUID commandId, long userId, byte[] payload,
+                                       RequestMode mode, CommandAdmissionCallback callback) {
+            Request request = availableRequests.poll();
+            if (request == null) {
+                return null;
+            }
             long correlationId = nextCorrelation.incrementAndGet();
-            if (oneWay) {
+            if (mode.oneWay) {
                 correlationId = -correlationId;
             }
             CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, commandId, productLine,
                     CommandSource.GATEWAY, sourceId, nextSequence.incrementAndGet(), userId,
                     Instant.now().toEpochMilli(), correlationId), payload);
-            return Request.command(message, commandId, oneWay);
+            request.reset(message, commandId, mode, callback);
+            return request;
         }
 
         private Request queryRequest(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
+            Request request = availableRequests.poll();
+            if (request == null) {
+                return null;
+            }
             long correlationId = nextCorrelation.incrementAndGet();
             CoreMessage message = new CoreMessage(CoreMessageHeader.query(type, queryId, productLine,
                     CommandSource.GATEWAY, sourceId, 0, userId, Instant.now().toEpochMilli(), correlationId), payload);
-            return Request.query(message, queryId);
+            request.reset(message, queryId, RequestMode.QUERY, null);
+            return request;
+        }
+
+        private Request preparedRequest(CoreMessage message, RequestMode mode) {
+            Request request = availableRequests.poll();
+            if (request != null) {
+                request.reset(message, message.header().commandId(), mode, null);
+            }
+            return request;
         }
 
         private boolean enqueue(Request request) {
@@ -516,7 +664,7 @@ public final class AeronClientPool implements AutoCloseable {
                         "duplicate in-flight Aeron correlationId=" + correlationId));
                 return true;
             }
-            request.releaseCorrelationWith(() -> claimedCorrelations.remove(correlationId));
+            request.correlationClaimed = true;
             RuntimeException failure = dispatcherFailure.get();
             if (failure != null) {
                 request.fail(failure);
@@ -542,6 +690,23 @@ public final class AeronClientPool implements AutoCloseable {
             return true;
         }
 
+        private void rejectUnqueued(Request request, CoreCommandOutcome.NotAccepted rejection) {
+            request.notAccepted(rejection);
+        }
+
+        private void recycleUnqueued(Request request) {
+            request.recycle();
+        }
+
+        private void recycle(Request request) {
+            request.releaseCorrelation();
+            request.clear();
+            if (!availableRequests.offer(request)) {
+                dispatcherFailure.compareAndSet(null,
+                        new IllegalStateException("Aeron request slot returned twice"));
+            }
+        }
+
         private void connected() {
             reconnectAtNanos = 0;
             reconnectMillis = MIN_RECONNECT_MILLIS;
@@ -553,6 +718,10 @@ public final class AeronClientPool implements AutoCloseable {
             reconnectAtNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(reconnectMillis);
             reconnectMillis = Math.min(MAX_RECONNECT_MILLIS, Math.multiplyExact(reconnectMillis, 2));
             keepAliveAtNanos = 0;
+        }
+
+        private void releaseCorrelation(long correlationId) {
+            claimedCorrelations.remove(correlationId);
         }
     }
 
@@ -694,7 +863,7 @@ public final class AeronClientPool implements AutoCloseable {
             while (true) {
                 Request next = lane.mailbox.peek();
                 if (next == null || lane.session == null || !lane.session.connected()
-                        || (!next.oneWay && lane.pending.size() >= lane.maxInFlight)) {
+                        || (!next.oneWay() && lane.pending.size() >= lane.maxInFlight)) {
                     return worked;
                 }
                 Request request = lane.mailbox.poll();
@@ -703,7 +872,7 @@ public final class AeronClientPool implements AutoCloseable {
                 }
                 worked = true;
                 if (!request.beginOffer()) {
-                    request.releaseCorrelation();
+                    request.recycle();
                     continue;
                 }
                 admit(lane, request);
@@ -725,14 +894,13 @@ public final class AeronClientPool implements AutoCloseable {
                 closeSession(lane);
                 return;
             }
-            request.admissionFuture.complete(offerResult);
             if (offerResult > 0) {
                 lane.connected();
-                if (!request.oneWay) {
+                if (!request.oneWay()) {
                     request.deadlineNanos = System.nanoTime() + responseTimeout.toNanos();
                     lane.pending.put(request.message.header().correlationId(), request);
                 } else {
-                    request.releaseCorrelation();
+                    request.acceptedOneWay(offerResult);
                 }
             } else {
                 if (offerResult == Publication.NOT_CONNECTED && request.isQuery()) {
@@ -907,36 +1075,66 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
-    private static final class Request {
-        private final CoreMessage message;
-        private final UUID operationId;
+    private enum RequestMode {
+        COMMAND_OUTCOME(false),
+        COMMAND_RESPONSE(false),
+        QUERY(false),
+        ONE_WAY_FUTURE(true),
+        ONE_WAY_CALLBACK(true);
+
         private final boolean oneWay;
-        private final CompletableFuture<CoreCommandOutcome> commandFuture;
-        private final CompletableFuture<CoreResponse> queryFuture;
-        private final CompletableFuture<Long> admissionFuture = new CompletableFuture<>();
-        private final AtomicBoolean correlationReleased = new AtomicBoolean();
-        private Runnable correlationRelease = () -> { };
+
+        RequestMode(boolean oneWay) {
+            this.oneWay = oneWay;
+        }
+    }
+
+    private static final class Request {
+        private final AgentLane owner;
+        private CoreMessage message;
+        private UUID operationId;
+        private RequestMode mode;
+        private CompletableFuture<CoreCommandOutcome> commandFuture;
+        private CompletableFuture<CoreResponse> responseFuture;
+        private CompletableFuture<Long> admissionFuture;
+        private CommandAdmissionCallback admissionCallback;
         private boolean offering;
         private boolean cancelled;
+        private boolean completed;
+        private boolean correlationClaimed;
+        private long generation;
         private long queueDeadlineNanos;
         private long deadlineNanos;
 
-        private Request(CoreMessage message, UUID operationId, boolean oneWay,
-                        CompletableFuture<CoreCommandOutcome> commandFuture,
-                        CompletableFuture<CoreResponse> queryFuture) {
-            this.message = message;
-            this.operationId = operationId;
-            this.oneWay = oneWay;
-            this.commandFuture = commandFuture;
-            this.queryFuture = queryFuture;
+        private Request(AgentLane owner) {
+            this.owner = owner;
         }
 
-        private static Request command(CoreMessage message, UUID commandId, boolean oneWay) {
-            return new Request(message, commandId, oneWay, oneWay ? null : new CompletableFuture<>(), null);
+        private synchronized void reset(CoreMessage message, UUID operationId, RequestMode mode,
+                                        CommandAdmissionCallback admissionCallback) {
+            this.message = Objects.requireNonNull(message, "message");
+            this.operationId = Objects.requireNonNull(operationId, "operationId");
+            this.mode = Objects.requireNonNull(mode, "mode");
+            this.commandFuture = mode == RequestMode.COMMAND_OUTCOME ? new CompletableFuture<>() : null;
+            this.responseFuture = mode == RequestMode.COMMAND_RESPONSE || mode == RequestMode.QUERY
+                    ? new CompletableFuture<>() : null;
+            this.admissionFuture = mode == RequestMode.ONE_WAY_FUTURE ? new CompletableFuture<>() : null;
+            this.admissionCallback = admissionCallback;
+            this.offering = false;
+            this.cancelled = false;
+            this.completed = false;
+            this.correlationClaimed = false;
+            this.queueDeadlineNanos = 0;
+            this.deadlineNanos = 0;
+            this.generation++;
         }
 
-        private static Request query(CoreMessage message, UUID queryId) {
-            return new Request(message, queryId, false, null, new CompletableFuture<>());
+        private synchronized long generation() {
+            return generation;
+        }
+
+        private boolean oneWay() {
+            return mode.oneWay;
         }
 
         private synchronized boolean beginOffer() {
@@ -958,67 +1156,158 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private synchronized boolean queueExpired(long now) {
-            return !offering && !cancelled && queueDeadlineNanos != 0 && now >= queueDeadlineNanos;
+            return !offering && (cancelled || queueDeadlineNanos != 0 && now >= queueDeadlineNanos);
         }
 
         private boolean isQuery() {
-            return queryFuture != null;
+            return mode == RequestMode.QUERY;
         }
 
-        private synchronized boolean cancelBeforeOffer() {
-            if (offering) {
+        private synchronized boolean cancelBeforeOffer(long expectedGeneration) {
+            if (generation != expectedGeneration || offering || completed) {
                 return false;
             }
             cancelled = true;
             return true;
         }
 
-        private void releaseCorrelationWith(Runnable release) {
-            correlationRelease = Objects.requireNonNull(release, "release");
-        }
-
-        private void releaseCorrelation() {
-            if (correlationReleased.compareAndSet(false, true)) {
-                correlationRelease.run();
+        private void acceptedOneWay(long offerResult) {
+            if (!claimCompletion()) {
+                return;
+            }
+            CompletableFuture<Long> future = admissionFuture;
+            CommandAdmissionCallback callback = admissionCallback;
+            UUID commandId = operationId;
+            if (future != null) {
+                future.complete(offerResult);
+            }
+            try {
+                invokeCallback(callback, commandId, TryCommandResult.SENT);
+            } finally {
+                owner.recycle(this);
             }
         }
 
         private void terminal(CoreResponse response) {
-            releaseCorrelation();
-            if (commandFuture != null) {
-                commandFuture.complete(new CoreCommandOutcome.Terminal(response));
-            } else {
-                queryFuture.complete(response);
+            if (!claimCompletion()) {
+                return;
             }
+            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
+            CompletableFuture<CoreResponse> result = responseFuture;
+            if (outcome != null) {
+                outcome.complete(new CoreCommandOutcome.Terminal(response));
+            } else if (result != null) {
+                result.complete(response);
+            }
+            owner.recycle(this);
         }
 
         private void notAccepted(CoreCommandOutcome.NotAccepted rejection) {
-            releaseCorrelation();
-            admissionFuture.complete(rejection.rawOfferResult());
-            if (commandFuture != null) {
-                commandFuture.complete(rejection);
-            } else if (queryFuture != null) {
-                queryFuture.completeExceptionally(new CoreCommandOutcome.NotAcceptedException(rejection));
+            if (!claimCompletion()) {
+                return;
+            }
+            CompletableFuture<Long> admission = admissionFuture;
+            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
+            CompletableFuture<CoreResponse> result = responseFuture;
+            CommandAdmissionCallback callback = admissionCallback;
+            UUID commandId = operationId;
+            if (admission != null) {
+                admission.complete(rejection.rawOfferResult());
+            }
+            if (outcome != null) {
+                outcome.complete(rejection);
+            } else if (result != null) {
+                result.completeExceptionally(new CoreCommandOutcome.NotAcceptedException(rejection));
+            }
+            try {
+                invokeCallback(callback, commandId, mapTryCommandResult(rejection.rawOfferResult()));
+            } finally {
+                owner.recycle(this);
             }
         }
 
         private void resultUnknown() {
-            releaseCorrelation();
-            if (commandFuture != null) {
-                commandFuture.complete(new CoreCommandOutcome.ResultUnknown(operationId));
-            } else if (queryFuture != null) {
-                queryFuture.completeExceptionally(new ResultUnknownException(operationId,
-                        "Aeron control query was admitted but its result is unknown"));
+            if (!claimCompletion()) {
+                return;
             }
+            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
+            CompletableFuture<CoreResponse> result = responseFuture;
+            UUID commandId = operationId;
+            if (outcome != null) {
+                outcome.complete(new CoreCommandOutcome.ResultUnknown(commandId));
+            } else if (result != null) {
+                result.completeExceptionally(new ResultUnknownException(commandId,
+                        "Aeron request was admitted but its result is unknown"));
+            }
+            owner.recycle(this);
         }
 
         private void fail(RuntimeException failure) {
-            releaseCorrelation();
-            admissionFuture.completeExceptionally(failure);
-            if (commandFuture != null) {
-                commandFuture.completeExceptionally(failure);
-            } else if (queryFuture != null) {
-                queryFuture.completeExceptionally(failure);
+            if (!claimCompletion()) {
+                return;
+            }
+            CompletableFuture<Long> admission = admissionFuture;
+            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
+            CompletableFuture<CoreResponse> result = responseFuture;
+            CommandAdmissionCallback callback = admissionCallback;
+            UUID commandId = operationId;
+            if (admission != null) {
+                admission.completeExceptionally(failure);
+            }
+            if (outcome != null) {
+                outcome.completeExceptionally(failure);
+            } else if (result != null) {
+                result.completeExceptionally(failure);
+            }
+            try {
+                invokeCallback(callback, commandId, TryCommandResult.UNAVAILABLE);
+            } finally {
+                owner.recycle(this);
+            }
+        }
+
+        private void recycle() {
+            if (claimCompletion()) {
+                owner.recycle(this);
+            }
+        }
+
+        private synchronized boolean claimCompletion() {
+            if (completed) {
+                return false;
+            }
+            completed = true;
+            return true;
+        }
+
+        private synchronized void clear() {
+            message = null;
+            operationId = null;
+            mode = null;
+            commandFuture = null;
+            responseFuture = null;
+            admissionFuture = null;
+            admissionCallback = null;
+            offering = false;
+            cancelled = false;
+            queueDeadlineNanos = 0;
+            deadlineNanos = 0;
+        }
+
+        private synchronized void releaseCorrelation() {
+            if (correlationClaimed && message != null) {
+                correlationClaimed = false;
+                owner.releaseCorrelation(message.header().correlationId());
+            }
+        }
+
+        private static void invokeCallback(
+                CommandAdmissionCallback callback, UUID commandId, TryCommandResult result) {
+            if (callback != null) {
+                try {
+                    callback.onAdmission(commandId, result);
+                } catch (RuntimeException ignored) {
+                }
             }
         }
     }

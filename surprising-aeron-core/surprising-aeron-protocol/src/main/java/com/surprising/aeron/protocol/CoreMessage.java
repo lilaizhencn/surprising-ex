@@ -19,6 +19,14 @@ public record CoreMessage(CoreMessageHeader header, byte[] payload) {
         return payload.length;
     }
 
+    public void copyPayloadTo(byte[] destination, int offset) {
+        Objects.requireNonNull(destination, "destination");
+        if (offset < 0 || offset > destination.length - payload.length) {
+            throw new IndexOutOfBoundsException("payload does not fit destination");
+        }
+        System.arraycopy(payload, 0, destination, offset, payload.length);
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) {

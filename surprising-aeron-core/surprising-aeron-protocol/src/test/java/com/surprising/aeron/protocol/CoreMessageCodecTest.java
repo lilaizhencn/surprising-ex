@@ -31,6 +31,19 @@ class CoreMessageCodecTest {
     }
 
     @Test
+    void encodesIntoReusableDestinationWithoutTouchingItsTail() {
+        CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
+        byte[] destination = new byte[256];
+        Arrays.fill(destination, (byte) 0x5a);
+
+        int length = CoreMessageCodec.encode(message, destination);
+
+        assertThat(length).isEqualTo(CoreMessageCodec.encodedLength(message));
+        assertThat(Arrays.copyOf(destination, length)).isEqualTo(CoreMessageCodec.encode(message));
+        assertThat(destination[length]).isEqualTo((byte) 0x5a);
+    }
+
+    @Test
     void roundTripsExplicitDefaultRoute() {
         CoreMessage command = command(UUID.randomUUID(), 42, 99, 7);
         CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.STATE_HASH_QUERY,

@@ -35,6 +35,32 @@ class AeronClientAgentTest {
     }
 
     @Test
+    void oneWayBatchUsesCallbacksWithoutWaitingForCommandResponses() throws Exception {
+        AtomicInteger offers = new AtomicInteger();
+        CountDownLatch callbacks = new CountDownLatch(3);
+        Set<UUID> completed = ConcurrentHashMap.newKeySet();
+        UUID[] commandIds = {UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()};
+        long[] userIds = {1, 2, 3};
+        byte[][] payloads = {new byte[0], new byte[0], new byte[0]};
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session(message -> {
+            offers.incrementAndGet();
+            return 1;
+        }))) {
+            int accepted = pool.commandBatchOneWay(CoreMessageType.APPLY_MARK_PRICE, commandIds, userIds, payloads,
+                    0, commandIds.length, (commandId, result) -> {
+                        assertThat(result).isEqualTo(AeronClientPool.TryCommandResult.SENT);
+                        completed.add(commandId);
+                        callbacks.countDown();
+                    });
+
+            assertThat(accepted).isEqualTo(3);
+            assertThat(callbacks.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(completed).containsExactlyInAnyOrder(commandIds);
+            assertThat(offers).hasValue(3);
+        }
+    }
+
+    @Test
     void oneDispatcherOwnsEgressForEveryFixedSession() throws Exception {
         CountDownLatch polled = new CountDownLatch(2);
         Set<String> owners = ConcurrentHashMap.newKeySet();
