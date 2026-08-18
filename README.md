@@ -100,7 +100,24 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 
 ## 构建与本地验证
 
-要求 JDK 25。基础设施启动、数据库初始化、Topic 创建和三节点部署入口正在重新整理；当前优先执行受影响模块测试：
+要求 JDK 25。Topic 创建和三节点部署入口仍在整理；PostgreSQL 首发初始化统一使用根目录 `init.sql`：
+
+```bash
+createdb surprising_exchange
+psql -v ON_ERROR_STOP=1 \
+  postgresql://surprising:surprising@localhost:5432/surprising_exchange \
+  -f init.sql
+```
+
+`init.sql` 是 PostgreSQL 18+ 的完整首发基线，在同一事务内创建配置、历史、审计、对账和 Aeron Core 投影表，
+并写入 `surprising_schema_metadata`。首发 instrument 使用 BTC、ETH、SOL、XRP、DOGE、BNB、ADA、AVAX、
+LINK、DOT、LTC、BCH、TRX、TON、SUI、APT、NEAR、UNI、AAVE、ETC，共 20 个主流资产；六个
+`ProductLine` 各初始化 20 个 symbol，总计 120 个。衍生品 symbol 使用产品线/到期日后缀，避免同库同名冲突。
+
+产品上线后不得通过修改 `init.sql` 升级存量数据库；新增 SQL 必须遵循 `migrations/README.md` 的版本、事务和
+验证规则。当前上线前日期补丁已全部折叠进基线，不需要再次执行。
+
+当前优先执行受影响模块测试：
 
 ```bash
 mvn -pl surprising-aeron-core/surprising-aeron-service -am test

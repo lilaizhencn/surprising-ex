@@ -138,18 +138,13 @@ producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.con
 - `instrument_index_sources`
 - `instrument_outbox_events`
 
-默认已写入：
+首发目录使用 BTC、ETH、SOL、XRP、DOGE、BNB、ADA、AVAX、LINK、DOT、LTC、BCH、TRX、TON、SUI、
+APT、NEAR、UNI、AAVE、ETC 共 20 个主流资产。`SPOT`、`LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、
+`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 各初始化 20 个 symbol，总计 120 个；每个 symbol 配置
+产品线当前版本，衍生品配置三档风险限额，全部配置 Binance、OKX、Bybit 三个指数源。
 
-- `BTC-USDT`：U 本位线性永续，`contract_multiplier_ppm=1000000`，`contract_value_asset=USDT`，
-  `price_tick_units=10000000`（0.1 USDT），`quantity_step_units=100000`（0.001 BTC），
-  `quantity_precision=3`，`min_quantity_steps=1`，`max_quantity_steps=100000`，
-  `notional_multiplier_units=10000`，`user_open_interest_limit_rate_ppm=300000`，
-  `user_open_interest_limit_floor_units=25000000000000`。
-- `ETH-USDT`：U 本位线性永续，`contract_multiplier_ppm=1000000`，`contract_value_asset=USDT`，
-  `price_tick_units=1000000`（0.01 USDT），`quantity_step_units=10000000000000000`（0.01 ETH），
-  `quantity_precision=2`，`min_quantity_steps=1`，`max_quantity_steps=500000`，
-  `notional_multiplier_units=10000`，`user_open_interest_limit_rate_ppm=300000`，
-  `user_open_interest_limit_floor_units=25000000000000`。
+为兼容已有 API 和交易脚本，`BTC-USDT`、`ETH-USDT` 仍表示 U 本位永续；其他业务线通过 `-SPOT`、
+`-INVERSE-PERP`、到期日及期权 strike 后缀区分。同一底层资产的不同产品线不会共享 instrument 主键或当前版本。
 
 ## 本地运行
 

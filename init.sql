@@ -1,5 +1,14 @@
--- Surprising Exchange initial PostgreSQL schema.
--- This project is new, so schema initialization is kept in one root SQL file.
+-- Surprising Exchange PostgreSQL production baseline.
+-- PostgreSQL 18+; execute once on an empty database with psql.
+-- This file contains the complete pre-launch schema and required seed data.
+-- After the first production release, never edit this baseline for upgrades;
+-- add an immutable versioned script under migrations/ instead.
+
+\set ON_ERROR_STOP on
+
+BEGIN;
+
+-- 01. Instrument definitions, lifecycle metadata and index sources.
 
 CREATE TABLE IF NOT EXISTS instruments (
     symbol                      TEXT NOT NULL,
@@ -483,6 +492,194 @@ INSERT INTO instrument_index_sources (
  TRUE, 'wss://ws.kraken.com/v2', '{"method":"subscribe","params":{"channel":"ticker","symbol":["ETH/USDT"]}}', 'KRAKEN_TICKER', 1000000)
 ON CONFLICT (symbol, version, source) DO NOTHING;
 
+-- Complete launch catalog: twenty mainstream markets for each of the six ProductLines.
+-- BTC-USDT and ETH-USDT above remain the canonical U-margined perpetual symbols.
+CREATE TEMP TABLE surprising_launch_instruments (
+    product_line       TEXT NOT NULL,
+    symbol             TEXT NOT NULL,
+    instrument_type    TEXT NOT NULL,
+    contract_type      TEXT NOT NULL,
+    base_asset         TEXT NOT NULL,
+    quote_asset        TEXT NOT NULL,
+    settle_asset       TEXT NOT NULL,
+    contract_value_asset TEXT NOT NULL,
+    price_tick_units   BIGINT NOT NULL,
+    quantity_step_units BIGINT NOT NULL,
+    price_precision    INTEGER NOT NULL,
+    quantity_precision INTEGER NOT NULL,
+    expiry_time        TIMESTAMPTZ,
+    delivery_time      TIMESTAMPTZ,
+    underlying_symbol  TEXT,
+    strike_price_units BIGINT,
+    option_type        TEXT,
+    settlement_method  TEXT,
+    funding_interval_hours INTEGER NOT NULL,
+    PRIMARY KEY (product_line, symbol)
+) ON COMMIT DROP;
+
+WITH assets(base_asset, price_tick_units, quantity_step_units, price_precision,
+            quantity_precision, option_strike_units) AS (
+    VALUES
+        ('BTC', 10000000::BIGINT, 100000::BIGINT, 1, 3, 100000::BIGINT),
+        ('ETH', 1000000::BIGINT, 1000000::BIGINT, 2, 3, 10000::BIGINT),
+        ('SOL', 100000::BIGINT, 10000000::BIGINT, 3, 2, 1000::BIGINT),
+        ('XRP', 1000::BIGINT, 100000000::BIGINT, 5, 1, 10::BIGINT),
+        ('DOGE', 100::BIGINT, 100000000::BIGINT, 6, 1, 1::BIGINT),
+        ('BNB', 100000::BIGINT, 10000000::BIGINT, 3, 2, 2000::BIGINT),
+        ('ADA', 1000::BIGINT, 100000000::BIGINT, 5, 1, 10::BIGINT),
+        ('AVAX', 10000::BIGINT, 10000000::BIGINT, 4, 2, 500::BIGINT),
+        ('LINK', 10000::BIGINT, 10000000::BIGINT, 4, 2, 100::BIGINT),
+        ('DOT', 1000::BIGINT, 10000000::BIGINT, 4, 2, 50::BIGINT),
+        ('LTC', 10000::BIGINT, 1000000::BIGINT, 3, 3, 500::BIGINT),
+        ('BCH', 100000::BIGINT, 1000000::BIGINT, 2, 3, 2000::BIGINT),
+        ('TRX', 10::BIGINT, 100000000::BIGINT, 6, 1, 1::BIGINT),
+        ('TON', 1000::BIGINT, 10000000::BIGINT, 4, 2, 50::BIGINT),
+        ('SUI', 1000::BIGINT, 10000000::BIGINT, 4, 2, 50::BIGINT),
+        ('APT', 1000::BIGINT, 10000000::BIGINT, 4, 2, 100::BIGINT),
+        ('NEAR', 1000::BIGINT, 10000000::BIGINT, 4, 2, 50::BIGINT),
+        ('UNI', 1000::BIGINT, 10000000::BIGINT, 4, 2, 100::BIGINT),
+        ('AAVE', 100000::BIGINT, 1000000::BIGINT, 2, 3, 1000::BIGINT),
+        ('ETC', 10000::BIGINT, 10000000::BIGINT, 3, 2, 500::BIGINT)
+), product_lines(product_line, instrument_type, contract_type) AS (
+    VALUES
+        ('SPOT', 'SPOT', 'SPOT'),
+        ('LINEAR_PERPETUAL', 'PERPETUAL', 'LINEAR_PERPETUAL'),
+        ('INVERSE_PERPETUAL', 'PERPETUAL', 'INVERSE_PERPETUAL'),
+        ('LINEAR_DELIVERY', 'DELIVERY', 'LINEAR_DELIVERY'),
+        ('INVERSE_DELIVERY', 'DELIVERY', 'INVERSE_DELIVERY'),
+        ('OPTION', 'OPTION', 'VANILLA_OPTION')
+)
+INSERT INTO surprising_launch_instruments (
+    product_line, symbol, instrument_type, contract_type, base_asset, quote_asset,
+    settle_asset, contract_value_asset, price_tick_units, quantity_step_units,
+    price_precision, quantity_precision, expiry_time, delivery_time,
+    underlying_symbol, strike_price_units, option_type, settlement_method,
+    funding_interval_hours
+)
+SELECT p.product_line,
+       CASE p.product_line
+           WHEN 'SPOT' THEN a.base_asset || '-USDT-SPOT'
+           WHEN 'LINEAR_PERPETUAL' THEN a.base_asset || '-USDT'
+           WHEN 'INVERSE_PERPETUAL' THEN a.base_asset || '-USD-INVERSE-PERP'
+           WHEN 'LINEAR_DELIVERY' THEN a.base_asset || '-USDT-20271231'
+           WHEN 'INVERSE_DELIVERY' THEN a.base_asset || '-USD-INVERSE-20271231'
+           WHEN 'OPTION' THEN a.base_asset || '-USDT-20271231-' || a.option_strike_units || '-C'
+       END,
+       p.instrument_type,
+       p.contract_type,
+       a.base_asset,
+       CASE WHEN p.product_line IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY') THEN 'USD' ELSE 'USDT' END,
+       CASE WHEN p.product_line IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY') THEN a.base_asset ELSE 'USDT' END,
+       CASE WHEN p.product_line IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY') THEN 'USD' ELSE 'USDT' END,
+       a.price_tick_units,
+       a.quantity_step_units,
+       a.price_precision,
+       a.quantity_precision,
+       CASE WHEN p.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+            THEN TIMESTAMPTZ '2027-12-31 08:00:00+00' END,
+       CASE WHEN p.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+            THEN TIMESTAMPTZ '2027-12-31 08:05:00+00' END,
+       CASE WHEN p.product_line = 'OPTION' THEN a.base_asset || '-USDT-SPOT' END,
+       CASE WHEN p.product_line = 'OPTION' THEN a.option_strike_units END,
+       CASE WHEN p.product_line = 'OPTION' THEN 'CALL' END,
+       CASE WHEN p.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION') THEN 'CASH' END,
+       CASE WHEN p.product_line IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL') THEN 8 ELSE 0 END
+  FROM assets a
+ CROSS JOIN product_lines p;
+
+INSERT INTO instruments (
+    symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
+    contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,
+    min_quantity_steps, max_quantity_steps, min_notional_units, max_notional_units,
+    notional_multiplier_units, price_precision, quantity_precision,
+    supported_order_types, supported_time_in_force, post_only_enabled, reduce_only_enabled,
+    market_order_enabled, max_leverage_ppm, initial_margin_rate_ppm,
+    maintenance_margin_rate_ppm, maker_fee_rate_ppm, taker_fee_rate_ppm,
+    max_position_notional_units, user_open_interest_limit_rate_ppm,
+    user_open_interest_limit_floor_units, funding_interval_hours, interest_rate_ppm,
+    funding_rate_cap_ppm, funding_rate_floor_ppm, impact_notional_units,
+    min_valid_index_sources, expiry_time, delivery_time, underlying_symbol,
+    strike_price_units, option_type, option_exercise_style, settlement_method,
+    status, effective_time, created_at, updated_at
+)
+SELECT symbol, 1, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
+       1000000, contract_value_asset, price_tick_units, quantity_step_units,
+       1, 1000000, 1, 1000000000000000, 1, price_precision, quantity_precision,
+       CASE WHEN instrument_type IN ('SPOT', 'PERPETUAL') THEN 'LIMIT,MARKET' ELSE 'LIMIT' END,
+       'GTC,IOC,FOK,GTX', TRUE, instrument_type <> 'SPOT',
+       instrument_type IN ('SPOT', 'PERPETUAL'), 100000000, 10000, 5000, 200, 500,
+       1000000000000000000, 1000000, 1000000000000000000,
+       funding_interval_hours,
+       CASE WHEN instrument_type = 'PERPETUAL' THEN 100 ELSE 0 END,
+       CASE WHEN instrument_type = 'PERPETUAL' THEN 3000 ELSE 0 END,
+       CASE WHEN instrument_type = 'PERPETUAL' THEN -3000 ELSE 0 END,
+       1000000000000, 3, expiry_time, delivery_time, underlying_symbol,
+       strike_price_units, option_type,
+       CASE WHEN instrument_type = 'OPTION' THEN 'EUROPEAN' END,
+       settlement_method, 'TRADING', now(), now(), now()
+  FROM surprising_launch_instruments
+ON CONFLICT (symbol, version) DO NOTHING;
+
+INSERT INTO instrument_current_versions (symbol, version, updated_at)
+SELECT symbol, 1, now() FROM surprising_launch_instruments
+ON CONFLICT (symbol) DO UPDATE SET version = EXCLUDED.version, updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_product_current_versions (product_line, symbol, version, updated_at)
+SELECT product_line, symbol, 1, now() FROM surprising_launch_instruments
+ON CONFLICT (product_line, symbol) DO UPDATE SET
+    version = EXCLUDED.version,
+    updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_symbol_sequences (symbol, version, updated_at)
+SELECT symbol, 1, now() FROM surprising_launch_instruments
+ON CONFLICT (symbol) DO UPDATE SET
+    version = GREATEST(instrument_symbol_sequences.version, EXCLUDED.version),
+    updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_risk_brackets (
+    symbol, version, bracket_no, notional_floor_units, notional_cap_units,
+    max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
+)
+SELECT seed.symbol, 1, bracket.bracket_no, bracket.notional_floor_units,
+       bracket.notional_cap_units, bracket.max_leverage_ppm,
+       bracket.initial_margin_rate_ppm, bracket.maintenance_margin_rate_ppm
+  FROM surprising_launch_instruments seed
+ CROSS JOIN (VALUES
+    (1, 0::BIGINT, 100000000000000::BIGINT, 100000000::BIGINT, 10000::BIGINT, 5000::BIGINT),
+    (2, 100000000000000::BIGINT, 500000000000000::BIGINT, 50000000::BIGINT, 20000::BIGINT, 10000::BIGINT),
+    (3, 500000000000000::BIGINT, 1000000000000000000::BIGINT, 20000000::BIGINT, 50000::BIGINT, 25000::BIGINT)
+ ) AS bracket(bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm,
+              initial_margin_rate_ppm, maintenance_margin_rate_ppm)
+ WHERE seed.product_line <> 'SPOT'
+ON CONFLICT (symbol, version, bracket_no) DO NOTHING;
+
+INSERT INTO instrument_index_sources (
+    symbol, version, source, enabled, base_url, path, source_symbol, parser,
+    quote_currency, target_quote_currency, conversion_base_url, conversion_path,
+    conversion_parser, conversion_mode, conversion_operation,
+    fallback_weight_multiplier_ppm, websocket_enabled, websocket_url,
+    websocket_subscribe_message, websocket_parser, weight_ppm
+)
+SELECT seed.symbol, 1, source.source, TRUE, source.base_url,
+       CASE source.source
+           WHEN 'BINANCE' THEN '/api/v3/ticker/bookTicker?symbol=' || seed.base_asset || 'USDT'
+           WHEN 'OKX' THEN '/api/v5/market/ticker?instId=' || seed.base_asset || '-USDT'
+           WHEN 'BYBIT' THEN '/v5/market/tickers?category=spot&symbol=' || seed.base_asset || 'USDT'
+       END,
+       CASE WHEN source.source = 'OKX' THEN seed.base_asset || '-USDT'
+            ELSE seed.base_asset || 'USDT' END,
+       source.parser, 'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY',
+       500000, FALSE, NULL, NULL, NULL, 1000000
+  FROM surprising_launch_instruments seed
+ CROSS JOIN (VALUES
+    ('BINANCE', 'https://api.binance.com', 'BINANCE_BOOK_TICKER'),
+    ('OKX', 'https://www.okx.com', 'OKX_TICKER'),
+    ('BYBIT', 'https://api.bybit.com', 'BYBIT_TICKER')
+ ) AS source(source, base_url, parser)
+ON CONFLICT (symbol, version, source) DO NOTHING;
+
+-- 02. Public market data, candles, index and mark-price history.
+
 CREATE TABLE IF NOT EXISTS candlestick_candles (
     symbol              TEXT NOT NULL,
     period              TEXT NOT NULL,
@@ -652,6 +849,8 @@ CREATE INDEX IF NOT EXISTS price_mark_ticks_query_idx
 CREATE INDEX IF NOT EXISTS price_mark_ticks_retention_idx
     ON price_mark_ticks USING BRIN (event_time) WITH (pages_per_range = 64);
 
+-- 03. Funding-rate history and settlement projections.
+
 CREATE SEQUENCE IF NOT EXISTS funding_settlement_id_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS funding_payment_id_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 4096;
 
@@ -781,6 +980,8 @@ CREATE INDEX IF NOT EXISTS funding_payments_pending_command_idx
     ON funding_payments (command_id)
     INCLUDE (settlement_id, user_id)
     WHERE status = 'PENDING';
+
+-- 04. Trading configuration and historical order/execution projections.
 
 CREATE SEQUENCE IF NOT EXISTS trading_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
@@ -1367,6 +1568,9 @@ CREATE INDEX IF NOT EXISTS trading_match_trades_maker_order_idx
 CREATE INDEX IF NOT EXISTS trading_match_trades_trace_idx
     ON trading_match_trades (trace_id)
     WHERE trace_id IS NOT NULL;
+
+-- 05. Account history, reconciliation projections and administrative adjustments.
+-- Aeron Core remains authoritative for online balances, reservations and positions.
 
 CREATE SEQUENCE IF NOT EXISTS account_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_product_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
@@ -2395,6 +2599,8 @@ CREATE INDEX IF NOT EXISTS risk_outbox_published_cleanup_idx
     ON risk_outbox_events (published_at, id)
     WHERE published_at IS NOT NULL;
 
+-- 06. Risk, liquidation, insurance fund and ADL history.
+
 CREATE SEQUENCE IF NOT EXISTS liquidation_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 
 CREATE TABLE IF NOT EXISTS liquidation_orders (
@@ -2779,6 +2985,8 @@ DROP INDEX IF EXISTS adl_events_asset_symbol_time_idx;
 CREATE INDEX IF NOT EXISTS adl_events_asset_symbol_time_idx
     ON adl_events (account_type, asset, symbol, created_at DESC);
 
+-- 07. Market-maker operational state and audit samples.
+
 CREATE TABLE IF NOT EXISTS market_maker_strategy_leases (
     product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     strategy_id                 TEXT NOT NULL,
@@ -2990,6 +3198,8 @@ CREATE INDEX IF NOT EXISTS market_maker_reference_samples_symbol_time_idx
 DROP INDEX IF EXISTS market_maker_reference_samples_transport_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_reference_samples_transport_time_idx
     ON market_maker_reference_samples (product_line, transport, sampled_at DESC);
+
+-- 08. Gateway identity, security, wallet workflow, compliance and support.
 
 CREATE TABLE IF NOT EXISTS gateway_users (
     user_id             BIGSERIAL PRIMARY KEY,
@@ -3764,3 +3974,214 @@ CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_service_time_idx
 CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_consumed_trace_idx
     ON gateway_admin_approval_requests (consumed_trace_id)
     WHERE consumed_trace_id IS NOT NULL;
+
+-- 09. Aeron Core audit, history projections and WebSocket delivery audit.
+
+CREATE TABLE IF NOT EXISTS core_event_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    applied_command_count BIGINT NOT NULL,
+    business_state_hash BIGINT NOT NULL,
+    command_id UUID NOT NULL,
+    command_type VARCHAR(64) NOT NULL,
+    command_status VARCHAR(16) NOT NULL,
+    result_code VARCHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL,
+    raw_event BYTEA NOT NULL,
+    projected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (product_line, export_sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_event_projection_command
+    ON core_event_projection (product_line, command_id);
+
+CREATE TABLE IF NOT EXISTS core_user_fact_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    user_revision BIGINT NOT NULL,
+    raw_user_delta BYTEA NOT NULL,
+    PRIMARY KEY (product_line, export_sequence, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS core_order_projection (
+    product_line VARCHAR(32) NOT NULL,
+    order_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    client_order_id VARCHAR(64),
+    symbol VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    created_at_epoch_ms BIGINT NOT NULL,
+    updated_at_epoch_ms BIGINT NOT NULL,
+    cluster_position BIGINT NOT NULL,
+    order_revision BIGINT NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    raw_order_state BYTEA NOT NULL,
+    PRIMARY KEY (product_line, order_id),
+    UNIQUE (product_line, user_id, client_order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_order_projection_user_status
+    ON core_order_projection (product_line, user_id, status, order_id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_order_projection_symbol_status
+    ON core_order_projection (product_line, symbol, status, order_id DESC);
+
+CREATE TABLE IF NOT EXISTS core_execution_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    execution_index INTEGER NOT NULL,
+    taker_order_id BIGINT NOT NULL,
+    maker_order_id BIGINT NOT NULL,
+    taker_user_id BIGINT NOT NULL,
+    maker_user_id BIGINT NOT NULL,
+    symbol VARCHAR(64) NOT NULL,
+    instrument_version BIGINT NOT NULL,
+    taker_side VARCHAR(8) NOT NULL,
+    taker_fee_rate_ppm BIGINT NOT NULL,
+    maker_fee_rate_ppm BIGINT NOT NULL,
+    price_ticks BIGINT NOT NULL,
+    quantity_steps BIGINT NOT NULL,
+    occurred_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line, export_sequence, execution_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_execution_projection_taker
+    ON core_execution_projection (product_line, taker_user_id, export_sequence DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_execution_projection_maker
+    ON core_execution_projection (product_line, maker_user_id, export_sequence DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_execution_projection_symbol_time
+    ON core_execution_projection (product_line, symbol, occurred_at_epoch_ms DESC, export_sequence DESC);
+
+CREATE TABLE IF NOT EXISTS core_funding_settlement_projection (
+    product_line VARCHAR(32) NOT NULL,
+    settlement_id BIGINT NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    symbol VARCHAR(64) NOT NULL,
+    instrument_version BIGINT NOT NULL,
+    funding_rate_ppm BIGINT NOT NULL,
+    command_status VARCHAR(32) NOT NULL,
+    result_code VARCHAR(64) NOT NULL,
+    total_long_payment_units BIGINT NOT NULL,
+    total_short_payment_units BIGINT NOT NULL,
+    position_count INTEGER NOT NULL,
+    occurred_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line, symbol, settlement_id),
+    UNIQUE (product_line, export_sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_funding_settlement_symbol
+    ON core_funding_settlement_projection (product_line, symbol, settlement_id DESC);
+
+CREATE TABLE IF NOT EXISTS core_funding_payment_projection (
+    payment_id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    payment_index INTEGER NOT NULL,
+    settlement_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    symbol VARCHAR(64) NOT NULL,
+    margin_mode VARCHAR(16) NOT NULL,
+    position_side VARCHAR(16) NOT NULL,
+    asset VARCHAR(20) NOT NULL,
+    signed_quantity_steps BIGINT NOT NULL,
+    notional_units BIGINT NOT NULL,
+    funding_rate_ppm BIGINT NOT NULL,
+    amount_units BIGINT NOT NULL,
+    occurred_at_epoch_ms BIGINT NOT NULL,
+    UNIQUE (product_line, export_sequence, payment_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_funding_payment_user
+    ON core_funding_payment_projection (product_line, user_id, payment_id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_funding_payment_user_symbol
+    ON core_funding_payment_projection (product_line, user_id, symbol, payment_id DESC);
+
+CREATE TABLE IF NOT EXISTS core_liquidation_projection (
+    product_line VARCHAR(32) NOT NULL,
+    liquidation_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    symbol VARCHAR(64) NOT NULL,
+    asset VARCHAR(20) NOT NULL,
+    margin_mode VARCHAR(16) NOT NULL,
+    position_side VARCHAR(16) NOT NULL,
+    instrument_version BIGINT NOT NULL,
+    trigger_price_sequence BIGINT NOT NULL,
+    signed_quantity_steps BIGINT NOT NULL,
+    close_quantity_steps BIGINT NOT NULL,
+    deficit_units BIGINT NOT NULL,
+    execution_price_ticks BIGINT NOT NULL,
+    liquidation_fee_rate_ppm BIGINT NOT NULL,
+    liquidation_fee_units BIGINT NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    updated_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line, liquidation_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_liquidation_pending
+    ON core_liquidation_projection (product_line, status, liquidation_id);
+
+CREATE INDEX IF NOT EXISTS idx_core_liquidation_user
+    ON core_liquidation_projection (product_line, user_id, liquidation_id DESC);
+
+CREATE TABLE IF NOT EXISTS core_treasury_projection (
+    product_line VARCHAR(32) NOT NULL,
+    asset VARCHAR(20) NOT NULL,
+    fee_balance_units BIGINT NOT NULL,
+    insurance_balance_units BIGINT NOT NULL,
+    insurance_deficit_units BIGINT NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    updated_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line, asset)
+);
+
+CREATE TABLE IF NOT EXISTS core_projection_watermark (
+    product_line VARCHAR(32) NOT NULL,
+    last_export_sequence BIGINT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (product_line),
+    CHECK (last_export_sequence >= 0)
+);
+
+INSERT INTO core_projection_watermark (product_line, last_export_sequence)
+VALUES ('SPOT', 0), ('LINEAR_PERPETUAL', 0), ('INVERSE_PERPETUAL', 0),
+       ('LINEAR_DELIVERY', 0), ('INVERSE_DELIVERY', 0), ('OPTION', 0)
+ON CONFLICT (product_line) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS core_websocket_audit_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    event_id UUID NOT NULL,
+    command_id UUID NOT NULL,
+    event_type VARCHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL,
+    occurred_at_epoch_ms BIGINT NOT NULL,
+    raw_event BYTEA NOT NULL,
+    projected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (product_line, export_sequence),
+    UNIQUE (product_line, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_websocket_audit_sequence
+    ON core_websocket_audit_projection (product_line, export_sequence DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_websocket_audit_event
+    ON core_websocket_audit_projection (product_line, event_id);
+
+-- 10. Baseline identity. Application upgrades use migrations/ after launch.
+
+CREATE TABLE IF NOT EXISTS surprising_schema_metadata (
+    baseline_version TEXT PRIMARY KEY,
+    initialized_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    postgres_version TEXT NOT NULL
+);
+
+INSERT INTO surprising_schema_metadata (baseline_version, postgres_version)
+VALUES ('2026.08.18', current_setting('server_version'))
+ON CONFLICT (baseline_version) DO NOTHING;
+
+COMMIT;

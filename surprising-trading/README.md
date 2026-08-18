@@ -86,7 +86,7 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 
 ## 手续费
 
-- `init.sql` 默认 `BTC-USDT`、`ETH-USDT` 使用 maker `200 ppm`、taker `500 ppm`，即 `0.02% / 0.05%`。
+- `init.sql` 初始化的六产品线 120 个 symbol 默认使用 maker `200 ppm`、taker `500 ppm`，即 `0.02% / 0.05%`。
 - `trading_fee_schedules` 可配置用户全局或单 symbol 覆盖，`source_type` 支持 `USER_OVERRIDE`、`VIP`、`MARKET_MAKER`、`PROMOTION`、`RISK_OVERRIDE`。
   单 symbol 优先于用户全局，未匹配时使用当前 Instrument 默认费率。
 - 多个用户全局费率同时 active 时，source 优先级是 `RISK_OVERRIDE`、`USER_OVERRIDE`、`PROMOTION`、`MARKET_MAKER`、`VIP`，防止 VIP 费率覆盖风控、人工、活动或做市商费率。
