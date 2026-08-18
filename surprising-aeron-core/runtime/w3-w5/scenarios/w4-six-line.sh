@@ -28,10 +28,14 @@ validate() {
   [[ -n "$RUN_ID" ]] || fail 'RUN_ID_REQUIRED'
   [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] || fail "INVALID_RUN_ID runId=$RUN_ID"
   (( ${#RUN_ID} <= 50 )) || fail 'RUN_ID_TOO_LONG_FOR_LINE_SCOPES'
-  [[ "$PRODUCT_LINE" == LINEAR_PERPETUAL ]] || fail "PRODUCT_LINE_REFUSED expected=LINEAR_PERPETUAL actual=${PRODUCT_LINE:-unset}"
   local seen=',' line
   IFS=',' read -r -a selected_lines <<< "$PRODUCT_LINES"
   (( ${#selected_lines[@]} > 0 )) || fail 'PRODUCT_LINES_REQUIRED'
+  if (( ${#selected_lines[@]} == 1 )); then
+    [[ "$PRODUCT_LINE" == "${selected_lines[0]}" ]] || fail "PRODUCT_LINE_REFUSED expected=${selected_lines[0]} actual=${PRODUCT_LINE:-unset}"
+  else
+    [[ "$PRODUCT_LINE" == LINEAR_PERPETUAL ]] || fail "PRODUCT_LINE_REFUSED expected=LINEAR_PERPETUAL actual=${PRODUCT_LINE:-unset}"
+  fi
   for line in "${selected_lines[@]}"; do
     [[ "$line" =~ ^(SPOT|LINEAR_PERPETUAL|INVERSE_PERPETUAL|LINEAR_DELIVERY|INVERSE_DELIVERY|OPTION)$ ]] \
       || fail "PRODUCT_LINE_REFUSED line=$line"
