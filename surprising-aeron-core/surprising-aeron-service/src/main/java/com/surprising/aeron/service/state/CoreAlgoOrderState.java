@@ -39,4 +39,8 @@ public record CoreAlgoOrderState(
                 value.traceId(), value.startAtEpochMillis(), value.nextSliceAtEpochMillis(), value.completedAtEpochMillis(),
                 value.createdAtEpochMillis(), value.updatedAtEpochMillis(), value.revision(), value.childOrderIds());
     }
+
+    public boolean terminal() {
+        return statusCode == 3 || statusCode == 4 || statusCode == 5;
+    }
 }

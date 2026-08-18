@@ -143,7 +143,7 @@ available + locked = accountTotal
 - 同一命令重复提交只能返回原裁决，不得再次预留、撮合、扣款或发布成交。
 - 幂等结果必须有界但不能静默丢失：窗口外重复只能走显式状态查询/重试协议，不能当新命令。
 - source sequence registry 必须有确定性租约/epoch 清理命令，不能无限增长。
-- 订单终态主体和 clientOrderId tombstone 在其导出事实仍可能被重放期间不得删除；只有对应导出 ACK 后才允许清理零余额 reservation，主体历史使用明确的 retention/tombstone 规则收口。
+- 订单、Algo、Trigger、Liquidation 终态主体和身份 tombstone 在其导出事实仍可能被重放期间不得删除；对应导出 ACK 后，Core 才按有界批次清理主体、派生索引和零余额 reservation，历史由 Export 投影保存。
 
 ## 3. 基线问题和当前处置状态
 
@@ -163,7 +163,7 @@ available + locked = accountTotal
 | S04 | `✅ 已完成` | timers、triggers、algo map 每次构造仍全量排序/校验 | `TradingCoreState` 构造器 | 热路径改为 delta 和增量索引，完整校验只在冷路径执行 |
 | S05 | `✅ 已完成` | `stampOrderChanges` 未知变更集时复制并比较全部 orders | `TradingCoreState.stampOrderChanges` | 权威调用显式传递 changed order IDs，空集合不扫描 |
 | S06 | `🟡 部分完成` | 用户内部 balances/reservations/positions 以及 risk/treasury 嵌套对象反复复制 | 各 immutable record 构造器 | 已通过 delta 降低整图复制；immutable entity shell 仍可继续优化 |
-| S07 | `🟡 部分完成` | 终态 order、algo、trigger、liquidation 主体长期留在热 map | `TradingCoreState` | 已有 export ACK 后清理边界；长期 retention/compaction 仍待 P6 运行门禁 |
+| S07 | `✅ 已完成` | 终态 order、algo、trigger、liquidation 主体长期留在热 map | `TradingCoreState`、`TerminalStateRetention` | Export ACK 后按固定预算清理四类终态主体、索引和零余额 reservation；保留最多 65,536 个身份 tombstone，清理队列与 tombstone 纳入 Core Snapshot v8 和 state hash；长期容量收益仍由 P6 压测量化 |
 | S08 | `✅ 已完成` | W1/W2 前 `CoreBookState` 与 exchange-core 同时保存活动盘口 | 已删除 `CoreBookState`、priority codec/hash 和所有生产引用 | exchange-core 已是唯一 FIFO/book 权威 |
 | S09 | `✅ 已完成` | applyMatches 曾因构造器、索引、验证触发全量工作 | `TradingCoreReducer.applyMatches` + `TradingCoreState` | 空成交复用原状态，其余路径使用 delta |
 
@@ -714,7 +714,7 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 | --- | --- | --- | --- | --- |
 | P0 文档/基线 | `DONE` | 规格、问题追踪、所有权、验收/回滚规则、脚本矩阵 | 本文档、README、基线约束、Core-only canonical wrappers 和六个固定产品线 Provider 脚本已同步 | 无；真实业务门禁归 P4，容量与运行手册归 P6 |
 | P1 正确性/单往返 | `DONE` | 失败回滚、稳定 lane、结果未知、fee/instrument version gate、直接响应 | Core 回滚护栏、bounded client、`COMMAND_RESULT_QUERY` 结果核验、native GTX 测试 | 无；source epoch 采用进程 epoch 编码 sourceId 的简单方案，不另建 registry |
-| P2 Runtime/O(delta) | `DONE` | 单写 runtime、持久化 delta entity store、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime`、DeltaMap lineage、各类派生 index、Core service 121 tests 和运行时 smoke；热点逐项状态见第 3.1/3.3 节 | 热路径已无隐式全量 constructor/diff/hash；用户/订单 immutable state shell 仍是可选的后续性能优化；历史实体 compaction 仍按运行手册执行 |
+| P2 Runtime/O(delta) | `DONE` | 单写 runtime、持久化 delta entity store、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime`、DeltaMap lineage、各类派生 index、Core service 121 tests 和运行时 smoke；热点逐项状态见第 3.1/3.3 节 | 热路径已无隐式全量 constructor/diff/hash；用户/订单 immutable state shell 仍是可选的后续性能优化；终态实体清理协议已落地，长期内存收益仍由 P6 容量门禁量化 |
 | P3 唯一盘口/恢复 | `DONE` | exchange-core 唯一 executable book、结构化 adapter、Aeron 托管 matcher snapshot、无逐单恢复 | fork 302 tests；六个 ProductLine 原生 FIFO restore；snapshot round-trip、损坏/版本/SHA/registry/订单集合不一致均 fail-closed；`CoreBookState` 和生产 rebuild 已删除 | 真实三 Member election、冷恢复和长时容量仍属于 P6 上线门禁 |
 | P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已通过宿主机三节点 Cluster 的真实 HTTP/做市/结算/资金守恒门禁；在线余额、持仓、活动订单、触发单、Risk Scan Control 和生命周期执行已由 Core 裁决 | SPOT 和两条永续仍需逐条执行真实 Provider 门禁；cursor 重启/缺口仍需验证；Funding 在线编排仍依赖 PostgreSQL lease/sequence/settlement reservation |
 | P5 导出/查询/外围 | `PARTIAL` | 一次编码 outbox、带 cursor 的批量 ACK、projection、查询旁路、慢连接隔离、Gateway Auth Cluster | `w5-export-final-1315` 通过 Kafka/PG 故障恢复、重复/乱序、Gateway/WebSocket offset、Core 独立和资金门禁；`w5-isolation-final-1345` 通过 PG 恢复、投影缺口回放、慢客户端隔离和清理；活动订单/单笔订单已直接查询 Core | Gateway 用户、MFA、challenge、refresh session 仍由 JDBC repository 持有，Gateway Auth Cluster 未实现；Trading/Account/Lifecycle 等 Provider 的 Spring 构造图仍强制创建 JDBC 历史/投影 Bean，尚未通过 PostgreSQL 停止后的在线启动门禁 |

@@ -76,6 +76,10 @@ public record CoreLiquidationState(
         CANCELED
     }
 
+    public boolean terminal() {
+        return status == Status.COMPLETED || status == Status.CANCELED;
+    }
+
     public CoreLiquidationState withStatus(Status nextStatus) {
         return new CoreLiquidationState(liquidationId, userId, symbol, marginMode, positionSide, instrumentVersion,
                 triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, deficitUnits,

@@ -739,6 +739,68 @@ public final class TradingCoreReducer {
                 state.triggerOrders());
     }
 
+    public TradingCoreState pruneTerminalState(TradingCoreState state, TerminalPruneBatch batch) {
+        if (state == null || batch == null) throw new IllegalArgumentException("terminal prune batch is required");
+        if (batch.isEmpty()) return state;
+        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
+        Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
+        Map<ClientOrderKey, Long> clientOrderIndex = StateMapSupport.delta(state.clientOrderIndex());
+        Map<Long, CoreAlgoOrderState> algoOrders = StateMapSupport.delta(state.algoOrders());
+        Map<Long, CoreTriggerOrderState> triggerOrders = StateMapSupport.delta(state.triggerOrders());
+        Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(state.riskState().liquidations());
+
+        for (long orderId : batch.orderIds()) {
+            CoreOrderState order = orders.get(orderId);
+            if (order == null || !order.status().terminal()) {
+                throw new IllegalStateException("order is not terminal: " + orderId);
+            }
+            CoreUserState user = users.get(order.userId());
+            OrderReservation reservation = user == null ? null : user.reservations().get(orderId);
+            if (reservation != null) {
+                if (reservation.remainingUnits() != 0) {
+                    throw new IllegalStateException("terminal order retains funded reservation: " + orderId);
+                }
+                Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
+                reservations.remove(orderId);
+                users.put(user.userId(), new CoreUserState(user.productLine(), user.userId(),
+                        Math.incrementExact(user.revision()), user.balances(), reservations,
+                        user.positions(), user.positionMode()));
+            }
+            orders.remove(orderId);
+            if (!order.clientOrderId().isEmpty()) {
+                ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
+                if (Long.valueOf(orderId).equals(clientOrderIndex.get(key))) clientOrderIndex.remove(key);
+            }
+        }
+        for (long algoOrderId : batch.algoOrderIds()) {
+            CoreAlgoOrderState algo = algoOrders.get(algoOrderId);
+            if (algo == null || !algo.terminal()) {
+                throw new IllegalStateException("algo order is not terminal: " + algoOrderId);
+            }
+            algoOrders.remove(algoOrderId);
+        }
+        for (long triggerOrderId : batch.triggerOrderIds()) {
+            CoreTriggerOrderState trigger = triggerOrders.get(triggerOrderId);
+            if (trigger == null || trigger.status().open()) {
+                throw new IllegalStateException("trigger order is not terminal: " + triggerOrderId);
+            }
+            triggerOrders.remove(triggerOrderId);
+        }
+        for (long liquidationId : batch.liquidationIds()) {
+            CoreLiquidationState liquidation = liquidations.get(liquidationId);
+            if (liquidation == null || !liquidation.terminal()) {
+                throw new IllegalStateException("liquidation is not terminal: " + liquidationId);
+            }
+            liquidations.remove(liquidationId);
+        }
+        CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
+                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(),
+                state.riskState().scanControl());
+        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
+                state.instruments(), risk, state.treasuryState(), state.leverages(), algoOrders,
+                state.cancelAllAfterTimers(), clientOrderIndex, triggerOrders);
+    }
+
     public TradingCoreState applyMatches(
             TradingCoreState state,
             long takerOrderId,

@@ -863,7 +863,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(7);
+        assertThat(manifest.schemaVersion()).isEqualTo(8);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();
@@ -912,7 +912,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void exportAckCompactsTerminalReservationWithoutReleasingOrderIdentity() {
+    void exportAckCompactsTerminalStateWithIdentityTombstone() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         applySpotInstrument(state);
         assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
@@ -936,8 +936,10 @@ class CoreProbeStateTest {
 
         assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(state.tradingState().user(1001).reservations()).doesNotContainKey(901L);
-        assertThat(state.tradingState().order(901).status().name()).isEqualTo("CANCELED");
-        assertThat(state.tradingState().order(1001, "client-901").orderId()).isEqualTo(901L);
+        assertThat(state.tradingState().order(901)).isNull();
+        assertThat(state.tradingState().order(1001, "client-901")).isNull();
+        assertThat(state.terminalRetentionCandidateCount()).isZero();
+        assertThat(state.terminalRetentionTombstoneCount()).isEqualTo(1);
 
         CoreMessage reusedOrderId = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 5,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(901, "BTC-USDT", 1,
@@ -946,8 +948,9 @@ class CoreProbeStateTest {
                         900, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 900, false,
                         "client-902", 0, 0)));
         assertThat(state.apply(reusedOrderId).resultCode()).isEqualTo(CoreResultCode.DUPLICATE_ORDER_ID);
-        assertThat(CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot()).tradingState().user(1001)
-                .reservations()).doesNotContainKey(901L);
+        CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot());
+        assertThat(restored.tradingState().user(1001).reservations()).doesNotContainKey(901L);
+        assertThat(restored.terminalRetentionTombstoneCount()).isEqualTo(1);
     }
 
     private static CoreMessage command(UUID commandId, long sourceSequence, long delta) {
