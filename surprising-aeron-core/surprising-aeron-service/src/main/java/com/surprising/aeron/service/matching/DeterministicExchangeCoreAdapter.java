@@ -11,6 +11,7 @@ import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.CoreWaitStrategy;
+import exchange.core2.core.common.L2MarketData;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.OrderAction;
 import exchange.core2.core.common.OrderType;
@@ -46,8 +47,6 @@ import java.util.function.Supplier;
 import java.util.function.Function;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
-
-    private static final int MAX_QUERY_DEPTH = 1_000;
 
     private ExchangeCore core;
     private ExchangeApi api;
@@ -337,35 +336,65 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CompletableFuture<List<CoreBookLevelView>> orderBookLevelsAsync(String requestedSymbol, int depth) {
+        if (requestedSymbol == null || requestedSymbol.isBlank() || depth < 1 || depth > 100) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid single-symbol book query"));
+        }
+        String symbol = requestedSymbol.trim().toUpperCase(java.util.Locale.ROOT);
+        return matchingLanes.enqueue(symbol, () -> {
+            Integer symbolId = symbols.get(symbol);
+            if (symbolId == null) return CompletableFuture.completedFuture(List.of());
+            return api.requestOrderBookAsync(symbolId, depth).thenApply(book -> bookLevels(symbol, book));
+        });
+    }
+
+    public CompletableFuture<BookBootstrapSnapshot> orderBookBootstrapAsync(int depth) {
+        if (depth < 1 || depth > 100) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid bootstrap book depth"));
+        }
         return matchingLanes.barrier(() -> {
-            String symbolFilter = requestedSymbol == null ? "" : requestedSymbol;
-            int boundedDepth = Math.min(Math.max(depth, 1), MAX_QUERY_DEPTH);
             List<Map.Entry<String, Integer>> entries = symbols.entrySet().stream()
-                    .filter(entry -> symbolFilter.isEmpty() || entry.getKey().equals(symbolFilter))
                     .sorted(Map.Entry.comparingByKey()).toList();
-            CompletableFuture<List<CoreBookLevelView>> result = CompletableFuture.completedFuture(new ArrayList<>());
+            List<CompletableFuture<BookResult>> requests = new ArrayList<>(entries.size());
             for (Map.Entry<String, Integer> entry : entries) {
-                result = result.thenCombine(api.requestOrderBookAsync(entry.getValue(), boundedDepth), (levels, book) -> {
-                    List<CoreBookLevelView> next = new ArrayList<>(levels);
-                    for (int index = 0; index < book.askSize; index++) {
-                        next.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.SELL, book.askPrices[index],
-                                book.askVolumes[index], book.askOrders[index]));
-                    }
-                    for (int index = 0; index < book.bidSize; index++) {
-                        next.add(new CoreBookLevelView(entry.getKey(), CoreOrderSide.BUY, book.bidPrices[index],
-                                book.bidVolumes[index], book.bidOrders[index]));
-                    }
-                    return next;
-                });
+                requests.add(api.requestOrderBookAsync(entry.getValue(), depth)
+                        .thenApply(book -> new BookResult(entry.getKey(), book)));
             }
-            CompletableFuture<List<CoreBookLevelView>> sorted = result.thenApply(levels -> {
+            return CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new)).thenApply(ignored -> {
+                int expectedLevels = 0;
+                for (CompletableFuture<BookResult> request : requests) {
+                    BookResult result = request.getNow(null);
+                    expectedLevels = Math.addExact(expectedLevels,
+                            Math.addExact(result.book().askSize, result.book().bidSize));
+                }
+                List<CoreBookLevelView> levels = new ArrayList<>(expectedLevels);
+                for (CompletableFuture<BookResult> request : requests) {
+                    BookResult result = request.getNow(null);
+                    levels.addAll(bookLevels(result.symbol(), result.book()));
+                }
                 levels.sort(Comparator.comparing(CoreBookLevelView::symbol)
                         .thenComparing(CoreBookLevelView::side)
                         .thenComparingLong(CoreBookLevelView::priceTicks));
-                return List.copyOf(levels);
+                return new BookBootstrapSnapshot(entries.stream().map(Map.Entry::getKey).toList(), levels);
             });
-            return sorted;
         });
+    }
+
+    private static List<CoreBookLevelView> bookLevels(String symbol, L2MarketData book) {
+        List<CoreBookLevelView> levels = new ArrayList<>(Math.addExact(book.askSize, book.bidSize));
+        for (int index = 0; index < book.askSize; index++) {
+            levels.add(new CoreBookLevelView(symbol, CoreOrderSide.SELL, book.askPrices[index],
+                    book.askVolumes[index], book.askOrders[index]));
+        }
+        for (int index = 0; index < book.bidSize; index++) {
+            levels.add(new CoreBookLevelView(symbol, CoreOrderSide.BUY, book.bidPrices[index],
+                    book.bidVolumes[index], book.bidOrders[index]));
+        }
+        levels.sort(Comparator.comparing(CoreBookLevelView::side)
+                .thenComparingLong(CoreBookLevelView::priceTicks));
+        return levels;
+    }
+
+    private record BookResult(String symbol, L2MarketData book) {
     }
 
     public CompletableFuture<Integer> ensureInstrumentAsync(CoreInstrumentState instrument) {

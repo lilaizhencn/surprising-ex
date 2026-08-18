@@ -24,7 +24,7 @@ public class MarketDataController {
 
     @GetMapping(TradingApiPaths.MARKET_BASE_PATH + "/orderbook")
     public OrderBookSnapshotResponse orderBook(@RequestParam("symbol") String symbol,
-                                               @RequestParam(value = "depth", defaultValue = "50") int depth) {
+                                               @RequestParam(value = "depth", defaultValue = "30") int depth) {
         try {
             return marketDataService.orderBookSnapshot(symbol, depth);
         } catch (IllegalArgumentException ex) {

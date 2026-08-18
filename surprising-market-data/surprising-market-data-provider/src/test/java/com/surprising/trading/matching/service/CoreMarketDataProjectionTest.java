@@ -71,6 +71,22 @@ class CoreMarketDataProjectionTest {
     }
 
     @Test
+    void restartsBootstrapWhenLeaderLosesThePaginationCursor() {
+        MatchingProperties properties = new MatchingProperties();
+        properties.getAeron().setBootstrapTimeout(java.time.Duration.ofSeconds(1));
+        MatchingAeronGateway gateway = mock(MatchingAeronGateway.class);
+        when(gateway.orderBookProjection())
+                .thenThrow(new MatchingAeronGateway.BootstrapCursorInvalidException())
+                .thenReturn(new CoreOrderBookView(7, List.of()));
+        CoreMarketDataProjection projection = new CoreMarketDataProjection(properties, gateway,
+                ignored -> { }, ignored -> { }, new LatestPublicTradeCache());
+
+        projection.initialize();
+
+        assertThat(projection.appliedExportSequence()).isEqualTo(7);
+    }
+
+    @Test
     void bootstrapsFromAeronAndAppliesContiguousCoreEvents() {
         MatchingProperties properties = new MatchingProperties();
         properties.getKafka().setProductLine(ProductLine.SPOT);
@@ -164,6 +180,15 @@ class CoreMarketDataProjectionTest {
                 .hasMessageContaining("non-contiguous Core events");
         assertThat(fixture.projection().appliedExportSequence()).isEqualTo(1);
         assertThat(fixture.projection().snapshot("BTC-USDT", 10).bids()).isEmpty();
+    }
+
+    @Test
+    void rejectsPublicDepthAboveCoreBookLimit() {
+        ProjectionFixture fixture = fixture(new CoreOrderBookView(0, List.of()));
+
+        assertThatThrownBy(() -> fixture.projection().snapshot("BTC-USDT", 101))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("[1, 100]");
     }
 
     private static ProjectionFixture fixture(CoreOrderBookView bootstrap) {

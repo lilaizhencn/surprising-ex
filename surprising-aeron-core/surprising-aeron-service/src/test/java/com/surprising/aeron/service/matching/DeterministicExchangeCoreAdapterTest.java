@@ -69,6 +69,23 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     @Test
+    void singleSymbolBookQueryAndBootstrapUseSeparateScopes() {
+        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+            assertThat(adapter.placeAsync(7, bid(1, 100)).join().accepted()).isTrue();
+            assertThat(adapter.placeAsync(8, bid(2, "ETH-USDT", 200)).join().accepted()).isTrue();
+
+            assertThat(adapter.orderBookLevelsAsync("BTC-USDT", 30).join())
+                    .extracting(value -> value.symbol()).containsOnly("BTC-USDT");
+            BookBootstrapSnapshot bootstrap = adapter.orderBookBootstrapAsync(30).join();
+            assertThat(bootstrap.symbols()).containsExactly("BTC-USDT", "ETH-USDT");
+            assertThat(bootstrap.levels()).extracting(value -> value.symbol())
+                    .containsExactly("BTC-USDT", "ETH-USDT");
+            assertThatThrownBy(() -> adapter.orderBookLevelsAsync("", 30).join())
+                    .hasCauseInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void nativeSnapshotRoundTripRestoresTheOnlyExecutableBook() {
         TradingCoreState state = stateWithOpenBid(100);
         MatcherSnapshot snapshot;
@@ -144,7 +161,11 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static PlaceOrderCommand bid(long orderId, long priceTicks) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT",
+        return bid(orderId, "BTC-USDT", priceTicks);
+    }
+
+    private static PlaceOrderCommand bid(long orderId, String symbol, long priceTicks) {
+        return new PlaceOrderCommand(orderId, symbol, 1, "BTC", "USDT", "USDT",
                 CoreOrderSide.BUY, priceTicks, 2, false, ReservationKind.SPOT_ASSET, "USDT", 200);
     }
 

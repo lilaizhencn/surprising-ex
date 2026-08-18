@@ -753,8 +753,7 @@ public final class W4LifecycleQaMain {
         int levels;
         Object levelDetails = List.of();
         do {
-            var book = CoreStateQueryCodec.decodeOrderBookView(
-                    query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0]));
+            var book = OrderBookBootstrapLoader.load((type, payload) -> query(type, 0, payload));
             levels = book.levels().size();
             levelDetails = book.levels();
             if (levels == 0) {

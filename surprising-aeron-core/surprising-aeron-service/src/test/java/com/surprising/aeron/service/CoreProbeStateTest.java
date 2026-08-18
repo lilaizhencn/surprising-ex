@@ -318,14 +318,26 @@ class CoreProbeStateTest {
                         new com.surprising.aeron.protocol.CoreOpenOrdersQuery("BTC-USDT", 0, 10)));
         var openOrders = CoreStateQueryCodec.decodeOpenOrders(original.apply(openOrdersQuery).data());
         assertThat(openOrders.orders()).extracting(order -> order.orderId()).containsExactly(91L);
-        var book = CoreStateQueryCodec.decodeOrderBookView(
-                applyBookQuery(original, query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0])).data());
+        assertThat(original.apply(query(CoreMessageType.BOOK_STATE_QUERY, 0, new byte[0])).resultCode())
+                .isEqualTo(CoreResultCode.INVALID_COMMAND);
+        var book = CoreStateQueryCodec.decodeOrderBookView(applyBookQuery(original,
+                query(CoreMessageType.BOOK_STATE_QUERY, 0,
+                        CoreStateQueryCodec.encodeOrderBookQuery(
+                                new com.surprising.aeron.protocol.CoreOrderBookQuery("BTC-USDT", 30)))).data());
         assertThat(book.exportSequence()).isEqualTo(5);
         assertThat(book.levels()).singleElement().satisfies(value -> {
             assertThat(value.priceTicks()).isEqualTo(1_000);
             assertThat(value.quantitySteps()).isEqualTo(2);
             assertThat(value.orderCount()).isEqualTo(1);
         });
+        CoreMessage bootstrapQuery = query(CoreMessageType.ORDER_BOOK_BOOTSTRAP_QUERY, 0,
+                CoreStateQueryCodec.encodeOrderBookBootstrapQuery(
+                        new com.surprising.aeron.protocol.CoreOrderBookBootstrapQuery("", "", 1, 30)));
+        var bootstrap = CoreStateQueryCodec.decodeOrderBookBootstrapPage(
+                applyBookQuery(original, bootstrapQuery).data());
+        assertThat(bootstrap.complete()).isTrue();
+        assertThat(bootstrap.exportSequence()).isEqualTo(5);
+        assertThat(bootstrap.levels()).isEqualTo(book.levels());
 
         UUID duplicateId = UUID.randomUUID();
         CoreMessage duplicateClientOrder = tradingCommand(CoreMessageType.PLACE_ORDER, duplicateId, 4,

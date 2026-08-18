@@ -388,8 +388,14 @@ public final class ClusterCapacityMain implements AutoCloseable {
     }
 
     private void verifyFundsAndBook() {
-        var book = CoreStateQueryCodec.decodeOrderBookView(clients.query(CoreMessageType.BOOK_STATE_QUERY,
-                stableId("book-query"), 0, new byte[0]).data());
+        var book = OrderBookBootstrapLoader.load((type, payload) -> {
+            var response = clients.query(type, stableId("book-query:" + java.util.Arrays.hashCode(payload)),
+                    0, payload);
+            if (response.status() != ResponseStatus.OK) {
+                throw new IllegalStateException(type + " query failed: " + response.resultCode());
+            }
+            return response.data();
+        });
         if (!book.levels().isEmpty()) {
             throw new IllegalStateException("capacity book is not empty levels=" + book.levels().size());
         }
