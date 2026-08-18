@@ -6,9 +6,9 @@
 >
 > 目标：单写者、无锁热路径、减少复制、减少往返、内存裁决、高吞吐、可恢复、资金守恒；在线交易运行时不依赖 PostgreSQL。
 >
-> 基线提交：`221b7f005e75af43f76b19d71abde0b1a053312e`；实施分支：`codex/aeron-unified-core`。
-> 当前文档阶段：`P3-DONE / P4-PARTIAL / P5-DONE / P6-IN_PROGRESS`。W1/W2 已完成：exchange-core 是唯一可执行盘口，Core 只保存订单业务元数据和必要索引，恢复只导入 Aeron 配对的原生 matcher snapshot。
-> 更新时间：2026-08-17
+> 基线提交：`221b7f005e75af43f76b19d71abde0b1a053312e`；实施分支：`codex/aeron-unified-core`；本次源码复核提交：`8d81475`。
+> 当前文档阶段：`P0-DONE / P1-DONE / P2-DONE / P3-DONE / P4-PARTIAL / P5-PARTIAL / P6-IN_PROGRESS`。W1/W2 已完成：exchange-core 是唯一可执行盘口，Core 只保存订单业务元数据和必要索引，恢复只导入 Aeron 配对的原生 matcher snapshot。P5 的导出/投影故障门禁已完成，但 Gateway Auth Cluster 和在线 Provider 无数据库启动出口尚未完成，因此阶段总状态按完整目标回退为 `PARTIAL`。
+> 更新时间：2026-08-18
 
 本文档是本轮源码审计、前序 Aeron 统一交易核心方案、exchange-core 单一盘口方案和本项目当前实现的合并实施规格。实现、代码审查、压测和上线门禁均以本文档为准。历史文档如果被删除，不代表其中的约束和验收项被删除；它们已经在本文档中合并保留。
 
@@ -573,7 +573,9 @@ SLO 约束下可用容量超过 70%、单 symbol 占 matcher CPU/队列时间的
 
 ### P5：导出、查询和外围隔离
 
-交付物：一次编码的 bounded replicated outbox、批量 exporter、幂等 PG projection、查询旁路、WebSocket 慢连接隔离。
+交付物：一次编码的 bounded replicated outbox、批量 exporter、幂等 PG projection、当前态查询旁路、
+WebSocket 慢连接隔离，以及第 1.0 节要求的 Gateway Auth Cluster/JWT 会话恢复边界。前五项已有 W5
+真实故障证据；Auth Cluster 和在线 Provider 无数据库启动门禁尚未完成，因此 P5 总状态不是 `DONE`。
 
 ### P6：恢复、压测和扩容门禁
 
@@ -590,7 +592,7 @@ SLO 约束下可用容量超过 70%、单 symbol 占 matcher CPU/队列时间的
 | W2 单一盘口 | adapter 改为 snapshot-only restore；移除 `CoreBookState`、priority sequence、逐单 replay/rebuild | `TradingCoreState`、`CoreBookState`、`CoreStateSnapshotCodec`、`DeterministicExchangeCoreAdapter`、runtime/index | FIFO/部分成交/撤改/GTX 在 Leader 切换与冷启动后完全一致；内存中无第二份 FIFO；最大状态恢复达标 |
 | W3 入口并发 | 强制 clientOrderId/幂等指纹；固定 Aeron agents、有界 mailbox；区分拒绝、已接收结果未知和终态 | Gateway、`AeronClientPool`、protocol/result query | backpressure 不阻塞 owner；超时复用同一 commandId；查询流量不进入写通道 |
 | W4 保证金与生命周期 | 锁定 CROSS 产品线域、ISOLATED position 域；覆盖资金费、强平、ADL、保险、交割、行权 | reducer、risk/position/treasury state、provider bridge | 六个 ProductLine 变体逐项资金守恒；全仓/逐仓互不串账；长任务均有 bounded cursor |
-| W5 导出与查询 | CoreExportState 作为 replicated outbox；Kafka/PG/WebSocket 全链路幂等、慢消费者隔离和 cursor 恢复 | exporter、projection、WebSocket fanout、查询 API | Kafka/PG 故障不影响裁决；重复/乱序不重记账；projection/event age 达标 |
+| W5 导出与查询 | CoreExportState 作为 replicated outbox；Kafka/PG/WebSocket 全链路幂等、慢消费者隔离、cursor 恢复和 Gateway Auth Cluster | exporter、projection、WebSocket fanout、查询 API、Gateway auth/session | Kafka/PG 故障不影响裁决；重复/乱序不重记账；projection/event age 达标；数据库停止时 JWT 校验、会话恢复和在线 Provider 启动通过 |
 | W6 HA 与容量 | 三 Member 故障、冷恢复、磁盘/网络故障、24h soak、逐级容量与回滚演练 | 单产品线集成环境、manifest、runbook、监控告警 | RPO=0；恢复/SLO/资金门禁全通过；日常负载不超过 SLO-bound capacity 的 70% |
 
 W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snapshot 格式上重新执行受影响门禁。
@@ -707,13 +709,48 @@ W1/W2 已完成并使 P3 达到 `DONE`。W3-W6 必须在新的单一盘口 snaps
 
 | 阶段 | 当前状态 | 本阶段交付物 | 当前证据 | 尚未满足的出口 |
 | --- | --- | --- | --- | --- |
-| P0 文档/基线 | `DONE` | 规格、问题追踪、所有权、验收/回滚规则、脚本矩阵 | 本文档、README、基线约束和 Core-only canonical wrappers 已同步 | provider/API 全链路仍需按各产品线接入真实运行实例；不影响 P1 代码门禁 |
+| P0 文档/基线 | `DONE` | 规格、问题追踪、所有权、验收/回滚规则、脚本矩阵 | 本文档、README、基线约束、Core-only canonical wrappers 和六个固定产品线 Provider 脚本已同步 | 无；真实业务门禁归 P4，容量与运行手册归 P6 |
 | P1 正确性/单往返 | `DONE` | 失败回滚、稳定 lane、结果未知、fee/instrument version gate、直接响应 | Core 回滚护栏、bounded client、`COMMAND_RESULT_QUERY` 结果核验、native GTX 测试 | 无；source epoch 采用进程 epoch 编码 sourceId 的简单方案，不另建 registry |
 | P2 Runtime/O(delta) | `DONE` | 单写 runtime、持久化 delta entity store、CommandDelta、增量 index、rolling hash | `TradingCoreRuntime`、DeltaMap lineage、各类派生 index、Core service 121 tests 和运行时 smoke；热点逐项状态见第 3.1/3.3 节 | 热路径已无隐式全量 constructor/diff/hash；用户/订单 immutable state shell 仍是可选的后续性能优化；历史实体 compaction 仍按运行手册执行 |
 | P3 唯一盘口/恢复 | `DONE` | exchange-core 唯一 executable book、结构化 adapter、Aeron 托管 matcher snapshot、无逐单恢复 | fork 302 tests；六个 ProductLine 原生 FIFO restore；snapshot round-trip、损坏/版本/SHA/registry/订单集合不一致均 fail-closed；`CoreBookState` 和生产 rebuild 已删除 | 真实三 Member election、冷恢复和长时容量仍属于 P6 上线门禁 |
-| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已通过宿主机三节点 Cluster 的真实 HTTP/做市/结算/资金守恒门禁 | SPOT 和两条永续仍需逐条执行真实 Provider 门禁；cursor 重启/缺口仍需验证 |
-| P5 导出/查询/外围 | `DONE` | 一次编码 outbox、带 cursor 的批量 ACK、projection、查询旁路、慢连接隔离 | `w5-export-final-1315` 通过 Kafka/PG 故障恢复、重复/乱序、Gateway/WebSocket offset、Core 独立和资金门禁；`w5-isolation-final-1345` 通过 PG 恢复、投影缺口回放、慢客户端隔离和清理 | 生产规模容量和长时 soak 属于 P6，不阻塞本阶段功能出口 |
-| P6 HA/压测/扩容 | `IN_PROGRESS` | leader/follower/cold recovery、单线容量、manifest、runbook | SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery manifest 通过；六条产品线均有 20 秒 capacity PASS 和角色日志 | 长时稳定容量报告、完整 CPU/GC/Aeron/export lag 指标和扩容结论 |
+| P4 风险/生命周期 | `PARTIAL` | trigger/risk/funding/settlement/liquidation bounded continuation | 六条 ProductLine Core-only 基线通过；W4 静态配置门禁通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已通过宿主机三节点 Cluster 的真实 HTTP/做市/结算/资金守恒门禁；在线余额、持仓、活动订单、触发单和生命周期执行已由 Core 裁决 | SPOT 和两条永续仍需逐条执行真实 Provider 门禁；cursor 重启/缺口仍需验证；Funding 在线编排仍依赖 PostgreSQL lease/sequence/settlement reservation，Risk scan control 仍有数据库配置路径 |
+| P5 导出/查询/外围 | `PARTIAL` | 一次编码 outbox、带 cursor 的批量 ACK、projection、查询旁路、慢连接隔离、Gateway Auth Cluster | `w5-export-final-1315` 通过 Kafka/PG 故障恢复、重复/乱序、Gateway/WebSocket offset、Core 独立和资金门禁；`w5-isolation-final-1345` 通过 PG 恢复、投影缺口回放、慢客户端隔离和清理；活动订单/单笔订单已直接查询 Core | Gateway 用户、MFA、challenge、refresh session 仍由 JDBC repository 持有，Gateway Auth Cluster 未实现；Trading/Account/Lifecycle 等 Provider 的 Spring 构造图仍强制创建 JDBC 历史/投影 Bean，尚未通过 PostgreSQL 停止后的在线启动门禁 |
+| P6 HA/压测/扩容 | `IN_PROGRESS` | leader/follower/cold recovery、单线容量、manifest、runbook | SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery manifest 通过；六条产品线均有 20 秒 capacity PASS 和角色日志 | 先完成 P4/P5 出口；再完成六条线固定脚本真实 `test` 门禁、长时稳定容量、CPU/GC/Aeron/export/projection lag 指标、70% 生产容量线、扩容结论、24 小时 soak、网络/磁盘故障和生产 runbook；文档引用的 `.omo/evidence` 当前未纳入工作树，正式门禁证据需持久化到版本化报告目录 |
+
+### 18.1.1 最新源码完成度复核（2026-08-18）
+
+以下结论以实施分支提交 `8d81475` 的源码和已记录运行证据为准。`DONE` 表示目标代码边界已经落地；
+`PARTIAL` 表示部分功能已切到 Core，但启动构造图、在线编排或真实运行出口仍未满足；历史查询使用
+PostgreSQL 本身不算缺陷，前提是它不参与当前态查询和在线裁决。
+
+| 能力/模块 | 状态 | 已完成实现 | 仍需完成 |
+| --- | --- | --- | --- |
+| 唯一盘口与恢复 | `DONE` | exchange-core 是唯一 executable book；原生 matcher snapshot、Cluster Log/Archive、配对 manifest 和 fail-closed 恢复已落地 | 长时 election/cold recovery 容量证据归 P6 |
+| 账户当前态 | `DONE` | 余额、冻结、持仓、仓位模式和调整命令均走 Account Aeron gateway/Core；PostgreSQL 只用于账本、划转记录和后台审计查询 | 将历史查询 Bean 与在线 Provider 启动构造图解耦，归“运行时零数据库”出口 |
+| 订单与触发单当前态 | `DONE` | 单笔订单、clientOrderId、活动订单分页、批量撤单选择和生命周期撤单均直接查询/命令 Core；历史订单和后台筛选继续读异步 PostgreSQL 投影 | 将 fee snapshot 初始化及历史投影 Bean 改为可离线/可选依赖，证明 PostgreSQL 停止时 Provider 可启动和交易 |
+| Risk/Liquidation/Insurance/ADL | `PARTIAL` | 四域已合并为单一 Lifecycle Provider/API；风险快照、强平 work、保险基金、ADL queue 与资金变化由 Core 查询/命令裁决 | 移除未使用的 sequence/projection 构造依赖；将 Risk scan control 从 JDBC override 改为版本化 Core/显式离线配置；保留历史查询只能通过异步投影 |
+| Funding | `PARTIAL` | 资金结算资金变化和 continuation progress 已进入 Core | `FundingService` 仍同步使用数据库 rate input、lease、sequence、settlement reservation 和 finalization；需迁移为 Core 状态/版本化输入，历史 rate/payment 查询再与在线服务解耦 |
+| Exporter/Projector/WebSocket | `DONE` | Exporter 仅 Aeron→Kafka，Projector 独立 Kafka→PostgreSQL；批量 ACK、重复/乱序、缺口恢复和慢客户端隔离门禁已通过 | 生产规模 lag、背压和长时故障指标归 P6 |
+| Gateway Auth | `NOT_STARTED` | 现有登录、MFA、challenge、refresh session 功能仍可通过 JDBC 工作 | 按第 1.0 节实现 Gateway Auth Cluster snapshot/JWT 边界，并验证数据库停止时登录态校验和会话恢复 |
+| Provider 模块归并 | `DONE` | Order/Trigger 统一为 Trading Provider；Risk/Liquidation/Insurance/ADL 统一为 Derivatives Lifecycle Provider/API；Matching/Candlestick 统一为 Market Data Provider/API；旧 Provider reactor 入口已删除 | 合并 JVM 的真实六产品线 Kafka/Aeron/资金门禁仍归 P4/P6，不以编译通过替代 |
+| Product API 边界 | `DONE` | `ProductLineSql` 已删除，`InstrumentSpecKey` 已迁入 Instrument API；`surprising-product-api` 只保留 ProductLine、配置与 Topic 命名等无 SQL 领域类型 | 无；不再把产品线通用领域类型强行并入 Instrument API |
+| 固定六产品线脚本 | `DONE` | 六个独立脚本固定 JDK 25、宿主机三节点 DEDICATED Cluster、端口、启动顺序、Clash、已有 PostgreSQL/Kafka/Valkey 和按需 Provider | 当前只完成 SPOT、LINEAR_PERPETUAL 启停验证及其余脚本 dry-run；六条脚本的完整 `test` 结果归 P4/P6 |
+| 运行时零数据库 | `PARTIAL` | Instrument 继续合法使用 PostgreSQL；在线资金/订单/风险权威状态已进入 Core；Exporter 不持有 DataSource | Trading、Account、Lifecycle、Funding、Maker、Market Data、Gateway 仍包含 JDBC/PostgreSQL 依赖，公共启动环境向所有 Provider 注入 DataSource；需拆分在线与历史查询进程/Bean 并通过 PostgreSQL/Kafka/Valkey 停止门禁 |
+
+### 18.1.2 完成项与剩余出口清单
+
+- [x] P0-P3：规范、单往返、O(delta) runtime、唯一 exchange-core 盘口和原生 snapshot 恢复。
+- [x] W5 导出/投影功能：Kafka/PG 故障隔离、批量 ACK、重复/乱序、缺口恢复、WebSocket offset 与慢客户端隔离。
+- [x] Trading、Derivatives Lifecycle、Market Data 三组 Provider/API 归并及旧运行入口清理。
+- [x] 六条产品线固定宿主机三节点 `DEDICATED` 启动脚本。
+- [x] `LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 真实 HTTP/做市/生命周期/资金守恒门禁。
+- [ ] SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL 真实 Provider 生命周期/资金守恒门禁。
+- [ ] 生命周期 cursor 在 leader restart、follower catch-up、缺口和重复回调场景下的恢复门禁。
+- [ ] Funding、Risk scan control、Trading fee snapshot 及各在线 Provider 构造图的 PostgreSQL 解耦。
+- [ ] Gateway Auth Cluster、会话 snapshot/JWT 恢复和数据库停止门禁。
+- [ ] 六条产品线逐条执行固定脚本完整 `test`，保存可复核 manifest，而不是只保留启动/dry-run 结果。
+- [ ] 单产品线长时容量与分阶段边界报告：下单、撮合、风控扫描、强平、平仓、结算、标记价和整体 OPS。
+- [ ] 完整 CPU/GC/Aeron/Kafka export/projection lag 指标、70% 生产容量线、24 小时 soak、网络/磁盘故障和部署/扩容 runbook。
 
 ### 18.2 文档、代码和证据同步规则
 
@@ -752,7 +789,7 @@ mvn -pl :surprising-funding-provider,:surprising-derivatives-lifecycle-provider 
 
 此前表格中的“PostgreSQL 仅记录历史/投影”仍可能被误读为生命周期调用可以同步或异步直写数据库。本次明确修订为：Core 命令返回 `APPLIED` 即是在线业务完成条件，Provider 不写 PostgreSQL ledger、sequence、coverage 或 ADL event。`AeronLifecycleCoordinator.shared()` 提供跨 Funding/Liquidation/Insurance/ADL 的统一有界调度；保险覆盖、资金调整、清算费和 ADL 事实由 Core export event 进入 Kafka，再由独立 projector 幂等写历史库。
 
-本次已验证 `surprising-aeron-client` 与 `surprising-derivatives-lifecycle-provider` 增量构建通过；Risk/Liquidation/Insurance/ADL 源码和 API contract 已由统一模块拥有。这不是完整无数据库门禁：Funding 的费率输入/租约、Price/Instrument 配置以及在线 Provider 构造图仍含 JDBC 依赖，必须在后续阶段迁移到 Core snapshot/query 或显式离线配置后，才能宣称 PostgreSQL 可完全停止。
+本次已验证 `surprising-aeron-client` 与 `surprising-derivatives-lifecycle-provider` 增量构建通过；Risk/Liquidation/Insurance/ADL 源码和 API contract 已由统一模块拥有。这不是完整无数据库门禁：Funding 的费率输入/租约/sequence/settlement reservation、Trading fee snapshot、Risk scan control 以及在线 Provider 构造图仍含 JDBC 依赖。Instrument 配置继续按既定例外保留 PostgreSQL，但必须先版本化导入 Core；其余在线依赖必须迁移到 Core snapshot/query 或显式离线配置后，才能宣称审计 PostgreSQL 可停止。
 
 ### 18.3.2 审计导出链路边界（2026-08-18）
 
@@ -927,7 +964,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 
 仍未宣称完成的交付物：
 
-- P1 的 source epoch registry v2 不作为当前简单设计的生产依赖，进程 epoch 已编码进 sourceId，跨重启不会复用旧 source sequence。P4 的在线触发路径只有 Aeron Core，仍需真实 provider 对四类业务线逐项跑完整生命周期；P5 的 Kafka/PG/Projector/Gateway/WebSocket 故障语义、慢客户端隔离和资金门禁已由单产品线真实运行完成。P2 采用单写者持有的 persistent `DeltaMap`，保留不可变状态壳但 mutation 只创建 O(delta) lineage。P3/W1/W2 已完成：fork 原生 snapshot、snapshot-only restore、单一 executable book 和 O(活动订单数) 精确对账已落地，`CoreBookState`、priority sequence 和生产 replay/rebuild 均已删除。CommandDelta 的 Core 内单次实体事实组装和 export wire acknowledged cursor 已完成。
+- P1 的 source epoch registry v2 不作为当前简单设计的生产依赖，进程 epoch 已编码进 sourceId，跨重启不会复用旧 source sequence。P4 的在线触发路径只有 Aeron Core，但 SPOT 和两条永续的真实 Provider 门禁以及 cursor 故障恢复仍未完成。P5 的 Kafka/PG/Projector/Gateway/WebSocket 导出故障语义、慢客户端隔离和资金门禁已由单产品线真实运行完成；Gateway Auth Cluster 与在线 Provider 无数据库启动门禁未完成，所以 P5 保持 `PARTIAL`。P2 采用单写者持有的 persistent `DeltaMap`，保留不可变状态壳但 mutation 只创建 O(delta) lineage。P3/W1/W2 已完成：fork 原生 snapshot、snapshot-only restore、单一 executable book 和 O(活动订单数) 精确对账已落地，`CoreBookState`、priority sequence 和生产 replay/rebuild 均已删除。CommandDelta 的 Core 内单次实体事实组装和 export wire acknowledged cursor 已完成。
 - 当前 Core 风险策略是固定代码版本 1；若预警/强平阈值需要动态调整，仍应新增带版本的 Core `RiskPolicy` 状态和命令，由 Core 原子切换并随快照恢复，不能把参数重新放回 Risk Provider。
 - 标记价超档位只在风险计算中采用最高档维持保证金率；若业务需要把超档位本身作为立即强平原因，应新增 Core 风险状态字段和版本化策略，不能让 Risk Provider 旁路裁决。
 - W1/W2 受影响 reactor 在 JDK 25 下通过 193 个测试；service provenance 正向门禁通过，错误整包 SHA 和错误 fork Git SHA 均被拒绝。完整 root 测试不属于本轮影响面，真实三 Member、Provider、Kafka/PG、做市、资金守恒和 24 小时 soak 仍按 P4-P6 上线门禁执行。
@@ -944,7 +981,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 - 本轮通过 `PRODUCT_LINE=LINEAR_PERPETUAL scripts/aeron-core-local.sh fresh` + `status` + `smoke` 观察到三节点均 `Up`，并得到 `derivativeSmoke=PASS productLine=LINEAR_PERPETUAL longUser=6100005001 shortUser=7100005001 usdtTotal=2000 fundingNet=0`；随后使用同一入口 `down` 清理容器和网络，保留数据卷。
 - 多个三节点集群并行运行会耗尽 Docker `/dev/shm`，表现为客户端 `ResultUnknown`；停止其他集群后同一 LINEAR_DELIVERY 门禁稳定通过。这是测试环境容量门禁，不能当成业务失败或生产容量结论。
 - W5 Aeron 线程模式 A/B 和完整 `LINEAR_PERPETUAL` 导出/投影故障门禁记录在 `.omo/evidence/w5-aeron-threading-ab-20260817.md`；`w5-export-final-1315` 已通过 Kafka/PG/Exporter/Projector/Gateway/WebSocket、重复乱序、Core 独立裁决和资金门禁，`W5_EXPORT_PROJECTION=PASS`。隔离复跑因 Docker Desktop 停止未完成，不影响已通过的功能门禁。
-- `CoreInMemoryBenchmark 200 20`：`PASS`，本轮测得约 18.3 orders/s、p50 6.4ms、p95 301ms；该结果包含 exchange-core ring/future 和 export/hash 成本，不能作为百万级容量结论，后续 P3/P5 仍需基准拆分和真实集群压测。
+- `CoreInMemoryBenchmark 200 20`：`PASS`，本轮测得约 18.3 orders/s、p50 6.4ms、p95 301ms；该结果包含 exchange-core ring/future 和 export/hash 成本，不能作为生产容量结论，后续 P6 仍需分阶段基准、真实集群长时压测和完整资源指标。
 - W4 执行记录：六条 ProductLine Core-only 基线逐条通过；`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 已完成真实 HTTP、做市、用户资金与 Treasury 对账门禁，其中 OPTION 使用 `w4-option-final11` 验证六种行权组合且 `FUNDS_DIFFERENCE=0`。SPOT、两条永续及 cursor 重启/缺口仍待真实验证，因此 P4 保持 `PARTIAL`。
 - 技术遗留复核：`TradingCoreReducer` 的下单/成交路径、`TradingCoreState` 的 delta lineage、`CoreCommandDelta`、`RollingBusinessStateHash` 和 `CoreProbeState` 已逐项核对。S02/S03/S05/H01/H02/H03 的 `PARTIAL` 原状态属于文档滞后，已更新为 `IMPLEMENTED`；S01/S06 仍为真实遗留，因为用户/订单实体继续使用 immutable record + persistent `DeltaMap`，尚未改为 mutable entity store。相关 reducer/state-map 测试已覆盖 delta、changed keys、显式 client-order index 和 rolling hash。
 - canonical wrappers：`bash -n scripts/*.sh` 全部通过；SPOT `integration-smoke.sh` 返回 `spotMatchSmoke=PASS`、`status=OK`、`exportStatus=PASS`；SPOT `live-runtime-trading-reconciliation.sh` 返回 `status=OK` 和 `exportStatus=PASS`；SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION 六条产品线 recovery matrix 均生成 node stop/rejoin/cold restart 相同 hash、`ROLE_EVIDENCE=PASS`、`EXPORT_FAILURE=PASS` 和 `FUNDS_DIFFERENCE=0` 的 manifest；六条产品线各执行 20 秒 fresh `run-product-line-capacity.sh`，均返回 `capacity=PASS` 且 0 failures/fundsDiff=0；`PRODUCT_LINE=SPOT scripts/kafka-trading-smoke.sh` 返回 `kafkaTradingSmoke=PASS productLine=SPOT scope=CORE_INPUT_EXPORT_BRIDGE`。这些是 Core-only/受控本地证据，真实 API/provider/做市/Kafka 集群全链路、生产网络/磁盘故障、长时容量和 projection lag 仍不能由上述结果代替。
@@ -956,7 +993,7 @@ scripts/build-incremental.sh --with-tests :surprising-aeron-service
 
 新项目直接编译四组源码，通过 fully-qualified Bean name 避免领域组件同名冲突，并排除四个旧 Application 类，确保不会重复创建 Spring Context、Feign 注册或 Aeron 客户端。旧模块不再作为生命周期 JAR 依赖；运行脚本和 W5 构建脚本只构建、启动统一 JAR；Funding 保持独立。
 
-验证：`mvn -pl surprising-derivatives-lifecycle -am -DskipTests package` 通过；启动脚本已统一使用 JDK 25 Aeron `--add-exports` 参数。真实六产品线生命周期门禁仍需按既定单产品线顺序执行，不能以本次构建替代资金守恒验证。
+验证：`mvn -pl surprising-derivatives-lifecycle -am -DskipTests package` 通过；启动脚本已统一使用 JDK 25 Aeron `--add-exports` 参数。交割、逆向交割和期权已有历史真实门禁；SPOT 与两条永续仍需按既定单产品线顺序执行，且六条固定拓扑脚本都要补留最终回归 manifest，不能以本次构建或 dry-run 替代资金守恒验证。
 
 ### 19.2 Matching/Candlestick 合并（2026-08-18）
 
