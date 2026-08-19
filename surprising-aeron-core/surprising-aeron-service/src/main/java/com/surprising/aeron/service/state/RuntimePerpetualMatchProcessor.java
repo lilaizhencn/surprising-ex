@@ -34,14 +34,21 @@ public final class RuntimePerpetualMatchProcessor {
                     match.quantitySteps(), true, settleAssetId);
             applyFill(before, runtime, identities, instrument, maker, match.priceTicks(),
                     match.quantitySteps(), false, settleAssetId);
-            if (runtime.order(maker.orderId()).canceled()) runtime.releaseTerminalReservation(maker.orderId());
+            if (runtime.order(maker.orderId()).canceled()) {
+                runtime.releaseTerminalReservation(maker.orderId());
+                runtime.advanceUserRevision(maker.userId());
+            }
         }
         taker = runtime.order(takerOrderId);
         if (!taker.canceled() && (taker.timeInForce().immediate()
                 || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
             runtime.replaceOrder(terminal(taker));
         }
-        if (runtime.order(takerOrderId).canceled()) runtime.releaseTerminalReservation(takerOrderId);
+        if (runtime.order(takerOrderId).canceled()) {
+            runtime.releaseTerminalReservation(takerOrderId);
+            runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
+        }
+        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
         return runtime;
     }
 

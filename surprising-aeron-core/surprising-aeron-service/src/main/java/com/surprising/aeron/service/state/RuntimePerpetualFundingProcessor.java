@@ -133,6 +133,7 @@ public final class RuntimePerpetualFundingProcessor {
                     command.settlementId(), command.instrumentVersion(), command.fundingRatePpm(),
                     nextCursorUserId, chunkCommandId));
         }
+        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
         return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
                 nextCursorUserId, selectedUserIds.size()));
     }

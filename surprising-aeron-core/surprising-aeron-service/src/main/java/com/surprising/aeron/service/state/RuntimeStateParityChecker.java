@@ -66,6 +66,8 @@ public final class RuntimeStateParityChecker {
     }
 
     private static String componentMismatch(TradingCoreState expected, TradingCoreState actual) {
+        if (expected.productLine() != actual.productLine()) return "product-line";
+        if (expected.revision() != actual.revision()) return "revision=" + expected.revision() + '/' + actual.revision();
         if (!expected.users().equals(actual.users())) return "users";
         if (!expected.orders().equals(actual.orders())) return "orders";
         if (!expected.riskState().equals(actual.riskState())) return "risk";
