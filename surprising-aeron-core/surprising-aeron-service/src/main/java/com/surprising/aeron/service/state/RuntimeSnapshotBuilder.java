@@ -14,7 +14,8 @@ final class RuntimeSnapshotBuilder {
         }
         Map<Long, TradingRuntimeSnapshot.UserSnapshot> users = new TreeMap<>();
         state.usersForSnapshot().forEachKeyValue((userId, user) ->
-                users.put(userId, new TradingRuntimeSnapshot.UserSnapshot(user.userId())));
+                users.put(userId, new TradingRuntimeSnapshot.UserSnapshot(user.productLine(), user.userId(),
+                        user.revision(), user.positionMode())));
 
         Map<TradingRuntimeSnapshot.BalanceKey, TradingRuntimeSnapshot.BalanceSnapshot> balances = new TreeMap<>();
         state.balancesForSnapshot().forEachKeyValue((userId, userBalances) ->
@@ -24,16 +25,20 @@ final class RuntimeSnapshotBuilder {
 
         Map<Long, TradingRuntimeSnapshot.OrderSnapshot> orders = new TreeMap<>();
         state.ordersForSnapshot().forEachKeyValue((orderId, order) -> orders.put(orderId,
-                new TradingRuntimeSnapshot.OrderSnapshot(order.userId(), order.symbolId(), order.instrumentVersion(),
-                        order.side(), order.priceTicks(), order.reduceOnly(), order.marginMode(), order.positionSide(),
-                        order.orderType(), order.timeInForce(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
-                        order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
-                        order.canceled())));
+                new TradingRuntimeSnapshot.OrderSnapshot(order.productLine(), order.userId(), order.symbolId(),
+                        order.instrumentVersion(), order.side(), order.priceTicks(), order.quantitySteps(),
+                        order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
+                        order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
+                        order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
+                        order.takerFeeRatePpm(), order.createdAtEpochMillis(), order.updatedAtEpochMillis(),
+                        order.clusterPosition(), order.status(), order.revision())));
 
         Map<Long, TradingRuntimeSnapshot.ReservationSnapshot> reservations = new TreeMap<>();
         state.reservationsForSnapshot().forEachKeyValue((orderId, reservation) -> reservations.put(orderId,
-                new TradingRuntimeSnapshot.ReservationSnapshot(reservation.userId(), reservation.assetId(),
-                        reservation.reservedUnits())));
+                new TradingRuntimeSnapshot.ReservationSnapshot(reservation.userId(), reservation.symbolId(),
+                        reservation.instrumentVersion(), reservation.kind(), reservation.assetId(),
+                        reservation.totalReservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
+                        reservation.orderQuantitySteps())));
 
         Map<TradingRuntimeSnapshot.ClientOrderKey, Long> clientOrderIndex = new TreeMap<>();
         state.clientOrderIndexForSnapshot().forEachKeyValue((userId, userClientOrders) ->
@@ -78,7 +83,7 @@ final class RuntimeSnapshotBuilder {
                         scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                         scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
                         scan.triggerOcoCursor())));
-
+        
         Map<Integer, TradingRuntimeSnapshot.TreasurySnapshot> treasury = new TreeMap<>();
         state.treasury().feeBalances().forEachKeyValue((assetId, units) -> treasury.put(assetId,
                 new TradingRuntimeSnapshot.TreasurySnapshot(units, state.treasury().insurance(assetId),
@@ -98,6 +103,8 @@ final class RuntimeSnapshotBuilder {
                         progress.commandId())));
         return new TradingRuntimeSnapshot(revision, users, balances, orders, reservations, clientOrderIndex,
                 positions, liquidations, markPrices, riskSnapshots, riskScans, state.nextLiquidationId(),
-                treasury, fundingSettlements, fundingProgress);
+                new TreeMap<>(state.instrumentsForRuntime()), new TreeMap<>(state.leveragesForRuntime()),
+                new TreeMap<>(state.algoOrdersForRuntime()), new TreeMap<>(state.cancelAllAfterTimersForRuntime()),
+                new TreeMap<>(state.triggerOrdersForRuntime()), treasury, fundingSettlements, fundingProgress);
     }
 }

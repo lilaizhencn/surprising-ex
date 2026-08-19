@@ -186,21 +186,27 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     public void transition(TradingCoreState before, TradingCoreState after) {
+        transition(before, after, after);
+    }
+
+    public void transition(TradingCoreState before, TradingCoreState deltaAfter, TradingCoreState authoritativeAfter) {
         assertOwner();
-        if (before != state || after == null || after.productLine() != productLine) {
+        if (before != state || deltaAfter == null || authoritativeAfter == null
+                || deltaAfter.productLine() != productLine || authoritativeAfter.productLine() != productLine
+                || !deltaAfter.equals(authoritativeAfter)) {
             throw new IllegalStateException("trading runtime transition is out of order");
         }
-        after.requireIncrementalLineage(before);
-        positionUsers.update(before, after);
-        openInterest.update(before, after);
-        triggers.update(before, after);
-        algos.update(before, after);
-        liquidations.update(before, after);
-        timers.update(before, after);
-        activeOrders.update(before, after);
-        adlPositions.update(before, after);
-        riskSnapshots.update(before, after);
-        state = after;
+        deltaAfter.requireIncrementalLineage(before);
+        positionUsers.update(before, deltaAfter);
+        openInterest.update(before, deltaAfter);
+        triggers.update(before, deltaAfter);
+        algos.update(before, deltaAfter);
+        liquidations.update(before, deltaAfter);
+        timers.update(before, deltaAfter);
+        activeOrders.update(before, deltaAfter);
+        adlPositions.update(before, deltaAfter);
+        riskSnapshots.update(before, deltaAfter);
+        state = authoritativeAfter;
     }
 
     public void restoreStateOnly(TradingCoreState restored) {

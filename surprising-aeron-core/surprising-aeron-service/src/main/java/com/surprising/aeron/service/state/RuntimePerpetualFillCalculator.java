@@ -115,16 +115,14 @@ public final class RuntimePerpetualFillCalculator {
                 nextQuantity, nextEntryPrice, nextEntryValue,
                 Math.addExact(current == null ? 0 : current.realizedPnlUnits(), realizedPnl),
                 Math.addExact(remainingMargin, marginIncrease));
-        OrderRuntime nextOrder = new OrderRuntime(order.orderId(), order.userId(), order.symbolId(), order.instrumentVersion(),
-                order.side(), order.priceTicks(), order.reduceOnly(), order.marginMode(), order.positionSide(),
-                order.orderType(), order.timeInForce(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
-                order.quantitySteps(), Math.addExact(order.executedQuantitySteps(), fillQuantitySteps),
-                Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps),
-                order.canceled() || order.remainingQuantitySteps() == fillQuantitySteps);
+        long nextRemainingQuantity = Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps);
+        OrderRuntime nextOrder = order.withExecution(
+                Math.addExact(order.executedQuantitySteps(), fillQuantitySteps), nextRemainingQuantity,
+                nextRemainingQuantity == 0 ? CoreOrderStatus.FILLED : order.status(),
+                Math.incrementExact(order.revision()));
 
         // Commit only after every arithmetic and business precondition has succeeded.
-        runtime.replaceReservation(new ReservationRuntime(order.orderId(), order.userId(), reservation.assetId(),
-                Math.subtractExact(reservation.reservedUnits(), reservationDebit)));
+        runtime.replaceReservation(reservation.consume(reservationDebit));
         balance.replace(nextAvailable, nextLocked);
         runtime.treasury().setFee(settleAssetId, feeUnits);
         runtime.treasury().setInsurance(settleAssetId, nextInsuranceNet >= 0 ? nextInsuranceNet : 0,

@@ -11,12 +11,14 @@ public final class RuntimeStateParityChecker {
         if (expected == null || identities == null || actual == null) {
             throw new IllegalArgumentException("parity arguments are required");
         }
-        TradingRuntimeState projected = RuntimeStateProjector.project(expected, identities);
-        TradingRuntimeSnapshot expectedSnapshot = projected.snapshot(expected.revision());
-        TradingRuntimeSnapshot actualSnapshot = actual.snapshot(expected.revision());
-        if (!expectedSnapshot.equals(actualSnapshot)) {
+        TradingCoreState materialized = RuntimeStateMaterializer.materialize(actual, identities);
+        if (!expected.equals(materialized) || expected.businessStateHash() != materialized.businessStateHash()) {
+            TradingRuntimeState projected = RuntimeStateProjector.project(expected, identities);
+            TradingRuntimeSnapshot expectedSnapshot = projected.snapshot(expected.revision());
+            TradingRuntimeSnapshot actualSnapshot = actual.snapshot(expected.revision());
             throw new IllegalStateException("runtime parity mismatch at revision " + expected.revision()
-                    + ": " + mismatch(expectedSnapshot, actualSnapshot));
+                    + ": " + mismatch(expectedSnapshot, actualSnapshot)
+                    + " hashes=" + expected.businessStateHash() + '/' + materialized.businessStateHash());
         }
     }
 
@@ -35,6 +37,11 @@ public final class RuntimeStateParityChecker {
         if (!expected.riskScans().equals(actual.riskScans())) return mapMismatch(
                 "risk-scans", expected.riskScans(), actual.riskScans());
         if (expected.nextLiquidationId() != actual.nextLiquidationId()) return "next-liquidation-id";
+        if (!expected.instruments().equals(actual.instruments())) return "instruments";
+        if (!expected.leverages().equals(actual.leverages())) return "leverages";
+        if (!expected.algoOrders().equals(actual.algoOrders())) return "algo-orders";
+        if (!expected.cancelAllAfterTimers().equals(actual.cancelAllAfterTimers())) return "cancel-all-after";
+        if (!expected.triggerOrders().equals(actual.triggerOrders())) return "trigger-orders";
         if (!expected.treasury().equals(actual.treasury())) return "treasury";
         if (!expected.fundingSettlements().equals(actual.fundingSettlements())) return "funding-settlements";
         return "funding-progress";

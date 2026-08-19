@@ -44,6 +44,17 @@ public final class RuntimePlaceOrderDeltaApplier {
         long clientKey = identities.clientKey(userId, nextOrder.clientOrderId());
         runtime.reserveOrder(orderId, userId, clientKey, identities.symbolId(nextOrder.symbol()),
                 nextOrder.quantitySteps(), identities.assetId(reservation.asset()), reservation.remainingUnits());
+        runtime.putUser(new UserRuntime(nextUser.productLine(), userId, nextUser.revision(), nextUser.positionMode()));
+        runtime.replaceOrder(new OrderRuntime(nextOrder.orderId(), nextOrder.productLine(), nextOrder.userId(),
+                identities.symbolId(nextOrder.symbol()), nextOrder.instrumentVersion(), nextOrder.side(),
+                nextOrder.priceTicks(), nextOrder.quantitySteps(), nextOrder.executedQuantitySteps(),
+                nextOrder.remainingQuantitySteps(), nextOrder.reduceOnly(), nextOrder.marginMode(),
+                nextOrder.positionSide(), nextOrder.orderType(), nextOrder.timeInForce(), nextOrder.postOnly(),
+                nextOrder.clientOrderId(), nextOrder.commandId(), nextOrder.makerFeeRatePpm(),
+                nextOrder.takerFeeRatePpm(), nextOrder.createdAtEpochMillis(), nextOrder.updatedAtEpochMillis(),
+                nextOrder.clusterPosition(), nextOrder.status(), nextOrder.revision()));
+        runtime.replaceReservation(RuntimeStateProjector.toRuntimeReservation(userId, reservation, identities));
+        runtime.setMetadata(after.productLine(), after.revision());
         if (runtime.balance(userId, identities.assetId(reservation.asset())).availableUnits()
                 != nextBalance.availableUnits()) {
             throw new IllegalStateException("runtime available balance mismatch: " + orderId);

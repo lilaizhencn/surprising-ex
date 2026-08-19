@@ -72,9 +72,6 @@ public final class RuntimePerpetualMatchProcessor {
     }
 
     private static OrderRuntime terminal(OrderRuntime order) {
-        return new OrderRuntime(order.orderId(), order.userId(), order.symbolId(), order.instrumentVersion(),
-                order.side(), order.priceTicks(), order.reduceOnly(), order.marginMode(), order.positionSide(),
-                order.orderType(), order.timeInForce(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
-                order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(), true);
+        return order.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(order.revision()));
     }
 }

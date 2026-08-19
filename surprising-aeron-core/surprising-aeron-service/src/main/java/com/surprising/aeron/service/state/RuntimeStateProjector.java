@@ -11,12 +11,13 @@ public final class RuntimeStateProjector {
     public static TradingRuntimeState project(TradingCoreState source, RuntimeIdentityRegistry identities) {
         if (source == null || identities == null) throw new IllegalArgumentException("source and identities are required");
         TradingRuntimeState runtime = new TradingRuntimeState();
+        runtime.replaceAuxiliaryState(source);
         source.users().forEach((userId, user) -> {
-            runtime.putUser(new UserRuntime(userId));
+            runtime.putUser(new UserRuntime(user.productLine(), userId, user.revision(), user.positionMode()));
             user.balances().forEach((asset, balance) -> runtime.putBalance(new BalanceRuntime(
                     userId, identities.assetId(asset), balance.availableUnits(), balance.lockedUnits())));
-            user.reservations().forEach((orderId, reservation) -> runtime.putReservation(new ReservationRuntime(
-                    orderId, userId, identities.assetId(reservation.asset()), reservation.remainingUnits())));
+            user.reservations().forEach((orderId, reservation) -> runtime.putReservation(toRuntimeReservation(
+                    userId, reservation, identities)));
             user.positions().forEach((positionKey, position) -> runtime.putPosition(
                     identities.positionKey(userId, positionKey), new PositionRuntime(userId,
                             identities.symbolId(position.symbol()), identities.assetId(position.marginAsset()),
@@ -41,6 +42,14 @@ public final class RuntimeStateProjector {
                         new TreasuryRuntime.FundingProgressRuntime(progress.settlementId(),
                                 progress.instrumentVersion(), progress.fundingRatePpm(),
                                 progress.nextCursorUserId(), progress.commandId())));
+        source.treasuryState().lifecycleSettlements().forEach((symbol, settlementId) ->
+                runtime.treasury().setLifecycleSettlement(identities.symbolId(symbol), settlementId));
+        source.treasuryState().lifecycleProgress().forEach((symbol, progress) ->
+                runtime.treasury().setLifecycleProgress(identities.symbolId(symbol),
+                        new TreasuryRuntime.LifecycleProgressRuntime(progress.settlementId(),
+                                progress.instrumentVersion(), progress.settlementPriceTicks(),
+                                progress.optionCashUnitsPerContract(), progress.ordersComplete(),
+                                progress.nextCursorOrderId(), progress.nextCursorUserId(), progress.commandId())));
         source.riskState().liquidations().forEach((liquidationId, liquidation) ->
                 runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
                         identities.symbolId(liquidation.symbol()), liquidation.marginMode(),
@@ -88,12 +97,22 @@ public final class RuntimeStateProjector {
         }
     }
 
-    private static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities) {
-        return new OrderRuntime(order.orderId(), order.userId(), identities.symbolId(order.symbol()),
-                order.instrumentVersion(), order.side(), order.priceTicks(), order.reduceOnly(), order.marginMode(),
-                order.positionSide(), order.orderType(), order.timeInForce(), order.makerFeeRatePpm(),
-                order.takerFeeRatePpm(), order.quantitySteps(), order.executedQuantitySteps(),
-                order.remainingQuantitySteps(), order.status() != CoreOrderStatus.OPEN);
+    static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities) {
+        return new OrderRuntime(order.orderId(), order.productLine(), order.userId(),
+                identities.symbolId(order.symbol()), order.instrumentVersion(), order.side(), order.priceTicks(),
+                order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
+                order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
+                order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
+                order.takerFeeRatePpm(), order.createdAtEpochMillis(), order.updatedAtEpochMillis(),
+                order.clusterPosition(), order.status(), order.revision());
+    }
+
+    static ReservationRuntime toRuntimeReservation(long userId, OrderReservation reservation,
+                                                    RuntimeIdentityRegistry identities) {
+        return new ReservationRuntime(reservation.orderId(), userId, identities.symbolId(reservation.symbol()),
+                reservation.instrumentVersion(), reservation.kind(), identities.assetId(reservation.asset()),
+                reservation.reservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
+                reservation.orderQuantitySteps());
     }
 
     private static String positionKey(String symbol, com.surprising.aeron.protocol.CorePositionSide side) {

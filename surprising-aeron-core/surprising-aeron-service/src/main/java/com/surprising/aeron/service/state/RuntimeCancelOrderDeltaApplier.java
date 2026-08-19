@@ -48,6 +48,10 @@ public final class RuntimeCancelOrderDeltaApplier {
             throw new IllegalStateException("runtime cancellation precondition mismatch: " + orderId);
         }
         runtime.cancelOrder(orderId, userId, releaseUnits);
+        runtime.putUser(new UserRuntime(nextUser.productLine(), userId, nextUser.revision(), nextUser.positionMode()));
+        runtime.replaceOrder(RuntimeStateProjector.toRuntimeOrder(nextOrder, identities));
+        runtime.replaceReservation(RuntimeStateProjector.toRuntimeReservation(userId, nextReservation, identities));
+        runtime.setMetadata(after.productLine(), after.revision());
         runtimeBalance = runtime.balance(userId, identities.assetId(previousReservation.asset()));
         if (runtimeBalance.availableUnits() != nextBalance.availableUnits()
                 || runtimeBalance.lockedUnits() != nextBalance.lockedUnits()) {

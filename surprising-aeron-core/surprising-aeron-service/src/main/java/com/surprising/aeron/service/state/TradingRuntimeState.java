@@ -5,8 +5,15 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreRiskScanControlView;
+import com.surprising.product.api.ProductLine;
+import java.util.Map;
+import java.util.TreeMap;
 
 public final class TradingRuntimeState {
+
+    private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+    private long revision;
 
     private final LongObjectHashMap<UserRuntime> users = new LongObjectHashMap<>();
     private final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances = new LongObjectHashMap<>();
@@ -21,7 +28,13 @@ public final class TradingRuntimeState {
     private final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
     private final LongObjectHashMap<LongObjectHashMap<Long>> clientOrderIndex = new LongObjectHashMap<>();
     private final TreasuryRuntime treasury = new TreasuryRuntime();
+    private final Map<String, CoreInstrumentState> instruments = new TreeMap<>();
+    private final Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
+    private final Map<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();
+    private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new TreeMap<>();
+    private final Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
     private long nextLiquidationId = 1;
+    private CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
     private final LongHashSet changedUsers = new LongHashSet();
     private final LongObjectHashMap<IntHashSet> changedBalances = new LongObjectHashMap<>();
     private final LongHashSet changedOrders = new LongHashSet();
@@ -40,6 +53,34 @@ public final class TradingRuntimeState {
 
     public void assertOwner() {
         bindOwner();
+    }
+
+    public ProductLine productLine() {
+        assertOwner();
+        return productLine;
+    }
+
+    public long revision() {
+        assertOwner();
+        return revision;
+    }
+
+    public void setMetadata(ProductLine productLine, long revision) {
+        assertOwner();
+        if (productLine == null || revision < 0) throw new IllegalArgumentException("invalid runtime metadata");
+        this.productLine = productLine;
+        this.revision = revision;
+    }
+
+    public CoreRiskScanControlView riskScanControl() {
+        assertOwner();
+        return riskScanControl;
+    }
+
+    public void setRiskScanControl(CoreRiskScanControlView riskScanControl) {
+        assertOwner();
+        if (riskScanControl == null) throw new IllegalArgumentException("risk scan control is required");
+        this.riskScanControl = riskScanControl;
     }
 
     public UserRuntime user(long userId) {
@@ -114,6 +155,47 @@ public final class TradingRuntimeState {
         return treasury;
     }
 
+    public Map<String, CoreInstrumentState> instrumentsForRuntime() {
+        assertOwner();
+        return instruments;
+    }
+
+    public Map<CoreLeverageKey, Long> leveragesForRuntime() {
+        assertOwner();
+        return leverages;
+    }
+
+    public Map<Long, CoreAlgoOrderState> algoOrdersForRuntime() {
+        assertOwner();
+        return algoOrders;
+    }
+
+    public Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimersForRuntime() {
+        assertOwner();
+        return cancelAllAfterTimers;
+    }
+
+    public Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
+        assertOwner();
+        return triggerOrders;
+    }
+
+    public void replaceAuxiliaryState(TradingCoreState source) {
+        assertOwner();
+        setMetadata(source.productLine(), source.revision());
+        setRiskScanControl(source.riskState().scanControl());
+        instruments.clear();
+        instruments.putAll(source.instruments());
+        leverages.clear();
+        leverages.putAll(source.leverages());
+        algoOrders.clear();
+        algoOrders.putAll(source.algoOrders());
+        cancelAllAfterTimers.clear();
+        cancelAllAfterTimers.putAll(source.cancelAllAfterTimers());
+        triggerOrders.clear();
+        triggerOrders.putAll(source.triggerOrders());
+    }
+
     public Long orderIdByClient(long userId, long clientKey) {
         assertOwner();
         LongObjectHashMap<Long> userClientOrders = clientOrderIndex.get(userId);
@@ -124,6 +206,14 @@ public final class TradingRuntimeState {
         assertOwner();
         users.put(user.userId(), user);
         changedUsers.add(user.userId());
+    }
+
+    public void removeUser(long userId) {
+        assertOwner();
+        users.remove(userId);
+        balances.remove(userId);
+        clientOrderIndex.remove(userId);
+        changedUsers.add(userId);
     }
 
     public void putBalance(BalanceRuntime balance) {
@@ -157,6 +247,15 @@ public final class TradingRuntimeState {
         orders.put(order.orderId(), order);
         changedOrders.add(order.orderId());
         changedUsers.add(order.userId());
+    }
+
+    public void removeOrder(long orderId) {
+        assertOwner();
+        OrderRuntime previous = orders.remove(orderId);
+        if (previous != null) {
+            changedOrders.add(orderId);
+            changedUsers.add(previous.userId());
+        }
     }
 
     public void replaceReservation(ReservationRuntime reservation) {
@@ -256,6 +355,30 @@ public final class TradingRuntimeState {
         changedUsers.add(userId);
     }
 
+    public void removeLiquidation(long liquidationId) {
+        assertOwner();
+        LiquidationRuntime previous = liquidations.remove(liquidationId);
+        if (previous != null) {
+            removeActiveLiquidation(previous);
+            changedUsers.add(previous.userId());
+        }
+    }
+
+    public void removeMarkPrice(int symbolId) {
+        assertOwner();
+        markPrices.remove(symbolId);
+    }
+
+    public void removeRiskSnapshot(long positionKey) {
+        assertOwner();
+        riskSnapshots.remove(positionKey);
+    }
+
+    public void removeRiskScan(int symbolId) {
+        assertOwner();
+        riskScans.remove(symbolId);
+    }
+
     public void cancelOrder(long orderId, long userId, long releaseUnits) {
         assertOwner();
         OrderRuntime order = orders.get(orderId);
@@ -271,12 +394,8 @@ public final class TradingRuntimeState {
             throw new IllegalArgumentException("runtime cancellation balance is missing: " + orderId);
         }
         balance.release(releaseUnits);
-        orders.put(orderId, new OrderRuntime(order.orderId(), order.userId(), order.symbolId(),
-                order.instrumentVersion(), order.side(), order.priceTicks(), order.reduceOnly(), order.marginMode(),
-                order.positionSide(), order.orderType(), order.timeInForce(), order.makerFeeRatePpm(),
-                order.takerFeeRatePpm(), order.quantitySteps(), order.executedQuantitySteps(),
-                order.remainingQuantitySteps(), true));
-        reservations.put(orderId, new ReservationRuntime(orderId, userId, reservation.assetId(), 0));
+        orders.put(orderId, order.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(order.revision())));
+        reservations.put(orderId, reservation.release(releaseUnits));
         changedOrders.add(orderId);
         changedReservations.add(orderId);
         changedUsers.add(userId);
@@ -295,7 +414,7 @@ public final class TradingRuntimeState {
         BalanceRuntime balance = balance(order.userId(), reservation.assetId());
         if (balance == null) throw new IllegalStateException("runtime terminal balance is missing: " + orderId);
         balance.release(releaseUnits);
-        reservations.put(orderId, new ReservationRuntime(orderId, order.userId(), reservation.assetId(), 0));
+        reservations.put(orderId, reservation.release(releaseUnits));
         changedReservations.add(orderId);
         changedUsers.add(order.userId());
         changedBalance(order.userId(), reservation.assetId());
@@ -309,6 +428,17 @@ public final class TradingRuntimeState {
             clientOrderIndex.put(userId, userClientOrders);
         }
         userClientOrders.put(clientKey, orderId);
+        changedClientOrders.add(clientKey);
+        changedUsers.add(userId);
+    }
+
+    public void removeClientOrder(long userId, long clientKey) {
+        assertOwner();
+        LongObjectHashMap<Long> userClientOrders = clientOrderIndex.get(userId);
+        if (userClientOrders != null) {
+            userClientOrders.remove(clientKey);
+            if (userClientOrders.isEmpty()) clientOrderIndex.remove(userId);
+        }
         changedClientOrders.add(clientKey);
         changedUsers.add(userId);
     }

@@ -6,6 +6,8 @@ import java.util.Map;
 import java.util.Collections;
 import java.util.TreeMap;
 import java.util.UUID;
+import com.surprising.product.api.ProductLine;
+import com.surprising.aeron.protocol.CorePositionMode;
 
 public record TradingRuntimeSnapshot(
         long revision,
@@ -20,6 +22,11 @@ public record TradingRuntimeSnapshot(
         Map<PositionKey, RiskSnapshot> riskSnapshots,
         Map<Integer, RiskScanSnapshot> riskScans,
         long nextLiquidationId,
+        Map<String, CoreInstrumentState> instruments,
+        Map<CoreLeverageKey, Long> leverages,
+        Map<Long, CoreAlgoOrderState> algoOrders,
+        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
+        Map<Long, CoreTriggerOrderState> triggerOrders,
         Map<Integer, TreasurySnapshot> treasury,
         Map<Integer, Long> fundingSettlements,
         Map<Integer, FundingProgressSnapshot> fundingProgress) {
@@ -28,6 +35,8 @@ public record TradingRuntimeSnapshot(
         if (revision < 0 || users == null || balances == null || orders == null
                 || reservations == null || clientOrderIndex == null || positions == null || liquidations == null
                 || markPrices == null || riskSnapshots == null || riskScans == null || nextLiquidationId <= 0
+                || instruments == null || leverages == null || algoOrders == null
+                || cancelAllAfterTimers == null || triggerOrders == null
                 || treasury == null
                 || fundingSettlements == null || fundingProgress == null) {
             throw new IllegalArgumentException("invalid runtime snapshot");
@@ -42,6 +51,11 @@ public record TradingRuntimeSnapshot(
         markPrices = immutableSorted(markPrices);
         riskSnapshots = immutableSorted(riskSnapshots);
         riskScans = immutableSorted(riskScans);
+        instruments = immutableSorted(instruments);
+        leverages = immutableSorted(leverages);
+        algoOrders = immutableSorted(algoOrders);
+        cancelAllAfterTimers = immutableSorted(cancelAllAfterTimers);
+        triggerOrders = immutableSorted(triggerOrders);
         treasury = immutableSorted(treasury);
         fundingSettlements = immutableSorted(fundingSettlements);
         fundingProgress = immutableSorted(fundingProgress);
@@ -59,9 +73,14 @@ public record TradingRuntimeSnapshot(
         return Collections.unmodifiableMap(new TreeMap<>(source));
     }
 
-    public record UserSnapshot(long userId) {
+    public record UserSnapshot(ProductLine productLine, long userId, long revision, CorePositionMode positionMode) {
+        public UserSnapshot(long userId) {
+            this(ProductLine.LINEAR_PERPETUAL, userId, 0, CorePositionMode.ONE_WAY);
+        }
         public UserSnapshot {
-            if (userId <= 0) throw new IllegalArgumentException("invalid snapshot user");
+            if (productLine == null || userId <= 0 || revision < 0 || positionMode == null) {
+                throw new IllegalArgumentException("invalid snapshot user");
+            }
         }
     }
 
@@ -97,21 +116,25 @@ public record TradingRuntimeSnapshot(
         }
     }
 
-    public record OrderSnapshot(long userId, int symbolId, long instrumentVersion,
+    public record OrderSnapshot(ProductLine productLine, long userId, int symbolId, long instrumentVersion,
                                 com.surprising.aeron.protocol.CoreOrderSide side, long priceTicks,
+                                long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
                                 boolean reduceOnly, com.surprising.aeron.protocol.CoreMarginMode marginMode,
                                 com.surprising.aeron.protocol.CorePositionSide positionSide,
                                 com.surprising.aeron.protocol.CoreOrderType orderType,
                                 com.surprising.aeron.protocol.CoreTimeInForce timeInForce,
-                                long makerFeeRatePpm, long takerFeeRatePpm, long quantitySteps,
-                                long executedQuantitySteps, long remainingQuantitySteps, boolean canceled) {
+                                boolean postOnly, String clientOrderId, UUID commandId,
+                                long makerFeeRatePpm, long takerFeeRatePpm,
+                                long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
+                                CoreOrderStatus status, long revision) {
         public OrderSnapshot(long userId, int symbolId, long quantitySteps, boolean canceled) {
-            this(userId, symbolId, 1, com.surprising.aeron.protocol.CoreOrderSide.BUY, 0, false,
+            this(ProductLine.LINEAR_PERPETUAL, userId, symbolId, 1,
+                    com.surprising.aeron.protocol.CoreOrderSide.BUY, 0, quantitySteps, 0, quantitySteps, false,
                     com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                     com.surprising.aeron.protocol.CorePositionSide.NET,
                     com.surprising.aeron.protocol.CoreOrderType.LIMIT,
-                    com.surprising.aeron.protocol.CoreTimeInForce.GTC, 0, 0,
-                    quantitySteps, 0, quantitySteps, canceled);
+                    com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "", new UUID(0, 1), 0, 0,
+                    0, 0, 0, canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
         }
 
         public OrderSnapshot(long userId, int symbolId, long quantitySteps) {
@@ -119,18 +142,32 @@ public record TradingRuntimeSnapshot(
         }
 
         public OrderSnapshot {
-            if (userId <= 0 || symbolId < 0 || instrumentVersion <= 0 || side == null || priceTicks < 0
+            if (productLine == null || userId <= 0 || symbolId < 0 || instrumentVersion <= 0 || side == null || priceTicks < 0
                     || marginMode == null || positionSide == null || orderType == null || timeInForce == null
                     || quantitySteps <= 0 || executedQuantitySteps < 0 || remainingQuantitySteps < 0
-                    || Math.addExact(executedQuantitySteps, remainingQuantitySteps) != quantitySteps) {
+                    || Math.addExact(executedQuantitySteps, remainingQuantitySteps) != quantitySteps
+                    || clientOrderId == null || commandId == null || status == null || revision <= 0) {
                 throw new IllegalArgumentException("invalid snapshot order");
             }
         }
     }
 
-    public record ReservationSnapshot(long userId, int assetId, long reservedUnits) {
+    public record ReservationSnapshot(long userId, int symbolId, long instrumentVersion,
+                                      com.surprising.aeron.protocol.ReservationKind kind, int assetId,
+                                      long totalReservedUnits, long releasedUnits, long consumedUnits,
+                                      long orderQuantitySteps) {
+        public ReservationSnapshot(long userId, int assetId, long reservedUnits) {
+            this(userId, 0, 1, com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
+                    assetId, Math.max(1, reservedUnits), 0, 0, 1);
+        }
+
+        public long reservedUnits() {
+            return Math.subtractExact(totalReservedUnits, Math.addExact(releasedUnits, consumedUnits));
+        }
         public ReservationSnapshot {
-            if (userId <= 0 || assetId < 0 || reservedUnits < 0) {
+            if (userId <= 0 || symbolId < 0 || instrumentVersion <= 0 || kind == null || assetId < 0
+                    || totalReservedUnits <= 0 || releasedUnits < 0 || consumedUnits < 0
+                    || Math.addExact(releasedUnits, consumedUnits) > totalReservedUnits || orderQuantitySteps <= 0) {
                 throw new IllegalArgumentException("invalid snapshot reservation");
             }
         }
