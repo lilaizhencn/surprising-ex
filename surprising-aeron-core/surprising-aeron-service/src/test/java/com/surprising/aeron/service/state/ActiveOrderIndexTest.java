@@ -2,13 +2,47 @@ package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.product.api.ProductLine;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class ActiveOrderIndexTest {
+
+    @Test
+    void maintainsRiskAggregatesAcrossOrderUpdates() {
+        CoreOrderState opening = new CoreOrderState(7, ProductLine.LINEAR_PERPETUAL, 11, "BTC-USDT", 1,
+                CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                CoreOrderStatus.OPEN, 1);
+        CoreOrderState reducing = new CoreOrderState(8, ProductLine.LINEAR_PERPETUAL, 11, "BTC-USDT", 1,
+                CoreOrderSide.SELL, 100, 3, 0, 3, true, CoreMarginMode.ISOLATED, CorePositionSide.NET,
+                CoreOrderStatus.OPEN, 1);
+        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(11L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 11)),
+                Map.of(7L, opening, 8L, reducing), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+        ActiveOrderIndex index = new ActiveOrderIndex(before);
+
+        assertThat(index.pendingQuantity(11, "BTC-USDT", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(5);
+        assertThat(index.reduceOnlyQuantity(11, "BTC-USDT", CoreOrderSide.SELL)).isEqualTo(3);
+        assertThat(index.hasDifferentMarginMode(11, "BTC-USDT", CorePositionSide.NET,
+                CoreMarginMode.CROSS)).isTrue();
+
+        Map<Long, CoreOrderState> orders = StateMapSupport.delta(before.orders());
+        orders.put(7L, opening.fill(3));
+        orders.put(8L, reducing.cancel());
+        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, before.users(), orders,
+                before.instruments(), before.riskState(), before.treasuryState(), before.leverages(),
+                before.algoOrders(), before.cancelAllAfterTimers(), before.clientOrderIndex(), before.triggerOrders());
+        index.update(before, after);
+
+        assertThat(index.pendingQuantity(11, "BTC-USDT", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(2);
+        assertThat(index.reduceOnlyQuantity(11, "BTC-USDT", CoreOrderSide.SELL)).isZero();
+        assertThat(index.hasDifferentMarginMode(11, "BTC-USDT", CorePositionSide.NET,
+                CoreMarginMode.CROSS)).isFalse();
+    }
 
     @Test
     void rebuildUsesOpenOrderLifecycle() {

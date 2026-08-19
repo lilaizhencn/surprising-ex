@@ -568,7 +568,7 @@ public final class TradingCoreReducer {
     }
 
     public TradingCoreState placeOrder(TradingCoreState state, long userId, PlaceOrderCommand command) {
-        return placeOrder(state, userId, command, new UUID(0, command.orderId()));
+        return placeOrder(state, userId, command, new UUID(0, command.orderId()), -1, null);
     }
 
     public TradingCoreState placeOrder(
@@ -576,7 +576,7 @@ public final class TradingCoreReducer {
             long userId,
             PlaceOrderCommand command,
             UUID commandId) {
-        return placeOrder(state, userId, command, commandId, -1);
+        return placeOrder(state, userId, command, commandId, -1, null);
     }
 
     public TradingCoreState placeOrder(
@@ -585,6 +585,16 @@ public final class TradingCoreReducer {
             PlaceOrderCommand command,
             UUID commandId,
             long indexedOpenInterestSteps) {
+        return placeOrder(state, userId, command, commandId, indexedOpenInterestSteps, null);
+    }
+
+    public TradingCoreState placeOrder(
+            TradingCoreState state,
+            long userId,
+            PlaceOrderCommand command,
+            UUID commandId,
+            long indexedOpenInterestSteps,
+            ActiveOrderIndex activeOrderIndex) {
         requireUserId(userId);
         if (state.orders().containsKey(command.orderId())) {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "orderId already exists");
@@ -600,12 +610,14 @@ public final class TradingCoreReducer {
         validateInstrumentOrder(instrument, command);
         CoreUserState currentUser = state.users().getOrDefault(userId,
                 CoreUserState.empty(state.productLine(), userId));
-        validatePositionIdentity(state, currentUser, command);
-        validateReduceOnlyCapacity(state, currentUser, command);
+        validatePositionIdentity(state, currentUser, command, activeOrderIndex);
+        validateReduceOnlyCapacity(state, currentUser, command, activeOrderIndex);
         validateDerivativeRiskLimits(state, instrument, currentUser, command,
+                activeOrderIndex,
                 indexedOpenInterestSteps < 0 ? symbolOpenInterestSteps(state, instrument.symbol())
                         : indexedOpenInterestSteps);
-        long requiredReservation = requiredReservationUnits(state, instrument, currentUser, command);
+        long requiredReservation = requiredReservationUnits(state, instrument, currentUser, command,
+                activeOrderIndex);
         if (command.reservedUnits() > 0 && command.reservedUnits() < requiredReservation) {
             throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
                     "order reservation is below deterministic margin and fee requirement");
@@ -2343,7 +2355,8 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
-            PlaceOrderCommand command) {
+            PlaceOrderCommand command,
+            ActiveOrderIndex activeOrderIndex) {
         if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
             if (command.side() == CoreOrderSide.SELL) return command.quantitySteps();
             long notional = Math.multiplyExact(command.matchingPriceTicks(), command.quantitySteps());
@@ -2360,8 +2373,9 @@ public final class TradingCoreReducer {
         long leverage = state.leverages().getOrDefault(
                 new CoreLeverageKey(user.userId(), instrument.symbol(), command.marginMode()),
                 instrument.maxLeveragePpm());
-        long projectedSteps = projectedPositionSignedSteps(state, instrument, user, command, command.quantitySteps());
-        long pendingSteps = projectedPositionSignedSteps(state, instrument, user, command, 0);
+        long projectedSteps = projectedPositionSignedSteps(state, instrument, user, command,
+                command.quantitySteps(), activeOrderIndex);
+        long pendingSteps = projectedPositionSignedSteps(state, instrument, user, command, 0, activeOrderIndex);
         long currentMargin = position == null ? 0 : position.positionMarginUnits();
         long releasedMargin = position == null || closeSteps == 0 ? 0
                 : proportional(currentMargin, closeSteps, Math.absExact(currentQuantity));
@@ -2400,9 +2414,10 @@ public final class TradingCoreReducer {
             CoreInstrumentState instrument,
             CoreUserState user,
             PlaceOrderCommand command,
+            ActiveOrderIndex activeOrderIndex,
             long indexedOpenInterestSteps) {
         if (!state.productLine().isDerivative() || command.reduceOnly()) return;
-        long projectedNotional = projectedPositionNotionalUnits(state, instrument, user, command);
+        long projectedNotional = projectedPositionNotionalUnits(state, instrument, user, command, activeOrderIndex);
         if (projectedNotional > instrument.maxPositionNotionalUnits()) {
             throw new CoreStateRejectedException("POSITION_NOTIONAL_LIMIT_EXCEEDED",
                     "projected position exceeds instrument notional limit");
@@ -2441,9 +2456,10 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
-            PlaceOrderCommand command) {
+            PlaceOrderCommand command,
+            ActiveOrderIndex activeOrderIndex) {
         return CoreContractMath.notionalUnits(instrument,
-                projectedPositionSteps(state, instrument, user, command, command.quantitySteps()),
+                projectedPositionSteps(state, instrument, user, command, command.quantitySteps(), activeOrderIndex),
                 command.matchingPriceTicks());
     }
 
@@ -2452,8 +2468,10 @@ public final class TradingCoreReducer {
             CoreInstrumentState instrument,
             CoreUserState user,
             PlaceOrderCommand command,
-            long additionalQuantitySteps) {
-        return Math.absExact(projectedPositionSignedSteps(state, instrument, user, command, additionalQuantitySteps));
+            long additionalQuantitySteps,
+            ActiveOrderIndex activeOrderIndex) {
+        return Math.absExact(projectedPositionSignedSteps(state, instrument, user, command,
+                additionalQuantitySteps, activeOrderIndex));
     }
 
     private static long projectedPositionSignedSteps(
@@ -2461,14 +2479,18 @@ public final class TradingCoreReducer {
             CoreInstrumentState instrument,
             CoreUserState user,
             PlaceOrderCommand command,
-            long additionalQuantitySteps) {
+            long additionalQuantitySteps,
+            ActiveOrderIndex activeOrderIndex) {
         CorePositionState position = user.positions().get(positionKey(instrument.symbol(), command.positionSide()));
         long current = position == null ? 0 : position.signedQuantitySteps();
-        long pendingSameSide = userOrders(state, user).stream()
+        long pendingSameSide = activeOrderIndex == null
+                ? userOrders(state, user).stream()
                 .filter(order -> order.status() == CoreOrderStatus.OPEN && !order.reduceOnly()
                         && order.symbol().equals(instrument.symbol()) && order.positionSide() == command.positionSide()
                         && order.side() == command.side())
-                .mapToLong(CoreOrderState::remainingQuantitySteps).reduce(0L, Math::addExact);
+                .mapToLong(CoreOrderState::remainingQuantitySteps).reduce(0L, Math::addExact)
+                : activeOrderIndex.pendingQuantity(user.userId(), instrument.symbol(),
+                command.positionSide(), command.side());
         long totalOrderSteps = Math.addExact(pendingSameSide, additionalQuantitySteps);
         long signedOrderSteps = command.side() == CoreOrderSide.BUY
                 ? totalOrderSteps : Math.negateExact(totalOrderSteps);
@@ -2507,7 +2529,8 @@ public final class TradingCoreReducer {
     private static void validateReduceOnlyCapacity(
             TradingCoreState state,
             CoreUserState user,
-            PlaceOrderCommand command) {
+            PlaceOrderCommand command,
+            ActiveOrderIndex activeOrderIndex) {
         if (!command.reduceOnly()) {
             return;
         }
@@ -2520,12 +2543,13 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("REDUCE_ONLY_REQUIRES_POSITION_STATE",
                     "reduce-only side must close an existing position");
         }
-        long alreadyOpen = userOrders(state, user).stream()
+        long alreadyOpen = activeOrderIndex == null ? userOrders(state, user).stream()
                 .filter(order -> order.reduceOnly() && order.status() == CoreOrderStatus.OPEN
                         && order.symbol().equals(position.symbol())
                         && order.side() == command.side())
                 .mapToLong(CoreOrderState::remainingQuantitySteps)
-                .reduce(0L, Math::addExact);
+                .reduce(0L, Math::addExact)
+                : activeOrderIndex.reduceOnlyQuantity(user.userId(), position.symbol(), command.side());
         long capacity = Math.subtractExact(Math.absExact(position.signedQuantitySteps()), alreadyOpen);
         if (command.quantitySteps() > capacity) {
             throw new CoreStateRejectedException("REDUCE_ONLY_CAPACITY_EXCEEDED",
@@ -2534,7 +2558,8 @@ public final class TradingCoreReducer {
     }
 
     private static void validatePositionIdentity(TradingCoreState state, CoreUserState user,
-                                                 PlaceOrderCommand command) {
+                                                 PlaceOrderCommand command,
+                                                 ActiveOrderIndex activeOrderIndex) {
         if (user.positionMode() == CorePositionMode.ONE_WAY && command.positionSide().hedgeSide()
                 || user.positionMode() == CorePositionMode.HEDGE && !command.positionSide().hedgeSide()) {
             throw new CoreStateRejectedException("POSITION_MODE_MISMATCH",
@@ -2548,9 +2573,12 @@ public final class TradingCoreReducer {
         CorePositionState position = user.positions().get(positionKey(command.symbol(), command.positionSide()));
         boolean positionConflict = position != null && position.signedQuantitySteps() != 0
                 && position.marginMode() != command.marginMode();
-        boolean orderConflict = userOrders(state, user).stream().anyMatch(order -> order.status() == CoreOrderStatus.OPEN
+        boolean orderConflict = activeOrderIndex == null ? userOrders(state, user).stream().anyMatch(
+                order -> order.status() == CoreOrderStatus.OPEN
                 && order.symbol().equalsIgnoreCase(command.symbol())
-                && order.positionSide() == command.positionSide() && order.marginMode() != command.marginMode());
+                && order.positionSide() == command.positionSide() && order.marginMode() != command.marginMode())
+                : activeOrderIndex.hasDifferentMarginMode(user.userId(), command.symbol(),
+                command.positionSide(), command.marginMode());
         if (positionConflict || orderConflict) {
             throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID",
                     "margin mode switch requires closing positions and open orders first");

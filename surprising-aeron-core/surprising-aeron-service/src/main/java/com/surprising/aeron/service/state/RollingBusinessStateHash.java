@@ -2,12 +2,14 @@ package com.surprising.aeron.service.state;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 public final class RollingBusinessStateHash {
 
     private static final long HASH_TAG = 0x9e3779b97f4a7c15L;
 
     private final Aggregate users = new Aggregate();
+    private final Map<Long, UserHash> userHashes = new TreeMap<>();
     private final Aggregate orders = new Aggregate();
     private final Aggregate instruments = new Aggregate();
     private final Aggregate leverages = new Aggregate();
@@ -50,7 +52,7 @@ public final class RollingBusinessStateHash {
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before == after) return;
         revision = after.revision();
-        updateMap(users, before.users(), after.users());
+        updateUsers(before.users(), after.users());
         updateMap(orders, before.orders(), after.orders());
         updateMap(instruments, before.instruments(), after.instruments());
         updateMap(leverages, before.leverages(), after.leverages());
@@ -115,7 +117,7 @@ public final class RollingBusinessStateHash {
     }
 
     private void rebuild(TradingCoreState state) {
-        rebuildMap(users, state.users());
+        rebuildUsers(state.users());
         rebuildMap(orders, state.orders());
         rebuildMap(instruments, state.instruments());
         rebuildMap(leverages, state.leverages());
@@ -139,6 +141,35 @@ public final class RollingBusinessStateHash {
     private static <K, V> void rebuildMap(Aggregate target, Map<K, V> values) {
         target.clear();
         values.forEach((key, value) -> target.add(entryHash(key, value)));
+    }
+
+    private void rebuildUsers(Map<Long, CoreUserState> values) {
+        users.clear();
+        userHashes.clear();
+        values.forEach((userId, user) -> {
+            UserHash hash = UserHash.create(user);
+            userHashes.put(userId, hash);
+            users.add(entryHash(userId, hash.value()));
+        });
+    }
+
+    private void updateUsers(Map<Long, CoreUserState> before, Map<Long, CoreUserState> after) {
+        if (before == after) return;
+        for (Long userId : StateMapSupport.changedKeys(before, after)) {
+            UserHash previousHash = userHashes.remove(userId);
+            CoreUserState previous = before.get(userId);
+            if (previous != null) {
+                if (previousHash == null) previousHash = UserHash.create(previous);
+                users.remove(entryHash(userId, previousHash.value()));
+            }
+            CoreUserState next = after.get(userId);
+            if (next != null) {
+                UserHash nextHash = previousHash == null
+                        ? UserHash.create(next) : previousHash.update(previous, next);
+                userHashes.put(userId, nextHash);
+                users.add(entryHash(userId, nextHash.value()));
+            }
+        }
     }
 
     private static <K, V> void updateMap(Aggregate target, Map<K, V> before, Map<K, V> after) {
@@ -200,6 +231,52 @@ public final class RollingBusinessStateHash {
             count--;
             sum -= value;
             xor ^= value;
+        }
+
+        private Aggregate copy() {
+            Aggregate result = new Aggregate();
+            result.count = count;
+            result.sum = sum;
+            result.xor = xor;
+            return result;
+        }
+    }
+
+    private record UserHash(int productLine, long userId, long revision, int positionMode,
+                            Aggregate balances, Aggregate reservations, Aggregate positions) {
+
+        private static UserHash create(CoreUserState user) {
+            Aggregate balances = new Aggregate();
+            Aggregate reservations = new Aggregate();
+            Aggregate positions = new Aggregate();
+            rebuildMap(balances, user.balances());
+            rebuildMap(reservations, user.reservations());
+            rebuildMap(positions, user.positions());
+            return new UserHash(user.productLine().ordinal(), user.userId(), user.revision(),
+                    user.positionMode().wireCode(), balances, reservations, positions);
+        }
+
+        private UserHash update(CoreUserState before, CoreUserState after) {
+            if (before == null || before.userId() != after.userId()) return create(after);
+            Aggregate nextBalances = balances.copy();
+            Aggregate nextReservations = reservations.copy();
+            Aggregate nextPositions = positions.copy();
+            updateMap(nextBalances, before.balances(), after.balances());
+            updateMap(nextReservations, before.reservations(), after.reservations());
+            updateMap(nextPositions, before.positions(), after.positions());
+            return new UserHash(after.productLine().ordinal(), after.userId(), after.revision(),
+                    after.positionMode().wireCode(), nextBalances, nextReservations, nextPositions);
+        }
+
+        private long value() {
+            long hash = CoreStateHash.start();
+            hash = CoreStateHash.mix(hash, productLine);
+            hash = CoreStateHash.mix(hash, userId);
+            hash = CoreStateHash.mix(hash, revision);
+            hash = CoreStateHash.mix(hash, positionMode);
+            hash = mixAggregate(hash, "balances", balances);
+            hash = mixAggregate(hash, "reservations", reservations);
+            return mixAggregate(hash, "positions", positions);
         }
     }
 }

@@ -134,6 +134,18 @@ public final class CoreUserState {
         return positionMode;
     }
 
+    public Set<String> changedBalanceAssetsSince(CoreUserState before) {
+        return before == null ? balances.keySet() : StateMapSupport.changedKeys(before.balances, balances);
+    }
+
+    public Set<Long> changedReservationIdsSince(CoreUserState before) {
+        return before == null ? reservations.keySet() : StateMapSupport.changedKeys(before.reservations, reservations);
+    }
+
+    public Set<String> changedPositionKeysSince(CoreUserState before) {
+        return before == null ? positions.keySet() : StateMapSupport.changedKeys(before.positions, positions);
+    }
+
     public long totalUnits(String asset) {
         AssetBalance balance = balances.get(AssetBalance.normalizeAsset(asset));
         return balance == null ? 0 : balance.totalUnits();

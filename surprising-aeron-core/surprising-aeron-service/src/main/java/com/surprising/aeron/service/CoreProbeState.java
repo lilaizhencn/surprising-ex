@@ -668,7 +668,8 @@ public final class CoreProbeState implements AutoCloseable {
                 var command = TradingCommandCodec.decodePlaceOrder(message.payload());
                 requireOrderIdentityAvailable(message.header().userId(), command);
                 TradingCoreState preview = tradingReducer.placeOrder(tradingState, message.header().userId(), command,
-                        message.header().commandId(), openInterestIndex.openInterestSteps(command.symbol()));
+                        message.header().commandId(), openInterestIndex.openInterestSteps(command.symbol()),
+                        activeOrderIndex);
                 var reservation = preview.user(message.header().userId()).reservations().get(command.orderId());
                 if (reservation == null) throw new IllegalStateException("preflight reservation is missing");
                 var view = new com.surprising.aeron.protocol.CoreOrderPreflightView(
@@ -973,7 +974,7 @@ public final class CoreProbeState implements AutoCloseable {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 requireOrderIdentityAvailable(userId, command);
                 adoptState(tradingReducer.placeOrder(tradingState, userId, command, commandId,
-                        openInterestIndex.openInterestSteps(command.symbol())));
+                        openInterestIndex.openInterestSteps(command.symbol()), activeOrderIndex));
             }
             case CANCEL -> {
                 CancelOrderCommand command = (CancelOrderCommand) item.command;
@@ -1104,7 +1105,8 @@ public final class CoreProbeState implements AutoCloseable {
                             new CancelOrderCommand(command.originalOrderId())));
                     requireOrderIdentityAvailable(pending.command().header().userId(), replacement);
                     adoptState(tradingReducer.placeOrder(tradingState, pending.command().header().userId(), replacement,
-                            pending.command().header().commandId(), openInterestIndex.openInterestSteps(replacement.symbol())));
+                            pending.command().header().commandId(), openInterestIndex.openInterestSteps(replacement.symbol()),
+                            activeOrderIndex));
                     adoptState(tradingReducer.applyMatches(tradingState, replacement.orderId(), replacement.baseAsset(),
                             replacement.quoteAsset(), matchingResult.matches()));
                 }
@@ -1279,7 +1281,8 @@ public final class CoreProbeState implements AutoCloseable {
                     var command = TradingCommandCodec.decodePlaceOrder(message.payload());
                     requireOrderIdentityAvailable(message.header().userId(), command);
                     adoptState(tradingReducer.placeOrder(tradingState, message.header().userId(), command,
-                            message.header().commandId(), openInterestIndex.openInterestSteps(command.symbol())));
+                            message.header().commandId(), openInterestIndex.openInterestSteps(command.symbol()),
+                            activeOrderIndex));
                     shadowPlaceOrder(before, tradingState, message.header().userId(), command.orderId());
                     commandChangedUserIds = List.of(message.header().userId());
                     commandChangedOrderIds = List.of(command.orderId());
@@ -2031,7 +2034,8 @@ public final class CoreProbeState implements AutoCloseable {
                                 pending.command().header().userId(), new com.surprising.aeron.protocol.CancelOrderCommand(originalOrderId)));
                         requireOrderIdentityAvailable(pending.command().header().userId(), command);
                         adoptState(tradingReducer.placeOrder(tradingState, pending.command().header().userId(), command,
-                                pending.command().header().commandId(), openInterestIndex.openInterestSteps(command.symbol())));
+                                pending.command().header().commandId(), openInterestIndex.openInterestSteps(command.symbol()),
+                                activeOrderIndex));
                         adoptState(tradingReducer.applyMatches(tradingState, command.orderId(), command.baseAsset(),
                                 command.quoteAsset(), matchingResult.matches()));
                         commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
@@ -3032,7 +3036,7 @@ public final class CoreProbeState implements AutoCloseable {
         TradingCoreState reserved;
         try {
             reserved = tradingReducer.placeOrder(claimed, trigger.userId(), place, commandId,
-                    openInterestIndex.openInterestSteps(trigger.symbol()));
+                    openInterestIndex.openInterestSteps(trigger.symbol()), activeOrderIndex);
         } catch (CoreStateRejectedException exception) {
             adoptState(tradingReducer.completeTriggerOrder(claimed, triggerOrderId, false, 0,
                     exception.code(), triggeredAtEpochMillis));
@@ -3282,7 +3286,7 @@ public final class CoreProbeState implements AutoCloseable {
             java.util.ArrayList<CoreUserStateView> result = new java.util.ArrayList<>(changedUserIds.size());
             for (Long userId : changedUserIds) {
                 var user = after.user(userId);
-                if (user != null && !user.equals(before.user(userId))) {
+                if (user != null && user != before.user(userId)) {
                     result.add(userDelta(before.user(userId), user));
                 }
             }
@@ -3364,17 +3368,20 @@ public final class CoreProbeState implements AutoCloseable {
     private static CoreUserStateView userDelta(com.surprising.aeron.service.state.CoreUserState before,
                                                 com.surprising.aeron.service.state.CoreUserState after) {
         return new CoreUserStateView(after.productLine(), after.userId(), after.revision(), after.positionMode(),
-                after.balances().values().stream()
-                        .filter(value -> before == null || !value.equals(before.balances().get(value.asset())))
+                after.changedBalanceAssetsSince(before).stream()
+                        .map(after.balances()::get)
+                        .filter(java.util.Objects::nonNull)
                         .map(value -> new CoreBalanceView(value.asset(), value.availableUnits(), value.lockedUnits()))
                         .toList(),
-                after.reservations().values().stream()
-                        .filter(value -> before == null || !value.equals(before.reservations().get(value.orderId())))
+                after.changedReservationIdsSince(before).stream()
+                        .map(after.reservations()::get)
+                        .filter(java.util.Objects::nonNull)
                         .map(value -> new CoreReservationView(value.orderId(), value.symbol(), value.instrumentVersion(),
                                 value.kind(), value.asset(), value.reservedUnits(), value.releasedUnits(),
                                 value.consumedUnits(), value.orderQuantitySteps())).toList(),
-                after.positions().values().stream()
-                        .filter(value -> before == null || !value.equals(before.positions().get(value.key())))
+                after.changedPositionKeysSince(before).stream()
+                        .map(after.positions()::get)
+                        .filter(java.util.Objects::nonNull)
                         .map(value -> new CorePositionView(value.symbol(), value.marginAsset(), value.marginMode(),
                                 value.positionSide(), value.instrumentVersion(), value.signedQuantitySteps(),
                                 value.entryPriceTicks(), value.entryValueTicks(), value.realizedPnlUnits(),
