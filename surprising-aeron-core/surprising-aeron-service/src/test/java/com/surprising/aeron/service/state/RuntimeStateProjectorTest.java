@@ -132,6 +132,42 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
+    void appliesCancellationAfterPartialFillWithoutReleasingConsumedReservation() {
+        OrderReservation reservation = OrderReservation.create(11, "BTC-USDT", 1,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 200, 2);
+        OrderReservation partiallyConsumed = reservation.consume(100);
+        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 2,
+                Map.of("USDT", new AssetBalance("USDT", 800, 100)), Map.of(11L, partiallyConsumed), Map.of());
+        CoreOrderState open = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7,
+                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 2, 0, 2, false,
+                CoreOrderStatus.OPEN, 1);
+        open = open.fill(1);
+        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(7L, beforeUser), Map.of(11L, open), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+
+        CoreUserState afterUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 3,
+                Map.of("USDT", new AssetBalance("USDT", 900, 0)),
+                Map.of(11L, partiallyConsumed.release(100)), Map.of());
+        CoreOrderState partiallyFilledAndCanceled = open.cancel();
+        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
+                Map.of(7L, afterUser), Map.of(11L, partiallyFilledAndCanceled), Map.of(),
+                CoreRiskState.empty(), CoreTreasuryState.empty());
+
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        RuntimeCancelOrderDeltaApplier.apply(before, after, 7, 11, runtime, identities);
+
+        assertThat(runtime.order(11).canceled()).isTrue();
+        assertThat(runtime.order(11).executedQuantitySteps()).isEqualTo(1);
+        assertThat(runtime.reservation(11).consumedUnits()).isEqualTo(100);
+        assertThat(runtime.reservation(11).releasedUnits()).isEqualTo(100);
+        assertThat(runtime.reservation(11).reservedUnits()).isZero();
+        assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(900);
+        assertThat(runtime.balance(7, identities.assetId("USDT")).lockedUnits()).isZero();
+        RuntimeStateParityChecker.assertMatches(after, identities, runtime);
+    }
+
+    @Test
     void rejectsInvalidCancellationWithoutChangingRuntime() {
         OrderReservation reservation = OrderReservation.create(11, "BTC-USDT", 1,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 200, 2);

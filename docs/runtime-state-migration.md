@@ -114,7 +114,7 @@ Runtime 是在线状态权威，`TradingCoreState` 是由 Runtime materialize �
 
 ## 阶段四：快照和恢复
 
-`RuntimeSnapshotBuilder` 已按数字 ID 固定排序生成独立的 `TradingRuntimeSnapshot`，覆盖 user、balance、order、reservation、client-order index、position、mark price、risk snapshot、risk scan、nextLiquidationId、liquidation、fee/insurance/deficit treasury，以及 funding settlement/progress。快照与 Runtime 可变对象隔离，可用于验证 immutable、确定性、资金、持仓和 treasury。下一步再对齐现有 `TradingCoreState` 编码，同时输出 Runtime hash 与旧 Snapshot hash；恢复后重新建立 primitive/hash 索引，并比较 engine hash、book hash、business hash 和资金总额。
+`RuntimeSnapshotBuilder` 已按数字 ID 固定排序生成独立的 `TradingRuntimeSnapshot`，覆盖 user、balance、order、reservation、client-order index、position、mark price、risk snapshot、risk scan、nextLiquidationId、liquidation、fee/insurance/deficit treasury，以及 funding settlement/progress。快照与 Runtime 可变对象隔离，可用于验证 immutable、确定性、资金、持仓和 treasury。持久化沿用现有 `CoreStateSnapshotCodec`/`TradingStateSnapshotCodec` 编码边界：Runtime 在快照前 materialize 为 `TradingCoreState`，恢复后由 `RuntimeStateProjector` 重建 primitive/hash 索引并执行完整 parity；Runtime 可变对象不直接写入 wire format，避免把热路径容器布局固化为持久化协议。恢复校验比较 engine hash、book hash、business hash 和资金总额。
 
 ### 阶段四补充：永续风险扫描
 
@@ -142,7 +142,10 @@ Runtime 全状态投影。
 
 ## 阶段五：其他产品线
 
-仅在 `LINEAR_PERPETUAL` 通过后迁移 `SPOT`、`INVERSE_PERPETUAL`、delivery 和 option。每条产品线独立验证冻结资产、保证金、资金费、强平、交割和行权边界。
+Runtime owner、增量 delta apply、materialize/parity 和恢复投影已对全部 `ProductLine` 开放；`CoreProbeState`
+不再把 Runtime 权威链路限制为 `LINEAR_PERPETUAL`。各产品线仍由现有 reducer 保持独立资金语义：现货资产冻结/成交，
+币本位永续保证金/资金费/强平，交割到期结算，期权权利金/行权/到期失效。服务模块的产品线金融矩阵、生命周期、
+触发器、撮合 continuation 和 Snapshot 恢复测试均在 Runtime 门禁开启下通过。
 
 ## 性能门禁
 
@@ -165,10 +168,10 @@ Runtime 与旧 Snapshot State 必须双写对照但不能双重扣款。发现 h
 | CoreProbe shadow 对照 | 已完成 | 普通/批量 PLACE_ORDER 已接入显式开关，CoreProbe 测试通过 |
 | Runtime 持久镜像生命周期 | 已完成 | 连续下单增量运行，非下单状态变化和回滚自动重建 |
 | 普通/批量撤单 shadow 差分 | 已完成 | 仅 `LINEAR_PERPETUAL`，逐项校验后释放 reservation 并标记终态；失败不变更 |
-| 旧状态逐字段对照 | 进行中 | 已加入身份注册、投影和下单差分，仍需补齐 instrument、风险、持仓和完整订单字段 |
+| 旧状态逐字段对照 | 已完成 | `RuntimeStateParityChecker` 覆盖 instrument、风险、持仓、订单、触发器、treasury、资金费进度和完整 Snapshot 字段 |
 | 永续 Runtime 在线权威 | 已完成 | Runtime 原地 delta apply、完整 materialize、Core equals/hash 门禁已接入默认链路 |
-| 部分成交后的撤单 | 未开始 | 需要先完成成交 reservation consumed/released 差分契约 |
-| 成交差分契约 | 进行中 | 已确认订单、reservation、持仓、结算余额和 treasury 必须同一差分提交 |
+| 部分成交后的撤单 | 已完成 | 严格校验已成交/已消费单位、取消释放单位、剩余冻结和终态订单；已覆盖资金守恒与 parity 测试 |
+| 成交差分契约 | 已完成 | 原生 perpetual match processor 对订单、reservation、持仓、结算余额和 treasury 原子提交并统一 parity |
 | position/treasury Runtime 投影 | 已完成 | 已接入 owner-thread Runtime 和恢复投影，含资金/持仓字段校验基础 |
 | 旧成交 shadow 增量 apply | 已移除 | `RuntimeMatchDeltaApplier` 已由原生 perpetual match processor 替代 |
 | Runtime 原生永续 fill | 已完成 | 已覆盖开仓、部分平仓、反向、reduce-only、maker/taker 多 match 和终态 reservation 释放，并接入普通/批量 PLACE shadow parity |
@@ -181,3 +184,7 @@ Runtime 与旧 Snapshot State 必须双写对照但不能双重扣款。发现 h
 | 风险扫描原生迁移 | 已完成 parity | 已覆盖 mark、三阶段分页、cross/isolated、PLANNED 创建/刷新/取消、nextLiquidationId 和 CoreProbe shadow |
 | 风险扫描原地增量提交 | 已完成 | 连续 mark/continuation 复用持久 Runtime；trigger-only scan 增量同步，状态变化时显式失效恢复 |
 | active liquidation Runtime 索引 | 已完成 | primitive 分层精确索引，创建、刷新、取消和恢复投影同步维护 |
+| SPOT Runtime 权威与交易链路 | 已完成 | CoreProbe 下单/撤单/触发器/撮合 continuation 和 Snapshot 恢复通过 Runtime parity |
+| INVERSE_PERPETUAL Runtime 权威与交易链路 | 已完成 | 共享 Runtime 容器，沿用币本位 reducer 资金语义并通过产品线金融矩阵 |
+| DELIVERY Runtime 权威与结算链路 | 已完成 | 线性/币本位交割生命周期、分页结算、恢复和 treasury parity 通过 |
+| OPTION Runtime 权威与行权链路 | 已完成 | 权利金、行权/到期状态和 Snapshot 恢复通过产品线金融矩阵与 Runtime parity |

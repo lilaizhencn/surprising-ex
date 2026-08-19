@@ -25,8 +25,27 @@ public final class RuntimeCancelOrderDeltaApplier {
         OrderReservation nextReservation = nextUser == null
                 ? null : nextUser.reservations().get(orderId);
         if (previousReservation == null || nextReservation == null
-                || nextReservation.remainingUnits() != 0) {
+                || nextReservation.remainingUnits() != 0
+                || nextReservation.orderQuantitySteps() != previousReservation.orderQuantitySteps()
+                || nextReservation.consumedUnits() < previousReservation.consumedUnits()
+                || nextReservation.releasedUnits() < previousReservation.releasedUnits()) {
             throw new IllegalStateException("cancellation reservation delta is invalid: " + orderId);
+        }
+        long consumedUnits = Math.subtractExact(nextReservation.consumedUnits(),
+                previousReservation.consumedUnits());
+        long releasedUnits = Math.subtractExact(nextReservation.releasedUnits(),
+                previousReservation.releasedUnits());
+        if (consumedUnits < 0 || releasedUnits <= 0
+                || Math.addExact(consumedUnits, releasedUnits) != previousReservation.remainingUnits()) {
+            throw new IllegalStateException("cancellation settlement delta is invalid: " + orderId);
+        }
+        long executedQuantityDelta = Math.subtractExact(nextOrder.executedQuantitySteps(),
+                previousOrder.executedQuantitySteps());
+        if (executedQuantityDelta < 0
+                || nextOrder.remainingQuantitySteps() != Math.subtractExact(previousOrder.remainingQuantitySteps(),
+                        executedQuantityDelta)
+                || executedQuantityDelta > previousOrder.remainingQuantitySteps()) {
+            throw new IllegalStateException("cancellation execution delta is invalid: " + orderId);
         }
         AssetBalance previousBalance = previousUser.balances().get(previousReservation.asset());
         AssetBalance nextBalance = nextUser.balances().get(previousReservation.asset());
@@ -35,8 +54,8 @@ public final class RuntimeCancelOrderDeltaApplier {
         }
         long releaseUnits = Math.subtractExact(nextBalance.availableUnits(), previousBalance.availableUnits());
         long lockedDecrease = Math.subtractExact(previousBalance.lockedUnits(), nextBalance.lockedUnits());
-        if (releaseUnits <= 0 || releaseUnits != lockedDecrease
-                || releaseUnits != previousReservation.remainingUnits()) {
+        if (releaseUnits <= 0 || lockedDecrease != Math.addExact(consumedUnits, releasedUnits)
+                || releaseUnits != releasedUnits) {
             throw new IllegalStateException("cancellation balance delta mismatch: " + orderId);
         }
         BalanceRuntime runtimeBalance = runtime.balance(userId, identities.assetId(previousReservation.asset()));

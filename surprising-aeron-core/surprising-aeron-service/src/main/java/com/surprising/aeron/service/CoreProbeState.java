@@ -220,7 +220,7 @@ public final class CoreProbeState implements AutoCloseable {
         this.activeOrderIndex = runtime.activeOrdersForConstruction();
         this.adlPositionIndex = runtime.adlPositionsForConstruction();
         this.riskSnapshotIndex = runtime.riskSnapshotsForConstruction();
-        if (RUNTIME_PLACE_ORDER_SHADOW && productLine == ProductLine.LINEAR_PERPETUAL) {
+        if (RUNTIME_PLACE_ORDER_SHADOW) {
             this.runtimePlaceOrderIdentities = new RuntimeIdentityRegistry();
             this.runtimePlaceOrderState = RuntimeStateProjector.project(tradingState, runtimePlaceOrderIdentities);
             this.runtimePlaceOrderCoreState = tradingState;
@@ -3051,7 +3051,6 @@ public final class CoreProbeState implements AutoCloseable {
         if (next == tradingState) return;
         TradingCoreState previous = tradingState;
         boolean runtimeCanAdvance = RUNTIME_PLACE_ORDER_SHADOW
-                && productLine == ProductLine.LINEAR_PERPETUAL
                 && runtimePlaceOrderCoreState == previous;
         TradingCoreState authoritativeNext = next;
         if (runtimeCanAdvance) {
@@ -3060,7 +3059,7 @@ public final class CoreProbeState implements AutoCloseable {
             authoritativeNext = RuntimeStateMaterializer.materialize(
                     runtimePlaceOrderState, runtimePlaceOrderIdentities);
             runtimePlaceOrderCoreState = authoritativeNext;
-        } else if (RUNTIME_PLACE_ORDER_SHADOW && productLine == ProductLine.LINEAR_PERPETUAL
+        } else if (RUNTIME_PLACE_ORDER_SHADOW
                 && runtimePlaceOrderCoreState == next) {
             RuntimeStateParityChecker.assertMatches(next, runtimePlaceOrderIdentities, runtimePlaceOrderState);
             authoritativeNext = RuntimeStateMaterializer.materialize(
