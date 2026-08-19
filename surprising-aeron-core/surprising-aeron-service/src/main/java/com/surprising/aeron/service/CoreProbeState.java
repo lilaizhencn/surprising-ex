@@ -62,7 +62,6 @@ import com.surprising.aeron.service.state.RuntimePlaceOrderDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.RuntimeStateParityChecker;
 import com.surprising.aeron.service.state.RuntimeStateDeltaApplier;
-import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualLiquidationProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualRiskProcessor;
@@ -107,6 +106,8 @@ public final class CoreProbeState implements AutoCloseable {
             "surprising.aeron.benchmark.skip-matching-submit");
     private static final boolean RUNTIME_PLACE_ORDER_SHADOW = Boolean.parseBoolean(System.getProperty(
             "surprising.aeron.runtime.place-order-shadow", "true"));
+    private static final boolean RUNTIME_FULL_PARITY = Boolean.getBoolean(
+            "surprising.aeron.runtime.full-parity");
     private static final int MATCHING_PHASE_LOG_INTERVAL = Integer.getInteger(
             "surprising.aeron.matching-phase-log-interval", 100);
     private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
@@ -3055,16 +3056,15 @@ public final class CoreProbeState implements AutoCloseable {
         TradingCoreState authoritativeNext = next;
         if (runtimeCanAdvance) {
             RuntimeStateDeltaApplier.apply(previous, next, runtimePlaceOrderState, runtimePlaceOrderIdentities);
-            RuntimeStateParityChecker.assertMatches(next, runtimePlaceOrderIdentities, runtimePlaceOrderState);
-            authoritativeNext = RuntimeStateMaterializer.materialize(
-                    runtimePlaceOrderState, runtimePlaceOrderIdentities);
-            runtimePlaceOrderCoreState = authoritativeNext;
+            if (RUNTIME_FULL_PARITY) {
+                RuntimeStateParityChecker.assertMatches(next, runtimePlaceOrderIdentities, runtimePlaceOrderState);
+            }
+            runtimePlaceOrderCoreState = next;
         } else if (RUNTIME_PLACE_ORDER_SHADOW
                 && runtimePlaceOrderCoreState == next) {
-            RuntimeStateParityChecker.assertMatches(next, runtimePlaceOrderIdentities, runtimePlaceOrderState);
-            authoritativeNext = RuntimeStateMaterializer.materialize(
-                    runtimePlaceOrderState, runtimePlaceOrderIdentities);
-            runtimePlaceOrderCoreState = authoritativeNext;
+            if (RUNTIME_FULL_PARITY) {
+                RuntimeStateParityChecker.assertMatches(next, runtimePlaceOrderIdentities, runtimePlaceOrderState);
+            }
         }
         runtime.transition(previous, next, authoritativeNext);
         rollingBusinessStateHash.update(previous, authoritativeNext);
@@ -3096,7 +3096,11 @@ public final class CoreProbeState implements AutoCloseable {
     private void restoreCommandState(TradingCoreState state) {
         tradingState = state;
         rollingBusinessStateHash.restore(state);
-        runtimePlaceOrderCoreState = null;
+        if (RUNTIME_PLACE_ORDER_SHADOW) {
+            runtimePlaceOrderIdentities = new RuntimeIdentityRegistry();
+            runtimePlaceOrderState = RuntimeStateProjector.project(state, runtimePlaceOrderIdentities);
+            runtimePlaceOrderCoreState = state;
+        }
     }
 
     private static long triggerChildOrderId(long triggerOrderId, TradingCoreState state) {

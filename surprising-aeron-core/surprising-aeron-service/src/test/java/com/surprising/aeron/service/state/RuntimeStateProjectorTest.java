@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderType;
@@ -10,12 +11,47 @@ import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class RuntimeStateProjectorTest {
+
+    @Test
+    void keepsRuntimeInParityAcrossIncrementalPlaceAndStampTransitions() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        state = reducer.upsertInstrument(state, new UpsertInstrumentCommand("BTC-USDT", 1,
+                ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 1_000_000));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+
+        for (int index = 0; index < 50; index++) {
+            long orderId = 10_000 + index;
+            PlaceOrderCommand command = new PlaceOrderCommand(orderId, "BTC-USDT", 1,
+                    "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 1, false,
+                    CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN,
+                    "USDT", 1_000, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 1_000, false,
+                    "incremental-" + orderId, 0, 0);
+            TradingCoreState placed = reducer.placeOrder(state, 7, command, new UUID(0, orderId), 0);
+            RuntimeStateDeltaApplier.apply(state, placed, runtime, identities);
+            TradingCoreState stamped = placed.stampOrderChanges(state, 1_000 + index, 2_000 + index,
+                    java.util.List.of(orderId));
+            RuntimeStateDeltaApplier.apply(placed, stamped, runtime, identities);
+            state = stamped;
+        }
+
+        RuntimeStateParityChecker.assertMatches(state, identities, runtime);
+        assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(995_000);
+        assertThat(runtime.balance(7, identities.assetId("USDT")).lockedUnits()).isEqualTo(5_000);
+        assertThat(runtime.order(10_049).clusterPosition()).isEqualTo(2_049);
+    }
 
     @Test
     void projectsBalancesOrdersAndReservationsWithoutChangingFunds() {
