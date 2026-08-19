@@ -56,6 +56,16 @@ import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.RuntimeCancelOrderDeltaApplier;
+import com.surprising.aeron.service.state.RuntimePlaceOrderDeltaApplier;
+import com.surprising.aeron.service.state.RuntimeStateProjector;
+import com.surprising.aeron.service.state.RuntimeStateParityChecker;
+import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
+import com.surprising.aeron.service.state.RuntimePerpetualLiquidationProcessor;
+import com.surprising.aeron.service.state.RuntimePerpetualRiskProcessor;
+import com.surprising.aeron.service.state.RuntimePerpetualMatchProcessor;
+import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderState;
 import com.surprising.aeron.service.state.CoreRiskState;
@@ -66,6 +76,7 @@ import com.surprising.aeron.service.matching.BookBootstrapSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -90,6 +101,12 @@ public final class CoreProbeState implements AutoCloseable {
     private static final int MAX_BOOK_BOOTSTRAP_SNAPSHOTS = 4;
     private static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
     private static final System.Logger LOG = System.getLogger(CoreProbeState.class.getName());
+    private static final boolean BENCHMARK_SKIP_MATCHING_SUBMIT = Boolean.getBoolean(
+            "surprising.aeron.benchmark.skip-matching-submit");
+    private static final boolean RUNTIME_PLACE_ORDER_SHADOW = Boolean.getBoolean(
+            "surprising.aeron.runtime.place-order-shadow");
+    private static final int MATCHING_PHASE_LOG_INTERVAL = Integer.getInteger(
+            "surprising.aeron.matching-phase-log-interval", 100);
     private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
     private static final long HASH_PRIME = 0x100000001b3L;
     private static final int MATCHING_PENDING_WIRE_CODE = 66;
@@ -121,6 +138,9 @@ public final class CoreProbeState implements AutoCloseable {
     private final AdlPositionIndex adlPositionIndex;
     private final RiskSnapshotIndex riskSnapshotIndex;
     private final CoreExportState exportState;
+    private final CoreMatchingPhaseMetrics matchingPhaseMetrics = new CoreMatchingPhaseMetrics();
+    private final Map<Long, Long> matchingSubmitNanos = new ConcurrentHashMap<>();
+    private long completedMatchingCount;
     private final TerminalStateRetention terminalRetention;
     private final com.surprising.aeron.service.state.RollingBusinessStateHash rollingBusinessStateHash;
     private long appliedCommandCount;
@@ -128,6 +148,9 @@ public final class CoreProbeState implements AutoCloseable {
     private long cachedBusinessStateHash;
     private long lastSourceSequenceDigest;
     private long nextAsyncQueryId = Long.MIN_VALUE;
+    private RuntimeIdentityRegistry runtimePlaceOrderIdentities;
+    private TradingRuntimeState runtimePlaceOrderState;
+    private TradingCoreState runtimePlaceOrderCoreState;
     private com.surprising.aeron.service.matching.FatalMatchingDivergenceException fatalFailure;
     private TradingCoreState tradingState;
     private List<CoreOrderStateView> commandOrderViews = List.of();
@@ -195,6 +218,15 @@ public final class CoreProbeState implements AutoCloseable {
         this.activeOrderIndex = runtime.activeOrdersForConstruction();
         this.adlPositionIndex = runtime.adlPositionsForConstruction();
         this.riskSnapshotIndex = runtime.riskSnapshotsForConstruction();
+        if (RUNTIME_PLACE_ORDER_SHADOW && productLine == ProductLine.LINEAR_PERPETUAL) {
+            this.runtimePlaceOrderIdentities = new RuntimeIdentityRegistry();
+            this.runtimePlaceOrderState = RuntimeStateProjector.project(tradingState, runtimePlaceOrderIdentities);
+            this.runtimePlaceOrderCoreState = tradingState;
+        } else {
+            this.runtimePlaceOrderIdentities = null;
+            this.runtimePlaceOrderState = null;
+            this.runtimePlaceOrderCoreState = null;
+        }
     }
 
     static CoreProbeState restore(
@@ -902,6 +934,10 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 prepareOrderBatchItem(batch, item, pending.command().header().userId(), pending.command().header().commandId());
                 batch.currentBefore = before;
+                if (batch.kind == OrderBatchKind.PLACE) {
+                    PlaceOrderCommand command = (PlaceOrderCommand) item.command;
+                    shadowPlaceOrder(before, tradingState, pending.command().header().userId(), command.orderId());
+                }
                 submitMatching(pending);
                 return null;
             } catch (CoreStateRejectedException exception) {
@@ -1037,8 +1073,10 @@ public final class CoreProbeState implements AutoCloseable {
             case PLACE -> {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 if (matchingResult.accepted()) {
+                    TradingCoreState matchBefore = tradingState;
                     adoptState(tradingReducer.applyMatches(tradingState, command.orderId(), command.baseAsset(),
                             command.quoteAsset(), matchingResult.matches()));
+                    shadowMatch(matchBefore, tradingState, command.orderId(), matchingResult.matches());
                 } else {
                     adoptState(tradingReducer.rejectPlaceOrder(tradingState,
                             pending.command().header().userId(), command.orderId()));
@@ -1049,6 +1087,8 @@ public final class CoreProbeState implements AutoCloseable {
                 CancelOrderCommand command = (CancelOrderCommand) item.command;
                 if (matchingResult.accepted()) {
                     adoptState(tradingReducer.cancelOrder(tradingState, pending.command().header().userId(), command));
+                    shadowCancelOrder(batch.currentBefore, tradingState,
+                            pending.command().header().userId(), command.orderId());
                 }
                 return List.of();
             }
@@ -1188,6 +1228,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private CoreResponse beginMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                        SourceKey sourceKey) {
+        long matchingStartNanos = System.nanoTime();
         int requiredExportCapacity = switch (message.header().messageType()) {
             case EXECUTE_LIQUIDATION, EXECUTE_LIQUIDATION_BATCH, SETTLE_INSTRUMENT -> 3;
             default -> 2;
@@ -1236,6 +1277,7 @@ public final class CoreProbeState implements AutoCloseable {
                     requireOrderIdentityAvailable(message.header().userId(), command);
                     adoptState(tradingReducer.placeOrder(tradingState, message.header().userId(), command,
                             message.header().commandId(), openInterestIndex.openInterestSteps(command.symbol())));
+                    shadowPlaceOrder(before, tradingState, message.header().userId(), command.orderId());
                     commandChangedUserIds = List.of(message.header().userId());
                     commandChangedOrderIds = List.of(command.orderId());
                     commandOrderViews = List.of(orderView(tradingState.order(command.orderId())));
@@ -1306,6 +1348,7 @@ public final class CoreProbeState implements AutoCloseable {
         byte[] responseData = commandResultData();
         storeResult(message.header().commandId(), new StoredResult(CommandFingerprint.of(message), ResponseStatus.OK,
                 matchingPendingCode(), appliedCommandCount, requiredExportSequence, stateHash, responseData, 0));
+        matchingPhaseMetrics.recordPrepare(System.nanoTime() - matchingStartNanos);
         submitMatching(pending);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
                 appliedCommandCount, requiredExportSequence, stateHash, responseData);
@@ -1655,7 +1698,212 @@ public final class CoreProbeState implements AutoCloseable {
         }
     }
 
+    private void shadowPlaceOrder(TradingCoreState before, TradingCoreState after,
+                                  long userId, long orderId) {
+        if (!RUNTIME_PLACE_ORDER_SHADOW || productLine != ProductLine.LINEAR_PERPETUAL) return;
+        if (runtimePlaceOrderCoreState != before) {
+            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            TradingRuntimeState state = RuntimeStateProjector.project(before, identities);
+            runtimePlaceOrderIdentities = identities;
+            runtimePlaceOrderState = state;
+        }
+        RuntimePlaceOrderDeltaApplier.apply(before, after, userId, orderId,
+                runtimePlaceOrderState, runtimePlaceOrderIdentities);
+        RuntimeStateParityChecker.assertMatches(after, runtimePlaceOrderIdentities, runtimePlaceOrderState);
+        runtimePlaceOrderCoreState = after;
+    }
+
+    private void shadowCancelOrder(TradingCoreState before, TradingCoreState after,
+                                   long userId, long orderId) {
+        if (!RUNTIME_PLACE_ORDER_SHADOW || productLine != ProductLine.LINEAR_PERPETUAL) return;
+        if (runtimePlaceOrderCoreState != before) {
+            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            TradingRuntimeState state = RuntimeStateProjector.project(before, identities);
+            runtimePlaceOrderIdentities = identities;
+            runtimePlaceOrderState = state;
+        }
+        RuntimeCancelOrderDeltaApplier.apply(before, after, userId, orderId,
+                runtimePlaceOrderState, runtimePlaceOrderIdentities);
+        RuntimeStateParityChecker.assertMatches(after, runtimePlaceOrderIdentities, runtimePlaceOrderState);
+        runtimePlaceOrderCoreState = after;
+    }
+
+    private void shadowMatch(TradingCoreState before, TradingCoreState after, long takerOrderId,
+                             java.util.List<com.surprising.aeron.service.matching.CoreMatch> matches) {
+        if (!RUNTIME_PLACE_ORDER_SHADOW || productLine != ProductLine.LINEAR_PERPETUAL
+                || before == after) return;
+        if (runtimePlaceOrderCoreState != before) {
+            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            runtimePlaceOrderIdentities = identities;
+            runtimePlaceOrderState = RuntimeStateProjector.project(before, identities);
+        }
+        TradingRuntimeState nativeResult = RuntimePerpetualMatchProcessor.simulate(
+                before, takerOrderId, matches, runtimePlaceOrderIdentities);
+        RuntimeStateParityChecker.assertMatches(after, runtimePlaceOrderIdentities, nativeResult);
+        runtimePlaceOrderState = nativeResult;
+        runtimePlaceOrderCoreState = after;
+    }
+
+    private void shadowFunding(TradingCoreState before, TradingCoreState after,
+                               com.surprising.aeron.protocol.ApplyFundingCommand command,
+                               Iterable<Long> indexedUserIds, UUID chunkCommandId) {
+        if (!RUNTIME_PLACE_ORDER_SHADOW || productLine != ProductLine.LINEAR_PERPETUAL) return;
+        if (runtimePlaceOrderCoreState != before) {
+            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            runtimePlaceOrderIdentities = identities;
+            runtimePlaceOrderState = RuntimeStateProjector.project(before, identities);
+        }
+        var nativeResult = RuntimePerpetualFundingProcessor.simulate(before, command, indexedUserIds,
+                chunkCommandId, runtimePlaceOrderIdentities);
+        RuntimeStateParityChecker.assertMatches(after, runtimePlaceOrderIdentities, nativeResult.state());
+        runtimePlaceOrderState = nativeResult.state();
+        runtimePlaceOrderCoreState = after;
+    }
+
+    private void shadowRisk(TradingCoreState before, TradingCoreState after,
+                            com.surprising.aeron.protocol.ApplyMarkPriceCommand command,
+                            Iterable<Long> indexedUserIds) {
+        if (!RUNTIME_PLACE_ORDER_SHADOW || productLine != ProductLine.LINEAR_PERPETUAL) return;
+        ensureRuntimeShadow(before);
+        RuntimePerpetualRiskProcessor.applyMarkPrice(before, command, indexedUserIds,
+                runtimePlaceOrderState, runtimePlaceOrderIdentities);
+        RuntimeStateParityChecker.assertMatches(after, runtimePlaceOrderIdentities, runtimePlaceOrderState);
+        runtimePlaceOrderCoreState = after;
+    }
+
+    private void shadowRiskContinuation(TradingCoreState before, TradingCoreState after,
+                                         int maxUsers, Iterable<Long> indexedUserIds) {
+        if (!RUNTIME_PLACE_ORDER_SHADOW || productLine != ProductLine.LINEAR_PERPETUAL) return;
+        ensureRuntimeShadow(before);
+        RuntimePerpetualRiskProcessor.applyContinuation(before, maxUsers, indexedUserIds,
+                runtimePlaceOrderState, runtimePlaceOrderIdentities);
+        RuntimeStateParityChecker.assertMatches(after, runtimePlaceOrderIdentities, runtimePlaceOrderState);
+        runtimePlaceOrderCoreState = after;
+    }
+
+    private void ensureRuntimeShadow(TradingCoreState expected) {
+        if (runtimePlaceOrderCoreState == expected) return;
+        runtimePlaceOrderIdentities = new RuntimeIdentityRegistry();
+        runtimePlaceOrderState = RuntimeStateProjector.project(expected, runtimePlaceOrderIdentities);
+        runtimePlaceOrderCoreState = expected;
+    }
+
+    private void reconcileRuntimeAfterTriggerScan() {
+        if (!RUNTIME_PLACE_ORDER_SHADOW || productLine != ProductLine.LINEAR_PERPETUAL
+                || runtimePlaceOrderCoreState == null) return;
+        TradingCoreState base = runtimePlaceOrderCoreState;
+        if (base.users() != tradingState.users() || base.orders() != tradingState.orders()
+                || base.instruments() != tradingState.instruments()
+                || base.riskState().markPrices() != tradingState.riskState().markPrices()
+                || base.riskState().snapshots() != tradingState.riskState().snapshots()
+                || base.riskState().liquidations() != tradingState.riskState().liquidations()
+                || base.riskState().nextLiquidationId() != tradingState.riskState().nextLiquidationId()
+                || base.treasuryState() != tradingState.treasuryState()
+                || base.clientOrderIndex() != tradingState.clientOrderIndex()) {
+            runtimePlaceOrderCoreState = null;
+            return;
+        }
+        RuntimePerpetualRiskProcessor.syncScanProgress(
+                tradingState, runtimePlaceOrderState, runtimePlaceOrderIdentities);
+        RuntimeStateParityChecker.assertMatches(
+                tradingState, runtimePlaceOrderIdentities, runtimePlaceOrderState);
+        runtimePlaceOrderCoreState = tradingState;
+    }
+
+    private TradingCoreState executeLiquidationWithShadow(TradingCoreState before,
+                                                           com.surprising.aeron.protocol.ExecuteLiquidationCommand command,
+                                                           boolean afterCancellation) {
+        TradingCoreState after = afterCancellation
+                ? tradingReducer.executeLiquidationAfterCancellation(before, command)
+                : tradingReducer.executeLiquidation(before, command);
+        if (RUNTIME_PLACE_ORDER_SHADOW && productLine == ProductLine.LINEAR_PERPETUAL) {
+            if (runtimePlaceOrderCoreState != before) {
+                RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+                runtimePlaceOrderIdentities = identities;
+                runtimePlaceOrderState = RuntimeStateProjector.project(before, identities);
+            }
+            TradingRuntimeState nativeResult = RuntimePerpetualLiquidationProcessor.simulateExecution(
+                    before, command, runtimePlaceOrderIdentities);
+            RuntimeStateParityChecker.assertMatches(after, runtimePlaceOrderIdentities, nativeResult);
+            runtimePlaceOrderState = nativeResult;
+            runtimePlaceOrderCoreState = after;
+        }
+        return after;
+    }
+
+    private TradingCoreState executeLiquidationAfterCancellationsWithShadow(
+            TradingCoreState before, TradingCoreState canceled,
+            com.surprising.aeron.protocol.ExecuteLiquidationCommand command,
+            Collection<CoreOrderState> canceledOrders) {
+        TradingCoreState after = tradingReducer.executeLiquidationAfterCancellation(canceled, command);
+        if (RUNTIME_PLACE_ORDER_SHADOW && productLine == ProductLine.LINEAR_PERPETUAL) {
+            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            TradingRuntimeState nativeResult = RuntimePerpetualLiquidationProcessor.simulateExecution(
+                    before, command, canceledOrders, identities);
+            RuntimeStateParityChecker.assertMatches(after, identities, nativeResult);
+            runtimePlaceOrderIdentities = identities;
+            runtimePlaceOrderState = nativeResult;
+            runtimePlaceOrderCoreState = after;
+        }
+        return after;
+    }
+
+    private TradingCoreState advanceLiquidationCancellationWithShadow(
+            TradingCoreState before, com.surprising.aeron.protocol.ExecuteLiquidationCommand command,
+            Collection<CoreOrderState> canceledOrders, long nextCursorOrderId) {
+        TradingCoreState after = tradingReducer.advanceLiquidationCancellation(
+                before, command, canceledOrders, nextCursorOrderId);
+        if (RUNTIME_PLACE_ORDER_SHADOW && productLine == ProductLine.LINEAR_PERPETUAL) {
+            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            TradingRuntimeState nativeResult = RuntimePerpetualLiquidationProcessor.simulateCancellationAdvance(
+                    before, command, canceledOrders, nextCursorOrderId, identities);
+            RuntimeStateParityChecker.assertMatches(after, identities, nativeResult);
+            runtimePlaceOrderIdentities = identities;
+            runtimePlaceOrderState = nativeResult;
+            runtimePlaceOrderCoreState = after;
+        }
+        return after;
+    }
+
+    private TradingCoreState resolveLiquidationWithShadow(TradingCoreState before,
+                                                           com.surprising.aeron.protocol.ResolveLiquidationCommand command) {
+        TradingCoreState after = tradingReducer.resolveLiquidation(before, command);
+        if (RUNTIME_PLACE_ORDER_SHADOW && productLine == ProductLine.LINEAR_PERPETUAL) {
+            if (runtimePlaceOrderCoreState != before) {
+                RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+                runtimePlaceOrderIdentities = identities;
+                runtimePlaceOrderState = RuntimeStateProjector.project(before, identities);
+            }
+            TradingRuntimeState nativeResult = RuntimePerpetualLiquidationProcessor.simulateResolution(
+                    before, command, runtimePlaceOrderIdentities);
+            RuntimeStateParityChecker.assertMatches(after, runtimePlaceOrderIdentities, nativeResult);
+            runtimePlaceOrderState = nativeResult;
+            runtimePlaceOrderCoreState = after;
+        }
+        return after;
+    }
+
+    private TradingCoreState executeAdlWithShadow(TradingCoreState before,
+                                                  com.surprising.aeron.protocol.ExecuteAdlCommand command) {
+        TradingCoreState after = tradingReducer.executeAdl(before, command);
+        if (RUNTIME_PLACE_ORDER_SHADOW && productLine == ProductLine.LINEAR_PERPETUAL) {
+            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            TradingRuntimeState nativeResult = RuntimePerpetualLiquidationProcessor.simulateAdl(
+                    before, command, identities);
+            RuntimeStateParityChecker.assertMatches(after, identities, nativeResult);
+            runtimePlaceOrderIdentities = identities;
+            runtimePlaceOrderState = nativeResult;
+            runtimePlaceOrderCoreState = after;
+        }
+        return after;
+    }
+
     private void submitMatching(PendingMatching pending) {
+        if (BENCHMARK_SKIP_MATCHING_SUBMIT) {
+            completedMatching.put(pending.sequence(),
+                    new com.surprising.aeron.service.matching.CoreMatchingResult(true, "BENCHMARK_SKIPPED", List.of()));
+            return;
+        }
         if (pendingOrderBatches.containsKey(pending.sequence())) {
             submitOrderBatchMatching(pending);
             return;
@@ -1673,6 +1921,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> submitMatchingNow(
             PendingMatching pending) {
+        matchingSubmitNanos.put(pending.sequence(), System.nanoTime());
         CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future;
         try {
             future = switch (pending.operation()) {
@@ -1832,6 +2081,11 @@ public final class CoreProbeState implements AutoCloseable {
         assertHealthy();
         PendingMatching pending = pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
+        Long submitNanos = matchingSubmitNanos.remove(sequence);
+        if (submitNanos != null) {
+            matchingPhaseMetrics.recordExchange(System.nanoTime() - submitNanos);
+        }
+        long applyStartNanos = System.nanoTime();
         if (pendingOrderBatches.containsKey(sequence)) {
             return completeOrderBatchMatching(sequence, matchingResult, clusterTimestamp, clusterPosition);
         }
@@ -1869,6 +2123,8 @@ public final class CoreProbeState implements AutoCloseable {
                             command.quoteAsset(), matchingResult.matches())
                             : tradingReducer.rejectPlaceOrder(tradingState, pending.command().header().userId(),
                             command.orderId()));
+                    if (matchingResult.accepted()) shadowMatch(before, tradingState, command.orderId(),
+                            matchingResult.matches());
                     commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
                             matchingResult.matches());
                 }
@@ -1879,6 +2135,8 @@ public final class CoreProbeState implements AutoCloseable {
                     if (matchingResult.accepted()) {
                         adoptState(tradingReducer.cancelOrder(tradingState,
                                 pending.command().header().userId(), command));
+                        shadowCancelOrder(before, tradingState,
+                                pending.command().header().userId(), command.orderId());
                     }
                 }
                 case REPLACE, AMEND -> {
@@ -1948,18 +2206,19 @@ public final class CoreProbeState implements AutoCloseable {
                     commandChangedUserIds = liquidation == null ? List.of() : List.of(liquidation.userId());
                     if (matchingResult.accepted() && liquidation != null) {
                         if (!tradingReducer.isLiquidationExecutable(tradingState, command)) {
-                            adoptState(tradingReducer.executeLiquidation(tradingState, command));
+                            adoptState(executeLiquidationWithShadow(tradingState, command, false));
                             commandLiquidationProgress = new CoreLiquidationProgressView(true, 0,
                                     chunk.orders().size());
                         } else if (chunk.more()) {
-                            adoptState(tradingReducer.advanceLiquidationCancellation(tradingState, command,
+                            adoptState(advanceLiquidationCancellationWithShadow(tradingState, command,
                                     chunk.orders(), chunk.nextCursorOrderId()));
                             commandLiquidationProgress = new CoreLiquidationProgressView(false,
                                     chunk.nextCursorOrderId(), chunk.orders().size());
                         } else {
                             TradingCoreState canceled = tradingReducer.cancelLifecycleOrders(tradingState,
                                     chunk.orders());
-                            adoptState(tradingReducer.executeLiquidationAfterCancellation(canceled, command));
+                            adoptState(executeLiquidationAfterCancellationsWithShadow(
+                                    tradingState, canceled, command, chunk.orders()));
                             commandLiquidationProgress = new CoreLiquidationProgressView(true, 0,
                                     chunk.orders().size());
                         }
@@ -2002,6 +2261,12 @@ public final class CoreProbeState implements AutoCloseable {
                     commandChangedOrderIds));
         }
         commandDelta = commandDelta(before, tradingState, true);
+        matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
+        completedMatchingCount++;
+        if (MATCHING_PHASE_LOG_INTERVAL > 0 && completedMatchingCount % MATCHING_PHASE_LOG_INTERVAL == 0) {
+            LOG.log(System.Logger.Level.INFO, "matching phases count=" + completedMatchingCount + " "
+                    + matchingPhaseMetrics.reportAndReset());
+        }
         long businessStateHash = tradingState == before ? cachedBusinessStateHash : rollingBusinessStateHash.value();
         long applied = Math.incrementExact(appliedCommandCount);
         long requiredExportSequence = exportState.append(pending.command(), status, resultCode, applied, businessStateHash,
@@ -2065,20 +2330,21 @@ public final class CoreProbeState implements AutoCloseable {
             changedOrders.addAll(chunk.orders().stream().mapToLong(CoreOrderState::orderId).boxed().toList());
             changedUsers.add(liquidation.userId());
             if (!tradingReducer.isLiquidationExecutable(tradingState, single)) {
-                adoptState(tradingReducer.executeLiquidation(tradingState, single));
+                adoptState(executeLiquidationWithShadow(tradingState, single, false));
                 applied++;
                 continue;
             }
             processedOrders += chunk.orders().size();
             remaining -= chunk.orders().size();
             if (chunk.more()) {
-                adoptState(tradingReducer.advanceLiquidationCancellation(tradingState, single,
+                adoptState(advanceLiquidationCancellationWithShadow(tradingState, single,
                         chunk.orders(), chunk.nextCursorOrderId()));
                 pending++;
                 continue;
             }
             TradingCoreState canceled = tradingReducer.cancelLifecycleOrders(tradingState, chunk.orders());
-            adoptState(tradingReducer.executeLiquidationAfterCancellation(canceled, single));
+            adoptState(executeLiquidationAfterCancellationsWithShadow(
+                    tradingState, canceled, single, chunk.orders()));
             applied++;
         }
         commandChangedOrderIds = changedOrders.stream().distinct().toList();
@@ -2133,10 +2399,11 @@ public final class CoreProbeState implements AutoCloseable {
             if (chunk.more() || count < chunk.orders().size()) {
                 long nextCursor = count < chunk.orders().size()
                         ? prefix.getLast().orderId() : chunk.nextCursorOrderId();
-                adoptState(tradingReducer.advanceLiquidationCancellation(tradingState, single, prefix, nextCursor));
+                adoptState(advanceLiquidationCancellationWithShadow(tradingState, single, prefix, nextCursor));
             } else {
                 TradingCoreState canceled = tradingReducer.cancelLifecycleOrders(tradingState, prefix);
-                adoptState(tradingReducer.executeLiquidationAfterCancellation(canceled, single));
+                adoptState(executeLiquidationAfterCancellationsWithShadow(
+                        tradingState, canceled, single, prefix));
             }
             var next = tradingState.riskState().liquidations().get(action.liquidationId());
             long nextCursor = next != null && next.status() == CoreLiquidationState.Status.ORDERED
@@ -2181,14 +2448,15 @@ public final class CoreProbeState implements AutoCloseable {
         commandChangedOrderIds = prefix.stream().mapToLong(CoreOrderState::orderId).boxed().toList();
         if (chunk.more() || count < chunk.orders().size()) {
             long nextCursor = count < chunk.orders().size() ? prefix.getLast().orderId() : chunk.nextCursorOrderId();
-            adoptState(tradingReducer.advanceLiquidationCancellation(tradingState, command, prefix, nextCursor));
+            adoptState(advanceLiquidationCancellationWithShadow(tradingState, command, prefix, nextCursor));
             return pending.withCommand(new CoreMessage(pending.command().header(),
                     TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
                             command.liquidationId(), command.triggerPriceSequence(), command.executionPriceTicks(),
                             command.liquidationFeeRatePpm(), nextCursor, command.maxOrders()))));
         }
         TradingCoreState canceled = tradingReducer.cancelLifecycleOrders(tradingState, prefix);
-        adoptState(tradingReducer.executeLiquidationAfterCancellation(canceled, command));
+        adoptState(executeLiquidationAfterCancellationsWithShadow(
+                tradingState, canceled, command, prefix));
         return pending;
     }
 
@@ -2467,16 +2735,23 @@ public final class CoreProbeState implements AutoCloseable {
                 var command = TradingCommandCodec.decodeApplyMarkPrice(message.payload());
                 int pendingBefore = pendingRiskScanCount();
                 long startedAt = System.nanoTime();
-                adoptState(tradingReducer.applyMarkPrice(tradingState, command, positionUserIndex, liquidationIndex));
+                TradingCoreState before = tradingState;
+                TradingCoreState after = tradingReducer.applyMarkPrice(before, command, positionUserIndex, liquidationIndex);
+                shadowRisk(before, after, command, positionUserIndex.users(command.symbol()));
+                adoptState(after);
                 initializeTriggerScan(command);
                 logRiskScan("mark-price", command.symbol(), tradingState.riskState().scanControl().scanBatchSize(),
                         pendingBefore, startedAt);
                 evaluateMarkPriceTriggers(command, message.header().commandId(), message.header().submittedAtEpochMillis());
+                reconcileRuntimeAfterTriggerScan();
             }
             case APPLY_FUNDING -> {
                 var command = TradingCommandCodec.decodeApplyFunding(message.payload());
-                var result = tradingReducer.applyFundingWithFacts(tradingState,
-                        command, positionUserIndex.users(command.symbol()), message.header().commandId());
+                TradingCoreState before = tradingState;
+                Iterable<Long> indexedUserIds = positionUserIndex.users(command.symbol());
+                var result = tradingReducer.applyFundingWithFacts(before,
+                        command, indexedUserIds, message.header().commandId());
+                shadowFunding(before, result.state(), command, indexedUserIds, message.header().commandId());
                 adoptState(result.state());
                 commandFundingPayments = result.payments();
                 commandFundingProgress = result.progress();
@@ -2486,9 +2761,9 @@ public final class CoreProbeState implements AutoCloseable {
             case EXECUTE_ADL -> {
                 var command = TradingCommandCodec.decodeExecuteAdl(message.payload());
                 commandChangedUserIds = List.of(command.targetUserId());
-                adoptState(tradingReducer.executeAdl(tradingState, command));
+                adoptState(executeAdlWithShadow(tradingState, command));
             }
-            case RESOLVE_LIQUIDATION -> adoptState(tradingReducer.resolveLiquidation(tradingState,
+            case RESOLVE_LIQUIDATION -> adoptState(resolveLiquidationWithShadow(tradingState,
                     TradingCommandCodec.decodeResolveLiquidation(message.payload())));
             case CONTINUE_RISK_SCAN -> {
                 var command = TradingCommandCodec.decodeContinueRiskScan(message.payload());
@@ -2500,9 +2775,14 @@ public final class CoreProbeState implements AutoCloseable {
                 String symbol = tradingState.riskState().scan().symbol();
                 int pendingBefore = pendingRiskScanCount();
                 long startedAt = System.nanoTime();
-                adoptState(tradingReducer.continueRiskScan(tradingState, command.maxUsers(), positionUserIndex,
-                        liquidationIndex));
+                TradingCoreState before = tradingState;
+                TradingCoreState after = tradingReducer.continueRiskScan(before, command.maxUsers(), positionUserIndex,
+                        liquidationIndex);
+                shadowRiskContinuation(before, after, command.maxUsers(),
+                        positionUserIndex.users(before.riskState().scan().symbol()));
+                adoptState(after);
                 evaluatePendingTriggerScan(symbol);
+                reconcileRuntimeAfterTriggerScan();
                 logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
             }
             case UPDATE_RISK_SCAN_CONTROL -> {
@@ -2930,6 +3210,7 @@ public final class CoreProbeState implements AutoCloseable {
     private void restoreCommandState(TradingCoreState state) {
         tradingState = state;
         rollingBusinessStateHash.restore(state);
+        runtimePlaceOrderCoreState = null;
     }
 
     private static long triggerChildOrderId(long triggerOrderId, TradingCoreState state) {

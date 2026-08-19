@@ -34,6 +34,7 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
+import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
@@ -90,25 +91,35 @@ public class OrderService {
     public OrderCommandReceipt placeCommand(PlaceOrderRequest request) {
         requireAeron();
         PreparedAeronOrder prepared = prepareAeronOrder(normalize(request));
-        return aeronOrders.receipt(aeronOrders.placeCommand(prepared.request(), prepared.validation(), prepared.fee()));
+        var execution = prepared.instrument() == null
+                ? aeronOrders.placeCommand(prepared.request(), prepared.validation(), prepared.fee())
+                : aeronOrders.placeCommand(prepared.request(), prepared.validation(), prepared.fee(),
+                prepared.instrument());
+        return aeronOrders.receipt(execution);
     }
 
     private OrderResponse placeAeron(PlaceOrderRequest request) {
         requireAeron();
         PlaceOrderRequest normalized = normalize(request);
         PreparedAeronOrder prepared = prepareAeronOrder(normalized);
-        return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee());
+        if (prepared.instrument() == null) {
+            return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee());
+        }
+        return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee(), prepared.instrument());
     }
 
     private PreparedAeronOrder prepareAeronOrder(PlaceOrderRequest normalized) {
         ProductLine productLine = currentProductLine();
         normalized = normalizePositionSemantics(normalized, productLine);
-        ValidationResult validation = orderValidator.validate(normalized);
+        InstrumentRule instrument = orderValidator.currentRule(normalized.symbol()).orElse(null);
+        ValidationResult validation = instrument == null
+                ? orderValidator.validate(normalized)
+                : orderValidator.validate(normalized, instrument);
         if (!validation.accepted()) throw new IllegalArgumentException(validation.rejectReason());
         OrderFeeSnapshot fee = feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
                         validation.instrumentVersion(), Instant.now())
                 .orElseThrow(() -> new IllegalStateException("fee schedule unavailable"));
-        return new PreparedAeronOrder(normalized, validation, fee);
+        return new PreparedAeronOrder(normalized, validation, fee, instrument);
     }
 
     public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
@@ -698,7 +709,7 @@ public class OrderService {
     }
 
     private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation,
-                                      OrderFeeSnapshot fee) {
+                                      OrderFeeSnapshot fee, InstrumentRule instrument) {
     }
 
     private PlaceOrderRequest normalize(PlaceOrderRequest request) {

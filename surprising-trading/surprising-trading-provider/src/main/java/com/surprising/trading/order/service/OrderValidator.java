@@ -36,6 +36,15 @@ public class OrderValidator {
     }
 
     public ValidationResult validate(PlaceOrderRequest request) {
+        InstrumentRule rule = instrumentRuleLookup.currentRule(request.symbol()).orElse(null);
+        return validate(request, rule);
+    }
+
+    public java.util.Optional<InstrumentRule> currentRule(String symbol) {
+        return instrumentRuleLookup.currentRule(symbol);
+    }
+
+    public ValidationResult validate(PlaceOrderRequest request, InstrumentRule rule) {
         if (request.userId() <= 0) {
             return ValidationResult.reject("userId must be positive");
         }
@@ -46,8 +55,6 @@ public class OrderValidator {
             return ValidationResult.reject("quantitySteps must be positive");
         }
 
-        InstrumentRule rule = instrumentRuleLookup.currentRule(request.symbol())
-                .orElse(null);
         if (rule == null) {
             return ValidationResult.reject("unknown symbol");
         }

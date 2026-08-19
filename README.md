@@ -9,6 +9,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 
 ## 已确认架构基线
 
+- Runtime 状态与 immutable Snapshot 状态的分层迁移方案见 [`docs/runtime-state-migration.md`](docs/runtime-state-migration.md)，架构决策见 [`docs/adr/0004-runtime-state-and-deterministic-snapshots.md`](docs/adr/0004-runtime-state-and-deterministic-snapshots.md)。
+
 - 一个 `ProductLine` 变体对应一个逻辑 ProductExecutionCore；逻辑 Core 是一套三 Member Aeron Cluster，
   不是单进程。该 Core 管理本产品线全部 symbol、账户、订单元数据、持仓、风险和生命周期。
 - CROSS 与 ISOLATED 都在同一个 Core 内。CROSS 只共享本产品线 Core 内的权益；ISOLATED 绑定 position identity，
@@ -43,6 +45,76 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 - Matching Provider 只做 Market Data Projection：启动从 Aeron 强查询恢复 L2 和 watermark，随后消费
   单分区连续 Core Event 发布公共深度与成交；历史成交和 24h 查询读取 PG 投影。
 - 四条业务线必须隔离部署和验证；压测前当前变体必须达到 `functional-gate=PASS`、`funds-diff=0`。
+
+## 永续架构图
+
+```mermaid
+flowchart LR
+    Client[交易客户端 / 模拟用户 API] --> Gateway[Gateway REST / WebSocket]
+    Gateway --> Trading[Trading Provider]
+    Gateway --> Account[Account Provider]
+    Gateway --> Risk[Derivatives Lifecycle Provider]
+    Gateway --> Funding[Funding Provider]
+
+    Trading --> Core[LINEAR_PERPETUAL ProductExecutionCore<br/>三节点 Aeron Cluster]
+    Account --> Core
+    Risk --> Core
+    Funding --> Core
+    Core --> Matcher[exchange-core<br/>唯一可执行盘口与 FIFO]
+    Core --> Exporter[Core Exporter<br/>序列化 Export ACK]
+    Exporter --> Kafka[Kafka<br/>公共事件 / WebSocket / 行情]
+    Exporter --> Projection[PostgreSQL 异步投影 / 对账]
+    Market[Price / Market Data Provider] --> Core
+    Maker[Maker Provider<br/>被动 GTX 报价] --> Trading
+    Gateway --> Kafka
+```
+
+永续的余额、订单预留、成交、持仓、保证金、风险和强平裁决都在同一个
+`LINEAR_PERPETUAL` Core 内完成；PostgreSQL、Kafka 和 Valkey 不参与在线资金裁决。
+
+## 永续成交流程图
+
+```mermaid
+sequenceDiagram
+    participant U as 用户 / 做市账号
+    participant G as Gateway
+    participant T as Trading Provider
+    participant C as Aeron Core
+    participant M as exchange-core
+    participant E as Exporter
+    participant K as Kafka / WebSocket
+
+    U->>G: 下单
+    G->>T: 校验产品线、账户与订单参数
+    T->>C: PLACE_ORDER(commandId)
+    C->>C: 校验 instrument / leverage / margin
+    C->>C: 原子冻结结算资产并写入 reservation
+    C->>M: 提交撮合请求
+    M-->>C: FIFO 撮合结果
+    C->>C: 原子结算 maker/taker、手续费、持仓与风险
+    C->>C: 释放已终结订单预留
+    C-->>T: APPLIED + command result
+    T-->>G: 订单与成交响应
+    C->>E: 发布 Core Event / Export Sequence
+    E->>K: 公共成交、盘口和私有推送
+    E->>E: ACK 仅在投影与事件成功后提交
+
+    Note over C,T: 已接受但响应超时不会自动重发
+    C-->>T: ResultUnknown(commandId)
+    T->>C: COMMAND_RESULT_QUERY(commandId)
+    C-->>T: 已提交结果或 RESULT_UNKNOWN_OUTSIDE_RETENTION
+```
+
+`ResultUnknown` 表示命令可能已经进入 Core，客户端不能把它当作“未执行”重发；必须用同一
+`commandId` 查询结果。这次压测发现的故障并非该语义本身，而是用户余额 delta lineage
+校验把同一撮合命令内“成交更新 → 释放预留”的合法多层 delta 误判为状态损坏，已在
+`StateMapSupport` 与 `CoreUserState` 修复并以状态测试和三节点永续 capacity 测试验证。
+
+永续 Runtime 迁移当前已完成下单、撤单、成交、资金费、强平、ADL 和风险扫描的独立原生计算
+与逐字段 parity。风险快照包含 mark price、cross/isolated 结果、分页 scan cursor、liquidation plan
+和 `nextLiquidationId`。连续 mark/continuation 已切换为 owner-thread 持久 Runtime 原地增量提交，
+active liquidation 使用 primitive 分层索引精确定位；旧 `TradingCoreReducer` 仍是在线唯一权威，
+Runtime parity 继续作为切换门禁。
 
 ## 产品线
 

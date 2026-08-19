@@ -59,8 +59,13 @@ class CoreRiskStateTest {
         state = withPosition(state, new CorePositionState("BTC-USDT", "USDT", 1,
                 10, entryPrice, Math.multiplyExact(entryPrice, 10), 0, 100));
 
-        TradingCoreState marked = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-USDT", 1, markPrice, 11, 1_700_000_000_000L));
+        ApplyMarkPriceCommand markCommand = new ApplyMarkPriceCommand(
+                "BTC-USDT", 1, markPrice, 11, 1_700_000_000_000L);
+        TradingCoreState marked = reducer.applyMarkPrice(state, markCommand);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        RuntimeStateParityChecker.assertMatches(marked, identities,
+                RuntimePerpetualRiskProcessor.simulateMarkPrice(
+                        state, markCommand, state.users().keySet(), identities));
 
         CoreRiskSnapshot risk = marked.riskState().snapshots().get("7:BTC-USDT");
         assertThat(risk.status()).isEqualTo(CoreRiskStatus.LIQUIDATION);
@@ -261,6 +266,58 @@ class CoreRiskStateTest {
         assertThat(paged.riskState().scan().riskComplete()).isTrue();
         assertThat(paged.riskState().snapshots()).isEqualTo(unpaged.riskState().snapshots());
         assertThat(paged.riskState().liquidations()).isEqualTo(unpaged.riskState().liquidations());
+    }
+
+    @Test
+    void runtimeRiskMatchesAuthoritativeMarkPriceAndPagedContinuation() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument(ContractType.LINEAR_PERPETUAL, 1));
+        for (long userId = 1; userId <= 260; userId++) {
+            state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
+            state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
+                    1, 100, 100, 0, 10));
+        }
+        ApplyMarkPriceCommand command = new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1,
+                1_700_000_000_000L);
+        TradingCoreState first = reducer.applyMarkPrice(state, command);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        RuntimePerpetualRiskProcessor.applyMarkPrice(
+                state, command, state.users().keySet(), runtime, identities);
+        RuntimeStateParityChecker.assertMatches(first, identities, runtime);
+
+        while (!first.riskState().scan().riskComplete()) {
+            TradingCoreState before = first;
+            first = reducer.continueRiskScan(before, 64);
+            RuntimePerpetualRiskProcessor.applyContinuation(
+                    before, 64, before.users().keySet(), runtime, identities);
+            RuntimeStateParityChecker.assertMatches(first, identities, runtime);
+        }
+        assertThat(first.riskState().snapshots()).hasSize(260);
+        assertThat(first.riskState().liquidations()).isEmpty();
+    }
+
+    @Test
+    void runtimeRiskPreservesOldPassBeforeRestartingLatestPrice() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument(ContractType.LINEAR_PERPETUAL, 1));
+        for (long userId = 1; userId <= 260; userId++) {
+            state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
+            state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
+                    1, 100, 100, 0, 10));
+        }
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 1,
+                1_700_000_000_000L));
+        ApplyMarkPriceCommand latest = new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2,
+                1_700_000_000_001L);
+        TradingCoreState after = reducer.applyMarkPrice(state, latest);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimePerpetualRiskProcessor.simulateMarkPrice(
+                state, latest, state.users().keySet(), identities);
+        RuntimeStateParityChecker.assertMatches(after, identities, runtime);
+        assertThat(after.riskState().scan().scanStartPriceSequence()).isEqualTo(2);
+        assertThat(after.riskState().scan().priceSequence()).isEqualTo(2);
+        assertThat(after.riskState().scan().riskComplete()).isFalse();
     }
 
     private static UpsertInstrumentCommand instrument(ContractType type, long settleScale) {

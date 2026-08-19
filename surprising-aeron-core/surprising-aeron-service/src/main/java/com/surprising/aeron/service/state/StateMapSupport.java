@@ -64,6 +64,17 @@ public final class StateMapSupport {
         return rawAfter instanceof DeltaMap<?, ?> delta && delta.base() == rawBefore;
     }
 
+    static boolean isDeltaDescendantOf(Map<?, ?> before, Map<?, ?> after) {
+        if (before == after) return true;
+        NavigableMap<?, ?> rawBefore = rawUntyped(before);
+        NavigableMap<?, ?> current = rawUntyped(after);
+        while (current instanceof DeltaMap<?, ?> delta) {
+            if (delta.base() == rawBefore) return true;
+            current = delta.base();
+        }
+        return false;
+    }
+
     private static NavigableMap<?, ?> rawUntyped(Map<?, ?> values) {
         if (values instanceof FrozenMap<?, ?> frozen) return frozen.raw();
         return values instanceof NavigableMap<?, ?> navigable ? navigable : null;

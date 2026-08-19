@@ -13,6 +13,9 @@
 - **Risk Scan Control**：Product Core 内控制风险扫描启停、续跑间隔和单批工作上限的版本化策略；它不包含 Instrument 风险参数，也不由数据库配置覆盖。
 - **Trading Provider**：统一承载普通订单和触发订单 HTTP/API、校验、幂等和 Aeron 命令提交的交易入口服务；触发订单不再通过独立进程或 HTTP 回调调用普通订单服务。
 - **Trading Identity**：用户一次明确交易意图的稳定身份；相同用户意图的重试或进程重启仍指向同一订单，普通订单、条件单和算法父单属于不同身份域。
+- **Runtime State**：Product Core owner 线程独占的交易热路径状态；允许使用 primitive/hash 索引和原地更新，但不能被异步回调或外围服务直接写入。
+- **Snapshot State**：由 Runtime State 按确定性顺序生成的不可变业务状态；用于 Cluster 快照、恢复、状态 hash 和对账，不等同于在线查询投影。
+- **Reservation**：订单或持仓对结算资产可用余额的权威冻结记录；冻结、消耗和释放必须与订单状态在同一 Product Core command 内裁决。
 
 ## Boundary
 

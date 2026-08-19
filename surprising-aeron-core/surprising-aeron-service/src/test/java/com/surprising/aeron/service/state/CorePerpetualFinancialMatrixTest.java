@@ -332,8 +332,13 @@ class CorePerpetualFinancialMatrixTest {
                     plan.signedQuantitySteps(), closeQuantity, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
             marked = replaceLiquidation(marked, plan);
         }
-        TradingCoreState ending = reducer.executeLiquidation(marked,
-                new ExecuteLiquidationCommand(1, partial ? 2 : 1, executionPrice, feeRate));
+        ExecuteLiquidationCommand liquidationCommand = new ExecuteLiquidationCommand(
+                1, partial ? 2 : 1, executionPrice, feeRate);
+        RuntimeIdentityRegistry liquidationIdentities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtimeLiquidated = RuntimePerpetualLiquidationProcessor.simulateExecution(
+                marked, liquidationCommand, liquidationIdentities);
+        TradingCoreState ending = reducer.executeLiquidation(marked, liquidationCommand);
+        RuntimeStateParityChecker.assertMatches(ending, liquidationIdentities, runtimeLiquidated);
 
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
@@ -494,8 +499,12 @@ class CorePerpetualFinancialMatrixTest {
     private Row cappedLiquidation(Variant variant) {
         TradingCoreState opening = withPosition(variant, USER_ID, QUANTITY, ENTRY_PRICE, 180, POSITION_MARGIN);
         TradingCoreState marked = mark(opening, variant, 90, 1);
-        TradingCoreState ending = reducer.executeLiquidation(marked,
-                new ExecuteLiquidationCommand(1, 1, 90, 100_000));
+        ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(1, 1, 90, 100_000);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtimeEnding = RuntimePerpetualLiquidationProcessor.simulateExecution(
+                marked, command, identities);
+        TradingCoreState ending = reducer.executeLiquidation(marked, command);
+        RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         boolean isolated = variant.marginMode() == CoreMarginMode.ISOLATED;
         long expectedFee = isolated ? 0 : linearOrInverse(variant, 80, 69);
@@ -521,8 +530,13 @@ class CorePerpetualFinancialMatrixTest {
         long coverage = full ? deficit : 25;
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), coverage));
-        TradingCoreState ending = reducer.resolveLiquidation(funded,
-                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage));
+        ResolveLiquidationCommand command = new ResolveLiquidationCommand(
+                1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtimeEnding = RuntimePerpetualLiquidationProcessor.simulateResolution(
+                funded, command, identities);
+        TradingCoreState ending = reducer.resolveLiquidation(funded, command);
+        RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
 
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         assertThat(result.deficitUnits()).isEqualTo(full ? 0 : deficit - coverage);
@@ -565,9 +579,13 @@ class CorePerpetualFinancialMatrixTest {
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE,
                         insuranceCoverage));
         long residual = linearOrInverse(variant, 865, 48_900);
-        TradingCoreState ending = reducer.executeAdl(beforeAdl,
-                new ExecuteAdlCommand(1, MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
-                        -QUANTITY, 200, 1, 5, residual));
+        ExecuteAdlCommand command = new ExecuteAdlCommand(1, MAKER_ID, SYMBOL, variant.marginMode(),
+                CorePositionSide.NET, -QUANTITY, 200, 1, 5, residual);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtimeEnding = RuntimePerpetualLiquidationProcessor.simulateAdl(
+                beforeAdl, command, identities);
+        TradingCoreState ending = reducer.executeAdl(beforeAdl, command);
+        RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
 
         long targetCashFlow = linearOrInverse(variant, 130, 850);
         long targetEndingEconomic = linearOrInverse(variant, 2_125, 51_600);

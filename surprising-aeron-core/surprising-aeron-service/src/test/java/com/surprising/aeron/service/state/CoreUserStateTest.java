@@ -105,6 +105,26 @@ class CoreUserStateTest {
     }
 
     @Test
+    void acceptsMultipleUserTransitionsWithinOneCommandLineage() {
+        CoreUserState user = fundedUser(1_000, 0);
+        Map<String, AssetBalance> reservedBalances = StateMapSupport.delta(user.balances());
+        reservedBalances.put("USDT", new AssetBalance("USDT", 700, 300));
+        Map<Long, OrderReservation> reservedOrders = StateMapSupport.delta(user.reservations());
+        reservedOrders.put(11L, reservation(11, 300));
+        CoreUserState reserved = user.transition(1, reservedBalances, reservedOrders, user.positions(),
+                user.positionMode());
+
+        Map<String, AssetBalance> settledBalances = StateMapSupport.delta(reserved.balances());
+        settledBalances.put("USDT", new AssetBalance("USDT", 1_000, 0));
+        Map<Long, OrderReservation> settledOrders = StateMapSupport.delta(reserved.reservations());
+        settledOrders.put(11L, reservedOrders.get(11L).releaseAll());
+        CoreUserState settled = reserved.transition(2, settledBalances, settledOrders, reserved.positions(),
+                reserved.positionMode());
+
+        assertThat(settled).satisfies(value -> value.requireIncrementalLineage(user));
+    }
+
+    @Test
     void derivedLocksDoNotChangeSnapshotValueSemantics() {
         CoreUserState original = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 3,
                 Map.of("USDT", new AssetBalance("USDT", 700, 300)),

@@ -71,7 +71,15 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation,
             OrderFeeSnapshot fee) {
-        CommandExecution execution = placeCommand(request, validation, fee);
+        return place(request, validation, fee, null);
+    }
+
+    public OrderResponse place(
+            com.surprising.trading.api.model.PlaceOrderRequest request,
+            ValidationResult validation,
+            OrderFeeSnapshot fee,
+            InstrumentRule instrument) {
+        CommandExecution execution = placeCommand(request, validation, fee, instrument);
         return requireOrder(commandOrder(terminalResponse(execution), execution.prospectiveOrderIds().getFirst()),
                 "placed order missing");
     }
@@ -139,6 +147,18 @@ public class AeronOrderCommandService {
         InstrumentRule instrument = instrumentRules.currentRule(request.symbol())
                 .filter(value -> value.version() == validation.instrumentVersion())
                 .orElseThrow(() -> new IllegalStateException("instrument snapshot changed before Aeron submit"));
+        return buildPlaceCommand(orderId, request, validation, fee, instrument);
+    }
+
+    private PlaceOrderCommand buildPlaceCommand(
+            long orderId,
+            com.surprising.trading.api.model.PlaceOrderRequest request,
+            ValidationResult validation,
+            OrderFeeSnapshot fee,
+            InstrumentRule instrument) {
+        if (instrument.version() != validation.instrumentVersion()) {
+            throw new IllegalStateException("instrument snapshot changed before Aeron submit");
+        }
         long matchingPriceTicks = matchingPriceTicks(request, validation.instrumentVersion());
         String reservationAsset = instrument.spot()
                 ? (request.side() == OrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset())
@@ -180,10 +200,20 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation,
             OrderFeeSnapshot fee) {
+        return placeCommand(request, validation, fee, null);
+    }
+
+    public CommandExecution placeCommand(
+            com.surprising.trading.api.model.PlaceOrderRequest request,
+            ValidationResult validation,
+            OrderFeeSnapshot fee,
+            InstrumentRule validatedInstrument) {
         String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
         ProductLine productLine = requireProductLine(fee.productLine());
         long orderId = StableOrderIdentity.orderId(productLine, request.userId(), clientOrderId);
-        PlaceOrderCommand command = buildPlaceCommand(orderId, request, validation, fee);
+        PlaceOrderCommand command = validatedInstrument == null
+                ? buildPlaceCommand(orderId, request, validation, fee)
+                : buildPlaceCommand(orderId, request, validation, fee, validatedInstrument);
         UUID commandId = StableOrderIdentity.commandId(productLine, request.userId(), clientOrderId);
         CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodePlaceOrder(command));

@@ -39,14 +39,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.function.Function;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
+
+    private static final String MATCHING_ENGINES_PROPERTY = "surprising.aeron.matching-engines";
 
     private ExchangeCore core;
     private ExchangeApi api;
@@ -59,13 +59,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final Map<Long, CompletableFuture<Void>> userRegistrations = new ConcurrentHashMap<>();
     private final AtomicReference<CompletableFuture<Void>> submissionTail =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
-    private final ExecutorService laneDispatcher = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "exchange-core-lane-dispatcher");
-        thread.setDaemon(true);
-        return thread;
-    });
-    private final SymbolMatchingLanes matchingLanes = new SymbolMatchingLanes(laneDispatcher);
-
     public DeterministicExchangeCoreAdapter() {
         this(true);
     }
@@ -113,7 +106,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CompletableFuture<CoreMatchingResult> placeAsync(long userId, PlaceOrderCommand command) {
-        return matchingLanes.enqueue(command.symbol(), () -> placeUnlanedAsync(userId, command));
+        return placeUnlanedAsync(userId, command);
     }
 
     private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, PlaceOrderCommand command) {
@@ -187,11 +180,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private CompletableFuture<CoreMatchingResult> cancelAsync(long userId, long orderId, String symbol) {
-        return matchingLanes.enqueue(symbol, () -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+        return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
                     return api.submitCommandAsync(ApiCancelOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).build());
-                })))
+                }))
                 .thenApply(resultCode -> new CoreMatchingResult(resultCode == CommandResultCode.SUCCESS,
                         resultCode.name(), List.of()));
     }
@@ -203,7 +196,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String symbol,
                                                                     PlaceOrderCommand replacement) {
-        return matchingLanes.enqueue(symbol, () -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+        return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
                     CompletableFuture<CommandResultCode> cancel = api.submitCommandAsync(ApiCancelOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).build());
@@ -229,22 +222,22 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                             });
                         });
                     });
-                })));
+                }));
     }
 
     public CompletableFuture<CoreMatchingResult> replaceAsync(long userId, long orderId, String symbol,
                                                                long newPriceTicks) {
-        return matchingLanes.enqueue(symbol, () -> ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
+        return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
                     CompletableFuture<exchange.core2.core.common.cmd.OrderCommand> submitted = api.submitCommandAsyncFullResponse(ApiMoveOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).newPrice(newPriceTicks).build());
                     return submitted;
-                })))
+                }))
                 .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
     }
 
     public CompletableFuture<Integer> orderBooksStateHashAsync() {
-        return matchingLanes.barrier(() -> currentStateHashesAsync().thenApply(StateHashes::bookHash));
+        return currentStateHashesAsync().thenApply(StateHashes::bookHash);
     }
 
     public CompletableFuture<MatcherSnapshot> snapshotAsync(
@@ -255,7 +248,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (snapshotId <= 0 || coreSequence < 0 || state == null || activeOrders == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher snapshot request"));
         }
-        return matchingLanes.barrier(() -> reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshotId,
+        return reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshotId,
                 "matcher snapshot").thenCompose(ignored -> currentStateHashesAsync()).thenCompose(hashes ->
                 api.submitCommandAsync(ApiPersistState.builder().dumpId(snapshotId).build())
                         .thenApply(result -> {
@@ -281,7 +274,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                             } finally {
                                 serializationProcessor.removeSnapshot(snapshotId);
                             }
-                        })));
+                        }));
     }
 
     private CompletableFuture<Void> reconcileOpenOrdersAsync(
@@ -340,18 +333,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid single-symbol book query"));
         }
         String symbol = requestedSymbol.trim().toUpperCase(java.util.Locale.ROOT);
-        return matchingLanes.enqueue(symbol, () -> {
-            Integer symbolId = symbols.get(symbol);
-            if (symbolId == null) return CompletableFuture.completedFuture(List.of());
-            return api.requestOrderBookAsync(symbolId, depth).thenApply(book -> bookLevels(symbol, book));
-        });
+        Integer symbolId = symbols.get(symbol);
+        if (symbolId == null) return CompletableFuture.completedFuture(List.of());
+        return api.requestOrderBookAsync(symbolId, depth).thenApply(book -> bookLevels(symbol, book));
     }
 
     public CompletableFuture<BookBootstrapSnapshot> orderBookBootstrapAsync(int depth) {
         if (depth < 1 || depth > 100) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid bootstrap book depth"));
         }
-        return matchingLanes.barrier(() -> {
+        return currentStateHashesAsync().thenCompose(barrierComplete -> {
             List<Map.Entry<String, Integer>> entries = symbols.entrySet().stream()
                     .sorted(Map.Entry.comparingByKey()).toList();
             List<CompletableFuture<BookResult>> requests = new ArrayList<>(entries.size());
@@ -419,7 +410,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
                         .build())
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
-                        .matchingEnginesNum(1).riskEnginesNum(1).waitStrategy(CoreWaitStrategy.BUSY_SPIN).build())
+                        .matchingEnginesNum(matchingEngines()).riskEnginesNum(1)
+                        .waitStrategy(CoreWaitStrategy.BUSY_SPIN).build())
                 .initStateCfg(initialState)
                 .serializationCfg(SerializationConfiguration.builder()
                         .enableJournaling(false)
@@ -430,6 +422,14 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }).build();
         core.startup();
         api = core.getApi();
+    }
+
+    private static int matchingEngines() {
+        int engines = Integer.getInteger(MATCHING_ENGINES_PROPERTY, 1);
+        if (engines < 1) {
+            throw new IllegalArgumentException(MATCHING_ENGINES_PROPERTY + " must be positive");
+        }
+        return engines;
     }
 
     private CompletableFuture<Integer> ensureSymbolAsync(String symbol) {
@@ -538,9 +538,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     @Override
     public void close() {
-        matchingLanes.quiesce().join();
         stop();
-        laneDispatcher.shutdown();
     }
 
     public record CancelBatchOutcome(List<CoreMatchingResult> results,

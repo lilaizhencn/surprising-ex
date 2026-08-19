@@ -100,10 +100,10 @@ public final class CoreUserState {
 
     void requireIncrementalLineage(CoreUserState before) {
         if (before == null || before == this) return;
-        requireLineage("user balances", before.balances, balances);
-        requireLineage("user reservations", before.reservations, reservations);
-        requireLineage("user positions", before.positions, positions);
-        requireLineage("user explained locks", before.explainedLocks, explainedLocks);
+        requireDescendantLineage("user balances", before.balances, balances);
+        requireDescendantLineage("user reservations", before.reservations, reservations);
+        requireDescendantLineage("user positions", before.positions, positions);
+        requireDescendantLineage("user explained locks", before.explainedLocks, explainedLocks);
     }
 
     public ProductLine productLine() {
@@ -207,6 +207,12 @@ public final class CoreUserState {
 
     private static void requireLineage(String name, Map<?, ?> before, Map<?, ?> after) {
         if (!StateMapSupport.isDirectDeltaOf(before, after)) {
+            throw new IllegalStateException(name + " lineage is unavailable");
+        }
+    }
+
+    private static void requireDescendantLineage(String name, Map<?, ?> before, Map<?, ?> after) {
+        if (!StateMapSupport.isDeltaDescendantOf(before, after)) {
             throw new IllegalStateException(name + " lineage is unavailable");
         }
     }

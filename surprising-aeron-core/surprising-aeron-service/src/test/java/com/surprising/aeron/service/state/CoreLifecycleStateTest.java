@@ -149,6 +149,85 @@ class CoreLifecycleStateTest {
     }
 
     @Test
+    void runtimeFundingMatchesAuthoritativeStateForNetZeroCappedAndChunkedSettlements() {
+        TradingCoreState netZero = stateWithOppositePositions(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 100, 10, 100);
+        netZero = reducer.applyMarkPrice(netZero, new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1,
+                1_700_000_000_000L));
+        ApplyFundingCommand netZeroCommand = new ApplyFundingCommand(101, "BTC-USDT", 1, 10_000);
+        TradingCoreReducer.FundingApplication netZeroExpected = reducer.applyFundingWithFacts(netZero,
+                netZeroCommand);
+        RuntimeIdentityRegistry netZeroIdentities = new RuntimeIdentityRegistry();
+        var netZeroActual = RuntimePerpetualFundingProcessor.simulate(netZero, netZeroCommand,
+                null, null, netZeroIdentities);
+        RuntimeStateParityChecker.assertMatches(netZeroExpected.state(), netZeroIdentities, netZeroActual.state());
+        assertThat(netZeroActual.payments()).isEqualTo(netZeroExpected.payments());
+        assertThat(netZeroActual.progress()).isEqualTo(netZeroExpected.progress());
+
+        TradingCoreState capped = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 5, 0);
+        capped = reducer.applyMarkPrice(capped, new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1,
+                1_700_000_000_000L));
+        ApplyFundingCommand cappedCommand = new ApplyFundingCommand(102, "BTC-USDT", 1, 10_000);
+        TradingCoreReducer.FundingApplication cappedExpected = reducer.applyFundingWithFacts(capped, cappedCommand);
+        RuntimeIdentityRegistry cappedIdentities = new RuntimeIdentityRegistry();
+        var cappedActual = RuntimePerpetualFundingProcessor.simulate(capped, cappedCommand,
+                null, null, cappedIdentities);
+        RuntimeStateParityChecker.assertMatches(cappedExpected.state(), cappedIdentities, cappedActual.state());
+        assertThat(cappedActual.payments()).isEqualTo(cappedExpected.payments());
+
+        TradingCoreState chunked = netZero;
+        UUID firstCommandId = UUID.fromString("00000000-0000-0000-0000-000000000101");
+        ApplyFundingCommand firstCommand = new ApplyFundingCommand(103, "BTC-USDT", 1, 10_000, 0, 1);
+        TradingCoreReducer.FundingApplication firstExpected = reducer.applyFundingWithFacts(chunked, firstCommand,
+                List.of(1L, 2L), firstCommandId);
+        RuntimeIdentityRegistry chunkedIdentities = new RuntimeIdentityRegistry();
+        var firstActual = RuntimePerpetualFundingProcessor.simulate(chunked, firstCommand,
+                List.of(1L, 2L), firstCommandId, chunkedIdentities);
+        RuntimeStateParityChecker.assertMatches(firstExpected.state(), chunkedIdentities, firstActual.state());
+        assertThat(firstActual.payments()).isEqualTo(firstExpected.payments());
+        assertThat(firstActual.progress()).isEqualTo(firstExpected.progress());
+
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(firstExpected.state()), ProductLine.LINEAR_PERPETUAL);
+        UUID secondCommandId = UUID.fromString("00000000-0000-0000-0000-000000000102");
+        ApplyFundingCommand secondCommand = new ApplyFundingCommand(103, "BTC-USDT", 1, 10_000, 1, 1);
+        TradingCoreReducer.FundingApplication secondExpected = reducer.applyFundingWithFacts(restored, secondCommand,
+                List.of(1L, 2L), secondCommandId);
+        var secondActual = RuntimePerpetualFundingProcessor.simulate(restored, secondCommand,
+                List.of(1L, 2L), secondCommandId, chunkedIdentities);
+        RuntimeStateParityChecker.assertMatches(secondExpected.state(), chunkedIdentities, secondActual.state());
+        assertThat(secondActual.payments()).isEqualTo(secondExpected.payments());
+        assertThat(secondActual.progress()).isEqualTo(secondExpected.progress());
+    }
+
+    @Test
+    void runtimeFundingRejectsMissingMarkStaleSettlementAndInvalidCursor() {
+        TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 100, 10, 100);
+        ApplyFundingCommand command = new ApplyFundingCommand(104, "BTC-USDT", 1, 10_000);
+        assertThatThrownBy(() -> RuntimePerpetualFundingProcessor.simulate(state, command,
+                null, null, new RuntimeIdentityRegistry()))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("MARK_PRICE_NOT_FOUND"));
+
+        TradingCoreState marked = reducer.applyMarkPrice(state,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, 1_700_000_000_000L));
+        TradingCoreState funded = reducer.applyFunding(marked, command);
+        assertThatThrownBy(() -> RuntimePerpetualFundingProcessor.simulate(funded, command,
+                null, null, new RuntimeIdentityRegistry()))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("STALE_SETTLEMENT_ID"));
+
+        ApplyFundingCommand invalidCursor = new ApplyFundingCommand(105, "BTC-USDT", 1, 10_000, 1, 1);
+        assertThatThrownBy(() -> RuntimePerpetualFundingProcessor.simulate(marked, invalidCursor,
+                List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000105"),
+                new RuntimeIdentityRegistry()))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("INVALID_COMMAND"));
+    }
+
+    @Test
     void deliveryAndOptionSettlementReleaseMarginFlattenPositionsAndConserveFunds() {
         TradingCoreState delivery = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
                 ContractType.LINEAR_DELIVERY, 100, 10, 100);
@@ -312,8 +391,13 @@ class CoreLifecycleStateTest {
         state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 90, 1,
                 1_700_000_000_000L));
 
-        TradingCoreState recovered = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 2, 1_700_000_000_000L));
+        ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(
+                "BTC-USDT", 1, 100, 2, 1_700_000_000_000L);
+        TradingCoreState recovered = reducer.applyMarkPrice(state, command);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        RuntimeStateParityChecker.assertMatches(recovered, identities,
+                RuntimePerpetualRiskProcessor.simulateMarkPrice(
+                        state, command, state.users().keySet(), identities));
 
         assertThat(recovered.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.CANCELED);
@@ -382,17 +466,60 @@ class CoreLifecycleStateTest {
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
         long before = totalEconomicEquity(state, "USDT");
 
-        TradingCoreState resolved = reducer.executeAdl(state,
-                new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
-                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                        com.surprising.aeron.protocol.CorePositionSide.NET,
-                        -10, 200, 1, 5, deficit - 25));
+        var command = new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                -10, 200, 1, 5, deficit - 25);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtimeResolved = RuntimePerpetualLiquidationProcessor.simulateAdl(
+                state, command, identities);
+        TradingCoreState resolved = reducer.executeAdl(state, command);
+        RuntimeStateParityChecker.assertMatches(resolved, identities, runtimeResolved);
 
         assertThat(resolved.user(2).positions().get("BTC-USDT").signedQuantitySteps()).isEqualTo(-5);
         assertThat(resolved.riskState().liquidations().get(1L).deficitUnits()).isZero();
         assertThat(resolved.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
         assertThat(totalEconomicEquity(resolved, "USDT")).isEqualTo(before);
+    }
+
+    @Test
+    void runtimeAdlRejectsStaleMarkChangedPositionAndInsufficientProfit() {
+        TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 100);
+        state = withPositionAndBalance(state, 2, -10, 200, 1_000, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1,
+                1_700_000_000_000L));
+        state = reducer.executeLiquidation(state, new ExecuteLiquidationCommand(1, 1, 1, 0));
+        state = reducer.adjustInsuranceFund(state,
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
+        TradingCoreState beforeAdl = reducer.resolveLiquidation(state,
+                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
+        long residual = beforeAdl.riskState().liquidations().get(1L).deficitUnits();
+
+        assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateAdl(beforeAdl,
+                new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
+                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                        com.surprising.aeron.protocol.CorePositionSide.NET,
+                        -9, 200, 1, 5, residual), new RuntimeIdentityRegistry()))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("ADL_POSITION_CONFLICT"));
+
+        assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateAdl(beforeAdl,
+                new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
+                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                        com.surprising.aeron.protocol.CorePositionSide.NET,
+                        -10, 200, 2, 5, residual), new RuntimeIdentityRegistry()))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("STALE_MARK_PRICE"));
+
+        assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateAdl(beforeAdl,
+                new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
+                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                        com.surprising.aeron.protocol.CorePositionSide.NET,
+                        -10, 200, 1, 1, residual), new RuntimeIdentityRegistry()))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("ADL_PROFIT_INSUFFICIENT"));
     }
 
     private TradingCoreState stateWithOppositePositions(

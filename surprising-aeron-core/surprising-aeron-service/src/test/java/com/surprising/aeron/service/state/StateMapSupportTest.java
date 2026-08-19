@@ -63,6 +63,20 @@ class StateMapSupportTest {
     }
 
     @Test
+    void descendantDeltaLineageIncludesEarlierParents() {
+        NavigableMap<Long, String> base = StateMapSupport.freezeSorted(
+                new TreeMap<>(Map.of(1L, "one")));
+        NavigableMap<Long, String> first = StateMapSupport.delta(base);
+        first.put(2L, "two");
+        NavigableMap<Long, String> second = StateMapSupport.delta(StateMapSupport.freezeSorted(first));
+        second.put(3L, "three");
+
+        assertThat(StateMapSupport.isDeltaDescendantOf(base, second)).isTrue();
+        assertThat(StateMapSupport.isDeltaDescendantOf(first, second)).isTrue();
+        assertThat(StateMapSupport.isDeltaDescendantOf(base, new TreeMap<>(second))).isFalse();
+    }
+
+    @Test
     void persistentPathCopiesKeepValuesWithoutPeriodicCompaction() {
         NavigableMap<Long, String> base = new TreeMap<>(Map.of(1L, "one"));
         NavigableMap<Long, String> previous = base;
