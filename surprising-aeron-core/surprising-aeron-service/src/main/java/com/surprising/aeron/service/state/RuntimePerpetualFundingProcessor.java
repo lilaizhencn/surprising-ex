@@ -97,6 +97,7 @@ public final class RuntimePerpetualFundingProcessor {
                 runtime.replaceBalance(new BalanceRuntime(userId, settleAssetId,
                         Math.addExact(balance.availableUnits(), appliedDelta), balance.lockedUnits()));
                 runtime.treasury().adjustInsurance(settleAssetId, Math.negateExact(appliedDelta));
+                runtime.advanceUserRevision(userId);
             }
 
             long debitRelief = Math.subtractExact(appliedDelta, requestedDelta);

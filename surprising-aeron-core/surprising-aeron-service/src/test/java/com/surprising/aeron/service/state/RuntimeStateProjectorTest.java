@@ -190,7 +190,7 @@ class RuntimeStateProjectorTest {
         CorePositionState position = new CorePositionState("BTC-USDT", "USDT", CoreMarginMode.ISOLATED,
                 CorePositionSide.LONG, 4, 2, 100, 200, 9, 100);
         CoreUserState user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 8,
-                Map.of("USDT", new AssetBalance("USDT", 700, 200)), Map.of(11L, reservation),
+                Map.of("USDT", new AssetBalance("USDT", 600, 300)), Map.of(11L, reservation),
                 Map.of(position.key(), position), CorePositionMode.HEDGE);
         CoreOrderState order = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7, "BTC-USDT", 4,
                 CoreOrderSide.BUY, 100, 5, 2, 3, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG,

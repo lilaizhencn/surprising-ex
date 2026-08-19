@@ -113,8 +113,8 @@ sequenceDiagram
 永续 Runtime 迁移当前已完成下单、撤单、成交、资金费、强平、ADL 和风险扫描的独立原生计算
 与逐字段 parity。风险快照包含 mark price、cross/isolated 结果、分页 scan cursor、liquidation plan
 和 `nextLiquidationId`。连续 mark/continuation 已切换为 owner-thread 持久 Runtime 原地增量提交，
-active liquidation 使用 primitive 分层索引精确定位；旧 `TradingCoreReducer` 仍是在线唯一权威，
-Runtime parity 继续作为切换门禁。
+active liquidation 使用 primitive 分层索引精确定位；`TradingCoreReducer` 生成候选 transition，
+Runtime 是在线状态权威，materialize 后的 Core 视图通过完整 equals 与 business hash 作为切换门禁。
 
 ## 产品线
 

@@ -18,12 +18,14 @@ public final class RuntimeStateParityChecker {
             TradingRuntimeSnapshot actualSnapshot = actual.snapshot(expected.revision());
             throw new IllegalStateException("runtime parity mismatch at revision " + expected.revision()
                     + ": " + mismatch(expectedSnapshot, actualSnapshot)
-                    + " hashes=" + expected.businessStateHash() + '/' + materialized.businessStateHash());
+                    + " hashes=" + expected.businessStateHash() + '/' + materialized.businessStateHash()
+                    + " component=" + componentMismatch(expected, materialized));
         }
     }
 
     private static String mismatch(TradingRuntimeSnapshot expected, TradingRuntimeSnapshot actual) {
-        if (!expected.users().equals(actual.users())) return "users";
+        if (!expected.users().equals(actual.users())) return mapMismatch(
+                "users", expected.users(), actual.users());
         if (!expected.balances().equals(actual.balances())) return "balances";
         if (!expected.orders().equals(actual.orders())) return "orders";
         if (!expected.reservations().equals(actual.reservations())) return "reservations";
@@ -44,7 +46,7 @@ public final class RuntimeStateParityChecker {
         if (!expected.triggerOrders().equals(actual.triggerOrders())) return "trigger-orders";
         if (!expected.treasury().equals(actual.treasury())) return "treasury";
         if (!expected.fundingSettlements().equals(actual.fundingSettlements())) return "funding-settlements";
-        return "funding-progress";
+        return mapMismatch("funding-progress", expected.fundingProgress(), actual.fundingProgress());
     }
 
     private static String mapMismatch(String name, java.util.Map<?, ?> expected, java.util.Map<?, ?> actual) {
@@ -61,5 +63,19 @@ public final class RuntimeStateParityChecker {
             }
         }
         return name + " sizes=" + expected.size() + '/' + actual.size();
+    }
+
+    private static String componentMismatch(TradingCoreState expected, TradingCoreState actual) {
+        if (!expected.users().equals(actual.users())) return "users";
+        if (!expected.orders().equals(actual.orders())) return "orders";
+        if (!expected.riskState().equals(actual.riskState())) return "risk";
+        if (!expected.treasuryState().equals(actual.treasuryState())) return "treasury";
+        if (!expected.instruments().equals(actual.instruments())) return "instruments";
+        if (!expected.leverages().equals(actual.leverages())) return "leverages";
+        if (!expected.algoOrders().equals(actual.algoOrders())) return "algo-orders";
+        if (!expected.cancelAllAfterTimers().equals(actual.cancelAllAfterTimers())) return "cancel-all-after";
+        if (!expected.clientOrderIndex().equals(actual.clientOrderIndex())) return "client-index";
+        if (!expected.triggerOrders().equals(actual.triggerOrders())) return "triggers";
+        return "unknown";
     }
 }

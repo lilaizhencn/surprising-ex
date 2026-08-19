@@ -208,6 +208,14 @@ public final class TradingRuntimeState {
         changedUsers.add(user.userId());
     }
 
+    public void advanceUserRevision(long userId) {
+        assertOwner();
+        UserRuntime current = requireUser(userId);
+        users.put(userId, new UserRuntime(current.productLine(), userId,
+                Math.incrementExact(current.revision()), current.positionMode()));
+        changedUsers.add(userId);
+    }
+
     public void removeUser(long userId) {
         assertOwner();
         users.remove(userId);

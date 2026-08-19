@@ -129,6 +129,7 @@ public final class RuntimePerpetualFillCalculator {
                 nextInsuranceNet < 0 ? Math.negateExact(nextInsuranceNet) : 0);
         runtime.replacePosition(positionKey, next);
         runtime.replaceOrder(nextOrder);
+        runtime.advanceUserRevision(order.userId());
     }
 
     private static long proportional(long units, long part, long total) {
