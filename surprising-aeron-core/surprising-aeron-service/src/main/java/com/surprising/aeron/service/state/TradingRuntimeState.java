@@ -408,6 +408,7 @@ public final class TradingRuntimeState {
         changedReservations.add(orderId);
         changedUsers.add(userId);
         changedBalance(userId, reservation.assetId());
+        advanceUserRevision(userId);
     }
 
     public void releaseTerminalReservation(long orderId) {

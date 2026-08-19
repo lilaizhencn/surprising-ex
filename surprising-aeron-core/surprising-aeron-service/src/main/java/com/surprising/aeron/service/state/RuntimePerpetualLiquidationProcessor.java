@@ -42,6 +42,8 @@ public final class RuntimePerpetualLiquidationProcessor {
         if (!executable(before, liquidation)) {
             runtime.replaceLiquidation(copy(runtimeLiquidation, 0, 0, 0,
                     CoreLiquidationState.Status.CANCELED, 0));
+            runtime.advanceUserRevision(liquidation.userId());
+            runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
             return runtime;
         }
         cancelOrders(runtime, canceledOrders == null ? List.of() : canceledOrders);
@@ -90,6 +92,8 @@ public final class RuntimePerpetualLiquidationProcessor {
         runtime.treasury().adjustInsurance(settleAssetId, insuranceDelta);
         runtime.replaceLiquidation(copy(runtimeLiquidation, uncovered, command.executionPriceTicks(),
                 command.liquidationFeeRatePpm(), nextStatus, cash.collectedFee()));
+        runtime.advanceUserRevision(liquidation.userId());
+        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
         return runtime;
     }
 
@@ -119,6 +123,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 current.deficitUnits(), current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
+        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
         return runtime;
     }
 
@@ -173,6 +178,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0));
+        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
         return runtime;
     }
 
@@ -249,6 +255,8 @@ public final class RuntimePerpetualLiquidationProcessor {
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0));
+        runtime.advanceUserRevision(command.targetUserId());
+        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
         return runtime;
     }
 
