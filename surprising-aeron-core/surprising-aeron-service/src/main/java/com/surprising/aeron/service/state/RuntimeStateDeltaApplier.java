@@ -178,12 +178,7 @@ public final class RuntimeStateDeltaApplier {
     }
 
     private static <K, V> Set<K> changedKeys(Map<K, V> before, Map<K, V> after) {
-        if (before == after) return Set.of();
-        if (StateMapSupport.isDelta(after)) return StateMapSupport.changedKeys(after);
-        Set<K> keys = new HashSet<>(before.keySet());
-        keys.addAll(after.keySet());
-        keys.removeIf(key -> java.util.Objects.equals(before.get(key), after.get(key)));
-        return keys;
+        return StateMapSupport.changedKeys(before, after);
     }
 
     private static <K, V> void syncMap(Map<K, V> before, Map<K, V> after, Map<K, V> target) {

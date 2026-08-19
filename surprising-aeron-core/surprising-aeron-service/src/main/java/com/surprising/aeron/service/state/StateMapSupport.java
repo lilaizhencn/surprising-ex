@@ -57,6 +57,29 @@ public final class StateMapSupport {
         return Set.of();
     }
 
+    /**
+     * Returns every key changed between two related persistent-map versions. A single state transition may
+     * create several nested deltas for the same map, for example while pruning multiple orders of one user.
+     */
+    static <K> Set<K> changedKeys(Map<K, ?> before, Map<K, ?> after) {
+        if (before == after) return Set.of();
+        NavigableMap<K, ?> rawBefore = (NavigableMap<K, ?>) rawUntyped(before);
+        NavigableMap<K, ?> current = (NavigableMap<K, ?>) rawUntyped(after);
+        if (rawBefore != null && current instanceof DeltaMap<?, ?>) {
+            Set<K> changed = new TreeSet<>(rawBefore.comparator());
+            while (current instanceof DeltaMap<?, ?> delta) {
+                changed.addAll((Set<K>) delta.changedKeys());
+                if (delta.base() == rawBefore) return Collections.unmodifiableSet(changed);
+                current = (NavigableMap<K, ?>) delta.base();
+            }
+        }
+        Set<K> changed = new TreeSet<>(rawBefore == null ? null : rawBefore.comparator());
+        changed.addAll(before.keySet());
+        changed.addAll(after.keySet());
+        changed.removeIf(key -> java.util.Objects.equals(before.get(key), after.get(key)));
+        return Collections.unmodifiableSet(changed);
+    }
+
     static boolean isDirectDeltaOf(Map<?, ?> before, Map<?, ?> after) {
         if (before == after) return true;
         NavigableMap<?, ?> rawBefore = rawUntyped(before);

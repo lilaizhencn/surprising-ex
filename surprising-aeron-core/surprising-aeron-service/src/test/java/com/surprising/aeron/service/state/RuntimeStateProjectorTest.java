@@ -253,4 +253,46 @@ class RuntimeStateProjectorTest {
         RuntimeStateParityChecker.assertMatches(after, identities, runtime);
     }
 
+    @Test
+    void appliesAllNestedReservationRemovalsForOneUser() {
+        OrderReservation first = OrderReservation.create(11, "BTC-USDT", 1,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 1).consume(100);
+        OrderReservation second = OrderReservation.create(12, "BTC-USDT", 1,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 1).consume(100);
+        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
+                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(11L, first, 12L, second), Map.of());
+        CoreOrderState firstOrder = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7,
+                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1).fill(1);
+        CoreOrderState secondOrder = new CoreOrderState(12, ProductLine.LINEAR_PERPETUAL, 7,
+                "BTC-USDT", 1, CoreOrderSide.SELL, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1).fill(1);
+        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(7L, beforeUser), Map.of(11L, firstOrder, 12L, secondOrder), Map.of(), CoreRiskState.empty(),
+                CoreTreasuryState.empty());
+
+        Map<Long, OrderReservation> firstRemoval = StateMapSupport.delta(beforeUser.reservations());
+        firstRemoval.remove(11L);
+        CoreUserState intermediate = beforeUser.transition(2, beforeUser.balances(), firstRemoval,
+                beforeUser.positions(), beforeUser.positionMode());
+        Map<Long, OrderReservation> secondRemoval = StateMapSupport.delta(intermediate.reservations());
+        secondRemoval.remove(12L);
+        CoreUserState afterUser = intermediate.transition(3, intermediate.balances(), secondRemoval,
+                intermediate.positions(), intermediate.positionMode());
+        Map<Long, CoreUserState> users = StateMapSupport.delta(before.users());
+        users.put(7L, intermediate);
+        users.put(7L, afterUser);
+        Map<Long, CoreOrderState> orders = StateMapSupport.delta(before.orders());
+        orders.remove(11L);
+        orders.remove(12L);
+        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, users, orders, Map.of(),
+                CoreRiskState.empty(), CoreTreasuryState.empty());
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+
+        RuntimeStateDeltaApplier.apply(before, after, runtime, identities);
+
+        assertThat(runtime.reservation(11)).isNull();
+        assertThat(runtime.reservation(12)).isNull();
+        RuntimeStateParityChecker.assertMatches(after, identities, runtime);
+    }
+
 }
