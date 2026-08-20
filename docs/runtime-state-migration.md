@@ -44,10 +44,10 @@ TradingRuntimeState
 - `TradingRuntimeSnapshot` 是独立的不可变快照，使用 `BalanceKey(userId, assetId)` 明确表达余额身份，并按数字 ID 排序复制；Runtime 的可变对象不会泄漏到快照。
 - `RuntimeStateProjector` 用于启动恢复；`RuntimeStateDeltaApplier` 负责在线 transition 的变更键提交，`RuntimeStateMaterializer` 生成兼容读取视图，禁止每笔命令重新投影完整旧状态。
 - `RuntimePlaceOrderDeltaApplier` 已实现首个增量 apply：只接受“订单从不存在到 OPEN、reservation 新增、余额 available/locked 等额变化”的合法差分；校验失败发生在 Runtime 写入之前。
-- `CoreProbeState` 的 Runtime 在线模式默认对全部 `ProductLine` 开启；旧 reducer 仍生成候选 transition，Runtime 负责 owner-thread 增量提交。正常热路径不再每笔完整 materialize/parity；需要逐笔诊断时显式设置 `-Dsurprising.aeron.runtime.full-parity=true`。
-- shadow Runtime 现在由 `CoreProbeState` 持有生命周期：连续 `PLACE_ORDER` 使用增量 apply；检测到旧状态游标不连续（撤单、成交、风控或恢复后）时，下一笔 PLACE 仅重建一次，再继续增量运行。回滚会使游标失效，禁止使用可能过期的 Runtime 状态。
+- `CoreProbeState` 的 Runtime 在线模式默认对全部 `ProductLine` 开启；旧 reducer 生成候选 transition，Runtime 在 owner thread 执行增量提交、完整 parity 校验和 materialize。materialized `TradingCoreState` 是后续兼容读取与持久化的权威视图。
+- `CoreProbeState` 持有唯一的持久 Runtime 实例及其 Core 游标。每次提交要求游标与当前 Core 完全一致；任何不一致、差分校验失败或 parity 失败都会阻断命令，不会继续使用可能过期的 Runtime 状态。
 
-这批实现已替换 `CoreProbeState` 的在线状态提交边界。旧 reducer 仍负责生成候选 transition，Runtime delta apply 是在线提交门禁；完整 materialize/parity 保留在恢复、快照和显式诊断路径，避免把兼容视图重建成本放入每单热路径。
+这批实现已替换 `CoreProbeState` 的在线状态提交边界。旧 reducer 仍负责生成候选 transition，Runtime delta apply 是在线提交门禁；每个成功 transition 均经完整 parity 和 materialize 后成为新的权威 Core 视图。
 
 ### 热路径
 
@@ -73,12 +73,11 @@ decode command
 
 ## 阶段二：撤单与拒单
 
-普通永续撤单和批量永续撤单已接入 shadow 差分校验：`RuntimeCancelOrderDeltaApplier` 只接受
+普通永续撤单、批量撤单、替换/修改订单中的旧单撤销以及触发子单预占已接入 Runtime 差分提交：`RuntimeCancelOrderDeltaApplier` 只接受
 `OPEN -> CANCELED`，在 Runtime 修改前校验用户归属、reservation 全量释放、available/locked
-资金变化和 Runtime 当前游标，随后原子释放余额并保留终态订单及 client index。批量撤单、成交后的
-部分 reservation、拒单和其他生命周期命令仍未接入 Runtime 差分。
+资金变化和 Runtime 当前游标，随后原子释放余额并保留终态订单及 client index。部分成交后的撤单同样校验已消费单位、剩余冻结与终态 reservation；拒单和未专门迁移的生命周期命令由通用 `RuntimeStateDeltaApplier` 提交。
 
-进入阶段二的门槛是：阶段一的 snapshot 对照、失败不变更、重复请求幂等和资金守恒测试全部通过；不得以旁路 shadow 结果替代旧 reducer 的在线裁决。
+进入阶段二的门槛是：阶段一的 snapshot 对照、失败不变更、重复请求幂等和资金守恒测试全部通过；不得以旁路结果替代 Runtime 的在线提交门禁。
 
 ## 阶段三：成交 apply
 
@@ -92,16 +91,16 @@ decode command
 - position 的 signed quantity、entry price/value、realized PnL 和 position margin；
 - fee treasury、insurance treasury 及其 deficit。
 
-Runtime 已增加 position 与 treasury 的 owner-thread 结构并纳入投影。成交 shadow 现在从撮合前状态
-独立执行原生 maker/taker perpetual fill，完成订单、余额、reservation、持仓和 treasury 更新后与旧
-Runtime 是在线状态权威，`TradingCoreState` 是由 Runtime materialize 的兼容视图。PLACE_ORDER、撤单和成交
-提交后均执行 `RuntimeStateParityChecker`，用同一 identity registry 重建完整 Core；任何结构化差异
-或 business hash 差异都会立即阻断当前命令。
+Runtime 已增加 position 与 treasury 的 owner-thread 结构并纳入投影。`RuntimePerpetualMatchProcessor`
+可从撮合前状态独立执行原生 maker/taker perpetual fill，覆盖订单、余额、reservation、持仓和 treasury，
+且其独立契约测试与 reducer parity 通过。它尚未接入真实异步撮合回调：预占命令与成交回调之间的用户 revision
+生命周期尚未统一，直接提交会被 parity 门禁阻断。当前成交仍由 `RuntimeStateDeltaApplier` 提交，随后完整
+materialize 为 `TradingCoreState`；这保证资金与状态一致，但不满足原生成交热路径迁移目标。
 
 ### 阶段三补充：永续资金费
 
 `RuntimePerpetualFundingProcessor` 已在独立 Runtime 投影上实现永续资金费计算，并接入
-`CoreProbeState` 的 `APPLY_FUNDING` shadow 门禁。当前覆盖：
+`CoreProbeState` 的 `APPLY_FUNDING` Runtime 提交门禁。当前覆盖：
 
 - settlementId 单调递增、instrument version、mark price 和 chunk cursor 校验；
 - 同一用户 NET/LONG/SHORT position 的资金费汇总和逐腿 payment facts；
@@ -155,7 +154,7 @@ Runtime owner、增量 delta apply、materialize/parity 和恢复投影已对全
 
 ## 失败与回滚
 
-Runtime 与旧 Snapshot State 必须双写对照但不能双重扣款。发现 hash、资金、订单状态或恢复差异时，停止切换并回退到旧 `CoreProbeState` reducer；不得用 fallback 混合两套裁决逻辑。
+Runtime 与候选 `TradingCoreState` 必须保持 parity，但不能双重扣款。发现 hash、资金、订单状态或恢复差异时，阻断当前 transition；不得用 fallback 混合两套裁决逻辑。
 
 ### 当前实施状态
 
@@ -165,23 +164,23 @@ Runtime 与旧 Snapshot State 必须双写对照但不能双重扣款。发现 h
 | 原子冻结入口 | 已完成 | `reserveOrder` 及重复请求、余额不足、溢出保护 |
 | Runtime Snapshot | 已完成 | 不可变、排序，已覆盖余额、订单、reservation、position、mark/risk scan、liquidation、treasury 和 funding progress |
 | PLACE_ORDER 增量 apply | 已完成 | `RuntimePlaceOrderDeltaApplier` 已具备成功和失败不变更测试 |
-| CoreProbe shadow 对照 | 已完成 | 普通/批量 PLACE_ORDER 已接入显式开关，CoreProbe 测试通过 |
-| Runtime 持久镜像生命周期 | 已完成 | 连续下单增量运行，非下单状态变化和回滚自动重建 |
-| 普通/批量撤单 shadow 差分 | 已完成 | 仅 `LINEAR_PERPETUAL`，逐项校验后释放 reservation 并标记终态；失败不变更 |
+| CoreProbe Runtime 提交门禁 | 已完成 | 每个 transition 必须通过 Runtime delta、完整 parity 和 materialize；无可关闭的对照旁路 |
+| Runtime 持久状态生命周期 | 已完成 | 唯一 Runtime 实例与 Core 游标强制一致；游标异常立即阻断 transition |
+| 下单/撤单 Runtime 差分 | 已完成 | `LINEAR_PERPETUAL` 普通、批量、替换/修改和触发子单路径逐项校验；失败不变更 |
 | 旧状态逐字段对照 | 已完成 | `RuntimeStateParityChecker` 覆盖 instrument、风险、持仓、订单、触发器、treasury、资金费进度和完整 Snapshot 字段 |
-| 永续 Runtime 在线权威 | 已完成 | Runtime 原地 delta apply 已接入默认链路；完整 materialize/parity 保留在恢复、快照和显式诊断路径 |
+| 永续 Runtime 在线权威 | 已完成 | 下单/撤单使用专用 Runtime delta，资金费、风险和强平使用原生处理器；成交尚由通用 delta 提交，所有路径均完整 parity 与 materialize |
 | 部分成交后的撤单 | 已完成 | 严格校验已成交/已消费单位、取消释放单位、剩余冻结和终态订单；已覆盖资金守恒与 parity 测试 |
-| 成交差分契约 | 已完成 | 原生 perpetual match processor 对订单、reservation、持仓、结算余额和 treasury 原子提交并统一 parity |
+| 成交差分契约 | 已完成 | 原生 perpetual match processor 覆盖订单、reservation、持仓、结算余额和 treasury，并有独立 parity 测试 |
 | position/treasury Runtime 投影 | 已完成 | 已接入 owner-thread Runtime 和恢复投影，含资金/持仓字段校验基础 |
-| 旧成交 shadow 增量 apply | 已移除 | `RuntimeMatchDeltaApplier` 已由原生 perpetual match processor 替代 |
-| Runtime 原生永续 fill | 已完成 | 已覆盖开仓、部分平仓、反向、reduce-only、maker/taker 多 match 和终态 reservation 释放，并接入普通/批量 PLACE shadow parity |
-| Runtime 原生永续资金费 | 已完成 | 已覆盖零和、扣款封顶、insurance、分片游标、Snapshot 恢复和 CoreProbe shadow parity |
+| 旧成交增量 applier | 已移除 | `RuntimeMatchDeltaApplier` 已移除；未迁移的成交由通用 `RuntimeStateDeltaApplier` 提交 |
+| Runtime 原生永续 fill | 未完成在线接入 | 独立测试覆盖开仓、部分平仓、反向、reduce-only、maker/taker 多 match 和终态 reservation 释放；异步成交的用户 revision 契约待统一后才能接入生产 |
+| Runtime 原生永续资金费 | 已完成 | 已覆盖零和、扣款封顶、insurance、分片游标、Snapshot 恢复和 CoreProbe Runtime parity |
 | 永续资金费在线提交 | 已完成 | 资金费 transition 统一经过 Runtime delta apply，并由完整 parity 门禁保护 |
-| Runtime 原生永续强平成交 | 已完成 | 已覆盖 cross/isolated、部分/全部平仓、手续费封顶、缺口、insurance、分片撤单游标和 CoreProbe shadow parity |
+| Runtime 原生永续强平成交 | 已完成 | 已覆盖 cross/isolated、部分/全部平仓、手续费封顶、缺口、insurance、分片撤单游标和 CoreProbe Runtime parity |
 | Runtime 原生永续强平保险解析 | 已完成 | 已覆盖完整/部分 insurance coverage 和残余 ADL_REQUIRED 状态 |
 | Runtime 原生 ADL | 已完成 | 已覆盖目标持仓一致性、mark sequence、盈利容量、部分/全部减仓、保证金释放、deficit 覆盖和资金守恒 |
 | 永续强平在线提交 | 已完成 | 强平、insurance、ADL transition 统一经过 Runtime delta apply，并由完整 parity 门禁保护 |
-| 风险扫描原生迁移 | 已完成 parity | 已覆盖 mark、三阶段分页、cross/isolated、PLANNED 创建/刷新/取消、nextLiquidationId 和 CoreProbe shadow |
+| 风险扫描原生迁移 | 已完成 parity | 已覆盖 mark、三阶段分页、cross/isolated、PLANNED 创建/刷新/取消、nextLiquidationId 和 CoreProbe Runtime parity |
 | 风险扫描原地增量提交 | 已完成 | 连续 mark/continuation 复用持久 Runtime；trigger-only scan 增量同步，状态变化时显式失效恢复 |
 | active liquidation Runtime 索引 | 已完成 | primitive 分层精确索引，创建、刷新、取消和恢复投影同步维护 |
 | SPOT Runtime 权威与交易链路 | 已完成 | CoreProbe 下单/撤单/触发器/撮合 continuation 和 Snapshot 恢复通过 Runtime parity |
