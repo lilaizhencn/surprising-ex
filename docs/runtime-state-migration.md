@@ -93,9 +93,9 @@ decode command
 
 Runtime 已增加 position 与 treasury 的 owner-thread 结构并纳入投影。`RuntimePerpetualMatchProcessor`
 可从撮合前状态独立执行原生 maker/taker perpetual fill，覆盖订单、余额、reservation、持仓和 treasury，
-且其独立契约测试与 reducer parity 通过。它尚未接入真实异步撮合回调：预占命令与成交回调之间的用户 revision
-生命周期尚未统一，直接提交会被 parity 门禁阻断。当前成交仍由 `RuntimeStateDeltaApplier` 提交，随后完整
-materialize 为 `TradingCoreState`；这保证资金与状态一致，但不满足原生成交热路径迁移目标。
+且已接入普通、批量、替换和触发下单的真实异步撮合回调。用户 revision 由 reducer 候选 transition 提供
+batch 级计划，原生 fill 不再根据 reservation 的历史生命周期自行推断；Runtime 完成资金、持仓、订单和
+treasury 原地更新后应用该计划，并通过完整 parity 与 materialize 成为新的 `TradingCoreState`。
 
 ### 阶段三补充：永续资金费
 
@@ -170,10 +170,10 @@ Runtime 与候选 `TradingCoreState` 必须保持 parity，但不能双重扣款
 | 旧状态逐字段对照 | 已完成 | `RuntimeStateParityChecker` 覆盖 instrument、风险、持仓、订单、触发器、treasury、资金费进度和完整 Snapshot 字段 |
 | 永续 Runtime 在线权威 | 已完成 | 下单/撤单使用专用 Runtime delta，资金费、风险和强平使用原生处理器；成交尚由通用 delta 提交，所有路径均完整 parity 与 materialize |
 | 部分成交后的撤单 | 已完成 | 严格校验已成交/已消费单位、取消释放单位、剩余冻结和终态订单；已覆盖资金守恒与 parity 测试 |
-| 成交差分契约 | 已完成 | 原生 perpetual match processor 覆盖订单、reservation、持仓、结算余额和 treasury，并有独立 parity 测试 |
+| 成交差分契约 | 已完成 | 原生 perpetual match processor 覆盖订单、reservation、持仓、结算余额和 treasury；用户 revision 由 reducer batch 计划统一，并有独立与 Core 异步 parity 测试 |
 | position/treasury Runtime 投影 | 已完成 | 已接入 owner-thread Runtime 和恢复投影，含资金/持仓字段校验基础 |
-| 旧成交增量 applier | 已移除 | `RuntimeMatchDeltaApplier` 已移除；未迁移的成交由通用 `RuntimeStateDeltaApplier` 提交 |
-| Runtime 原生永续 fill | 未完成在线接入 | 独立测试覆盖开仓、部分平仓、反向、reduce-only、maker/taker 多 match 和终态 reservation 释放；异步成交的用户 revision 契约待统一后才能接入生产 |
+| 旧成交增量 applier | 已移除 | `RuntimeMatchDeltaApplier` 已移除；线性永续成交由原生 perpetual match processor 提交，其他产品线保持通用 `RuntimeStateDeltaApplier` |
+| Runtime 原生永续 fill | 已完成 | 已覆盖开仓、部分平仓、反向、reduce-only、maker/taker 多 match 和终态 reservation 释放，并接入普通、批量、替换和触发下单的异步撮合回调 |
 | Runtime 原生永续资金费 | 已完成 | 已覆盖零和、扣款封顶、insurance、分片游标、Snapshot 恢复和 CoreProbe Runtime parity |
 | 永续资金费在线提交 | 已完成 | 资金费 transition 统一经过 Runtime delta apply，并由完整 parity 门禁保护 |
 | Runtime 原生永续强平成交 | 已完成 | 已覆盖 cross/isolated、部分/全部平仓、手续费封顶、缺口、insurance、分片撤单游标和 CoreProbe Runtime parity |

@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.matching.CoreMatch;
+import java.util.Map;
 import java.util.List;
 
 /** Runs a complete perpetual match batch on a discardable Runtime projection. */
@@ -49,6 +50,33 @@ public final class RuntimePerpetualMatchProcessor {
             runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
         }
         runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
+        return runtime;
+    }
+
+    /**
+     * Executes the native fill and applies the reducer-owned user revision plan for an asynchronous match batch.
+     * User revisions encode command-lifecycle transitions (including reservation release), which cannot be inferred
+     * from the fill alone once the reservation was created by an earlier command.
+     */
+    public static TradingRuntimeState simulateTransition(TradingCoreState before, TradingCoreState expected,
+                                                         long takerOrderId, List<CoreMatch> matches,
+                                                         RuntimeIdentityRegistry identities) {
+        if (expected == null || expected.productLine() != before.productLine()) {
+            throw new IllegalArgumentException("invalid perpetual match transition");
+        }
+        TradingRuntimeState runtime = simulate(before, takerOrderId, matches, identities);
+        for (Map.Entry<Long, CoreUserState> entry : expected.users().entrySet()) {
+            UserRuntime actual = runtime.user(entry.getKey());
+            CoreUserState planned = entry.getValue();
+            if (actual == null || actual.productLine() != planned.productLine()) {
+                throw new IllegalStateException("runtime match user is missing: " + entry.getKey());
+            }
+            if (actual.revision() != planned.revision()) {
+                runtime.putUser(new UserRuntime(actual.productLine(), actual.userId(), planned.revision(),
+                        actual.positionMode()));
+            }
+        }
+        runtime.setMetadata(expected.productLine(), expected.revision());
         return runtime;
     }
 
