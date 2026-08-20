@@ -33,7 +33,7 @@ instrument 配置按 exchange-core 友好的 long 单位保存：
 - `min_notional_units` / `max_notional_units`：long notional 边界。`LINEAR_PERPETUAL` 使用结算资产最小单位；`INVERSE_PERPETUAL` 使用报价币合约面值单位。
 - `notional_multiplier_units`：`LINEAR_PERPETUAL` 表示每个 `priceTick * quantityStep` 对应的结算资产最小单位；`INVERSE_PERPETUAL` 表示每个合约 step 的报价币面值单位。
 - `contract_type` 不只是展示字段，账户、风控、资金费、强平和 ADL 的公式都会按它分支。
-- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后写入 `trading_orders` 快照；账户结算按订单快照写入 `TRADE_FEE` ledger。正数扣用户余额，负数给用户返佣。默认 BTC/ETH 合约为 maker `200 ppm`、taker `500 ppm`。
+- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后写入 `trading_orders` 快照；账户结算按订单快照写入 `TRADE_FEE` ledger。OKX 初始化基线为现货 maker/taker `800/1000 ppm`、永续和交割 `200/500 ppm`、期权 `200/300 ppm`。实际用户费率仍以账户等级覆盖为准。
 - `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`：单用户动态持仓量上限配置。trading provider 使用 `max(平台 OI notional * rate, floor)` 并再受 `max_position_notional_units` 限制。默认 BTC/ETH 为 `300000 ppm`，固定下限 `25000000000000`，即 250,000 USDT。
 - `*_rate_ppm`、`max_leverage_ppm`、`weight_ppm`：费率、杠杆、权重统一使用 ppm。
 
@@ -139,13 +139,14 @@ producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.con
 - `instrument_index_sources`
 - `instrument_outbox_events`
 
-首发目录使用 BTC、ETH、SOL、XRP、DOGE、BNB、ADA、AVAX、LINK、DOT、LTC、BCH、TRX、TON、SUI、
-APT、NEAR、UNI、AAVE、ETC 共 20 个主流资产。`SPOT`、`LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、
-`LINEAR_DELIVERY`、`INVERSE_DELIVERY`、`OPTION` 各初始化 20 个 symbol，总计 120 个；每个 symbol 配置
-产品线当前版本，衍生品配置三档风险限额，全部配置 Binance、OKX、Bybit 三个指数源。
+`init.sql` 通过 psql 的 `\ir` 引入 `okx-instrument-seed.sql` 和 `okx-asset-scales.sql`。两份文件是
+2026-08-20 UTC 从 OKX V5 Public API 生成的 live 快照：SPOT 1349、LINEAR_PERPETUAL 430、
+INVERSE_PERPETUAL 15、LINEAR_DELIVERY 148、INVERSE_DELIVERY 16、OPTION 2847。每个 symbol
+绑定产品线当前版本、三档风险限额和 OKX 指数源；29 个单字符资产因现有账户资产约束被跳过。
 
-为兼容已有 API 和交易脚本，`BTC-USDT`、`ETH-USDT` 仍表示 U 本位永续；其他业务线通过 `-SPOT`、
-`-INVERSE-PERP`、到期日及期权 strike 后缀区分。同一底层资产的不同产品线不会共享 instrument 主键或当前版本。
+OKX USDⓈ-margined 期权在初始化时统一映射到项目的 USDT 结算路径，coin-margined 期权保留 BTC/ETH
+结算资产。OKX 的交割费、行权费和强平费不等同于 maker/taker 默认费率，现有 `instruments` 字段只
+承载交易默认费率；交割固定费和期权行权费仍需由对应生命周期结算规则读取官方账户费率后处理。
 
 ## 本地运行
 

@@ -678,6 +678,8 @@ SELECT seed.symbol, 1, source.source, TRUE, source.base_url,
  ) AS source(source, base_url, parser)
 ON CONFLICT (symbol, version, source) DO NOTHING;
 
+\ir okx-instrument-seed.sql
+
 -- 02. Public market data, candles, index and mark-price history.
 
 CREATE TABLE IF NOT EXISTS candlestick_candles (
@@ -1630,6 +1632,8 @@ VALUES
 ('BTC', 100000000, now(), now()),
 ('ETH', 1000000000000000000, now(), now())
 ON CONFLICT (asset) DO NOTHING;
+
+\ir okx-asset-scales.sql
 
 CREATE TABLE IF NOT EXISTS account_balances (
     user_id             BIGINT NOT NULL,
