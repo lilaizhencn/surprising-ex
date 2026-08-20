@@ -317,7 +317,7 @@ class RuntimeStateProjectorTest {
                 Map.of(11L, reservation.releaseAll()), Map.of());
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
                 Map.of(7L, afterUser), Map.of(11L, open.cancel()), Map.of(), CoreRiskState.empty(),
-                new CoreTreasuryState(Map.of("USDT", 3L), Map.of(), Map.of(), Map.of(), Map.of()));
+                before.treasuryState().adjustFee("USDT", 3));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
@@ -358,7 +358,7 @@ class RuntimeStateProjectorTest {
         orders.remove(11L);
         orders.remove(12L);
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, users, orders, Map.of(),
-                CoreRiskState.empty(), CoreTreasuryState.empty());
+                CoreRiskState.empty(), before.treasuryState());
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 

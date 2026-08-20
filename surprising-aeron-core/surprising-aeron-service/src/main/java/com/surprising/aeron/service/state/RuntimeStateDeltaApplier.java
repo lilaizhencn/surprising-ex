@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -21,7 +20,9 @@ public final class RuntimeStateDeltaApplier {
         syncOrders(before, after, runtime, identities);
         syncClientIndex(before, after, runtime, identities);
         syncRisk(before, after, runtime, identities);
-        if (before.treasuryState() != after.treasuryState()) syncTreasury(after, runtime, identities);
+        if (before.treasuryState() != after.treasuryState()) {
+            runtime.treasury().applyDelta(before.treasuryState(), after.treasuryState(), identities);
+        }
         syncMap(before.instruments(), after.instruments(), runtime.instrumentsForRuntime());
         syncMap(before.leverages(), after.leverages(), runtime.leveragesForRuntime());
         syncMap(before.algoOrders(), after.algoOrders(), runtime.algoOrdersForRuntime());
@@ -149,28 +150,6 @@ public final class RuntimeStateDeltaApplier {
                     scan.triggerOcoCursor()));
         }
         runtime.setNextLiquidationId(after.riskState().nextLiquidationId());
-    }
-
-    private static void syncTreasury(TradingCoreState after, TradingRuntimeState runtime,
-                                     RuntimeIdentityRegistry identities) {
-        runtime.treasury().clear();
-        CoreTreasuryState source = after.treasuryState();
-        source.feeBalances().forEach((asset, value) -> runtime.treasury().setFee(identities.assetId(asset), value));
-        Set<String> insuranceAssets = new HashSet<>(source.insuranceBalances().keySet());
-        insuranceAssets.addAll(source.insuranceDeficits().keySet());
-        insuranceAssets.forEach(asset -> runtime.treasury().setInsurance(identities.assetId(asset),
-                source.insuranceBalances().getOrDefault(asset, 0L), source.insuranceDeficits().getOrDefault(asset, 0L)));
-        source.fundingSettlements().forEach((symbol, value) ->
-                runtime.treasury().setFundingSettlement(identities.symbolId(symbol), value));
-        source.fundingProgress().forEach((symbol, value) -> runtime.treasury().setFundingProgress(
-                identities.symbolId(symbol), new TreasuryRuntime.FundingProgressRuntime(value.settlementId(),
-                        value.instrumentVersion(), value.fundingRatePpm(), value.nextCursorUserId(), value.commandId())));
-        source.lifecycleSettlements().forEach((symbol, value) ->
-                runtime.treasury().setLifecycleSettlement(identities.symbolId(symbol), value));
-        source.lifecycleProgress().forEach((symbol, value) -> runtime.treasury().setLifecycleProgress(
-                identities.symbolId(symbol), new TreasuryRuntime.LifecycleProgressRuntime(value.settlementId(),
-                        value.instrumentVersion(), value.settlementPriceTicks(), value.optionCashUnitsPerContract(),
-                        value.ordersComplete(), value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId())));
     }
 
     private static String positionKey(CoreRiskSnapshot risk) {

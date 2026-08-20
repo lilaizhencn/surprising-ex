@@ -3,6 +3,9 @@ package com.surprising.aeron.service.state;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 public final class TreasuryRuntime {
@@ -65,6 +68,103 @@ public final class TreasuryRuntime {
     public void setLifecycleProgress(int symbolId, LifecycleProgressRuntime progress) {
         if (symbolId < 0 || progress == null) throw new IllegalArgumentException("invalid lifecycle progress");
         lifecycleProgress.put(symbolId, progress);
+    }
+
+    void applyDelta(CoreTreasuryState before, CoreTreasuryState after, RuntimeIdentityRegistry identities) {
+        if (before == null || after == null || identities == null) {
+            throw new IllegalArgumentException("invalid treasury transition");
+        }
+        requireDelta("feeBalances", before.feeBalances(), after.feeBalances());
+        requireDelta("insuranceBalances", before.insuranceBalances(), after.insuranceBalances());
+        requireDelta("insuranceDeficits", before.insuranceDeficits(), after.insuranceDeficits());
+        requireDelta("fundingSettlements", before.fundingSettlements(), after.fundingSettlements());
+        requireDelta("lifecycleSettlements", before.lifecycleSettlements(), after.lifecycleSettlements());
+        requireDelta("fundingProgress", before.fundingProgress(), after.fundingProgress());
+        requireDelta("lifecycleProgress", before.lifecycleProgress(), after.lifecycleProgress());
+
+        syncFeeBalances(before.feeBalances(), after.feeBalances(), identities);
+        syncInsurance(before, after, identities);
+        syncFunding(before, after, identities);
+        syncLifecycle(before, after, identities);
+    }
+
+    private void syncFeeBalances(Map<String, Long> before, Map<String, Long> after,
+                                 RuntimeIdentityRegistry identities) {
+        for (String asset : StateMapSupport.changedKeys(before, after)) {
+            Long units = after.get(asset);
+            setFee(identities.assetId(asset), units == null ? 0 : units);
+        }
+    }
+
+    private void syncInsurance(CoreTreasuryState before, CoreTreasuryState after,
+                               RuntimeIdentityRegistry identities) {
+        Set<String> changedAssets = new TreeSet<>(StateMapSupport.changedKeys(
+                before.insuranceBalances(), after.insuranceBalances()));
+        changedAssets.addAll(StateMapSupport.changedKeys(before.insuranceDeficits(), after.insuranceDeficits()));
+        for (String asset : changedAssets) {
+            setInsurance(identities.assetId(asset),
+                    after.insuranceBalances().getOrDefault(asset, 0L),
+                    after.insuranceDeficits().getOrDefault(asset, 0L));
+        }
+    }
+
+    private void syncFunding(CoreTreasuryState before, CoreTreasuryState after,
+                             RuntimeIdentityRegistry identities) {
+        Set<String> changedSymbols = new TreeSet<>(StateMapSupport.changedKeys(
+                before.fundingSettlements(), after.fundingSettlements()));
+        changedSymbols.addAll(StateMapSupport.changedKeys(before.fundingProgress(), after.fundingProgress()));
+        for (String symbol : changedSymbols) {
+            Long settlementId = after.fundingSettlements().get(symbol);
+            int symbolId = identities.symbolId(symbol);
+            if (settlementId == null) removeFundingSettlement(symbolId);
+            else setFundingSettlement(symbolId, settlementId);
+            CoreTreasuryState.FundingProgress progress = after.fundingProgress().get(symbol);
+            if (progress == null) removeFundingProgress(symbolId);
+            else setFundingProgress(symbolId, new FundingProgressRuntime(progress.settlementId(),
+                    progress.instrumentVersion(), progress.fundingRatePpm(), progress.nextCursorUserId(),
+                    progress.commandId()));
+        }
+    }
+
+    private void syncLifecycle(CoreTreasuryState before, CoreTreasuryState after,
+                               RuntimeIdentityRegistry identities) {
+        Set<String> changedSymbols = new TreeSet<>(StateMapSupport.changedKeys(
+                before.lifecycleSettlements(), after.lifecycleSettlements()));
+        changedSymbols.addAll(StateMapSupport.changedKeys(before.lifecycleProgress(), after.lifecycleProgress()));
+        for (String symbol : changedSymbols) {
+            Long settlementId = after.lifecycleSettlements().get(symbol);
+            int symbolId = identities.symbolId(symbol);
+            if (settlementId == null) removeLifecycleSettlement(symbolId);
+            else setLifecycleSettlement(symbolId, settlementId);
+            CoreTreasuryState.LifecycleProgress progress = after.lifecycleProgress().get(symbol);
+            if (progress == null) removeLifecycleProgress(symbolId);
+            else setLifecycleProgress(symbolId, new LifecycleProgressRuntime(progress.settlementId(),
+                    progress.instrumentVersion(), progress.settlementPriceTicks(), progress.optionCashUnitsPerContract(),
+                    progress.ordersComplete(), progress.nextCursorOrderId(), progress.nextCursorUserId(),
+                    progress.commandId()));
+        }
+    }
+
+    private void removeFundingSettlement(int symbolId) {
+        fundingSettlements.remove(symbolId);
+    }
+
+    private void removeFundingProgress(int symbolId) {
+        fundingProgress.remove(symbolId);
+    }
+
+    private void removeLifecycleSettlement(int symbolId) {
+        lifecycleSettlements.remove(symbolId);
+    }
+
+    private void removeLifecycleProgress(int symbolId) {
+        lifecycleProgress.remove(symbolId);
+    }
+
+    private static void requireDelta(String field, Map<?, ?> before, Map<?, ?> after) {
+        if (!StateMapSupport.isDeltaDescendantOf(before, after)) {
+            throw new IllegalStateException("online treasury transition is not a delta: " + field);
+        }
     }
 
     public void clear() {
