@@ -1,6 +1,6 @@
 # exchange-core 交易主链路性能与恢复审计报告
 
-> 状态：`P0_MAKER_DEPTH_JFR_VERIFIED`
+> 状态：`P0_MAKER_DEPTH_JFR_VERIFIED; REMEDIATION_DESIGN_CAPTURED`
 >
 > 审计分支：`codex/aeron-unified-core`
 >
@@ -11,8 +11,10 @@
 ## 1. 结论
 
 当前架构方向正确，但现状还不具备 100,000 条最终裁决命令/秒的容量基础。exchange-core 撮合器不是首要
-瓶颈，主要瓶颈位于 Product Core 外层状态迁移：每条命令仍可能执行全状态投影、完整物化和 parity 比较；
-永续成交、资金费、风险和强平的部分 Runtime processor 也仍从完整 immutable state 重建 Runtime。
+瓶颈，主要瓶颈位于 Product Core 外层状态迁移、treasury 全量重建、结果账本 hash、continuation 调度、协议复制和
+outbox 编码。
+普通 `adoptState` 当前已经使用增量 Runtime transition；旧审计中“每条命令完整 materialize/parity”的表述已过时，
+但 treasury 同步以及永续成交、资金费和风险续跑仍存在随状态规模增长的在线全量工作。
 
 当前最优先的改造不是增加 Matching Engine 数量或单独调整 GC，而是让 `TradingRuntimeState` 成为在线唯一
 可变状态，由 Product Core owner thread 对本次命令触及的实体执行原地、可验证的增量提交。完整
@@ -76,48 +78,54 @@ exchange-core README 中的峰值不能直接换算为 Surprising-EX 端到端�
 以上边界不应为了吞吐量被推倒。性能改造应集中在 Product Core 内部状态表示、continuation 调度、协议复制和
 outbox 编码上。
 
-## 4. P0：全状态投影和物化阻塞 100k/s
+## 4. 当前源码状态：在线增量路径与残留全量工作
 
-### 4.1 每次状态迁移仍完整 materialize
+### 4.1 普通状态迁移已经改为增量，但必须防止退化
 
 [`CoreProbeState.adoptState`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java)
-当前执行：
+当前在线执行：
 
 1. `RuntimeStateDeltaApplier.apply` 将候选 immutable state 的差分应用到 Runtime。
-2. `RuntimeStateParityChecker.assertMatches` 对 Runtime 执行完整物化。
-3. 将完整 materialized state 与候选 state 做 equals 和 business hash 比较。
-4. 将 materialized state 继续作为兼容读取和后续 transition 的权威视图。
+2. `TradingCoreRuntime.transition` 依据 changed keys 增量更新索引。
+3. `RollingBusinessStateHash.update` 依据 changed keys 增量更新业务 hash。
+4. 只有快照、恢复、模拟或测试 parity 才应该执行完整 projection/materialization。
+
+“增量 Runtime transition”目前仍有一个严重例外：[`RuntimeStateDeltaApplier.syncTreasury`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateDeltaApplier.java)
+在 treasury 发生变化时先清空整个 `TreasuryRuntime`，再重建 fee、insurance、funding 和 lifecycle 全部 map。
+成交、资金费和其他结算命令都可能触发 treasury 变化，因此这不是 materializer 冷路径问题，而是在线 owner thread
+上的全局重建，必须作为 P0 消除。
 
 [`RuntimeStateMaterializer`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateMaterializer.java)
 会重建全部用户、余额、订单、reservation、position、risk、liquidation、treasury、client-order index、algo、
-timer 和 trigger map。更严重的是，它在每个用户循环内再次扫描全局 reservation 和 position 集合，因此最坏
-复杂度可能接近：
+timer 和 trigger map。它在每个用户循环内再次扫描全局 reservation 和 position 集合，因此冷路径最坏复杂度
+可能接近：
 
 ```text
 O(U * R + U * P + O + Risk + Treasury)
 ```
 
-其中 `U` 为用户数，`R` 为 reservation 数，`P` 为 position 数，`O` 为订单数。这不仅是 CPU 扫描问题，
-还会为 `TreeMap`、immutable state 和各层业务对象产生大量短命分配。
+其中 `U` 为用户数，`R` 为 reservation 数，`P` 为 position 数，`O` 为订单数。这是恢复、快照、离线 parity
+的风险，不应重新引入普通命令热路径。解决方案见 5.6.14。
 
 [`RuntimeStateParityChecker`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateParityChecker.java)
-适合作为迁移期 fail-closed 门禁，但不能继续存在于 100k/s 的每命令生产热路径。
+适合作为迁移期 fail-closed 门禁，但不能重新放回 100k/s 的每命令生产热路径。
 
-### 4.2 永续 processor 仍从完整状态重建 Runtime
+### 4.2 永续 processor 的在线残留问题不是完整投影，而是局部全量扫描
 
-以下处理器仍存在 `RuntimeStateProjector.project(before, identities)`：
+`RuntimeStateProjector.project(before, identities)` 当前主要位于构造、恢复和 `simulate*` 冷路径。在线
+`CoreProbeState` 已持有 Runtime，但以下处理器仍有局部全量工作：
 
 - `RuntimePerpetualMatchProcessor`
 - `RuntimePerpetualFundingProcessor`
 - `RuntimePerpetualRiskProcessor`
-- `RuntimePerpetualLiquidationProcessor`
+- `RuntimePerpetualLiquidationProcessor` 的 `simulate*` 仍只允许冷路径调用。
 
 例如 [`RuntimePerpetualMatchProcessor`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimePerpetualMatchProcessor.java)
-在处理单个成交批次前投影完整状态，随后还遍历 `expected.users()` 对齐用户 revision，最后再进入完整 parity
-materialize。资金费、风险和强平也存在相同类别的全量投影出口。
+在在线 transition 后仍遍历 `expected.users()` 对齐 revision；资金费按用户扫描全局 positions，风险续跑从
+用户索引头部反复寻找下一个用户。它们仍然会随用户数或持仓数增长，属于当前真正的 P0 残留。
 
-这说明当前 Runtime processor 的主要价值仍是迁移期结果对照，尚未成为 exchange-core 式的持久 owner-thread
-原地状态机。
+Runtime processor 的在线状态应继续由 Product Core owner thread 持有并原地增量更新；immutable reducer 可以在
+迁移期作为 shadow/parity 参照，不能与 Runtime 在每条生产命令上重复执行完整业务计算。
 
 ### 4.3 本地诊断基准
 
@@ -217,6 +225,263 @@ snapshot 和 recovery 可以是 `O(N)` 冷路径，但必须限制 owner-thread 
 根据真实 live set 决定 heap，使用真实负载比较 ZGC 与 G1。保留 `Xms=Xmx` 和 pre-touch，同时为 direct
 memory、Archive page cache 和操作系统留足物理内存。
 
+### 5.6 逐项解决方案、理由与安全边界
+
+以下方案按“先消除全局复杂度，再减少复制和异步开销，最后处理冷路径与下游”排序。所有方案都必须保留
+ProductLine 隔离、Aeron Cluster sequence 顺序、幂等语义和资金守恒，不以牺牲确定性换取吞吐量。
+
+#### 5.6.1 幂等结果账本：从全量 hash/copy 改为增量摘要
+
+当前 [`CoreProbeState.stateHash`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java)
+会遍历最多 128 个 `StoredResult`，而 `responseData()` 还会复制完整响应；`storeResult` 又会重新统计整个账本的
+字节数。
+
+方案：
+
+- `StoredResult` 写入时一次性计算 `responseDigest` 和 `encodedBytes`。
+- Core 内部增加 `responseDataUnsafe()` 或只读 owned view，防御性复制只保留在协议边界。
+- 维护 `resultLedgerBytes`、`resultLedgerCount` 和增量 `ledgerDigest`。
+- 插入、替换、淘汰只更新受影响的摘要节点，不重新遍历所有响应。
+- 如果要求严格可复现的有序 hash，使用按 commandId/retentionSequence 排序的轻量 Merkle/持久树；不要只依赖
+  简单 XOR。
+- 继续保留 128 条和 32MiB 上限，超限时确定性淘汰旧结果或拒绝超大响应。
+
+理由：
+
+结果账本属于每条命令都会触碰的状态。将成本从“历史响应总字节数”降为 `O(log 128)` 或近似 `O(1)`，才能
+避免大响应把普通下单的延迟和 GC 一起放大。
+
+验证：
+
+- 多节点对相同 command sequence 的 ledger digest 必须一致。
+- 重试、重复、幂等冲突和淘汰后的 command result 必须保持原语义。
+- 32MiB 账本压力下，单命令不得复制整个账本。
+
+#### 5.6.2 永续成交：只处理 touched users
+
+[`RuntimePerpetualMatchProcessor.applyTransition`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimePerpetualMatchProcessor.java)
+不应遍历 `expected.users()`。
+
+方案：
+
+- 使用 reducer 产生的 `changedUserIds`。
+- 额外加入 taker user 和每个 maker user，使用 primitive long set 去重。
+- 只对 touched user 更新 revision、余额、reservation、position 和相关 index。
+- debug/parity 模式下断言 touched 集合覆盖 immutable expected 的 changed users；生产路径不执行全量断言。
+- 对同一批次的 maker user 只执行一次 runtime update。
+
+理由：成交影响范围是 `O(1 + k)`，其中 `k` 是 maker/fill 数；不应随全局用户数 `U` 增长。
+
+#### 5.6.3 风险续跑：使用有序索引游标
+
+[`RuntimePerpetualRiskProcessor.nextUser`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimePerpetualRiskProcessor.java)
+应与 [`TradingCoreReducer.nextRiskUser`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreReducer.java)
+保持同一实现策略。
+
+方案：
+
+- 将 symbol user index 暴露为 `NavigableSet<Long>`。
+- 直接使用 `higher(lastUserId)` 获取下一用户。
+- 风险扫描状态持久化 `lastUserId`，续跑不重新从集合头部扫描。
+- 非有序索引只允许测试或离线 fallback；在线路径记录错误并 fail-closed。
+
+理由：每个 continuation 应为 `O(batch)`，完整用户扫描应为 `O(U)`，不能退化成 `O(U²)`。
+
+#### 5.6.4 资金费：增加 `(symbol, user)` 持仓索引
+
+方案：
+
+- 在 Runtime State 中维护 `symbolId + userId -> position keys`。
+- 位置创建、修改、归零时增量维护索引。
+- 资金费直接读取指定 user/symbol 的非零持仓，不扫描全局 positions。
+- position key 预先保持有序，移除每用户临时 `ArrayList` 和 `sort()`。
+- 每个 continuation 继续使用 `maxUsers`，并把 `O(B*P)` 降为 `O(B + touchedPositions)`。
+
+理由：资金费即使分批，也必须限制每一批的真实工作量；分批不能掩盖每用户扫描全局集合的问题。
+
+资金安全：保留原有 funding payment 对账、insurance adjustment、用户余额和 treasury 守恒断言；索引只作为
+访问加速结构，不能成为第二份资金权威。
+
+#### 5.6.5 pending matching：有界 completion queue 和单一 wakeup
+
+方案：
+
+- `pendingMatching` 使用 sequence ring 或 primitive map。
+- 增加 `commandId -> sequence` 直接索引，取消 `stream().filter()` 扫描。
+- matcher callback 只写有界 completion slot/队列，不直接修改 Core 状态。
+- owner thread 通过一个 wakeup/timer drain completion，状态提交仍在 owner thread 完成。
+- 只为当前 sequence、重试 deadline 和超时任务设置 timer。
+- 增加显式 `MAX_PENDING_MATCHING`、每 session pending client 上限和 completion queue 上限。
+- 队列满时拒绝新命令或进入确定性 fail-closed，不能无限增长。
+- 保留 `takeMatchingResult` 的 head sequence gate，禁止 out-of-order 资金提交。
+
+理由：当前每完成一条 continuation 都重新遍历 pending，累计可达 `O(P²)`；单一 wakeup 可将调度成本降到与
+实际完成数和超时数相关。10ms timer 只作为兜底，不应成为正常完成延迟来源。
+
+#### 5.6.6 Delta 和 rolling hash：禁止静默全量退化
+
+方案：
+
+- 在线 reducer 所有核心 map 必须返回 delta map。
+- `adoptState` 记录非 delta transition 的计数和 map 名称。
+- 交易热路径遇到普通 map 时，使用明确的 touched-key diff；不要默认 `rebuildMap`。
+- `RollingBusinessStateHash` 只对 changed keys 更新。
+- 对 instrument、risk scan、treasury 等固定结构使用 numeric field hash，减少 `toString()` 和 UTF-8 临时数组。
+- 全量 rebuild 只放在 snapshot、restore、offline parity。
+
+理由：当前增量架构只有在所有 reducer 遵守 delta 契约时才成立；任何一个普通 map 都可能把整条命令退化为全局
+扫描。
+
+#### 5.6.7 Runtime 与 immutable reducer：分阶段取消双重业务计算
+
+方案：
+
+1. 第一阶段：Runtime 继续在线提交，immutable reducer 作为 shadow/parity，只在采样命令、测试、快照边界或
+   follower 上执行。
+2. 第二阶段：Runtime 产生 compact touched change set，由 snapshot/export 层按需生成 immutable view。
+3. 第三阶段：普通命令不再同时构造完整 immutable candidate 和 Runtime candidate。
+4. 每个 ProductLine 独立启用 feature flag，不能跨产品线一次性切换。
+
+理由：当前 reducer + Runtime processor + index transition 重复执行交易逻辑，虽然提高迁移期安全性，但会直接
+   翻倍 CPU 和对象分配。必须以 parity 证据逐产品线迁移，不能一次删除校验。
+
+#### 5.6.8 协议、fingerprint 和内部 ownership：只复制一次
+
+方案：
+
+- 增加 `DirectBuffer + offset + length` flyweight decoder。
+- Aeron callback 中解析成 compact typed command；pending 生命周期只保存 typed command 或一次 owned copy。
+- Core 内部使用 owned read-only view，外部 API 仍保留 defensive copy。
+- 响应直接写入复用的 Agrona buffer。
+- `CommandFingerprint` 使用复用的 `MessageDigest` 和 canonical buffer，避免每条命令创建 digest、ByteBuffer 和
+  payload clone。
+- 不得把 Aeron callback 的临时 slice 跨 callback 生命周期保存。
+
+理由：协议边界需要内存所有权，但不需要在同一线程内反复复制。此方案同时降低 CPU、Young GC 和网络前的延迟。
+
+#### 5.6.9 matcher Future、Stream 和重复 decode
+
+方案：
+
+- 为 exchange-core adapter 增加 callback 或批量提交 API，逐步减少每命令 `CompletableFuture` 链。
+- matching result 使用紧凑数组或受控对象池，保留明确生命周期。
+- `Stream.concat().distinct().toList()` 改为 primitive touched set。
+- `REPLACE/AMEND` payload 只 decode 一次，结果存入 `PendingMatching`。
+- batch cancel/amend 使用直接循环；只有跨线程边界才创建 Future。
+
+理由：这些分配不一定改变算法大 O，但会增加短命对象、GC 次数和尾延迟。JFR 已经观察到相关数组和对象分配。
+
+#### 5.6.10 replicated outbox：预编码 frame 和 ACK metadata
+
+方案：
+
+- outbox entry 保存预编码 frame、sequence、frame length、terminal order IDs、digest 和产品线信息。
+- batch query 只复制连续 frame，不创建 `CoreMessage` 列表后再次编码。
+- ACK 按 entry metadata 清理，不重新 decode event。
+- pending bytes 作为主容量门禁，event count 作为辅助门禁。
+- 明确 pending fact 是否为外部审计契约；如果外部只需要最终事实，pending continuation 留在 Aeron Log，不进入
+  Kafka Core Fact。
+- 如果 pending fact 必须保留，使用紧凑 progress fact，不重复携带完整 changed users/orders。
+
+Kafka exporter 保持 `acks=all` 和幂等 producer，但改为批量发送后使用单一 metadata barrier；ACK 仍必须在全部消息
+成功发布后提交，不能为了吞吐提前确认。
+
+理由：outbox 位于 Product Core owner-thread 热路径，编码和 ACK decode 都会直接消耗交易裁决预算。
+
+#### 5.6.11 下单入口：移除热路径 preflight，避免同步 HTTP 占满线程
+
+方案：
+
+- 普通下单只提交一次真实 `PLACE_ORDER` command。
+- Core 在同一 command 内完成最终校验、reservation 和资金冻结。
+- Trading Provider 继续执行格式、instrument、fee 等本地校验。
+- preflight 保留为显式可选 API，不作为真实下单前置步骤。
+- HTTP 优先使用 async command admission：返回 commandId 和 `202 Accepted`，通过 command result 查询最终状态。
+- 若同步兼容接口必须保留，使用有界等待 executor；线程池满时直接返回 backpressure。
+
+理由：preflight 无法替代真实 command 的最终校验，却增加一次 Aeron 往返；同步 `.join()` 会把 Core 背压传导成
+Web 容器线程耗尽。
+
+#### 5.6.12 热门 user 的 AgentLane
+
+方案：
+
+- 保留默认 user affinity，避免破坏 source sequence 顺序。
+- 优先为做市账户增加 batch command 和专用高容量 lane。
+- 只有确认单 user lane 成为瓶颈后，才增加 per-user sequencer、source sequence 重排和多 lane 发送。
+- 多 lane 必须有 reorder buffer 上限；超限时 backpressure，不允许无界缓存。
+
+理由：简单随机分散同一 user 的命令会破坏顺序、幂等和资金状态可预测性。
+
+#### 5.6.13 treasury、pending client 和 egress queue
+
+方案：
+
+- `RuntimeStateDeltaApplier` 增加 `TreasuryRuntime.applyDelta()`，只同步 changed assets/symbols，不再
+  `treasury.clear()` 后重建。
+- `PendingClient` 不保存完整 `CoreMessage`，只保存 session、response type、correlation/header 必需字段。
+- 对同一 commandId 的重复等待可以合并。
+- `doBackgroundWork()` 维护 active egress set，只扫描真正有排队数据的 session。
+- 每 session egress、pending client 和 response queue 都设置硬上限，超限返回明确 backpressure 或关闭慢连接。
+
+当前问题：[`RuntimeStateDeltaApplier.syncTreasury`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateDeltaApplier.java)
+当前会在任意 treasury state 变化时 `clear()` 后重建全部 treasury map；成交和资金费因此可能触发与全局 treasury
+规模成比例的复制和分配。
+
+理由：这些改动不改变交易语义，但会显著减少高并发时的 payload retention、空 session 扫描和 treasury 重建。
+
+#### 5.6.14 Materializer、snapshot 和恢复
+
+方案：
+
+- materializer 只允许用于 snapshot、restore、offline parity 和模拟。
+- materializer 先按 user 建立 reservation/position 索引，避免 `O(U*R + U*P)` 的重复全局扫描。
+- snapshot 在 admission fence 后固定 epoch，等待 pending matching drain，再生成业务和 matcher snapshot。
+- 使用分段 writer 直接写 snapshot publication 或 bounded sink，避免 `ByteArrayOutputStream + toByteArray()` 双份
+  大数组。
+- 对 snapshot size、encode duration、owner pause、restore duration 设置硬门禁。
+- snapshot/restore 必须校验业务 hash、matcher hash、open-order set 和 ProductLine。
+
+理由：snapshot 可以是 `O(N)` 冷路径，但不能在高流量期间制造不可控 owner pause 或瞬时堆峰值。
+
+#### 5.6.15 Online query、busy-spin 和 matcher engine
+
+方案：
+
+- 增加 `(userId, symbol, marginMode) -> leverage` 索引，消除 user state query 对全局 leverage 的扫描。
+- 同一热门 symbol 仍只允许一个价格时间优先 owner；增加 matcher engine 只用于多个 symbol 分片。
+- busy-spin 只部署在专用 CPU 上；低负载环境使用 backoff/yield strategy。
+- 根据 symbol 热点和物理核心数配置 engine，避免 Aeron owner、matcher、Kafka、HTTP 线程过度订阅。
+
+理由：查询也在 owner thread 上执行；busy-spin 能降低延迟，但 CPU 过载会反过来放大所有尾延迟。
+
+#### 5.6.16 Kafka、History Projector 和 WebSocket
+
+方案：
+
+- History Projector 批量写 PostgreSQL，在数据库事务完成后再提交 Kafka offset。
+- 维护 projected watermark，WebSocket 只在 watermark 缺口或跨越时校验数据库，不要每条事件都同步 query。
+- Kafka listener 使用 batch listener，按 topic/用户聚合 fanout。
+- 订单、成交、资金类消息不能无条件 coalesce；行情类消息可以按 symbol 做 coalesce。
+- WebSocket 继续使用有界 per-connection queue，慢连接主动断开，不能把背压传回 Product Core。
+- 监控 Kafka lag、projected watermark、fanout queue depth、慢连接数和重连率。
+
+理由：Kafka/WebSocket 不属于交易裁决权威，但同步数据库校验和逐条 fanout 会造成审计链路积压，最终表现为用户
+推送延迟。
+
+#### 5.6.17 JVM、GC 和可观测性
+
+方案：
+
+- 固定 JDK、Aeron、Agrona、LZ4 版本并增加 duplicate-class 门禁。
+- 为 heap、direct memory、Aeron publication backpressure、pending matching、outbox bytes、result ledger bytes、
+  completion age、owner apply duration 建立指标。
+- 使用 JFR allocation profile、GC pause、native memory tracking 和 heap histogram 分离 Java heap 与 direct memory。
+- 不先验选择 G1 或 ZGC；在同一 JDK、状态规模、开放环负载和 heap 下做对照。
+- 任何优化都必须同时观察 p50、p99、p99.9、allocation rate、GC pause、CPU steal 和 queue depth。
+
+理由：仅看平均吞吐不能发现 continuation backlog、direct memory、HTTP worker exhaustion 或慢客户端导致的尾部问题。
+
 ## 6. 目标热链路
 
 ```text
@@ -258,6 +523,9 @@ Aeron owner thread
 | 用户余额、持仓、冻结读取 | 平均 `O(1)` |
 | 资金费、风险扫描、ADL、交割、行权 | `O(batch)` continuation |
 | snapshot/recovery | `O(N)`，仅允许出现在冷路径 |
+| treasury 同步 | `O(changed assets/symbols)`，不得 `clear()` 后重建全量 map |
+| 幂等结果账本更新 | `O(1)` 或 `O(log R)`，`R <= 128`，不得扫描响应正文 |
+| pending matching completion | `O(completions + timeouts)`，不得按在途数重复全量 schedule |
 | 热路径分配 | 不随全局状态规模增长，持续压到近零 |
 
 任何单用户下单、撤单或单笔成交都不得产生与全局用户数、订单数、持仓数成比例的扫描、排序、状态复制或
@@ -265,24 +533,32 @@ Aeron owner thread
 
 ## 8. 分阶段改造路线
 
-### P0：消除全状态工作
+### P0：消除在线全局工作
 
-- 让 Runtime State 成为在线唯一状态。
-- 移除每命令 projector、materializer 和完整 parity。
-- 将永续成交、资金费、风险和强平改为持久 Runtime 原地 continuation。
-- 为 reservation、position 和 pending matching 建立直接索引。
+- 保持 Runtime State 为在线 owner-thread 状态；确认普通 `adoptState` 不调用完整 materializer/parity。
+- 修复结果账本 hash/copy，使其不扫描历史响应正文。
+- 将永续成交改为 touched-user revision/update。
+- 将资金费改为 `(symbol, user)` 持仓索引，将风险续跑改为 `higher(cursor)`。
+- 将 treasury 同步改为 changed assets/symbols 的增量更新，禁止 `clear()` 后重建全量 treasury map。
+- 为 reservation、position、leverage、pending matching 建立直接索引。
+- 对任何非 delta map transition 增加门禁，禁止静默全量 rebuild。
+- 每个 ProductLine 单独完成成交、资金费、风险、强平和资金守恒回归后才能启用。
 
 ### P1：控制 continuation 与分配
 
-- completion queue、单一 drain wakeup、max in-flight 和入口背压。
-- DirectBuffer flyweight 解码和复用响应 buffer。
-- 移除 matcher/result 热路径中的 stream、`toList`、`List.copyOf` 和无界 future 分配。
-- outbox 预编码及 ACK metadata 化。
+- completion queue、单一 drain wakeup、sequence head gate、max in-flight 和入口背压。
+- DirectBuffer flyweight 解码、一次 owned copy 和复用响应 buffer。
+- fingerprint digest、matcher result、Stream、`toList`、重复 decode 和 Future 链分配优化。
+- outbox 预编码、terminal metadata、pending fact 契约收敛和 ACK metadata 化。
+- 去掉普通下单 preflight，HTTP 入口改为异步 admission；保留稳定 commandId。
+- treasury 增量同步、pending client compact header、active egress set。
 - 统一依赖版本和 JDK 25 模块参数。
 
 ### P2：快照与故障恢复
 
-- snapshot admission barrier 和分段 Runtime snapshot。
+- materializer 只留在快照、恢复和 parity；预先按 user 建索引，避免 `O(U*R + U*P)`。
+- snapshot admission barrier、固定 epoch 和分段 Runtime snapshot。
+- 禁止 `ByteArrayOutputStream + toByteArray()` 双份完整 snapshot buffer。
 - 三节点 leader kill、snapshot corruption、Archive 重放测试。
 - Kafka 不可用、outbox 达上限、Archive 磁盘满和 follower 落后测试。
 
@@ -291,6 +567,21 @@ Aeron owner thread
 优先把单 Product Core owner thread 做到目标。Matching Engine 可以按 symbol 扩展，但 Product Core 不能简单
 按 symbol 拆分：同一用户的跨 symbol 余额、全仓保证金和风险属于同一个 risk domain。真正按账户/风险域分片
 会引入订单簿和结算跨 shard 协调，只能在单核热链路完成 P0-P2 后重新评审。
+
+实施顺序固定为：
+
+```text
+测量与状态 hash 门禁
+    -> P0 全局扫描和结果账本
+    -> pending matching 与入口背压
+    -> 协议/outbox/ Future 分配
+    -> HTTP、Kafka、WebSocket 异步链路
+    -> snapshot/restore 冷路径
+    -> 开放环容量、故障和长稳验收
+```
+
+每完成一个阶段，必须先通过该阶段对应的单产品线测试和资金守恒，再进入下一阶段；不得因为 benchmark 吞吐
+提升而跳过回归或扩大产品线范围。
 
 ## 9. 100k/s 验收口径
 
@@ -311,6 +602,22 @@ Aeron owner thread
 - 满负载 kill leader 后，无已提交命令丢失、无重复最终事实。
 - Kafka/Projector 停止期间交易按设计继续；outbox 达上限后确定性背压。
 - 用户和做市账户逐项核对期初、充值/调整、成交、手续费、资金费、强平费、交割/行权和期末资金守恒。
+
+### 9.1 改造完成判定
+
+每个方案只有同时满足“性能证据”和“业务安全证据”才算完成：
+
+| 改造面 | 性能完成条件 | 业务安全完成条件 |
+| --- | --- | --- |
+| 结果账本 hash/copy | 单命令不扫描历史响应正文；账本 bytes 增量维护 | 重试、重复、幂等冲突、快照恢复后的 command result 完全一致 |
+| 成交/资金费/风险索引 | 单次工作量只随 touched users、positions 或 batch 增长 | reducer/runtime parity、用户 revision、资金费 payment 和 risk cursor 一致 |
+| pending matching | pending、completion、timer 都有硬上限；无 `O(P²)` 调度 | 只能按 global sequence 完成资金和持仓裁决，不能 out-of-order |
+| 协议/outbox | payload、response、event 不重复复制；outbox ACK 不重新 decode | sequence 连续、Kafka 不重复最终事实、ACK 只能确认已发布事实 |
+| HTTP/客户端背压 | Core 慢时不耗尽 HTTP worker、Aeron lane 或堆内存 | commandId 稳定，重试仍幂等，未提交命令明确返回未接受 |
+| snapshot/restore | owner pause、snapshot size、restore time 在预算内 | business hash、matcher hash、open orders、ProductLine 和资金状态一致 |
+| Kafka/WebSocket | projector lag、fanout queue 和慢连接有界 | 订单/成交/资金消息不丢失、不乱序；慢客户端只影响自身 |
+
+任何一项业务安全条件失败，都不得以性能基准通过为理由上线。
 
 ## 10. 本轮验证范围
 
@@ -434,3 +741,9 @@ CPU top frames 为 `BusySpinWaitStrategy.waitFor`、`Util.getMinimumSequence`、
 
 剩余风险：Stage 1 负载很短且状态很小，fork 间最终裁决吞吐离散约 19%；JFR 本身和 JVM 启动占比较高；
 accept/freeze 与并发入口基准刻意不完成 matching，只作为分阶段 control，不可纳入最终裁决分子。
+
+### 10.4 本次文档补充
+
+本次补充将当前源码复核结果和逐项解决方案写入本报告，没有修改交易代码、协议代码或测试代码。文档级验证
+只执行 `git diff --check`；前述构建、测试和 benchmark 数字属于既有审计证据，不代表本次文档变更重新执行了
+这些运行验证。工作区中其他未提交修改不属于本次文档补充范围。
