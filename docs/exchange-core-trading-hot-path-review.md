@@ -340,7 +340,7 @@ mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
 | 阶段 | 结果 | parent commit | UTC | 固定负载 | 最终裁决吞吐中位数 | 修正后 p50 / p99 / p99.9 | 证据 |
 | --- | --- | --- | --- | --- | ---: | ---: | --- |
 | Stage 1 | **PASS（基准工具门禁）** | `9ec69899a8096d3e2c1b74e33ea393d26b1853c3` | `2026-08-20T04:54:40Z` | seeds `9901..9903`，每 fork：adapter 500、accept/freeze 25、完整内存 25、并发入口 50、永续最终裁决 50 | `325.373/s` | `3,848 / 12,541 / 13,541 us` | `.omo/evidence/task-1/task-1-baseline-result.json`；三个 `task-1-baseline-fork-*.jfr`；五个 `jfr-*.txt` |
-| Stage 2 | **PASS（maker-depth 资金路径覆盖）** | `0c393ea1` | `2026-08-20T08:40:04Z` 至 `08:43:31Z` | 每 fork、25 measured cycles、JDK 25、3 forks；maker depth `1/10/100`，每 cycle 为 `k` 个 GTC maker 加 1 个 IOC taker | `555.385 / 543.990 / 442.549/s`（depth 1/10/100） | `1,620 / 3,391 / 3,391`；`1,569 / 9,158 / 12,156`；`1,859 / 15,523 / 22,740 us` | `/tmp/surprising-p0-maker-depth-{1,10,100}/p0-maker-depth-*-result.json`；每档 3 个 JFR 和五类 `jfr-*.txt` |
+| Stage 2 | **PASS（maker-depth 资金路径覆盖）** | `0c393ea17ecd1cbc88ae2a5cdc03491e88c3d9d6` | `2026-08-20T08:40:04Z` 至 `08:43:31Z` | 每 fork、25 measured cycles、JDK 25、3 forks；maker depth `1/10/100`，每 cycle 为 `k` 个 GTC maker 加 1 个 IOC taker | `555.385 / 543.990 / 442.549/s`（depth 1/10/100） | `1,620 / 3,391 / 3,391`；`1,569 / 9,158 / 12,156`；`1,859 / 15,523 / 22,740 us` | `/tmp/surprising-p0-maker-depth-{1,10,100}/p0-maker-depth-*-result.json`；每档 3 个 JFR 和五类 `jfr-*.txt` |
 
 Stage 2 的逐档守恒断言为：depth 1/10/100 分别最终裁决 `50/275/2525` 单、成交数量 `25/250/2500`；每 fork 的 offered、accepted、finalized 完全相等，`perpetualPendingMatching=0`。这些数量由 benchmark 实际下单、撮合和 `completeMatching` 返回值产生，runner 还会逐 fork 拒绝计数偏差或残留撮合任务。
 
