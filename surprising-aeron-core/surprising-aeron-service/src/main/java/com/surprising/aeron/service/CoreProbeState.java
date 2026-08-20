@@ -2600,8 +2600,10 @@ public final class CoreProbeState implements AutoCloseable {
                 TradingCoreState after = tradingReducer.applyMarkPrice(tradingState, command, positionUserIndex,
                         liquidationIndex);
                 if (productLine == ProductLine.LINEAR_PERPETUAL) {
-                    adoptRuntimeState(after, RuntimePerpetualRiskProcessor.simulateMarkPrice(tradingState, command,
-                            positionUserIndex.users(command.symbol()), runtimePlaceOrderIdentities));
+                    RuntimePerpetualRiskProcessor.applyMarkPrice(tradingState, command,
+                            positionUserIndex.users(command.symbol()), runtimePlaceOrderState,
+                            runtimePlaceOrderIdentities);
+                    adoptRuntimeState(after, runtimePlaceOrderState);
                 } else {
                     adoptState(after);
                 }
@@ -2658,8 +2660,9 @@ public final class CoreProbeState implements AutoCloseable {
                 TradingCoreState after = tradingReducer.continueRiskScan(tradingState, command.maxUsers(), positionUserIndex,
                         liquidationIndex);
                 if (productLine == ProductLine.LINEAR_PERPETUAL) {
-                    adoptRuntimeState(after, RuntimePerpetualRiskProcessor.simulateContinuation(tradingState,
-                            command.maxUsers(), positionUserIndex.users(symbol), runtimePlaceOrderIdentities));
+                    RuntimePerpetualRiskProcessor.applyContinuation(tradingState, command.maxUsers(),
+                            positionUserIndex.users(symbol), runtimePlaceOrderState, runtimePlaceOrderIdentities);
+                    adoptRuntimeState(after, runtimePlaceOrderState);
                 } else {
                     adoptState(after);
                 }
