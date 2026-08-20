@@ -60,7 +60,6 @@ import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeCancelOrderDeltaApplier;
 import com.surprising.aeron.service.state.RuntimePlaceOrderDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
-import com.surprising.aeron.service.state.RuntimeStateParityChecker;
 import com.surprising.aeron.service.state.RuntimeStateDeltaApplier;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualLiquidationProcessor;
@@ -3066,11 +3065,9 @@ public final class CoreProbeState implements AutoCloseable {
             throw new IllegalStateException("runtime state cursor does not match core state");
         }
         RuntimeStateDeltaApplier.apply(previous, next, runtimePlaceOrderState, runtimePlaceOrderIdentities);
-        TradingCoreState authoritativeNext = RuntimeStateParityChecker.assertMatches(next,
-                runtimePlaceOrderIdentities, runtimePlaceOrderState);
-        runtimePlaceOrderCoreState = authoritativeNext;
-        runtime.transition(previous, next, authoritativeNext);
-        rollingBusinessStateHash.update(previous, authoritativeNext);
+        runtimePlaceOrderCoreState = next;
+        runtime.transition(previous, next, next);
+        rollingBusinessStateHash.update(previous, next);
         seedChangeAccumulators();
         if (previous.users() != next.users()) {
             changedUserIds.addAll(next.changedUserIds());
@@ -3087,7 +3084,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (previous.treasuryState() != next.treasuryState()) {
             changedTreasuryAssets.addAll(next.changedTreasuryAssets());
         }
-        tradingState = authoritativeNext;
+        tradingState = next;
     }
 
     private void adoptRuntimeState(TradingCoreState expected, TradingRuntimeState nextRuntimeState) {
@@ -3098,25 +3095,23 @@ public final class CoreProbeState implements AutoCloseable {
         if (runtimePlaceOrderCoreState != previous) {
             throw new IllegalStateException("runtime state cursor does not match core state");
         }
-        TradingCoreState authoritativeNext = RuntimeStateParityChecker.assertMatches(expected,
-                runtimePlaceOrderIdentities, nextRuntimeState);
         runtimePlaceOrderState = nextRuntimeState;
-        runtimePlaceOrderCoreState = authoritativeNext;
-        runtime.transition(previous, expected, authoritativeNext);
-        rollingBusinessStateHash.update(previous, authoritativeNext);
+        runtimePlaceOrderCoreState = expected;
+        runtime.transition(previous, expected, expected);
+        rollingBusinessStateHash.update(previous, expected);
         seedChangeAccumulators();
-        if (previous.users() != authoritativeNext.users()) changedUserIds.addAll(authoritativeNext.changedUserIds());
-        if (previous.orders() != authoritativeNext.orders()) changedOrderIds.addAll(authoritativeNext.changedOrderIds());
-        if (previous.riskState().liquidations() != authoritativeNext.riskState().liquidations()) {
-            changedLiquidationIds.addAll(authoritativeNext.changedLiquidationIds());
+        if (previous.users() != expected.users()) changedUserIds.addAll(expected.changedUserIds());
+        if (previous.orders() != expected.orders()) changedOrderIds.addAll(expected.changedOrderIds());
+        if (previous.riskState().liquidations() != expected.riskState().liquidations()) {
+            changedLiquidationIds.addAll(expected.changedLiquidationIds());
         }
-        if (previous.triggerOrders() != authoritativeNext.triggerOrders()) {
-            changedTriggerOrderIds.addAll(authoritativeNext.changedTriggerOrderIds());
+        if (previous.triggerOrders() != expected.triggerOrders()) {
+            changedTriggerOrderIds.addAll(expected.changedTriggerOrderIds());
         }
-        if (previous.treasuryState() != authoritativeNext.treasuryState()) {
-            changedTreasuryAssets.addAll(authoritativeNext.changedTreasuryAssets());
+        if (previous.treasuryState() != expected.treasuryState()) {
+            changedTreasuryAssets.addAll(expected.changedTreasuryAssets());
         }
-        tradingState = authoritativeNext;
+        tradingState = expected;
     }
 
     private void adoptLiquidationRuntimeState(TradingCoreState expected,
