@@ -62,7 +62,6 @@ import com.surprising.aeron.service.state.RuntimePlaceOrderDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.RuntimeStateParityChecker;
 import com.surprising.aeron.service.state.RuntimeStateDeltaApplier;
-import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualLiquidationProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualMatchProcessor;
@@ -3067,9 +3066,8 @@ public final class CoreProbeState implements AutoCloseable {
             throw new IllegalStateException("runtime state cursor does not match core state");
         }
         RuntimeStateDeltaApplier.apply(previous, next, runtimePlaceOrderState, runtimePlaceOrderIdentities);
-        RuntimeStateParityChecker.assertMatches(next, runtimePlaceOrderIdentities, runtimePlaceOrderState);
-        TradingCoreState authoritativeNext = RuntimeStateMaterializer.materialize(runtimePlaceOrderState,
-                runtimePlaceOrderIdentities);
+        TradingCoreState authoritativeNext = RuntimeStateParityChecker.assertMatches(next,
+                runtimePlaceOrderIdentities, runtimePlaceOrderState);
         runtimePlaceOrderCoreState = authoritativeNext;
         runtime.transition(previous, next, authoritativeNext);
         rollingBusinessStateHash.update(previous, authoritativeNext);
@@ -3100,9 +3098,8 @@ public final class CoreProbeState implements AutoCloseable {
         if (runtimePlaceOrderCoreState != previous) {
             throw new IllegalStateException("runtime state cursor does not match core state");
         }
-        RuntimeStateParityChecker.assertMatches(expected, runtimePlaceOrderIdentities, nextRuntimeState);
-        TradingCoreState authoritativeNext = RuntimeStateMaterializer.materialize(nextRuntimeState,
-                runtimePlaceOrderIdentities);
+        TradingCoreState authoritativeNext = RuntimeStateParityChecker.assertMatches(expected,
+                runtimePlaceOrderIdentities, nextRuntimeState);
         runtimePlaceOrderState = nextRuntimeState;
         runtimePlaceOrderCoreState = authoritativeNext;
         runtime.transition(previous, expected, authoritativeNext);

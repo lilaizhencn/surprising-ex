@@ -47,7 +47,9 @@ class RuntimeStateProjectorTest {
             state = stamped;
         }
 
-        RuntimeStateParityChecker.assertMatches(state, identities, runtime);
+        TradingCoreState materialized = RuntimeStateParityChecker.assertMatches(state, identities, runtime);
+        assertThat(materialized).isEqualTo(state);
+        assertThat(materialized.businessStateHash()).isEqualTo(state.businessStateHash());
         assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(995_000);
         assertThat(runtime.balance(7, identities.assetId("USDT")).lockedUnits()).isEqualTo(5_000);
         assertThat(runtime.order(10_049).clusterPosition()).isEqualTo(2_049);

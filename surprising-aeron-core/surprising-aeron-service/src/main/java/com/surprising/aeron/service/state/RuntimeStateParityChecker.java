@@ -6,8 +6,13 @@ public final class RuntimeStateParityChecker {
     private RuntimeStateParityChecker() {
     }
 
-    public static void assertMatches(TradingCoreState expected, RuntimeIdentityRegistry identities,
-                                     TradingRuntimeState actual) {
+    /**
+     * Fully validates the runtime and returns the immutable state built during that validation.
+     * Callers that need the authoritative compatibility state must retain this result rather than
+     * materializing the same runtime a second time.
+     */
+    public static TradingCoreState assertMatches(TradingCoreState expected, RuntimeIdentityRegistry identities,
+                                                  TradingRuntimeState actual) {
         if (expected == null || identities == null || actual == null) {
             throw new IllegalArgumentException("parity arguments are required");
         }
@@ -21,6 +26,7 @@ public final class RuntimeStateParityChecker {
                     + " hashes=" + expected.businessStateHash() + '/' + materialized.businessStateHash()
                     + " component=" + componentMismatch(expected, materialized));
         }
+        return materialized;
     }
 
     private static String mismatch(TradingRuntimeSnapshot expected, TradingRuntimeSnapshot actual) {
