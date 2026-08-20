@@ -63,6 +63,7 @@ import com.surprising.aeron.service.state.RuntimeStateDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualMatchProcessor;
+import com.surprising.aeron.service.state.RuntimePerpetualRiskProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderState;
@@ -2588,7 +2589,12 @@ public final class CoreProbeState implements AutoCloseable {
                 long startedAt = System.nanoTime();
                 TradingCoreState after = tradingReducer.applyMarkPrice(tradingState, command, positionUserIndex,
                         liquidationIndex);
-                adoptState(after);
+                if (productLine == ProductLine.LINEAR_PERPETUAL) {
+                    adoptRuntimeState(after, RuntimePerpetualRiskProcessor.simulateMarkPrice(tradingState, command,
+                            positionUserIndex.users(command.symbol()), runtimePlaceOrderIdentities));
+                } else {
+                    adoptState(after);
+                }
                 initializeTriggerScan(command);
                 logRiskScan("mark-price", command.symbol(), tradingState.riskState().scanControl().scanBatchSize(),
                         pendingBefore, startedAt);
@@ -2635,7 +2641,12 @@ public final class CoreProbeState implements AutoCloseable {
                 long startedAt = System.nanoTime();
                 TradingCoreState after = tradingReducer.continueRiskScan(tradingState, command.maxUsers(), positionUserIndex,
                         liquidationIndex);
-                adoptState(after);
+                if (productLine == ProductLine.LINEAR_PERPETUAL) {
+                    adoptRuntimeState(after, RuntimePerpetualRiskProcessor.simulateContinuation(tradingState,
+                            command.maxUsers(), positionUserIndex.users(symbol), runtimePlaceOrderIdentities));
+                } else {
+                    adoptState(after);
+                }
                 evaluatePendingTriggerScan(symbol);
                 logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
             }
