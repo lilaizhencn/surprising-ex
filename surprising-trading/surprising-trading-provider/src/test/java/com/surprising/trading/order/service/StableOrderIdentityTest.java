@@ -13,6 +13,7 @@ import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreCommandResultView;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderStateView;
+import com.surprising.aeron.protocol.CoreOrderPreflightView;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -73,6 +74,9 @@ class StableOrderIdentityTest {
         MarkPriceLookup marks = Mockito.mock(MarkPriceLookup.class);
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAeron().setNodeId(3);
+        when(aeron.preflight(eq(1001L), any(PlaceOrderCommand.class)))
+                .thenReturn(new OrderAeronGateway.PreflightResult(CoreResultCode.NONE,
+                        new CoreOrderPreflightView("USDT", 1L)));
         when(rules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
         when(marks.latestMarkPriceTicks("BTC-USDT", 7, 5_000)).thenReturn(OptionalLong.of(60_000));
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), any(UUID.class), eq(1001L), any(byte[].class)))

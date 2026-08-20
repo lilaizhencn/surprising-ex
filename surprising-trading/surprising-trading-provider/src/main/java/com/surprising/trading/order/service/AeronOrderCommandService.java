@@ -215,6 +215,16 @@ public class AeronOrderCommandService {
                 ? buildPlaceCommand(orderId, request, validation, fee)
                 : buildPlaceCommand(orderId, request, validation, fee, validatedInstrument);
         UUID commandId = StableOrderIdentity.commandId(productLine, request.userId(), clientOrderId);
+        OrderAeronGateway.PreflightResult preflight = aeron.preflight(request.userId(), command);
+        if (preflight == null || preflight.resultCode() == null) {
+            throw new IllegalStateException("order preflight response is missing");
+        }
+        if (!preflight.accepted()) {
+            return new CommandExecution(commandId, List.of(orderId),
+                    new CoreCommandOutcome.Terminal(new CoreResponse(
+                            ResponseStatus.REJECTED, ResponseStatus.REJECTED, preflight.resultCode(),
+                            0L, 0L, 0L, new byte[0])), CommandKind.PLACE);
+        }
         CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodePlaceOrder(command));
         return new CommandExecution(commandId, List.of(orderId), outcome, CommandKind.PLACE);
@@ -411,6 +421,9 @@ public class AeronOrderCommandService {
 
     private static CoreCommandResultView requireCommandResult(
             com.surprising.aeron.protocol.CoreResponse response) {
+        if (response != null && response.status() == ResponseStatus.REJECTED) {
+            throw new IllegalStateException(response.resultCode().name() + ": Core order command rejected");
+        }
         if (response == null || response.data().length == 0) {
             throw new IllegalStateException("command response is missing result payload");
         }

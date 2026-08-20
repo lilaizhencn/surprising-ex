@@ -1,7 +1,11 @@
 package com.surprising.trading.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,6 +17,7 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreCommandResultView;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderPreflightView;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -71,6 +76,9 @@ class AeronOrderCommandServiceTest {
         properties.getAeron().setNodeId(3);
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         service = new AeronOrderCommandService(aeron, instrumentRules, markPrices, properties);
+        lenient().when(aeron.preflight(anyLong(), any(PlaceOrderCommand.class)))
+                .thenReturn(new OrderAeronGateway.PreflightResult(CoreResultCode.NONE,
+                        new CoreOrderPreflightView("USDT", 1L)));
     }
 
     @Test
@@ -95,6 +103,9 @@ class AeronOrderCommandServiceTest {
         verify(aeron).commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), payload.capture());
         PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(payload.getValue());
+        ArgumentCaptor<PlaceOrderCommand> preflight = ArgumentCaptor.forClass(PlaceOrderCommand.class);
+        verify(aeron).preflight(eq(1001L), preflight.capture());
+        assertThat(preflight.getValue()).isEqualTo(command);
         assertThat(command.orderType()).isEqualTo(CoreOrderType.MARKET);
         assertThat(command.timeInForce()).isEqualTo(CoreTimeInForce.IOC);
         assertThat(command.priceTicks()).isZero();
@@ -126,6 +137,26 @@ class AeronOrderCommandServiceTest {
 
         verify(aeron, times(1)).commandOutcome(eq(CoreMessageType.PLACE_ORDER),
                 org.mockito.ArgumentMatchers.any(UUID.class), eq(1001L),
+                org.mockito.ArgumentMatchers.any(byte[].class));
+    }
+
+    @Test
+    void preflightRejectionStopsPlaceCommandBeforeSubmittingToCore() {
+        PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-no-funds", "BTC-USDT", OrderSide.BUY,
+                OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
+                false, false);
+        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
+        when(aeron.preflight(eq(1001L), org.mockito.ArgumentMatchers.any(PlaceOrderCommand.class)))
+                .thenReturn(new OrderAeronGateway.PreflightResult(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, null));
+
+        AeronOrderCommandService.CommandExecution execution = service.placeCommand(request,
+                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL),
+                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test"));
+
+        assertThat(execution.outcome()).isInstanceOf(CoreCommandOutcome.Terminal.class);
+        assertThat(((CoreCommandOutcome.Terminal) execution.outcome()).response().resultCode())
+                .isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+        verify(aeron, never()).commandOutcome(eq(CoreMessageType.PLACE_ORDER), any(UUID.class), eq(1001L),
                 org.mockito.ArgumentMatchers.any(byte[].class));
     }
 
