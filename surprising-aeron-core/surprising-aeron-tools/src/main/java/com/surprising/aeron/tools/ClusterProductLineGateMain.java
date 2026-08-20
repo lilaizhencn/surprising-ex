@@ -9,7 +9,10 @@ import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskQueryCodec;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreUserStateView;
@@ -18,6 +21,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
@@ -32,6 +36,8 @@ public final class ClusterProductLineGateMain {
     private static final String SYMBOL = "BTC-USDT";
     private static final long INITIAL_USER_UNITS = 1_000;
     private static final long LIQUIDATION_USER_UNITS = 180;
+    private static final long MAKER_FEE_RATE_PPM = 1_000;
+    private static final long TAKER_FEE_RATE_PPM = 2_000;
 
     private final ProductLine productLine;
     private final SurprisingAeronClient client;
@@ -82,9 +88,9 @@ public final class ClusterProductLineGateMain {
         applied(seller, CoreMessageType.ADJUST_BALANCE,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 5)));
         applied(buyer, CoreMessageType.ADJUST_BALANCE,
-                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 600)));
         applied(seller, CoreMessageType.PLACE_ORDER, order(order(1), CoreOrderSide.SELL, 5, "BTC", 5));
-        applied(buyer, CoreMessageType.PLACE_ORDER, order(order(2), CoreOrderSide.BUY, 5, "USDT", 500));
+        applied(buyer, CoreMessageType.PLACE_ORDER, order(order(2), CoreOrderSide.BUY, 5, "USDT", 600));
     }
 
     private void executeDerivative() {
@@ -94,8 +100,8 @@ public final class ClusterProductLineGateMain {
         long initialUserUnits = initialUserUnits();
         adjust(shortUser, settleAsset, initialUserUnits);
         adjust(longUser, settleAsset, initialUserUnits);
-        long shortReservation = productLine == ProductLine.OPTION ? 1_100 : 100;
-        long longReservation = productLine == ProductLine.OPTION ? 1_000 : 100;
+        long shortReservation = productLine == ProductLine.OPTION ? 1_200 : 150;
+        long longReservation = productLine == ProductLine.OPTION ? 1_100 : 150;
         applied(shortUser, CoreMessageType.PLACE_ORDER,
                 order(order(1), CoreOrderSide.SELL, 10, settleAsset, shortReservation));
         applied(longUser, CoreMessageType.PLACE_ORDER,
@@ -124,9 +130,9 @@ public final class ClusterProductLineGateMain {
         adjust(shortUser, settleAsset, LIQUIDATION_USER_UNITS);
         adjust(longUser, settleAsset, LIQUIDATION_USER_UNITS);
         applied(shortUser, CoreMessageType.PLACE_ORDER,
-                order(order(3), CoreOrderSide.SELL, 10, settleAsset, 100));
+                order(order(3), CoreOrderSide.SELL, 10, settleAsset, 150));
         applied(longUser, CoreMessageType.PLACE_ORDER,
-                order(order(4), CoreOrderSide.BUY, 10, settleAsset, 100));
+                order(order(4), CoreOrderSide.BUY, 10, settleAsset, 150));
         long markPrice = productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80;
         long priceSequence = 2;
         applied(1, CoreMessageType.APPLY_MARK_PRICE,
@@ -147,9 +153,9 @@ public final class ClusterProductLineGateMain {
         requireBookEmpty();
         if (productLine == ProductLine.SPOT) {
             requireBalance(userState(user(1)), "BTC", 0);
-            requireBalance(userState(user(1)), "USDT", 500);
+            requireBalance(userState(user(1)), "USDT", 499);
             requireBalance(userState(user(2)), "BTC", 5);
-            requireBalance(userState(user(2)), "USDT", 0);
+            requireBalance(userState(user(2)), "USDT", 99);
             return;
         }
         if (isPerpetual()) {
@@ -199,7 +205,8 @@ public final class ClusterProductLineGateMain {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
         return new UpsertInstrumentCommand(SYMBOL, 1, type.ordinal(), "BTC", "USDT", settleAsset(),
-                1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
+                1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000,
+                MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }
 
@@ -207,7 +214,10 @@ public final class ClusterProductLineGateMain {
         ReservationKind kind = productLine == ProductLine.SPOT
                 ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
         return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, 1,
-                "BTC", "USDT", settleAsset(), side, 100, quantity, false, kind, reservationAsset, reserved));
+                "BTC", "USDT", settleAsset(), side, 100, quantity, false, CoreMarginMode.CROSS,
+                CorePositionSide.NET, kind, reservationAsset, reserved, CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC, 100, false, "cluster-gate-" + orderId,
+                MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM));
     }
 
     private void adjust(long userId, String asset, long units) {

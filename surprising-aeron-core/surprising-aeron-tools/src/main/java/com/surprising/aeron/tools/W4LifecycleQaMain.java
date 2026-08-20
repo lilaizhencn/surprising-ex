@@ -64,6 +64,9 @@ public final class W4LifecycleQaMain {
     private static final String SYMBOL = "BTC-USDT";
     private static final long VERSION = 1;
     private static final long STRIKE = 100;
+    private static final long MAKER_FEE_RATE_PPM = 100_000;
+    private static final long TAKER_FEE_RATE_PPM = 200_000;
+    private static final long FUNDING_RATE_PPM = 10_000;
     private static final long SOURCE_ID_BASE = 160_000;
     private static final String REAL_CAPABILITY_PENDING =
             "provider-to-core-lifecycle,cursor-repeat-gap,pg-selected,maker-user-treasury-reconciliation";
@@ -84,6 +87,7 @@ public final class W4LifecycleQaMain {
     private boolean reconciliationObserved;
     private boolean makerReconciliationObserved;
     private boolean providerBoundaryObserved;
+    private boolean feeLedgerObserved;
 
     W4LifecycleQaMain(ProductLine productLine, SurprisingAeronClient client, long seed) {
         this.productLine = productLine;
@@ -246,6 +250,8 @@ public final class W4LifecycleQaMain {
         crossLineGuard();
         if (!verifyOnly) {
             reconcile();
+            requireFeeLedgerObserved();
+            rows.add(productLine + ":TRADES_FEES");
         }
         rows.add(productLine + ":SNAPSHOT_CONTINUATION");
     }
@@ -286,7 +292,6 @@ public final class W4LifecycleQaMain {
         reconcile();
         rows.add("SPOT:CONSERVATION");
         rows.add("SPOT:CONTROL_GUARD");
-        rows.add("SPOT:TRADES_FEES");
     }
 
     private void runPerpetual() {
@@ -305,7 +310,9 @@ public final class W4LifecycleQaMain {
             applyMark(symbol, 1, 100);
             queryRisk(shortUser);
             queryRisk(longUser);
-            applyFunding(symbol, 20_000L + marginMode.ordinal());
+            applyFunding(symbol, 20_000L + marginMode.ordinal(), FUNDING_RATE_PPM);
+            readFundingProgress(symbol);
+            applyFunding(symbol, 20_100L + marginMode.ordinal(), Math.negateExact(FUNDING_RATE_PPM));
             readFundingProgress(symbol);
             applyMark(symbol, 2, productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80);
             resolveBoundedLiquidationWork(symbol);
@@ -313,6 +320,7 @@ public final class W4LifecycleQaMain {
             runProviderCycles(symbol, shortUser);
             requireBookEmpty();
             rows.add(productLine + ":" + mode + ":FUNDING_POSITIVE");
+            rows.add(productLine + ":" + mode + ":FUNDING_NEGATIVE");
             rows.add(productLine + ":" + mode + ":MARK");
             rows.add(productLine + ":" + mode + ":RISK_SCAN");
             rows.add(productLine + ":" + mode + ":LIQUIDATION");
@@ -384,7 +392,8 @@ public final class W4LifecycleQaMain {
                         symbol, version, type.ordinal(), BASE_ASSET,
                         type.isInverse() ? "USD" : "USDT", settleAsset(),
                         type.isInverse() ? 100 : 1, 1, type.isInverse() ? 100 : 1,
-                        100_000, 100_000, 0, 0, expiry, optionCode, strike)));
+                        100_000, 100_000, MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
+                        expiry, optionCode, strike)));
     }
 
     private void upsertInstrumentViaProvider(String symbol, ContractType type, int optionCode,
@@ -426,8 +435,9 @@ public final class W4LifecycleQaMain {
                 + "\"pricePrecision\":2,\"quantityPrecision\":3,\"supportedOrderTypes\":[\"LIMIT\"],"
                 + "\"supportedTimeInForce\":[\"GTC\",\"IOC\"],\"postOnlyEnabled\":true,\"reduceOnlyEnabled\":"
                 + (!spot) + ",\"marketOrderEnabled\":false,\"maxLeveragePpm\":100000000,"
-                + "\"initialMarginRatePpm\":10000,\"maintenanceMarginRatePpm\":5000,\"makerFeeRatePpm\":200,"
-                + "\"takerFeeRatePpm\":500,\"maxPositionNotionalUnits\":25000000000000,"
+                + "\"initialMarginRatePpm\":10000,\"maintenanceMarginRatePpm\":"
+                + "5000,\"makerFeeRatePpm\":" + MAKER_FEE_RATE_PPM + ","
+                + "\"takerFeeRatePpm\":" + TAKER_FEE_RATE_PPM + ",\"maxPositionNotionalUnits\":25000000000000,"
                 + "\"userOpenInterestLimitRatePpm\":0,\"userOpenInterestLimitFloorUnits\":1,\"fundingIntervalHours\":"
                 + funding.split(",")[0] + ",\"interestRatePpm\":" + funding.split(",")[1]
                 + ",\"fundingRateCapPpm\":" + funding.split(",")[2] + ",\"fundingRateFloorPpm\":"
@@ -554,10 +564,10 @@ public final class W4LifecycleQaMain {
                         symbol, VERSION, price, priceSequence, 1_700_000_000_000L)));
     }
 
-    private void applyFunding(String symbol, long settlementId) {
+    private void applyFunding(String symbol, long settlementId, long fundingRatePpm) {
         command(CoreMessageType.APPLY_FUNDING, 0,
                 TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                        settlementId, symbol, VERSION, 10_000, 0, 256)));
+                        settlementId, symbol, VERSION, fundingRatePpm, 0, 256)));
     }
 
     private void settle(String symbol, long price, long underlyingSettlementPrice, long settlementId) {
@@ -700,6 +710,9 @@ public final class W4LifecycleQaMain {
         makerReconciliationObserved = true;
         for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
                 query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
+            if (treasury.feeBalanceUnits() != 0) {
+                feeLedgerObserved = true;
+            }
             fees.put(treasury.asset(), treasury.feeBalanceUnits());
             insurance.put(treasury.asset(), treasury.insuranceBalanceUnits());
             deficits.put(treasury.asset(), treasury.insuranceDeficitUnits());
@@ -731,6 +744,12 @@ public final class W4LifecycleQaMain {
         rows.add("TREASURY_RECONCILIATION_OBSERVED");
         reconciliationObserved = true;
         rows.add("FUNDS_DIFFERENCE=0");
+    }
+
+    private void requireFeeLedgerObserved() {
+        if (!feeLedgerObserved) {
+            throw new IllegalStateException("TRADE_FEES_NOT_OBSERVED productLine=" + productLine);
+        }
     }
 
     private void crossLineGuard() {
@@ -991,12 +1010,12 @@ public final class W4LifecycleQaMain {
 
     static String requiredRows(ProductLine productLine) {
         return switch (productLine) {
-            case SPOT -> "SPOT:CONSERVATION,SPOT:CONTROL_GUARD";
+            case SPOT -> "SPOT:CONSERVATION,SPOT:CONTROL_GUARD,SPOT:TRADES_FEES";
             case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> productLine + ":CROSS," + productLine
-                    + ":ISOLATED,FUNDING_POSITIVE,MARK,RISK_SCAN,LIQUIDATION,INSURANCE,ADL";
+                    + ":ISOLATED,FUNDING_POSITIVE,FUNDING_NEGATIVE,MARK,RISK_SCAN,LIQUIDATION,INSURANCE,ADL,TRADES_FEES";
             case LINEAR_DELIVERY, INVERSE_DELIVERY -> productLine + ":CROSS," + productLine
-                    + ":ISOLATED,SETTLEMENT,CURSOR";
-            case OPTION -> "OPTION:CALL:ITM,OPTION:CALL:ATM,OPTION:CALL:OTM,OPTION:PUT:ITM,OPTION:PUT:ATM,OPTION:PUT:OTM";
+                    + ":ISOLATED,SETTLEMENT,CURSOR,TRADES_FEES";
+            case OPTION -> "OPTION:CALL:ITM,OPTION:CALL:ATM,OPTION:CALL:OTM,OPTION:PUT:ITM,OPTION:PUT:ATM,OPTION:PUT:OTM,OPTION:TRADES_FEES";
         };
     }
 

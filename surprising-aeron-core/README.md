@@ -72,6 +72,22 @@ processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期。旧�
 - 同步调用超时表示结果未知。调用方必须复用同一 `commandId` 查询或重试，不能生成新 ID。
 - `SurprisingAeronClient` 串行提交消息；Gateway 后续通过固定数量的单线程 client agent 扩展吞吐。
 
+## 六产品线资金守恒契约
+
+六条产品线均使用同一套交易事实和对账边界，差异只由 `ProductLine` 映射到对应的
+`ContractType`、结算资产和生命周期能力：
+
+- SPOT：成交资产转移和手续费入 Treasury。
+- LINEAR_PERPETUAL / INVERSE_PERPETUAL：成交、正负资金费、标记价、风险扫描、强平、保险基金和 ADL。
+- LINEAR_DELIVERY / INVERSE_DELIVERY：成交、手续费、分批 cursor 结算和交割后解冻。
+- OPTION：CALL/PUT 的 ITM、ATM、OTM 成交、权利金、手续费和到期结算。
+
+Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + 保险基金余额 - 保险基金赤字`
+对每个结算资产做守恒校验；交割、期权、强平和 ADL 的生命周期流水只能改变资金归属，不能制造或吞掉资金。
+真实链路的 W4 清单要求六条产品线都观察到非零手续费入账，永续同时执行正、负资金费，并在 Treasury
+对账后才允许生成 `FUNDS_DIFFERENCE=0` 结果。单元矩阵另外覆盖 maker/taker 费率、交割/期权派生现金、
+强平手续费上限、保险基金全额/部分覆盖、ADL 覆盖和 snapshot cursor 恢复。
+
 ## W1/W2 原生快照契约
 
 - fork 坐标为 `exchange.core2:exchange-core:0.5.15-emporia`，Git SHA

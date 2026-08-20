@@ -262,6 +262,45 @@ class CoreMatchingStateTest {
         }
     }
 
+    @ParameterizedTest
+    @MethodSource("allProductLines")
+    void everyProductLineMatchConservesSettlementFundsWithNonzeroFees(ProductLine productLine) {
+        try (CoreProbeState state = new CoreProbeState(productLine)) {
+            applyInstrument(state, 100_000, 200_000);
+            String settlementAsset = settleAsset(productLine);
+            boolean spot = productLine == ProductLine.SPOT;
+            ReservationKind reservationKind = spot
+                    ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
+            String sellerAsset = spot ? "BTC" : settlementAsset;
+            String buyerAsset = spot ? "USDT" : settlementAsset;
+            long wallet = spot ? 1_000 : 20_000;
+            long sellerReservation = spot ? 2 : 10_000;
+            long buyerReservation = spot ? 240 : 10_000;
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(
+                            sellerAsset, spot ? 2 : wallet)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(buyerAsset, wallet)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(101, CoreOrderSide.SELL, 100, 2, false, reservationKind,
+                            sellerAsset, sellerReservation, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, false,
+                            100_000, 200_000));
+            long fundsBefore = total(state, settlementAsset);
+            long feeBefore = state.tradingState().treasuryState().feeBalances()
+                    .getOrDefault(settlementAsset, 0L);
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(202, CoreOrderSide.BUY, 100, 2, false, reservationKind,
+                            buyerAsset, buyerReservation, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
+                            100, false, 100_000, 200_000));
+
+            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().treasuryState().feeBalances().getOrDefault(settlementAsset, 0L))
+                    .isGreaterThan(feeBefore);
+            assertThat(total(state, settlementAsset)).isEqualTo(fundsBefore);
+        }
+    }
+
     @Test
     void linearPerpetualPostOnlyRejectionPreservesFundsAndReservations() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
@@ -455,12 +494,17 @@ class CoreMatchingStateTest {
     }
 
     private static void applyInstrument(CoreProbeState state) {
+        applyInstrument(state, 0, 0);
+    }
+
+    private static void applyInstrument(CoreProbeState state, long makerFeeRatePpm, long takerFeeRatePpm) {
         ProductLine productLine = state.productLine();
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1, type.ordinal(),
                 "BTC", "USDT", settleAsset(productLine), 1, 1, type.isInverse() ? 1_000 : 1,
-                100_000, 50_000, 0, 0, expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
+                100_000, 50_000, makerFeeRatePpm, takerFeeRatePpm, expiry,
+                type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.UPSERT_INSTRUMENT,
                 UUID.randomUUID(), productLine, CommandSource.OPERATIONS, 88, 1, 1,
                 1_000, 1), TradingCommandCodec.encodeUpsertInstrument(instrument));
