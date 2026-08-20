@@ -1,6 +1,6 @@
 # exchange-core 交易主链路性能与恢复审计报告
 
-> 状态：`P0_RUNTIME_HOT_PATH_REMEDIATED; P1_CONTINUATION_ALLOCATION_REMEDIATED; CAPACITY_GATE_PENDING`
+> 状态：`P0_RUNTIME_HOT_PATH_REMEDIATED; P1_CONTINUATION_ALLOCATION_REMEDIATED; SIX_LINE_SERIAL_GATE_PASS; OPEN_LOOP_100K_PENDING`
 >
 > 审计分支：`codex/aeron-unified-core`
 >
@@ -20,9 +20,10 @@
 可变状态，由 Product Core owner thread 对本次命令触及的实体执行原地、可验证的增量提交。完整
 `TradingCoreState` 只应在快照、恢复、离线对账或抽样一致性检查中生成。
 
-本报告是当前源码和本地诊断基准的现状审计。P0 代码已接入并通过受影响模块回归，但“功能已接入”“完整 parity 已完成”不等于
-生产性能门禁已经通过；凡涉及 100k/s、无全量复制和热路径复杂度的结论，以本报告列出的源码出口和正式
-容量门禁为准。
+本报告是当前源码和本地诊断基准的现状审计。P0 代码已接入并通过受影响模块回归；六条产品线已经完成
+三节点 Core、provider、常驻做市、Aeron 在线资金/持仓守恒和串行容量基线，但这仍不等于 100k/s、开放环、
+故障恢复或长稳生产门禁通过。凡涉及 100k/s、无全量复制和热路径复杂度的结论，以本报告列出的源码出口和
+正式容量门禁为准。
 
 ## 2. exchange-core 可借鉴的设计
 
@@ -150,7 +151,7 @@ exchange-core 阶段约为 `0.2 ms`。跳过 matcher 只提升约 7%，说明当
 [`SurprisingClusteredService`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/SurprisingClusteredService.java)
 本轮已在 [`CoreProbeState`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java)
 和 [`SurprisingClusteredService`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/SurprisingClusteredService.java)
-落地有界 completion queue、单一 `Long.MAX_VALUE` wakeup、`commandId -> sequence` 直接索引以及
+落地有界 completion queue、单一非 Aeron missing-value sentinel wakeup、`commandId -> sequence` 直接索引以及
 `MAX_PENDING_MATCHING` admission backpressure。异步 matcher callback 只入队，owner thread drain 后按 head sequence
 完成状态提交；Aeron timer backpressure 不再在 matching 路径 busy-spin。
 
@@ -546,7 +547,8 @@ Aeron owner thread
 - treasury 已改为 changed assets/symbols 增量更新，禁止 `clear()` 后重建全量 map。
 - pending matching 已具备直接 commandId 索引、有界 completion queue、单一 wakeup、max in-flight 和入口背压。
 - 所有 Product Core runtime index 的非 delta transition 已增加 fail-closed 门禁，禁止静默全量 rebuild。
-- P0 回归已覆盖成交、资金费、风险、treasury、快照和服务调度；六产品线开放环资金守恒仍属于容量/系统验收。
+- P0 回归已覆盖成交、资金费、风险、treasury、快照和服务调度；六产品线串行系统基线已通过，开放环 100k/s、
+  故障恢复和长稳仍属于后续容量/系统验收。
 
 ### P1：控制 continuation 与分配
 
@@ -642,9 +644,9 @@ mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
 `RuntimePerpetualMatchProcessorTest` 6、`CoreMatchingStateTest` 20；这些测试覆盖成交、手续费、持仓、资金费、
 风险和余额守恒边界。当前 benchmark 本身仍不宣称可以替代这些状态断言。
 
-本轮未执行三节点 Aeron 容量、Kafka/PostgreSQL 历史链路、leader failover、快照恢复、磁盘故障、六产品线
-资金守恒和长时间 JVM soak。原因是这些属于三节点系统容量、故障恢复和生产规模验收，不能由本地单模块回归
-替代；P0 在线代码阻塞已解除。
+本轮此前未执行三节点 Aeron 容量、Kafka/PostgreSQL 历史链路、leader failover、快照恢复、磁盘故障、六产品线
+资金守恒和长时间 JVM soak；六产品线串行系统基线已在下文补充。仍未完成的是 100k/s 开放环、故障恢复、磁盘
+故障和长时间 JVM soak，这些不能由短时容量基线替代。
 
 ### P1 continuation 与分配验证
 
@@ -670,9 +672,9 @@ fast path 后再次运行 continuation、撮合、批量和永续端到端回归
 测试验证了有界溢出、顺序消费和 overflow 信号，cluster service 测试验证了单 wakeup timer、head sequence gate 和
 egress backpressure。
 
-本轮还执行了 `git diff --check`，以及 protocol/service 变更文件的 JDTLS error diagnostics，结果均为无错误。未执行
-三节点容量、100k/s 开放环、Kafka/Projector、leader failover、snapshot corruption、direct memory、长时间 soak 和
-六产品线逐项资金守恒；这些继续保留在 10.3 的未执行清单，不因 P1 代码回归通过而标记完成。
+本轮还执行了 `git diff --check`，以及 protocol/service 变更文件的 JDTLS error diagnostics，结果均为无错误。三节点
+容量、100k/s 开放环、Kafka/Projector、leader failover、snapshot corruption、direct memory 和长时间 soak 仍未完成；
+六产品线逐项资金守恒已由下文的 Aeron 在线查询完成，不再列为未执行项。
 
 本轮随后执行单产品线本地 benchmark 与 JFR：
 
@@ -790,14 +792,15 @@ CPU top frames 为 `BusySpinWaitStrategy.waitFor`、`Util.getMinimumSequence`、
 | primitive map vs dense ring | 默认 primitive map | matching sequence 允许 gap，未取得可证明的密度约束；Task 5 负责实测。 |
 | pooled owned command vs compact owned copy | 默认一次 compact owned copy | Aeron callback 生命周期外必须拥有数据；Task 6 负责 allocation 对照。 |
 | segmented snapshot writer API | Aeron-publication chunk writer | Stage 1 只冻结 API 方向；Task 10 验证 pause、checksum 和恢复。 |
-| G1 vs ZGC | 两者保留 | 本轮仅记录 HotSpot 默认 collector；Task 9 在相同负载/JDK/heap 下执行矩阵，不在 Stage 1 提前选择。 |
+| G1 vs ZGC | 当前系统基线采用 ZGC | 六产品线串行基线均使用 ZGC 并记录 JFR/GC；同负载 G1 对照与生产规模矩阵仍待 Task 9。 |
 
 ### 10.3 not yet run
 
 - 三节点 Aeron committed-command 开放环负载、leader kill、follower lag 和 Archive replay。
 - 60 分钟 100k/s、10 秒 200k/s burst、24 小时 soak，以及四个连续 15 分钟增长窗口。
 - 100 万用户、400 万活动订单、热门 symbol/user，以及 0 maker fill-depth。
-- 六产品线资金、持仓、手续费、资金费、强平费、保险基金、ADL、交割、行权和到期逐项守恒。
+- 六产品线串行基线已完成用户/做市账户、Treasury、持仓、资金费、保险覆盖、交割和期权结算守恒；仍缺生产规模
+  的 maker fill-depth 与长时间混合负载。
 - Kafka/Projector outage、outbox 上限、Archive 磁盘满、snapshot corruption 和 fail-closed restore。
 - direct memory、有效 safepoint duration、replicated outbox maxima、签名 state/funds hash 和 G1/ZGC 对照。
 
@@ -818,5 +821,37 @@ mvn -pl surprising-aeron-core/surprising-aeron-service -am clean test
 
 结果：service 232、protocol 59、instrument-api 13、product-api 12 个测试全部通过；另外定向 P0 回归 31 个测试、
 风险/生命周期回归 29 个测试均通过。测试覆盖本地 runtime parity、撮合、资金费、风险、treasury、snapshot、
-matching timer backpressure 和服务调度。未执行项目 9.1 所列三节点开放环容量、leader failover、Kafka/Projector、
-六产品线系统级守恒和长时间 soak，因此本报告仍不宣称 100k/s 或生产 SLO 已通过。
+matching timer backpressure 和服务调度。六产品线系统级串行守恒与容量基线见 10.5；仍未执行项目 9.1 所列
+100k/s 开放环、leader failover、Kafka/Projector 和长时间 soak，因此本报告不宣称 100k/s 或生产 SLO 已通过。
+
+### 10.5 六产品线串行系统基线（2026-08-21）
+
+本次按单产品线启动三节点 Core、对应 provider 和常驻做市进程，`WALLET_ENABLED=false`；每条线先执行真实
+交易门禁，再由 `ClusterFundsReconcileMain` 通过 Aeron 查询用户、持仓、Treasury 和 liquidation work，最后在
+独立 symbol/用户范围运行 `capacity-workers=1`、`PLACE_ONLY`、2 秒 warmup + 8 秒 measured 的串行容量基线。
+六条线均为 ZGC；provider 和容量进程均开启 JFR `profile`、`FlightRecorderOptions=stackdepth=256`、GC/safepoint
+日志。容量结果如下：
+
+| ProductLine | 门禁/资金守恒 | accepted/finalized | p50 / p99 / p99.9 (us) | JFR 最长 GC pause |
+| --- | --- | ---: | ---: | ---: |
+| `SPOT` | PASS；BTC `2000=2000`，USDT `1000000002=1000000002` | `182/182` | `39256 / 120651 / 144441` | `0.0444 ms` |
+| `LINEAR_PERPETUAL` | PASS；Core 用户/做市/Treasury 对账差 `0` | `218/218` | `27295 / 127008 / 525598` | `0.0443 ms` |
+| `INVERSE_PERPETUAL` | PASS；BTC `2360=2360`，持仓/未完成 work 清零 | `198/198` | `37421 / 95158 / 102039` | `0.0437 ms` |
+| `LINEAR_DELIVERY` | PASS；USDT `2000=2000`，结算后持仓归零 | `145/145` | `50888 / 164757 / 290193` | `0.1520 ms` |
+| `INVERSE_DELIVERY` | PASS；BTC `2000=2000`，结算后持仓归零 | `134/134` | `52264 / 189792 / 207224` | `0.0432 ms` |
+| `OPTION` | PASS；USDT `4000=4000`，行权/结算后持仓归零 | `137/137` | `48824 / 160301 / 231473` | `0.0426 ms` |
+
+JFR 热点在六条线都以 Aeron/Chronicle `ScopedMemoryAccess.putByteInternal` 为首，容量短样本中占比约
+`9.72%-19.51%`；其余样本主要落在 Aeron egress/driver、协议编码和有限集合遍历。六条线的 `jdk.ZYoungGarbageCollection`
+与 `jdk.ZOldGarbageCollection` 均有记录，未观察到 Full GC；这些是 12-13 秒短样本，不能外推长稳或生产 p99。
+
+证据文件保存在各自运行目录的 `evidence/*-capacity-serial.jfr`，例如：
+
+```text
+/tmp/surprising-mm-runtime-20260820-option2/mm-option-jfr-20260820b/evidence/option-capacity-serial.jfr
+/tmp/surprising-mm-runtime-20260820-inverse-perp8/mm-inverse-perp-jfr-20260820i/evidence/inverse-perp-capacity-serial.jfr
+```
+
+本轮仍未完成 100k/s 开放环、multi-worker source-sequence 压测、leader/follower/cold recovery、Kafka/Projector
+故障、direct-memory 账本和 24 小时 soak；因此当前结论是“六产品线可运行并通过串行资金安全基线”，不是“达到
+100k/s 生产容量”。

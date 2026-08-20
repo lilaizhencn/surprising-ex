@@ -28,6 +28,7 @@ public record CoreLiquidationState(
                 || executionPriceTicks < 0 || liquidationFeeRatePpm < 0
                 || liquidationFeeRatePpm > 1_000_000 || liquidationFeeUnits < 0 || status == null
                 || nextCancelOrderId < 0
+                || status == Status.COMPLETED && deficitUnits != 0
                 || (status == Status.PLANNED || status == Status.CANCELED)
                 && (executionPriceTicks != 0 || liquidationFeeRatePpm != 0 || liquidationFeeUnits != 0)
                 || (status != Status.ORDERED && nextCancelOrderId != 0)) {
@@ -77,7 +78,7 @@ public record CoreLiquidationState(
     }
 
     public boolean terminal() {
-        return status == Status.COMPLETED || status == Status.CANCELED;
+        return status == Status.CANCELED || status == Status.COMPLETED && deficitUnits == 0;
     }
 
     public CoreLiquidationState withStatus(Status nextStatus) {

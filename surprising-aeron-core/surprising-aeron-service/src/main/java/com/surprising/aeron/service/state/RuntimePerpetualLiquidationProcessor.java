@@ -198,6 +198,13 @@ public final class RuntimePerpetualLiquidationProcessor {
                             "insurance fund balance is insufficient");
                 }
                 runtime.treasury().adjustInsurance(assetId, Math.negateExact(command.coveredUnits()));
+                BalanceRuntime balance = runtime.balance(liquidation.userId(), assetId);
+                if (balance == null) {
+                    throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
+                }
+                runtime.replaceBalance(new BalanceRuntime(balance.userId(), balance.assetId(),
+                        Math.addExact(balance.availableUnits(), command.coveredUnits()), balance.lockedUnits()));
+                runtime.advanceUserRevision(liquidation.userId());
                 nextDeficit = Math.subtractExact(nextDeficit, command.coveredUnits());
                 nextStatus = nextDeficit == 0 ? CoreLiquidationState.Status.COMPLETED
                         : CoreLiquidationState.Status.ADL_REQUIRED;
@@ -207,6 +214,10 @@ public final class RuntimePerpetualLiquidationProcessor {
             case COMPLETED -> {
                 if (command.coveredUnits() != 0) {
                     throw new CoreStateRejectedException("INVALID_COMMAND", "completed resolution covers no units");
+                }
+                if (liquidation.deficitUnits() != 0) {
+                    throw new CoreStateRejectedException("LIQUIDATION_DEFICIT_REMAINS",
+                            "liquidation deficit must be fully covered before completion");
                 }
                 nextStatus = CoreLiquidationState.Status.COMPLETED;
             }

@@ -8,6 +8,7 @@ import java.net.ProxySelector;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "surprising.price.index")
@@ -20,6 +21,7 @@ public class IndexPriceProperties {
     private Fiat fiat = new Fiat();
     private Coordination coordination = new Coordination();
     private Audit audit = new Audit();
+    private List<String> requiredSymbols = List.of();
 
     public Kafka getKafka() {
         return kafka;
@@ -75,6 +77,18 @@ public class IndexPriceProperties {
 
     public void setAudit(Audit audit) {
         this.audit = audit;
+    }
+
+    public List<String> getRequiredSymbols() {
+        return requiredSymbols;
+    }
+
+    public void setRequiredSymbols(List<String> requiredSymbols) {
+        this.requiredSymbols = requiredSymbols == null ? List.of() : requiredSymbols.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.trim().toUpperCase(Locale.ROOT))
+                .distinct()
+                .toList();
     }
 
     public static class Kafka {

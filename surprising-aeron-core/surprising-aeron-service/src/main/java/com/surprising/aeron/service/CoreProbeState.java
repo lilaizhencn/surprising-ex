@@ -233,8 +233,8 @@ public final class CoreProbeState implements AutoCloseable {
         this.adlPositionIndex = runtime.adlPositionsForConstruction();
         this.riskSnapshotIndex = runtime.riskSnapshotsForConstruction();
         this.runtimePlaceOrderIdentities = new RuntimeIdentityRegistry();
-        this.runtimePlaceOrderState = RuntimeStateProjector.project(tradingState, runtimePlaceOrderIdentities);
-        this.runtimePlaceOrderCoreState = tradingState;
+        this.runtimePlaceOrderState = null;
+        this.runtimePlaceOrderCoreState = null;
     }
 
     static CoreProbeState restore(
@@ -310,6 +310,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         runtime.assertOwner();
+        ensureRuntimePlaceOrderState();
         assertHealthy();
         if (message.header().productLine() != productLine) {
             return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
@@ -589,9 +590,8 @@ public final class CoreProbeState implements AutoCloseable {
                 if (query.productLine() != productLine) {
                     return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
                 }
-                var eligible = liquidationIndex.activeIds().tailSet(query.afterLiquidationId(), false).stream()
-                        .map(tradingState.riskState().liquidations()::get)
-                        .filter(java.util.Objects::nonNull)
+                var eligible = tradingState.riskState().liquidations().values().stream()
+                        .filter(value -> value.liquidationId() > query.afterLiquidationId())
                         .filter(value -> switch (query.purpose()) {
                             case EXECUTION -> value.status()
                                     == com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED
@@ -1956,6 +1956,7 @@ public final class CoreProbeState implements AutoCloseable {
                                   com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) {
         runtime.assertOwner();
+        ensureRuntimePlaceOrderState();
         assertHealthy();
         PendingMatching pending = pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
@@ -3124,6 +3125,17 @@ public final class CoreProbeState implements AutoCloseable {
             changedTreasuryAssets.addAll(next.changedTreasuryAssets());
         }
         tradingState = next;
+    }
+
+    private void ensureRuntimePlaceOrderState() {
+        if (runtimePlaceOrderState != null) {
+            if (runtimePlaceOrderCoreState != tradingState) {
+                throw new IllegalStateException("runtime state cursor does not match core state");
+            }
+            return;
+        }
+        runtimePlaceOrderState = RuntimeStateProjector.project(tradingState, runtimePlaceOrderIdentities);
+        runtimePlaceOrderCoreState = tradingState;
     }
 
     private void adoptRuntimeState(TradingCoreState expected, TradingRuntimeState nextRuntimeState) {

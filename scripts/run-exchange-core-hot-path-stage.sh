@@ -65,7 +65,8 @@ selected_java_home="$JAVA_HOME"
 java_bin="$selected_java_home/bin/java"
 jfr_bin="$selected_java_home/bin/jfr"
 java_build=$("$java_bin" -version 2>&1 | tr '\n' ' ' | sed 's/[[:space:]]*$//')
-java_flag_args=(-Xms256m -Xmx256m -XX:+AlwaysPreTouch --enable-native-access=ALL-UNNAMED
+java_flag_args=(-Xms256m -Xmx256m -XX:+AlwaysPreTouch -XX:+UseZGC
+  -XX:FlightRecorderOptions=stackdepth=256 --enable-native-access=ALL-UNNAMED
   --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
   --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED)
 java_flags="${java_flag_args[*]}"
@@ -113,7 +114,9 @@ for ((fork=1; fork<=forks; fork++)); do
   seed=$((9900 + fork))
   fork_log="$attempt_dir/$stage-fork-$fork.log"
   recording="$attempt_dir/$stage-fork-$fork.jfr"
-  "$java_bin" "${java_flag_args[@]}" \
+  fork_java_flag_args=("${java_flag_args[@]}"
+    "-Xlog:gc*,safepoint:file=$attempt_dir/$stage-fork-$fork-gc.log:time,uptime,level,tags:filecount=5,filesize=100M")
+  "$java_bin" "${fork_java_flag_args[@]}" \
     -XX:StartFlightRecording="filename=$recording,settings=$jfr_settings,dumponexit=true" \
     -cp "$jar" com.surprising.aeron.tools.ClusterCapacityMain --local-baseline "$seed" "$maker_depth" \
     >"$fork_log" 2>&1 &

@@ -844,8 +844,9 @@ public class MarketMakerService {
         String accountPrefix = accountPrefix(strategy, symbol, accountId);
         String clientOrderId = quotePrefix(accountPrefix, quote.side(), quote.level())
                 + cycleSequence + "-" + orderNonce;
+        TimeInForce timeInForce = TimeInForce.GTX;
         return new PlaceOrderRequest(accountId, clientOrderId, symbol, quote.side(),
-                OrderType.LIMIT, TimeInForce.GTX, quote.priceTicks(), quote.quantitySteps(),
+                OrderType.LIMIT, timeInForce, quote.priceTicks(), quote.quantitySteps(),
                 strategy.getMarginMode(), PositionSide.NET, false, true);
     }
 

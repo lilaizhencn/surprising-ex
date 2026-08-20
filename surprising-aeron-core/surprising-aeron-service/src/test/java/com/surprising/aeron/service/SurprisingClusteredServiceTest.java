@@ -94,7 +94,7 @@ class SurprisingClusteredServiceTest {
             service.doBackgroundWork(0);
 
             assertThat(attempts).hasValue(3);
-            assertThat(correlationId).hasValue(Long.MAX_VALUE);
+            assertThat(correlationId).hasValue(Long.MAX_VALUE - 1);
         } finally {
             service.onTerminate(null);
         }

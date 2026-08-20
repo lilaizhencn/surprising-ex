@@ -364,8 +364,31 @@ class CoreLifecycleStateTest {
         TradingCoreState resolved = reducer.resolveLiquidation(funded,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, deficit));
         assertThat(resolved.treasuryState().insuranceBalances()).containsEntry("USDT", 100L);
+        assertThat(resolved.user(1).totalUnits("USDT")).isEqualTo(deficit);
         assertThat(resolved.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
+    }
+
+    @Test
+    void liquidationCannotCompleteWhileDeficitRemains() {
+        TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1,
+                1_700_000_000_000L));
+        TradingCoreState liquidated = reducer.executeLiquidation(state,
+                new ExecuteLiquidationCommand(1, 1, 1, 0));
+        ResolveLiquidationCommand command = new ResolveLiquidationCommand(
+                1, ResolveLiquidationCommand.Resolution.COMPLETED, 0);
+
+        assertThatThrownBy(() -> reducer.resolveLiquidation(liquidated, command))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("LIQUIDATION_DEFICIT_REMAINS"));
+        assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateResolution(
+                liquidated, command, new RuntimeIdentityRegistry()))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("LIQUIDATION_DEFICIT_REMAINS"));
+        assertThat(liquidated.riskState().liquidations().get(1L).status())
+                .isEqualTo(CoreLiquidationState.Status.INSURANCE_REQUIRED);
     }
 
     @Test

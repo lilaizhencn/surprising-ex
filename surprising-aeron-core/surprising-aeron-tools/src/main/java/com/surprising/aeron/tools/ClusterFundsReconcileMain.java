@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreRiskQueryCodec;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
+import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
@@ -70,6 +71,35 @@ public final class ClusterFundsReconcileMain {
                         treasury.asset(), treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits(),
                         treasury.insuranceDeficitUnits(), economicBalance);
             }
+            Map<Long, com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution> outstanding =
+                    new LinkedHashMap<>();
+            for (var purpose : List.of(
+                    com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.INSURANCE,
+                    com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.ADL)) {
+                var workResponse = query(client, productLine, CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
+                        CoreLiquidationWorkCodec.encodeQuery(productLine, purpose, 0, 100, 1_048_576));
+                if (workResponse.status() != ResponseStatus.OK) {
+                    throw new IllegalStateException("liquidation work query failed purpose=" + purpose
+                            + " result=" + workResponse.resultCode());
+                }
+                var liquidationWork = CoreLiquidationWorkCodec.decodeWork(workResponse.data());
+                System.out.printf("liquidationWork purpose=%s actions=%d resolutions=%d complete=%s cursor=%d%n",
+                        purpose, liquidationWork.actions().size(), liquidationWork.resolutions().size(),
+                        liquidationWork.complete(), liquidationWork.nextCursorLiquidationId());
+                for (var resolution : liquidationWork.resolutions()) {
+                    var previous = outstanding.putIfAbsent(resolution.liquidationId(), resolution);
+                    if (previous != null && (previous.deficitUnits() != resolution.deficitUnits()
+                            || !previous.asset().equals(resolution.asset()))) {
+                        throw new IllegalStateException("liquidation work changed while reconciling id="
+                                + resolution.liquidationId());
+                    }
+                }
+            }
+            for (var resolution : outstanding.values()) {
+                actual.merge(resolution.asset(), resolution.deficitUnits(), Math::addExact);
+                System.out.printf("liquidation asset=%s id=%d deficit=%d purpose=%s%n",
+                        resolution.asset(), resolution.liquidationId(), resolution.deficitUnits(), resolution.purpose());
+            }
         }
         for (var entry : expected.entrySet()) {
             long value = actual.getOrDefault(entry.getKey(), 0L);
@@ -86,10 +116,16 @@ public final class ClusterFundsReconcileMain {
 
     private static com.surprising.aeron.protocol.CoreResponse query(
             SurprisingAeronClient client, ProductLine productLine, CoreMessageType type, long userId) {
+        return query(client, productLine, type, userId, new byte[0]);
+    }
+
+    private static com.surprising.aeron.protocol.CoreResponse query(
+            SurprisingAeronClient client, ProductLine productLine, CoreMessageType type, long userId,
+            byte[] payload) {
         long correlation = System.nanoTime();
         CoreMessage message = new CoreMessage(CoreMessageHeader.query(
                 type, UUID.randomUUID(), productLine, CommandSource.OPERATIONS,
-                0x46554E4453524543L, correlation, userId, correlation, correlation), new byte[0]);
+                0x46554E4453524543L, correlation, userId, correlation, correlation), payload);
         return client.submit(message);
     }
 

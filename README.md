@@ -229,6 +229,39 @@ matching 使用 `exchange.core2:exchange-core:0.5.15-emporia` 及其 Chronicle/O
 --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
 ```
 
+### 单产品线做市与 JFR 压测
+
+真实链路一次只启动一个 `ProductLine`，做市进程保持运行；在线余额、冻结、持仓、订单簿和 Treasury
+必须通过 Aeron Core 查询，不以 PostgreSQL 投影作为裁决来源。启动脚本默认使用 ZGC；短时采样打开
+JFR，并同时记录 GC/safepoint 日志：
+
+```bash
+PRODUCT_LINE=LINEAR_PERPETUAL RUN_ID=mm-lp-jfr-<run> ACTION=up \
+  POSTGRES_MODE=native POSTGRES_DB=surprising_exchange_qa_linear_perp \
+  JAVA_HOME=/path/to/jdk-25 JVM_GC=ZGC JFR_ENABLED=true \
+  PRICE_HTTP_PROXY_ENABLED=false PRICE_INDEX_REQUIRED_SYMBOLS=BTC-USDT \
+  PRICE_CONSUMER_REQUIRED_SYMBOLS=BTC-USDT MM_BASE_QUANTITY_STEPS=20 MM_ORDER_LEVELS=20 \
+  bash scripts/start-product-line-providers.sh up
+```
+
+使用 `ClusterProductLineGateMain` 覆盖下单、撮合、资金费/交割/行权或强平路径，再用
+`ClusterFundsReconcileMain` 逐资产核对用户、做市账户和 Treasury 的总额、冻结、持仓及未完成 work；只有
+`fundsReconcile=PASS`、`fundsDiff=0` 且盘口清空后才进入容量测试。容量测试应使用独立 symbol 和用户范围，
+先执行 `capacity-workers=1` 的串行基线，记录 accepted/finalized、失败数、p50/p99/p99.9 和 book/funds
+结果。压测 JVM 使用以下等价配置，`stackdepth` 是 `FlightRecorderOptions` 参数，不是
+`StartFlightRecording` 的 `.jfc` setting：
+
+```text
+-XX:+UseZGC -Xms512m -Xmx512m -XX:+AlwaysPreTouch
+-XX:FlightRecorderOptions=stackdepth=256
+-XX:StartFlightRecording=filename=<run>.jfr,settings=profile,dumponexit=true
+-Xlog:gc*,safepoint:file=<run>-gc.log:time,uptime,level,tags
+```
+
+采样结束后使用 `jfr summary <run>.jfr`、`jfr view hot-methods <run>.jfr` 和
+`jfr view gc <run>.jfr`，同时保留每条产品线的容量输出和资金对账结果；JFR 只用于性能分析，不改变
+Core 的资金权威边界。
+
 Chronicle 版本由父 POM 的 BOM 统一管理，避免旧版在 JDK 25 中触发 `unmap0`/`Bytes` 初始化错误。
 默认合并进程和端口：
 

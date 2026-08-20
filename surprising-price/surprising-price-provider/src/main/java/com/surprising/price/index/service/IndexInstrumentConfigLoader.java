@@ -6,6 +6,7 @@ import com.surprising.instrument.api.model.IndexSourceConfig;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +33,8 @@ public class IndexInstrumentConfigLoader {
         }
         return snapshotCache.current(productLine).stream()
                 .filter(instrument -> instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.TRADING)
+                .filter(instrument -> properties.getRequiredSymbols().isEmpty()
+                        || properties.getRequiredSymbols().contains(instrument.symbol().toUpperCase(Locale.ROOT)))
                 .map(this::toSymbol)
                 .filter(symbol -> !symbol.getSources().isEmpty())
                 .toList();

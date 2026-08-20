@@ -3,6 +3,7 @@ package com.surprising.aeron.tools;
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
@@ -36,19 +37,28 @@ public final class ClusterInstrumentSeedMain {
         }
         try (var clients = new AeronClientPool("instrument-seed", productLine, hosts, egressHost,
                 Duration.ofSeconds(10), Math.min(8, instruments.size()))) {
+            int applied = 0;
+            int alreadyApplied = 0;
             for (InstrumentSeed instrument : instruments) {
                 UUID commandId = UUID.nameUUIDFromBytes((productLine + ":instrument:"
                         + instrument.command().symbol() + ':' + instrument.command().instrumentVersion())
                         .getBytes(StandardCharsets.UTF_8));
                 var response = clients.command(CoreMessageType.UPSERT_INSTRUMENT, commandId, 0,
                         TradingCommandCodec.encodeUpsertInstrument(instrument.command()));
+                if (response.commandStatus() == ResponseStatus.REJECTED
+                        && response.resultCode() == CoreResultCode.STALE_INSTRUMENT_VERSION) {
+                    alreadyApplied++;
+                    continue;
+                }
                 if (response.commandStatus() != ResponseStatus.APPLIED) {
                     throw new IllegalStateException("instrument rejected symbol=" + instrument.command().symbol()
                             + " result=" + response.resultCode());
                 }
+                applied++;
             }
+            System.out.printf("instrumentSeed=PASS productLine=%s count=%d applied=%d alreadyApplied=%d%n",
+                    productLine, instruments.size(), applied, alreadyApplied);
         }
-        System.out.printf("instrumentSeed=PASS productLine=%s count=%d%n", productLine, instruments.size());
     }
 
     private static List<InstrumentSeed> load(

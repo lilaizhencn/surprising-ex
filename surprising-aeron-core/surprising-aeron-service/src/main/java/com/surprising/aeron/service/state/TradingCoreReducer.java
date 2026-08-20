@@ -1768,6 +1768,12 @@ public final class TradingCoreReducer {
                 liquidation.instrumentVersion());
         CoreLiquidationState.Status nextStatus;
         CoreTreasuryState treasury = state.treasuryState();
+        CoreUserState target = state.user(liquidation.userId());
+        if (target == null) {
+            throw new CoreStateRejectedException("USER_NOT_FOUND", "liquidation user does not exist");
+        }
+        AssetBalance targetBalance = requireBalance(target, instrument.settleAsset());
+        long creditedUnits = 0;
         switch (command.resolution()) {
             case INSURANCE -> {
                 if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
@@ -1785,6 +1791,8 @@ public final class TradingCoreReducer {
                 }
                 treasury = treasury.adjustInsurance(instrument.settleAsset(),
                         Math.negateExact(command.coveredUnits()));
+                targetBalance = targetBalance.credit(command.coveredUnits());
+                creditedUnits = command.coveredUnits();
                 nextStatus = command.coveredUnits() == liquidation.deficitUnits()
                         ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
             }
@@ -1796,6 +1804,10 @@ public final class TradingCoreReducer {
                 if (command.coveredUnits() != 0) {
                     throw new CoreStateRejectedException("INVALID_COMMAND", "completed resolution covers no units");
                 }
+                if (liquidation.deficitUnits() != 0) {
+                    throw new CoreStateRejectedException("LIQUIDATION_DEFICIT_REMAINS",
+                            "liquidation deficit must be fully covered before completion");
+                }
                 nextStatus = CoreLiquidationState.Status.COMPLETED;
             }
             default -> throw new IllegalStateException("unknown liquidation resolution");
@@ -1804,11 +1816,18 @@ public final class TradingCoreReducer {
         CoreLiquidationState nextLiquidation = command.resolution() == ResolveLiquidationCommand.Resolution.COMPLETED
                 ? liquidation.withStatus(nextStatus) : liquidation.covered(command.coveredUnits(), nextStatus);
         liquidations.put(liquidation.liquidationId(), nextLiquidation);
+        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
+        if (creditedUnits > 0) {
+            Map<String, AssetBalance> balances = StateMapSupport.delta(target.balances());
+            balances.put(instrument.settleAsset(), targetBalance);
+            users.put(target.userId(), target.transition(Math.incrementExact(target.revision()), balances,
+                    target.reservations(), target.positions(), target.positionMode()));
+        }
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(),
                 state.riskState().scanControl());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                state.users(), state.orders(), state.instruments(), risk, treasury,
+                users, state.orders(), state.instruments(), risk, treasury,
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }

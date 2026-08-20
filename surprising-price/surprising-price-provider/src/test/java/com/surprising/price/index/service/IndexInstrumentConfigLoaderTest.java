@@ -46,6 +46,19 @@ class IndexInstrumentConfigLoaderTest {
 
     }
 
+    @Test
+    void requiredSymbolsLimitIndexWorkToTheConfiguredHotSet() {
+        IndexPriceProperties properties = new IndexPriceProperties();
+        properties.setRequiredSymbols(List.of("BTC-USDT"));
+        InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
+        cache.replace(ProductLine.LINEAR_PERPETUAL, List.of(instrument("BTC-USDT", 7L, true),
+                instrument("ETH-USDT", 3L, true)));
+        IndexInstrumentConfigLoader loader = new IndexInstrumentConfigLoader(properties, cache);
+
+        assertThat(loader.load()).extracting(IndexPriceProperties.SymbolConfig::getSymbol)
+                .containsExactly("BTC-USDT");
+    }
+
     private IndexSourceConfig source() {
         return new IndexSourceConfig(
                 "BINANCE",

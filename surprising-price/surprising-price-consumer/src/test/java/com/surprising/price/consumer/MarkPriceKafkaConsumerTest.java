@@ -58,6 +58,19 @@ class MarkPriceKafkaConsumerTest {
     }
 
     @Test
+    void skipsUnconfiguredSymbolsBeforeDeserializingThePublication() {
+        MarkPriceConsumerProperties properties = new MarkPriceConsumerProperties();
+        properties.setRequiredSymbols(List.of("BTC-USDT"));
+        LatestMarkPriceCache cache = new LatestMarkPriceCache(properties);
+        MarkPriceKafkaConsumer consumer = new MarkPriceKafkaConsumer(new ObjectMapper(), cache, properties);
+
+        assertThatCode(() -> consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, 0L,
+                "ETH-USDT", "{not-json"))).doesNotThrowAnyException();
+
+        assertThat(cache.latest("ETH-USDT")).isEmpty();
+    }
+
+    @Test
     void notifiesListenersForEveryAcceptedUpdateAfterWarmup() throws Exception {
         MarkPriceConsumerProperties properties = new MarkPriceConsumerProperties();
         LatestMarkPriceCache cache = new LatestMarkPriceCache(properties);

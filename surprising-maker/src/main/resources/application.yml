@@ -43,8 +43,9 @@ surprising:
       group-id: surprising-market-maker-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 3s
       allowed-future-skew: 1s
-      concurrency: 1
+      concurrency: ${PRICE_CONSUMER_CONCURRENCY:8}
       max-poll-records: 500
+      required-symbols: ${PRICE_CONSUMER_REQUIRED_SYMBOLS:}
   clients:
     account:
       base-url: http://localhost:9086
@@ -134,5 +135,6 @@ surprising:
         enabled: true
         account-ids: [900001, 900002]
         symbols: [BTC-USDT]
-        base-quantity-steps: 20
+        base-quantity-steps: ${MM_BASE_QUANTITY_STEPS:20}
+        order-levels: ${MM_ORDER_LEVELS:20}
         margin-mode: CROSS

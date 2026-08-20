@@ -10,15 +10,31 @@ RUNTIME_ROOT="${RUNTIME_ROOT:-${TMPDIR:-/tmp}/surprising-product-line-runtime}"
 RUN_DIR="$RUNTIME_ROOT/$RUN_ID"
 PID_DIR="$RUN_DIR/pids"
 LOG_DIR="$RUN_DIR/logs"
+JFR_DIR="$RUN_DIR/jfr"
 READY_FILE="$RUN_DIR/ready.tsv"
 OWNER_FILE="$RUN_DIR/owner"
 LOCK_DIR="$RUNTIME_ROOT/active.lock"
 LOCK_OWNER="$LOCK_DIR/owner"
+JVM_XMS="${JVM_XMS:-512m}"
+JVM_XMX="${JVM_XMX:-512m}"
+JVM_GC="${JVM_GC:-ZGC}"
+JFR_ENABLED="${JFR_ENABLED:-false}"
+JFR_SETTINGS="${JFR_SETTINGS:-profile}"
+JFR_STACK_DEPTH="${JFR_STACK_DEPTH:-256}"
 POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_DB="${POSTGRES_DB:-postgres}"
 POSTGRES_USER="${POSTGRES_USER:-postgres}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
+POSTGRES_MODE="${POSTGRES_MODE:-auto}"
+PRICE_HTTP_PROXY_ENABLED="${PRICE_HTTP_PROXY_ENABLED:-false}"
+PRICE_HTTP_PROXY_HOST="${PRICE_HTTP_PROXY_HOST:-127.0.0.1}"
+PRICE_HTTP_PROXY_PORT="${PRICE_HTTP_PROXY_PORT:-7897}"
+PRICE_CONSUMER_CONCURRENCY="${PRICE_CONSUMER_CONCURRENCY:-8}"
+PRICE_CONSUMER_REQUIRED_SYMBOLS="${PRICE_CONSUMER_REQUIRED_SYMBOLS:-BTC-USDT}"
+PRICE_INDEX_REQUIRED_SYMBOLS="${PRICE_INDEX_REQUIRED_SYMBOLS:-}"
+MM_BASE_QUANTITY_STEPS="${MM_BASE_QUANTITY_STEPS:-20}"
+MM_ORDER_LEVELS="${MM_ORDER_LEVELS:-20}"
 KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}"
 VALKEY_HOST="${VALKEY_HOST:-127.0.0.1}"
 VALKEY_PORT="${VALKEY_PORT:-6379}"
@@ -44,6 +60,10 @@ case "$ACTION" in
   *) fail "unsupported ACTION=$ACTION" ;;
 esac
 case "$BUILD_CHANGED" in true|false) ;; *) fail 'BUILD_CHANGED must be true or false' ;; esac
+case "$JVM_GC" in ZGC|G1) ;; *) fail 'JVM_GC must be ZGC or G1' ;; esac
+case "$JFR_ENABLED" in true|false) ;; *) fail 'JFR_ENABLED must be true or false' ;; esac
+case "$JFR_SETTINGS" in profile|default) ;; *) fail 'JFR_SETTINGS must be profile or default' ;; esac
+case "$POSTGRES_MODE" in auto|docker|native) ;; *) fail 'POSTGRES_MODE must be auto, docker or native' ;; esac
 [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] || fail "invalid RUN_ID=$RUN_ID"
 
 service_enabled() {
@@ -85,10 +105,14 @@ preflight_port() {
 
 preflight() {
   [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 25 unavailable JAVA_HOME=$JAVA_HOME"
-  command -v docker >/dev/null || fail 'docker unavailable'
   command -v curl >/dev/null || fail 'curl unavailable'
   command -v nc >/dev/null || fail 'nc unavailable'
-  docker info >/dev/null 2>&1 || fail 'docker daemon unavailable'
+  if [[ "$POSTGRES_MODE" == docker ]] || {
+    [[ "$POSTGRES_MODE" == auto ]] && [[ -z "$(postgres_container)" ]] && ! command -v psql >/dev/null
+  }; then
+    command -v docker >/dev/null || fail 'docker unavailable'
+    docker info >/dev/null 2>&1 || fail 'docker daemon unavailable'
+  fi
   preflight_port "$POSTGRES_HOST" "$POSTGRES_PORT"
   preflight_port "${KAFKA_BOOTSTRAP_SERVERS%:*}" "${KAFKA_BOOTSTRAP_SERVERS##*:}"
   preflight_port "$VALKEY_HOST" "$VALKEY_PORT"
@@ -107,15 +131,36 @@ build_artifacts() {
 }
 
 postgres_container() {
+  command -v docker >/dev/null 2>&1 || return 0
   docker ps --filter publish="$POSTGRES_PORT" --format '{{.ID}}' | head -1
 }
 
+postgres_transport() {
+  case "$POSTGRES_MODE" in
+    docker) printf 'docker\n' ;;
+    native) printf 'native\n' ;;
+    auto)
+      if [[ -n "$(postgres_container)" ]]; then
+        printf 'docker\n'
+      else
+        printf 'native\n'
+      fi
+      ;;
+  esac
+}
+
 postgres_exec() {
-  local container
-  container="$(postgres_container)"
-  [[ -n "$container" ]] || fail "PostgreSQL container exposing port $POSTGRES_PORT not found"
-  docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" -i "$container" \
-    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
+  if [[ "$(postgres_transport)" == docker ]]; then
+    local container
+    container="$(postgres_container)"
+    [[ -n "$container" ]] || fail "PostgreSQL container exposing port $POSTGRES_PORT not found"
+    docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" -i "$container" \
+      psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
+    return
+  fi
+  command -v psql >/dev/null || fail 'native PostgreSQL selected but psql unavailable'
+  PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
 }
 
 initialize_database() {
@@ -139,10 +184,34 @@ assert_lock_available() {
 
 claim_runtime() {
   assert_lock_available
-  mkdir -p "$PID_DIR" "$LOG_DIR" "$LOCK_DIR"
+  mkdir -p "$PID_DIR" "$LOG_DIR" "$JFR_DIR" "$LOCK_DIR"
   printf '%s\n' "$RUN_ID" > "$LOCK_OWNER"
   printf '%s\n' "$RUN_ID" > "$OWNER_FILE"
   : > "$READY_FILE"
+}
+
+java_args_for() {
+  local service="$1"
+  JVM_ARGS=(
+    "-Xms$JVM_XMS"
+    "-Xmx$JVM_XMX"
+    "-XX:+AlwaysPreTouch"
+    "--enable-native-access=ALL-UNNAMED"
+    "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
+    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+    "-Xlog:gc*,safepoint:file=$LOG_DIR/$service-gc.log:time,uptime,level,tags:filecount=5,filesize=100M"
+  )
+  if [[ "$JVM_GC" == ZGC ]]; then
+    JVM_ARGS+=("-XX:+UseZGC")
+  else
+    JVM_ARGS+=("-XX:+UseG1GC")
+  fi
+  if [[ "$JFR_ENABLED" == true ]]; then
+    JVM_ARGS+=(
+      "-XX:FlightRecorderOptions=stackdepth=$JFR_STACK_DEPTH"
+      "-XX:StartFlightRecording=filename=$JFR_DIR/$service.jfr,settings=$JFR_SETTINGS,dumponexit=true"
+    )
+  fi
 }
 
 mark_ready() {
@@ -209,6 +278,7 @@ COMMON_ENV=(
     SURPRISING_INSTRUMENT_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_ACCOUNT_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_PRICE_CONSUMER_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
+    PRICE_INDEX_REQUIRED_SYMBOLS="$PRICE_INDEX_REQUIRED_SYMBOLS" \
     SURPRISING_PRICE_INDEX_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_PRICE_MARK_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_TRADING_ORDER_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
@@ -221,21 +291,28 @@ COMMON_ENV=(
     DATABASE_URL="jdbc:postgresql://$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
     DATABASE_USER="$POSTGRES_USER" DATABASE_PASSWORD="$POSTGRES_PASSWORD" \
     REDIS_HOST="$VALKEY_HOST" REDIS_PORT="$VALKEY_PORT" \
-    SURPRISING_PRICE_INDEX_HTTP_PROXY_ENABLED=true SURPRISING_PRICE_INDEX_HTTP_PROXY_HOST=127.0.0.1 \
-    SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT=7897
+    SURPRISING_PRICE_INDEX_HTTP_PROXY_ENABLED="$PRICE_HTTP_PROXY_ENABLED" \
+    SURPRISING_PRICE_INDEX_HTTP_PROXY_HOST="$PRICE_HTTP_PROXY_HOST" \
+    SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT="$PRICE_HTTP_PROXY_PORT" \
+    PRICE_CONSUMER_CONCURRENCY="$PRICE_CONSUMER_CONCURRENCY" \
+    PRICE_CONSUMER_REQUIRED_SYMBOLS="$PRICE_CONSUMER_REQUIRED_SYMBOLS" \
+    MM_BASE_QUANTITY_STEPS="$MM_BASE_QUANTITY_STEPS" \
+    MM_ORDER_LEVELS="$MM_ORDER_LEVELS"
 )
 
 start_http_service() {
   local service="$1" port
   port="$(service_port "$service")"
+  java_args_for "$service"
   start_owned_process "$service" "$port" "${COMMON_ENV[@]}" SERVER_PORT="$port" \
-    "$JAVA_HOME/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED -jar "$(jar_path "$service")"
+    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path "$service")"
 }
 
 start_background_service() {
   local service="$1" main_class="$2"
+  java_args_for "$service"
   start_owned_process "$service" '' "${COMMON_ENV[@]}" \
-    "$JAVA_HOME/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
     -cp "$(jar_path "$service")" "$main_class"
 }
 
@@ -246,8 +323,9 @@ start_core() {
   fi
   mkdir -p "$RUN_DIR/aeron"
   for node in 0 1 2; do
+    java_args_for "core-node$node"
     start_owned_process "core-node$node" '' "${COMMON_ENV[@]}" AERON_CORE_THREADING_MODE=DEDICATED \
-      "$JAVA_HOME/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+      "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
       -Dsurprising.aeron.product-line="$PRODUCT_LINE" \
       -Dsurprising.aeron.node-id="$node" \
       -Dsurprising.aeron.hostnames="$AERON_CLUSTER_HOSTNAMES" \
@@ -256,7 +334,8 @@ start_core() {
       -jar "$(jar_path core)"
   done
   local deadline=$((SECONDS + 90))
-  until "${COMMON_ENV[@]}" "$JAVA_HOME/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+  java_args_for core-probe
+  until "${COMMON_ENV[@]}" "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
     -Dsurprising.aeron.product-line="$PRODUCT_LINE" \
     -Dsurprising.aeron.hostnames="$AERON_CLUSTER_HOSTNAMES" \
     -Dsurprising.aeron.egress-hostname="$AERON_EGRESS_HOSTNAME" \
@@ -334,8 +413,9 @@ run_test() {
   start_stack fresh
   trap 'stop_stack' EXIT INT TERM
   local manifest="$RUN_DIR/product-line-test.manifest"
+  java_args_for lifecycle-qa
   "${COMMON_ENV[@]}" W4_LIFECYCLE_AUTHORITY=CORE W4_DERIVATIVES_LIFECYCLE_URL=http://127.0.0.1:9087 \
-    "$JAVA_HOME/bin/java" --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
     -Dsurprising.aeron.product-line="$PRODUCT_LINE" \
     -Dsurprising.aeron.hostnames="$AERON_CLUSTER_HOSTNAMES" \
     -Dsurprising.aeron.egress-hostname="$AERON_EGRESS_HOSTNAME" \

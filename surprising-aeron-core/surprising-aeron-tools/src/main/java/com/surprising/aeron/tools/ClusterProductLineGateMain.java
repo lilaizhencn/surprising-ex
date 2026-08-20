@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
+import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -28,7 +29,9 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public final class ClusterProductLineGateMain {
@@ -106,6 +109,7 @@ public final class ClusterProductLineGateMain {
                 order(order(1), CoreOrderSide.SELL, 10, settleAsset, shortReservation));
         applied(longUser, CoreMessageType.PLACE_ORDER,
                 order(order(2), CoreOrderSide.BUY, 10, settleAsset, longReservation));
+        requireBookEmpty();
 
         if (isPerpetual()) {
             applied(1, CoreMessageType.APPLY_MARK_PRICE,
@@ -133,20 +137,31 @@ public final class ClusterProductLineGateMain {
                 order(order(3), CoreOrderSide.SELL, 10, settleAsset, 150));
         applied(longUser, CoreMessageType.PLACE_ORDER,
                 order(order(4), CoreOrderSide.BUY, 10, settleAsset, 150));
+        requireBookEmpty();
         long markPrice = productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80;
         long priceSequence = 2;
         applied(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                         SYMBOL, 1, markPrice, priceSequence, 1_700_000_000_000L)));
-        var work = CoreLiquidationWorkCodec.decodeWork(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
-                CoreLiquidationWorkCodec.encodeQuery(productLine,
-                        com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION,
-                        0, 100, 1_048_576)));
+        var work = executionWork();
+        if (work.riskScanPending()) {
+            applied(1, CoreMessageType.CONTINUE_RISK_SCAN,
+                    TradingCommandCodec.encodeContinueRiskScan(
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(256)));
+            work = executionWork();
+        }
         var action = work.actions().stream().filter(value -> value.userId() == longUser).findFirst()
                 .orElseThrow(() -> new IllegalStateException("missing liquidation work for user " + longUser));
         applied(longUser, CoreMessageType.EXECUTE_LIQUIDATION,
                 TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
                         action.liquidationId(), action.triggerPriceSequence(), action.markPriceTicks(), 100_000)));
+    }
+
+    private CoreLiquidationWorkView executionWork() {
+        return CoreLiquidationWorkCodec.decodeWork(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
+                CoreLiquidationWorkCodec.encodeQuery(productLine,
+                        com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.EXECUTION,
+                        0, 100, 1_048_576)));
     }
 
     private void verify() {
@@ -196,6 +211,28 @@ public final class ClusterProductLineGateMain {
                 actual = Math.addExact(actual, treasury.insuranceBalanceUnits());
             }
         }
+        Map<Long, com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution> outstanding =
+                new LinkedHashMap<>();
+        for (var purpose : List.of(
+                com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.INSURANCE,
+                com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.ADL)) {
+            var liquidationWork = CoreLiquidationWorkCodec.decodeWork(query(
+                    CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
+                    CoreLiquidationWorkCodec.encodeQuery(productLine, purpose, 0, 100, 1_048_576)));
+            for (var resolution : liquidationWork.resolutions()) {
+                if (!resolution.asset().equals(settleAsset())) continue;
+                var previous = outstanding.putIfAbsent(resolution.liquidationId(), resolution);
+                if (previous != null && (previous.deficitUnits() != resolution.deficitUnits()
+                        || !previous.asset().equals(resolution.asset()))) {
+                    throw new IllegalStateException("liquidation work changed while reconciling id="
+                            + resolution.liquidationId());
+                }
+            }
+        }
+        long outstandingDeficit = outstanding.values().stream()
+                .mapToLong(com.surprising.aeron.protocol.CoreLiquidationWorkView.Resolution::deficitUnits)
+                .sum();
+        actual = Math.addExact(actual, outstandingDeficit);
         if (actual != expected) {
             throw new IllegalStateException("economic funds mismatch expected=" + expected + " actual=" + actual);
         }

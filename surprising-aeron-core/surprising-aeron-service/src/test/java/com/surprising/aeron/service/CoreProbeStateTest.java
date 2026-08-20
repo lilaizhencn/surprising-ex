@@ -34,9 +34,26 @@ import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class CoreProbeStateTest {
+
+    @Test
+    void bindsRuntimeStateToTheFirstCoreCommandThread() throws InterruptedException {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            AtomicReference<CoreResponse> response = new AtomicReference<>();
+            Thread coreAgent = new Thread(() -> response.set(state.apply(tradingCommand(
+                    CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))));
+
+            coreAgent.start();
+            coreAgent.join();
+
+            assertThat(response.get().status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+        }
+    }
 
     @Test
     void materializesStableTriggerCreationOnceAndReplaysItAfterRecovery() {

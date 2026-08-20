@@ -44,6 +44,10 @@ public class MarkPriceKafkaConsumer {
             groupId = "#{@markPriceConsumerProperties.groupId}",
             containerFactory = "markPriceCacheKafkaListenerContainerFactory")
     public void onMarkPrice(ConsumerRecord<String, String> record) {
+        if (!properties.getRequiredSymbols().isEmpty()
+                && (record.key() == null || !properties.getRequiredSymbols().contains(record.key()))) {
+            return;
+        }
         try {
             PricePublishedEvent priceEvent = objectMapper.readValue(record.value(), PricePublishedEvent.class);
             if (priceEvent.eventType() != PriceEventType.MARK_PRICE) {

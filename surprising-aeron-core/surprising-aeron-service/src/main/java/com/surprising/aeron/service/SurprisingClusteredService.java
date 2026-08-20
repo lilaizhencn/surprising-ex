@@ -32,7 +32,9 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
     private static final long MATCHING_TIMER_DELAY_MS = 10;
-    private static final long MATCHING_WAKEUP_CORRELATION_ID = Long.MAX_VALUE;
+    private static final long EGRESS_DRAIN_TIMER_DELAY_MS = 1;
+    private static final long MATCHING_WAKEUP_CORRELATION_ID = Long.MAX_VALUE - 1;
+    private static final long FIRST_EGRESS_DRAIN_CORRELATION_ID = Long.MIN_VALUE + 1;
 
     private final ProductLine productLine;
     private final AtomicReference<Cluster.Role> role = new AtomicReference<>();
@@ -41,7 +43,9 @@ public final class SurprisingClusteredService implements ClusteredService {
     private IdleStrategy idleStrategy;
     private final Map<Long, PendingEgress> pendingEgress = new HashMap<>();
     private final Set<Long> activeEgressSessions = new HashSet<>();
+    private final Map<Long, Long> egressDrainTimers = new HashMap<>();
     private final Map<Long, ArrayDeque<PendingClient>> pendingClients = new HashMap<>();
+    private long nextEgressDrainCorrelationId = FIRST_EGRESS_DRAIN_CORRELATION_ID;
     private boolean matchingWakeupScheduled;
 
     public SurprisingClusteredService(ProductLine productLine) {
@@ -54,7 +58,9 @@ public final class SurprisingClusteredService implements ClusteredService {
         this.cluster = cluster;
         pendingEgress.clear();
         activeEgressSessions.clear();
+        egressDrainTimers.clear();
         pendingClients.clear();
+        nextEgressDrainCorrelationId = FIRST_EGRESS_DRAIN_CORRELATION_ID;
         matchingWakeupScheduled = false;
         idleStrategy = cluster.idleStrategy();
         role.set(cluster.role());
@@ -136,10 +142,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             if (egress == null || egress.session.isClosing()) {
                 if (egress != null) egress.queue.clear();
                 sessions.remove();
-                continue;
             }
-            work += drain(egress);
-            if (egress.queue.isEmpty()) sessions.remove();
         }
         if (state.pendingMatchingCount() > 0 && !matchingWakeupScheduled) {
             scheduleMatchingWakeup();
@@ -151,6 +154,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     public void onTerminate(Cluster cluster) {
         pendingEgress.clear();
         activeEgressSessions.clear();
+        egressDrainTimers.clear();
         pendingClients.clear();
         matchingWakeupScheduled = false;
         this.cluster = null;
@@ -171,6 +175,22 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTimerEvent(long correlationId, long timestamp) {
+        Long egressSessionId = egressDrainTimers.remove(correlationId);
+        if (egressSessionId != null) {
+            PendingEgress egress = pendingEgress.get(egressSessionId);
+            if (egress == null || egress.session.isClosing()) {
+                activeEgressSessions.remove(egressSessionId);
+                return;
+            }
+            egress.drainTimerScheduled = false;
+            drain(egress);
+            if (egress.queue.isEmpty()) {
+                activeEgressSessions.remove(egressSessionId);
+            } else {
+                scheduleEgressDrain(egress);
+            }
+            return;
+        }
         if (correlationId == MATCHING_WAKEUP_CORRELATION_ID) {
             matchingWakeupScheduled = false;
             state.drainMatchingCompletions();
@@ -269,10 +289,12 @@ public final class SurprisingClusteredService implements ClusteredService {
         CoreMessageCodec.encode(message, egress.scratch);
         if (!egress.queue.isEmpty()) {
             enqueue(egress, egress.scratch, length);
+            scheduleEgressDrain(egress);
             return;
         }
         if (session.offer(egress.scratchBuffer, 0, length) < 0) {
             enqueue(egress, egress.scratch, length);
+            scheduleEgressDrain(egress);
         }
     }
 
@@ -303,11 +325,27 @@ public final class SurprisingClusteredService implements ClusteredService {
         activeEgressSessions.add(egress.session.id());
     }
 
+    private void scheduleEgressDrain(PendingEgress egress) {
+        if (cluster == null || egress.drainTimerScheduled || egress.session.isClosing()
+                || egress.queue.isEmpty()) return;
+        long correlationId = nextEgressDrainCorrelationId++;
+        long delay = Math.max(1L, cluster.timeUnit().convert(EGRESS_DRAIN_TIMER_DELAY_MS,
+                java.util.concurrent.TimeUnit.MILLISECONDS));
+        long deadline = cluster.time() + delay;
+        idleStrategy.reset();
+        while (!cluster.scheduleTimer(correlationId, deadline)) {
+            idleStrategy.idle();
+        }
+        egressDrainTimers.put(correlationId, egress.session.id());
+        egress.drainTimerScheduled = true;
+    }
+
     private static final class PendingEgress {
         private final ClientSession session;
         private final ArrayDeque<UnsafeBuffer> queue = new ArrayDeque<>();
         private byte[] scratch = new byte[0];
         private UnsafeBuffer scratchBuffer = new UnsafeBuffer(scratch);
+        private boolean drainTimerScheduled;
 
         private PendingEgress(ClientSession session) {
             this.session = session;

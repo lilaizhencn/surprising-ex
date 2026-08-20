@@ -101,7 +101,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 .mapToObj(ignored -> new Object()).toArray(Object[]::new);
         this.capacityMetrics = new CapacityMetrics(offeredCommandsPerSecond == 0
                 ? 0 : Math.max(1, 1_000_000_000L / offeredCommandsPerSecond));
-        this.clients = new AeronClientPool("capacity", productLine, hosts, egress, Duration.ofSeconds(10), connections);
+        this.clients = new AeronClientPool("capacity", productLine, hosts, egress, Duration.ofSeconds(10),
+                connections, "capacity-" + productLine + '-' + seed);
         this.nextOrderId = new AtomicLong(40_000_000_000L + seed * 1_000_000L);
     }
 
@@ -384,6 +385,11 @@ public final class ClusterCapacityMain implements AutoCloseable {
         if (measured) capacityMetrics.recordOffered();
         var response = clients.command(CoreMessageType.PLACE_ORDER, stableId("order:" + command.orderId()), userId,
                 TradingCommandCodec.encodePlaceOrder(command));
+        if (response.commandStatus() != ResponseStatus.APPLIED) {
+            throw new IllegalStateException("capacity order rejected orderId=" + command.orderId()
+                    + " userId=" + userId + " status=" + response.commandStatus()
+                    + " result=" + response.resultCode());
+        }
         record(response, System.nanoTime() - started, measured);
     }
 
@@ -420,8 +426,12 @@ public final class ClusterCapacityMain implements AutoCloseable {
             }
             return response.data();
         });
-        if (!book.levels().isEmpty()) {
-            throw new IllegalStateException("capacity book is not empty levels=" + book.levels().size());
+        long unexpectedLevels = book.levels().stream()
+                .filter(level -> symbols.contains(level.symbol()))
+                .count();
+        if (unexpectedLevels != 0) {
+            throw new IllegalStateException("capacity book is not empty symbols=" + symbols
+                    + " levels=" + unexpectedLevels);
         }
         long actual = 0;
         for (int pair = 0; pair < pairCount; pair++) {
