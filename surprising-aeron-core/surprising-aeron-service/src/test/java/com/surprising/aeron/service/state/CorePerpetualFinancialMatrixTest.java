@@ -214,6 +214,38 @@ class CorePerpetualFinancialMatrixTest {
         RuntimeStateParityChecker.assertMatches(executionExpected, identities, executionRuntime);
     }
 
+    @Test
+    void mixedPricePendingOrdersReserveForTheirActualFillPrices() {
+        for (Variant variant : List.of(VARIANTS.getFirst(), VARIANTS.get(2))) {
+            TradingCoreState opening = pairFunded(variant, false, DEFAULT_WALLET, DEFAULT_WALLET);
+            TradingCoreState placed = reducer.placeOrder(opening, USER_ID,
+                    pricedOrder(801, variant, CoreOrderSide.SELL, 1, 100, false, 100_000, 100_000));
+            placed = reducer.placeOrder(placed, USER_ID,
+                    pricedOrder(802, variant, CoreOrderSide.SELL, 1, 101, false, 100_000, 100_000));
+            long expectedMargin = variant.type().isInverse() ? 20 : 21;
+            long expectedFee = variant.type().isInverse() ? 20 : 21;
+            assertThat(placed.user(USER_ID).balances().get(variant.settleAsset()).lockedUnits())
+                    .isEqualTo(expectedMargin + expectedFee);
+
+            placed = reducer.placeOrder(placed, MAKER_ID,
+                    pricedOrder(803, variant, CoreOrderSide.BUY, 1, 100));
+            TradingCoreState afterFirstFill = reducer.applyMatches(placed, 803, variant.baseAsset(),
+                    variant.quoteAsset(), List.of(new CoreMatch(801, USER_ID, 100, 1, true, true)));
+            afterFirstFill = reducer.placeOrder(afterFirstFill, MAKER_ID,
+                    pricedOrder(804, variant, CoreOrderSide.BUY, 1, 101));
+            TradingCoreState ending = reducer.applyMatches(afterFirstFill, 804, variant.baseAsset(),
+                    variant.quoteAsset(), List.of(new CoreMatch(802, USER_ID, 101, 1, true, true)));
+
+            assertThat(ending.user(USER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-2);
+            assertThat(ending.user(USER_ID).positions().get(SYMBOL).positionMarginUnits())
+                    .isEqualTo(expectedMargin);
+            assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset()))
+                    .isEqualTo(DEFAULT_WALLET - expectedFee);
+            assertThat(ending.user(MAKER_ID).totalUnits(variant.settleAsset())).isEqualTo(DEFAULT_WALLET);
+            assertThat(ending.treasuryState().feeBalances()).containsEntry(variant.settleAsset(), expectedFee);
+        }
+    }
+
     private List<Row> allRows() {
         List<Row> rows = new ArrayList<>();
         for (Variant variant : VARIANTS) {
@@ -776,11 +808,23 @@ class CorePerpetualFinancialMatrixTest {
 
     private PlaceOrderCommand order(long orderId, Variant variant, CoreOrderSide side, long quantity,
                                      boolean reduceOnly, long makerFeeRatePpm, long takerFeeRatePpm) {
+        return pricedOrder(orderId, variant, side, quantity, ENTRY_PRICE, reduceOnly,
+                makerFeeRatePpm, takerFeeRatePpm);
+    }
+
+    private PlaceOrderCommand pricedOrder(long orderId, Variant variant, CoreOrderSide side, long quantity,
+                                           long priceTicks) {
+        return pricedOrder(orderId, variant, side, quantity, priceTicks, false, 0, 0);
+    }
+
+    private PlaceOrderCommand pricedOrder(long orderId, Variant variant, CoreOrderSide side, long quantity,
+                                          long priceTicks, boolean reduceOnly,
+                                          long makerFeeRatePpm, long takerFeeRatePpm) {
         return new PlaceOrderCommand(orderId, SYMBOL, 1, variant.baseAsset(), variant.quoteAsset(),
-                variant.settleAsset(), side, ENTRY_PRICE, quantity, reduceOnly, variant.marginMode(),
+                variant.settleAsset(), side, priceTicks, quantity, reduceOnly, variant.marginMode(),
                 CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, variant.settleAsset(), 0,
                 com.surprising.aeron.protocol.CoreOrderType.LIMIT,
-                com.surprising.aeron.protocol.CoreTimeInForce.GTC, ENTRY_PRICE, false, "",
+                com.surprising.aeron.protocol.CoreTimeInForce.GTC, priceTicks, false, "",
                 makerFeeRatePpm, takerFeeRatePpm);
     }
 

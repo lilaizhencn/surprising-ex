@@ -2379,7 +2379,8 @@ public final class TradingCoreReducer {
         long currentMargin = position == null ? 0 : position.positionMarginUnits();
         long releasedMargin = position == null || closeSteps == 0 ? 0
                 : proportional(currentMargin, closeSteps, Math.absExact(currentQuantity));
-        long pendingMargin = positionMarginRequirement(instrument, pendingSteps, command.matchingPriceTicks(), leverage);
+        long pendingPriceTicks = pendingPriceTicks(state, instrument, user, command, activeOrderIndex);
+        long pendingMargin = positionMarginRequirement(instrument, pendingSteps, pendingPriceTicks, leverage);
         long pendingOrderSteps = Math.subtractExact(pendingSteps, currentQuantity);
         long pendingAdditionalMargin = pendingOrderSteps == 0 ? 0
                 : Math.max(0, Math.subtractExact(pendingMargin, currentMargin));
@@ -2407,6 +2408,31 @@ public final class TradingCoreReducer {
                 initialMarginRateFromLeverage(leveragePpm));
         CoreOrderSide side = signedQuantitySteps > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL;
         return CoreContractMath.openingMarginUnits(instrument, side, priceTicks, quantitySteps, effectiveRate);
+    }
+
+    private static long pendingPriceTicks(
+            TradingCoreState state,
+            CoreInstrumentState instrument,
+            CoreUserState user,
+            PlaceOrderCommand command,
+            ActiveOrderIndex activeOrderIndex) {
+        if (!instrument.contractType().isPerpetual()) return command.matchingPriceTicks();
+        long candidate = instrument.contractType().isInverse() ? Long.MAX_VALUE : 0;
+        boolean found = false;
+        Iterable<CoreOrderState> orders = activeOrderIndex == null
+                ? userOrders(state, user) : activeOrderIndex.orders();
+        for (CoreOrderState order : orders) {
+            if (order.status() != CoreOrderStatus.OPEN || order.reduceOnly()
+                    || order.userId() != user.userId() || !order.symbol().equals(instrument.symbol())
+                    || order.positionSide() != command.positionSide() || order.side() != command.side()
+                    || order.priceTicks() <= 0) {
+                continue;
+            }
+            found = true;
+            candidate = instrument.contractType().isInverse()
+                    ? Math.min(candidate, order.priceTicks()) : Math.max(candidate, order.priceTicks());
+        }
+        return found ? candidate : command.matchingPriceTicks();
     }
 
     private static void validateDerivativeRiskLimits(
