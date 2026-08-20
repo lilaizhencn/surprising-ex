@@ -10,6 +10,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 ## 已确认架构基线
 
 - Runtime 状态与 immutable Snapshot 状态的分层迁移方案见 [`docs/runtime-state-migration.md`](docs/runtime-state-migration.md)，架构决策见 [`docs/adr/0004-runtime-state-and-deterministic-snapshots.md`](docs/adr/0004-runtime-state-and-deterministic-snapshots.md)。
+- exchange-core 设计对照、当前热路径性能出口、JVM/恢复风险和 100k/s 验收口径见
+  [`docs/exchange-core-trading-hot-path-review.md`](docs/exchange-core-trading-hot-path-review.md)。
 
 - 一个 `ProductLine` 变体对应一个逻辑 ProductExecutionCore；逻辑 Core 是一套三 Member Aeron Cluster，
   不是单进程。该 Core 管理本产品线全部 symbol、账户、订单元数据、持仓、风险和生命周期。
