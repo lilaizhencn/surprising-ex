@@ -511,28 +511,28 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private static void runLocalBaseline(String[] args) {
         long seed = args.length > 1 ? Long.parseLong(args[1]) : 9901L;
         if (seed <= 0) throw new IllegalArgumentException("baseline seed must be positive");
+        int makerDepth = args.length > 2 ? Integer.parseInt(args[2]) : 1;
         ExchangeCoreConcurrentBenchmark.main(new String[]{"500", "100", "64", "2"});
         CoreAcceptFreezeBenchmark.main(new String[]{"25", "5"});
         CoreInMemoryBenchmark.main(new String[]{"25", "5"});
         CoreAcceptFreezeConcurrentBenchmark.main(new String[]{"50", "10", "2"});
         CorePerpetualEndToEndBenchmark.BaselineResult perpetual =
-                CorePerpetualEndToEndBenchmark.measure(25, 5);
+                CorePerpetualEndToEndBenchmark.measure(25, 5, makerDepth);
         CapacityMetrics finalizationMetrics = new CapacityMetrics(TimeUnit.MILLISECONDS.toNanos(1));
         for (long latency : perpetual.latenciesNanos()) {
-            for (int command = 0; command < 2; command++) {
-                finalizationMetrics.recordOffered();
-                finalizationMetrics.recordAccepted();
-                finalizationMetrics.recordFinalized(latency, 0);
-            }
+            finalizationMetrics.recordOffered();
+            finalizationMetrics.recordAccepted();
+            finalizationMetrics.recordFinalized(latency, 0);
         }
         MetricsSnapshot finalization = finalizationMetrics.snapshot(perpetual.elapsedNanos());
-        System.out.printf("perpetualEndToEndBenchmark=PASS cycles=%d orders=%d elapsedSeconds=%.3f "
+        System.out.printf("perpetualEndToEndBenchmark=PASS cycles=%d makerDepth=%d orders=%d matchedQuantity=%d elapsedSeconds=%.3f "
                         + "finalizedPerSec=%.3f corrected=true expectedIntervalMicros=1000 "
                         + "p50Micros=%d p99Micros=%d p999Micros=%d pendingMatching=%d%n",
-                perpetual.cycles(), finalization.finalized(), perpetual.elapsedNanos() / 1_000_000_000.0,
+                perpetual.cycles(), perpetual.makerDepth(), perpetual.finalizedOrders(), perpetual.matchedQuantity(),
+                perpetual.elapsedNanos() / 1_000_000_000.0,
                 finalization.finalizedPerSecond(), finalization.p50Micros(), finalization.p99Micros(),
                 finalization.p999Micros(), perpetual.pendingMatching());
-        System.out.printf("clusterCapacityBaseline=PASS seed=%d suite=baseline%n", seed);
+        System.out.printf("clusterCapacityBaseline=PASS seed=%d suite=baseline makerDepth=%d%n", seed, makerDepth);
     }
 
     static final class CapacityMetrics {

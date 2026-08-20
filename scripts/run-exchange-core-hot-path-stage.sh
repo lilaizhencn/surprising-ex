@@ -2,13 +2,14 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 --stage NAME --attempt-dir DIR --benchmark-suite baseline --forks N [--jfr-settings profile]" >&2
+  echo "usage: $0 --stage NAME --attempt-dir DIR --benchmark-suite baseline --forks N [--maker-depth N] [--jfr-settings profile]" >&2
 }
 
 stage=""
 attempt_dir=""
 benchmark_suite=""
 forks=""
+maker_depth="1"
 jfr_settings="profile"
 while (($#)); do
   case "$1" in
@@ -16,6 +17,7 @@ while (($#)); do
     --attempt-dir) attempt_dir="${2-}"; shift 2 ;;
     --benchmark-suite) benchmark_suite="${2-}"; shift 2 ;;
     --forks) forks="${2-}"; shift 2 ;;
+    --maker-depth) maker_depth="${2-}"; shift 2 ;;
     --jfr-settings) jfr_settings="${2-}"; shift 2 ;;
     *) usage; echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -31,6 +33,10 @@ if [[ "$benchmark_suite" != "baseline" ]]; then
 fi
 if [[ ! "$forks" =~ ^[1-9][0-9]*$ ]]; then
   echo "forks must be a positive integer" >&2
+  exit 2
+fi
+if [[ "$maker_depth" != "1" && "$maker_depth" != "10" && "$maker_depth" != "100" ]]; then
+  echo "maker-depth must be one of 1, 10, or 100" >&2
   exit 2
 fi
 if [[ "$jfr_settings" != "profile" && "$jfr_settings" != "default" ]]; then
@@ -98,6 +104,8 @@ rates=()
 p50s=()
 p99s=()
 p999s=()
+orderss=()
+matched_quantitys=()
 queue_depths=()
 pending_depths=()
 timeout_seconds="${STAGE_FORK_TIMEOUT_SECONDS:-180}"
@@ -107,7 +115,7 @@ for ((fork=1; fork<=forks; fork++)); do
   recording="$attempt_dir/$stage-fork-$fork.jfr"
   "$java_bin" "${java_flag_args[@]}" \
     -XX:StartFlightRecording="filename=$recording,settings=$jfr_settings,dumponexit=true" \
-    -cp "$jar" com.surprising.aeron.tools.ClusterCapacityMain --local-baseline "$seed" \
+    -cp "$jar" com.surprising.aeron.tools.ClusterCapacityMain --local-baseline "$seed" "$maker_depth" \
     >"$fork_log" 2>&1 &
   child_pid=$!
   started_at=$SECONDS
@@ -154,6 +162,22 @@ for ((fork=1; fork<=forks; fork++)); do
   p50s+=("$(value p50Micros)")
   p99s+=("$(value p99Micros)")
   p999s+=("$(value p999Micros)")
+  orderss+=("$(value orders)")
+  matched_quantitys+=("$(value matchedQuantity)")
+  expected_orders=$((25 * (maker_depth + 1)))
+  expected_matched_quantity=$((25 * maker_depth))
+  [[ "$(value orders)" == "$expected_orders" ]] || {
+    echo "benchmark fork $fork finalized order count is not $expected_orders; see $fork_log" >&2
+    exit 1
+  }
+  [[ "$(value matchedQuantity)" == "$expected_matched_quantity" ]] || {
+    echo "benchmark fork $fork matched quantity is not $expected_matched_quantity; see $fork_log" >&2
+    exit 1
+  }
+  [[ "$(value pendingMatching)" == "0" ]] || {
+    echo "benchmark fork $fork has pending matching work; see $fork_log" >&2
+    exit 1
+  }
   concurrent=$(grep 'coreAcceptFreezeConcurrentBenchmark=PASS' "$fork_log" | tail -1)
   queue_depths+=("$(printf '%s\n' "$concurrent" | tr ' ' '\n' | awk -F= '$1=="maxQueueDepth" {print $2; exit}')")
   pending_depths+=("$(printf '%s\n' "$concurrent" | tr ' ' '\n' | awk -F= '$1=="pendingMatching" {print $2; exit}')")
@@ -168,6 +192,8 @@ finalized_per_second=$(median "${rates[@]}")
 p50=$(median "${p50s[@]}")
 p99=$(median "${p99s[@]}")
 p999=$(median "${p999s[@]}")
+orders=$(median "${orderss[@]}")
+matched_quantity=$(median "${matched_quantitys[@]}")
 queue_max=$(printf '%s\n' "${queue_depths[@]}" | sort -nr | head -1)
 pending_max=$(printf '%s\n' "${pending_depths[@]}" | sort -nr | head -1)
 created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -182,12 +208,14 @@ jq -n \
   --argjson forks "$forks" --argjson finalizedPerSecond "$finalized_per_second" \
   --arg jfrSettings "$jfr_settings" --argjson p50 "$p50" --argjson p99 "$p99" --argjson p999 "$p999" \
   --argjson queueMax "$queue_max" --argjson pendingMax "$pending_max" \
+  --argjson makerDepth "$maker_depth" --argjson orders "$orders" --argjson matchedQuantity "$matched_quantity" \
   '{schemaVersion:1,result:"PASS",stage:$stage,createdUtc:$createdUtc,benchmarkSuite:$suite,forks:$forks,
-    workload:{seedBase:9901,perFork:{adapterOnlyOrders:500,acceptFreezeOrders:25,inMemoryOrders:25,
-      concurrentIngressOrders:50,perpetualFinalizedOrders:50}},
+    workload:{seedBase:9901,makerDepth:$makerDepth,perFork:{adapterOnlyOrders:500,acceptFreezeOrders:25,inMemoryOrders:25,
+      concurrentIngressOrders:50,perpetualFinalizedOrders:$orders,perpetualMatchedQuantity:$matchedQuantity}},
     java:{home:$javaHome,build:$javaBuild,vendor:$javaVendor,vmName:$vmName,runtimeVersion:$runtimeVersion,
       flags:$javaFlags,jfrSettings:$jfrSettings},
-    metrics:{offered:50,accepted:50,finalized:50,finalizedPerSecond:$finalizedPerSecond,
+    metrics:{offered:$orders,accepted:$orders,finalized:$orders,matchedQuantity:$matchedQuantity,perpetualPendingMatching:0,
+      finalizedPerSecond:$finalizedPerSecond,
       pendingMax:$pendingMax,completionQueueMax:$queueMax,outboxMax:null},
     latency:{kind:"acceptance-to-finalization",coordinatedOmissionCorrected:true,
       p50Micros:$p50,p99Micros:$p99,p999Micros:$p999},
