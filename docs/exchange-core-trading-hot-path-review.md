@@ -1,6 +1,6 @@
 # exchange-core 交易主链路性能与恢复审计报告
 
-> 状态：`AS_IS_REVIEW_BASELINE`
+> 状态：`P0_MAKER_DEPTH_JFR_VERIFIED`
 >
 > 审计分支：`codex/aeron-unified-core`
 >
@@ -318,9 +318,18 @@ Aeron owner thread
 
 ```bash
 mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package
+mvn -pl surprising-aeron-core/surprising-aeron-service \
+  -Dtest=CorePerpetualEndToEndBenchmarkTest test
+mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
+  -Dtest=ClusterCapacityMetricsTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
-构建通过，并执行 exchange-core adapter、完整 Core 和 skip-matcher 对照短基准。工作区在审计前保持干净。
+构建通过，并执行 exchange-core adapter、完整 Core、skip-matcher 对照短基准以及永续 maker-depth 契约测试。
+工作区在审计前保持干净。
+
+独立资金/撮合回归共通过 `61` 个测试：`CoreProbeStateTest` 30、`CorePerpetualFinancialMatrixTest` 5、
+`RuntimePerpetualMatchProcessorTest` 6、`CoreMatchingStateTest` 20；这些测试覆盖成交、手续费、持仓、资金费、
+风险和余额守恒边界。当前 benchmark 本身仍不宣称可以替代这些状态断言。
 
 本轮未执行三节点 Aeron 容量、Kafka/PostgreSQL 历史链路、leader failover、快照恢复、磁盘故障、六产品线
 资金守恒和长时间 JVM soak。原因是当前全状态投影/物化已经构成明确 P0 阻塞；在消除该阻塞前扩大压测不能
@@ -331,6 +340,13 @@ mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package
 | 阶段 | 结果 | parent commit | UTC | 固定负载 | 最终裁决吞吐中位数 | 修正后 p50 / p99 / p99.9 | 证据 |
 | --- | --- | --- | --- | --- | ---: | ---: | --- |
 | Stage 1 | **PASS（基准工具门禁）** | `9ec69899a8096d3e2c1b74e33ea393d26b1853c3` | `2026-08-20T04:54:40Z` | seeds `9901..9903`，每 fork：adapter 500、accept/freeze 25、完整内存 25、并发入口 50、永续最终裁决 50 | `325.373/s` | `3,848 / 12,541 / 13,541 us` | `.omo/evidence/task-1/task-1-baseline-result.json`；三个 `task-1-baseline-fork-*.jfr`；五个 `jfr-*.txt` |
+| Stage 2 | **PASS（maker-depth 资金路径覆盖）** | `0c393ea1` | `2026-08-20T08:40:04Z` 至 `08:43:31Z` | 每 fork、25 measured cycles、JDK 25、3 forks；maker depth `1/10/100`，每 cycle 为 `k` 个 GTC maker 加 1 个 IOC taker | `555.385 / 543.990 / 442.549/s`（depth 1/10/100） | `1,620 / 3,391 / 3,391`；`1,569 / 9,158 / 12,156`；`1,859 / 15,523 / 22,740 us` | `/tmp/surprising-p0-maker-depth-{1,10,100}/p0-maker-depth-*-result.json`；每档 3 个 JFR 和五类 `jfr-*.txt` |
+
+Stage 2 的逐档守恒断言为：depth 1/10/100 分别最终裁决 `50/275/2525` 单、成交数量 `25/250/2500`；每 fork 的 offered、accepted、finalized 完全相等，`perpetualPendingMatching=0`。这些数量由 benchmark 实际下单、撮合和 `completeMatching` 返回值产生，runner 还会逐 fork 拒绝计数偏差或残留撮合任务。
+
+这组数据验证了深度参数确实扩大了真实撮合工作量，但不是容量认证。JFR 还观察到 depth 1/10/100 三档跨三个 fork 的 Young/Old GC 次数分别为 `3/3`、`6/3`、`39/3`；最大列出的 GC pause 约为 `6.41/10.30/17.70 ms`。深度 100 的 p99.9 已明显高于 10 ms 预算，因此当前结论是“资金/撮合路径可复现且无残留任务”，不是“满足延迟 SLO”。
+
+JFR 的 `hot-methods` 在 depth 10/100 捕获了 `CorePerpetualEndToEndBenchmark.placeAndComplete` 和 `CoreProbeState.completeMatching`；后者在源码中通过 `adoptPerpetualMatchRuntimeState` 调用 `RuntimePerpetualMatchProcessor.applyTransition`。allocation view 的主要压力随深度增加集中到 `CoreProbeState$StoredResult.responseData()`、UTF-8 编码、`CommandFingerprint` 和数组拷贝。JFR 没有提供可用的 direct-memory 数值，safepoint duration 显示 `Indefinite`，因此这两项仍不能作为稳定性门禁。
 
 Stage 1 的 PASS 仅表示可重复执行的度量/JFR 契约通过，不是生产容量认证。该短样本明显低于 100k/s，且
 `p99=12.541 ms` 未达到后续容量门禁的 `10 ms` 默认预算；后续阶段不得把本行解释为性能 SLO 已通过。
@@ -361,6 +377,21 @@ export PATH="$JAVA_HOME/bin:$PATH"
 scripts/run-exchange-core-hot-path-stage.sh --stage task-1-baseline \
   --attempt-dir .omo/evidence/task-1 --benchmark-suite baseline --forks 3 --jfr-settings profile
 ```
+
+Stage 2 三档 benchmark 命令为：
+
+```bash
+export JAVA_HOME=/Users/atomex/Desktop/surprising-jfr-work/jdk-25.0.4.1+1/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
+for depth in 1 10 100; do
+  scripts/run-exchange-core-hot-path-stage.sh --stage p0-maker-depth-$depth \
+    --attempt-dir /tmp/surprising-p0-maker-depth-$depth --benchmark-suite baseline \
+    --forks 3 --maker-depth "$depth" --jfr-settings profile
+done
+```
+
+Stage 2 的 JSON 将 `fundsDelta` 保留为 `null`，因为这个 local baseline 没有暴露签名资金 hash；资金/手续费/持仓守恒由
+`CorePerpetualFinancialMatrixTest` 和 `RuntimePerpetualMatchProcessorTest` 的独立回归覆盖，不能用 benchmark 的订单计数替代。
 
 三个 fork 的最终裁决速率为 `323.190 / 326.114 / 325.373 per second`。并发入口观察到的
 `pendingMatching` 最大值和 ingress queue 最大值均为 `50`；当前短本地基准没有暴露 replicated outbox
@@ -396,7 +427,7 @@ CPU top frames 为 `BusySpinWaitStrategy.waitFor`、`Util.getMinimumSequence`、
 
 - 三节点 Aeron committed-command 开放环负载、leader kill、follower lag 和 Archive replay。
 - 60 分钟 100k/s、10 秒 200k/s burst、24 小时 soak，以及四个连续 15 分钟增长窗口。
-- 100 万用户、400 万活动订单、热门 symbol/user、0/1/10/100 maker fill-depth。
+- 100 万用户、400 万活动订单、热门 symbol/user，以及 0 maker fill-depth。
 - 六产品线资金、持仓、手续费、资金费、强平费、保险基金、ADL、交割、行权和到期逐项守恒。
 - Kafka/Projector outage、outbox 上限、Archive 磁盘满、snapshot corruption 和 fail-closed restore。
 - direct memory、有效 safepoint duration、replicated outbox maxima、签名 state/funds hash 和 G1/ZGC 对照。
