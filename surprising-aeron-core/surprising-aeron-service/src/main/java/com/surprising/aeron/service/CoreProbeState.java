@@ -61,6 +61,7 @@ import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.RuntimeStateParityChecker;
 import com.surprising.aeron.service.state.RuntimeStateDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.RuntimePerpetualMatchProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderState;
@@ -1964,11 +1965,17 @@ public final class CoreProbeState implements AutoCloseable {
                             java.util.stream.Stream.of(command.orderId()),
                             matchingResult.matches().stream().map(com.surprising.aeron.service.matching.CoreMatch::makerOrderId))
                             .distinct().toList();
-                    adoptState(matchingResult.accepted()
+                    TradingCoreState next = matchingResult.accepted()
                             ? tradingReducer.applyMatches(tradingState, command.orderId(), command.baseAsset(),
                             command.quoteAsset(), matchingResult.matches())
                             : tradingReducer.rejectPlaceOrder(tradingState, pending.command().header().userId(),
-                            command.orderId()));
+                            command.orderId());
+                    if (matchingResult.accepted() && productLine == ProductLine.LINEAR_PERPETUAL) {
+                        adoptRuntimeState(next, RuntimePerpetualMatchProcessor.simulate(before, command.orderId(),
+                                matchingResult.matches(), runtimePlaceOrderIdentities));
+                    } else {
+                        adoptState(next);
+                    }
                     commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
                             matchingResult.matches());
                 }
@@ -3040,6 +3047,36 @@ public final class CoreProbeState implements AutoCloseable {
         }
         if (previous.treasuryState() != next.treasuryState()) {
             changedTreasuryAssets.addAll(next.changedTreasuryAssets());
+        }
+        tradingState = authoritativeNext;
+    }
+
+    private void adoptRuntimeState(TradingCoreState expected, TradingRuntimeState nextRuntimeState) {
+        if (expected == null || nextRuntimeState == null || expected.productLine() != productLine) {
+            throw new IllegalArgumentException("invalid runtime state transition");
+        }
+        TradingCoreState previous = tradingState;
+        if (runtimePlaceOrderCoreState != previous) {
+            throw new IllegalStateException("runtime state cursor does not match core state");
+        }
+        RuntimeStateParityChecker.assertMatches(expected, runtimePlaceOrderIdentities, nextRuntimeState);
+        TradingCoreState authoritativeNext = RuntimeStateMaterializer.materialize(nextRuntimeState,
+                runtimePlaceOrderIdentities);
+        runtimePlaceOrderState = nextRuntimeState;
+        runtimePlaceOrderCoreState = authoritativeNext;
+        runtime.transition(previous, expected, authoritativeNext);
+        rollingBusinessStateHash.update(previous, authoritativeNext);
+        seedChangeAccumulators();
+        if (previous.users() != authoritativeNext.users()) changedUserIds.addAll(authoritativeNext.changedUserIds());
+        if (previous.orders() != authoritativeNext.orders()) changedOrderIds.addAll(authoritativeNext.changedOrderIds());
+        if (previous.riskState().liquidations() != authoritativeNext.riskState().liquidations()) {
+            changedLiquidationIds.addAll(authoritativeNext.changedLiquidationIds());
+        }
+        if (previous.triggerOrders() != authoritativeNext.triggerOrders()) {
+            changedTriggerOrderIds.addAll(authoritativeNext.changedTriggerOrderIds());
+        }
+        if (previous.treasuryState() != authoritativeNext.treasuryState()) {
+            changedTreasuryAssets.addAll(authoritativeNext.changedTreasuryAssets());
         }
         tradingState = authoritativeNext;
     }
