@@ -25,19 +25,20 @@ class CoreResultLedgerTest {
 
     @Test
     void evictedCommandResultIsExplicitlyOutsideRetention() {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
-        UUID firstCommandId = UUID.randomUUID();
-        state.apply(probe(firstCommandId, 1, 1));
-        for (int sequence = 2; sequence <= CoreProbeState.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
-            assertThat(state.apply(probe(UUID.randomUUID(), sequence, 1)).status())
-                    .isEqualTo(ResponseStatus.APPLIED);
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            UUID firstCommandId = UUID.randomUUID();
+            state.apply(probe(firstCommandId, 1, 1));
+            for (int sequence = 2; sequence <= CoreProbeState.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
+                assertThat(state.apply(probe(UUID.randomUUID(), sequence, 1)).status())
+                        .isEqualTo(ResponseStatus.APPLIED);
+            }
+
+            CoreResponse result = state.apply(commandResultQuery(firstCommandId));
+
+            assertThat(result.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(result.resultCode()).isEqualTo(CoreResultCode.fromRejectionCode(
+                    "RESULT_UNKNOWN_OUTSIDE_RETENTION"));
         }
-
-        CoreResponse result = state.apply(commandResultQuery(firstCommandId));
-
-        assertThat(result.status()).isEqualTo(ResponseStatus.REJECTED);
-        assertThat(result.resultCode()).isEqualTo(CoreResultCode.fromRejectionCode(
-                "RESULT_UNKNOWN_OUTSIDE_RETENTION"));
     }
 
     @Test
@@ -60,74 +61,84 @@ class CoreResultLedgerTest {
 
     @Test
     void evictsOldestResultWhenResponseBytesExceedTheBound() throws Exception {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
-        Method storeResult = CoreProbeState.class.getDeclaredMethod(
-                "storeResult", UUID.class, CoreProbeState.StoredResult.class);
-        storeResult.setAccessible(true);
-        byte[] response = new byte[12 * 1024 * 1024];
-        UUID first = UUID.randomUUID();
-        UUID second = UUID.randomUUID();
-        UUID third = UUID.randomUUID();
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            Method storeResult = CoreProbeState.class.getDeclaredMethod(
+                    "storeResult", UUID.class, CoreProbeState.StoredResult.class);
+            storeResult.setAccessible(true);
+            byte[] response = new byte[12 * 1024 * 1024];
+            UUID first = UUID.randomUUID();
+            UUID second = UUID.randomUUID();
+            UUID third = UUID.randomUUID();
 
-        storeResult.invoke(state, first,
-                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, response));
-        storeResult.invoke(state, second,
-                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 2, 2, response));
-        storeResult.invoke(state, third,
-                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, response));
+            storeResult.invoke(state, first,
+                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, response));
+            storeResult.invoke(state, second,
+                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 2, 2, response));
+            storeResult.invoke(state, third,
+                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, response));
 
-        assertThat(state.commandResults()).doesNotContainKey(first);
-        assertThat(state.commandResults()).containsKeys(second, third);
+            assertThat(state.commandResults()).doesNotContainKey(first);
+            assertThat(state.commandResults()).containsKeys(second, third);
+            try (CoreProbeState restored = CoreProbeState.restore(ProductLine.SPOT, state.appliedCommandCount(),
+                    state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState(),
+                    state.exportState())) {
+                assertThat(restored.stateHash()).isEqualTo(state.stateHash());
+            }
+        }
     }
 
     @Test
     void replacementEvictsOldestOtherResultsAndKeepsTheReplacedKeyBounded() throws Exception {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
-        Method storeResult = CoreProbeState.class.getDeclaredMethod(
-                "storeResult", UUID.class, CoreProbeState.StoredResult.class);
-        storeResult.setAccessible(true);
-        UUID oldest = UUID.randomUUID();
-        UUID pending = UUID.randomUUID();
-        UUID newest = UUID.randomUUID();
-        byte[] fourteenMiB = new byte[14 * 1024 * 1024];
-        byte[] oneMiB = new byte[1024 * 1024];
-        byte[] fourMiB = new byte[4 * 1024 * 1024];
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            Method storeResult = CoreProbeState.class.getDeclaredMethod(
+                    "storeResult", UUID.class, CoreProbeState.StoredResult.class);
+            storeResult.setAccessible(true);
+            UUID oldest = UUID.randomUUID();
+            UUID pending = UUID.randomUUID();
+            UUID newest = UUID.randomUUID();
+            byte[] fourteenMiB = new byte[14 * 1024 * 1024];
+            byte[] oneMiB = new byte[1024 * 1024];
+            byte[] fourMiB = new byte[4 * 1024 * 1024];
 
-        storeResult.invoke(state, oldest,
-                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, fourteenMiB));
-        storeResult.invoke(state, pending,
-                new CoreProbeState.StoredResult(ResponseStatus.OK, CoreResultCode.MATCHING_PENDING, 2, 2,
-                        oneMiB));
-        long pendingRetention = state.commandResults().get(pending).retentionSequence();
-        storeResult.invoke(state, newest,
-                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, fourteenMiB));
+            storeResult.invoke(state, oldest,
+                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, fourteenMiB));
+            storeResult.invoke(state, pending,
+                    new CoreProbeState.StoredResult(ResponseStatus.OK, CoreResultCode.MATCHING_PENDING, 2, 2,
+                            oneMiB));
+            long pendingRetention = state.commandResults().get(pending).retentionSequence();
+            storeResult.invoke(state, newest,
+                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, fourteenMiB));
 
-        storeResult.invoke(state, pending,
-                new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 4, 4, fourMiB));
+            storeResult.invoke(state, pending,
+                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 4, 4, fourMiB));
 
-        assertThat(state.commandResults()).doesNotContainKey(oldest);
-        assertThat(state.commandResults()).containsKeys(pending, newest);
-        assertThat(state.commandResults().get(pending).status()).isEqualTo(ResponseStatus.APPLIED);
-        assertThat(state.commandResults().get(pending).responseData()).hasSize(fourMiB.length);
-        assertThat(state.commandResults().get(pending).retentionSequence()).isEqualTo(pendingRetention);
-        assertThat(CoreProbeState.restore(ProductLine.SPOT, state.appliedCommandCount(), state.probeValue(),
-                state.commandResults(), state.lastSourceSequences(), state.tradingState(), state.exportState()))
-                .isNotNull();
+            assertThat(state.commandResults()).doesNotContainKey(oldest);
+            assertThat(state.commandResults()).containsKeys(pending, newest);
+            assertThat(state.commandResults().get(pending).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.commandResults().get(pending).responseData()).hasSize(fourMiB.length);
+            assertThat(state.commandResults().get(pending).retentionSequence()).isEqualTo(pendingRetention);
+            try (CoreProbeState restored = CoreProbeState.restore(ProductLine.SPOT, state.appliedCommandCount(),
+                    state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState(),
+                    state.exportState())) {
+                assertThat(restored.stateHash()).isEqualTo(state.stateHash());
+            }
+        }
     }
 
     @Test
     void requiredExportSequenceIsNotAppliedCommandCountAfterExportAck() {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
-        state.apply(probe(UUID.randomUUID(), 1, 1));
-        CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
-                UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 1, 0,
-                2_000, 81), CoreExportCodec.encodeAck(new AckExportCommand(1)));
-        assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            state.apply(probe(UUID.randomUUID(), 1, 1));
+            CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
+                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 1, 0,
+                    2_000, 81), CoreExportCodec.encodeAck(new AckExportCommand(1)));
+            assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
 
-        CoreResponse response = state.apply(probe(UUID.randomUUID(), 2, 2));
-        assertThat(response.appliedCommandCount()).isEqualTo(3);
-        assertThat(response.requiredExportSequence()).isEqualTo(2);
-        assertThat(response.requiredExportSequence()).isNotEqualTo(response.appliedCommandCount());
+            CoreResponse response = state.apply(probe(UUID.randomUUID(), 2, 2));
+            assertThat(response.appliedCommandCount()).isEqualTo(3);
+            assertThat(response.requiredExportSequence()).isEqualTo(2);
+            assertThat(response.requiredExportSequence()).isNotEqualTo(response.appliedCommandCount());
+        }
     }
 
     private static CoreMessage probe(UUID commandId, long sourceSequence, long delta) {

@@ -76,14 +76,12 @@ import com.surprising.aeron.service.matching.BookBootstrapSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.TreeMap;
 import java.util.NavigableMap;
 import java.util.UUID;
@@ -107,12 +105,16 @@ public final class CoreProbeState implements AutoCloseable {
             "surprising.aeron.matching-phase-log-interval", 100);
     private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
     private static final long HASH_PRIME = 0x100000001b3L;
+    private static final long RESULT_LEDGER_POSITION_BASE = 0x9e3779b97f4a7c15L;
     private static final int MATCHING_PENDING_WIRE_CODE = 66;
     private final ProductLine productLine;
     private final TradingCoreRuntime runtime;
     private final LinkedHashMap<UUID, StoredResult> commandResults;
+    private final LinkedHashMap<UUID, Long> commandResultContributions;
     private long commandResultBytes;
+    private long commandResultsDigest;
     private long nextResultRetentionSequence;
+    private long nextResultRetentionWeight;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final LinkedHashMap<Long, PendingMatching> pendingMatching;
     private final LinkedHashMap<Long, List<LifecycleScope>> pendingLifecycleScopes;
@@ -192,8 +194,11 @@ public final class CoreProbeState implements AutoCloseable {
         this.appliedCommandCount = appliedCommandCount;
         this.probeValue = probeValue;
         this.commandResults = commandResults;
+        this.commandResultContributions = resultLedgerContributions(commandResults);
         this.commandResultBytes = resultLedgerBytes(commandResults);
+        this.commandResultsDigest = resultLedgerDigest(commandResultContributions);
         this.nextResultRetentionSequence = nextRetentionSequence(commandResults);
+        this.nextResultRetentionWeight = retentionWeight(nextResultRetentionSequence);
         this.lastSourceSequences = lastSourceSequences;
         this.pendingMatching = new LinkedHashMap<>();
         this.pendingLifecycleScopes = new LinkedHashMap<>();
@@ -2481,21 +2486,9 @@ public final class CoreProbeState implements AutoCloseable {
         hash = mix(hash, exportState.pendingDigest());
         hash = mix(hash, terminalRetention.digest());
         hash = mix(hash, lastSourceSequenceDigest);
-        for (Map.Entry<UUID, StoredResult> entry : commandResults.entrySet()) {
-            hash = mix(hash, entry.getKey().getMostSignificantBits());
-            hash = mix(hash, entry.getKey().getLeastSignificantBits());
-            for (byte value : entry.getValue().fingerprint().bytes()) {
-                hash = mix(hash, Byte.toUnsignedInt(value));
-            }
-            hash = mix(hash, entry.getValue().status().wireCode());
-            hash = mix(hash, entry.getValue().resultCode().wireCode());
-            hash = mix(hash, entry.getValue().appliedCommandCount());
-            hash = mix(hash, entry.getValue().requiredExportSequence());
-            hash = mix(hash, entry.getValue().retentionSequence());
-            for (byte value : entry.getValue().responseData()) {
-                hash = mix(hash, Byte.toUnsignedInt(value));
-            }
-        }
+        hash = mix(hash, commandResults.size());
+        hash = mix(hash, commandResultBytes);
+        hash = mix(hash, commandResultsDigest);
         if (commandId != null) {
             hash = mix(hash, commandId.getMostSignificantBits());
             hash = mix(hash, commandId.getLeastSignificantBits());
@@ -3552,7 +3545,55 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private static long resultEntryBytes(StoredResult result) {
-        return Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH, result.responseData().length);
+        return Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH, result.responseDataUnsafe().length);
+    }
+
+    private static LinkedHashMap<UUID, Long> resultLedgerContributions(Map<UUID, StoredResult> results) {
+        LinkedHashMap<UUID, Long> contributions = new LinkedHashMap<>();
+        for (Map.Entry<UUID, StoredResult> entry : results.entrySet()) {
+            contributions.put(entry.getKey(), resultContribution(entry.getKey(), entry.getValue()));
+        }
+        return contributions;
+    }
+
+    private static long resultLedgerDigest(Map<UUID, Long> contributions) {
+        long digest = 0;
+        for (long contribution : contributions.values()) digest += contribution;
+        return digest;
+    }
+
+    private static long resultEntryDigest(UUID commandId, StoredResult result) {
+        long digest = HASH_OFFSET_BASIS;
+        digest = mix(digest, commandId.getMostSignificantBits());
+        digest = mix(digest, commandId.getLeastSignificantBits());
+        for (byte value : result.fingerprint().bytes()) {
+            digest = mix(digest, Byte.toUnsignedInt(value));
+        }
+        digest = mix(digest, result.status().wireCode());
+        digest = mix(digest, result.resultCode().wireCode());
+        digest = mix(digest, result.appliedCommandCount());
+        digest = mix(digest, result.requiredExportSequence());
+        digest = mix(digest, result.retentionSequence());
+        for (byte value : result.responseDataUnsafe()) {
+            digest = mix(digest, Byte.toUnsignedInt(value));
+        }
+        return digest;
+    }
+
+    private static long resultContribution(UUID commandId, StoredResult result) {
+        return resultEntryDigest(commandId, result) * retentionWeight(result.retentionSequence());
+    }
+
+    private static long retentionWeight(long sequence) {
+        long weight = 1;
+        long factor = RESULT_LEDGER_POSITION_BASE;
+        long exponent = sequence;
+        while (exponent > 0) {
+            if ((exponent & 1) != 0) weight *= factor;
+            factor *= factor;
+            exponent >>>= 1;
+        }
+        return weight;
     }
 
     private static long nextRetentionSequence(Map<UUID, StoredResult> results) {
@@ -3588,21 +3629,42 @@ public final class CoreProbeState implements AutoCloseable {
         }
         StoredResult previous = commandResults.get(commandId);
         if (previous != null) {
-            commandResults.put(commandId, result.withRetentionSequence(previous.retentionSequence()));
-        } else {
-            StoredResult retained = result.withRetentionSequence(nextResultRetentionSequence);
-            nextResultRetentionSequence = Math.incrementExact(nextResultRetentionSequence);
+            StoredResult retained = result.withRetentionSequence(previous.retentionSequence());
             commandResults.put(commandId, retained);
+            commandResultBytes = Math.addExact(Math.subtractExact(commandResultBytes, resultEntryBytes(previous)),
+                    resultBytes);
+            long replacementContribution = resultContribution(commandId, retained);
+            long previousContribution = commandResultContributions.put(commandId, replacementContribution);
+            commandResultsDigest -= previousContribution;
+            commandResultsDigest += replacementContribution;
+        } else {
+            long retentionSequence = nextResultRetentionSequence;
+            StoredResult retained = result.withRetentionSequence(retentionSequence);
+            long contribution = resultEntryDigest(commandId, retained) * nextResultRetentionWeight;
+            nextResultRetentionSequence = Math.incrementExact(nextResultRetentionSequence);
+            nextResultRetentionWeight *= RESULT_LEDGER_POSITION_BASE;
+            commandResults.put(commandId, retained);
+            commandResultBytes = Math.addExact(commandResultBytes, resultBytes);
+            commandResultContributions.put(commandId, contribution);
+            commandResultsDigest += contribution;
         }
-        commandResultBytes = resultLedgerBytes(commandResults);
         while (commandResults.size() > MAX_IDEMPOTENCY_RESULTS
                 || commandResultBytes > MAX_RESULT_LEDGER_BYTES) {
-            UUID oldest = commandResults.keySet().stream()
-                    .filter(key -> !key.equals(commandId))
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException("result ledger protected entry exceeds bound"));
-            commandResults.remove(oldest);
-            commandResultBytes = resultLedgerBytes(commandResults);
+            Iterator<Map.Entry<UUID, StoredResult>> iterator = commandResults.entrySet().iterator();
+            Map.Entry<UUID, StoredResult> oldest = null;
+            while (iterator.hasNext()) {
+                Map.Entry<UUID, StoredResult> candidate = iterator.next();
+                if (!candidate.getKey().equals(commandId)) {
+                    oldest = candidate;
+                    iterator.remove();
+                    break;
+                }
+            }
+            if (oldest == null) {
+                throw new IllegalStateException("result ledger protected entry exceeds bound");
+            }
+            commandResultBytes = Math.subtractExact(commandResultBytes, resultEntryBytes(oldest.getValue()));
+            commandResultsDigest -= commandResultContributions.remove(oldest.getKey());
         }
     }
 
@@ -3742,6 +3804,10 @@ public final class CoreProbeState implements AutoCloseable {
         StoredResult withRetentionSequence(long sequence) {
             return new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
                     requiredExportSequence, stateHash, responseData, sequence);
+        }
+
+        byte[] responseDataUnsafe() {
+            return responseData;
         }
 
         @Override
