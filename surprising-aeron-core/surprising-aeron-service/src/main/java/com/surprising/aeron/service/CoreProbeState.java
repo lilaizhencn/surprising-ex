@@ -57,13 +57,14 @@ import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.RuntimeCancelOrderDeltaApplier;
+import com.surprising.aeron.service.state.RuntimePlaceOrderDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.RuntimeStateParityChecker;
 import com.surprising.aeron.service.state.RuntimeStateDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualLiquidationProcessor;
-import com.surprising.aeron.service.state.RuntimePerpetualMatchProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualRiskProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
@@ -962,8 +963,9 @@ public final class CoreProbeState implements AutoCloseable {
             case PLACE -> {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 requireOrderIdentityAvailable(userId, command);
-                adoptState(tradingReducer.placeOrder(tradingState, userId, command, commandId,
-                        openInterestIndex.openInterestSteps(command.symbol()), activeOrderIndex));
+                TradingCoreState expected = tradingReducer.placeOrder(tradingState, userId, command, commandId,
+                        openInterestIndex.openInterestSteps(command.symbol()), activeOrderIndex);
+                adoptPlaceOrderRuntimeState(expected, userId, command.orderId());
             }
             case CANCEL -> {
                 CancelOrderCommand command = (CancelOrderCommand) item.command;
@@ -1074,24 +1076,29 @@ public final class CoreProbeState implements AutoCloseable {
                 }
                 return executionViews(command.orderId(), pending.command().header().userId(), matchingResult.matches());
             }
-            case CANCEL -> {
-                CancelOrderCommand command = (CancelOrderCommand) item.command;
-                if (matchingResult.accepted()) {
-                    adoptState(tradingReducer.cancelOrder(tradingState, pending.command().header().userId(), command));
+                case CANCEL -> {
+                    CancelOrderCommand command = (CancelOrderCommand) item.command;
+                    if (matchingResult.accepted()) {
+                        TradingCoreState expected = tradingReducer.cancelOrder(tradingState,
+                                pending.command().header().userId(), command);
+                        adoptCancelOrderRuntimeState(expected, pending.command().header().userId(), command.orderId());
+                    }
+                    return List.of();
                 }
-                return List.of();
-            }
             case AMEND -> {
                 AmendOrderCommand command = (AmendOrderCommand) item.command;
                 PlaceOrderCommand replacement = replacementForAmend(command,
                         tradingState.order(command.originalOrderId()));
                 if (matchingResult.accepted()) {
-                    adoptState(tradingReducer.cancelOrder(tradingState, pending.command().header().userId(),
-                            new CancelOrderCommand(command.originalOrderId())));
+                    TradingCoreState canceled = tradingReducer.cancelOrder(tradingState,
+                            pending.command().header().userId(), new CancelOrderCommand(command.originalOrderId()));
+                    adoptCancelOrderRuntimeState(canceled, pending.command().header().userId(),
+                            command.originalOrderId());
                     requireOrderIdentityAvailable(pending.command().header().userId(), replacement);
-                    adoptState(tradingReducer.placeOrder(tradingState, pending.command().header().userId(), replacement,
-                            pending.command().header().commandId(), openInterestIndex.openInterestSteps(replacement.symbol()),
-                            activeOrderIndex));
+                    TradingCoreState reserved = tradingReducer.placeOrder(tradingState,
+                            pending.command().header().userId(), replacement, pending.command().header().commandId(),
+                            openInterestIndex.openInterestSteps(replacement.symbol()), activeOrderIndex);
+                    adoptPlaceOrderRuntimeState(reserved, pending.command().header().userId(), replacement.orderId());
                     adoptState(tradingReducer.applyMatches(tradingState, replacement.orderId(), replacement.baseAsset(),
                             replacement.quoteAsset(), matchingResult.matches()));
                 }
@@ -1265,9 +1272,10 @@ public final class CoreProbeState implements AutoCloseable {
                 case PLACE -> {
                     var command = TradingCommandCodec.decodePlaceOrder(message.payload());
                     requireOrderIdentityAvailable(message.header().userId(), command);
-                    adoptState(tradingReducer.placeOrder(tradingState, message.header().userId(), command,
+                    TradingCoreState expected = tradingReducer.placeOrder(tradingState, message.header().userId(), command,
                             message.header().commandId(), openInterestIndex.openInterestSteps(command.symbol()),
-                            activeOrderIndex));
+                            activeOrderIndex);
+                    adoptPlaceOrderRuntimeState(expected, message.header().userId(), command.orderId());
                     commandChangedUserIds = List.of(message.header().userId());
                     commandChangedOrderIds = List.of(command.orderId());
                     commandOrderViews = List.of(orderView(tradingState.order(command.orderId())));
@@ -1941,12 +1949,7 @@ public final class CoreProbeState implements AutoCloseable {
                             command.quoteAsset(), matchingResult.matches())
                             : tradingReducer.rejectPlaceOrder(tradingState, pending.command().header().userId(),
                             command.orderId());
-                    if (matchingResult.accepted() && productLine == ProductLine.LINEAR_PERPETUAL) {
-                        adoptRuntimeState(next, RuntimePerpetualMatchProcessor.simulate(before, command.orderId(),
-                                matchingResult.matches(), runtimePlaceOrderIdentities));
-                    } else {
-                        adoptState(next);
-                    }
+                    adoptState(next);
                     commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
                             matchingResult.matches());
                 }
@@ -1955,8 +1958,9 @@ public final class CoreProbeState implements AutoCloseable {
                     commandChangedUserIds = List.of(pending.command().header().userId());
                     commandChangedOrderIds = List.of(command.orderId());
                     if (matchingResult.accepted()) {
-                        adoptState(tradingReducer.cancelOrder(tradingState,
-                                pending.command().header().userId(), command));
+                        TradingCoreState expected = tradingReducer.cancelOrder(tradingState,
+                                pending.command().header().userId(), command);
+                        adoptCancelOrderRuntimeState(expected, pending.command().header().userId(), command.orderId());
                     }
                 }
                 case REPLACE, AMEND -> {
@@ -1976,12 +1980,15 @@ public final class CoreProbeState implements AutoCloseable {
                             matchingResult.matches().stream().map(com.surprising.aeron.service.matching.CoreMatch::makerOrderId))
                             .distinct().toList();
                     if (matchingResult.accepted()) {
-                        adoptState(tradingReducer.cancelOrder(tradingState,
-                                pending.command().header().userId(), new com.surprising.aeron.protocol.CancelOrderCommand(originalOrderId)));
+                        TradingCoreState canceled = tradingReducer.cancelOrder(tradingState,
+                                pending.command().header().userId(),
+                                new com.surprising.aeron.protocol.CancelOrderCommand(originalOrderId));
+                        adoptCancelOrderRuntimeState(canceled, pending.command().header().userId(), originalOrderId);
                         requireOrderIdentityAvailable(pending.command().header().userId(), command);
-                        adoptState(tradingReducer.placeOrder(tradingState, pending.command().header().userId(), command,
-                                pending.command().header().commandId(), openInterestIndex.openInterestSteps(command.symbol()),
-                                activeOrderIndex));
+                        TradingCoreState reserved = tradingReducer.placeOrder(tradingState,
+                                pending.command().header().userId(), command, pending.command().header().commandId(),
+                                openInterestIndex.openInterestSteps(command.symbol()), activeOrderIndex);
+                        adoptPlaceOrderRuntimeState(reserved, pending.command().header().userId(), command.orderId());
                         adoptState(tradingReducer.applyMatches(tradingState, command.orderId(), command.baseAsset(),
                                 command.quoteAsset(), matchingResult.matches()));
                         commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
@@ -3034,7 +3041,7 @@ public final class CoreProbeState implements AutoCloseable {
                     exception.code(), triggeredAtEpochMillis));
             return;
         }
-        adoptState(reserved);
+        adoptPlaceOrderRuntimeState(reserved, trigger.userId(), childOrderId);
         markUserChanged(trigger.userId());
         markOrderChanged(childOrderId);
         queueTriggerMatching(trigger, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId);
@@ -3110,6 +3117,26 @@ public final class CoreProbeState implements AutoCloseable {
                                               java.util.function.Supplier<TradingRuntimeState> runtimeState) {
         if (productLine == ProductLine.LINEAR_PERPETUAL) {
             adoptRuntimeState(expected, runtimeState.get());
+        } else {
+            adoptState(expected);
+        }
+    }
+
+    private void adoptPlaceOrderRuntimeState(TradingCoreState expected, long userId, long orderId) {
+        if (productLine == ProductLine.LINEAR_PERPETUAL) {
+            RuntimePlaceOrderDeltaApplier.apply(tradingState, expected, userId, orderId, runtimePlaceOrderState,
+                    runtimePlaceOrderIdentities);
+            adoptRuntimeState(expected, runtimePlaceOrderState);
+        } else {
+            adoptState(expected);
+        }
+    }
+
+    private void adoptCancelOrderRuntimeState(TradingCoreState expected, long userId, long orderId) {
+        if (productLine == ProductLine.LINEAR_PERPETUAL) {
+            RuntimeCancelOrderDeltaApplier.apply(tradingState, expected, userId, orderId, runtimePlaceOrderState,
+                    runtimePlaceOrderIdentities);
+            adoptRuntimeState(expected, runtimePlaceOrderState);
         } else {
             adoptState(expected);
         }
