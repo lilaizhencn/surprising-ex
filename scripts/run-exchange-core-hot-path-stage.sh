@@ -42,38 +42,20 @@ if [[ -z "${JAVA_HOME:-}" || ! -x "$JAVA_HOME/bin/java" ]]; then
   exit 25
 fi
 
-requested_version=$("$JAVA_HOME/bin/java" -XshowSettings:properties -version 2>&1 \
-  | awk -F'= ' '/^[[:space:]]*java.version =/{print $2; exit}')
-if [[ "$requested_version" != 25* ]]; then
-  echo "JDK 25 is required; JAVA_HOME reports ${requested_version:-unknown}" >&2
+java_properties=$("$JAVA_HOME/bin/java" -XshowSettings:properties -version 2>&1)
+property() { printf '%s\n' "$java_properties" | awk -F'= ' -v key="$1" '$0 ~ "^[[:space:]]*" key " =" {print $2; exit}'; }
+feature_version=$(property java.specification.version)
+java_vendor=$(property java.vendor)
+vm_name=$(property java.vm.name)
+runtime_version=$(property java.runtime.version)
+if [[ "$feature_version" != "25" || "$java_vendor" != "Eclipse Adoptium" \
+  || ( "$vm_name" != *HotSpot* && "$vm_name" != "OpenJDK 64-Bit Server VM" ) \
+  || ! -x "$JAVA_HOME/bin/jfr" ]]; then
+  echo "Temurin 25 required: feature=${feature_version:-unknown} vendor=${java_vendor:-unknown} vm=${vm_name:-unknown} runtime=${runtime_version:-unknown}" >&2
   exit 25
 fi
 
 selected_java_home="$JAVA_HOME"
-vm_name=$("$selected_java_home/bin/java" -XshowSettings:properties -version 2>&1 \
-  | awk -F'= ' '/^[[:space:]]*java.vm.name =/{print $2; exit}')
-requested_vm_name="$vm_name"
-if [[ "$vm_name" != *HotSpot* ]]; then
-  for candidate in /Library/Java/JavaVirtualMachines/*/Contents/Home \
-                   /Users/"$USER"/Library/Java/JavaVirtualMachines/*/Contents/Home; do
-    [[ -x "$candidate/bin/java" ]] || continue
-    candidate_version=$("$candidate/bin/java" -XshowSettings:properties -version 2>&1 \
-      | awk -F'= ' '/^[[:space:]]*java.version =/{print $2; exit}')
-    candidate_vm=$("$candidate/bin/java" -XshowSettings:properties -version 2>&1 \
-      | awk -F'= ' '/^[[:space:]]*java.vm.name =/{print $2; exit}')
-    if [[ "$candidate_version" == 25* && "$candidate_vm" == *HotSpot* && -x "$candidate/bin/jfr" ]]; then
-      selected_java_home="$candidate"
-      vm_name="$candidate_vm"
-      echo "Selected JFR-capable Java 25 HotSpot at $selected_java_home; requested Java 25 VM was $requested_vm_name" >&2
-      break
-    fi
-  done
-fi
-if [[ "$vm_name" != *HotSpot* || ! -x "$selected_java_home/bin/jfr" ]]; then
-  echo "JDK 25 is required with HotSpot JFR support" >&2
-  exit 25
-fi
-
 java_bin="$selected_java_home/bin/java"
 jfr_bin="$selected_java_home/bin/jfr"
 java_build=$("$java_bin" -version 2>&1 | tr '\n' ' ' | sed 's/[[:space:]]*$//')
@@ -192,7 +174,8 @@ created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 jq -n \
   --arg stage "$stage" --arg createdUtc "$created_utc" --arg suite "$benchmark_suite" \
-  --arg javaHome "$selected_java_home" --arg javaBuild "$java_build" --arg javaFlags "$java_flags" \
+  --arg javaHome "$selected_java_home" --arg javaBuild "$java_build" --arg javaVendor "$java_vendor" \
+  --arg vmName "$vm_name" --arg runtimeVersion "$runtime_version" --arg javaFlags "$java_flags" \
   --arg hotMethods "$attempt_dir/jfr-hot-methods.txt" \
   --arg allocations "$attempt_dir/jfr-allocation-by-site.txt" \
   --arg gc "$attempt_dir/jfr-gc.txt" --arg safepoints "$attempt_dir/jfr-safepoints.txt" \
@@ -202,7 +185,8 @@ jq -n \
   '{schemaVersion:1,result:"PASS",stage:$stage,createdUtc:$createdUtc,benchmarkSuite:$suite,forks:$forks,
     workload:{seedBase:9901,perFork:{adapterOnlyOrders:500,acceptFreezeOrders:25,inMemoryOrders:25,
       concurrentIngressOrders:50,perpetualFinalizedOrders:50}},
-    java:{home:$javaHome,build:$javaBuild,flags:$javaFlags,jfrSettings:$jfrSettings},
+    java:{home:$javaHome,build:$javaBuild,vendor:$javaVendor,vmName:$vmName,runtimeVersion:$runtimeVersion,
+      flags:$javaFlags,jfrSettings:$jfrSettings},
     metrics:{offered:50,accepted:50,finalized:50,finalizedPerSecond:$finalizedPerSecond,
       pendingMax:$pendingMax,completionQueueMax:$queueMax,outboxMax:null},
     latency:{kind:"acceptance-to-finalization",coordinatedOmissionCorrected:true,

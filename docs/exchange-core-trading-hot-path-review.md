@@ -330,14 +330,17 @@ mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package
 
 | 阶段 | 结果 | parent commit | UTC | 固定负载 | 最终裁决吞吐中位数 | 修正后 p50 / p99 / p99.9 | 证据 |
 | --- | --- | --- | --- | --- | ---: | ---: | --- |
-| Stage 1 | **PASS（基准工具门禁）** | `9ec69899a8096d3e2c1b74e33ea393d26b1853c3` | `2026-08-20T04:42:46Z` | seeds `9901..9903`，每 fork：adapter 500、accept/freeze 25、完整内存 25、并发入口 50、永续最终裁决 50 | `218.359/s` | `5,292 / 18,857 / 20,856 us` | `.omo/evidence/task-1/task-1-baseline-result.json`；三个 `task-1-baseline-fork-*.jfr`；五个 `jfr-*.txt` |
+| Stage 1 | **PASS（基准工具门禁）** | `9ec69899a8096d3e2c1b74e33ea393d26b1853c3` | `2026-08-20T04:54:40Z` | seeds `9901..9903`，每 fork：adapter 500、accept/freeze 25、完整内存 25、并发入口 50、永续最终裁决 50 | `325.373/s` | `3,848 / 12,541 / 13,541 us` | `.omo/evidence/task-1/task-1-baseline-result.json`；三个 `task-1-baseline-fork-*.jfr`；五个 `jfr-*.txt` |
 
 Stage 1 的 PASS 仅表示可重复执行的度量/JFR 契约通过，不是生产容量认证。该短样本明显低于 100k/s，且
-`p99=18.857 ms` 未达到后续容量门禁的 `10 ms` 默认预算；后续阶段不得把本行解释为性能 SLO 已通过。
+`p99=12.541 ms` 未达到后续容量门禁的 `10 ms` 默认预算；后续阶段不得把本行解释为性能 SLO 已通过。
 
 运行环境为 macOS 26.7（Darwin 25.6.0）、Intel i9-9880H、16 logical CPU、16 GiB RAM；运行时未置于
-容器，数据卷剩余约 98 GiB。`/usr/libexec/java_home -v 25` 指向不产出所需 JFR 的 OpenJ9，因此 runner
-明确选择本机 JFR-capable Oracle GraalVM Java 25.0.1 HotSpot，并在 JSON 记录实际路径和 build。固定参数为
+容器，数据卷剩余约 98 GiB。`/usr/libexec/java_home -V` 没有 Temurin 25；本次从官方 Adoptium API 下载临时
+Temurin 25.0.4.1 HotSpot archive 后运行，`java.vendor=Eclipse Adoptium`，`java.vm.name=OpenJDK 64-Bit
+Server VM`，`java.runtime.version=25.0.4.1+1-LTS`，`java.home=/tmp/task-1-temurin-25/extracted/jdk-25.0.4.1+1/Contents/Home`。
+runner 现在在创建目录、构建或启动 benchmark child 前拒绝非 Temurin 25；JSON 记录实际路径、vendor、VM 和
+runtime version。固定参数为
 `-Xms256m -Xmx256m -XX:+AlwaysPreTouch --enable-native-access=ALL-UNNAMED`
 以及 `jdk.internal.misc` 的 `--add-opens/--add-exports`，JFR settings 为 `profile`。
 
@@ -353,28 +356,30 @@ outbox sequence gauge，以及 `recordValueWithExpectedInterval` 对 `100 ms` ob
 interval 生成 10 个修正样本。基准命令为：
 
 ```bash
-export JAVA_HOME=$(/usr/libexec/java_home -v 25)
+export JAVA_HOME=/tmp/task-1-temurin-25/extracted/jdk-25.0.4.1+1/Contents/Home
 export PATH="$JAVA_HOME/bin:$PATH"
 scripts/run-exchange-core-hot-path-stage.sh --stage task-1-baseline \
   --attempt-dir .omo/evidence/task-1 --benchmark-suite baseline --forks 3 --jfr-settings profile
 ```
 
-三个 fork 的最终裁决速率为 `220.118 / 178.798 / 218.359 per second`。并发入口观察到的
+三个 fork 的最终裁决速率为 `323.190 / 326.114 / 325.373 per second`。并发入口观察到的
 `pendingMatching` 最大值和 ingress queue 最大值均为 `50`；当前短本地基准没有暴露 replicated outbox
 占用，JSON 使用 `null`，不得解释为零。JFR 每 fork 观察到两次 Young GC 和一次 `Old Garbage Collection`，
-GC 后 heap 为 `18.8-19.0 MiB`，最长列出的 pause 为 `5.81 ms`；没有 `Full GC` 标签。该 JFR view 未提供
+GC 后 heap 为 `15.7-16.0 MiB`（第二次 Young GC 后为 `60.1-60.3 MiB`），最长列出的 pause 为 `7.08 ms`；没有 `Full GC` 标签。该 JFR view 未提供
 可用的 direct-memory 数值，safepoint duration 显示 `Indefinite`，两项保留为未测，不能据此通过长稳门禁。
 
-CPU top frames 为 `ProcessingSequenceBarrier.checkAlert`、`WaitSpinningHelper.tryWaitFor`、
-`ProcessingSequenceBarrier.getCursor` 和 `Util.getMinimumSequence`。allocation top frames 为
-`ObjectsPool$ArrayStack.<init>`、`Arrays.copyOf(byte[], int)`、`RollingBusinessStateHash.stable` 和
+CPU top frames 为 `BusySpinWaitStrategy.waitFor`、`Util.getMinimumSequence`、`WaitSpinningHelper.tryWaitFor` 和
+`ProcessingSequenceBarrier.getCursor`。allocation top frames 为 `ObjectsPool$ArrayStack.<init>`、
+`String.encodeUTF8`、`ConcurrentHashMap.initTable`、`Arrays.copyOf(byte[], int)` 和
 `Unsafe.allocateUninitializedArray`；`RuntimeStateMaterializer.materialize` 仍出现在 allocation view，符合
 本报告的 P0 诊断。Stage 1 没有暴露可签名 state hash，也没有执行逐项资金守恒查询，因此 JSON 明确记录
 `stateHash=not-exposed-by-local-baseline`、`fundsDelta=null`、`bookEmpty=not-queried`。
 
 与 4.3 的旧短基准不做数值增益宣称：旧值是 200 组下单+撤单的 raw closed-loop `51.3 groups/s`，本行是
 25 个永续成交 cycle、50 条最终裁决命令的修正后短样本，分子和负载不同。Stage 1 的 rollback boundary 是
-单独回退 `perf(core): establish JFR hot-path baseline`；它未修改 Product Core 资金、订单或撮合语义。
+单独回退 `perf(core): establish JFR hot-path baseline`；它未修改 Product Core 资金、订单或撮合语义。本行的
+原始 parent commit 保持为 `9ec69899`；上述 Temurin evidence 是其后 follow-up runtime gate 修复的重跑，
+不改变原提交的时间线。
 
 ### 10.2 Decision register
 
