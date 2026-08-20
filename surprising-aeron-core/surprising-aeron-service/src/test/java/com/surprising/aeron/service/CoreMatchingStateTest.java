@@ -233,6 +233,63 @@ class CoreMatchingStateTest {
     }
 
     @Test
+    void linearPerpetualMatchConservesFundsWithMakerTakerFees() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(101, CoreOrderSide.SELL, 100, 2, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, false, -50_000, 0));
+
+            long fundsBefore = total(state, "USDT");
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(202, CoreOrderSide.BUY, 100, 2, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
+                            CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false, 0, 100_000));
+
+            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().user(11).positions().get("BTC-USDT").signedQuantitySteps())
+                    .isEqualTo(-2);
+            assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps())
+                    .isEqualTo(2);
+            assertThat(state.tradingState().treasuryState().feeBalances()).containsEntry("USDT", 10L);
+            assertThat(total(state, "USDT")).isEqualTo(fundsBefore);
+        }
+    }
+
+    @Test
+    void linearPerpetualPostOnlyRejectionPreservesFundsAndReservations() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 2, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            long fundsBefore = total(state, "USDT");
+
+            CoreMessage crossingPostOnly = message(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 2,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTX, 100, true));
+            CoreResponse pending = state.apply(crossingPostOnly);
+            CoreResponse completed = drainMatching(state, pending, crossingPostOnly);
+
+            assertThat(completed.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.REJECTED);
+            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(total(state, "USDT")).isEqualTo(fundsBefore);
+        }
+    }
+
+    @Test
     void replaceLosesPriorityCanMatchAndRestoresToSameExchangeCoreHash() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);
@@ -358,6 +415,30 @@ class CoreMatchingStateTest {
                 matchingPriceTicks, postOnly, "client-" + orderId, 0, 0));
     }
 
+    private static byte[] placeWithFees(
+            long orderId,
+            CoreOrderSide side,
+            long priceTicks,
+            long quantitySteps,
+            boolean reduceOnly,
+            ReservationKind reservationKind,
+            String reservationAsset,
+            long reservedUnits,
+            CoreOrderType orderType,
+            CoreTimeInForce timeInForce,
+            long matchingPriceTicks,
+            boolean postOnly,
+            long makerFeeRatePpm,
+            long takerFeeRatePpm) {
+        String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
+                "BTC", "USDT", settleAsset, side, priceTicks, quantitySteps, reduceOnly,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                reservationKind, reservationAsset, reservedUnits, orderType, timeInForce,
+                matchingPriceTicks, postOnly, "client-" + orderId, makerFeeRatePpm, takerFeeRatePpm));
+    }
+
     private static byte[] place(
             long orderId,
             CoreOrderSide side,
@@ -444,5 +525,14 @@ class CoreMatchingStateTest {
 
     private static Stream<ProductLine> allProductLines() {
         return Stream.of(ProductLine.values());
+    }
+
+    private static long total(CoreProbeState state, String asset) {
+        long users = state.tradingState().users().values().stream()
+                .mapToLong(user -> user.totalUnits(asset)).sum();
+        long fee = state.tradingState().treasuryState().feeBalances().getOrDefault(asset, 0L);
+        long insurance = state.tradingState().treasuryState().insuranceBalances().getOrDefault(asset, 0L);
+        long deficit = state.tradingState().treasuryState().insuranceDeficits().getOrDefault(asset, 0L);
+        return Math.subtractExact(Math.addExact(Math.addExact(users, fee), insurance), deficit);
     }
 }
