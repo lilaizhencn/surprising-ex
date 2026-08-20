@@ -28,6 +28,20 @@ public final class RuntimePerpetualLiquidationProcessor {
         if (before == null || command == null || identities == null || !before.productLine().isFundingProduct()) {
             throw new IllegalArgumentException("invalid perpetual liquidation simulation");
         }
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        return applyExecution(before, command, canceledOrders, runtime, identities);
+    }
+
+    public static TradingRuntimeState applyExecution(TradingCoreState before,
+                                                     ExecuteLiquidationCommand command,
+                                                     Collection<CoreOrderState> canceledOrders,
+                                                     TradingRuntimeState runtime,
+                                                     RuntimeIdentityRegistry identities) {
+        if (before == null || command == null || runtime == null || identities == null
+                || !before.productLine().isFundingProduct()) {
+            throw new IllegalArgumentException("invalid perpetual liquidation apply");
+        }
+        runtime.assertOwner();
         CoreLiquidationState liquidation = before.riskState().liquidations().get(command.liquidationId());
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
@@ -37,7 +51,6 @@ public final class RuntimePerpetualLiquidationProcessor {
             throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not planned");
         }
         validatePrice(before, liquidation, command);
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         LiquidationRuntime runtimeLiquidation = runtime.liquidation(command.liquidationId());
         if (!executable(before, liquidation)) {
             runtime.replaceLiquidation(copy(runtimeLiquidation, 0, 0, 0,
@@ -93,7 +106,7 @@ public final class RuntimePerpetualLiquidationProcessor {
         runtime.replaceLiquidation(copy(runtimeLiquidation, uncovered, command.executionPriceTicks(),
                 command.liquidationFeeRatePpm(), nextStatus, cash.collectedFee()));
         runtime.advanceUserRevision(liquidation.userId());
-        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
+        runtime.setMetadata(before.productLine(), revisionAfterCancellation(before, canceledOrders));
         return runtime;
     }
 
@@ -106,6 +119,21 @@ public final class RuntimePerpetualLiquidationProcessor {
                 || !before.productLine().isFundingProduct()) {
             throw new IllegalArgumentException("invalid liquidation cancellation simulation");
         }
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        return applyCancellationAdvance(before, command, canceledOrders, nextCursorOrderId, runtime, identities);
+    }
+
+    public static TradingRuntimeState applyCancellationAdvance(TradingCoreState before,
+                                                               ExecuteLiquidationCommand command,
+                                                               Collection<CoreOrderState> canceledOrders,
+                                                               long nextCursorOrderId,
+                                                               TradingRuntimeState runtime,
+                                                               RuntimeIdentityRegistry identities) {
+        if (before == null || command == null || runtime == null || identities == null || nextCursorOrderId <= 0
+                || !before.productLine().isFundingProduct()) {
+            throw new IllegalArgumentException("invalid liquidation cancellation apply");
+        }
+        runtime.assertOwner();
         CoreLiquidationState liquidation = before.riskState().liquidations().get(command.liquidationId());
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
@@ -115,7 +143,6 @@ public final class RuntimePerpetualLiquidationProcessor {
             throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT",
                     "liquidation cancellation cursor does not match state");
         }
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         cancelOrders(runtime, canceledOrders == null ? List.of() : canceledOrders);
         LiquidationRuntime current = runtime.liquidation(command.liquidationId());
         runtime.replaceLiquidation(new LiquidationRuntime(current.liquidationId(), current.userId(),
@@ -123,7 +150,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 current.deficitUnits(), current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
-        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
+        runtime.setMetadata(before.productLine(), revisionAfterCancellation(before, canceledOrders));
         return runtime;
     }
 
@@ -133,13 +160,25 @@ public final class RuntimePerpetualLiquidationProcessor {
         if (before == null || command == null || identities == null || !before.productLine().isFundingProduct()) {
             throw new IllegalArgumentException("invalid liquidation resolution simulation");
         }
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        return applyResolution(before, command, runtime, identities);
+    }
+
+    public static TradingRuntimeState applyResolution(TradingCoreState before,
+                                                      ResolveLiquidationCommand command,
+                                                      TradingRuntimeState runtime,
+                                                      RuntimeIdentityRegistry identities) {
+        if (before == null || command == null || runtime == null || identities == null
+                || !before.productLine().isFundingProduct()) {
+            throw new IllegalArgumentException("invalid liquidation resolution apply");
+        }
+        runtime.assertOwner();
         CoreLiquidationState liquidation = before.riskState().liquidations().get(command.liquidationId());
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
         }
         CoreInstrumentState instrument = requireInstrument(before, liquidation.symbol(),
                 liquidation.instrumentVersion());
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         LiquidationRuntime current = runtime.liquidation(command.liquidationId());
         CoreLiquidationState.Status nextStatus;
         long nextDeficit = liquidation.deficitUnits();
@@ -187,6 +226,18 @@ public final class RuntimePerpetualLiquidationProcessor {
         if (before == null || command == null || identities == null || !before.productLine().isFundingProduct()) {
             throw new IllegalArgumentException("invalid ADL simulation");
         }
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        return applyAdl(before, command, runtime, identities);
+    }
+
+    public static TradingRuntimeState applyAdl(TradingCoreState before, ExecuteAdlCommand command,
+                                               TradingRuntimeState runtime,
+                                               RuntimeIdentityRegistry identities) {
+        if (before == null || command == null || runtime == null || identities == null
+                || !before.productLine().isFundingProduct()) {
+            throw new IllegalArgumentException("invalid ADL apply");
+        }
+        runtime.assertOwner();
         CoreLiquidationState liquidation = before.riskState().liquidations().get(command.liquidationId());
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
@@ -205,7 +256,6 @@ public final class RuntimePerpetualLiquidationProcessor {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
         }
 
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         long positionKey = identities.positionKey(command.targetUserId(),
                 positionKey(command.symbol(), command.positionSide()));
         PositionRuntime position = runtime.position(positionKey);
@@ -323,6 +373,11 @@ public final class RuntimePerpetualLiquidationProcessor {
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
                 && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
                 && risk.status() == CoreRiskStatus.LIQUIDATION;
+    }
+
+    private static long revisionAfterCancellation(TradingCoreState before,
+                                                  Collection<CoreOrderState> canceledOrders) {
+        return Math.addExact(before.revision(), canceledOrders == null || canceledOrders.isEmpty() ? 1 : 2);
     }
 
     private static void validatePrice(TradingCoreState state, CoreLiquidationState liquidation,

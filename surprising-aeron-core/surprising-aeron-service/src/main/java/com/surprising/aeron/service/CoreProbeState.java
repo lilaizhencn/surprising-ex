@@ -2042,16 +2042,17 @@ public final class CoreProbeState implements AutoCloseable {
                     if (matchingResult.accepted() && liquidation != null) {
                         if (!tradingReducer.isLiquidationExecutable(tradingState, command)) {
                             TradingCoreState expected = tradingReducer.executeLiquidation(tradingState, command);
-                            adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.simulateExecution(
-                                    tradingState, command, runtimePlaceOrderIdentities));
+                            adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.applyExecution(
+                                    tradingState, command, List.of(), runtimePlaceOrderState,
+                                    runtimePlaceOrderIdentities));
                             commandLiquidationProgress = new CoreLiquidationProgressView(true, 0,
                                     chunk.orders().size());
                         } else if (chunk.more()) {
                             TradingCoreState expected = tradingReducer.advanceLiquidationCancellation(tradingState,
                                     command, chunk.orders(), chunk.nextCursorOrderId());
                             adoptLiquidationRuntimeState(expected, () ->
-                                    RuntimePerpetualLiquidationProcessor.simulateCancellationAdvance(tradingState,
-                                            command, chunk.orders(), chunk.nextCursorOrderId(),
+                                    RuntimePerpetualLiquidationProcessor.applyCancellationAdvance(tradingState,
+                                            command, chunk.orders(), chunk.nextCursorOrderId(), runtimePlaceOrderState,
                                             runtimePlaceOrderIdentities));
                             commandLiquidationProgress = new CoreLiquidationProgressView(false,
                                     chunk.nextCursorOrderId(), chunk.orders().size());
@@ -2061,8 +2062,8 @@ public final class CoreProbeState implements AutoCloseable {
                             TradingCoreState expected = tradingReducer.executeLiquidationAfterCancellation(canceled,
                                     command);
                             adoptLiquidationRuntimeState(expected, () ->
-                                    RuntimePerpetualLiquidationProcessor.simulateExecution(tradingState, command,
-                                            chunk.orders(), runtimePlaceOrderIdentities));
+                                    RuntimePerpetualLiquidationProcessor.applyExecution(tradingState, command,
+                                            chunk.orders(), runtimePlaceOrderState, runtimePlaceOrderIdentities));
                             commandLiquidationProgress = new CoreLiquidationProgressView(true, 0,
                                     chunk.orders().size());
                         }
@@ -2175,8 +2176,8 @@ public final class CoreProbeState implements AutoCloseable {
             changedUsers.add(liquidation.userId());
             if (!tradingReducer.isLiquidationExecutable(tradingState, single)) {
                 TradingCoreState expected = tradingReducer.executeLiquidation(tradingState, single);
-                adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.simulateExecution(
-                        tradingState, single, runtimePlaceOrderIdentities));
+                adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.applyExecution(
+                        tradingState, single, List.of(), runtimePlaceOrderState, runtimePlaceOrderIdentities));
                 applied++;
                 continue;
             }
@@ -2186,15 +2187,16 @@ public final class CoreProbeState implements AutoCloseable {
                 TradingCoreState expected = tradingReducer.advanceLiquidationCancellation(tradingState, single,
                         chunk.orders(), chunk.nextCursorOrderId());
                 adoptLiquidationRuntimeState(expected, () ->
-                        RuntimePerpetualLiquidationProcessor.simulateCancellationAdvance(tradingState, single,
-                                chunk.orders(), chunk.nextCursorOrderId(), runtimePlaceOrderIdentities));
+                        RuntimePerpetualLiquidationProcessor.applyCancellationAdvance(tradingState, single,
+                                chunk.orders(), chunk.nextCursorOrderId(), runtimePlaceOrderState,
+                                runtimePlaceOrderIdentities));
                 pending++;
                 continue;
             }
             TradingCoreState canceled = tradingReducer.cancelLifecycleOrders(tradingState, chunk.orders());
             TradingCoreState expected = tradingReducer.executeLiquidationAfterCancellation(canceled, single);
-            adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.simulateExecution(
-                    tradingState, single, chunk.orders(), runtimePlaceOrderIdentities));
+            adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.applyExecution(
+                    tradingState, single, chunk.orders(), runtimePlaceOrderState, runtimePlaceOrderIdentities));
             applied++;
         }
         commandChangedOrderIds = changedOrders.stream().distinct().toList();
@@ -2252,14 +2254,14 @@ public final class CoreProbeState implements AutoCloseable {
                 TradingCoreState expected = tradingReducer.advanceLiquidationCancellation(tradingState, single,
                         prefix, nextCursor);
                 adoptLiquidationRuntimeState(expected,
-                        () -> RuntimePerpetualLiquidationProcessor.simulateCancellationAdvance(tradingState, single,
-                                prefix, nextCursor, runtimePlaceOrderIdentities));
+                        () -> RuntimePerpetualLiquidationProcessor.applyCancellationAdvance(tradingState, single,
+                                prefix, nextCursor, runtimePlaceOrderState, runtimePlaceOrderIdentities));
             } else {
                 TradingCoreState canceled = tradingReducer.cancelLifecycleOrders(tradingState, prefix);
                 TradingCoreState expected = tradingReducer.executeLiquidationAfterCancellation(canceled, single);
                 adoptLiquidationRuntimeState(expected,
-                        () -> RuntimePerpetualLiquidationProcessor.simulateExecution(tradingState, single, prefix,
-                                runtimePlaceOrderIdentities));
+                        () -> RuntimePerpetualLiquidationProcessor.applyExecution(tradingState, single, prefix,
+                                runtimePlaceOrderState, runtimePlaceOrderIdentities));
             }
             var next = tradingState.riskState().liquidations().get(action.liquidationId());
             long nextCursor = next != null && next.status() == CoreLiquidationState.Status.ORDERED
@@ -2307,8 +2309,8 @@ public final class CoreProbeState implements AutoCloseable {
             TradingCoreState expected = tradingReducer.advanceLiquidationCancellation(tradingState, command, prefix,
                     nextCursor);
             adoptLiquidationRuntimeState(expected,
-                    () -> RuntimePerpetualLiquidationProcessor.simulateCancellationAdvance(tradingState, command,
-                            prefix, nextCursor, runtimePlaceOrderIdentities));
+                    () -> RuntimePerpetualLiquidationProcessor.applyCancellationAdvance(tradingState, command,
+                            prefix, nextCursor, runtimePlaceOrderState, runtimePlaceOrderIdentities));
             return pending.withCommand(new CoreMessage(pending.command().header(),
                     TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
                             command.liquidationId(), command.triggerPriceSequence(), command.executionPriceTicks(),
@@ -2317,8 +2319,8 @@ public final class CoreProbeState implements AutoCloseable {
         TradingCoreState canceled = tradingReducer.cancelLifecycleOrders(tradingState, prefix);
         TradingCoreState expected = tradingReducer.executeLiquidationAfterCancellation(canceled, command);
         adoptLiquidationRuntimeState(expected,
-                () -> RuntimePerpetualLiquidationProcessor.simulateExecution(tradingState, command, prefix,
-                        runtimePlaceOrderIdentities));
+                () -> RuntimePerpetualLiquidationProcessor.applyExecution(tradingState, command, prefix,
+                        runtimePlaceOrderState, runtimePlaceOrderIdentities));
         return pending;
     }
 
@@ -2638,14 +2640,14 @@ public final class CoreProbeState implements AutoCloseable {
                 var command = TradingCommandCodec.decodeExecuteAdl(message.payload());
                 commandChangedUserIds = List.of(command.targetUserId());
                 TradingCoreState expected = tradingReducer.executeAdl(tradingState, command);
-                adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.simulateAdl(
-                        tradingState, command, runtimePlaceOrderIdentities));
+                adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.applyAdl(
+                        tradingState, command, runtimePlaceOrderState, runtimePlaceOrderIdentities));
             }
             case RESOLVE_LIQUIDATION -> {
                 var command = TradingCommandCodec.decodeResolveLiquidation(message.payload());
                 TradingCoreState expected = tradingReducer.resolveLiquidation(tradingState, command);
-                adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.simulateResolution(
-                        tradingState, command, runtimePlaceOrderIdentities));
+                adoptLiquidationRuntimeState(expected, () -> RuntimePerpetualLiquidationProcessor.applyResolution(
+                        tradingState, command, runtimePlaceOrderState, runtimePlaceOrderIdentities));
             }
             case CONTINUE_RISK_SCAN -> {
                 var command = TradingCommandCodec.decodeContinueRiskScan(message.payload());
