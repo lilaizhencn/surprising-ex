@@ -38,19 +38,28 @@ public final class CorePerpetualEndToEndBenchmark {
     public static void main(String[] args) {
         int cycles = positive(args, 0, 1_000);
         int warmupCycles = positive(args, 1, 100);
+        BaselineResult result = measure(cycles, warmupCycles);
+        System.out.printf("perpetualEndToEndBenchmark=PASS cycles=%d orders=%d elapsedSeconds=%.3f "
+                        + "matchedCyclesPerSec=%.3f ordersPerSec=%.3f p50Micros=%d p95Micros=%d "
+                        + "p99Micros=%d maxMicros=%d pendingMatching=%d%n",
+                result.cycles(), Math.multiplyExact(result.cycles(), 2), result.elapsedNanos() / 1_000_000_000.0,
+                result.cycles() / (result.elapsedNanos() / 1_000_000_000.0),
+                Math.multiplyExact(result.cycles(), 2) / (result.elapsedNanos() / 1_000_000_000.0),
+                percentile(result.latenciesNanos(), .50), percentile(result.latenciesNanos(), .95),
+                percentile(result.latenciesNanos(), .99), percentile(result.latenciesNanos(), 1.0),
+                result.pendingMatching());
+    }
+
+    public static BaselineResult measure(int cycles, int warmupCycles) {
+        if (cycles <= 0 || warmupCycles <= 0) {
+            throw new IllegalArgumentException("benchmark counts must be positive");
+        }
         try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
             Sequences sequences = new Sequences();
             setup(state, sequences);
             run(state, sequences, warmupCycles, false);
             Result result = run(state, sequences, cycles, true);
-            System.out.printf("perpetualEndToEndBenchmark=PASS cycles=%d orders=%d elapsedSeconds=%.3f "
-                            + "matchedCyclesPerSec=%.3f ordersPerSec=%.3f p50Micros=%d p95Micros=%d "
-                            + "p99Micros=%d maxMicros=%d pendingMatching=%d%n",
-                    result.cycles(), Math.multiplyExact(result.cycles(), 2), result.elapsedNanos() / 1_000_000_000.0,
-                    result.cycles() / (result.elapsedNanos() / 1_000_000_000.0),
-                    Math.multiplyExact(result.cycles(), 2) / (result.elapsedNanos() / 1_000_000_000.0),
-                    percentile(result.latencies(), .50), percentile(result.latencies(), .95),
-                    percentile(result.latencies(), .99), percentile(result.latencies(), 1.0),
+            return new BaselineResult(result.cycles(), result.elapsedNanos(), result.latencies(),
                     state.pendingMatchingCount());
         }
     }
@@ -160,5 +169,16 @@ public final class CorePerpetualEndToEndBenchmark {
     }
 
     private record Result(int cycles, long elapsedNanos, long[] latencies) {
+    }
+
+    public record BaselineResult(int cycles, long elapsedNanos, long[] latenciesNanos, int pendingMatching) {
+        public BaselineResult {
+            latenciesNanos = latenciesNanos.clone();
+        }
+
+        @Override
+        public long[] latenciesNanos() {
+            return latenciesNanos.clone();
+        }
     }
 }

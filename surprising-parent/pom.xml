@@ -38,6 +38,7 @@
         <exchange-core.build-jdk>25</exchange-core.build-jdk>
         <exchange-core.sha256>09e324685e9ae77244939c9f8c4044dc00dda4f03b98b60ff5d48f7e051e2d21</exchange-core.sha256>
         <aeron.version>1.52.2</aeron.version>
+        <hdrhistogram.version>2.2.2</hdrhistogram.version>
         <chronicle.bom.version>2026.18</chronicle.bom.version>
         <dependency-check.version>12.1.0</dependency-check.version>
     </properties>
@@ -70,6 +71,11 @@
                 <groupId>io.aeron</groupId>
                 <artifactId>aeron-all</artifactId>
                 <version>${aeron.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.hdrhistogram</groupId>
+                <artifactId>HdrHistogram</artifactId>
+                <version>${hdrhistogram.version}</version>
             </dependency>
             <dependency>
                 <groupId>net.openhft</groupId>

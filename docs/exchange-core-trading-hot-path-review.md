@@ -325,3 +325,76 @@ mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package
 本轮未执行三节点 Aeron 容量、Kafka/PostgreSQL 历史链路、leader failover、快照恢复、磁盘故障、六产品线
 资金守恒和长时间 JVM soak。原因是当前全状态投影/物化已经构成明确 P0 阻塞；在消除该阻塞前扩大压测不能
 证明目标架构成立。
+
+### 10.1 分阶段证据
+
+| 阶段 | 结果 | parent commit | UTC | 固定负载 | 最终裁决吞吐中位数 | 修正后 p50 / p99 / p99.9 | 证据 |
+| --- | --- | --- | --- | --- | ---: | ---: | --- |
+| Stage 1 | **PASS（基准工具门禁）** | `9ec69899a8096d3e2c1b74e33ea393d26b1853c3` | `2026-08-20T04:42:46Z` | seeds `9901..9903`，每 fork：adapter 500、accept/freeze 25、完整内存 25、并发入口 50、永续最终裁决 50 | `218.359/s` | `5,292 / 18,857 / 20,856 us` | `.omo/evidence/task-1/task-1-baseline-result.json`；三个 `task-1-baseline-fork-*.jfr`；五个 `jfr-*.txt` |
+
+Stage 1 的 PASS 仅表示可重复执行的度量/JFR 契约通过，不是生产容量认证。该短样本明显低于 100k/s，且
+`p99=18.857 ms` 未达到后续容量门禁的 `10 ms` 默认预算；后续阶段不得把本行解释为性能 SLO 已通过。
+
+运行环境为 macOS 26.7（Darwin 25.6.0）、Intel i9-9880H、16 logical CPU、16 GiB RAM；运行时未置于
+容器，数据卷剩余约 98 GiB。`/usr/libexec/java_home -v 25` 指向不产出所需 JFR 的 OpenJ9，因此 runner
+明确选择本机 JFR-capable Oracle GraalVM Java 25.0.1 HotSpot，并在 JSON 记录实际路径和 build。固定参数为
+`-Xms256m -Xmx256m -XX:+AlwaysPreTouch --enable-native-access=ALL-UNNAMED`
+以及 `jdk.internal.misc` 的 `--add-opens/--add-exports`，JFR settings 为 `profile`。
+
+精确功能测试为：
+
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
+  -Dtest=ClusterCapacityMetricsTest -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+RED 在缺少 `CapacityMetrics` 时以 AssertJ assertion 失败；GREEN 验证 offered/accepted/finalized 分离、
+outbox sequence gauge，以及 `recordValueWithExpectedInterval` 对 `100 ms` observation、`10 ms` expected
+interval 生成 10 个修正样本。基准命令为：
+
+```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
+export PATH="$JAVA_HOME/bin:$PATH"
+scripts/run-exchange-core-hot-path-stage.sh --stage task-1-baseline \
+  --attempt-dir .omo/evidence/task-1 --benchmark-suite baseline --forks 3 --jfr-settings profile
+```
+
+三个 fork 的最终裁决速率为 `220.118 / 178.798 / 218.359 per second`。并发入口观察到的
+`pendingMatching` 最大值和 ingress queue 最大值均为 `50`；当前短本地基准没有暴露 replicated outbox
+占用，JSON 使用 `null`，不得解释为零。JFR 每 fork 观察到两次 Young GC 和一次 `Old Garbage Collection`，
+GC 后 heap 为 `18.8-19.0 MiB`，最长列出的 pause 为 `5.81 ms`；没有 `Full GC` 标签。该 JFR view 未提供
+可用的 direct-memory 数值，safepoint duration 显示 `Indefinite`，两项保留为未测，不能据此通过长稳门禁。
+
+CPU top frames 为 `ProcessingSequenceBarrier.checkAlert`、`WaitSpinningHelper.tryWaitFor`、
+`ProcessingSequenceBarrier.getCursor` 和 `Util.getMinimumSequence`。allocation top frames 为
+`ObjectsPool$ArrayStack.<init>`、`Arrays.copyOf(byte[], int)`、`RollingBusinessStateHash.stable` 和
+`Unsafe.allocateUninitializedArray`；`RuntimeStateMaterializer.materialize` 仍出现在 allocation view，符合
+本报告的 P0 诊断。Stage 1 没有暴露可签名 state hash，也没有执行逐项资金守恒查询，因此 JSON 明确记录
+`stateHash=not-exposed-by-local-baseline`、`fundsDelta=null`、`bookEmpty=not-queried`。
+
+与 4.3 的旧短基准不做数值增益宣称：旧值是 200 组下单+撤单的 raw closed-loop `51.3 groups/s`，本行是
+25 个永续成交 cycle、50 条最终裁决命令的修正后短样本，分子和负载不同。Stage 1 的 rollback boundary 是
+单独回退 `perf(core): establish JFR hot-path baseline`；它未修改 Product Core 资金、订单或撮合语义。
+
+### 10.2 Decision register
+
+| 决策 | Stage 1 结论 | 证据 / 后续归属 |
+| --- | --- | --- |
+| HdrHistogram vs in-repo histogram | 采用 HdrHistogram `2.2.2` | `ClusterCapacityMetricsTest` 直接验证 coordinated-omission 修正计数和 percentiles。 |
+| simple validate-before-commit vs multi-entity change set | simple 使用 validate-before-commit；多实体使用 touched-entity compact change set | Stage 1 不改交易状态；Task 2 用相同 runner 验证。 |
+| primitive map vs dense ring | 默认 primitive map | matching sequence 允许 gap，未取得可证明的密度约束；Task 5 负责实测。 |
+| pooled owned command vs compact owned copy | 默认一次 compact owned copy | Aeron callback 生命周期外必须拥有数据；Task 6 负责 allocation 对照。 |
+| segmented snapshot writer API | Aeron-publication chunk writer | Stage 1 只冻结 API 方向；Task 10 验证 pause、checksum 和恢复。 |
+| G1 vs ZGC | 两者保留 | 本轮仅记录 HotSpot 默认 collector；Task 9 在相同负载/JDK/heap 下执行矩阵，不在 Stage 1 提前选择。 |
+
+### 10.3 not yet run
+
+- 三节点 Aeron committed-command 开放环负载、leader kill、follower lag 和 Archive replay。
+- 60 分钟 100k/s、10 秒 200k/s burst、24 小时 soak，以及四个连续 15 分钟增长窗口。
+- 100 万用户、400 万活动订单、热门 symbol/user、0/1/10/100 maker fill-depth。
+- 六产品线资金、持仓、手续费、资金费、强平费、保险基金、ADL、交割、行权和到期逐项守恒。
+- Kafka/Projector outage、outbox 上限、Archive 磁盘满、snapshot corruption 和 fail-closed restore。
+- direct memory、有效 safepoint duration、replicated outbox maxima、签名 state/funds hash 和 G1/ZGC 对照。
+
+剩余风险：Stage 1 负载很短且状态很小，fork 间最终裁决吞吐离散约 19%；JFR 本身和 JVM 启动占比较高；
+accept/freeze 与并发入口基准刻意不完成 matching，只作为分阶段 control，不可纳入最终裁决分子。

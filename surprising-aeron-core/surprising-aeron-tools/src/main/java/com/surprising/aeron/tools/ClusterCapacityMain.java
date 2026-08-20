@@ -17,6 +17,11 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.service.CoreAcceptFreezeBenchmark;
+import com.surprising.aeron.service.CoreAcceptFreezeConcurrentBenchmark;
+import com.surprising.aeron.service.CoreInMemoryBenchmark;
+import com.surprising.aeron.service.CorePerpetualEndToEndBenchmark;
+import com.surprising.aeron.service.ExchangeCoreConcurrentBenchmark;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
+import org.HdrHistogram.Histogram;
 
 public final class ClusterCapacityMain implements AutoCloseable {
 
@@ -63,6 +69,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private final AtomicLong failures = new AtomicLong();
     private final AtomicReference<RuntimeException> firstFailure = new AtomicReference<>();
     private final Object[] symbolLocks;
+    private final CapacityMetrics capacityMetrics;
 
     private ClusterCapacityMain(
             ProductLine productLine,
@@ -92,11 +99,17 @@ public final class ClusterCapacityMain implements AutoCloseable {
         this.workload = workload;
         this.symbolLocks = java.util.stream.IntStream.range(0, symbols.size())
                 .mapToObj(ignored -> new Object()).toArray(Object[]::new);
+        this.capacityMetrics = new CapacityMetrics(offeredCommandsPerSecond == 0
+                ? 0 : Math.max(1, 1_000_000_000L / offeredCommandsPerSecond));
         this.clients = new AeronClientPool("capacity", productLine, hosts, egress, Duration.ofSeconds(10), connections);
         this.nextOrderId = new AtomicLong(40_000_000_000L + seed * 1_000_000L);
     }
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && "--local-baseline".equals(args[0])) {
+            runLocalBaseline(args);
+            return;
+        }
         ProductLine productLine = ProductLine.requireExternalCode(
                 System.getProperty("surprising.aeron.product-line", "LINEAR_PERPETUAL"));
         List<String> hosts = Arrays.stream(System.getProperty(
@@ -147,6 +160,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         matches.set(0);
         failures.set(0);
         firstFailure.set(null);
+        capacityMetrics.reset();
         nextPermitNanos.set(System.nanoTime());
         long started = System.nanoTime();
         execute(durationSeconds, true);
@@ -160,14 +174,16 @@ public final class ClusterCapacityMain implements AutoCloseable {
         long commandCount = commands.get();
         long matchCount = matches.get();
         double elapsedSeconds = elapsedNanos / 1_000_000_000.0;
+        MetricsSnapshot metrics = capacityMetrics.snapshot(elapsedNanos);
         System.out.printf("capacity=PASS scope=LOCAL_CAPACITY productLine=%s workload=%s symbols=%d users=%d workers=%d connections=%d "
-                        + "offeredCommandsPerSec=%d commands=%d matches=%d failures=%d elapsedSeconds=%.3f "
-                        + "coreCommittedOpsPerSec=%.3f coreMatchEventsPerSec=%.3f p50Micros=%d p95Micros=%d "
-                        + "p99Micros=%d p999Micros=%d maxMicros=%d fundsDiff=0 bookLevels=0%n",
-                productLine, workload, symbols.size(), userCount, workers, connections, offeredCommandsPerSecond, commandCount, matchCount,
-                failures.get(), elapsedSeconds, commandCount / elapsedSeconds, matchCount / elapsedSeconds,
-                percentileMicros(sorted, 0.50), percentileMicros(sorted, 0.95), percentileMicros(sorted, 0.99),
-                percentileMicros(sorted, 0.999), percentileMicros(sorted, 1.0));
+                        + "targetOfferedPerSec=%d offered=%d accepted=%d finalized=%d matches=%d failures=%d elapsedSeconds=%.3f "
+                        + "finalizedPerSec=%.3f coreMatchEventsPerSec=%.3f acceptanceToFinalizationP50Micros=%d "
+                        + "acceptanceToFinalizationP99Micros=%d acceptanceToFinalizationP999Micros=%d "
+                        + "pendingMax=-1 completionQueueMax=-1 outboxMaxSequence=%d fundsDiff=0 bookLevels=0%n",
+                productLine, workload, symbols.size(), userCount, workers, connections, offeredCommandsPerSecond,
+                metrics.offered(), metrics.accepted(), metrics.finalized(), matchCount, failures.get(), elapsedSeconds,
+                metrics.finalizedPerSecond(), matchCount / elapsedSeconds, metrics.p50Micros(), metrics.p99Micros(),
+                metrics.p999Micros(), metrics.outboxMaxSequence());
     }
 
     private void setup() {
@@ -270,6 +286,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 CoreOrderSide takerSide = CoreOrderSide.BUY;
                 long started = System.nanoTime();
                 throttle();
+                if (measured) capacityMetrics.recordOffered();
                 CompletableFuture<CoreResponse> maker = clients.commandAsync(
                         CoreMessageType.PLACE_ORDER, stableId("async-maker:" + makerOrder), firstUser(pair),
                         TradingCommandCodec.encodePlaceOrder(order(symbol, makerOrder, makerSide, CoreTimeInForce.GTC)));
@@ -278,6 +295,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                     if (response.commandStatus() != ResponseStatus.APPLIED) {
                         throw new IllegalStateException("async maker rejected status=" + response.commandStatus());
                     }
+                    record(response, System.nanoTime() - started, measured);
+                    if (measured) capacityMetrics.recordOffered();
                     return clients.commandAsync(CoreMessageType.PLACE_ORDER,
                             stableId("async-taker:" + takerOrder), secondUser(pair),
                             TradingCommandCodec.encodePlaceOrder(order(symbol, takerOrder, takerSide, CoreTimeInForce.IOC)));
@@ -293,7 +312,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 }
                 pending.removeFirst();
                 CoreResponse response = pair.result().getNow(null);
-                record(response.commandStatus(), System.nanoTime() - pair.startedNanos(), measured);
+                record(response, System.nanoTime() - pair.startedNanos(), measured);
                 if (measured) {
                     commands.incrementAndGet();
                     matches.incrementAndGet();
@@ -330,9 +349,10 @@ public final class ClusterCapacityMain implements AutoCloseable {
         submitOrder(userId, order(symbol, orderId, CoreOrderSide.SELL, CoreTimeInForce.GTC, 110), measured);
         throttle();
         long started = System.nanoTime();
+        if (measured) capacityMetrics.recordOffered();
         var response = clients.command(CoreMessageType.CANCEL_ORDER, stableId("cancel:" + orderId), userId,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
-        record(response.commandStatus(), System.nanoTime() - started, measured);
+        record(response, System.nanoTime() - started, measured);
     }
 
     private void placeOnlyCycle(int worker, long cycle, boolean measured) {
@@ -348,30 +368,34 @@ public final class ClusterCapacityMain implements AutoCloseable {
         synchronized (symbolLocks[symbols.indexOf(symbol)]) {
             throttle();
             long started = System.nanoTime();
+            if (measured) capacityMetrics.recordOffered();
             long sequence = nextPriceSequence.incrementAndGet();
             var response = clients.command(CoreMessageType.APPLY_MARK_PRICE,
                     stableId("mark-price:" + worker + ':' + cycle), firstUser(Math.floorMod(worker, pairCount)),
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                             symbol, 1, PRICE_TICKS + (cycle & 1L), sequence, 1_700_000_000_000L)));
-            record(response.commandStatus(), System.nanoTime() - started, measured);
+            record(response, System.nanoTime() - started, measured);
         }
     }
 
     private void submitOrder(long userId, PlaceOrderCommand command, boolean measured) {
         throttle();
         long started = System.nanoTime();
+        if (measured) capacityMetrics.recordOffered();
         var response = clients.command(CoreMessageType.PLACE_ORDER, stableId("order:" + command.orderId()), userId,
                 TradingCommandCodec.encodePlaceOrder(command));
-        record(response.commandStatus(), System.nanoTime() - started, measured);
+        record(response, System.nanoTime() - started, measured);
     }
 
-    private void record(ResponseStatus status, long latencyNanos, boolean measured) {
-        if (status != ResponseStatus.APPLIED) {
-            throw new IllegalStateException("capacity command rejected status=" + status);
+    private void record(CoreResponse response, long latencyNanos, boolean measured) {
+        if (response.commandStatus() != ResponseStatus.APPLIED) {
+            throw new IllegalStateException("capacity command rejected status=" + response.commandStatus());
         }
         if (measured) {
             commands.incrementAndGet();
             latenciesNanos.add(latencyNanos);
+            capacityMetrics.recordAccepted();
+            capacityMetrics.recordFinalized(latencyNanos, response.requiredExportSequence());
         }
     }
 
@@ -482,6 +506,91 @@ public final class ClusterCapacityMain implements AutoCloseable {
         }
         int index = (int) Math.ceil(percentile * sorted.size()) - 1;
         return TimeUnit.NANOSECONDS.toMicros(sorted.get(Math.max(0, Math.min(index, sorted.size() - 1))));
+    }
+
+    private static void runLocalBaseline(String[] args) {
+        long seed = args.length > 1 ? Long.parseLong(args[1]) : 9901L;
+        if (seed <= 0) throw new IllegalArgumentException("baseline seed must be positive");
+        ExchangeCoreConcurrentBenchmark.main(new String[]{"500", "100", "64", "2"});
+        CoreAcceptFreezeBenchmark.main(new String[]{"25", "5"});
+        CoreInMemoryBenchmark.main(new String[]{"25", "5"});
+        CoreAcceptFreezeConcurrentBenchmark.main(new String[]{"50", "10", "2"});
+        CorePerpetualEndToEndBenchmark.BaselineResult perpetual =
+                CorePerpetualEndToEndBenchmark.measure(25, 5);
+        CapacityMetrics finalizationMetrics = new CapacityMetrics(TimeUnit.MILLISECONDS.toNanos(1));
+        for (long latency : perpetual.latenciesNanos()) {
+            for (int command = 0; command < 2; command++) {
+                finalizationMetrics.recordOffered();
+                finalizationMetrics.recordAccepted();
+                finalizationMetrics.recordFinalized(latency, 0);
+            }
+        }
+        MetricsSnapshot finalization = finalizationMetrics.snapshot(perpetual.elapsedNanos());
+        System.out.printf("perpetualEndToEndBenchmark=PASS cycles=%d orders=%d elapsedSeconds=%.3f "
+                        + "finalizedPerSec=%.3f corrected=true expectedIntervalMicros=1000 "
+                        + "p50Micros=%d p99Micros=%d p999Micros=%d pendingMatching=%d%n",
+                perpetual.cycles(), finalization.finalized(), perpetual.elapsedNanos() / 1_000_000_000.0,
+                finalization.finalizedPerSecond(), finalization.p50Micros(), finalization.p99Micros(),
+                finalization.p999Micros(), perpetual.pendingMatching());
+        System.out.printf("clusterCapacityBaseline=PASS seed=%d suite=baseline%n", seed);
+    }
+
+    static final class CapacityMetrics {
+        private static final long HIGHEST_TRACKABLE_NANOS = TimeUnit.MINUTES.toNanos(1);
+
+        private final long expectedIntervalNanos;
+        private final Histogram finalizationLatency = new Histogram(HIGHEST_TRACKABLE_NANOS, 3);
+        private long offered;
+        private long accepted;
+        private long finalized;
+        private long outboxMaxSequence;
+
+        CapacityMetrics(long expectedIntervalNanos) {
+            if (expectedIntervalNanos < 0) throw new IllegalArgumentException("expected interval must be non-negative");
+            this.expectedIntervalNanos = expectedIntervalNanos;
+        }
+
+        synchronized void recordOffered() {
+            offered++;
+        }
+
+        synchronized void recordAccepted() {
+            accepted++;
+        }
+
+        synchronized void recordFinalized(long acceptanceToFinalizationNanos, long requiredExportSequence) {
+            if (acceptanceToFinalizationNanos <= 0) {
+                throw new IllegalArgumentException("acceptance-to-finalization latency must be positive");
+            }
+            finalizationLatency.recordValueWithExpectedInterval(
+                    Math.min(acceptanceToFinalizationNanos, HIGHEST_TRACKABLE_NANOS), expectedIntervalNanos);
+            finalized++;
+            outboxMaxSequence = Math.max(outboxMaxSequence, requiredExportSequence);
+        }
+
+        synchronized MetricsSnapshot snapshot(long elapsedNanos) {
+            if (elapsedNanos <= 0) throw new IllegalArgumentException("elapsed time must be positive");
+            return new MetricsSnapshot(offered, accepted, finalized,
+                    finalized * 1_000_000_000.0 / elapsedNanos,
+                    micros(50), micros(99), micros(99.9), finalizationLatency.getTotalCount(), outboxMaxSequence);
+        }
+
+        synchronized void reset() {
+            offered = 0;
+            accepted = 0;
+            finalized = 0;
+            outboxMaxSequence = 0;
+            finalizationLatency.reset();
+        }
+
+        private long micros(double percentile) {
+            return TimeUnit.NANOSECONDS.toMicros(finalizationLatency.getValueAtPercentile(percentile));
+        }
+    }
+
+    record MetricsSnapshot(long offered, long accepted, long finalized, double finalizedPerSecond,
+                           long p50Micros, long p99Micros, long p999Micros, long correctedSampleCount,
+                           long outboxMaxSequence) {
     }
 
     private static UUID stableId(String value) {
