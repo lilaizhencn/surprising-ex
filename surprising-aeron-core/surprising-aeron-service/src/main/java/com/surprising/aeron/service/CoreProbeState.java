@@ -61,6 +61,7 @@ import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.RuntimeStateParityChecker;
 import com.surprising.aeron.service.state.RuntimeStateDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualMatchProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
@@ -2596,11 +2597,22 @@ public final class CoreProbeState implements AutoCloseable {
             case APPLY_FUNDING -> {
                 var command = TradingCommandCodec.decodeApplyFunding(message.payload());
                 Iterable<Long> indexedUserIds = positionUserIndex.users(command.symbol());
-                var result = tradingReducer.applyFundingWithFacts(tradingState,
+                var expected = tradingReducer.applyFundingWithFacts(tradingState,
                         command, indexedUserIds, message.header().commandId());
-                adoptState(result.state());
-                commandFundingPayments = result.payments();
-                commandFundingProgress = result.progress();
+                if (productLine == ProductLine.LINEAR_PERPETUAL) {
+                    var result = RuntimePerpetualFundingProcessor.simulate(tradingState, command, indexedUserIds,
+                            message.header().commandId(), runtimePlaceOrderIdentities);
+                    if (!expected.payments().equals(result.payments()) || !expected.progress().equals(result.progress())) {
+                        throw new IllegalStateException("runtime funding facts do not match core state expectation");
+                    }
+                    adoptRuntimeState(expected.state(), result.state());
+                    commandFundingPayments = result.payments();
+                    commandFundingProgress = result.progress();
+                } else {
+                    adoptState(expected.state());
+                    commandFundingPayments = expected.payments();
+                    commandFundingProgress = expected.progress();
+                }
                 commandChangedUserIds = commandFundingPayments.stream()
                         .map(com.surprising.aeron.protocol.CoreFundingPaymentView::userId).distinct().toList();
             }
