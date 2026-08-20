@@ -3149,8 +3149,8 @@ public final class CoreProbeState implements AutoCloseable {
     private void adoptPerpetualMatchRuntimeState(TradingCoreState expected, long takerOrderId,
                                                   List<com.surprising.aeron.service.matching.CoreMatch> matches) {
         if (productLine == ProductLine.LINEAR_PERPETUAL && expected != tradingState) {
-            adoptRuntimeState(expected, RuntimePerpetualMatchProcessor.simulateTransition(tradingState, expected,
-                    takerOrderId, matches, runtimePlaceOrderIdentities));
+            adoptRuntimeState(expected, RuntimePerpetualMatchProcessor.applyTransition(tradingState, expected,
+                    takerOrderId, matches, runtimePlaceOrderState, runtimePlaceOrderIdentities));
         } else {
             adoptState(expected);
         }

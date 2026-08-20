@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
@@ -17,6 +20,47 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class RuntimePerpetualMatchProcessorTest {
+
+    @Test
+    void persistentApplyMutatesProvidedRuntimeAndMatchesAuthoritativeReducer() {
+        CoreInstrumentState instrument = instrument();
+        CoreOrderState taker = order(11, 7, CoreOrderSide.BUY, 1);
+        CoreOrderState maker = order(12, 8, CoreOrderSide.SELL, 1);
+        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100)),
+                Map.of(11L, taker, 12L, maker), Map.of(instrument.symbol(), instrument),
+                CoreRiskState.empty(), CoreTreasuryState.empty());
+        List<CoreMatch> matches = List.of(new CoreMatch(12, 8, 100, 1, true, true));
+        TradingCoreState expected = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+
+        TradingRuntimeState applied = RuntimePerpetualMatchProcessor.apply(
+                before, 11, matches, runtime, identities);
+
+        assertThat(applied).isSameAs(runtime);
+        RuntimeStateParityChecker.assertMatches(expected, identities, applied);
+    }
+
+    @Test
+    void persistentApplyRejectsMissingMakerWithoutMutatingRuntime() {
+        CoreInstrumentState instrument = instrument();
+        CoreOrderState taker = order(11, 7, CoreOrderSide.BUY, 2);
+        CoreOrderState maker = order(12, 8, CoreOrderSide.SELL, 1);
+        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(7L, user(7, taker, 200), 8L, user(8, maker, 100)),
+                Map.of(11L, taker, 12L, maker),
+                Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+
+        assertThatThrownBy(() -> RuntimePerpetualMatchProcessor.apply(before, 11,
+                List.of(new CoreMatch(12, 8, 100, 1, true, true),
+                        new CoreMatch(99, 9, 100, 1, true, true)), runtime, identities))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("runtime matched order is not open: 99");
+        RuntimeStateParityChecker.assertMatches(before, identities, runtime);
+    }
 
     @Test
     void multiMatchSimulationEqualsAuthoritativeReducer() {
