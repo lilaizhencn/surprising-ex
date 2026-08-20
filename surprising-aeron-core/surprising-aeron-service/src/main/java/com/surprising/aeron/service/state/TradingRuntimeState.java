@@ -7,8 +7,11 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.product.api.ProductLine;
+import java.util.Collections;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 public final class TradingRuntimeState {
 
@@ -20,6 +23,8 @@ public final class TradingRuntimeState {
     private final LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>();
     private final LongObjectHashMap<ReservationRuntime> reservations = new LongObjectHashMap<>();
     private final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>();
+    private final IntObjectHashMap<LongObjectHashMap<TreeSet<Long>>> positionKeysBySymbolAndUser
+            = new IntObjectHashMap<>();
     private final LongObjectHashMap<LiquidationRuntime> liquidations = new LongObjectHashMap<>();
     private final LongObjectHashMap<IntObjectHashMap<LongObjectHashMap<Long>>> activeLiquidationIndex
             = new LongObjectHashMap<>();
@@ -115,6 +120,13 @@ public final class TradingRuntimeState {
     public PositionRuntime position(long positionKey) {
         assertOwner();
         return positions.get(positionKey);
+    }
+
+    public NavigableSet<Long> positionKeysForUserAndSymbol(long userId, int symbolId) {
+        assertOwner();
+        LongObjectHashMap<TreeSet<Long>> byUser = positionKeysBySymbolAndUser.get(symbolId);
+        TreeSet<Long> keys = byUser == null ? null : byUser.get(userId);
+        return keys == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(keys);
     }
 
     public LiquidationRuntime liquidation(long liquidationId) {
@@ -305,7 +317,10 @@ public final class TradingRuntimeState {
 
     public void replacePosition(long positionKey, PositionRuntime position) {
         assertOwner();
+        PositionRuntime previous = positions.get(positionKey);
+        if (previous != null) unindexPosition(positionKey, previous);
         positions.put(positionKey, position);
+        indexPosition(positionKey, position);
         changedUsers.add(position.userId());
     }
 
@@ -360,6 +375,7 @@ public final class TradingRuntimeState {
             throw new IllegalArgumentException("runtime position is not registered: " + positionKey);
         }
         positions.remove(positionKey);
+        unindexPosition(positionKey, current);
         changedUsers.add(userId);
     }
 
@@ -577,8 +593,34 @@ public final class TradingRuntimeState {
 
     public void putPosition(long positionKey, PositionRuntime position) {
         assertOwner();
+        PositionRuntime previous = positions.get(positionKey);
+        if (previous != null) unindexPosition(positionKey, previous);
         positions.put(positionKey, position);
+        indexPosition(positionKey, position);
         changedUsers.add(position.userId());
+    }
+
+    private void indexPosition(long positionKey, PositionRuntime position) {
+        if (position.signedQuantitySteps() == 0) return;
+        LongObjectHashMap<TreeSet<Long>> byUser = positionKeysBySymbolAndUser.get(position.symbolId());
+        if (byUser == null) {
+            byUser = new LongObjectHashMap<>();
+            positionKeysBySymbolAndUser.put(position.symbolId(), byUser);
+        }
+        TreeSet<Long> keys = byUser.get(position.userId());
+        if (keys == null) {
+            keys = new TreeSet<>();
+            byUser.put(position.userId(), keys);
+        }
+        keys.add(positionKey);
+    }
+
+    private void unindexPosition(long positionKey, PositionRuntime position) {
+        LongObjectHashMap<TreeSet<Long>> byUser = positionKeysBySymbolAndUser.get(position.symbolId());
+        TreeSet<Long> keys = byUser == null ? null : byUser.get(position.userId());
+        if (keys == null || !keys.remove(positionKey)) return;
+        if (keys.isEmpty()) byUser.remove(position.userId());
+        if (byUser.isEmpty()) positionKeysBySymbolAndUser.remove(position.symbolId());
     }
 
     private void changedBalance(long userId, int assetId) {

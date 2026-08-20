@@ -196,6 +196,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 || !deltaAfter.equals(authoritativeAfter)) {
             throw new IllegalStateException("trading runtime transition is out of order");
         }
+        deltaAfter.requireOnlineDeltaLineage(before);
         positionUsers.update(before, deltaAfter);
         openInterest.update(before, deltaAfter);
         triggers.update(before, deltaAfter);

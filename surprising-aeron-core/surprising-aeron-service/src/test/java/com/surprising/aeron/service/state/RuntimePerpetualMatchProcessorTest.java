@@ -63,6 +63,27 @@ class RuntimePerpetualMatchProcessorTest {
     }
 
     @Test
+    void transitionOnlyRevisesUsersInAuthoritativeDelta() {
+        CoreInstrumentState instrument = instrument();
+        CoreOrderState taker = order(11, 7, CoreOrderSide.BUY, 1);
+        CoreOrderState maker = order(12, 8, CoreOrderSide.SELL, 1);
+        CoreUserState unrelated = CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 99);
+        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100), 99L, unrelated),
+                Map.of(11L, taker, 12L, maker), Map.of(instrument.symbol(), instrument),
+                CoreRiskState.empty(), CoreTreasuryState.empty());
+        List<CoreMatch> matches = List.of(new CoreMatch(12, 8, 100, 1, true, true));
+        TradingCoreState expected = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        runtime.putUser(new UserRuntime(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
+
+        RuntimePerpetualMatchProcessor.applyTransition(before, expected, 11, matches, runtime, identities);
+
+        assertThat(runtime.user(99).revision()).isEqualTo(999);
+    }
+
+    @Test
     void multiMatchSimulationEqualsAuthoritativeReducer() {
         CoreInstrumentState instrument = instrument();
         CoreOrderState taker = order(11, 7, CoreOrderSide.BUY, 2);

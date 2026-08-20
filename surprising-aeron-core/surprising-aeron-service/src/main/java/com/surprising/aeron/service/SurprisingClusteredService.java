@@ -27,6 +27,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
     private static final long MATCHING_TIMER_DELAY_MS = 10;
+    private static final long MATCHING_WAKEUP_CORRELATION_ID = Long.MAX_VALUE;
 
     private final ProductLine productLine;
     private final AtomicReference<Cluster.Role> role = new AtomicReference<>();
@@ -35,6 +36,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private IdleStrategy idleStrategy;
     private final Map<Long, PendingEgress> pendingEgress = new HashMap<>();
     private final Map<Long, ArrayDeque<PendingClient>> pendingClients = new HashMap<>();
+    private boolean matchingWakeupScheduled;
 
     public SurprisingClusteredService(ProductLine productLine) {
         this.productLine = productLine;
@@ -46,6 +48,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         this.cluster = cluster;
         pendingEgress.clear();
         pendingClients.clear();
+        matchingWakeupScheduled = false;
         idleStrategy = cluster.idleStrategy();
         role.set(cluster.role());
         System.out.printf("Aeron core role productLine=%s role=%s%n", productLine, cluster.role());
@@ -78,7 +81,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                 pendingClients.computeIfAbsent(matchingSequence, ignored -> new ArrayDeque<>())
                         .addLast(new PendingClient(session, request));
             }
-            scheduleMatchingTimer(matchingSequence);
+            scheduleMatchingWakeup();
             return;
         }
         long querySequence = state.querySequence(request.header().commandId());
@@ -87,7 +90,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                 pendingClients.computeIfAbsent(querySequence, ignored -> new ArrayDeque<>())
                         .addLast(new PendingClient(session, request));
             }
-            scheduleMatchingTimer(querySequence);
+            scheduleQueryTimer(querySequence);
             return;
         }
         if (session != null) {
@@ -125,6 +128,9 @@ public final class SurprisingClusteredService implements ClusteredService {
         for (PendingEgress egress : pendingEgress.values()) {
             work += drain(egress);
         }
+        if (state.pendingMatchingCount() > 0 && !matchingWakeupScheduled) {
+            scheduleMatchingWakeup();
+        }
         return work;
     }
 
@@ -132,6 +138,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     public void onTerminate(Cluster cluster) {
         pendingEgress.clear();
         pendingClients.clear();
+        matchingWakeupScheduled = false;
         this.cluster = null;
         state.close();
     }
@@ -149,10 +156,34 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTimerEvent(long correlationId, long timestamp) {
+        if (correlationId == MATCHING_WAKEUP_CORRELATION_ID) {
+            matchingWakeupScheduled = false;
+            state.drainMatchingCompletions();
+            long sequence = state.firstPendingMatchingSequence();
+            if (sequence == 0) return;
+            var matchingResult = state.takeMatchingResult(sequence);
+            if (matchingResult == null) {
+                state.markMatchingTimeout(sequence, timestamp);
+                matchingResult = state.takeMatchingResult(sequence);
+            }
+            if (matchingResult == null) {
+                scheduleMatchingWakeup();
+                return;
+            }
+            CoreResponse result = state.completeMatching(sequence, matchingResult, timestamp,
+                    cluster == null ? 0 : cluster.logPosition());
+            if (result == null) {
+                scheduleMatchingWakeup();
+                return;
+            }
+            deliverMatchingResponse(sequence, result);
+            scheduleMatchingWakeup();
+            return;
+        }
         if (correlationId < 0) {
             CoreResponse queryResult = state.takeQueryResult(correlationId);
             if (queryResult == null) {
-                scheduleMatchingTimer(correlationId);
+                scheduleQueryTimer(correlationId);
                 return;
             }
             ArrayDeque<PendingClient> clients = pendingClients.remove(correlationId);
@@ -172,24 +203,16 @@ public final class SurprisingClusteredService implements ClusteredService {
             matchingResult = state.takeMatchingResult(correlationId);
         }
         if (matchingResult == null) {
-            scheduleMatchingTimer(correlationId);
+            scheduleMatchingWakeup();
             return;
         }
         CoreResponse result = state.completeMatching(correlationId, matchingResult, timestamp,
                 cluster == null ? 0 : cluster.logPosition());
         if (result == null) {
-            scheduleMatchingTimer(correlationId);
+            scheduleMatchingWakeup();
             return;
         }
-        ArrayDeque<PendingClient> clients = pendingClients.remove(correlationId);
-        if (clients != null) {
-            for (PendingClient pendingClient : clients) {
-                if (pendingClient.session().isClosing()) continue;
-                CoreMessage response = new CoreMessage(pendingClient.request().header().response(
-                        responseType(pendingClient.request())), CoreProtocol.responsePayload(result));
-                offer(pendingClient.session(), CoreMessageCodec.encode(response));
-            }
-        }
+        deliverMatchingResponse(correlationId, result);
         schedulePendingMatchingTimers();
     }
 
@@ -276,13 +299,32 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void schedulePendingMatchingTimers() {
-        if (cluster == null) return;
-        for (long sequence : state.pendingMatching().keySet()) {
-            scheduleMatchingTimer(sequence);
+        scheduleMatchingWakeup();
+    }
+
+    private void scheduleMatchingWakeup() {
+        if (cluster == null || matchingWakeupScheduled || state.pendingMatchingCount() == 0) return;
+        long delay = Math.max(1L, cluster.timeUnit().convert(MATCHING_TIMER_DELAY_MS,
+                java.util.concurrent.TimeUnit.MILLISECONDS));
+        long deadline = cluster.time() + delay;
+        idleStrategy.reset();
+        if (cluster.scheduleTimer(MATCHING_WAKEUP_CORRELATION_ID, deadline)) {
+            matchingWakeupScheduled = true;
         }
     }
 
-    private void scheduleMatchingTimer(long sequence) {
+    private void deliverMatchingResponse(long sequence, CoreResponse result) {
+        ArrayDeque<PendingClient> clients = pendingClients.remove(sequence);
+        if (clients == null) return;
+        for (PendingClient pendingClient : clients) {
+            if (pendingClient.session().isClosing()) continue;
+            CoreMessage response = new CoreMessage(pendingClient.request().header().response(
+                    responseType(pendingClient.request())), CoreProtocol.responsePayload(result));
+            offer(pendingClient.session(), CoreMessageCodec.encode(response));
+        }
+    }
+
+    private void scheduleQueryTimer(long sequence) {
         if (cluster == null || sequence == 0) return;
         long delay = Math.max(1L, cluster.timeUnit().convert(MATCHING_TIMER_DELAY_MS,
                 java.util.concurrent.TimeUnit.MILLISECONDS));

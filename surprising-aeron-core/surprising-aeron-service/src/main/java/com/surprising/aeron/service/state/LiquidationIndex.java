@@ -27,10 +27,8 @@ public final class LiquidationIndex {
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.riskState().liquidations() == after.riskState().liquidations()) return;
-        if (!StateMapSupport.isDelta(after.riskState().liquidations())) {
-            rebuild(after);
-            return;
-        }
+        StateMapSupport.requireDeltaLineage(before.riskState().liquidations(), after.riskState().liquidations(),
+                "liquidation index liquidations");
         Set<Long> changed = after.changedLiquidationIds();
         for (Long id : changed) {
             if (id == null) continue;

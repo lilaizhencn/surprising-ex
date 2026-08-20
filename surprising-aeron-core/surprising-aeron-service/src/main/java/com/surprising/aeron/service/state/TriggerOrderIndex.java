@@ -270,10 +270,8 @@ public final class TriggerOrderIndex {
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.triggerOrders() == after.triggerOrders()) return;
-        if (!StateMapSupport.isDelta(after.triggerOrders())) {
-            rebuild(after);
-            return;
-        }
+        StateMapSupport.requireDeltaLineage(before.triggerOrders(), after.triggerOrders(),
+                "trigger order index orders");
         Set<Long> changed = after.changedTriggerOrderIds();
         for (Long id : changed) {
             if (id == null) continue;

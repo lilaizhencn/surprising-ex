@@ -137,10 +137,7 @@ public final class ActiveOrderIndex {
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.orders() == after.orders()) return;
-        if (!StateMapSupport.isDelta(after.orders())) {
-            rebuild(after);
-            return;
-        }
+        StateMapSupport.requireDeltaLineage(before.orders(), after.orders(), "active order index orders");
         Set<Long> changed = after.changedOrderIds();
         for (Long id : changed) {
             if (id == null) continue;

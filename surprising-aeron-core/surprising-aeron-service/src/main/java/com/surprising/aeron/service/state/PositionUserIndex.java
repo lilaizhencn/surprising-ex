@@ -15,17 +15,19 @@ public final class PositionUserIndex {
         rebuild(state);
     }
 
-    public Set<Long> users(String symbol) {
+    public NavigableSet<Long> users(String symbol) {
         NavigableSet<Long> users = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
-        return users == null ? Set.of() : Collections.unmodifiableNavigableSet(users);
+        return users == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(users);
+    }
+
+    public Long higherUser(String symbol, long cursorUserId) {
+        NavigableSet<Long> users = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        return users == null ? null : users.higher(cursorUserId);
     }
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.users() == after.users()) return;
-        if (!StateMapSupport.isDelta(after.users())) {
-            rebuild(after);
-            return;
-        }
+        StateMapSupport.requireDeltaLineage(before.users(), after.users(), "position user index users");
         Set<Long> changedUsers = after.changedUserIds();
         for (Long userId : changedUsers) {
             if (userId == null) continue;

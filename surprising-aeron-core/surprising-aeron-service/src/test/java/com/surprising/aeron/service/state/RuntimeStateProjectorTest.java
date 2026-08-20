@@ -143,6 +143,24 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
+    void rejectsNonDeltaOnlineTransitionBeforeRuntimeMutation() {
+        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
+                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(), Map.of());
+        CoreUserState afterUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 2,
+                Map.of("USDT", new AssetBalance("USDT", 900, 100)), Map.of(), Map.of());
+        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(7L, beforeUser), Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
+                Map.of(7L, afterUser), Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+
+        assertThatThrownBy(() -> RuntimeStateDeltaApplier.apply(before, after, runtime, identities))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("online runtime transition is not a delta: users");
+    }
+
+    @Test
     void appliesCancellationReleaseAndMarksRuntimeOrderTerminal() {
         OrderReservation reservation = OrderReservation.create(11, "BTC-USDT", 1,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 200, 2);
@@ -312,11 +330,18 @@ class RuntimeStateProjectorTest {
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, beforeUser), Map.of(11L, open), Map.of(), CoreRiskState.empty(),
                 CoreTreasuryState.empty());
-        CoreUserState afterUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 2,
-                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)),
-                Map.of(11L, reservation.releaseAll()), Map.of());
+        Map<String, AssetBalance> afterBalances = StateMapSupport.delta(beforeUser.balances());
+        afterBalances.put("USDT", new AssetBalance("USDT", 1_000, 0));
+        Map<Long, OrderReservation> afterReservations = StateMapSupport.delta(beforeUser.reservations());
+        afterReservations.put(11L, reservation.releaseAll());
+        CoreUserState afterUser = beforeUser.transition(2, afterBalances, afterReservations,
+                beforeUser.positions(), beforeUser.positionMode());
+        Map<Long, CoreUserState> afterUsers = StateMapSupport.delta(before.users());
+        afterUsers.put(7L, afterUser);
+        Map<Long, CoreOrderState> afterOrders = StateMapSupport.delta(before.orders());
+        afterOrders.put(11L, open.cancel());
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
-                Map.of(7L, afterUser), Map.of(11L, open.cancel()), Map.of(), CoreRiskState.empty(),
+                afterUsers, afterOrders, before.instruments(), CoreRiskState.empty(),
                 before.treasuryState().adjustFee("USDT", 3));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);

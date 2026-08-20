@@ -42,10 +42,8 @@ public final class CancelAllAfterIndex {
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.cancelAllAfterTimers() == after.cancelAllAfterTimers()) return;
-        if (!StateMapSupport.isDelta(after.cancelAllAfterTimers())) {
-            rebuild(after);
-            return;
-        }
+        StateMapSupport.requireDeltaLineage(before.cancelAllAfterTimers(), after.cancelAllAfterTimers(),
+                "cancel-all-after timers");
         Set<CoreCancelAllAfterKey> changed = after.changedCancelAllAfterKeys();
         for (CoreCancelAllAfterKey key : changed) {
             if (key == null) continue;

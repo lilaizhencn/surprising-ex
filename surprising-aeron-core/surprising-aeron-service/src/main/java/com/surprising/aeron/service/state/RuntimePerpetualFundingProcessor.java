@@ -6,8 +6,8 @@ import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
+import java.util.NavigableSet;
 import java.util.UUID;
 
 public final class RuntimePerpetualFundingProcessor {
@@ -85,14 +85,13 @@ public final class RuntimePerpetualFundingProcessor {
 
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
         for (Long userId : selectedUserIds) {
-            List<PositionEntry> positions = positions(runtime, userId, symbolId);
-            if (positions.isEmpty()) continue;
+            NavigableSet<Long> positionKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
+            if (positionKeys.isEmpty()) continue;
             long requestedDelta = 0;
-            ArrayList<Long> positionDeltas = new ArrayList<>(positions.size());
-            for (PositionEntry entry : positions) {
+            for (long positionKey : positionKeys) {
+                PositionRuntime position = runtime.position(positionKey);
                 long positionDelta = CoreContractMath.fundingDeltaUnits(instrument,
-                        entry.position().signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
-                positionDeltas.add(positionDelta);
+                        position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
                 requestedDelta = Math.addExact(requestedDelta, positionDelta);
             }
 
@@ -110,9 +109,10 @@ public final class RuntimePerpetualFundingProcessor {
             }
 
             long debitRelief = Math.subtractExact(appliedDelta, requestedDelta);
-            for (int index = 0; index < positions.size(); index++) {
-                PositionRuntime position = positions.get(index).position();
-                long amount = positionDeltas.get(index);
+            for (long positionKey : positionKeys) {
+                PositionRuntime position = runtime.position(positionKey);
+                long amount = CoreContractMath.fundingDeltaUnits(instrument,
+                        position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
                 if (amount < 0 && debitRelief > 0) {
                     long relief = Math.min(Math.negateExact(amount), debitRelief);
                     amount = Math.addExact(amount, relief);
@@ -145,21 +145,6 @@ public final class RuntimePerpetualFundingProcessor {
         runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
         return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
                 nextCursorUserId, selectedUserIds.size()));
-    }
-
-    private static List<PositionEntry> positions(TradingRuntimeState runtime, long userId, int symbolId) {
-        ArrayList<PositionEntry> positions = new ArrayList<>();
-        runtime.positionsForSnapshot().forEachKeyValue((positionKey, position) -> {
-            if (position.userId() == userId && position.symbolId() == symbolId
-                    && position.signedQuantitySteps() != 0) {
-                positions.add(new PositionEntry(positionKey, position));
-            }
-        });
-        positions.sort(Comparator.comparingLong(PositionEntry::positionKey));
-        return positions;
-    }
-
-    private record PositionEntry(long positionKey, PositionRuntime position) {
     }
 
     public record FundingResult(TradingRuntimeState state, List<CoreFundingPaymentView> payments,

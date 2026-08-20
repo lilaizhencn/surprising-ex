@@ -22,10 +22,7 @@ public final class AdlPositionIndex {
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.users() == after.users()) return;
-        if (!StateMapSupport.isDelta(after.users())) {
-            rebuild(after);
-            return;
-        }
+        StateMapSupport.requireDeltaLineage(before.users(), after.users(), "adl position users");
         Set<Long> changed = after.changedUserIds();
         for (Long userId : changed) {
             if (userId == null) continue;

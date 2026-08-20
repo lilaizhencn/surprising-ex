@@ -15,6 +15,7 @@ public final class RuntimeStateDeltaApplier {
                 || before.productLine() != after.productLine()) {
             throw new IllegalArgumentException("invalid runtime transition");
         }
+        after.requireOnlineDeltaLineage(before);
         runtime.assertOwner();
         syncUsers(before, after, runtime, identities);
         syncOrders(before, after, runtime, identities);

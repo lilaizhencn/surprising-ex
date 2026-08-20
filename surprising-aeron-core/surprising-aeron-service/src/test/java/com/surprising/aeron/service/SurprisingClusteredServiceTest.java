@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.agrona.concurrent.NoOpIdleStrategy;
 import org.junit.jupiter.api.Test;
 
@@ -84,12 +85,16 @@ class SurprisingClusteredServiceTest {
     void retriesTimerSchedulingUntilAeronBackpressureClears() {
         SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
         AtomicInteger attempts = new AtomicInteger();
+        AtomicLong correlationId = new AtomicLong();
         try {
             preparePendingPlace(service.state(), 902);
 
-            service.onStart(clusterWithTimerBackpressure(attempts), null);
+            service.onStart(clusterWithTimerBackpressure(attempts, correlationId), null);
+            service.doBackgroundWork(0);
+            service.doBackgroundWork(0);
 
             assertThat(attempts).hasValue(3);
+            assertThat(correlationId).hasValue(Long.MAX_VALUE);
         } finally {
             service.onTerminate(null);
         }
@@ -147,7 +152,7 @@ class SurprisingClusteredServiceTest {
                 });
     }
 
-    private static Cluster clusterWithTimerBackpressure(AtomicInteger attempts) {
+    private static Cluster clusterWithTimerBackpressure(AtomicInteger attempts, AtomicLong correlationId) {
         return (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "role" -> Cluster.Role.LEADER;
@@ -155,7 +160,10 @@ class SurprisingClusteredServiceTest {
                     case "idleStrategy" -> NoOpIdleStrategy.INSTANCE;
                     case "timeUnit" -> TimeUnit.MILLISECONDS;
                     case "time" -> 1_000L;
-                    case "scheduleTimer" -> attempts.incrementAndGet() >= 3;
+                    case "scheduleTimer" -> {
+                        correlationId.set((long) arguments[0]);
+                        yield attempts.incrementAndGet() >= 3;
+                    }
                     default -> defaultValue(method.getReturnType());
                 });
     }

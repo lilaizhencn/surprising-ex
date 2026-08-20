@@ -1,6 +1,6 @@
 # exchange-core 交易主链路性能与恢复审计报告
 
-> 状态：`P0_MAKER_DEPTH_JFR_VERIFIED; REMEDIATION_DESIGN_CAPTURED`
+> 状态：`P0_RUNTIME_HOT_PATH_REMEDIATED; CAPACITY_GATE_PENDING`
 >
 > 审计分支：`codex/aeron-unified-core`
 >
@@ -10,17 +10,17 @@
 
 ## 1. 结论
 
-当前架构方向正确，但现状还不具备 100,000 条最终裁决命令/秒的容量基础。exchange-core 撮合器不是首要
-瓶颈，主要瓶颈位于 Product Core 外层状态迁移、treasury 全量重建、结果账本 hash、continuation 调度、协议复制和
-outbox 编码。
+当前架构方向正确，但现状仍没有 100,000 条最终裁决命令/秒的容量认证证据。exchange-core 撮合器不是首要
+瓶颈；本轮已消除 Product Core 在线路径中的 treasury 全量重建、永续 processor 全局扫描、delta 静默 rebuild
+和 pending matching 逐条调度，协议复制与 outbox 编码仍是后续容量工作。
 普通 `adoptState` 当前已经使用增量 Runtime transition；旧审计中“每条命令完整 materialize/parity”的表述已过时，
-但 treasury 同步以及永续成交、资金费和风险续跑仍存在随状态规模增长的在线全量工作。
+容量认证仍缺少三节点、开放环和长稳证据；代码层面的 treasury 同步、永续成交、资金费和风险续跑全量工作已在本轮消除。
 
-当前最优先的改造不是增加 Matching Engine 数量或单独调整 GC，而是让 `TradingRuntimeState` 成为在线唯一
+本轮 P0 改造不是增加 Matching Engine 数量或单独调整 GC，而是让 `TradingRuntimeState` 成为在线唯一
 可变状态，由 Product Core owner thread 对本次命令触及的实体执行原地、可验证的增量提交。完整
 `TradingCoreState` 只应在快照、恢复、离线对账或抽样一致性检查中生成。
 
-本报告是当前源码和本地诊断基准的现状审计。既有实施规格中的“功能已接入”“完整 parity 已完成”不等于
+本报告是当前源码和本地诊断基准的现状审计。P0 代码已接入并通过受影响模块回归，但“功能已接入”“完整 parity 已完成”不等于
 生产性能门禁已经通过；凡涉及 100k/s、无全量复制和热路径复杂度的结论，以本报告列出的源码出口和正式
 容量门禁为准。
 
@@ -90,10 +90,10 @@ outbox 编码上。
 3. `RollingBusinessStateHash.update` 依据 changed keys 增量更新业务 hash。
 4. 只有快照、恢复、模拟或测试 parity 才应该执行完整 projection/materialization。
 
-“增量 Runtime transition”目前仍有一个严重例外：[`RuntimeStateDeltaApplier.syncTreasury`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateDeltaApplier.java)
-在 treasury 发生变化时先清空整个 `TreasuryRuntime`，再重建 fee、insurance、funding 和 lifecycle 全部 map。
-成交、资金费和其他结算命令都可能触发 treasury 变化，因此这不是 materializer 冷路径问题，而是在线 owner thread
-上的全局重建，必须作为 P0 消除。
+本轮已将 [`RuntimeStateDeltaApplier`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateDeltaApplier.java)
+和 [`TreasuryRuntime`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TreasuryRuntime.java)
+改为只应用 changed assets/symbols；在线 treasury 不再 `clear()` 后全量重建。所有核心 runtime index 也会对非 delta
+transition 直接 fail closed，不再静默调用 `rebuild(after)`。
 
 [`RuntimeStateMaterializer`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateMaterializer.java)
 会重建全部用户、余额、订单、reservation、position、risk、liquidation、treasury、client-order index、algo、
@@ -120,9 +120,9 @@ O(U * R + U * P + O + Risk + Treasury)
 - `RuntimePerpetualRiskProcessor`
 - `RuntimePerpetualLiquidationProcessor` 的 `simulate*` 仍只允许冷路径调用。
 
-例如 [`RuntimePerpetualMatchProcessor`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimePerpetualMatchProcessor.java)
-在在线 transition 后仍遍历 `expected.users()` 对齐 revision；资金费按用户扫描全局 positions，风险续跑从
-用户索引头部反复寻找下一个用户。它们仍然会随用户数或持仓数增长，属于当前真正的 P0 残留。
+本轮已修复 [`RuntimePerpetualMatchProcessor`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimePerpetualMatchProcessor.java)
+只按 authoritative changed users 更新 revision；资金费通过 `(symbolId,userId) -> position keys` 有序索引访问非零持仓；
+风险续跑通过 `NavigableSet.higher(cursor)` 前进。上述 online 路径不再按全局 positions 排序或扫描无序候选集合。
 
 Runtime processor 的在线状态应继续由 Product Core owner thread 持有并原地增量更新；immutable reducer 可以在
 迁移期作为 shadow/parity 参照，不能与 Runtime 在每条生产命令上重复执行完整业务计算。
@@ -145,20 +145,24 @@ exchange-core 阶段约为 `0.2 ms`。跳过 matcher 只提升约 7%，说明当
 
 ## 5. 其他高优先级问题
 
-### 5.1 pending matching 调度随在途请求放大
+### 5.1 pending matching 调度已改为有界单唤醒
 
 [`SurprisingClusteredService`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/SurprisingClusteredService.java)
-当前为每个 pending matching 设置 timer；每完成一条 continuation，又遍历全部 pending sequence 并重新调用
-`scheduleTimer`。同时：
+本轮已在 [`CoreProbeState`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java)
+和 [`SurprisingClusteredService`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/SurprisingClusteredService.java)
+落地有界 completion queue、单一 `Long.MAX_VALUE` wakeup、`commandId -> sequence` 直接索引以及
+`MAX_PENDING_MATCHING` admission backpressure。异步 matcher callback 只入队，owner thread drain 后按 head sequence
+完成状态提交；Aeron timer backpressure 不再在 matching 路径 busy-spin。
+
+剩余容量风险不再是当前 P0 代码缺口，而是尚未执行的开放环/长稳认证：
 
 - `matchingSequence(commandId)` 通过 stream 扫描全部 pending command，平均工作量为 `O(P)`。
 - 单次完成会产生 `O(P)` timer 调度调用。
 - 一批 `P` 个请求完成时，累计调度调用可能接近 `O(P^2)`。
 - `scheduleTimer` 失败时在 Aeron owner thread 上 busy idle。
 
-目标实现应改为：matcher callback 写有界 MPSC completion queue；owner thread 使用一个 drain wakeup，每次最多
-处理固定数量；sequence 到 pending 使用数组/ring 或 primitive map；commandId 到 sequence 使用直接索引，并
-设置明确的 max in-flight 和入口背压。
+当前实现使用 `ArrayBlockingQueue` 作为有界跨线程完成边界；队列溢出进入确定性 matcher divergence fail-closed，
+不允许无界增长。
 
 ### 5.2 协议入口和出口重复复制
 
@@ -302,7 +306,7 @@ ProductLine 隔离、Aeron Cluster sequence 顺序、幂等语义和资金守恒
 资金安全：保留原有 funding payment 对账、insurance adjustment、用户余额和 treasury 守恒断言；索引只作为
 访问加速结构，不能成为第二份资金权威。
 
-#### 5.6.5 pending matching：有界 completion queue 和单一 wakeup
+#### 5.6.5 pending matching：有界 completion queue 和单一 wakeup（已落地）
 
 方案：
 
@@ -424,9 +428,9 @@ Web 容器线程耗尽。
 - `doBackgroundWork()` 维护 active egress set，只扫描真正有排队数据的 session。
 - 每 session egress、pending client 和 response queue 都设置硬上限，超限返回明确 backpressure 或关闭慢连接。
 
-当前问题：[`RuntimeStateDeltaApplier.syncTreasury`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateDeltaApplier.java)
-当前会在任意 treasury state 变化时 `clear()` 后重建全部 treasury map；成交和资金费因此可能触发与全局 treasury
-规模成比例的复制和分配。
+本轮已完成 [`RuntimeStateDeltaApplier.syncTreasury`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateDeltaApplier.java)
+的 changed assets/symbols 增量同步；成交和资金费不再因 treasury state 变化触发全量 map 重建。pending client compact
+header、active egress set 和协议层一次复制仍归入 P1。
 
 理由：这些改动不改变交易语义，但会显著减少高并发时的 payload retention、空 session 扫描和 treasury 重建。
 
@@ -533,25 +537,23 @@ Aeron owner thread
 
 ## 8. 分阶段改造路线
 
-### P0：消除在线全局工作
+### P0：消除在线全局工作（代码已落地，容量门禁待执行）
 
 - 保持 Runtime State 为在线 owner-thread 状态；确认普通 `adoptState` 不调用完整 materializer/parity。
-- 修复结果账本 hash/copy，使其不扫描历史响应正文。
-- 将永续成交改为 touched-user revision/update。
-- 将资金费改为 `(symbol, user)` 持仓索引，将风险续跑改为 `higher(cursor)`。
-- 将 treasury 同步改为 changed assets/symbols 的增量更新，禁止 `clear()` 后重建全量 treasury map。
-- 为 reservation、position、leverage、pending matching 建立直接索引。
-- 对任何非 delta map transition 增加门禁，禁止静默全量 rebuild。
-- 每个 ProductLine 单独完成成交、资金费、风险、强平和资金守恒回归后才能启用。
+- 结果账本 hash/copy 已改为增量维护，不扫描历史响应正文。
+- 永续成交已改为 touched-user revision/update。
+- 资金费已使用 `(symbol, user)` 持仓索引，风险续跑已使用 `higher(cursor)`。
+- treasury 已改为 changed assets/symbols 增量更新，禁止 `clear()` 后重建全量 map。
+- pending matching 已具备直接 commandId 索引、有界 completion queue、单一 wakeup、max in-flight 和入口背压。
+- 所有 Product Core runtime index 的非 delta transition 已增加 fail-closed 门禁，禁止静默全量 rebuild。
+- P0 回归已覆盖成交、资金费、风险、treasury、快照和服务调度；六产品线开放环资金守恒仍属于容量/系统验收。
 
 ### P1：控制 continuation 与分配
 
-- completion queue、单一 drain wakeup、sequence head gate、max in-flight 和入口背压。
 - DirectBuffer flyweight 解码、一次 owned copy 和复用响应 buffer。
 - fingerprint digest、matcher result、Stream、`toList`、重复 decode 和 Future 链分配优化。
 - outbox 预编码、terminal metadata、pending fact 契约收敛和 ACK metadata 化。
 - 去掉普通下单 preflight，HTTP 入口改为异步 admission；保留稳定 commandId。
-- treasury 增量同步、pending client compact header、active egress set。
 - 统一依赖版本和 JDK 25 模块参数。
 
 ### P2：快照与故障恢复
@@ -639,8 +641,8 @@ mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
 风险和余额守恒边界。当前 benchmark 本身仍不宣称可以替代这些状态断言。
 
 本轮未执行三节点 Aeron 容量、Kafka/PostgreSQL 历史链路、leader failover、快照恢复、磁盘故障、六产品线
-资金守恒和长时间 JVM soak。原因是当前全状态投影/物化已经构成明确 P0 阻塞；在消除该阻塞前扩大压测不能
-证明目标架构成立。
+资金守恒和长时间 JVM soak。原因是这些属于三节点系统容量、故障恢复和生产规模验收，不能由本地单模块回归
+替代；P0 在线代码阻塞已解除。
 
 ### 10.1 分阶段证据
 
@@ -742,8 +744,19 @@ CPU top frames 为 `BusySpinWaitStrategy.waitFor`、`Util.getMinimumSequence`、
 剩余风险：Stage 1 负载很短且状态很小，fork 间最终裁决吞吐离散约 19%；JFR 本身和 JVM 启动占比较高；
 accept/freeze 与并发入口基准刻意不完成 matching，只作为分阶段 control，不可纳入最终裁决分子。
 
-### 10.4 本次文档补充
+### 10.4 本次 P0 落地与验证
 
-本次补充将当前源码复核结果和逐项解决方案写入本报告，没有修改交易代码、协议代码或测试代码。文档级验证
-只执行 `git diff --check`；前述构建、测试和 benchmark 数字属于既有审计证据，不代表本次文档变更重新执行了
-这些运行验证。工作区中其他未提交修改不属于本次文档补充范围。
+本轮已落地：touched-user 成交更新、`(symbol,user)` 持仓索引、风险 `higher(cursor)`、所有 runtime index 的
+非 delta fail-closed、treasury 增量同步，以及 pending matching 的有界 completion queue、单一 wakeup、直接
+commandId 索引和 max in-flight backpressure。
+
+clean 构建与受影响 reactor 全量测试：
+
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-service -am clean test
+```
+
+结果：service 232、protocol 59、instrument-api 13、product-api 12 个测试全部通过；另外定向 P0 回归 31 个测试、
+风险/生命周期回归 29 个测试均通过。测试覆盖本地 runtime parity、撮合、资金费、风险、treasury、snapshot、
+matching timer backpressure 和服务调度。未执行项目 9.1 所列三节点开放环容量、leader failover、Kafka/Projector、
+六产品线系统级守恒和长时间 soak，因此本报告仍不宣称 100k/s 或生产 SLO 已通过。

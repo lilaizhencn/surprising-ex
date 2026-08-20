@@ -47,6 +47,13 @@ public final class StateMapSupport {
         return values instanceof FrozenMap<?, ?> frozen && isDelta(frozen.raw());
     }
 
+    public static void requireDeltaLineage(Map<?, ?> before, Map<?, ?> after, String name) {
+        if (before == after || java.util.Objects.equals(before, after)) return;
+        if (!isDeltaDescendantOf(before, after)) {
+            throw new IllegalStateException("online runtime transition is not a delta: " + name);
+        }
+    }
+
     static boolean isFrozen(Map<?, ?> values) {
         return values instanceof FrozenMap<?, ?>;
     }
@@ -141,6 +148,9 @@ public final class StateMapSupport {
 
         @Override
         public Set<Entry<K, V>> entrySet() { return delegate.entrySet(); }
+
+        @Override
+        public NavigableSet<K> keySet() { return delegate.navigableKeySet(); }
 
         @Override
         public Comparator<? super K> comparator() { return delegate.comparator(); }

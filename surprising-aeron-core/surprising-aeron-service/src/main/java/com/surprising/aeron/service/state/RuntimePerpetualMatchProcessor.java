@@ -120,14 +120,17 @@ public final class RuntimePerpetualMatchProcessor {
             throw new IllegalArgumentException("invalid perpetual match transition");
         }
         apply(before, takerOrderId, matches, runtime, identities);
-        for (Map.Entry<Long, CoreUserState> entry : expected.users().entrySet()) {
-            UserRuntime actual = runtime.user(entry.getKey());
-            CoreUserState planned = entry.getValue();
+        for (Long userId : expected.changedUserIds()) {
+            CoreUserState planned = expected.users().get(userId);
+            if (planned == null) {
+                throw new IllegalStateException("runtime match changed user is missing: " + userId);
+            }
+            UserRuntime actual = runtime.user(userId);
             if (actual == null || actual.productLine() != planned.productLine()) {
-                throw new IllegalStateException("runtime match user is missing: " + entry.getKey());
+                throw new IllegalStateException("runtime match user is missing: " + userId);
             }
             if (actual.revision() != planned.revision()) {
-                runtime.putUser(new UserRuntime(actual.productLine(), actual.userId(), planned.revision(),
+                runtime.putUser(new UserRuntime(actual.productLine(), userId, planned.revision(),
                         actual.positionMode()));
             }
         }

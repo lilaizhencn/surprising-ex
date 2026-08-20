@@ -25,10 +25,7 @@ public final class OpenInterestIndex {
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.users() == after.users()) return;
-        if (!StateMapSupport.isDelta(after.users())) {
-            rebuild(after);
-            return;
-        }
+        StateMapSupport.requireDeltaLineage(before.users(), after.users(), "open interest users");
         Set<Long> changedUsers = after.changedUserIds();
         for (Long userId : changedUsers) {
             if (userId == null) continue;

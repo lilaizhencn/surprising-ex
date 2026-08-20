@@ -5,6 +5,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 
 import java.util.Map;
+import java.util.NavigableSet;
 
 /** Applies perpetual mark-price risk work to the owner-thread Runtime. */
 public final class RuntimePerpetualRiskProcessor {
@@ -329,12 +330,20 @@ public final class RuntimePerpetualRiskProcessor {
     }
 
     private static CoreUserState nextUser(TradingCoreState state, Iterable<Long> indexedUserIds, long cursor) {
-        Long next = null;
-        Iterable<Long> candidates = indexedUserIds == null ? state.users().keySet() : indexedUserIds;
-        for (Long userId : candidates) {
-            if (userId != null && userId > cursor && (next == null || userId < next)) next = userId;
+        if (indexedUserIds instanceof NavigableSet<?>) {
+            @SuppressWarnings("unchecked")
+            NavigableSet<Long> orderedUsers = (NavigableSet<Long>) indexedUserIds;
+            Long next = orderedUsers.higher(cursor);
+            return next == null ? null : state.user(next);
         }
-        return next == null ? null : state.user(next);
+        if (indexedUserIds == null && state.users() instanceof java.util.NavigableMap<?, ?>) {
+            @SuppressWarnings("unchecked")
+            java.util.NavigableMap<Long, CoreUserState> orderedUsers =
+                    (java.util.NavigableMap<Long, CoreUserState>) state.users();
+            Map.Entry<Long, CoreUserState> next = orderedUsers.higherEntry(cursor);
+            return next == null ? null : next.getValue();
+        }
+        throw new IllegalStateException("risk user index must be ordered for online scanning");
     }
 
     private static Map.Entry<String, CorePositionState> nextPosition(Map<String, CorePositionState> values,
