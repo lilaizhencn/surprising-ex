@@ -81,7 +81,8 @@ public final class CoreAcceptFreezeConcurrentBenchmark {
                     }
                     CoreResponse response = state.apply(submitted.command());
                     if (response.status() != ResponseStatus.OK) {
-                        throw new IllegalStateException("order was not accepted: " + response.status());
+                        throw new IllegalStateException("order was not accepted: status=" + response.status()
+                                + ", resultCode=" + response.resultCode());
                     }
                     consumed.incrementAndGet();
                     if (measured) latencies[submitted.index()] = System.nanoTime() - submitted.enqueuedNanos();
@@ -89,6 +90,9 @@ public final class CoreAcceptFreezeConcurrentBenchmark {
                 }
                 return new Result(orders, 0, System.nanoTime() - acceptStarted, latencies,
                         maxQueueDepth.get(), state.pendingMatchingCount());
+            } catch (Throwable failure) {
+                ownerReady.countDown();
+                throw failure;
             }
         });
         await(ownerReady);

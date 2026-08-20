@@ -57,15 +57,9 @@ import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.RuntimeCancelOrderDeltaApplier;
-import com.surprising.aeron.service.state.RuntimePlaceOrderDeltaApplier;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.RuntimeStateParityChecker;
 import com.surprising.aeron.service.state.RuntimeStateDeltaApplier;
-import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
-import com.surprising.aeron.service.state.RuntimePerpetualLiquidationProcessor;
-import com.surprising.aeron.service.state.RuntimePerpetualRiskProcessor;
-import com.surprising.aeron.service.state.RuntimePerpetualMatchProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderState;
@@ -120,6 +114,7 @@ public final class CoreProbeState implements AutoCloseable {
     private long nextResultRetentionSequence;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final LinkedHashMap<Long, PendingMatching> pendingMatching;
+    private final LinkedHashMap<Long, List<LifecycleScope>> pendingLifecycleScopes;
     private final LinkedHashMap<Long, OrderBatchPending> pendingOrderBatches;
     private final List<CoreMessage> queuedMatching = new ArrayList<>();
     private final Map<Long, com.surprising.aeron.service.matching.CoreMatchingResult> completedMatching
@@ -200,6 +195,7 @@ public final class CoreProbeState implements AutoCloseable {
         this.nextResultRetentionSequence = nextRetentionSequence(commandResults);
         this.lastSourceSequences = lastSourceSequences;
         this.pendingMatching = new LinkedHashMap<>();
+        this.pendingLifecycleScopes = new LinkedHashMap<>();
         this.pendingOrderBatches = new LinkedHashMap<>();
         this.tradingState = tradingState;
         this.rollingBusinessStateHash = com.surprising.aeron.service.state.RollingBusinessStateHash.create(tradingState);
@@ -839,6 +835,7 @@ public final class CoreProbeState implements AutoCloseable {
             PendingMatching pending = newPendingMatching(sequence, PendingMatching.Operation.TRIGGER, command,
                     command.header().submittedAtEpochMillis());
             pendingMatching.put(sequence, pending);
+            registerPendingLifecycle(pending);
             appliedCommandCount = sequence;
             submitMatching(pending);
         }
@@ -880,6 +877,7 @@ public final class CoreProbeState implements AutoCloseable {
         PendingMatching pending = newPendingMatching(sequence, batch.operation, message, clusterTimestamp);
         batch.sequence = sequence;
         pendingMatching.put(sequence, pending);
+        registerPendingLifecycle(pending);
         pendingOrderBatches.put(sequence, batch);
         appliedCommandCount = sequence;
         recordSourceSequence(sourceKey, message.header().sourceSequence());
@@ -938,10 +936,6 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 prepareOrderBatchItem(batch, item, pending.command().header().userId(), pending.command().header().commandId());
                 batch.currentBefore = before;
-                if (batch.kind == OrderBatchKind.PLACE) {
-                    PlaceOrderCommand command = (PlaceOrderCommand) item.command;
-                    shadowPlaceOrder(before, tradingState, pending.command().header().userId(), command.orderId());
-                }
                 submitMatching(pending);
                 return null;
             } catch (CoreStateRejectedException exception) {
@@ -1077,10 +1071,8 @@ public final class CoreProbeState implements AutoCloseable {
             case PLACE -> {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 if (matchingResult.accepted()) {
-                    TradingCoreState matchBefore = tradingState;
                     adoptState(tradingReducer.applyMatches(tradingState, command.orderId(), command.baseAsset(),
                             command.quoteAsset(), matchingResult.matches()));
-                    shadowMatch(matchBefore, tradingState, command.orderId(), matchingResult.matches());
                 } else {
                     adoptState(tradingReducer.rejectPlaceOrder(tradingState,
                             pending.command().header().userId(), command.orderId()));
@@ -1091,8 +1083,6 @@ public final class CoreProbeState implements AutoCloseable {
                 CancelOrderCommand command = (CancelOrderCommand) item.command;
                 if (matchingResult.accepted()) {
                     adoptState(tradingReducer.cancelOrder(tradingState, pending.command().header().userId(), command));
-                    shadowCancelOrder(batch.currentBefore, tradingState,
-                            pending.command().header().userId(), command.orderId());
                 }
                 return List.of();
             }
@@ -1151,7 +1141,7 @@ public final class CoreProbeState implements AutoCloseable {
         storeResult(pending.command().header().commandId(), new StoredResult(
                 CommandFingerprint.of(pending.command()), ResponseStatus.APPLIED, CoreResultCode.NONE,
                 appliedCommandCount, requiredExportSequence, stateHash, responseData, 0));
-        pendingMatching.remove(batch.sequence);
+        removePendingMatching(batch.sequence);
         pendingOrderBatches.remove(batch.sequence);
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 appliedCommandCount, requiredExportSequence, stateHash, responseData);
@@ -1283,7 +1273,6 @@ public final class CoreProbeState implements AutoCloseable {
                     adoptState(tradingReducer.placeOrder(tradingState, message.header().userId(), command,
                             message.header().commandId(), openInterestIndex.openInterestSteps(command.symbol()),
                             activeOrderIndex));
-                    shadowPlaceOrder(before, tradingState, message.header().userId(), command.orderId());
                     commandChangedUserIds = List.of(message.header().userId());
                     commandChangedOrderIds = List.of(command.orderId());
                     commandOrderViews = List.of(orderView(tradingState.order(command.orderId())));
@@ -1342,6 +1331,7 @@ public final class CoreProbeState implements AutoCloseable {
         }
         PendingMatching pending = newPendingMatching(sequence, operation, message, clusterTimestamp);
         pendingMatching.put(sequence, pending);
+        registerPendingLifecycle(pending);
         cachedBusinessStateHash = businessStateHash;
         appliedCommandCount = sequence;
         Long previousSourceSequence = lastSourceSequences.put(sourceKey, message.header().sourceSequence());
@@ -1534,10 +1524,19 @@ public final class CoreProbeState implements AutoCloseable {
 
     private void ensureLifecycleScopeAvailable(LifecycleScope candidate) {
         if (candidate.symbol().isBlank()) return;
-        for (PendingMatching pending : pendingMatching.values()) {
-            if (pendingLifecycleConflicts(candidate, pending)) {
-                throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
-                        "matching lifecycle scope is in progress");
+        if (candidate.lifecycle()) {
+            for (PendingMatching pending : pendingMatching.values()) {
+                if (pendingLifecycleConflicts(candidate, pending)) {
+                    throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
+                            "matching lifecycle scope is in progress");
+                }
+            }
+        } else {
+            for (List<LifecycleScope> scopes : pendingLifecycleScopes.values()) {
+                if (scopes.stream().anyMatch(scope -> conflicts(candidate, scope))) {
+                    throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
+                            "matching lifecycle scope is in progress");
+                }
             }
         }
         if (tradingState.treasuryState().lifecycleProgress(candidate.symbol()) != null
@@ -1568,6 +1567,24 @@ public final class CoreProbeState implements AutoCloseable {
         var batch = TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payload());
         return batch.actions().stream().map(action -> new LifecycleScope(false, action.userId(), action.symbol(),
                         action.liquidationId(), true, false)).anyMatch(scope -> conflicts(candidate, scope));
+    }
+
+    private void registerPendingLifecycle(PendingMatching pending) {
+        List<LifecycleScope> scopes = switch (pending.operation()) {
+            case LIQUIDATION, SETTLEMENT -> List.of(lifecycleScope(pending));
+            case LIQUIDATION_BATCH -> TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payload())
+                    .actions().stream()
+                    .map(action -> new LifecycleScope(false, action.userId(), action.symbol(),
+                            action.liquidationId(), true, false))
+                    .toList();
+            default -> List.of();
+        };
+        if (!scopes.isEmpty()) pendingLifecycleScopes.put(pending.sequence(), scopes);
+    }
+
+    private PendingMatching removePendingMatching(long sequence) {
+        pendingLifecycleScopes.remove(sequence);
+        return pendingMatching.remove(sequence);
     }
 
     private LifecycleScope lifecycleScope(CoreMessage message, PendingMatching.Operation operation) {
@@ -1702,42 +1719,6 @@ public final class CoreProbeState implements AutoCloseable {
         private boolean more() {
             return nextCursorOrderId != 0;
         }
-    }
-
-    private void shadowPlaceOrder(TradingCoreState before, TradingCoreState after,
-                                  long userId, long orderId) {
-        // RuntimeStateDeltaApplier commits every transition in adoptState.
-    }
-
-    private void shadowCancelOrder(TradingCoreState before, TradingCoreState after,
-                                   long userId, long orderId) {
-        // RuntimeStateDeltaApplier commits every transition in adoptState.
-    }
-
-    private void shadowMatch(TradingCoreState before, TradingCoreState after, long takerOrderId,
-                             java.util.List<com.surprising.aeron.service.matching.CoreMatch> matches) {
-        // RuntimeStateDeltaApplier commits every transition in adoptState.
-    }
-
-    private void shadowFunding(TradingCoreState before, TradingCoreState after,
-                               com.surprising.aeron.protocol.ApplyFundingCommand command,
-                               Iterable<Long> indexedUserIds, UUID chunkCommandId) {
-        // RuntimeStateDeltaApplier commits every transition in adoptState.
-    }
-
-    private void shadowRisk(TradingCoreState before, TradingCoreState after,
-                            com.surprising.aeron.protocol.ApplyMarkPriceCommand command,
-                            Iterable<Long> indexedUserIds) {
-        // RuntimeStateDeltaApplier commits every transition in adoptState.
-    }
-
-    private void shadowRiskContinuation(TradingCoreState before, TradingCoreState after,
-                                         int maxUsers, Iterable<Long> indexedUserIds) {
-        // RuntimeStateDeltaApplier commits every transition in adoptState.
-    }
-
-    private void reconcileRuntimeAfterTriggerScan() {
-        // Trigger scan transitions are committed by adoptState.
     }
 
     private TradingCoreState executeLiquidationWithShadow(TradingCoreState before,
@@ -1997,8 +1978,6 @@ public final class CoreProbeState implements AutoCloseable {
                             command.quoteAsset(), matchingResult.matches())
                             : tradingReducer.rejectPlaceOrder(tradingState, pending.command().header().userId(),
                             command.orderId()));
-                    if (matchingResult.accepted()) shadowMatch(before, tradingState, command.orderId(),
-                            matchingResult.matches());
                     commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
                             matchingResult.matches());
                 }
@@ -2009,8 +1988,6 @@ public final class CoreProbeState implements AutoCloseable {
                     if (matchingResult.accepted()) {
                         adoptState(tradingReducer.cancelOrder(tradingState,
                                 pending.command().header().userId(), command));
-                        shadowCancelOrder(before, tradingState,
-                                pending.command().header().userId(), command.orderId());
                     }
                 }
                 case REPLACE, AMEND -> {
@@ -2158,7 +2135,7 @@ public final class CoreProbeState implements AutoCloseable {
         byte[] responseData = commandResultData();
         storeResult(pending.command().header().commandId(), new StoredResult(CommandFingerprint.of(pending.command()),
                 status, resultCode, applied, requiredExportSequence, stateHash, responseData, 0));
-        pendingMatching.remove(sequence);
+        removePendingMatching(sequence);
         return new CoreResponse(status, status, resultCode, applied, requiredExportSequence, stateHash, responseData);
     }
 
@@ -2610,23 +2587,19 @@ public final class CoreProbeState implements AutoCloseable {
                 var command = TradingCommandCodec.decodeApplyMarkPrice(message.payload());
                 int pendingBefore = pendingRiskScanCount();
                 long startedAt = System.nanoTime();
-                TradingCoreState before = tradingState;
-                TradingCoreState after = tradingReducer.applyMarkPrice(before, command, positionUserIndex, liquidationIndex);
-                shadowRisk(before, after, command, positionUserIndex.users(command.symbol()));
+                TradingCoreState after = tradingReducer.applyMarkPrice(tradingState, command, positionUserIndex,
+                        liquidationIndex);
                 adoptState(after);
                 initializeTriggerScan(command);
                 logRiskScan("mark-price", command.symbol(), tradingState.riskState().scanControl().scanBatchSize(),
                         pendingBefore, startedAt);
                 evaluateMarkPriceTriggers(command, message.header().commandId(), message.header().submittedAtEpochMillis());
-                reconcileRuntimeAfterTriggerScan();
             }
             case APPLY_FUNDING -> {
                 var command = TradingCommandCodec.decodeApplyFunding(message.payload());
-                TradingCoreState before = tradingState;
                 Iterable<Long> indexedUserIds = positionUserIndex.users(command.symbol());
-                var result = tradingReducer.applyFundingWithFacts(before,
+                var result = tradingReducer.applyFundingWithFacts(tradingState,
                         command, indexedUserIds, message.header().commandId());
-                shadowFunding(before, result.state(), command, indexedUserIds, message.header().commandId());
                 adoptState(result.state());
                 commandFundingPayments = result.payments();
                 commandFundingProgress = result.progress();
@@ -2650,14 +2623,10 @@ public final class CoreProbeState implements AutoCloseable {
                 String symbol = tradingState.riskState().scan().symbol();
                 int pendingBefore = pendingRiskScanCount();
                 long startedAt = System.nanoTime();
-                TradingCoreState before = tradingState;
-                TradingCoreState after = tradingReducer.continueRiskScan(before, command.maxUsers(), positionUserIndex,
+                TradingCoreState after = tradingReducer.continueRiskScan(tradingState, command.maxUsers(), positionUserIndex,
                         liquidationIndex);
-                shadowRiskContinuation(before, after, command.maxUsers(),
-                        positionUserIndex.users(before.riskState().scan().symbol()));
                 adoptState(after);
                 evaluatePendingTriggerScan(symbol);
-                reconcileRuntimeAfterTriggerScan();
                 logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
             }
             case UPDATE_RISK_SCAN_CONTROL -> {
@@ -3197,6 +3166,7 @@ public final class CoreProbeState implements AutoCloseable {
         failedQueries.clear();
         queryIds.clear();
         pendingMatching.clear();
+        pendingLifecycleScopes.clear();
         pendingOrderBatches.clear();
         runtime.close();
     }

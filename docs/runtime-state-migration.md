@@ -44,10 +44,10 @@ TradingRuntimeState
 - `TradingRuntimeSnapshot` 是独立的不可变快照，使用 `BalanceKey(userId, assetId)` 明确表达余额身份，并按数字 ID 排序复制；Runtime 的可变对象不会泄漏到快照。
 - `RuntimeStateProjector` 用于启动恢复；`RuntimeStateDeltaApplier` 负责在线 transition 的变更键提交，`RuntimeStateMaterializer` 生成兼容读取视图，禁止每笔命令重新投影完整旧状态。
 - `RuntimePlaceOrderDeltaApplier` 已实现首个增量 apply：只接受“订单从不存在到 OPEN、reservation 新增、余额 available/locked 等额变化”的合法差分；校验失败发生在 Runtime 写入之前。
-- `CoreProbeState` 的 `LINEAR_PERPETUAL` Runtime 在线模式默认开启；旧 reducer 生成候选 transition，Runtime 提交后必须通过完整 Core equals 与 business hash 校验。
+- `CoreProbeState` 的 Runtime 在线模式默认对全部 `ProductLine` 开启；旧 reducer 仍生成候选 transition，Runtime 负责 owner-thread 增量提交。正常热路径不再每笔完整 materialize/parity；需要逐笔诊断时显式设置 `-Dsurprising.aeron.runtime.full-parity=true`。
 - shadow Runtime 现在由 `CoreProbeState` 持有生命周期：连续 `PLACE_ORDER` 使用增量 apply；检测到旧状态游标不连续（撤单、成交、风控或恢复后）时，下一笔 PLACE 仅重建一次，再继续增量运行。回滚会使游标失效，禁止使用可能过期的 Runtime 状态。
 
-这批实现已替换 `CoreProbeState` 的在线状态提交边界。旧 reducer 仍负责生成候选 transition，Runtime delta apply 和 materialize parity 是每次提交的强制门禁。
+这批实现已替换 `CoreProbeState` 的在线状态提交边界。旧 reducer 仍负责生成候选 transition，Runtime delta apply 是在线提交门禁；完整 materialize/parity 保留在恢复、快照和显式诊断路径，避免把兼容视图重建成本放入每单热路径。
 
 ### 热路径
 
@@ -169,7 +169,7 @@ Runtime 与旧 Snapshot State 必须双写对照但不能双重扣款。发现 h
 | Runtime 持久镜像生命周期 | 已完成 | 连续下单增量运行，非下单状态变化和回滚自动重建 |
 | 普通/批量撤单 shadow 差分 | 已完成 | 仅 `LINEAR_PERPETUAL`，逐项校验后释放 reservation 并标记终态；失败不变更 |
 | 旧状态逐字段对照 | 已完成 | `RuntimeStateParityChecker` 覆盖 instrument、风险、持仓、订单、触发器、treasury、资金费进度和完整 Snapshot 字段 |
-| 永续 Runtime 在线权威 | 已完成 | Runtime 原地 delta apply、完整 materialize、Core equals/hash 门禁已接入默认链路 |
+| 永续 Runtime 在线权威 | 已完成 | Runtime 原地 delta apply 已接入默认链路；完整 materialize/parity 保留在恢复、快照和显式诊断路径 |
 | 部分成交后的撤单 | 已完成 | 严格校验已成交/已消费单位、取消释放单位、剩余冻结和终态订单；已覆盖资金守恒与 parity 测试 |
 | 成交差分契约 | 已完成 | 原生 perpetual match processor 对订单、reservation、持仓、结算余额和 treasury 原子提交并统一 parity |
 | position/treasury Runtime 投影 | 已完成 | 已接入 owner-thread Runtime 和恢复投影，含资金/持仓字段校验基础 |
