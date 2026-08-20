@@ -158,8 +158,9 @@ class CoreLifecycleStateTest {
         TradingCoreReducer.FundingApplication netZeroExpected = reducer.applyFundingWithFacts(netZero,
                 netZeroCommand);
         RuntimeIdentityRegistry netZeroIdentities = new RuntimeIdentityRegistry();
-        var netZeroActual = RuntimePerpetualFundingProcessor.simulate(netZero, netZeroCommand,
-                null, null, netZeroIdentities);
+        TradingRuntimeState netZeroRuntime = RuntimeStateProjector.project(netZero, netZeroIdentities);
+        var netZeroActual = RuntimePerpetualFundingProcessor.apply(netZero, netZeroCommand,
+                null, null, netZeroRuntime, netZeroIdentities);
         RuntimeStateParityChecker.assertMatches(netZeroExpected.state(), netZeroIdentities, netZeroActual.state());
         assertThat(netZeroActual.payments()).isEqualTo(netZeroExpected.payments());
         assertThat(netZeroActual.progress()).isEqualTo(netZeroExpected.progress());
@@ -182,8 +183,9 @@ class CoreLifecycleStateTest {
         TradingCoreReducer.FundingApplication firstExpected = reducer.applyFundingWithFacts(chunked, firstCommand,
                 List.of(1L, 2L), firstCommandId);
         RuntimeIdentityRegistry chunkedIdentities = new RuntimeIdentityRegistry();
-        var firstActual = RuntimePerpetualFundingProcessor.simulate(chunked, firstCommand,
-                List.of(1L, 2L), firstCommandId, chunkedIdentities);
+        TradingRuntimeState chunkedRuntime = RuntimeStateProjector.project(chunked, chunkedIdentities);
+        var firstActual = RuntimePerpetualFundingProcessor.apply(chunked, firstCommand,
+                List.of(1L, 2L), firstCommandId, chunkedRuntime, chunkedIdentities);
         RuntimeStateParityChecker.assertMatches(firstExpected.state(), chunkedIdentities, firstActual.state());
         assertThat(firstActual.payments()).isEqualTo(firstExpected.payments());
         assertThat(firstActual.progress()).isEqualTo(firstExpected.progress());
@@ -194,8 +196,8 @@ class CoreLifecycleStateTest {
         ApplyFundingCommand secondCommand = new ApplyFundingCommand(103, "BTC-USDT", 1, 10_000, 1, 1);
         TradingCoreReducer.FundingApplication secondExpected = reducer.applyFundingWithFacts(restored, secondCommand,
                 List.of(1L, 2L), secondCommandId);
-        var secondActual = RuntimePerpetualFundingProcessor.simulate(restored, secondCommand,
-                List.of(1L, 2L), secondCommandId, chunkedIdentities);
+        var secondActual = RuntimePerpetualFundingProcessor.apply(restored, secondCommand,
+                List.of(1L, 2L), secondCommandId, firstActual.state(), chunkedIdentities);
         RuntimeStateParityChecker.assertMatches(secondExpected.state(), chunkedIdentities, secondActual.state());
         assertThat(secondActual.payments()).isEqualTo(secondExpected.payments());
         assertThat(secondActual.progress()).isEqualTo(secondExpected.progress());

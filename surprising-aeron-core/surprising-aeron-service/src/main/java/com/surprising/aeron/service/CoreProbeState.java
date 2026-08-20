@@ -2618,8 +2618,8 @@ public final class CoreProbeState implements AutoCloseable {
                 var expected = tradingReducer.applyFundingWithFacts(tradingState,
                         command, indexedUserIds, message.header().commandId());
                 if (productLine == ProductLine.LINEAR_PERPETUAL) {
-                    var result = RuntimePerpetualFundingProcessor.simulate(tradingState, command, indexedUserIds,
-                            message.header().commandId(), runtimePlaceOrderIdentities);
+                    var result = RuntimePerpetualFundingProcessor.apply(tradingState, command, indexedUserIds,
+                            message.header().commandId(), runtimePlaceOrderState, runtimePlaceOrderIdentities);
                     if (!expected.payments().equals(result.payments()) || !expected.progress().equals(result.progress())) {
                         throw new IllegalStateException("runtime funding facts do not match core state expectation");
                     }

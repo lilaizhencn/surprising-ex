@@ -10,7 +10,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
-/** Runs one perpetual funding chunk on a discardable Runtime projection. */
 public final class RuntimePerpetualFundingProcessor {
 
     private RuntimePerpetualFundingProcessor() {
@@ -22,6 +21,17 @@ public final class RuntimePerpetualFundingProcessor {
         if (before == null || command == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual funding simulation");
         }
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        return apply(before, command, indexedUserIds, chunkCommandId, runtime, identities);
+    }
+
+    public static FundingResult apply(TradingCoreState before, ApplyFundingCommand command,
+                                      Iterable<Long> indexedUserIds, UUID chunkCommandId,
+                                      TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (before == null || command == null || runtime == null || identities == null) {
+            throw new IllegalArgumentException("invalid perpetual funding apply");
+        }
+        runtime.assertOwner();
         if (!before.productLine().isFundingProduct()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
@@ -37,7 +47,6 @@ public final class RuntimePerpetualFundingProcessor {
             throw new CoreStateRejectedException("MARK_PRICE_NOT_FOUND", "funding requires mark price");
         }
 
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         int symbolId = identities.symbolId(instrument.symbol());
         int settleAssetId = identities.assetId(instrument.settleAsset());
         long previousSettlement = runtime.treasury().fundingSettlement(symbolId);
