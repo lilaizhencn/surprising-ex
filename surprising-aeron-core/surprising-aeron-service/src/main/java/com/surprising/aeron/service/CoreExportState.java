@@ -25,7 +25,7 @@ final class CoreExportState {
             + (long) CoreMessageCodec.MAX_PAYLOAD_LENGTH;
     private long acknowledgedSequence;
     private long nextSequence;
-    private final ArrayDeque<CoreMessage> pending;
+    private final ArrayDeque<PendingExport> pending;
     private long pendingBytes;
     private long pendingDigest;
 
@@ -40,14 +40,16 @@ final class CoreExportState {
         }
         this.acknowledgedSequence = acknowledgedSequence;
         this.nextSequence = nextSequence;
-        this.pending = new ArrayDeque<>(pending);
+        this.pending = new ArrayDeque<>(pending.size());
         long expectedSequence = Math.incrementExact(acknowledgedSequence);
-        for (CoreMessage event : this.pending) {
+        for (CoreMessage event : pending) {
+            CoreExportEvent decoded = CoreExportCodec.decodeEvent(event.payloadUnsafe());
             if (event.header().kind() != WireMessageKind.EXPORT_EVENT
                     || event.header().sourceSequence() != expectedSequence
-                    || CoreExportCodec.decodeEvent(event.payload()).exportSequence() != expectedSequence) {
+                    || decoded.exportSequence() != expectedSequence) {
                 throw new IllegalArgumentException("non-contiguous export state");
             }
+            this.pending.add(new PendingExport(event, terminalOrderIds(decoded)));
             pendingBytes = Math.addExact(pendingBytes, encodedLength(event));
             pendingDigest ^= eventDigest(event);
             expectedSequence = Math.incrementExact(expectedSequence);
@@ -76,11 +78,11 @@ final class CoreExportState {
         long sequence = nextSequence;
         CoreExportEvent event = new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
                 command.header().commandId(), command.header().messageType(), status, resultCode,
-                command.header().userId(), command.payload(), changedUsers, changedOrders, executions,
+                command.header().userId(), command.payloadUnsafe(), changedUsers, changedOrders, executions,
                 fundingPayments, changedLiquidations, changedTreasuryAssets, changedTriggerOrders);
         CoreMessage message;
         try {
-            message = new CoreMessage(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));
+            message = CoreMessage.owned(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));
         } catch (IllegalArgumentException exception) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export fact exceeds event limit");
         }
@@ -88,7 +90,7 @@ final class CoreExportState {
         if (pendingBytes + eventBytes > MAX_PENDING_BYTES) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached byte limit");
         }
-        pending.add(message);
+        pending.add(new PendingExport(message, terminalOrderIds(event)));
         pendingBytes = Math.addExact(pendingBytes, eventBytes);
         pendingDigest ^= eventDigest(message);
         nextSequence = Math.incrementExact(nextSequence);
@@ -121,14 +123,10 @@ final class CoreExportState {
         int removeCount = Math.toIntExact(command.throughSequence() - acknowledgedSequence);
         Set<Long> terminalOrderIds = new LinkedHashSet<>();
         for (int index = 0; index < removeCount; index++) {
-            CoreMessage removed = pending.removeFirst();
-            CoreExportEvent event = CoreExportCodec.decodeEvent(removed.payload());
-            event.changedOrders().stream()
-                    .filter(order -> !"OPEN".equals(order.status()))
-                    .map(com.surprising.aeron.protocol.CoreOrderStateView::orderId)
-                    .forEach(terminalOrderIds::add);
-            pendingBytes = Math.subtractExact(pendingBytes, encodedLength(removed));
-            pendingDigest ^= eventDigest(removed);
+            PendingExport removed = pending.removeFirst();
+            terminalOrderIds.addAll(removed.terminalOrderIds());
+            pendingBytes = Math.subtractExact(pendingBytes, encodedLength(removed.message()));
+            pendingDigest ^= eventDigest(removed.message());
         }
         acknowledgedSequence = command.throughSequence();
         return List.copyOf(terminalOrderIds);
@@ -139,9 +137,9 @@ final class CoreExportState {
         long encodedLength = Integer.BYTES;
         int limit = Math.min(maxEvents, pending.size());
         ArrayList<CoreMessage> batch = new ArrayList<>(limit);
-        Iterator<CoreMessage> iterator = pending.iterator();
+        Iterator<PendingExport> iterator = pending.iterator();
         while (count < limit && iterator.hasNext()) {
-            CoreMessage event = iterator.next();
+            CoreMessage event = iterator.next().message();
             int eventLength = encodedLength(event);
             long nextLength = Math.addExact(encodedLength, Math.addExact(Integer.BYTES, eventLength));
             if (nextLength > CoreExportCodec.MAX_BATCH_ENCODED_LENGTH - CoreExportCodec.BATCH_STATUS_FIXED_LENGTH) {
@@ -168,11 +166,13 @@ final class CoreExportState {
     }
 
     List<CoreMessage> pending() {
-        return List.copyOf(pending);
+        ArrayList<CoreMessage> events = new ArrayList<>(pending.size());
+        for (PendingExport event : pending) events.add(event.message());
+        return List.copyOf(events);
     }
 
     Iterable<CoreMessage> pendingEvents() {
-        return pending;
+        return pending()::iterator;
     }
 
     int pendingCount() {
@@ -202,7 +202,7 @@ final class CoreExportState {
         hash = digestLong(hash, header.userId());
         hash = digestLong(hash, header.submittedAtEpochMillis());
         hash = digestLong(hash, header.correlationId());
-        for (byte value : message.payload()) {
+        for (byte value : message.payloadUnsafe()) {
             hash ^= Byte.toUnsignedInt(value);
             hash *= 0x100000001b3L;
         }
@@ -216,5 +216,19 @@ final class CoreExportState {
             result *= 0x100000001b3L;
         }
         return result;
+    }
+
+    private static List<Long> terminalOrderIds(CoreExportEvent event) {
+        LinkedHashSet<Long> terminal = new LinkedHashSet<>();
+        for (var order : event.changedOrders()) {
+            if (!"OPEN".equals(order.status())) terminal.add(order.orderId());
+        }
+        return List.copyOf(terminal);
+    }
+
+    private record PendingExport(CoreMessage message, List<Long> terminalOrderIds) {
+        private PendingExport {
+            terminalOrderIds = List.copyOf(terminalOrderIds);
+        }
     }
 }

@@ -1,6 +1,6 @@
 # exchange-core 交易主链路性能与恢复审计报告
 
-> 状态：`P0_RUNTIME_HOT_PATH_REMEDIATED; CAPACITY_GATE_PENDING`
+> 状态：`P0_RUNTIME_HOT_PATH_REMEDIATED; P1_CONTINUATION_ALLOCATION_REMEDIATED; CAPACITY_GATE_PENDING`
 >
 > 审计分支：`codex/aeron-unified-core`
 >
@@ -550,11 +550,13 @@ Aeron owner thread
 
 ### P1：控制 continuation 与分配
 
-- DirectBuffer flyweight 解码、一次 owned copy 和复用响应 buffer。
-- fingerprint digest、matcher result、Stream、`toList`、重复 decode 和 Future 链分配优化。
-- outbox 预编码、terminal metadata、pending fact 契约收敛和 ACK metadata 化。
-- 去掉普通下单 preflight，HTTP 入口改为异步 admission；保留稳定 commandId。
-- 统一依赖版本和 JDK 25 模块参数。
+> 状态：**✅ 已完成（代码、定向回归与 3-fork benchmark/JFR）**。本状态表示 P1 代码出口已落地并完成本地观测，不表示 100k/s、三节点故障恢复或长稳容量门禁已通过。
+
+- [x] DirectBuffer flyweight 解码、一次 owned copy 和复用响应 buffer：`CoreMessageFlyweightDecoder`、`CoreMessage.owned`、`SurprisingClusteredService.PendingEgress`。
+- [x] fingerprint digest、matcher result、Stream、`toList`、重复 decode 和 Future 链分配优化：ThreadLocal SHA-256、bounded completion queue、热路径 changed-id 构造、export codec 显式循环、`matcherReady` 已完成时直达 matcher。
+- [x] outbox 预编码、terminal metadata、pending fact 契约收敛和 ACK metadata 化：`CoreExportState.PendingExport` 保存编码 fact 与 terminal order ids，ACK 不再重新 decode event。
+- [x] 去掉普通下单 preflight，HTTP 入口改为异步 admission；保留稳定 commandId：普通下单主链路沿用现有 asynchronous admission，preflight 仅保留为显式查询契约。
+- [x] 统一依赖版本和 JDK 25 模块参数：沿用 parent 的集中版本与 JDK 25 编译门禁，本轮 reactor 编译和测试均通过。
 
 ### P2：快照与故障恢复
 
@@ -634,7 +636,7 @@ mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
 ```
 
 构建通过，并执行 exchange-core adapter、完整 Core、skip-matcher 对照短基准以及永续 maker-depth 契约测试。
-工作区在审计前保持干净。
+本轮 P1 在保留既有未提交 P0 改动的工作区上完成；未覆盖的改动均未被重置或清理。
 
 独立资金/撮合回归共通过 `61` 个测试：`CoreProbeStateTest` 30、`CorePerpetualFinancialMatrixTest` 5、
 `RuntimePerpetualMatchProcessorTest` 6、`CoreMatchingStateTest` 20；这些测试覆盖成交、手续费、持仓、资金费、
@@ -643,6 +645,64 @@ mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
 本轮未执行三节点 Aeron 容量、Kafka/PostgreSQL 历史链路、leader failover、快照恢复、磁盘故障、六产品线
 资金守恒和长时间 JVM soak。原因是这些属于三节点系统容量、故障恢复和生产规模验收，不能由本地单模块回归
 替代；P0 在线代码阻塞已解除。
+
+### P1 continuation 与分配验证
+
+P1 已完成并由以下定向证据闭环：
+
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-service -am clean test \
+  -Dtest=CoreMessageFlyweightDecoderTest,MatchingCompletionQueueTest,SurprisingClusteredServiceTest,CoreProbeStateTest,CoreMatchingStateTest,CoreResultLedgerTest,CoreOrderedOrderBatchTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
+
+mvn -pl surprising-aeron-core/surprising-aeron-protocol -am test \
+  -Dtest=CoreMessageCodecTest,CoreExportCodecTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
+
+mvn -pl surprising-aeron-core/surprising-aeron-service -am test \
+  -Dtest=CoreProbeStateTest,CoreMatchingStateTest,CoreOrderedOrderBatchTest,CorePerpetualEndToEndBenchmarkTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+结果：第一组 service reactor 定向回归 `73` 个测试通过；protocol 编解码回归 `12` 个测试通过；加入 matcher-ready
+fast path 后再次运行 continuation、撮合、批量和永续端到端回归 `63` 个测试通过；永续资金矩阵 `5` 个测试和端到端
+撮合基准 `1` 个测试通过。新增 DirectBuffer 解码测试验证了 source frame 修改不会污染 owned payload，completion queue
+测试验证了有界溢出、顺序消费和 overflow 信号，cluster service 测试验证了单 wakeup timer、head sequence gate 和
+egress backpressure。
+
+本轮还执行了 `git diff --check`，以及 protocol/service 变更文件的 JDTLS error diagnostics，结果均为无错误。未执行
+三节点容量、100k/s 开放环、Kafka/Projector、leader failover、snapshot corruption、direct memory、长时间 soak 和
+六产品线逐项资金守恒；这些继续保留在 10.3 的未执行清单，不因 P1 代码回归通过而标记完成。
+
+本轮随后执行单产品线本地 benchmark 与 JFR：
+
+```bash
+env JAVA_HOME=<Temurin-25.0.4.1>/Contents/Home \
+  scripts/run-exchange-core-hot-path-stage.sh \
+  --stage p1-continuation-jfr --attempt-dir /tmp/surprising-p1-continuation-jfr \
+  --benchmark-suite baseline --forks 3 --maker-depth 1 --jfr-settings profile
+```
+
+结果为 `stageResult=PASS`。3 个 fork 均完成 50/50 最终裁决、成交数量 25，且 `pendingMatching=0`；最终裁决
+吞吐中位数 `678.997/s`，修正后 acceptance-to-finalization 延迟为 p50/p99/p99.9 `1,359/2,918/2,918 us`，
+并发 completion queue 最大深度 `50`。JFR 三个 recording 均约 3 秒，CPU 样本主要为 Disruptor busy-spin 等待；
+分配样本主要为 `ObjectsPool.ArrayStack` 初始化、`ConcurrentHashMap.initTable` 和 `Arrays.copyOf`。三份 JFR
+均未记录 `ContinuationFreeze`/`ContinuationThaw`；每份有 1 次 Young GC 和 1 次 Old GC，列出的最长 pause 为
+Young `5.05-6.27 ms`、Old `1.79-1.86 ms`。该结果是本地短样本观测，不替代 100k/s 容量、长稳、三节点故障恢复
+或资金守恒验收；benchmark runner 本身不暴露 funds delta、state hash 和 book-empty 断言。
+
+为扩大 P1 观测，本轮继续使用同一 runner 执行 `makerDepth=10` 与 `makerDepth=100`，每档 3 个 fork、Temurin
+25、JFR `profile`：
+
+| maker depth | 每 fork 最终裁决 / 成交 | 吞吐中位数 | 修正后 p50 / p99 / p99.9 | matching 残留 |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | `275 / 250` | `766.366/s` | `1,060 / 6,733 / 8,740 us` | `0` |
+| 100 | `2,525 / 2,500` | `374.049/s` | `2,140 / 10,231 / 14,032 us` | `0` |
+
+两档所有 fork 均为 `stageResult=PASS`。depth100 的 JFR 显示 `String.encodeUTF8` 分配压力升至 `48.22%-52.56%`，
+并从每 fork 1 次 Young GC 增至 6 次，最长列出的 Young GC pause 为 `8.72-9.38 ms`；六份 JFR 均未记录
+`ContinuationFreeze`/`ContinuationThaw`。扩大后的结果证明 P1 continuation、completion drain 和有界队列在更深
+撮合工作量下无残留任务，但 depth100 的 p99.9 已超过 `10 ms` 预算，仍不能标记为容量 SLO 通过。
 
 ### 10.1 分阶段证据
 

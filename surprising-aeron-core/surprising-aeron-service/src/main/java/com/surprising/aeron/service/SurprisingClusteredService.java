@@ -18,10 +18,15 @@ import io.aeron.logbuffer.Header;
 import java.util.concurrent.atomic.AtomicReference;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
+import org.agrona.concurrent.UnsafeBuffer;
 
 public final class SurprisingClusteredService implements ClusteredService {
 
@@ -35,6 +40,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private Cluster cluster;
     private IdleStrategy idleStrategy;
     private final Map<Long, PendingEgress> pendingEgress = new HashMap<>();
+    private final Set<Long> activeEgressSessions = new HashSet<>();
     private final Map<Long, ArrayDeque<PendingClient>> pendingClients = new HashMap<>();
     private boolean matchingWakeupScheduled;
 
@@ -47,6 +53,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     public void onStart(Cluster cluster, Image snapshotImage) {
         this.cluster = cluster;
         pendingEgress.clear();
+        activeEgressSessions.clear();
         pendingClients.clear();
         matchingWakeupScheduled = false;
         idleStrategy = cluster.idleStrategy();
@@ -66,11 +73,9 @@ public final class SurprisingClusteredService implements ClusteredService {
             int offset,
             int length,
             Header header) {
-        byte[] encoded = new byte[length];
-        buffer.getBytes(offset, encoded);
         CoreMessage request;
         try {
-            request = CoreMessageCodec.decode(encoded);
+            request = CoreMessageFlyweightDecoder.decode(buffer, offset, length);
         } catch (IllegalArgumentException exception) {
             return;
         }
@@ -79,7 +84,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (matchingSequence > 0) {
             if (session != null) {
                 pendingClients.computeIfAbsent(matchingSequence, ignored -> new ArrayDeque<>())
-                        .addLast(new PendingClient(session, request));
+                        .addLast(new PendingClient(session, request.header()));
             }
             scheduleMatchingWakeup();
             return;
@@ -88,15 +93,15 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (querySequence != 0) {
             if (session != null) {
                 pendingClients.computeIfAbsent(querySequence, ignored -> new ArrayDeque<>())
-                        .addLast(new PendingClient(session, request));
+                        .addLast(new PendingClient(session, request.header()));
             }
             scheduleQueryTimer(querySequence);
             return;
         }
         if (session != null) {
-            CoreMessage response = new CoreMessage(request.header().response(responseType(request)),
+            CoreMessage response = new CoreMessage(request.header().response(responseType(request.header())),
                     CoreProtocol.responsePayload(result));
-            offer(session, CoreMessageCodec.encode(response));
+            offer(session, response);
         }
     }
 
@@ -125,8 +130,16 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public int doBackgroundWork(long nowNs) {
         int work = 0;
-        for (PendingEgress egress : pendingEgress.values()) {
+        Iterator<Long> sessions = activeEgressSessions.iterator();
+        while (sessions.hasNext()) {
+            PendingEgress egress = pendingEgress.get(sessions.next());
+            if (egress == null || egress.session.isClosing()) {
+                if (egress != null) egress.queue.clear();
+                sessions.remove();
+                continue;
+            }
             work += drain(egress);
+            if (egress.queue.isEmpty()) sessions.remove();
         }
         if (state.pendingMatchingCount() > 0 && !matchingWakeupScheduled) {
             scheduleMatchingWakeup();
@@ -137,6 +150,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public void onTerminate(Cluster cluster) {
         pendingEgress.clear();
+        activeEgressSessions.clear();
         pendingClients.clear();
         matchingWakeupScheduled = false;
         this.cluster = null;
@@ -152,6 +166,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public void onSessionClose(ClientSession session, long timestamp, CloseReason closeReason) {
         pendingEgress.remove(session.id());
+        activeEgressSessions.remove(session.id());
     }
 
     @Override
@@ -159,24 +174,20 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (correlationId == MATCHING_WAKEUP_CORRELATION_ID) {
             matchingWakeupScheduled = false;
             state.drainMatchingCompletions();
-            long sequence = state.firstPendingMatchingSequence();
-            if (sequence == 0) return;
-            var matchingResult = state.takeMatchingResult(sequence);
-            if (matchingResult == null) {
-                state.markMatchingTimeout(sequence, timestamp);
-                matchingResult = state.takeMatchingResult(sequence);
+            for (int completed = 0; completed < 64; completed++) {
+                long sequence = state.firstPendingMatchingSequence();
+                if (sequence == 0) break;
+                var matchingResult = state.takeMatchingResult(sequence);
+                if (matchingResult == null) {
+                    state.markMatchingTimeout(sequence, timestamp);
+                    matchingResult = state.takeMatchingResult(sequence);
+                }
+                if (matchingResult == null) break;
+                CoreResponse result = state.completeMatching(sequence, matchingResult, timestamp,
+                        cluster == null ? 0 : cluster.logPosition());
+                if (result == null) break;
+                deliverMatchingResponse(sequence, result);
             }
-            if (matchingResult == null) {
-                scheduleMatchingWakeup();
-                return;
-            }
-            CoreResponse result = state.completeMatching(sequence, matchingResult, timestamp,
-                    cluster == null ? 0 : cluster.logPosition());
-            if (result == null) {
-                scheduleMatchingWakeup();
-                return;
-            }
-            deliverMatchingResponse(sequence, result);
             scheduleMatchingWakeup();
             return;
         }
@@ -190,9 +201,9 @@ public final class SurprisingClusteredService implements ClusteredService {
             if (clients != null) {
                 for (PendingClient pendingClient : clients) {
                     if (pendingClient.session().isClosing()) continue;
-                    CoreMessage response = new CoreMessage(pendingClient.request().header().response(
-                            responseType(pendingClient.request())), CoreProtocol.responsePayload(queryResult));
-                    offer(pendingClient.session(), CoreMessageCodec.encode(response));
+                    CoreMessage response = new CoreMessage(pendingClient.requestHeader().response(
+                            responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(queryResult));
+                    offer(pendingClient.session(), response);
                 }
             }
             return;
@@ -251,15 +262,17 @@ public final class SurprisingClusteredService implements ClusteredService {
         state = restored;
     }
 
-    private void offer(ClientSession session, byte[] encoded) {
+    private void offer(ClientSession session, CoreMessage message) {
         PendingEgress egress = pendingEgress.computeIfAbsent(session.id(), id -> new PendingEgress(session));
+        int length = CoreMessageCodec.encodedLength(message);
+        egress.ensureScratch(length);
+        CoreMessageCodec.encode(message, egress.scratch);
         if (!egress.queue.isEmpty()) {
-            enqueue(egress, encoded);
+            enqueue(egress, egress.scratch, length);
             return;
         }
-        org.agrona.concurrent.UnsafeBuffer response = new org.agrona.concurrent.UnsafeBuffer(encoded);
-        if (session.offer(response, 0, encoded.length) < 0) {
-            enqueue(egress, encoded);
+        if (session.offer(egress.scratchBuffer, 0, length) < 0) {
+            enqueue(egress, egress.scratch, length);
         }
     }
 
@@ -270,8 +283,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
         int work = 0;
         while (!egress.queue.isEmpty()) {
-            byte[] encoded = egress.queue.peekFirst();
-            if (egress.session.offer(new org.agrona.concurrent.UnsafeBuffer(encoded), 0, encoded.length) < 0) {
+            UnsafeBuffer encoded = egress.queue.peekFirst();
+            if (egress.session.offer(encoded, 0, encoded.capacity()) < 0) {
                 break;
             }
             egress.queue.removeFirst();
@@ -280,21 +293,30 @@ public final class SurprisingClusteredService implements ClusteredService {
         return work;
     }
 
-    private static void enqueue(PendingEgress egress, byte[] encoded) {
+    private void enqueue(PendingEgress egress, byte[] encoded, int length) {
         if (egress.queue.size() >= MAX_PENDING_EGRESS_PER_SESSION) {
             egress.queue.clear();
             egress.session.close();
             return;
         }
-        egress.queue.addLast(encoded);
+        egress.queue.addLast(new UnsafeBuffer(Arrays.copyOf(encoded, length)));
+        activeEgressSessions.add(egress.session.id());
     }
 
     private static final class PendingEgress {
         private final ClientSession session;
-        private final ArrayDeque<byte[]> queue = new ArrayDeque<>();
+        private final ArrayDeque<UnsafeBuffer> queue = new ArrayDeque<>();
+        private byte[] scratch = new byte[0];
+        private UnsafeBuffer scratchBuffer = new UnsafeBuffer(scratch);
 
         private PendingEgress(ClientSession session) {
             this.session = session;
+        }
+
+        private void ensureScratch(int length) {
+            if (scratch.length >= length) return;
+            scratch = new byte[length];
+            scratchBuffer = new UnsafeBuffer(scratch);
         }
     }
 
@@ -318,9 +340,9 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (clients == null) return;
         for (PendingClient pendingClient : clients) {
             if (pendingClient.session().isClosing()) continue;
-            CoreMessage response = new CoreMessage(pendingClient.request().header().response(
-                    responseType(pendingClient.request())), CoreProtocol.responsePayload(result));
-            offer(pendingClient.session(), CoreMessageCodec.encode(response));
+            CoreMessage response = new CoreMessage(pendingClient.requestHeader().response(
+                    responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(result));
+            offer(pendingClient.session(), response);
         }
     }
 
@@ -335,11 +357,12 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
     }
 
-    private record PendingClient(ClientSession session, CoreMessage request) {
+    private record PendingClient(ClientSession session,
+                                 com.surprising.aeron.protocol.CoreMessageHeader requestHeader) {
     }
 
-    private static CoreMessageType responseType(CoreMessage request) {
-        return switch (request.header().messageType()) {
+    private static CoreMessageType responseType(com.surprising.aeron.protocol.CoreMessageHeader requestHeader) {
+        return switch (requestHeader.messageType()) {
             case USER_STATE_QUERY -> CoreMessageType.USER_STATE_RESULT;
             case ORDER_STATE_QUERY, CLIENT_ORDER_STATE_QUERY -> CoreMessageType.ORDER_STATE_RESULT;
             case BOOK_STATE_QUERY -> CoreMessageType.BOOK_STATE_RESULT;
@@ -352,7 +375,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             case SETTLEMENT_PROGRESS_QUERY -> CoreMessageType.SETTLEMENT_PROGRESS_RESULT;
             case COMMAND_RESULT_QUERY -> CoreMessageType.COMMAND_RESULT_RESULT;
             case RISK_SCAN_CONTROL_QUERY -> CoreMessageType.RISK_SCAN_CONTROL_RESULT;
-            default -> request.header().kind() == WireMessageKind.QUERY
+            default -> requestHeader.kind() == WireMessageKind.QUERY
                     ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
         };
     }

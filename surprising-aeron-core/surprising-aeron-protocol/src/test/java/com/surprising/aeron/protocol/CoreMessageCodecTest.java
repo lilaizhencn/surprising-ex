@@ -42,7 +42,6 @@ class CoreMessageCodecTest {
         assertThat(Arrays.copyOf(destination, length)).isEqualTo(CoreMessageCodec.encode(message));
         assertThat(destination[length]).isEqualTo((byte) 0x5a);
     }
-
     @Test
     void roundTripsExplicitDefaultRoute() {
         CoreMessage command = command(UUID.randomUUID(), 42, 99, 7);

@@ -83,4 +83,8 @@ public record CoreExportEvent(
     public byte[] commandPayload() {
         return commandPayload.clone();
     }
+
+    public byte[] commandPayloadUnsafe() {
+        return commandPayload;
+    }
 }

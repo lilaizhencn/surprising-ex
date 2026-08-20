@@ -45,9 +45,11 @@ public final class CoreExportCodec {
     }
 
     public static byte[] encodeEvent(CoreExportEvent event) {
-        byte[] payload = event.commandPayload();
-        List<byte[]> users = event.changedUsers().stream().map(CoreStateQueryCodec::encodeUserState).toList();
-        List<byte[]> orders = event.changedOrders().stream().map(CoreStateQueryCodec::encodeOrderState).toList();
+        byte[] payload = event.commandPayloadUnsafe();
+        List<byte[]> users = new ArrayList<>(event.changedUsers().size());
+        for (CoreUserStateView user : event.changedUsers()) users.add(CoreStateQueryCodec.encodeUserState(user));
+        List<byte[]> orders = new ArrayList<>(event.changedOrders().size());
+        for (CoreOrderStateView order : event.changedOrders()) orders.add(CoreStateQueryCodec.encodeOrderState(order));
         long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 7L + payload.length;
         for (byte[] user : users) length = Math.addExact(length, Integer.BYTES + user.length);
         for (byte[] order : orders) length = Math.addExact(length, Integer.BYTES + order.length);
@@ -311,7 +313,8 @@ public final class CoreExportCodec {
         if (events == null || events.size() > MAX_BATCH_EVENTS) {
             throw new IllegalArgumentException("invalid export event batch");
         }
-        List<byte[]> encoded = events.stream().map(CoreMessageCodec::encode).toList();
+        List<byte[]> encoded = new ArrayList<>(events.size());
+        for (CoreMessage event : events) encoded.add(CoreMessageCodec.encode(event));
         long total = Integer.BYTES;
         for (byte[] event : encoded) {
             total = Math.addExact(total, Math.addExact(Integer.BYTES, event.length));

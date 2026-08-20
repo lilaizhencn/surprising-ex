@@ -96,6 +96,6 @@ public final class CoreMessageCodec {
         CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType, commandId,
                 productLine, route, source, sourceId, sourceSequence, userId,
                 submittedAtEpochMillis, correlationId);
-        return new CoreMessage(header, payload);
+        return CoreMessage.owned(header, payload);
     }
 }

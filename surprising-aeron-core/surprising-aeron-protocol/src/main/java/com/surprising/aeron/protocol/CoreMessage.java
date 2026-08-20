@@ -3,16 +3,36 @@ package com.surprising.aeron.protocol;
 import java.util.Arrays;
 import java.util.Objects;
 
-public record CoreMessage(CoreMessageHeader header, byte[] payload) {
+public final class CoreMessage {
 
-    public CoreMessage {
-        Objects.requireNonNull(header, "header");
-        payload = payload == null ? new byte[0] : Arrays.copyOf(payload, payload.length);
+    private final CoreMessageHeader header;
+    private final byte[] payload;
+
+    public CoreMessage(CoreMessageHeader header, byte[] payload) {
+        this(header, payload, false);
     }
 
-    @Override
+    public static CoreMessage owned(CoreMessageHeader header, byte[] payload) {
+        return new CoreMessage(header, payload, true);
+    }
+
+    private CoreMessage(CoreMessageHeader header, byte[] payload, boolean owned) {
+        this.header = Objects.requireNonNull(header, "header");
+        this.payload = owned
+                ? Objects.requireNonNull(payload, "payload")
+                : payload == null ? new byte[0] : Arrays.copyOf(payload, payload.length);
+    }
+
+    public CoreMessageHeader header() {
+        return header;
+    }
+
     public byte[] payload() {
         return Arrays.copyOf(payload, payload.length);
+    }
+
+    public byte[] payloadUnsafe() {
+        return payload;
     }
 
     public int payloadLength() {
@@ -29,10 +49,7 @@ public record CoreMessage(CoreMessageHeader header, byte[] payload) {
 
     @Override
     public boolean equals(Object other) {
-        if (this == other) {
-            return true;
-        }
-        return other instanceof CoreMessage message
+        return this == other || other instanceof CoreMessage message
                 && header.equals(message.header)
                 && Arrays.equals(payload, message.payload);
     }
@@ -40,5 +57,10 @@ public record CoreMessage(CoreMessageHeader header, byte[] payload) {
     @Override
     public int hashCode() {
         return 31 * header.hashCode() + Arrays.hashCode(payload);
+    }
+
+    @Override
+    public String toString() {
+        return "CoreMessage[header=" + header + ", payload=" + Arrays.toString(payload) + "]";
     }
 }

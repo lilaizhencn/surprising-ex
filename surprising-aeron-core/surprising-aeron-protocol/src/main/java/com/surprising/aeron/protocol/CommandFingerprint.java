@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
@@ -11,32 +9,37 @@ public final class CommandFingerprint {
 
     public static final int LENGTH = 32;
     private static final int CANONICAL_VERSION = 1;
+    private static final ThreadLocal<MessageDigest> DIGEST = ThreadLocal.withInitial(CommandFingerprint::newDigest);
     private final byte[] value;
 
     private CommandFingerprint(byte[] value) {
+        this(value, false);
+    }
+
+    private CommandFingerprint(byte[] value, boolean owned) {
         if (value.length != LENGTH) {
             throw new IllegalArgumentException("command fingerprint must be " + LENGTH + " bytes");
         }
-        this.value = value.clone();
+        this.value = owned ? value : value.clone();
     }
 
     public static CommandFingerprint of(CoreMessage message) {
         Objects.requireNonNull(message, "message");
         CoreMessageHeader header = message.header();
-        byte[] payload = message.payload();
-        ByteBuffer canonical = ByteBuffer.allocate(Integer.BYTES * 8 + Long.BYTES + payload.length)
-                .order(ByteOrder.LITTLE_ENDIAN);
-        canonical.putInt(CANONICAL_VERSION);
-        canonical.putInt(header.schemaVersion());
-        canonical.putInt(header.messageType().wireCode());
-        canonical.putInt(ProductLineWireCode.encode(header.productLine()));
-        canonical.putInt(header.route().shardCode());
-        canonical.putInt(header.route().version());
-        canonical.putInt(header.source().wireCode());
-        canonical.putLong(header.userId());
-        canonical.putInt(payload.length);
-        canonical.put(payload);
-        return digest(canonical.array());
+        byte[] payload = message.payloadUnsafe();
+        MessageDigest digest = DIGEST.get();
+        digest.reset();
+        updateInt(digest, CANONICAL_VERSION);
+        updateInt(digest, header.schemaVersion());
+        updateInt(digest, header.messageType().wireCode());
+        updateInt(digest, ProductLineWireCode.encode(header.productLine()));
+        updateInt(digest, header.route().shardCode());
+        updateInt(digest, header.route().version());
+        updateInt(digest, header.source().wireCode());
+        updateLong(digest, header.userId());
+        updateInt(digest, payload.length);
+        digest.update(payload);
+        return new CommandFingerprint(digest.digest(), true);
     }
 
     public static CommandFingerprint fromBytes(byte[] value) {
@@ -70,11 +73,25 @@ public final class CommandFingerprint {
         return result.toString();
     }
 
-    private static CommandFingerprint digest(byte[] canonical) {
+    private static MessageDigest newDigest() {
         try {
-            return new CommandFingerprint(MessageDigest.getInstance("SHA-256").digest(canonical));
+            return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("JDK does not provide SHA-256", exception);
+        }
+    }
+
+    private static void updateInt(MessageDigest digest, int value) {
+        updateLong(digest, Integer.toUnsignedLong(value), Integer.BYTES);
+    }
+
+    private static void updateLong(MessageDigest digest, long value) {
+        updateLong(digest, value, Long.BYTES);
+    }
+
+    private static void updateLong(MessageDigest digest, long value, int bytes) {
+        for (int shift = 0; shift < bytes * Byte.SIZE; shift += Byte.SIZE) {
+            digest.update((byte) (value >>> shift));
         }
     }
 }
