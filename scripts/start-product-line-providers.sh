@@ -33,6 +33,7 @@ PRICE_HTTP_PROXY_PORT="${PRICE_HTTP_PROXY_PORT:-7897}"
 PRICE_CONSUMER_CONCURRENCY="${PRICE_CONSUMER_CONCURRENCY:-8}"
 PRICE_CONSUMER_REQUIRED_SYMBOLS="${PRICE_CONSUMER_REQUIRED_SYMBOLS:-BTC-USDT}"
 PRICE_INDEX_REQUIRED_SYMBOLS="${PRICE_INDEX_REQUIRED_SYMBOLS:-}"
+MM_SYMBOL="${MM_SYMBOL:-}"
 MM_BASE_QUANTITY_STEPS="${MM_BASE_QUANTITY_STEPS:-20}"
 MM_ORDER_LEVELS="${MM_ORDER_LEVELS:-20}"
 KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:9092}"
@@ -195,6 +196,7 @@ java_args_for() {
   JVM_ARGS=(
     "-Xms$JVM_XMS"
     "-Xmx$JVM_XMX"
+    "-Dsurprising.launcher.identity=$RUN_ID/$service"
     "-XX:+AlwaysPreTouch"
     "--enable-native-access=ALL-UNNAMED"
     "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
@@ -233,22 +235,35 @@ port_owned_by_process_tree() {
   return 1
 }
 
+launchctl_path() {
+  local resolved
+  if [[ -x /bin/launchctl ]]; then
+    printf '/bin/launchctl\n'
+  elif resolved="$(command -v launchctl 2>/dev/null)" && [[ -n "$resolved" ]]; then
+    printf '%s\n' "$resolved"
+  else
+    return 1
+  fi
+}
+
 start_owned_process() {
-  local name="$1" port="$2" pid label
+  local name="$1" port="$2" pid label launchctl_bin setsid_bin
   shift 2
-  if command -v launchctl >/dev/null 2>&1; then
+  if launchctl_bin="$(launchctl_path)"; then
     label="com.surprising.product-line.${RUN_ID//[^a-zA-Z0-9.-]/-}.$name"
-    launchctl remove "$label" >/dev/null 2>&1 || true
-    launchctl submit -l "$label" -o "$LOG_DIR/$name.log" -e "$LOG_DIR/$name.log" -- \
+    "$launchctl_bin" remove "$label" >/dev/null 2>&1 || true
+    "$launchctl_bin" submit -l "$label" -o "$LOG_DIR/$name.log" -e "$LOG_DIR/$name.log" -- \
       /bin/bash -c 'cd "$0"; exec "$@"' "$RUN_DIR" "$@"
     printf '%s\n' "$label" > "$PID_DIR/$name.label"
     local pid_deadline=$((SECONDS + 10))
-    until pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk '/pid =/{print $3; exit}')" && [[ "$pid" =~ ^[0-9]+$ ]]; do
+    until pid="$("$launchctl_bin" print "gui/$(id -u)/$label" 2>/dev/null | awk '/pid =/{print $3; exit}')" && [[ "$pid" =~ ^[0-9]+$ ]]; do
       (( SECONDS < pid_deadline )) || fail "launch timeout name=$name log=$LOG_DIR/$name.log"
       sleep 1
     done
   else
-    nohup bash -c 'cd "$0"; exec "$@"' "$RUN_DIR" "$@" \
+    setsid_bin="$(command -v setsid 2>/dev/null)" || \
+      fail "durable process supervisor unavailable name=$name; require launchctl or setsid"
+    nohup "$setsid_bin" bash -c 'cd "$0"; exec "$@"' "$RUN_DIR" "$@" \
       >"$LOG_DIR/$name.log" 2>&1 < /dev/null &
     pid=$!
   fi
@@ -296,6 +311,7 @@ COMMON_ENV=(
     SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT="$PRICE_HTTP_PROXY_PORT" \
     PRICE_CONSUMER_CONCURRENCY="$PRICE_CONSUMER_CONCURRENCY" \
     PRICE_CONSUMER_REQUIRED_SYMBOLS="$PRICE_CONSUMER_REQUIRED_SYMBOLS" \
+    MM_SYMBOL="$MM_SYMBOL" \
     MM_BASE_QUANTITY_STEPS="$MM_BASE_QUANTITY_STEPS" \
     MM_ORDER_LEVELS="$MM_ORDER_LEVELS"
 )
@@ -372,13 +388,17 @@ start_stack() {
 
 stop_processes() {
   [[ -d "$PID_DIR" ]] || return 0
-  local pid_file pid deadline
+  local pid_file pid deadline launchctl_bin
   for pid_file in "$PID_DIR"/*.pid; do
     [[ -e "$pid_file" ]] || continue
     pid="$(<"$pid_file")"
     local label_file="${pid_file%.pid}.label"
     if [[ -f "$label_file" ]]; then
-      launchctl remove "$(<"$label_file")" >/dev/null 2>&1 || true
+      if launchctl_bin="$(launchctl_path)"; then
+        "$launchctl_bin" remove "$(<"$label_file")" >/dev/null 2>&1 || true
+      else
+        kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null || true
+      fi
       rm -f "$label_file"
     else
       kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null || true
@@ -429,13 +449,52 @@ run_test() {
 
 print_status() {
   [[ -f "$LOCK_OWNER" && "$(<"$LOCK_OWNER")" == "$RUN_ID" ]] || fail "runtime not active runId=$RUN_ID"
-  local pid_file pid
-  for pid_file in "$PID_DIR"/*.pid; do
-    [[ -e "$pid_file" ]] || continue
-    pid="$(<"$pid_file")"
-    kill -0 "$pid" 2>/dev/null || fail "process not running service=$(basename "$pid_file" .pid)"
-    printf 'PROCESS=RUNNING service=%s pid=%s\n' "$(basename "$pid_file" .pid)" "$pid"
+  local service pid index
+  local required_services=(core-node0 core-node1 core-node2) verified_pids=()
+  for service in "${SERVICES[@]}"; do
+    service_enabled "$service" && required_services+=("$service")
   done
+  local pid_files=("$PID_DIR"/*.pid)
+  [[ -e "${pid_files[0]}" && "${#pid_files[@]}" -eq "${#required_services[@]}" ]] || \
+    fail "process ownership set mismatch expected=${#required_services[@]}"
+  for service in "${required_services[@]}"; do
+    verify_owned_process "$service" >/dev/null
+  done
+  sleep 1
+  for service in "${required_services[@]}"; do
+    pid="$(verify_owned_process "$service")" || return $?
+    verified_pids+=("$pid")
+  done
+  for index in "${!required_services[@]}"; do
+    printf 'PROCESS=RUNNING service=%s pid=%s\n' \
+      "${required_services[$index]}" "${verified_pids[$index]}"
+  done
+}
+
+verify_owned_process() {
+  local service="$1" pid_file="$PID_DIR/$1.pid" label_file="$PID_DIR/$1.label"
+  local pid label expected_label launchctl_bin supervised_pid command_line
+  [[ -f "$pid_file" ]] || fail "process ownership missing service=$service"
+  pid="$(<"$pid_file")"
+  [[ "$pid" =~ ^[0-9]+$ ]] || fail "invalid process ownership service=$service"
+  kill -0 "$pid" 2>/dev/null || fail "process not running service=$service"
+  if [[ -f "$label_file" ]]; then
+    launchctl_bin="$(launchctl_path)" || fail "launchd ownership unavailable service=$service"
+    label="$(<"$label_file")"
+    expected_label="com.surprising.product-line.${RUN_ID//[^a-zA-Z0-9.-]/-}.$service"
+    [[ "$label" == "$expected_label" ]] || fail "launchd label mismatch service=$service"
+    supervised_pid="$("$launchctl_bin" print "gui/$(id -u)/$expected_label" 2>/dev/null | \
+      awk '/pid =/{print $3; exit}')"
+    [[ "$supervised_pid" == "$pid" ]] || fail "launchd pid mismatch service=$service"
+  elif launchctl_path >/dev/null; then
+    fail "launchd label missing service=$service"
+  else
+    command_line="$(ps -p "$pid" -o command= 2>/dev/null)" || \
+      fail "process identity unavailable service=$service"
+    [[ " $command_line " == *" -Dsurprising.launcher.identity=$RUN_ID/$service "* ]] || \
+      fail "process identity mismatch service=$service"
+  fi
+  printf '%s\n' "$pid"
 }
 
 print_dry_run() {
