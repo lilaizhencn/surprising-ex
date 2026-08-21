@@ -33,6 +33,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
     private static final long MATCHING_TIMER_DELAY_MS = 10;
     private static final long EGRESS_DRAIN_TIMER_DELAY_MS = 1;
+    private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
     private static final long MATCHING_WAKEUP_CORRELATION_ID = Long.MAX_VALUE - 1;
     private static final long FIRST_EGRESS_DRAIN_CORRELATION_ID = Long.MIN_VALUE + 1;
 
@@ -47,6 +48,8 @@ public final class SurprisingClusteredService implements ClusteredService {
     private final Map<Long, ArrayDeque<PendingClient>> pendingClients = new HashMap<>();
     private long nextEgressDrainCorrelationId = FIRST_EGRESS_DRAIN_CORRELATION_ID;
     private boolean matchingWakeupScheduled;
+    private long snapshotFenceNotReadyCount;
+    private long snapshotFenceTimeoutCount;
 
     public SurprisingClusteredService(ProductLine productLine) {
         this.productLine = productLine;
@@ -62,6 +65,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingClients.clear();
         nextEgressDrainCorrelationId = FIRST_EGRESS_DRAIN_CORRELATION_ID;
         matchingWakeupScheduled = false;
+        snapshotFenceNotReadyCount = 0;
+        snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
         role.set(cluster.role());
         System.out.printf("Aeron core role productLine=%s role=%s%n", productLine, cluster.role());
@@ -113,7 +118,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTakeSnapshot(ExclusivePublication snapshotPublication) {
-        byte[] snapshot = state.snapshot(Math.max(1, cluster.logPosition()));
+        byte[] snapshot = captureSnapshot(Math.max(1, cluster.logPosition()));
         org.agrona.concurrent.UnsafeBuffer buffer = new org.agrona.concurrent.UnsafeBuffer(snapshot);
         idleStrategy.reset();
         int offset = 0;
@@ -124,6 +129,36 @@ public final class SurprisingClusteredService implements ClusteredService {
             }
             offset += chunkLength;
         }
+    }
+
+    byte[] captureSnapshot(long snapshotId) {
+        long deadlineNanos = Math.addExact(System.nanoTime(),
+                java.util.concurrent.TimeUnit.SECONDS.toNanos(SNAPSHOT_TIMEOUT_SECONDS));
+        return captureSnapshot(snapshotId, deadlineNanos);
+    }
+
+    byte[] captureSnapshot(long snapshotId, long deadlineNanos) {
+        state.beginSnapshot(snapshotId, deadlineNanos);
+        try {
+            return state.captureSnapshot(
+                    cluster == null ? 0 : cluster.time(),
+                    cluster == null ? 0 : cluster.logPosition(),
+                    System.nanoTime());
+        } catch (CoreProbeState.SnapshotNotReadyException notReady) {
+            snapshotFenceNotReadyCount++;
+            throw notReady;
+        } catch (CoreProbeState.SnapshotFenceTimeoutException timeout) {
+            snapshotFenceTimeoutCount++;
+            throw timeout;
+        }
+    }
+
+    public long snapshotFenceNotReadyCount() {
+        return snapshotFenceNotReadyCount;
+    }
+
+    public long snapshotFenceTimeoutCount() {
+        return snapshotFenceTimeoutCount;
     }
 
     @Override

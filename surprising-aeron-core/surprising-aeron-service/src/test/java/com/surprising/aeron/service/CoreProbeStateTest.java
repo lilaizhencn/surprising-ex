@@ -448,7 +448,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void rejectsSnapshotWhileMatchingPending() {
+    void compatibilitySnapshotWaitsForPendingMatchingCompletion() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
             state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
@@ -461,9 +461,108 @@ class CoreProbeStateTest {
                             "snapshot-attempt-713", 0, 0)));
 
             state.apply(place);
-            assertThatThrownBy(state::snapshot)
+            assertThat(state.snapshot()).isNotEmpty();
+            assertThat(state.pendingMatching()).isEmpty();
+        }
+    }
+
+    @Test
+    void snapshotFenceFinalizesReverseCompletionsInGlobalSequenceOrder() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            UUID firstCommandId = UUID.randomUUID();
+            CoreMessage firstPlace = tradingCommand(CoreMessageType.PLACE_ORDER, firstCommandId, 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(715, "BTC-USDT", 1,
+                            "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 2, false,
+                            CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT",
+                            2_000, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 1_000, false,
+                            "snapshot-fence-715", 0, 0)));
+            UUID secondCommandId = UUID.randomUUID();
+            CoreMessage secondPlace = tradingCommand(CoreMessageType.PLACE_ORDER, secondCommandId, 3,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(716, "BTC-USDT", 1,
+                            "BTC", "USDT", "USDT", CoreOrderSide.BUY, 900, 2, false,
+                            CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT",
+                            1_800, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 900, false,
+                            "snapshot-fence-716", 0, 0)));
+            assertThat(state.apply(firstPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(state.apply(secondPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long firstSequence = state.matchingSequence(firstCommandId);
+            long secondSequence = state.matchingSequence(secondCommandId);
+            var accepted = new com.surprising.aeron.service.matching.CoreMatchingResult(
+                    true, "SUCCESS", List.of());
+            state.publishMatchingCompletion(secondSequence, accepted);
+            state.publishMatchingCompletion(firstSequence, accepted);
+
+            state.beginSnapshot(715, Long.MAX_VALUE);
+            assertThatThrownBy(() -> state.apply(command(UUID.randomUUID(), 3, 1)))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("cannot snapshot while matching commands are pending");
+                    .hasMessage("snapshot fence is active");
+
+            assertThatThrownBy(() -> state.captureSnapshot(2_000, 3, System.nanoTime()))
+                    .isInstanceOf(CoreProbeState.SnapshotNotReadyException.class)
+                    .hasMessage("snapshot not ready");
+            assertThat(state.pendingMatching()).isEmpty();
+            assertThat(state.commandResults().get(firstCommandId).appliedCommandCount())
+                    .isLessThan(state.commandResults().get(secondCommandId).appliedCommandCount());
+            assertThat(state.tradingState().order(715).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().order(716).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+        }
+    }
+
+    @Test
+    void incompleteSnapshotPublishesNothingAndRetryHasNoStaleFence() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            state.beginSnapshot(801, Long.MAX_VALUE);
+
+            assertThatThrownBy(() -> state.captureSnapshot(1_000, 1, System.nanoTime()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("snapshot not ready");
+
+            state.beginSnapshot(802, 10);
+            assertThatThrownBy(() -> state.captureSnapshot(1_001, 2, 10))
+                    .isInstanceOf(CoreProbeState.SnapshotFenceTimeoutException.class)
+                    .hasMessage("snapshot fence timed out");
+        }
+    }
+
+    @Test
+    void interruptedSnapshotFencePublishesNothingAndAllowsExplicitRetry() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            state.beginSnapshot(901, Long.MAX_VALUE);
+            Thread.currentThread().interrupt();
+            try {
+                assertThatThrownBy(() -> state.pollSnapshot(1_000, 1, System.nanoTime()))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessage("snapshot fence interrupted");
+            } finally {
+                Thread.interrupted();
+            }
+
+            assertThat(state.snapshot(902)).isNotEmpty();
+        }
+    }
+
+    @Test
+    void snapshotFenceFailsClosedWhenCompletionQueueOverflows() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            var result = new com.surprising.aeron.service.matching.CoreMatchingResult(
+                    true, "SUCCESS", List.of());
+            for (int index = 0; index <= CoreProbeState.MAX_PENDING_MATCHING; index++) {
+                state.publishMatchingCompletion(1, result);
+            }
+            state.beginSnapshot(903, Long.MAX_VALUE);
+
+            Throwable fatal = catchThrowable(() -> state.pollSnapshot(1_000, 1, System.nanoTime()));
+
+            assertThat(fatal).isInstanceOf(
+                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class)
+                    .hasMessageContaining("matching completion queue is full");
+            assertThatThrownBy(state::snapshot).isSameAs(fatal);
         }
     }
 

@@ -100,6 +100,70 @@ class SurprisingClusteredServiceTest {
         }
     }
 
+    @Test
+    void incompleteMatcherSnapshotFailsClosedWithoutLoopingOwnerCallback() {
+        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        service.onStart(cluster(), null);
+        try {
+            assertThatThrownBy(() -> service.captureSnapshot(7))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("snapshot not ready");
+            assertThat(service.snapshotFenceNotReadyCount()).isEqualTo(1);
+            assertThat(service.snapshotFenceTimeoutCount()).isZero();
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
+    void snapshotCaptureTimeoutIsFailClosedAndObservable() {
+        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        service.onStart(cluster(), null);
+        try {
+            assertThatThrownBy(() -> service.captureSnapshot(9, System.nanoTime()))
+                    .isInstanceOf(CoreProbeState.SnapshotFenceTimeoutException.class)
+                    .hasMessage("snapshot fence timed out");
+            assertThat(service.snapshotFenceTimeoutCount()).isEqualTo(1);
+            assertThat(service.snapshotFenceNotReadyCount()).isZero();
+
+            assertThatThrownBy(() -> service.captureSnapshot(10))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("snapshot not ready");
+            assertThat(service.snapshotFenceNotReadyCount()).isEqualTo(1);
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
+    void snapshotCallbackSurfaceDrainsPendingMatcherBeforeRoundTrip() {
+        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        service.onStart(cluster(), null);
+        try {
+            long pendingSequence = preparePendingPlace(service.state(), 903);
+            com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
+            long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (matching == null && System.nanoTime() < deadlineNanos) {
+                matching = service.state().takeMatchingResult(pendingSequence);
+            }
+            assertThat(matching).isNotNull();
+            service.state().publishMatchingCompletion(pendingSequence, matching);
+
+            assertThatThrownBy(() -> service.captureSnapshot(8))
+                    .isInstanceOf(CoreProbeState.SnapshotNotReadyException.class)
+                    .hasMessage("snapshot not ready");
+
+            assertThat(service.state().pendingMatchingCount()).isZero();
+            assertThat(service.state().pendingMatching(pendingSequence)).isNull();
+            byte[] snapshot = service.state().snapshot(11);
+            service.restoreSnapshot(snapshot);
+            assertThat(service.state().tradingState().order(903).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
     private static long preparePendingPlace(CoreProbeState state, long orderId) {
         assertThat(state.apply(instrument()).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,

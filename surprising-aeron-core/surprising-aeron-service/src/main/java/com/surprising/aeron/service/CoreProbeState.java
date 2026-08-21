@@ -161,6 +161,7 @@ public final class CoreProbeState implements AutoCloseable {
     private TradingRuntimeState runtimePlaceOrderState;
     private TradingCoreState runtimePlaceOrderCoreState;
     private com.surprising.aeron.service.matching.FatalMatchingDivergenceException fatalFailure;
+    private SnapshotFence snapshotFence;
     private TradingCoreState tradingState;
     private List<CoreOrderStateView> commandOrderViews = List.of();
     private List<Long> commandChangedUserIds;
@@ -310,8 +311,9 @@ public final class CoreProbeState implements AutoCloseable {
 
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         runtime.assertOwner();
-        ensureRuntimePlaceOrderState();
         assertHealthy();
+        if (snapshotFence != null) throw new IllegalStateException("snapshot fence is active");
+        ensureRuntimePlaceOrderState();
         if (message.header().productLine() != productLine) {
             return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
         }
@@ -1789,7 +1791,7 @@ public final class CoreProbeState implements AutoCloseable {
                 });
     }
 
-    private void publishMatchingCompletion(
+    void publishMatchingCompletion(
             long sequence,
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         matchingCompletions.offer(sequence, result);
@@ -2547,14 +2549,105 @@ public final class CoreProbeState implements AutoCloseable {
 
     public byte[] snapshot(long snapshotId) {
         assertHealthy();
-        if (!pendingMatching.isEmpty()) {
-            throw new IllegalStateException("cannot snapshot while matching commands are pending");
+        long deadlineNanos = Math.addExact(System.nanoTime(), java.util.concurrent.TimeUnit.SECONDS.toNanos(30));
+        beginSnapshot(snapshotId, deadlineNanos);
+        // Compatibility-only synchronous surface for non-Aeron callers. The clustered-service callback must use
+        // captureSnapshot(), which performs exactly one poll and fails closed when this matcher work is not ready.
+        while (true) {
+            byte[] snapshot = pollSnapshot(0, 0, System.nanoTime());
+            if (snapshot != null) return snapshot;
+            Thread.yield();
         }
-        MatcherSnapshot matcherSnapshot = matchingAdapter
-                .snapshotAsync(snapshotId, appliedCommandCount, tradingState, activeOrderIndex.orders())
-                .orTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                .join();
-        return CoreStateSnapshotCodec.encode(this, matcherSnapshot);
+    }
+
+    void beginSnapshot(long snapshotId, long deadlineNanos) {
+        runtime.assertOwner();
+        assertHealthy();
+        if (snapshotId <= 0 || deadlineNanos <= 0) {
+            throw new IllegalArgumentException("invalid snapshot fence");
+        }
+        if (snapshotFence != null) throw new IllegalStateException("snapshot fence is already active");
+        snapshotFence = new SnapshotFence(snapshotId, deadlineNanos);
+    }
+
+    byte[] pollSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
+        runtime.assertOwner();
+        assertHealthy();
+        SnapshotFence fence = snapshotFence;
+        if (fence == null) throw new IllegalStateException("snapshot fence is not active");
+        if (Thread.currentThread().isInterrupted()) {
+            releaseSnapshotFence();
+            throw new IllegalStateException("snapshot fence interrupted");
+        }
+        if (nowNanos >= fence.deadlineNanos) {
+            releaseSnapshotFence();
+            throw new SnapshotFenceTimeoutException();
+        }
+        try {
+            drainMatchingCompletions();
+            while (!pendingMatching.isEmpty()) {
+                long sequence = firstPendingMatchingSequence();
+                com.surprising.aeron.service.matching.CoreMatchingResult result = completedMatching.remove(sequence);
+                if (result == null) return null;
+                if (completeMatching(sequence, result, clusterTimestamp, clusterPosition) == null) return null;
+                drainMatchingCompletions();
+            }
+            if (fence.matcherSnapshot == null) {
+                fence.coreSequence = appliedCommandCount;
+                fence.matcherSnapshot = matchingAdapter.snapshotAsync(
+                        fence.snapshotId, fence.coreSequence, tradingState, activeOrderIndex.orders());
+            }
+            if (!fence.matcherSnapshot.isDone()) return null;
+            MatcherSnapshot matcherSnapshot = fence.matcherSnapshot.getNow(null);
+            if (matcherSnapshot == null || appliedCommandCount != fence.coreSequence || !pendingMatching.isEmpty()) {
+                throw new IllegalStateException("snapshot fence state changed during capture");
+            }
+            byte[] encoded = CoreStateSnapshotCodec.encode(this, matcherSnapshot);
+            snapshotFence = null;
+            return encoded;
+        } catch (RuntimeException failure) {
+            releaseSnapshotFence();
+            throw failure;
+        }
+    }
+
+    byte[] captureSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
+        byte[] snapshot = pollSnapshot(clusterTimestamp, clusterPosition, nowNanos);
+        if (snapshot != null) return snapshot;
+        releaseSnapshotFence();
+        throw new SnapshotNotReadyException();
+    }
+
+    private void releaseSnapshotFence() {
+        SnapshotFence fence = snapshotFence;
+        snapshotFence = null;
+        if (fence != null && fence.matcherSnapshot != null && !fence.matcherSnapshot.isDone()) {
+            fence.matcherSnapshot.cancel(false);
+        }
+    }
+
+    static final class SnapshotNotReadyException extends IllegalStateException {
+        private SnapshotNotReadyException() {
+            super("snapshot not ready");
+        }
+    }
+
+    static final class SnapshotFenceTimeoutException extends IllegalStateException {
+        private SnapshotFenceTimeoutException() {
+            super("snapshot fence timed out");
+        }
+    }
+
+    private static final class SnapshotFence {
+        private final long snapshotId;
+        private final long deadlineNanos;
+        private long coreSequence = -1;
+        private CompletableFuture<MatcherSnapshot> matcherSnapshot;
+
+        private SnapshotFence(long snapshotId, long deadlineNanos) {
+            this.snapshotId = snapshotId;
+            this.deadlineNanos = deadlineNanos;
+        }
     }
 
     private com.surprising.aeron.service.matching.FatalMatchingDivergenceException failMatching(
@@ -3316,6 +3409,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     @Override
     public void close() {
+        releaseSnapshotFence();
         matchingCompletions.clear();
         completedMatching.clear();
         completedBookQueries.clear();
