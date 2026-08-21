@@ -540,25 +540,25 @@ Aeron owner thread
 
 ### P0：消除在线全局工作（代码已落地，容量门禁待执行）
 
-- 保持 Runtime State 为在线 owner-thread 状态；确认普通 `adoptState` 不调用完整 materializer/parity。
-- 结果账本 hash/copy 已改为增量维护，不扫描历史响应正文。
-- 永续成交已改为 touched-user revision/update。
-- 资金费已使用 `(symbol, user)` 持仓索引，风险续跑已使用 `higher(cursor)`。
-- treasury 已改为 changed assets/symbols 增量更新，禁止 `clear()` 后重建全量 map。
-- pending matching 已具备直接 commandId 索引、有界 completion queue、单一 wakeup、max in-flight 和入口背压。
-- 所有 Product Core runtime index 的非 delta transition 已增加 fail-closed 门禁，禁止静默全量 rebuild。
-- P0 回归已覆盖成交、资金费、风险、treasury、快照和服务调度；六产品线串行系统基线已通过，开放环 100k/s、
+- ~~保持 Runtime State 为在线 owner-thread 状态；确认普通 `adoptState` 不调用完整 materializer/parity。~~
+- ~~结果账本 hash/copy 已改为增量维护，不扫描历史响应正文。~~
+- ~~永续成交已改为 touched-user revision/update。~~
+- ~~资金费已使用 `(symbol, user)` 持仓索引，风险续跑已使用 `higher(cursor)`。~~
+- ~~treasury 已改为 changed assets/symbols 增量更新，禁止 `clear()` 后重建全量 map。~~
+- ~~pending matching 已具备直接 commandId 索引、有界 completion queue、单一 wakeup、max in-flight 和入口背压。~~
+- ~~所有 Product Core runtime index 的非 delta transition 已增加 fail-closed 门禁，禁止静默全量 rebuild。~~
+- ~~P0 回归已覆盖成交、资金费、风险、treasury、快照和服务调度；六产品线串行系统基线已通过，~~开放环 100k/s、
   故障恢复和长稳仍属于后续容量/系统验收。
 
 ### P1：控制 continuation 与分配
 
 > 状态：**✅ 已完成（代码、定向回归与 3-fork benchmark/JFR）**。本状态表示 P1 代码出口已落地并完成本地观测，不表示 100k/s、三节点故障恢复或长稳容量门禁已通过。
 
-- [x] DirectBuffer flyweight 解码、一次 owned copy 和复用响应 buffer：`CoreMessageFlyweightDecoder`、`CoreMessage.owned`、`SurprisingClusteredService.PendingEgress`。
-- [x] fingerprint digest、matcher result、Stream、`toList`、重复 decode 和 Future 链分配优化：ThreadLocal SHA-256、bounded completion queue、热路径 changed-id 构造、export codec 显式循环、`matcherReady` 已完成时直达 matcher。
-- [x] outbox 预编码、terminal metadata、pending fact 契约收敛和 ACK metadata 化：`CoreExportState.PendingExport` 保存编码 fact 与 terminal order ids，ACK 不再重新 decode event。
-- [x] 去掉普通下单 preflight，HTTP 入口改为异步 admission；保留稳定 commandId：普通下单主链路沿用现有 asynchronous admission，preflight 仅保留为显式查询契约。
-- [x] 统一依赖版本和 JDK 25 模块参数：沿用 parent 的集中版本与 JDK 25 编译门禁，本轮 reactor 编译和测试均通过。
+- ~~[x] DirectBuffer flyweight 解码、一次 owned copy 和复用响应 buffer：`CoreMessageFlyweightDecoder`、`CoreMessage.owned`、`SurprisingClusteredService.PendingEgress`。~~
+- ~~[x] fingerprint digest、matcher result、Stream、`toList`、重复 decode 和 Future 链分配优化：ThreadLocal SHA-256、bounded completion queue、热路径 changed-id 构造、export codec 显式循环、`matcherReady` 已完成时直达 matcher。~~
+- ~~[x] outbox 预编码、terminal metadata、pending fact 契约收敛和 ACK metadata 化：`CoreExportState.PendingExport` 保存编码 fact 与 terminal order ids，ACK 不再重新 decode event。~~
+- ~~[x] 去掉普通下单 preflight，HTTP 入口改为异步 admission；保留稳定 commandId：普通下单主链路沿用现有 asynchronous admission，preflight 仅保留为显式查询契约。~~
+- ~~[x] 统一依赖版本和 JDK 25 模块参数：沿用 parent 的集中版本与 JDK 25 编译门禁，本轮 reactor 编译和测试均通过。~~
 
 ### P2：快照与故障恢复
 
