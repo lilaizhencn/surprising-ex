@@ -2,6 +2,7 @@ package com.surprising.price.index.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.price.api.model.QuoteTransport;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
 import java.math.BigDecimal;
@@ -25,6 +26,7 @@ class ExternalSpotPriceClientTest {
             assertThat(quote).isPresent();
             assertThat(quote.get().price()).isEqualByComparingTo("101.00");
             assertThat(quote.get().sourceTime()).isEqualTo(Instant.ofEpochMilli(1782828000000L));
+            assertThat(quote.get().transport()).isEqualTo(QuoteTransport.PUBLIC_WEBSOCKET);
         } finally {
             client.close();
         }
@@ -41,6 +43,29 @@ class ExternalSpotPriceClientTest {
                     Instant.parse("2026-06-30T10:00:00Z"));
 
             assertThat(quote).isEmpty();
+        } finally {
+            client.close();
+        }
+    }
+
+    @Test
+    void parsesOkxIndexTickerForRestAndWebSocket() {
+        ExternalSpotPriceClient client = new ExternalSpotPriceClient(new IndexPriceProperties(), new ObjectMapper());
+        try {
+            IndexPriceProperties.SourceConfig source = source("OKX", "BTC-USDT", "OKX_INDEX_TICKER");
+
+            String payload = "{\"data\":[{\"instId\":\"BTC-USDT\",\"idxPx\":\"100.50\",\"ts\":\"1782828000000\"}]}";
+            SourceQuote restQuote = client.parsePayload(source, payload,
+                    Instant.parse("2026-06-30T10:00:00Z"), 1L);
+            Optional<SourceQuote> websocketQuote = client.parseWebSocketPayload(source, payload,
+                    Instant.parse("2026-06-30T10:00:00Z"));
+
+            assertThat(restQuote.price()).isEqualByComparingTo("100.50");
+            assertThat(restQuote.transport()).isEqualTo(QuoteTransport.REST);
+            assertThat(websocketQuote).isPresent();
+            assertThat(websocketQuote.get().price()).isEqualByComparingTo("100.50");
+            assertThat(websocketQuote.get().sourceTime()).isEqualTo(Instant.ofEpochMilli(1782828000000L));
+            assertThat(websocketQuote.get().transport()).isEqualTo(QuoteTransport.PUBLIC_WEBSOCKET);
         } finally {
             client.close();
         }

@@ -2,6 +2,8 @@ package com.surprising.price.index.service;
 
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.PricePublishedEvent;
+import com.surprising.price.api.model.QuoteTransport;
+import com.surprising.price.api.model.SourceStatus;
 import com.surprising.price.index.client.ExternalSpotPriceClient;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
@@ -108,7 +110,9 @@ import org.springframework.stereotype.Service;
             return latestSourceQuoteStore.latest(symbol, source)
                     .filter(quote -> freshEnough(quote, now))
                     .map(CompletableFuture::completedFuture)
-                    .orElseGet(() -> externalSpotPriceClient.fetch(source));
+                    .orElseGet(() -> properties.getWebSocket().isRestFallbackEnabled()
+                            ? externalSpotPriceClient.fetch(source)
+                            : CompletableFuture.completedFuture(webSocketUnavailable(source, now)));
         }
         return externalSpotPriceClient.fetch(source);
     }
@@ -119,6 +123,12 @@ import org.springframework.stereotype.Service;
         }
         Duration age = Duration.between(quote.receivedAt(), now);
         return !age.isNegative() && age.compareTo(properties.getCalculation().getMaxSourceAge()) <= 0;
+    }
+
+    private SourceQuote webSocketUnavailable(IndexPriceProperties.SourceConfig source, Instant now) {
+        return new SourceQuote(source.getName(), source.getSourceSymbol(), null, null, null, source.getWeight(),
+                SourceStatus.STALE, "public WebSocket quote unavailable", null, now, null,
+                QuoteTransport.PUBLIC_WEBSOCKET);
     }
 
     private String resolveNodeId(String configured) {

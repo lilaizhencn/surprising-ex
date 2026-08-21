@@ -18,6 +18,8 @@ import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @SpringBootConfiguration
 @EnableAutoConfiguration
@@ -30,6 +32,8 @@ import jakarta.annotation.PostConstruct;
 @EnableConfigurationProperties({IndexPriceProperties.class, MarkPriceProperties.class})
 @ImportRuntimeHints({IndexPriceRuntimeHints.class, MarkPriceRuntimeHints.class})
 public class SurprisingPriceApplication {
+
+    private static final Logger log = LoggerFactory.getLogger(SurprisingPriceApplication.class);
 
     private final IndexPriceProperties indexProperties;
     private final MarkPriceProperties markProperties;
@@ -49,6 +53,11 @@ public class SurprisingPriceApplication {
                 || consumerProperties.getProductLine() != markProperties.getKafka().getProductLine()) {
             throw new IllegalStateException("index and mark price product-line configuration must match");
         }
+        log.info("Effective mark matrix configuration publishIntervalMs={} indexWebSocketEnabled={} "
+                        + "indexRestFallbackEnabled={} indexMaxSourceAge={}",
+                markProperties.getCalculation().getPublishIntervalMs(), indexProperties.getWebSocket().isEnabled(),
+                indexProperties.getWebSocket().isRestFallbackEnabled(),
+                indexProperties.getCalculation().getMaxSourceAge());
     }
 
     public static void main(String[] args) {

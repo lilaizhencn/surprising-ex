@@ -309,6 +309,7 @@ public class IndexPriceProperties {
 
     public static class WebSocket {
         private boolean enabled = true;
+        private boolean restFallbackEnabled;
         private long refreshDelayMs = 30000L;
         private Duration idleTimeout = Duration.ofSeconds(20);
         private Duration reconnectInitialDelay = Duration.ofSeconds(1);
@@ -321,6 +322,14 @@ public class IndexPriceProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public boolean isRestFallbackEnabled() {
+            return restFallbackEnabled;
+        }
+
+        public void setRestFallbackEnabled(boolean restFallbackEnabled) {
+            this.restFallbackEnabled = restFallbackEnabled;
         }
 
         public long getRefreshDelayMs() {

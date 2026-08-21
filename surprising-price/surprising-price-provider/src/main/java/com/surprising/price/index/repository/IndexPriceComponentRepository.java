@@ -88,7 +88,7 @@ public class IndexPriceComponentRepository {
                 rs.getString("reason"),
                 timestamp(rs.getTimestamp("source_time")),
                 timestamp(rs.getTimestamp("received_at")),
-                nullableLong(rs, "latency_millis")), symbol, sequence);
+                nullableLong(rs, "latency_millis"), null), symbol, sequence);
     }
 
     public int deleteByKeys(List<TickKey> keys) {

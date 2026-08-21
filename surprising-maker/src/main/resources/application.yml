@@ -58,14 +58,14 @@ surprising:
   market-maker:
     engine:
       enabled: true
-      cycle-delay-ms: 100
+      cycle-delay-ms: ${MM_CYCLE_DELAY_MS:100}
       node-id:
     coordination:
       enabled: true
       lease-duration: 5s
     quoting:
       order-book-depth: 50
-      order-levels: 20
+      order-levels: ${MM_ORDER_LEVELS:20}
       min-spread-ticks: 20
       level-spacing-ticks: 8
       refresh-threshold-ticks: 1
@@ -73,7 +73,7 @@ surprising:
       stale-order-max-age: 2s
       max-price-deviation-ppm: 5000
       order-reconciliation-interval: 500ms
-      max-order-operations-per-cycle: 40
+      max-order-operations-per-cycle: ${MM_MAX_ORDER_OPERATIONS_PER_CYCLE:40}
       volatility-spread-multiplier-ppm: 500000
       max-volatility-spread-ticks: 100
     risk:
@@ -133,7 +133,7 @@ surprising:
       - strategy-id: btc-usdt-mm-a
         product-line: ${PRODUCT_LINE}
         enabled: true
-        account-ids: [900001, 900002]
+        account-ids: ${MM_ACCOUNT_IDS:900001,900002}
         symbols: [BTC-USDT]
         base-quantity-steps: ${MM_BASE_QUANTITY_STEPS:20}
         order-levels: ${MM_ORDER_LEVELS:20}

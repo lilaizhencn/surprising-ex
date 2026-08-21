@@ -1,5 +1,6 @@
 package com.surprising.price.index.client;
 
+import com.surprising.price.api.model.QuoteTransport;
 import com.surprising.price.api.model.SourceStatus;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
@@ -150,7 +151,8 @@ public class ExternalSpotPriceClient {
         BigDecimal configuredWeight = source.getWeight().multiply(converted.weightMultiplier());
         return new SourceQuote(source.getName(), source.getSourceSymbol(), converted.price(), converted.bidPrice(),
                 converted.askPrice(), configuredWeight, SourceStatus.HEALTHY, converted.reason(),
-                ticker.sourceTime(), receivedAt, latencyMillis);
+                ticker.sourceTime(), receivedAt, latencyMillis,
+                websocket ? QuoteTransport.PUBLIC_WEBSOCKET : QuoteTransport.REST);
     }
 
     private String parser(IndexPriceProperties.SourceConfig source, boolean websocket) {
@@ -164,6 +166,7 @@ public class ExternalSpotPriceClient {
         return switch (parser.toUpperCase(Locale.ROOT)) {
             case "BINANCE_BOOK_TICKER" -> parseBinanceBookTicker(root);
             case "OKX_TICKER" -> parseOkxTicker(root);
+            case "OKX_INDEX_TICKER" -> parseOkxIndexTicker(root);
             case "BYBIT_TICKER" -> parseBybitTicker(root);
             case "COINBASE_TICKER" -> parseCoinbaseTicker(root);
             case "KRAKEN_TICKER" -> parseKrakenTicker(root);
@@ -187,6 +190,16 @@ public class ExternalSpotPriceClient {
         BigDecimal last = decimal(ticker, "last");
         Instant sourceTime = epochMillis(ticker.path("ts").asString(null));
         return new ParsedTicker(midOrLast(bid, ask, last), bid, ask, sourceTime, firstText(ticker, "instId"));
+    }
+
+    private ParsedTicker parseOkxIndexTicker(JsonNode root) {
+        JsonNode ticker = root.path("data").path(0);
+        BigDecimal indexPrice = decimal(ticker, "idxPx");
+        Instant sourceTime = epochMillis(ticker.path("ts").asString(null));
+        if (!positive(indexPrice)) {
+            throw new IllegalArgumentException("OKX index ticker has no valid idxPx");
+        }
+        return new ParsedTicker(indexPrice, null, null, sourceTime, firstText(ticker, "instId"));
     }
 
     private ParsedTicker parseBybitTicker(JsonNode root) {
@@ -383,7 +396,7 @@ public class ExternalSpotPriceClient {
     private SourceQuote error(IndexPriceProperties.SourceConfig source, SourceStatus status, String reason,
                               Instant receivedAt, Long latencyMillis) {
         return new SourceQuote(source.getName(), source.getSourceSymbol(), null, null, null, source.getWeight(),
-                status, reason, null, receivedAt, latencyMillis);
+                status, reason, null, receivedAt, latencyMillis, QuoteTransport.REST);
     }
 
     private String normalizedCurrency(String currency) {

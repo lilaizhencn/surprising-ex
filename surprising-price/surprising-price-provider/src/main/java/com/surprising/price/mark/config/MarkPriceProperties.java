@@ -2,11 +2,15 @@ package com.surprising.price.mark.config;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductTopicNames;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
+@Validated
 @ConfigurationProperties(prefix = "surprising.price.mark")
 public class MarkPriceProperties {
 
@@ -212,6 +216,8 @@ public class MarkPriceProperties {
     }
 
     public static class Calculation {
+        @Min(100)
+        @Max(1000)
         private long publishIntervalMs = 1000L;
         private Duration basisWindow = Duration.ofSeconds(60);
         private Duration maxInputAge = Duration.ofSeconds(5);

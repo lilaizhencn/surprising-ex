@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
+import com.surprising.price.api.model.QuoteTransport;
 import com.surprising.price.api.model.SourceStatus;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
@@ -36,6 +37,7 @@ class IndexPriceCalculatorTest {
                 .first()
                 .extracting(component -> component.status())
                 .isEqualTo(SourceStatus.OUTLIER);
+        assertThat(event.components()).allMatch(component -> component.transport() == QuoteTransport.REST);
     }
 
     @Test
@@ -60,6 +62,6 @@ class IndexPriceCalculatorTest {
 
     private SourceQuote quote(String source, String price, Instant now) {
         return new SourceQuote(source, "BTCUSDT", new BigDecimal(price), new BigDecimal(price), new BigDecimal(price),
-                BigDecimal.ONE, SourceStatus.HEALTHY, null, now, now, 1L);
+                BigDecimal.ONE, SourceStatus.HEALTHY, null, now, now, 1L, QuoteTransport.REST);
     }
 }

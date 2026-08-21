@@ -64,6 +64,7 @@ surprising:
         proxy-port: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT:7897}
       web-socket:
         enabled: true
+        rest-fallback-enabled: false
         refresh-delay-ms: 30000
         idle-timeout: 20s
         reconnect-initial-delay: 1s
@@ -132,7 +133,7 @@ surprising:
         funding-rate-topic: surprising.perp.funding.rate.v1
         price-events-topic: surprising.perp.price.events.v1
       calculation:
-        publish-interval-ms: 1000
+        publish-interval-ms: ${MARK_PUBLISH_INTERVAL_MS:1000}
         basis-window: 60s
         max-input-age: 15s
         clamp-ratio: 0.03

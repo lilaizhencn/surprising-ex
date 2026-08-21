@@ -129,6 +129,7 @@ public class MarketMakerProperties {
     public static class Engine {
         private boolean enabled;
         @Min(50)
+        @Max(1000)
         private long cycleDelayMs = 250L;
         private String nodeId;
 
@@ -205,7 +206,7 @@ public class MarketMakerProperties {
         @Max(200)
         private int orderBookDepth = 20;
         @Min(1)
-        @Max(20)
+        @Max(50)
         private int orderLevels = 3;
         @Positive
         private long minSpreadTicks = 10L;
@@ -222,7 +223,7 @@ public class MarketMakerProperties {
         private long maxPriceDeviationPpm = 5000L;
         private Duration orderReconciliationInterval = Duration.ofMillis(500);
         @Min(1)
-        @Max(500)
+        @Max(160)
         private int maxOrderOperationsPerCycle = 40;
         @Min(0)
         @Max(5_000_000)
@@ -678,7 +679,7 @@ public class MarketMakerProperties {
         @PositiveOrZero
         private Long maxInventorySkewPpm;
         @Min(0)
-        @Max(20)
+        @Max(50)
         private Integer orderLevels;
 
         public String getStrategyId() {

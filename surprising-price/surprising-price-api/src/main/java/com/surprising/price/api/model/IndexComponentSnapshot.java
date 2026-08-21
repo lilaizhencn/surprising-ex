@@ -15,5 +15,6 @@ public record IndexComponentSnapshot(
         String reason,
         Instant sourceTime,
         Instant receivedAt,
-        Long latencyMillis) {
+        Long latencyMillis,
+        QuoteTransport transport) {
 }

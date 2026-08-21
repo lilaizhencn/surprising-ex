@@ -65,7 +65,8 @@ public class IndexPriceCalculator {
             }
             weightedComponents.add(new IndexComponentSnapshot(component.source(), component.sourceSymbol(), component.price(),
                     component.bidPrice(), component.askPrice(), component.configuredWeight(), effectiveWeight,
-                    component.status(), component.reason(), component.sourceTime(), component.receivedAt(), component.latencyMillis()));
+                    component.status(), component.reason(), component.sourceTime(), component.receivedAt(),
+                    component.latencyMillis(), component.transport()));
         }
 
         PriceStatus status = validCount == components.size() ? PriceStatus.HEALTHY : PriceStatus.DEGRADED;
@@ -80,7 +81,7 @@ public class IndexPriceCalculator {
         if (Duration.between(quote.sourceTime(), now).compareTo(properties.getCalculation().getMaxSourceAge()) > 0) {
             return new SourceQuote(quote.source(), quote.sourceSymbol(), quote.price(), quote.bidPrice(), quote.askPrice(),
                     quote.configuredWeight(), SourceStatus.STALE, "source price is stale", quote.sourceTime(),
-                    quote.receivedAt(), quote.latencyMillis());
+                    quote.receivedAt(), quote.latencyMillis(), quote.transport());
         }
         return quote;
     }
@@ -95,7 +96,7 @@ public class IndexPriceCalculator {
             return new SourceQuote(quote.source(), quote.sourceSymbol(), quote.price(), quote.bidPrice(), quote.askPrice(),
                     quote.configuredWeight(), SourceStatus.OUTLIER,
                     "deviation " + deviation + " exceeds " + properties.getCalculation().getOutlierThreshold(),
-                    quote.sourceTime(), quote.receivedAt(), quote.latencyMillis());
+                    quote.sourceTime(), quote.receivedAt(), quote.latencyMillis(), quote.transport());
         }
         return quote;
     }
@@ -103,7 +104,7 @@ public class IndexPriceCalculator {
     private IndexComponentSnapshot toComponent(SourceQuote quote, BigDecimal effectiveWeight) {
         return new IndexComponentSnapshot(quote.source(), quote.sourceSymbol(), quote.price(), quote.bidPrice(),
                 quote.askPrice(), quote.configuredWeight(), effectiveWeight, quote.status(), quote.reason(),
-                quote.sourceTime(), quote.receivedAt(), quote.latencyMillis());
+                quote.sourceTime(), quote.receivedAt(), quote.latencyMillis(), quote.transport());
     }
 
     private BigDecimal median(List<BigDecimal> values) {

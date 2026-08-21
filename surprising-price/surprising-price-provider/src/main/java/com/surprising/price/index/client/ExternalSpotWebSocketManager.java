@@ -88,6 +88,19 @@ import org.springframework.stereotype.Component;
         }
     }
 
+    public List<WebSocketHealth> health() {
+        long now = System.currentTimeMillis();
+        return sessions.values().stream()
+                .map(session -> new WebSocketHealth(session.url, session.sources().size(),
+                        session.webSocket.get() != null,
+                        Math.max(0L, now - session.lastFrameEpochMillis.get()),
+                        session.reconnectAttempts.get(), session.sources().stream()
+                                .map(source -> new WebSocketSourceHealth(source.symbol(), source.source().getName(),
+                                        "PUBLIC_WEBSOCKET"))
+                                .toList()))
+                .toList();
+    }
+
     @PreDestroy
     public void stop() {
         running = false;
@@ -318,5 +331,13 @@ import org.springframework.stereotype.Component;
     }
 
     private record TrackedSource(String symbol, IndexPriceProperties.SourceConfig source) {
+    }
+
+    public record WebSocketHealth(String url, int sourceCount, boolean connected,
+                                  long frameAgeMillis, int reconnectAttempts,
+                                  List<WebSocketSourceHealth> sources) {
+    }
+
+    public record WebSocketSourceHealth(String symbol, String exchange, String transport) {
     }
 }
