@@ -562,11 +562,13 @@ Aeron owner thread
 
 ### P2：快照与故障恢复
 
-- materializer 只留在快照、恢复和 parity；预先按 user 建索引，避免 `O(U*R + U*P)`。
-- snapshot admission barrier、固定 epoch 和分段 Runtime snapshot。
-- 禁止 `ByteArrayOutputStream + toByteArray()` 双份完整 snapshot buffer。
-- 三节点 leader kill、snapshot corruption、Archive 重放测试。
-- Kafka 不可用、outbox 达上限、Archive 磁盘满和 follower 落后测试。
+> 状态：**部分完成**。本地快照/恢复 seam 和 outbox 容量门禁已完成；三节点、真实 Archive、下游故障和容量验收仍未完成。
+
+- ~~materializer 只留在快照、恢复和 parity；预先按 user 建索引，避免 `O(U*R + U*P)`。~~
+- ~~snapshot admission barrier、固定 epoch 和分段 Runtime snapshot。~~
+- ~~禁止 `ByteArrayOutputStream + toByteArray()` 双份完整 snapshot buffer。~~
+- ~~本地 snapshot corruption 与 fail-closed restore 测试。~~ 三节点 leader kill 和真实 Archive 重放仍未完成。
+- ~~本地 outbox 达上限时在资金变更前拒绝测试。~~ Kafka 不可用、Archive 磁盘满和 follower 落后测试仍未完成。
 
 ### P3：容量与分片
 
@@ -644,7 +646,7 @@ mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
 `RuntimePerpetualMatchProcessorTest` 6、`CoreMatchingStateTest` 20；这些测试覆盖成交、手续费、持仓、资金费、
 风险和余额守恒边界。当前 benchmark 本身仍不宣称可以替代这些状态断言。
 
-本轮此前未执行三节点 Aeron 容量、Kafka/PostgreSQL 历史链路、leader failover、快照恢复、磁盘故障、六产品线
+本轮此前未执行三节点 Aeron 容量、Kafka/PostgreSQL 历史链路、leader failover、真实 Archive/Cluster 快照恢复、磁盘故障、六产品线
 资金守恒和长时间 JVM soak；六产品线串行系统基线已在下文补充。仍未完成的是 100k/s 开放环、故障恢复、磁盘
 故障和长时间 JVM soak，这些不能由短时容量基线替代。
 
@@ -673,7 +675,7 @@ fast path 后再次运行 continuation、撮合、批量和永续端到端回归
 egress backpressure。
 
 本轮还执行了 `git diff --check`，以及 protocol/service 变更文件的 JDTLS error diagnostics，结果均为无错误。三节点
-容量、100k/s 开放环、Kafka/Projector、leader failover、snapshot corruption、direct memory 和长时间 soak 仍未完成；
+容量、100k/s 开放环、Kafka/Projector、leader failover、真实 Archive replay/corruption、direct memory 和长时间 soak 仍未完成；
 六产品线逐项资金守恒已由下文的 Aeron 在线查询完成，不再列为未执行项。
 
 本轮随后执行单产品线本地 benchmark 与 JFR：
@@ -801,7 +803,8 @@ CPU top frames 为 `BusySpinWaitStrategy.waitFor`、`Util.getMinimumSequence`、
 - 100 万用户、400 万活动订单、热门 symbol/user，以及 0 maker fill-depth。
 - 六产品线串行基线已完成用户/做市账户、Treasury、持仓、资金费、保险覆盖、交割和期权结算守恒；仍缺生产规模
   的 maker fill-depth 与长时间混合负载。
-- Kafka/Projector outage、outbox 上限、Archive 磁盘满、snapshot corruption 和 fail-closed restore。
+- Kafka/Projector outage、Archive 磁盘满和真实 Archive/Cluster failover。
+- ~~outbox 上限、snapshot corruption 和 fail-closed restore 的本地 seam 测试。~~
 - direct memory、有效 safepoint duration、replicated outbox maxima、签名 state/funds hash 和 G1/ZGC 对照。
 
 剩余风险：Stage 1 负载很短且状态很小，fork 间最终裁决吞吐离散约 19%；JFR 本身和 JVM 启动占比较高；
