@@ -39,6 +39,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -57,13 +59,31 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final Set<Long> users = ConcurrentHashMap.newKeySet();
     private final Map<String, CompletableFuture<Integer>> symbolRegistrations = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<Void>> userRegistrations = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final AtomicReference<CompletableFuture<Void>> submissionTail =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
+    private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
+            snapshotPersistence;
+
     public DeterministicExchangeCoreAdapter() {
         this(true);
     }
 
     public DeterministicExchangeCoreAdapter(boolean startImmediately) {
+        this(startImmediately, submission -> submission.get());
+    }
+
+    DeterministicExchangeCoreAdapter(
+            Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
+                    snapshotPersistence) {
+        this(true, snapshotPersistence);
+    }
+
+    private DeterministicExchangeCoreAdapter(
+            boolean startImmediately,
+            Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
+                    snapshotPersistence) {
+        this.snapshotPersistence = java.util.Objects.requireNonNull(snapshotPersistence, "snapshotPersistence");
         if (startImmediately) {
             start();
         }
@@ -74,6 +94,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             Iterable<CoreOrderState> activeOrders,
             long coreSequence,
             MatcherSnapshot snapshot) {
+        this.snapshotPersistence = submission -> submission.get();
         if (snapshot == null || activeOrders == null) {
             throw new IllegalArgumentException("matcher snapshot is required");
         }
@@ -248,33 +269,72 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (snapshotId <= 0 || coreSequence < 0 || state == null || activeOrders == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher snapshot request"));
         }
-        return reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshotId,
-                "matcher snapshot").thenCompose(ignored -> currentStateHashesAsync()).thenCompose(hashes ->
-                api.submitCommandAsync(ApiPersistState.builder().dumpId(snapshotId).build())
-                        .thenApply(result -> {
-                            if (result != CommandResultCode.SUCCESS) {
-                                throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence,
-                                        snapshotId, "exchange-core persist failed: " + result);
-                            }
-                            try {
-                                List<InMemorySerializationProcessor.SerializedModule> modules =
-                                        serializationProcessor.exportSnapshot(snapshotId);
-                                long matcherSequence = modules.stream()
-                                        .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence)
-                                        .max().orElseThrow();
-                                return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
-                                        MatcherSnapshot.ROUTE_VERSION, snapshotId, coreSequence, matcherSequence,
-                                        state.businessStateHash(), hashes.engineHash(), hashes.bookHash(),
-                                        MatcherSnapshot.symbolRegistryHash(symbols),
-                                        MatcherSnapshot.userRegistryHash(users),
-                                        MatcherSnapshot.instrumentRegistryHash(state),
-                                        MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
-                                        MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.MATCHER_CONFIG_HASH,
-                                        symbols, users, modules);
-                            } finally {
-                                serializationProcessor.removeSnapshot(snapshotId);
-                            }
-                        }));
+        long businessStateHash = state.businessStateHash();
+        SnapshotOperation operation = snapshotOperations.get(snapshotId);
+        if (operation == null) {
+            SnapshotOperation candidate = new SnapshotOperation(coreSequence, businessStateHash);
+            operation = snapshotOperations.putIfAbsent(snapshotId, candidate);
+            if (operation == null) {
+                operation = candidate;
+                startSnapshotOperation(operation, snapshotId, coreSequence, state, activeOrders);
+            }
+        }
+        if (operation.coreSequence != coreSequence || operation.businessStateHash != businessStateHash) {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("snapshot retry does not match in-flight core state"));
+        }
+        return operation.view();
+    }
+
+    private void startSnapshotOperation(
+            SnapshotOperation operation,
+            long snapshotId,
+            long coreSequence,
+            TradingCoreState state,
+            Iterable<CoreOrderState> activeOrders) {
+        CompletableFuture<MatcherSnapshot> pipeline;
+        try {
+            pipeline = reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshotId,
+                    "matcher snapshot").thenCompose(ignored -> currentStateHashesAsync()).thenCompose(hashes ->
+                    snapshotPersistence.apply(() -> api.submitCommandAsync(
+                                    ApiPersistState.builder().dumpId(snapshotId).build()))
+                            .thenApply(result -> {
+                                if (result != CommandResultCode.SUCCESS) {
+                                    throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence,
+                                            snapshotId, "exchange-core persist failed: " + result);
+                                }
+                                try {
+                                    List<InMemorySerializationProcessor.SerializedModule> modules =
+                                            serializationProcessor.exportSnapshot(snapshotId);
+                                    long matcherSequence = modules.stream()
+                                            .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence)
+                                            .max().orElseThrow();
+                                    return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
+                                            MatcherSnapshot.ROUTE_VERSION, snapshotId, coreSequence, matcherSequence,
+                                            state.businessStateHash(), hashes.engineHash(), hashes.bookHash(),
+                                            MatcherSnapshot.symbolRegistryHash(symbols),
+                                            MatcherSnapshot.userRegistryHash(users),
+                                            MatcherSnapshot.instrumentRegistryHash(state),
+                                            MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
+                                            MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.MATCHER_CONFIG_HASH,
+                                            symbols, users, modules);
+                                } finally {
+                                    serializationProcessor.removeSnapshot(snapshotId);
+                                }
+                            }));
+        } catch (RuntimeException exception) {
+            operation.result.completeExceptionally(exception);
+            snapshotOperations.remove(snapshotId, operation);
+            return;
+        }
+        pipeline.whenComplete((snapshot, failure) -> {
+            if (failure == null) {
+                operation.result.complete(snapshot);
+            } else {
+                operation.result.completeExceptionally(failure);
+            }
+            snapshotOperations.remove(snapshotId, operation);
+        });
     }
 
     private CompletableFuture<Void> reconcileOpenOrdersAsync(
@@ -497,8 +557,39 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private record StateHashes(int engineHash, int bookHash) {
     }
 
+    private static final class SnapshotOperation {
+        private final long coreSequence;
+        private final long businessStateHash;
+        private final CompletableFuture<MatcherSnapshot> result = new CompletableFuture<>();
+
+        private SnapshotOperation(long coreSequence, long businessStateHash) {
+            this.coreSequence = coreSequence;
+            this.businessStateHash = businessStateHash;
+        }
+
+        private CompletableFuture<MatcherSnapshot> view() {
+            NonCancellableFuture<MatcherSnapshot> view = new NonCancellableFuture<>();
+            result.whenComplete((snapshot, failure) -> {
+                if (failure == null) {
+                    view.complete(snapshot);
+                } else {
+                    view.completeExceptionally(failure);
+                }
+            });
+            return view;
+        }
+    }
+
+    private static final class NonCancellableFuture<T> extends CompletableFuture<T> {
+        @Override
+        public boolean cancel(boolean mayInterruptIfRunning) {
+            return false;
+        }
+    }
+
     private void stop() {
         if (core != null) {
+            awaitSnapshotOperations();
             if (api != null) {
                 api.processReport(new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0).join();
             }
@@ -508,6 +599,19 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             symbolRegistrations.clear();
             userRegistrations.clear();
             submissionTail.set(CompletableFuture.completedFuture(null));
+        }
+    }
+
+    private void awaitSnapshotOperations() {
+        for (SnapshotOperation operation : snapshotOperations.values()) {
+            try {
+                operation.result.get(30, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (ExecutionException | TimeoutException ignored) {
+                return;
+            }
         }
     }
 

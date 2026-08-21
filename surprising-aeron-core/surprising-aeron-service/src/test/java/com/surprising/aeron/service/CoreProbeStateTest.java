@@ -32,8 +32,10 @@ import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -473,6 +475,8 @@ class CoreProbeStateTest {
             assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                     .status()).isEqualTo(ResponseStatus.APPLIED);
+            long fixtureStartingCount = state.appliedCommandCount();
+            assertThat(fixtureStartingCount).isEqualTo(2);
             UUID firstCommandId = UUID.randomUUID();
             CoreMessage firstPlace = tradingCommand(CoreMessageType.PLACE_ORDER, firstCommandId, 2,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(715, "BTC-USDT", 1,
@@ -506,7 +510,10 @@ class CoreProbeStateTest {
                     .hasMessage("snapshot not ready");
             assertThat(state.pendingMatching()).isEmpty();
             assertThat(state.commandResults().get(firstCommandId).appliedCommandCount())
-                    .isLessThan(state.commandResults().get(secondCommandId).appliedCommandCount());
+                    .isEqualTo(fixtureStartingCount + 3);
+            assertThat(state.commandResults().get(secondCommandId).appliedCommandCount())
+                    .isEqualTo(fixtureStartingCount + 4);
+            assertThat(state.appliedCommandCount()).isEqualTo(fixtureStartingCount + 4);
             assertThat(state.tradingState().order(715).status())
                     .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
             assertThat(state.tradingState().order(716).status())
@@ -515,18 +522,41 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void incompleteSnapshotPublishesNothingAndRetryHasNoStaleFence() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+    void notReadyReleasesAdmissionButRetainsInFlightMatcherGuardUntilCompletion() {
+        // Given
+        CompletableFuture<Void> nestedMatcherStage = new CompletableFuture<>();
+        CompletableFuture<com.surprising.aeron.service.matching.MatcherSnapshot> matcherSnapshot =
+                nestedMatcherStage.thenApply(ignored -> null);
+        AtomicInteger captureCount = new AtomicInteger();
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT,
+                (snapshotId, coreSequence, tradingState, activeOrders) -> captureCount.incrementAndGet() == 1
+                        ? matcherSnapshot
+                        : CompletableFuture.failedFuture(new IllegalStateException("fresh capture fixture failure")))) {
             state.beginSnapshot(801, Long.MAX_VALUE);
 
+            // When
             assertThatThrownBy(() -> state.captureSnapshot(1_000, 1, System.nanoTime()))
-                    .isInstanceOf(IllegalStateException.class)
+                    .isInstanceOf(CoreProbeState.SnapshotNotReadyException.class)
                     .hasMessage("snapshot not ready");
 
-            state.beginSnapshot(802, 10);
-            assertThatThrownBy(() -> state.captureSnapshot(1_001, 2, 10))
-                    .isInstanceOf(CoreProbeState.SnapshotFenceTimeoutException.class)
-                    .hasMessage("snapshot fence timed out");
+            // Then
+            assertThat(matcherSnapshot).isNotCancelled().isNotDone();
+            assertThat(nestedMatcherStage).isNotCancelled().isNotDone();
+            assertThat(state.apply(command(UUID.randomUUID(), 1, 7)).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThatThrownBy(() -> state.beginSnapshot(802, Long.MAX_VALUE))
+                    .isInstanceOf(CoreProbeState.SnapshotNotReadyException.class)
+                    .hasMessage("snapshot not ready");
+            assertThat(captureCount).hasValue(1);
+            assertThat(matcherSnapshot).isNotCancelled().isNotDone();
+
+            assertThat(nestedMatcherStage.completeExceptionally(new IllegalStateException("test completion")))
+                    .isTrue();
+            assertThat(matcherSnapshot).isCompletedExceptionally();
+            state.beginSnapshot(802, Long.MAX_VALUE);
+            assertThatThrownBy(() -> state.captureSnapshot(1_001, 2, System.nanoTime()))
+                    .isInstanceOf(java.util.concurrent.CompletionException.class)
+                    .hasRootCauseMessage("fresh capture fixture failure");
+            assertThat(captureCount).hasValue(2);
         }
     }
 
@@ -959,11 +989,57 @@ class CoreProbeStateTest {
     }
 
     @Test
+    void rejectsFactProducingOrderBeforeFinancialMutationWhenReplicatedOutboxCapacityIsReserved() {
+        // Given
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                .status()).isEqualTo(ResponseStatus.APPLIED);
+        fillExportBacklogCapacity(state.exportState());
+
+        var beforeUser = state.tradingState().user(1001);
+        var beforeBalances = beforeUser.balances();
+        var beforeReservations = beforeUser.reservations();
+        var beforeOrders = state.tradingState().orders();
+        long beforeBusinessStateHash = state.tradingState().businessStateHash();
+        long beforeStateHash = state.stateHash();
+        long beforeAppliedCommandCount = state.appliedCommandCount();
+        var beforeSourceCursors = state.lastSourceSequences();
+        long beforeSourceCursorDigest = state.sourceSequenceDigest();
+        var beforeExportStatus = state.exportState().status();
+        UUID rejectedCommandId = UUID.randomUUID();
+        CoreMessage command = tradingCommand(CoreMessageType.PLACE_ORDER, rejectedCommandId, 2,
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9_001, "BTC-USDT", 1,
+                        "BTC", "USDT", "USDT", CoreOrderSide.BUY, 600, 1, false,
+                        ReservationKind.SPOT_ASSET, "USDT", 1_000)));
+
+        // When
+        CoreResponse rejected = state.apply(command);
+
+        // Then
+        assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
+        assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.EXPORT_BACKLOG_FULL);
+        assertThat(rejected.appliedCommandCount()).isEqualTo(beforeAppliedCommandCount);
+        assertThat(rejected.stateHash()).isEqualTo(beforeStateHash);
+        assertThat(state.tradingState().user(1001).balances()).isEqualTo(beforeBalances);
+        assertThat(state.tradingState().user(1001).reservations()).isEqualTo(beforeReservations);
+        assertThat(state.tradingState().orders()).isEqualTo(beforeOrders).isEmpty();
+        assertThat(state.tradingState().businessStateHash()).isEqualTo(beforeBusinessStateHash);
+        assertThat(state.stateHash()).isEqualTo(beforeStateHash);
+        assertThat(state.appliedCommandCount()).isEqualTo(beforeAppliedCommandCount);
+        assertThat(state.lastSourceSequences()).isEqualTo(beforeSourceCursors);
+        assertThat(state.sourceSequenceDigest()).isEqualTo(beforeSourceCursorDigest);
+        assertThat(state.exportState().status()).isEqualTo(beforeExportStatus);
+        assertThat(state.commandResults()).doesNotContainKey(rejectedCommandId);
+    }
+
+    @Test
     void snapshotChecksumRejectsCorruption() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         state.apply(command(UUID.randomUUID(), 1, 7));
         byte[] snapshot = state.snapshot();
-        snapshot[snapshot.length - Long.BYTES - 1] ^= 1;
+        snapshot[20] ^= 1;
 
         org.assertj.core.api.Assertions.assertThatThrownBy(
                         () -> CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot))
@@ -991,7 +1067,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(8);
+        assertThat(manifest.schemaVersion()).isEqualTo(9);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();
@@ -1083,6 +1159,17 @@ class CoreProbeStateTest {
 
     private static CoreMessage command(UUID commandId, long sourceSequence, long delta) {
         return command(ProductLine.SPOT, commandId, sourceSequence, delta);
+    }
+
+    private static void fillExportBacklogCapacity(CoreExportState exportState) {
+        byte[] payload = new byte[CoreExportCodec.MAX_COMMAND_PAYLOAD / 2];
+        for (long sequence = 1; sequence <= 6; sequence++) {
+            exportState.append(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 91, sequence,
+                    0, 1_000, sequence), payload), ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    sequence, 0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        }
+        assertThat(exportState.hasCapacityFor()).isFalse();
     }
 
     private static CoreResponse applyAndDrain(CoreProbeState state, CoreMessage message) {

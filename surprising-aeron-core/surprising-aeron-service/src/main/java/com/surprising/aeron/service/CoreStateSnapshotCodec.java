@@ -31,84 +31,20 @@ final class CoreStateSnapshotCodec {
     private static final int EXPORT_FIXED_LENGTH = 20;
     private static final int CHECKSUM_LENGTH = Long.BYTES;
     static final int MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+    static final int MAX_SECTION_BYTES = SectionedCoreSnapshotCodec.MAX_SECTION_BYTES;
 
     private CoreStateSnapshotCodec() {
     }
 
     static byte[] encode(CoreProbeState state, MatcherSnapshot matcherSnapshot) {
-        if (!state.pendingMatching().isEmpty()) {
-            throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
-        }
-        matcherSnapshot.verifyCoreState(state.tradingState(), state.appliedCommandCount());
-        byte[] tradingState = TradingStateSnapshotCodec.encode(state.tradingState());
-        byte[] matcherState = MatcherSnapshotCodec.encode(matcherSnapshot);
-        byte[] retentionState = state.terminalRetention().encode();
-        ArrayList<byte[]> pendingEvents = new ArrayList<>(state.exportState().pendingCount());
-        for (CoreMessage event : state.exportState().pendingEvents()) {
-            pendingEvents.add(CoreMessageCodec.encode(event));
-        }
-        long exportLength = EXPORT_FIXED_LENGTH;
-        for (byte[] event : pendingEvents) {
-            exportLength = Math.addExact(exportLength, Math.addExact(Integer.BYTES, event.length));
-        }
-        long resultLength = 0;
-        for (CoreProbeState.StoredResult result : state.commandResults().values()) {
-            resultLength = Math.addExact(resultLength,
-                    Math.addExact(Integer.BYTES, resultEntryLength(result)));
-        }
-        long calculatedLength = Math.addExact(Math.addExact(Math.addExact(
-                Math.addExact((long) FIXED_LENGTH,
-                        Math.multiplyExact((long) state.lastSourceSequences().size(), SOURCE_SEQUENCE_LENGTH)),
-                resultLength),
-                exportLength), Math.addExact(Math.addExact(Math.addExact(matcherState.length, tradingState.length),
-                        retentionState.length), CHECKSUM_LENGTH));
-        if (calculatedLength > MAX_SNAPSHOT_BYTES) {
-            throw new IllegalArgumentException("core snapshot exceeds maximum size");
-        }
-        int snapshotLength = Math.toIntExact(calculatedLength);
-        ByteBuffer buffer = ByteBuffer.allocate(snapshotLength)
-                .order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(MAGIC);
-        buffer.putShort((short) VERSION);
-        buffer.put((byte) ProductLineWireCode.encode(state.productLine()));
-        buffer.put((byte) 0);
-        buffer.putInt(MatcherSnapshot.ROUTE_VERSION);
-        buffer.putLong(state.appliedCommandCount());
-        buffer.putLong(state.probeValue());
-        buffer.putInt(state.commandResults().size());
-        buffer.putInt(state.lastSourceSequences().size());
-        buffer.putInt(tradingState.length);
-        buffer.putInt(matcherState.length);
-        buffer.putInt(retentionState.length);
-        state.lastSourceSequences().forEach((sourceKey, sequence) -> {
-            buffer.putInt(sourceKey.source().wireCode());
-            buffer.putInt(0);
-            buffer.putLong(sourceKey.sourceId());
-            buffer.putLong(sequence);
-        });
-        state.commandResults().forEach((commandId, result) -> {
-            byte[] encoded = encodeResult(commandId, result);
-            buffer.putInt(encoded.length);
-            buffer.put(encoded);
-        });
-        buffer.putLong(state.exportState().acknowledgedSequence());
-        buffer.putLong(state.exportState().nextSequence());
-        buffer.putInt(state.exportState().pendingCount());
-        pendingEvents.forEach(encoded -> {
-            buffer.putInt(encoded.length);
-            buffer.put(encoded);
-        });
-        buffer.put(matcherState);
-        buffer.put(tradingState);
-        buffer.put(retentionState);
-        CRC32C checksum = new CRC32C();
-        checksum.update(buffer.array(), 0, buffer.position());
-        buffer.putLong(checksum.getValue());
-        return buffer.array();
+        return SectionedCoreSnapshotCodec.encode(state, matcherSnapshot).toByteArray();
     }
 
     static CoreSnapshotManifest manifest(byte[] snapshot, ProductLine expectedProductLine) {
         rejectOversizedSnapshot(snapshot);
+        if (SectionedCoreSnapshotCodec.isSectioned(snapshot)) {
+            return SectionedCoreSnapshotCodec.manifest(snapshot, expectedProductLine);
+        }
         if (snapshot == null || snapshot.length < FIXED_LENGTH) {
             throw new ProtocolException("snapshot shorter than fixed header");
         }
@@ -209,6 +145,9 @@ final class CoreStateSnapshotCodec {
 
     static CoreProbeState decode(byte[] snapshot, ProductLine expectedProductLine) {
         rejectOversizedSnapshot(snapshot);
+        if (SectionedCoreSnapshotCodec.isSectioned(snapshot)) {
+            return SectionedCoreSnapshotCodec.decode(snapshot, expectedProductLine);
+        }
         if (snapshot == null || snapshot.length < FIXED_LENGTH) {
             throw new ProtocolException("snapshot shorter than fixed header");
         }

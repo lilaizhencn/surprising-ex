@@ -15,6 +15,8 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -299,6 +301,108 @@ class RuntimeStateProjectorTest {
 
         assertThat(restored).isEqualTo(source);
         assertThat(restored.businessStateHash()).isEqualTo(source.businessStateHash());
+    }
+
+    @Test
+    void materializesSharedGlobalUserStateDeterministically() {
+        // Given
+        OrderReservation firstReservation = new OrderReservation(11, "BTC-USDT", 4,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 500, 100, 300, 5);
+        CorePositionState firstPosition = new CorePositionState("BTC-USDT", "USDT",
+                CoreMarginMode.ISOLATED, CorePositionSide.LONG, 4, 2, 100, 200, 9, 100);
+        OrderReservation additionalFirstReservation = new OrderReservation(22, "ETH-USDT", 3,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 400, 200, 150, 4);
+        CorePositionState additionalFirstPosition = new CorePositionState("ETH-USDT", "USDT",
+                CoreMarginMode.CROSS, CorePositionSide.SHORT, 3, -2, 80, 160, -7, 50);
+        CoreUserState firstUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 8,
+                Map.of("USDT", new AssetBalance("USDT", 700, 300)),
+                Map.of(22L, additionalFirstReservation, 11L, firstReservation),
+                Map.of(additionalFirstPosition.key(), additionalFirstPosition, firstPosition.key(), firstPosition),
+                CorePositionMode.HEDGE);
+        OrderReservation secondReservation = new OrderReservation(33, "ETH-USDT", 3,
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 400, 50, 100, 4);
+        CorePositionState secondPosition = new CorePositionState("ETH-USDT", "USDT",
+                CoreMarginMode.CROSS, CorePositionSide.SHORT, 3, -2, 80, 160, -7, 50);
+        CoreUserState secondUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 9, 5,
+                Map.of("USDT", new AssetBalance("USDT", 900, 300)), Map.of(33L, secondReservation),
+                Map.of(secondPosition.key(), secondPosition), CorePositionMode.HEDGE);
+        TradingCoreState source = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 12,
+                Map.of(9L, secondUser, 7L, firstUser), Map.of(), Map.of(), CoreRiskState.empty(),
+                CoreTreasuryState.empty());
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        identities.positionKey(7, additionalFirstPosition.key());
+        identities.positionKey(7, firstPosition.key());
+        TradingRuntimeState runtime = RuntimeStateProjector.project(source, identities);
+        runtime.removeReservation(11, 7);
+        runtime.putReservation(RuntimeStateProjector.toRuntimeReservation(7, firstReservation, identities));
+        long firstPositionKey = identities.positionKey(7, firstPosition.key());
+        runtime.removePosition(firstPositionKey, 7);
+        runtime.putPosition(firstPositionKey, new PositionRuntime(7,
+                identities.symbolId(firstPosition.symbol()), identities.assetId(firstPosition.marginAsset()),
+                firstPosition.marginMode(), firstPosition.positionSide(), firstPosition.instrumentVersion(),
+                firstPosition.signedQuantitySteps(), firstPosition.entryPriceTicks(), firstPosition.entryValueTicks(),
+                firstPosition.realizedPnlUnits(), firstPosition.positionMarginUnits()));
+        RuntimeStateMaterializer.SnapshotTraversalProbe traversalProbe =
+                new RuntimeStateMaterializer.SnapshotTraversalProbe();
+
+        List<Long> runtimeFirstUserReservationOrder = new ArrayList<>();
+        runtime.reservationsForSnapshot().forEachKeyValue((orderId, reservation) -> {
+            if (reservation.userId() == 7) runtimeFirstUserReservationOrder.add(orderId);
+        });
+        List<String> runtimeFirstUserPositionOrder = new ArrayList<>();
+        runtime.positionsForSnapshot().forEachKeyValue((positionKey, position) -> {
+            if (position.userId() == 7) runtimeFirstUserPositionOrder.add(identities.positionKey(7, positionKey));
+        });
+        assertThat(runtimeFirstUserReservationOrder).isNotEqualTo(List.of(11L, 22L));
+        assertThat(runtimeFirstUserPositionOrder).isNotEqualTo(List.of("BTC-USDT:LONG", "ETH-USDT:SHORT"));
+
+        // When
+        TradingCoreState first = RuntimeStateMaterializer.materialize(runtime, identities, traversalProbe);
+        TradingCoreState repeated = RuntimeStateMaterializer.materialize(runtime, identities);
+
+        // Then
+        assertThat(first).isEqualTo(source);
+        assertThat(first.businessStateHash()).isEqualTo(source.businessStateHash());
+        assertThat(repeated).isEqualTo(first);
+        assertThat(repeated.businessStateHash()).isEqualTo(first.businessStateHash());
+        assertThat(new ArrayList<>(first.users().keySet())).isEqualTo(List.of(7L, 9L));
+        assertThat(new ArrayList<>(first.users().get(7L).reservations().keySet())).isEqualTo(List.of(11L, 22L));
+        assertThat(first.users().get(9L).reservations()).containsOnlyKeys(33L);
+        assertThat(new ArrayList<>(first.users().get(7L).positions().keySet()))
+                .isEqualTo(List.of("BTC-USDT:LONG", "ETH-USDT:SHORT"));
+        assertThat(first.users().get(9L).positions()).containsOnlyKeys("ETH-USDT:SHORT");
+        assertThat(traversalProbe.reservationTraversals()).isEqualTo(1);
+        assertThat(traversalProbe.reservationEntries()).isEqualTo(3);
+        assertThat(traversalProbe.positionTraversals()).isEqualTo(1);
+        assertThat(traversalProbe.positionEntries()).isEqualTo(3);
+    }
+
+    @Test
+    void rejectsGlobalStateOwnedByAnUnknownRuntimeUser() {
+        CoreUserState user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
+                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(), Map.of());
+        TradingCoreState source = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(7L, user), Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+        RuntimeIdentityRegistry reservationIdentities = new RuntimeIdentityRegistry();
+        TradingRuntimeState reservationRuntime = RuntimeStateProjector.project(source, reservationIdentities);
+        reservationRuntime.putReservation(new ReservationRuntime(99, 99,
+                reservationIdentities.symbolId("BTC-USDT"), 1, ReservationKind.DERIVATIVE_MARGIN,
+                reservationIdentities.assetId("USDT"), 100, 0, 0, 1));
+
+        assertThatThrownBy(() -> RuntimeStateMaterializer.materialize(reservationRuntime, reservationIdentities))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("reservation owner is not registered: 99");
+
+        RuntimeIdentityRegistry positionIdentities = new RuntimeIdentityRegistry();
+        TradingRuntimeState positionRuntime = RuntimeStateProjector.project(source, positionIdentities);
+        long positionKey = positionIdentities.positionKey(99, "BTC-USDT:LONG");
+        positionRuntime.replacePosition(positionKey, new PositionRuntime(99,
+                positionIdentities.symbolId("BTC-USDT"), positionIdentities.assetId("USDT"),
+                CoreMarginMode.ISOLATED, CorePositionSide.LONG, 1, 1, 100, 100, 0, 100));
+
+        assertThatThrownBy(() -> RuntimeStateMaterializer.materialize(positionRuntime, positionIdentities))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("position owner is not registered: 99");
     }
 
     @Test

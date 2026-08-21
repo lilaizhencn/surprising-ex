@@ -8,15 +8,13 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
-import io.aeron.FragmentAssembler;
 import io.aeron.Image;
 import io.aeron.cluster.codecs.CloseReason;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClusteredService;
+import io.aeron.logbuffer.FragmentHandler;
 import io.aeron.logbuffer.Header;
-import java.util.concurrent.atomic.AtomicReference;
-import java.io.ByteArrayOutputStream;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -24,6 +22,8 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -118,29 +118,40 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTakeSnapshot(ExclusivePublication snapshotPublication) {
-        byte[] snapshot = captureSnapshot(Math.max(1, cluster.logPosition()));
-        org.agrona.concurrent.UnsafeBuffer buffer = new org.agrona.concurrent.UnsafeBuffer(snapshot);
+        SectionedCoreSnapshotCodec.SectionedSnapshot snapshot =
+                captureSnapshotSections(Math.max(1, cluster.logPosition()), snapshotDeadline());
         idleStrategy.reset();
-        int offset = 0;
-        while (offset < snapshot.length) {
-            int chunkLength = Math.min(snapshotPublication.maxPayloadLength(), snapshot.length - offset);
-            while (snapshotPublication.offer(buffer, offset, chunkLength) < 0) {
-                idleStrategy.idle();
+        for (byte[] sectionChunk : snapshot.chunks()) {
+            UnsafeBuffer buffer = new UnsafeBuffer(sectionChunk);
+            int offset = 0;
+            while (offset < sectionChunk.length) {
+                int chunkLength = Math.min(snapshotPublication.maxPayloadLength(), sectionChunk.length - offset);
+                while (snapshotPublication.offer(buffer, offset, chunkLength) < 0) {
+                    idleStrategy.idle();
+                }
+                offset += chunkLength;
             }
-            offset += chunkLength;
         }
     }
 
     byte[] captureSnapshot(long snapshotId) {
-        long deadlineNanos = Math.addExact(System.nanoTime(),
-                java.util.concurrent.TimeUnit.SECONDS.toNanos(SNAPSHOT_TIMEOUT_SECONDS));
-        return captureSnapshot(snapshotId, deadlineNanos);
+        return captureSnapshot(snapshotId, snapshotDeadline());
     }
 
     byte[] captureSnapshot(long snapshotId, long deadlineNanos) {
-        state.beginSnapshot(snapshotId, deadlineNanos);
+        return captureSnapshotSections(snapshotId, deadlineNanos).toByteArray();
+    }
+
+    private long snapshotDeadline() {
+        return Math.addExact(System.nanoTime(),
+                java.util.concurrent.TimeUnit.SECONDS.toNanos(SNAPSHOT_TIMEOUT_SECONDS));
+    }
+
+    private SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(
+            long snapshotId, long deadlineNanos) {
         try {
-            return state.captureSnapshot(
+            state.beginSnapshot(snapshotId, deadlineNanos);
+            return state.captureSnapshotSections(
                     cluster == null ? 0 : cluster.time(),
                     cluster == null ? 0 : cluster.logPosition(),
                     System.nanoTime());
@@ -287,21 +298,18 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void loadSnapshot(Image snapshotImage) {
-        ByteArrayOutputStream snapshot = new ByteArrayOutputStream();
-        FragmentAssembler assembler = new FragmentAssembler((buffer, offset, length, header) -> {
-            ensureSnapshotCapacity(snapshot.size(), length);
-            byte[] data = new byte[length];
-            buffer.getBytes(offset, data);
-            snapshot.writeBytes(data);
-        });
-        while (!snapshotImage.isEndOfStream()) {
-            int fragments = snapshotImage.poll(assembler, 10);
+        loadSnapshot(snapshotImage::poll, snapshotImage::isEndOfStream);
+    }
+
+    void loadSnapshot(SnapshotFragmentSource snapshotSource, BooleanSupplier endOfStream) {
+        SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
+        FragmentHandler fragmentHandler = (buffer, offset, length, header) ->
+                recovery.accept(buffer, offset, length);
+        while (!endOfStream.getAsBoolean()) {
+            int fragments = snapshotSource.poll(fragmentHandler, 10);
             idleStrategy.idle(fragments);
         }
-        if (snapshot.size() == 0) {
-            throw new IllegalStateException("incomplete Aeron core snapshot");
-        }
-        restoreSnapshot(snapshot.toByteArray());
+        replaceState(recovery.decode(productLine));
     }
 
     static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
@@ -312,9 +320,17 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     void restoreSnapshot(byte[] snapshot) {
-        CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot);
+        replaceState(CoreProbeState.fromSnapshot(productLine, snapshot));
+    }
+
+    private void replaceState(CoreProbeState restored) {
         state.close();
         state = restored;
+    }
+
+    @FunctionalInterface
+    interface SnapshotFragmentSource {
+        int poll(FragmentHandler fragmentHandler, int fragmentLimit);
     }
 
     private void offer(ClientSession session, CoreMessage message) {

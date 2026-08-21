@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -10,8 +11,41 @@ public final class RuntimeStateMaterializer {
     }
 
     public static TradingCoreState materialize(TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        return materialize(runtime, identities, null);
+    }
+
+    static TradingCoreState materialize(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                        SnapshotTraversalProbe traversalProbe) {
         if (runtime == null || identities == null) throw new IllegalArgumentException("runtime and identities required");
         runtime.assertOwner();
+
+        Map<Long, Map<Long, OrderReservation>> reservationsByUser = new HashMap<>();
+        if (traversalProbe != null) traversalProbe.reservationTraversalStarted();
+        runtime.reservationsForSnapshot().forEachKeyValue((orderId, reservation) -> {
+            if (traversalProbe != null) traversalProbe.reservationEntryVisited();
+            if (!runtime.usersForSnapshot().containsKey(reservation.userId())) {
+                throw new IllegalStateException("reservation owner is not registered: " + reservation.userId());
+            }
+            reservationsByUser.computeIfAbsent(reservation.userId(), ignored -> new TreeMap<>())
+                    .put(orderId, new OrderReservation(orderId, identities.symbol(reservation.symbolId()),
+                            reservation.instrumentVersion(), reservation.kind(), identities.asset(reservation.assetId()),
+                            reservation.totalReservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
+                            reservation.orderQuantitySteps()));
+        });
+        Map<Long, Map<String, CorePositionState>> positionsByUser = new HashMap<>();
+        if (traversalProbe != null) traversalProbe.positionTraversalStarted();
+        runtime.positionsForSnapshot().forEachKeyValue((positionKey, position) -> {
+            if (traversalProbe != null) traversalProbe.positionEntryVisited();
+            if (!runtime.usersForSnapshot().containsKey(position.userId())) {
+                throw new IllegalStateException("position owner is not registered: " + position.userId());
+            }
+            String key = identities.positionKey(position.userId(), positionKey);
+            positionsByUser.computeIfAbsent(position.userId(), ignored -> new TreeMap<>())
+                    .put(key, new CorePositionState(identities.symbol(position.symbolId()),
+                            identities.asset(position.assetId()), position.marginMode(), position.positionSide(),
+                            position.instrumentVersion(), position.signedQuantitySteps(), position.entryPriceTicks(),
+                            position.entryValueTicks(), position.realizedPnlUnits(), position.positionMarginUnits()));
+        });
 
         Map<Long, CoreUserState> users = new TreeMap<>();
         runtime.usersForSnapshot().forEachKeyValue((userId, user) -> {
@@ -21,23 +55,10 @@ public final class RuntimeStateMaterializer {
                 String asset = identities.asset(assetId);
                 balances.put(asset, new AssetBalance(asset, balance.availableUnits(), balance.lockedUnits()));
             });
-            Map<Long, OrderReservation> reservations = new TreeMap<>();
-            runtime.reservationsForSnapshot().forEachKeyValue((orderId, reservation) -> {
-                if (reservation.userId() != userId) return;
-                reservations.put(orderId, new OrderReservation(orderId, identities.symbol(reservation.symbolId()),
-                        reservation.instrumentVersion(), reservation.kind(), identities.asset(reservation.assetId()),
-                        reservation.totalReservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
-                        reservation.orderQuantitySteps()));
-            });
-            Map<String, CorePositionState> positions = new TreeMap<>();
-            runtime.positionsForSnapshot().forEachKeyValue((positionKey, position) -> {
-                if (position.userId() != userId) return;
-                String key = identities.positionKey(userId, positionKey);
-                positions.put(key, new CorePositionState(identities.symbol(position.symbolId()),
-                        identities.asset(position.assetId()), position.marginMode(), position.positionSide(),
-                        position.instrumentVersion(), position.signedQuantitySteps(), position.entryPriceTicks(),
-                        position.entryValueTicks(), position.realizedPnlUnits(), position.positionMarginUnits()));
-            });
+            Map<Long, OrderReservation> reservations = new TreeMap<>(
+                    reservationsByUser.getOrDefault(userId, Map.of()));
+            Map<String, CorePositionState> positions = new TreeMap<>(
+                    positionsByUser.getOrDefault(userId, Map.of()));
             users.put(userId, new CoreUserState(user.productLine(), userId, user.revision(), balances,
                     reservations, positions, user.positionMode()));
         });
@@ -118,5 +139,44 @@ public final class RuntimeStateMaterializer {
                 new TreeMap<>(runtime.leveragesForRuntime()), new TreeMap<>(runtime.algoOrdersForRuntime()),
                 new TreeMap<>(runtime.cancelAllAfterTimersForRuntime()), clientIndex,
                 new TreeMap<>(runtime.triggerOrdersForRuntime()));
+    }
+
+    static final class SnapshotTraversalProbe {
+        private int reservationTraversals;
+        private int reservationEntries;
+        private int positionTraversals;
+        private int positionEntries;
+
+        void reservationTraversalStarted() {
+            reservationTraversals++;
+        }
+
+        void reservationEntryVisited() {
+            reservationEntries++;
+        }
+
+        void positionTraversalStarted() {
+            positionTraversals++;
+        }
+
+        void positionEntryVisited() {
+            positionEntries++;
+        }
+
+        int reservationTraversals() {
+            return reservationTraversals;
+        }
+
+        int reservationEntries() {
+            return reservationEntries;
+        }
+
+        int positionTraversals() {
+            return positionTraversals;
+        }
+
+        int positionEntries() {
+            return positionEntries;
+        }
     }
 }

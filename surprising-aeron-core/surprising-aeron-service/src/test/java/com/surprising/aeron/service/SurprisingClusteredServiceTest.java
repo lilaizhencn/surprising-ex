@@ -13,6 +13,7 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -25,15 +26,73 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;
 import java.lang.reflect.Proxy;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.zip.CRC32C;
 import org.agrona.concurrent.NoOpIdleStrategy;
+import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 
 class SurprisingClusteredServiceTest {
+
+    @Test
+    void loadsOneByteSnapshotFragmentsThroughBoundedSectionRecovery() {
+        SurprisingClusteredService source = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService target = new SurprisingClusteredService(ProductLine.SPOT);
+        try {
+            assertThat(source.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
+                    CoreProtocol.probePayload(9))).status()).isEqualTo(ResponseStatus.APPLIED);
+            byte[] snapshot = source.state().snapshot(45);
+            AtomicInteger offset = new AtomicInteger();
+            UnsafeBuffer buffer = new UnsafeBuffer(snapshot);
+            SurprisingClusteredService.SnapshotFragmentSource fragments = (handler, fragmentLimit) -> {
+                if (offset.get() == snapshot.length) return 0;
+                handler.onFragment(buffer, offset.getAndIncrement(), 1, null);
+                return 1;
+            };
+            target.onStart(cluster(), null);
+
+            target.loadSnapshot(fragments, () -> offset.get() == snapshot.length);
+
+            assertThat(target.state().probeValue()).isEqualTo(9);
+            assertThat(target.state().stateHash()).isEqualTo(source.state().stateHash());
+            assertThat(offset).hasValue(snapshot.length);
+        } finally {
+            source.onTerminate(null);
+            target.onTerminate(null);
+        }
+    }
+
+    @Test
+    void emptyAndIncompleteFragmentSourcesFailBeforeStateReplacement() {
+        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        try {
+            CoreProbeState before = service.state();
+            service.onStart(cluster(), null);
+            assertThatThrownBy(() -> service.loadSnapshot((handler, limit) -> 0, () -> true))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
+            assertThat(service.state()).isSameAs(before);
+
+            byte[] snapshot = before.snapshot(46);
+            byte[] truncated = Arrays.copyOf(snapshot, snapshot.length - 1);
+            AtomicInteger delivered = new AtomicInteger();
+            assertThatThrownBy(() -> service.loadSnapshot((handler, limit) -> {
+                if (delivered.getAndIncrement() > 0) return 0;
+                handler.onFragment(new UnsafeBuffer(truncated), 0, truncated.length, null);
+                return 1;
+            }, () -> delivered.get() > 0))
+                    .isInstanceOf(ProtocolException.class);
+            assertThat(service.state()).isSameAs(before);
+        } finally {
+            service.onTerminate(null);
+        }
+    }
 
     @Test
     void rejectsSnapshotFragmentsBeyondBoundedRecoveryBuffer() {
@@ -57,6 +116,33 @@ class SurprisingClusteredServiceTest {
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("checksum");
             assertThat(service.state()).isSameAs(before);
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
+    void pairedManifestMismatchFailsBeforeLiveStateReplacement() {
+        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        try {
+            CoreProbeState before = service.state();
+            assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
+                    CoreProtocol.probePayload(9))).status()).isEqualTo(ResponseStatus.APPLIED);
+            long beforeHash = before.stateHash();
+            long beforeSequence = before.appliedCommandCount();
+            byte[] snapshot = before.snapshot(75);
+            ByteBuffer manifest = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
+            manifest.putLong(20 + 22, manifest.getLong(20 + 22) + 1);
+            CRC32C checksum = new CRC32C();
+            checksum.update(snapshot, 0, snapshot.length - 16);
+            manifest.putLong(snapshot.length - Long.BYTES, checksum.getValue());
+
+            assertThatThrownBy(() -> service.restoreSnapshot(snapshot))
+                    .isInstanceOf(ProtocolException.class)
+                    .hasMessageContaining("snapshot id");
+            assertThat(service.state()).isSameAs(before);
+            assertThat(service.state().stateHash()).isEqualTo(beforeHash);
+            assertThat(service.state().appliedCommandCount()).isEqualTo(beforeSequence);
         } finally {
             service.onTerminate(null);
         }
@@ -101,13 +187,15 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void incompleteMatcherSnapshotFailsClosedWithoutLoopingOwnerCallback() {
+    void incompleteMatcherSnapshotFailsClosedAndReleasesCommandAdmission() {
         SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
         service.onStart(cluster(), null);
         try {
             assertThatThrownBy(() -> service.captureSnapshot(7))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessage("snapshot not ready");
+            assertThat(service.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
+                    CoreProtocol.probePayload(7))).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(service.snapshotFenceNotReadyCount()).isEqualTo(1);
             assertThat(service.snapshotFenceTimeoutCount()).isZero();
         } finally {
@@ -136,29 +224,47 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void snapshotCallbackSurfaceDrainsPendingMatcherBeforeRoundTrip() {
+    void snapshotCallbackSurfaceDrainsQueuedMatcherCompletionWithSinglePoll() {
+        // Given
         SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
         service.onStart(cluster(), null);
         try {
             long pendingSequence = preparePendingPlace(service.state(), 903);
-            com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
-            long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            while (matching == null && System.nanoTime() < deadlineNanos) {
-                matching = service.state().takeMatchingResult(pendingSequence);
-            }
-            assertThat(matching).isNotNull();
-            service.state().publishMatchingCompletion(pendingSequence, matching);
+            service.state().publishMatchingCompletion(pendingSequence,
+                    new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS", List.of()));
 
+            // When
             assertThatThrownBy(() -> service.captureSnapshot(8))
                     .isInstanceOf(CoreProbeState.SnapshotNotReadyException.class)
                     .hasMessage("snapshot not ready");
 
+            // Then
             assertThat(service.state().pendingMatchingCount()).isZero();
             assertThat(service.state().pendingMatching(pendingSequence)).isNull();
-            byte[] snapshot = service.state().snapshot(11);
-            service.restoreSnapshot(snapshot);
             assertThat(service.state().tradingState().order(903).status())
                     .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
+    void restoresSuccessfulSnapshotRoundTripWithoutTimingPoll() {
+        // Given
+        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        try {
+            CoreProbeState before = service.state();
+            assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
+                    CoreProtocol.probePayload(7))).status()).isEqualTo(ResponseStatus.APPLIED);
+            byte[] snapshot = before.snapshot(11);
+
+            // When
+            service.restoreSnapshot(snapshot);
+
+            // Then
+            assertThat(service.state()).isNotSameAs(before);
+            assertThat(service.state().probeValue()).isEqualTo(7);
+            assertThat(service.state().appliedCommandCount()).isEqualTo(1);
         } finally {
             service.onTerminate(null);
         }

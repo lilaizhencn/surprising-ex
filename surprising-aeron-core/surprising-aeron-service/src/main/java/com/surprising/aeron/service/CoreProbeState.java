@@ -89,6 +89,7 @@ import java.util.NavigableMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class CoreProbeState implements AutoCloseable {
 
@@ -137,6 +138,9 @@ public final class CoreProbeState implements AutoCloseable {
     private final LinkedHashMap<String, BookBootstrapSession> bookBootstrapSessions = new LinkedHashMap<>();
     private final TradingCoreReducer tradingReducer;
     private final DeterministicExchangeCoreAdapter matchingAdapter;
+    private final MatcherSnapshotCapture matcherSnapshotCapture;
+    private final AtomicReference<CompletableFuture<MatcherSnapshot>> inFlightMatcherSnapshot =
+            new AtomicReference<>();
     private final PositionUserIndex positionUserIndex;
     private final OpenInterestIndex openInterestIndex;
     private final TriggerOrderIndex triggerOrderIndex;
@@ -186,7 +190,13 @@ public final class CoreProbeState implements AutoCloseable {
 
     public CoreProbeState(ProductLine productLine) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
-                TradingCoreState.empty(productLine), new CoreExportState(), new TerminalStateRetention(), null);
+                TradingCoreState.empty(productLine), new CoreExportState(), new TerminalStateRetention(), null, null);
+    }
+
+    CoreProbeState(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture) {
+        this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
+                TradingCoreState.empty(productLine), new CoreExportState(), new TerminalStateRetention(), null,
+                matcherSnapshotCapture);
     }
 
     private CoreProbeState(
@@ -198,7 +208,8 @@ public final class CoreProbeState implements AutoCloseable {
             TradingCoreState tradingState,
             CoreExportState exportState,
             TerminalStateRetention terminalRetention,
-            MatcherSnapshot matcherSnapshot) {
+            MatcherSnapshot matcherSnapshot,
+            MatcherSnapshotCapture matcherSnapshotCapture) {
         this.productLine = productLine;
         this.appliedCommandCount = appliedCommandCount;
         this.probeValue = probeValue;
@@ -224,6 +235,9 @@ public final class CoreProbeState implements AutoCloseable {
                 : new TradingCoreRuntime(productLine, tradingState, appliedCommandCount, matcherSnapshot);
         this.tradingReducer = runtime.reducerForConstruction();
         this.matchingAdapter = runtime.matcherForConstruction();
+        this.matcherSnapshotCapture = matcherSnapshotCapture == null
+                ? matchingAdapter::snapshotAsync
+                : matcherSnapshotCapture;
         this.positionUserIndex = runtime.positionUsersForConstruction();
         this.openInterestIndex = runtime.openInterestForConstruction();
         this.triggerOrderIndex = runtime.triggersForConstruction();
@@ -269,7 +283,7 @@ public final class CoreProbeState implements AutoCloseable {
         validateResultLedger(commandResults);
         return new CoreProbeState(productLine, appliedCommandCount, probeValue,
                 new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences),
-                tradingState, exportState, terminalRetention, matcherSnapshot);
+                tradingState, exportState, terminalRetention, matcherSnapshot, null);
     }
 
     static CoreProbeState restore(
@@ -2554,8 +2568,8 @@ public final class CoreProbeState implements AutoCloseable {
         // Compatibility-only synchronous surface for non-Aeron callers. The clustered-service callback must use
         // captureSnapshot(), which performs exactly one poll and fails closed when this matcher work is not ready.
         while (true) {
-            byte[] snapshot = pollSnapshot(0, 0, System.nanoTime());
-            if (snapshot != null) return snapshot;
+            SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = pollSnapshotSections(0, 0, System.nanoTime());
+            if (snapshot != null) return snapshot.toByteArray();
             Thread.yield();
         }
     }
@@ -2566,11 +2580,19 @@ public final class CoreProbeState implements AutoCloseable {
         if (snapshotId <= 0 || deadlineNanos <= 0) {
             throw new IllegalArgumentException("invalid snapshot fence");
         }
-        if (snapshotFence != null) throw new IllegalStateException("snapshot fence is already active");
+        if (snapshotFence != null) {
+            if (snapshotFence.snapshotId == snapshotId) {
+                snapshotFence.deadlineNanos = Math.min(snapshotFence.deadlineNanos, deadlineNanos);
+                return;
+            }
+            throw new SnapshotNotReadyException();
+        }
+        if (inFlightMatcherSnapshot.get() != null) throw new SnapshotNotReadyException();
         snapshotFence = new SnapshotFence(snapshotId, deadlineNanos);
     }
 
-    byte[] pollSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
+    SectionedCoreSnapshotCodec.SectionedSnapshot pollSnapshotSections(
+            long clusterTimestamp, long clusterPosition, long nowNanos) {
         runtime.assertOwner();
         assertHealthy();
         SnapshotFence fence = snapshotFence;
@@ -2594,21 +2616,35 @@ public final class CoreProbeState implements AutoCloseable {
             }
             if (fence.matcherSnapshot == null) {
                 fence.coreSequence = appliedCommandCount;
-                fence.matcherSnapshot = matchingAdapter.snapshotAsync(
+                CompletableFuture<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
                         fence.snapshotId, fence.coreSequence, tradingState, activeOrderIndex.orders());
+                if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
+                    throw new SnapshotNotReadyException();
+                }
+                fence.matcherSnapshot = matcherSnapshot;
+                matcherSnapshot.whenComplete((ignored, failure) ->
+                        inFlightMatcherSnapshot.compareAndSet(matcherSnapshot, null));
             }
             if (!fence.matcherSnapshot.isDone()) return null;
             MatcherSnapshot matcherSnapshot = fence.matcherSnapshot.getNow(null);
             if (matcherSnapshot == null || appliedCommandCount != fence.coreSequence || !pendingMatching.isEmpty()) {
                 throw new IllegalStateException("snapshot fence state changed during capture");
             }
-            byte[] encoded = CoreStateSnapshotCodec.encode(this, matcherSnapshot);
+            SectionedCoreSnapshotCodec.SectionedSnapshot encoded =
+                    SectionedCoreSnapshotCodec.encode(this, matcherSnapshot, fence.snapshotId,
+                            fence.coreSequence, clusterTimestamp, clusterPosition);
             snapshotFence = null;
             return encoded;
         } catch (RuntimeException failure) {
             releaseSnapshotFence();
             throw failure;
         }
+    }
+
+    byte[] pollSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
+        SectionedCoreSnapshotCodec.SectionedSnapshot snapshot =
+                pollSnapshotSections(clusterTimestamp, clusterPosition, nowNanos);
+        return snapshot == null ? null : snapshot.toByteArray();
     }
 
     byte[] captureSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
@@ -2618,12 +2654,17 @@ public final class CoreProbeState implements AutoCloseable {
         throw new SnapshotNotReadyException();
     }
 
+    SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(
+            long clusterTimestamp, long clusterPosition, long nowNanos) {
+        SectionedCoreSnapshotCodec.SectionedSnapshot snapshot =
+                pollSnapshotSections(clusterTimestamp, clusterPosition, nowNanos);
+        if (snapshot != null) return snapshot;
+        releaseSnapshotFence();
+        throw new SnapshotNotReadyException();
+    }
+
     private void releaseSnapshotFence() {
-        SnapshotFence fence = snapshotFence;
         snapshotFence = null;
-        if (fence != null && fence.matcherSnapshot != null && !fence.matcherSnapshot.isDone()) {
-            fence.matcherSnapshot.cancel(false);
-        }
     }
 
     static final class SnapshotNotReadyException extends IllegalStateException {
@@ -2640,7 +2681,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private static final class SnapshotFence {
         private final long snapshotId;
-        private final long deadlineNanos;
+        private long deadlineNanos;
         private long coreSequence = -1;
         private CompletableFuture<MatcherSnapshot> matcherSnapshot;
 
@@ -2648,6 +2689,15 @@ public final class CoreProbeState implements AutoCloseable {
             this.snapshotId = snapshotId;
             this.deadlineNanos = deadlineNanos;
         }
+    }
+
+    @FunctionalInterface
+    interface MatcherSnapshotCapture {
+        CompletableFuture<MatcherSnapshot> capture(
+                long snapshotId,
+                long coreSequence,
+                TradingCoreState state,
+                Iterable<CoreOrderState> activeOrders);
     }
 
     private com.surprising.aeron.service.matching.FatalMatchingDivergenceException failMatching(
@@ -2692,6 +2742,10 @@ public final class CoreProbeState implements AutoCloseable {
 
     CoreExportState exportState() {
         return exportState;
+    }
+
+    long sourceSequenceDigest() {
+        return lastSourceSequenceDigest;
     }
 
     Map<UUID, StoredResult> commandResults() {
@@ -3410,6 +3464,7 @@ public final class CoreProbeState implements AutoCloseable {
     @Override
     public void close() {
         releaseSnapshotFence();
+        inFlightMatcherSnapshot.set(null);
         matchingCompletions.clear();
         completedMatching.clear();
         completedBookQueries.clear();
@@ -3683,7 +3738,7 @@ public final class CoreProbeState implements AutoCloseable {
         return result;
     }
 
-    private static long sourceSequenceDigest(Map<SourceKey, Long> sequences) {
+    static long sourceSequenceDigest(Map<SourceKey, Long> sequences) {
         long digest = 0;
         for (Map.Entry<SourceKey, Long> entry : sequences.entrySet()) {
             digest ^= sourceSequenceDigest(entry.getKey(), entry.getValue());

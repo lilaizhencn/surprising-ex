@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class DeterministicExchangeCoreAdapterTest {
@@ -109,6 +110,44 @@ class DeterministicExchangeCoreAdapterTest {
         try (DeterministicExchangeCoreAdapter restored =
                      new DeterministicExchangeCoreAdapter(state, activeOrders(state), 1, decoded)) {
             assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(snapshot.bookStateHash());
+        }
+    }
+
+    @Test
+    void snapshotPipelineCompletesPersistAndExportWithoutCallerCancellation() {
+        TradingCoreState state = stateWithOpenBid(100);
+        CompletableFuture<Void> persistEntered = new CompletableFuture<>();
+        CompletableFuture<Void> releasePersist = new CompletableFuture<>();
+        AtomicInteger persistSubmissions = new AtomicInteger();
+        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(nativePersist -> {
+            persistSubmissions.incrementAndGet();
+            persistEntered.complete(null);
+            return releasePersist.thenCompose(ignored -> nativePersist.get());
+        })) {
+            assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
+            CompletableFuture<MatcherSnapshot> first =
+                    adapter.snapshotAsync(94, 1, state, activeOrders(state));
+
+            persistEntered.join();
+            assertThat(first.isDone()).isFalse();
+            assertThat(first.cancel(false))
+                    .as("caller cancellation must not cancel the nested persist/export operation")
+                    .isFalse();
+            assertThat(first.isCancelled()).isFalse();
+
+            CompletableFuture<MatcherSnapshot> retry =
+                    adapter.snapshotAsync(94, 1, state, activeOrders(state));
+            assertThat(retry).isNotSameAs(first);
+            assertThat(retry.isDone()).isFalse();
+            assertThat(persistSubmissions).hasValue(1);
+
+            releasePersist.complete(null);
+            MatcherSnapshot completed = first.join();
+
+            assertThat(retry.join()).isEqualTo(completed);
+            assertThat(completed.snapshotId()).isEqualTo(94);
+            assertThat(completed.modules()).isNotEmpty();
+            assertThat(persistSubmissions).hasValue(1);
         }
     }
 
