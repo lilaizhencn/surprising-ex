@@ -41,6 +41,8 @@ VALKEY_HOST="${VALKEY_HOST:-127.0.0.1}"
 VALKEY_PORT="${VALKEY_PORT:-6379}"
 AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-127.0.0.1,127.0.0.1,127.0.0.1}"
 AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-127.0.0.1}"
+EXPORTER_METRICS_HOST="${EXPORTER_METRICS_HOST:-}"
+EXPORTER_METRICS_PORT="${EXPORTER_METRICS_PORT:-}"
 BUILD_CHANGED="${BUILD_CHANGED:-false}"
 
 readonly SERVICES=(instrument exporter projector price account trading market-data derivatives-lifecycle funding gateway maker)
@@ -66,6 +68,13 @@ case "$JFR_ENABLED" in true|false) ;; *) fail 'JFR_ENABLED must be true or false
 case "$JFR_SETTINGS" in profile|default) ;; *) fail 'JFR_SETTINGS must be profile or default' ;; esac
 case "$POSTGRES_MODE" in auto|docker|native) ;; *) fail 'POSTGRES_MODE must be auto, docker or native' ;; esac
 [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] || fail "invalid RUN_ID=$RUN_ID"
+
+validate_exporter_metrics() {
+  [[ "$EXPORTER_METRICS_HOST" =~ [^[:space:]] ]] || fail 'EXPORTER_METRICS_HOST must be non-empty'
+  [[ "$EXPORTER_METRICS_PORT" =~ ^[0-9]{1,5}$ ]] || fail 'EXPORTER_METRICS_PORT must be numeric'
+  (( 10#$EXPORTER_METRICS_PORT >= 1 && 10#$EXPORTER_METRICS_PORT <= 65535 )) || \
+    fail 'EXPORTER_METRICS_PORT must be between 1 and 65535'
+}
 
 service_enabled() {
   case "$1" in
@@ -288,6 +297,7 @@ COMMON_ENV=(
     PRODUCT_LINE="$PRODUCT_LINE" WALLET_ENABLED=false \
     AERON_CLUSTER_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" AERON_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" \
     AERON_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" AERON_CLIENT_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" \
+    EXPORTER_METRICS_HOST="$EXPORTER_METRICS_HOST" EXPORTER_METRICS_PORT="$EXPORTER_METRICS_PORT" \
     KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" SPRING_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_INSTRUMENT_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
@@ -510,6 +520,9 @@ print_dry_run() {
 export JAVA_HOME PRODUCT_LINE RUN_ID AERON_CLUSTER_HOSTNAMES AERON_EGRESS_HOSTNAME
 export POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD KAFKA_BOOTSTRAP_SERVERS
 export VALKEY_HOST VALKEY_PORT
+case "$ACTION" in
+  up|fresh|dry-run) validate_exporter_metrics ;;
+esac
 case "$ACTION" in
   up) start_stack up ;;
   fresh) stop_stack >/dev/null 2>&1 || true; start_stack fresh ;;

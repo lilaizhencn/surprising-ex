@@ -2,7 +2,7 @@
 set -euo pipefail
 
 fake_java() {
-  local argument name=background state_dir
+  local argument name=background state_dir metrics_host metrics_port
   for argument in "$@"; do
     case "$argument" in
       *ClusterProbeMain) exit 0 ;;
@@ -26,6 +26,25 @@ fake_java() {
   fi
   state_dir="${LAUNCHER_TEST_STATE:-$(cd "$(dirname "$0")/../.." && pwd)/state}"
   printf '%s\t%s\n' "$name" "$$" >> "$state_dir/started.tsv"
+  if [[ "$name" == exporter ]]; then
+    metrics_host="${EXPORTER_METRICS_HOST:-<unset>}"
+    metrics_port="${EXPORTER_METRICS_PORT:-<unset>}"
+    printf 'EXPORTER_METRICS_HOST=%s EXPORTER_METRICS_PORT=%s\n' "$metrics_host" "$metrics_port" \
+      >> "$state_dir/exporter-metrics.tsv"
+    [[ "$metrics_host" != '<unset>' && -n "$metrics_host" ]] || {
+      printf 'FAKE_EXPORTER_CONFIG=FAIL missing EXPORTER_METRICS_HOST\n' >&2
+      exit 64
+    }
+    [[ "$metrics_port" =~ ^[1-9][0-9]*$ ]] || {
+      printf 'FAKE_EXPORTER_CONFIG=FAIL invalid EXPORTER_METRICS_PORT=%s\n' "$metrics_port" >&2
+      exit 64
+    }
+    if [[ "$metrics_host" == quick-exit ]]; then
+      /bin/sleep 0.2
+      printf 'FAKE_EXPORTER_CONFIG=FAIL forced quick exit\n' >&2
+      exit 65
+    fi
+  fi
   trap '' HUP
   trap 'exit 0' TERM INT
   while :; do /bin/sleep 1; done
@@ -77,8 +96,7 @@ for command in bash mkdir ps rm rmdir sleep; do ln -s "/bin/$command" "$FAKE_BIN
 cp "$TEST_DRIVER" "$FAKE_JAVA_HOME/bin/java"
 chmod +x "$FAKE_JAVA_HOME/bin/java"
 
-launcher_env=(
-  env
+common_env=(
   PATH="$FAKE_BIN:/usr/bin:/usr/sbin"
   JAVA_HOME="$FAKE_JAVA_HOME"
   PRODUCT_LINE=LINEAR_PERPETUAL
@@ -91,6 +109,34 @@ launcher_env=(
   LAUNCHER_TEST_STATE="$LAUNCHER_TEST_STATE"
   LAUNCHER_TEST_RUNTIME="$LAUNCHER_TEST_RUNTIME"
   LAUNCHER_TEST_RUN_ID="$LAUNCHER_TEST_RUN_ID"
+)
+
+launcher_env=(
+  env
+  "${common_env[@]}"
+  EXPORTER_METRICS_HOST=127.0.0.1
+  EXPORTER_METRICS_PORT=9191
+)
+
+operational_env=(
+  env
+  -u EXPORTER_METRICS_HOST
+  -u EXPORTER_METRICS_PORT
+  "${common_env[@]}"
+)
+
+missing_metrics_host_env=(
+  env
+  -u EXPORTER_METRICS_HOST
+  "${common_env[@]}"
+  EXPORTER_METRICS_PORT=9191
+)
+
+missing_metrics_port_env=(
+  env
+  -u EXPORTER_METRICS_PORT
+  "${common_env[@]}"
+  EXPORTER_METRICS_HOST=127.0.0.1
 )
 
 cleanup() {
@@ -111,7 +157,7 @@ status_must_fail() {
   local scenario="$1" scenario_log scenario_exit
   scenario_log="$TEST_ROOT/status-$scenario.log"
   set +e
-  "${launcher_env[@]}" ACTION=status "$LAUNCHER" > "$scenario_log" 2>&1
+  "${operational_env[@]}" ACTION=status "$LAUNCHER" > "$scenario_log" 2>&1
   scenario_exit=$?
   set -e
   printf '%s\n' "--- status adversary: $scenario ---"
@@ -119,6 +165,30 @@ status_must_fail() {
   printf 'STATUS_CASE=%s EXIT=%s EXPECTED=NONZERO\n' "$scenario" "$scenario_exit"
   if [[ "$scenario_exit" == 0 ]]; then
     printf 'LAUNCHER_OWNERSHIP_REGRESSION=FAIL reason=status-false-pass scenario=%s\n' "$scenario" >&2
+    exit 1
+  fi
+}
+
+launcher_must_fail_before_ready() {
+  local environment="$1" action="$2" scenario="$3" scenario_log scenario_exit
+  local -a scenario_env
+  shift 3
+  scenario_log="$TEST_ROOT/launcher-$scenario.log"
+  case "$environment" in
+    startup) scenario_env=("${launcher_env[@]}") ;;
+    missing-host) scenario_env=("${missing_metrics_host_env[@]}") ;;
+    missing-port) scenario_env=("${missing_metrics_port_env[@]}") ;;
+    *) printf 'unknown validation environment=%s\n' "$environment" >&2; exit 1 ;;
+  esac
+  set +e
+  "${scenario_env[@]}" "$@" ACTION="$action" "$LAUNCHER" > "$scenario_log" 2>&1
+  scenario_exit=$?
+  set -e
+  printf '%s\n' "--- launcher validation: $scenario ---"
+  cat "$scenario_log"
+  printf 'LAUNCHER_CASE=%s ACTION=%s EXIT=%s EXPECTED=NONZERO\n' "$scenario" "$action" "$scenario_exit"
+  if [[ "$scenario_exit" == 0 ]] || grep -q '^READY=\|^PRODUCT_LINE_RUNTIME=PASS ' "$scenario_log"; then
+    printf 'EXPORTER_METRICS_REGRESSION=FAIL reason=launcher-false-pass scenario=%s\n' "$scenario" >&2
     exit 1
   fi
 }
@@ -174,6 +244,8 @@ for sent_signal in (signal.SIGHUP, signal.SIGTERM):
 PY
 
 cat "$UP_LOG"
+printf '%s\n' '--- exporter metrics observed by mock ExporterMain ---'
+cat "$LAUNCHER_TEST_STATE/exporter-metrics.tsv"
 printf '%s\n' '--- PID ownership before caller-session teardown ---'
 cat "$OWNERSHIP_LOG"
 printf '%s\n' '--- persisted PID equals durable mock service PID ---'
@@ -182,13 +254,15 @@ owned_count="$(awk 'NR==FNR {started[$2]=1; next} $2 in started {matched++} END 
   "$LAUNCHER_TEST_STATE/started.tsv" "$OWNERSHIP_LOG")"
 printf 'PID_COUNT=%s OWNED_PID_COUNT=%s\n' "$pid_count" "$owned_count"
 [[ "$pid_count" == 14 && "$owned_count" == 14 ]]
+grep -qx 'EXPORTER_METRICS_HOST=127.0.0.1 EXPORTER_METRICS_PORT=9191' \
+  "$LAUNCHER_TEST_STATE/exporter-metrics.tsv"
 
 set +e
-"${launcher_env[@]}" ACTION=status "$LAUNCHER" > "$STATUS_LOG" 2>&1
+"${operational_env[@]}" ACTION=status "$LAUNCHER" > "$STATUS_LOG" 2>&1
 status_exit=$?
 set -e
 cat "$STATUS_LOG"
-printf 'STATUS_EXIT=%s\n' "$status_exit"
+printf 'STATUS_ABSENT_METRICS_EXIT=%s\n' "$status_exit"
 
 grep -q '^PRODUCT_LINE_RUNTIME=PASS ' "$UP_LOG"
 [[ "$(grep -c '^READY=' "$UP_LOG")" == 15 ]]
@@ -201,9 +275,19 @@ if [[ "$(grep -c '^PROCESS=RUNNING ' "$STATUS_LOG")" != 14 ]]; then
   exit 1
 fi
 
+for validation_action in up dry-run; do
+  launcher_must_fail_before_ready missing-host "$validation_action" "missing-metrics-host-$validation_action"
+  launcher_must_fail_before_ready missing-port "$validation_action" "missing-metrics-port-$validation_action"
+  launcher_must_fail_before_ready startup "$validation_action" "empty-metrics-host-$validation_action" EXPORTER_METRICS_HOST=
+  launcher_must_fail_before_ready startup "$validation_action" "empty-metrics-port-$validation_action" EXPORTER_METRICS_PORT=
+  launcher_must_fail_before_ready startup "$validation_action" "non-numeric-metrics-port-$validation_action" EXPORTER_METRICS_PORT=not-a-port
+  launcher_must_fail_before_ready startup "$validation_action" "out-of-range-metrics-port-$validation_action" EXPORTER_METRICS_PORT=65536
+done
+
 PID_DIR="$LAUNCHER_TEST_RUNTIME/$LAUNCHER_TEST_RUN_ID/pids"
 MAKER_PID="$(<"$PID_DIR/maker.pid")"
 MAKER_LABEL="$(<"$PID_DIR/maker.label")"
+EXPORTER_LABEL="$(<"$PID_DIR/exporter.label")"
 
 mv "$PID_DIR/maker.pid" "$TEST_ROOT/maker.pid"
 status_must_fail missing-one-service
@@ -229,10 +313,10 @@ mv "$TEST_ROOT/maker.label" "$PID_DIR/maker.label"
 
 QUICK_DEATH_LOG="$TEST_ROOT/status-quick-death.log"
 set +e
-"${launcher_env[@]}" ACTION=status "$LAUNCHER" > "$QUICK_DEATH_LOG" 2>&1 &
+"${operational_env[@]}" ACTION=status "$LAUNCHER" > "$QUICK_DEATH_LOG" 2>&1 &
 quick_status_pid=$!
 sleep 0.2
-/bin/launchctl remove "$MAKER_LABEL" >/dev/null 2>&1
+/bin/launchctl remove "$EXPORTER_LABEL" >/dev/null 2>&1
 wait "$quick_status_pid"
 quick_status_exit=$?
 set -e
@@ -244,9 +328,25 @@ if [[ "$quick_status_exit" == 0 ]]; then
   exit 1
 fi
 
-"${launcher_env[@]}" ACTION=down "$LAUNCHER"
+"${operational_env[@]}" ACTION=down "$LAUNCHER"
 [[ ! -e "$LAUNCHER_TEST_RUNTIME/active.lock/owner" ]]
 [[ -z "$(find "$PID_DIR" -type f \( -name '*.pid' -o -name '*.label' \) -print -quit)" ]]
 [[ -z "$(/bin/launchctl list 2>/dev/null | awk -v prefix="com.surprising.product-line.${LAUNCHER_TEST_RUN_ID}." '$3 ~ "^" prefix {print $3}')" ]]
-printf 'ACTION_DOWN_REGRESSION=PASS\n'
+printf 'ACTION_DOWN_ABSENT_METRICS_REGRESSION=PASS\n'
+
+QUICK_EXPORTER_LOG="$TEST_ROOT/up-exporter-quick-exit.log"
+set +e
+"${launcher_env[@]}" EXPORTER_METRICS_HOST=quick-exit ACTION=up "$LAUNCHER" > "$QUICK_EXPORTER_LOG" 2>&1
+quick_exporter_exit=$?
+set -e
+printf '%s\n' '--- exporter quick configuration exit ---'
+cat "$QUICK_EXPORTER_LOG"
+printf 'EXPORTER_QUICK_EXIT=%s EXPECTED=NONZERO\n' "$quick_exporter_exit"
+if [[ "$quick_exporter_exit" == 0 ]] || grep -q '^READY=exporter$\|^PRODUCT_LINE_RUNTIME=PASS ' "$QUICK_EXPORTER_LOG"; then
+  printf 'EXPORTER_METRICS_REGRESSION=FAIL reason=exporter-quick-exit-false-pass\n' >&2
+  exit 1
+fi
+grep -q '^ERROR=service exited name=exporter ' "$QUICK_EXPORTER_LOG"
+[[ ! -e "$LAUNCHER_TEST_RUNTIME/active.lock/owner" ]]
+
 printf 'LAUNCHER_OWNERSHIP_REGRESSION=PASS\n'
