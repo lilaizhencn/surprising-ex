@@ -93,7 +93,9 @@ expect_failure checksum env RUN_ID="pcv-checksum-$$" RUNTIME_ROOT="$TEST_ROOT/ch
 grep -Fq 'provenance checksum failed' "$RESULT_DIR/checksum.err" || fail 'checksum refusal reason missing'
 ! grep -Fq 'PREFLIGHT=PASS' "$RESULT_DIR/checksum.out" || fail 'checksum failure printed success'
 
-expect_failure database env RUN_ID="pcv-db-$$" RUNTIME_ROOT="$TEST_ROOT/db" POSTGRES_DB="$DATABASE_NAME" "$PREFLIGHT"
+DATABASE_RUN_ID="pcv-db-$$"
+expect_failure database env RUN_ID="$DATABASE_RUN_ID" RUNTIME_ROOT="$TEST_ROOT/db" POSTGRES_DB="$DATABASE_NAME" "$PREFLIGHT"
 grep -Fq 'PostgreSQL database already exists' "$RESULT_DIR/database.err" || fail 'database refusal reason missing'
+[[ ! -e "$TEST_ROOT/db/$DATABASE_RUN_ID" ]] || fail 'database refusal created run path'
 
 printf 'CONTRACT_TEST=PASS root=%s runId=%s database=%s\n' "$TEST_ROOT" "$RUN_ID" "$DATABASE_NAME"

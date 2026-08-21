@@ -30,6 +30,10 @@ PROVENANCE_JSON="$MANIFEST_DIR/provenance.json"
 PROVENANCE_CHECKSUM="$PROVENANCE_JSON.sha256"
 TEMP_DIR=""
 FINALIZED=false
+RUN_PATH_CLAIMED=false
+DATABASE_CREATED=false
+RUN_PATH_ABSENT_AT_CHECK=false
+DATABASE_ABSENT_AT_CHECK=false
 
 fail() {
   printf 'ERROR=%s\n' "$*" >&2
@@ -57,7 +61,7 @@ run_with_timeout() {
 
 write_abort_evidence() {
   local reason="$1" status="$2"
-  [[ -d "$MANIFEST_DIR" && "$FINALIZED" != true ]] || return 0
+  [[ "$RUN_PATH_CLAIMED" == true && -d "$MANIFEST_DIR" && "$FINALIZED" != true ]] || return 0
   jq -n \
     --arg reason "$reason" \
     --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -70,14 +74,22 @@ write_abort_evidence() {
 on_signal() {
   local signal="$1"
   trap - EXIT INT TERM
+  drop_reserved_database
   write_abort_evidence "signal=$signal" 130
   exit 130
+}
+
+drop_reserved_database() {
+  [[ "$DATABASE_CREATED" == true && "$FINALIZED" != true ]] || return 0
+  postgres -c "DROP DATABASE \"$POSTGRES_DB\"" >/dev/null 2>/dev/null || true
+  DATABASE_CREATED=false
 }
 
 on_exit() {
   local status="$1"
   trap - EXIT INT TERM
   if [[ "$status" -ne 0 && "$FINALIZED" != true ]]; then
+    drop_reserved_database
     write_abort_evidence 'preflight failure' "$status"
   fi
   exit "$status"
@@ -190,14 +202,15 @@ capture_git_baseline() {
   } | shasum -a 256 | awk '{print $1}')"
 }
 
-assert_absent_and_claim() {
+assert_run_path_absent() {
   [[ ! -e "$RUN_DIR" && ! -L "$RUN_DIR" ]] || fail "run path already exists path=$RUN_DIR"
   RUN_PATH_ABSENT_AT_CHECK=true
+}
+
+claim_run_path() {
   mkdir "$RUN_DIR"
   mkdir "$MANIFEST_DIR"
-  trap 'on_signal INT' INT
-  trap 'on_signal TERM' TERM
-  trap 'on_exit $?' EXIT
+  RUN_PATH_CLAIMED=true
 }
 
 reserve_database() {
@@ -272,8 +285,12 @@ main() {
   collect_resource_budget
   collect_hashes
   capture_git_baseline
-  assert_absent_and_claim
+  assert_run_path_absent
+  trap 'on_signal INT' INT
+  trap 'on_signal TERM' TERM
+  trap 'on_exit $?' EXIT
   reserve_database
+  claim_run_path
   write_provenance
   FINALIZED=true
   trap - EXIT INT TERM
