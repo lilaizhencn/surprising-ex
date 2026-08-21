@@ -3,6 +3,7 @@ package com.surprising.aeron.exporter;
 import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import io.aeron.exceptions.TimeoutException;
+import java.net.InetSocketAddress;
 
 public final class ExporterMain {
 
@@ -11,15 +12,19 @@ public final class ExporterMain {
 
     public static void main(String[] args) throws Exception {
         var productLine = ExporterConfiguration.productLine();
+        var metrics = new ExporterMetrics(productLine);
         long reconnectMillis = AdaptiveExportLoop.MIN_IDLE_MILLIS;
-        System.out.printf("Aeron exporter started productLine=%s topic=%s%n",
-                productLine, KafkaCoreExportSink.topic(productLine));
-        while (!Thread.currentThread().isInterrupted()) {
-            try (var sink = new KafkaCoreExportSink(ExporterConfiguration.kafkaProducerProperties());
-                    var client = SurprisingAeronClient.connect(productLine, ExporterConfiguration.aeronHosts(),
-                            ExporterConfiguration.aeronEgressHost(), ExporterConfiguration.aeronTimeout())) {
+        var metricsAddress = new InetSocketAddress(
+                ExporterConfiguration.metricsHost(), ExporterConfiguration.metricsPort());
+        try (var metricsServer = ExporterMetricsHttpServer.start(metrics, metricsAddress)) {
+            System.out.printf("Aeron exporter started productLine=%s topic=%s metrics=%s%n",
+                    productLine, KafkaCoreExportSink.topic(productLine), metricsServer.address());
+            while (!Thread.currentThread().isInterrupted()) {
+                try (var sink = new KafkaCoreExportSink(ExporterConfiguration.kafkaProducerProperties());
+                        var client = SurprisingAeronClient.connect(productLine, ExporterConfiguration.aeronHosts(),
+                                ExporterConfiguration.aeronEgressHost(), ExporterConfiguration.aeronTimeout())) {
                     var exporter = new ReliableCoreExporter(productLine, client::submit, sink,
-                            ExporterConfiguration.batchSize());
+                            ExporterConfiguration.batchSize(), metrics);
                     var loop = new AdaptiveExportLoop(exporter::exportOnce, Thread::sleep,
                             ExporterConfiguration.idleMillis());
                     long failureMillis = AdaptiveExportLoop.MIN_IDLE_MILLIS;
@@ -57,6 +62,7 @@ public final class ExporterMain {
                     Thread.sleep(reconnectMillis);
                     reconnectMillis = AdaptiveExportLoop.nextIdleMillis(reconnectMillis,
                             AdaptiveExportLoop.MAX_IDLE_MILLIS);
+                }
             }
         }
     }

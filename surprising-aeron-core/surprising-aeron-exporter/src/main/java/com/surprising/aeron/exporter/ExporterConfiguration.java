@@ -38,6 +38,18 @@ final class ExporterConfiguration {
                 Math.min(configured, AdaptiveExportLoop.MAX_IDLE_MILLIS));
     }
 
+    static String metricsHost() {
+        return required("EXPORTER_METRICS_HOST");
+    }
+
+    static int metricsPort() {
+        long port = Long.parseLong(required("EXPORTER_METRICS_PORT"));
+        if (port <= 0 || port > 65_535) {
+            throw new IllegalArgumentException("EXPORTER_METRICS_PORT must be between 1 and 65535");
+        }
+        return Math.toIntExact(port);
+    }
+
     static Map<String, Object> kafkaProducerProperties() {
         return Map.of("bootstrap.servers", value("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
                 "client.id", "surprising-core-exporter-" + productLine().topicSegment(),
