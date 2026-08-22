@@ -29,6 +29,11 @@ SELECT * FROM jsonb_to_recordset($okx$[{"product_line":"SPOT","symbol":"USDC-TEV
     index_symbol TEXT, spot_index BOOLEAN, effective_ms BIGINT
 );
 
+UPDATE surprising_okx_instruments
+   SET price_tick_units = 10000000
+ WHERE product_line = 'LINEAR_PERPETUAL'
+   AND symbol = 'BTC-USDT-SWAP';
+
 DELETE FROM instrument_index_sources;
 DELETE FROM instrument_risk_brackets;
 DELETE FROM instrument_product_current_versions;

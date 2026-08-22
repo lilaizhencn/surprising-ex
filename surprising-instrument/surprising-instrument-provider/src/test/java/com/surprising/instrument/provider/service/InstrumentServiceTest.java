@@ -15,18 +15,25 @@ import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 class InstrumentServiceTest {
+
+    private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().findAndAddModules().build();
 
     @Test
     void publishesDeliverySettlementToProductTopic() {
@@ -136,6 +143,51 @@ class InstrumentServiceTest {
         verify(storageService, org.mockito.Mockito.never()).insert(any(), anyLong(), any(), any());
     }
 
+    @Test
+    void upsertCreatesImmutableLinearPerpetualV4AndAdvancesOnlyItsCurrentPointer() throws Exception {
+        String symbol = "BTC-USDT-SWAP";
+        InstrumentResponse v3 = linearPerpetual(symbol, 3L, 100_000_000_000L);
+        InstrumentUpsertRequest request = request(v3, 10_000_000L);
+        byte[] independentlySerializedV3 = OBJECT_MAPPER.writeValueAsBytes(v3);
+        StatefulSerializedInstrumentStorage storageService = new StatefulSerializedInstrumentStorage();
+        storageService.seedRow(symbol, 3L, independentlySerializedV3);
+        storageService.seedGlobalPointer(symbol, 3L);
+        storageService.seedGlobalPointer("ETH-USDT-SWAP", 7L);
+        storageService.seedProductPointer(ProductLine.LINEAR_PERPETUAL, symbol, 3L);
+        storageService.seedProductPointer(ProductLine.SPOT, "ETH-USDT", 11L);
+        storageService.seedProductPointer(ProductLine.INVERSE_PERPETUAL, "BTC-USD-SWAP", 13L);
+        Map<String, Long> globalPointersBefore = storageService.globalPointers();
+        Map<String, Long> productPointersBefore = storageService.productPointers();
+        InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);
+        InstrumentService service = new InstrumentService(storageService, mock(InstrumentValidator.class),
+                new InstrumentProperties(), outboxService);
+
+        byte[] persistedV3Before = storageService.persistedBytes(symbol, 3L);
+        InstrumentResponse created = service.upsert(request);
+        byte[] persistedV3After = storageService.persistedBytes(symbol, 3L);
+        InstrumentResponse independentlyReadV3 = storageService.persistedResponse(symbol, 3L);
+        InstrumentResponse current = service.latest(symbol, ProductLine.LINEAR_PERPETUAL);
+
+        assertThat(created.version()).isEqualTo(4L);
+        assertThat(created.priceTickUnits()).isEqualTo(10_000_000L);
+        assertThat(current).isEqualTo(created);
+        assertThat(storageService.insertedVersion()).isEqualTo(4L);
+        assertThat(storageService.insertedRequest()).isEqualTo(request);
+        assertThat(persistedV3Before).containsExactly(independentlySerializedV3);
+        assertThat(persistedV3After).containsExactly(independentlySerializedV3);
+        assertThat(independentlyReadV3).isEqualTo(v3);
+
+        Map<String, Long> expectedGlobalPointers = new HashMap<>(globalPointersBefore);
+        expectedGlobalPointers.put(symbol, 4L);
+        assertThat(storageService.globalPointers()).containsExactlyInAnyOrderEntriesOf(expectedGlobalPointers);
+        Map<String, Long> expectedProductPointers = new HashMap<>(productPointersBefore);
+        expectedProductPointers.put(ProductLine.LINEAR_PERPETUAL.name() + ":" + symbol, 4L);
+        assertThat(storageService.productPointers()).containsExactlyInAnyOrderEntriesOf(expectedProductPointers);
+        verify(outboxService).enqueue(eq("INSTRUMENT"), eq(4L),
+                eq("surprising.instrument.events.v1"), eq("LINEAR_PERPETUAL:" + symbol), eq("UPSERTED"),
+                any(Object.class), any(Instant.class));
+    }
+
     private InstrumentService service(InstrumentOutboxService outboxService, InstrumentProperties properties) {
         return new InstrumentService(mock(InstrumentStorageService.class), mock(InstrumentValidator.class),
                 properties, outboxService);
@@ -154,6 +206,44 @@ class InstrumentServiceTest {
     private InstrumentResponse option(String symbol, InstrumentStatus status) {
         return response(symbol, InstrumentType.OPTION, ContractType.VANILLA_OPTION,
                 "BTC-USDT", 50_000_000_000L, OptionType.CALL, status);
+    }
+
+    private InstrumentResponse linearPerpetual(String symbol, long version, long priceTickUnits) {
+        InstrumentResponse template = response(symbol, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
+                null, null, null, InstrumentStatus.TRADING);
+        return new InstrumentResponse(template.symbol(), version, template.instrumentType(), template.contractType(),
+                template.baseAsset(), template.quoteAsset(), template.settleAsset(), template.contractMultiplierPpm(),
+                template.contractValueAsset(), priceTickUnits, template.quantityStepUnits(), template.minQuantitySteps(),
+                template.maxQuantitySteps(), template.minNotionalUnits(), template.maxNotionalUnits(),
+                template.notionalMultiplierUnits(), template.pricePrecision(), template.quantityPrecision(),
+                template.supportedOrderTypes(), template.supportedTimeInForce(), template.postOnlyEnabled(),
+                template.reduceOnlyEnabled(), template.marketOrderEnabled(), template.maxLeveragePpm(),
+                template.initialMarginRatePpm(), template.maintenanceMarginRatePpm(), template.makerFeeRatePpm(),
+                template.takerFeeRatePpm(), template.maxPositionNotionalUnits(),
+                template.userOpenInterestLimitRatePpm(), template.userOpenInterestLimitFloorUnits(),
+                template.fundingIntervalHours(), template.interestRatePpm(), template.fundingRateCapPpm(),
+                template.fundingRateFloorPpm(), template.impactNotionalUnits(), template.minValidIndexSources(),
+                template.expiryTime(), template.deliveryTime(), template.underlyingSymbol(), template.strikePriceUnits(),
+                template.optionType(), template.optionExerciseStyle(), template.settlementMethod(), template.status(),
+                template.effectiveTime(), template.createdAt(), template.updatedAt(), template.riskLimitBrackets(),
+                template.indexSources());
+    }
+
+    private InstrumentUpsertRequest request(InstrumentResponse source, long priceTickUnits) {
+        return new InstrumentUpsertRequest(source.symbol(), source.instrumentType(), source.contractType(),
+                source.baseAsset(), source.quoteAsset(), source.settleAsset(), source.contractMultiplierPpm(),
+                source.contractValueAsset(), priceTickUnits, source.quantityStepUnits(), source.minQuantitySteps(),
+                source.maxQuantitySteps(), source.minNotionalUnits(), source.maxNotionalUnits(),
+                source.notionalMultiplierUnits(), source.pricePrecision(), source.quantityPrecision(),
+                source.supportedOrderTypes(), source.supportedTimeInForce(), source.postOnlyEnabled(),
+                source.reduceOnlyEnabled(), source.marketOrderEnabled(), source.maxLeveragePpm(),
+                source.initialMarginRatePpm(), source.maintenanceMarginRatePpm(), source.makerFeeRatePpm(),
+                source.takerFeeRatePpm(), source.maxPositionNotionalUnits(), source.userOpenInterestLimitRatePpm(),
+                source.userOpenInterestLimitFloorUnits(), source.fundingIntervalHours(), source.interestRatePpm(),
+                source.fundingRateCapPpm(), source.fundingRateFloorPpm(), source.impactNotionalUnits(),
+                source.minValidIndexSources(), source.expiryTime(), source.deliveryTime(), source.underlyingSymbol(),
+                source.strikePriceUnits(), source.optionType(), source.optionExerciseStyle(), source.settlementMethod(),
+                source.status(), source.effectiveTime(), source.riskLimitBrackets(), source.indexSources());
     }
 
     private InstrumentResponse response(String symbol,
@@ -215,5 +305,100 @@ class InstrumentServiceTest {
                 now,
                 List.of(),
                 List.of());
+    }
+
+    private final class StatefulSerializedInstrumentStorage extends InstrumentStorageService {
+        private final Map<String, Map<Long, byte[]>> rows = new HashMap<>();
+        private final Map<String, Long> globalPointers = new HashMap<>();
+        private final Map<String, Long> productPointers = new HashMap<>();
+        private InstrumentUpsertRequest insertedRequest;
+        private long insertedVersion;
+
+        private StatefulSerializedInstrumentStorage() {
+            super(null, null, null, null, null, null);
+        }
+
+        private void seedRow(String symbol, long version, byte[] serialized) {
+            rows.computeIfAbsent(symbol, ignored -> new HashMap<>()).put(version, serialized.clone());
+        }
+
+        private void seedGlobalPointer(String symbol, long version) {
+            globalPointers.put(symbol, version);
+        }
+
+        private void seedProductPointer(ProductLine productLine, String symbol, long version) {
+            productPointers.put(productLine.name() + ":" + symbol, version);
+        }
+
+        private byte[] persistedBytes(String symbol, long version) {
+            return rows.getOrDefault(symbol, Map.of()).get(version).clone();
+        }
+
+        private InstrumentResponse persistedResponse(String symbol, long version) {
+            try {
+                return OBJECT_MAPPER.readValue(persistedBytes(symbol, version), InstrumentResponse.class);
+            } catch (Exception ex) {
+                throw new AssertionError("failed to deserialize persisted instrument", ex);
+            }
+        }
+
+        private Map<String, Long> globalPointers() {
+            return Map.copyOf(globalPointers);
+        }
+
+        private Map<String, Long> productPointers() {
+            return Map.copyOf(productPointers);
+        }
+
+        private InstrumentUpsertRequest insertedRequest() {
+            return insertedRequest;
+        }
+
+        private long insertedVersion() {
+            return insertedVersion;
+        }
+
+        @Override
+        public long nextVersion(String symbol) {
+            return rows.getOrDefault(symbol, Map.of()).keySet().stream().mapToLong(Long::longValue).max().orElse(0L) + 1L;
+        }
+
+        @Override
+        public void insert(String symbol, long version, InstrumentUpsertRequest request, Instant now) {
+            insertedRequest = request;
+            insertedVersion = version;
+            seedRow(symbol, version, OBJECT_MAPPER.writeValueAsBytes(
+                    linearPerpetual(symbol, version, request.priceTickUnits())));
+        }
+
+        @Override
+        public void setCurrentVersion(String symbol, long version, Instant now) {
+            globalPointers.put(symbol, version);
+        }
+
+        @Override
+        public void setCurrentVersion(ProductLine productLine, String symbol, long version, Instant now) {
+            productPointers.put(productLine.name() + ":" + symbol, version);
+        }
+
+        @Override
+        public Optional<InstrumentResponse> latest(String symbol) {
+            Long version = globalPointers.get(symbol);
+            return version == null ? Optional.empty() : version(symbol, version);
+        }
+
+        @Override
+        public Optional<InstrumentResponse> latest(String symbol, ProductLine productLine) {
+            Long version = productPointers.get(productLine.name() + ":" + symbol);
+            return version == null ? Optional.empty() : version(symbol, version);
+        }
+
+        @Override
+        public Optional<InstrumentResponse> version(String symbol, long version) {
+            if (!rows.getOrDefault(symbol, Map.of()).containsKey(version)) {
+                return Optional.empty();
+            }
+            return Optional.of(persistedResponse(symbol, version));
+        }
     }
 }

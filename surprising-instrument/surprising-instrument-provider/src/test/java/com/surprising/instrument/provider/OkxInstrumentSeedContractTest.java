@@ -32,6 +32,18 @@ class OkxInstrumentSeedContractTest {
         assertThat(matrix).doesNotContain("INVERSE_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION");
     }
 
+    @Test
+    void linearPerpetualBtcSwapUsesOneTenthUsdtPriceTicks() throws IOException {
+        String sql = Files.readString(repositoryFile("okx-instrument-seed.sql"));
+
+        assertThat(sql).contains("""
+                UPDATE surprising_okx_instruments
+                   SET price_tick_units = 10000000
+                 WHERE product_line = 'LINEAR_PERPETUAL'
+                   AND symbol = 'BTC-USDT-SWAP';
+                """);
+    }
+
     private Path repositoryFile(String fileName) {
         Path directory = Path.of("").toAbsolutePath();
         while (directory != null && !Files.exists(directory.resolve(fileName))) {
