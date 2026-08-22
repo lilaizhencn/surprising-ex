@@ -129,6 +129,8 @@ public final class CoreProbeState implements AutoCloseable {
     private final List<CoreMessage> queuedMatching = new ArrayList<>();
     private final Map<Long, com.surprising.aeron.service.matching.CoreMatchingResult> completedMatching
             = new LinkedHashMap<>();
+    private final Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>
+            matchingFutures = new ConcurrentHashMap<>();
     private final MatchingCompletionQueue matchingCompletions =
             new MatchingCompletionQueue(MAX_MATCHING_COMPLETIONS);
     private final Map<Long, CompletedBookQuery> completedBookQueries
@@ -1041,12 +1043,7 @@ public final class CoreProbeState implements AutoCloseable {
         } else {
             future = matcherReady.thenCompose(ignored -> submitOrderBatchMatchingNow(pending, batch));
         }
-        future
-                .whenComplete((result, failure) -> {
-                    publishMatchingCompletion(pending.sequence(), failure == null && result != null ? result
-                            : new com.surprising.aeron.service.matching.CoreMatchingResult(
-                                    false, "EXCHANGE_CORE_FAILURE", List.of()));
-                });
+        trackMatchingFuture(pending.sequence(), future);
     }
 
     private CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> submitOrderBatchMatchingNow(
@@ -1796,19 +1793,48 @@ public final class CoreProbeState implements AutoCloseable {
         } else {
             future = matcherReady.thenCompose(ignored -> submitMatchingNow(pending));
         }
-        future
-                .whenComplete((result, failure) -> {
-                    publishMatchingCompletion(pending.sequence(),
-                            failure == null && result != null ? result
-                                    : new com.surprising.aeron.service.matching.CoreMatchingResult(false,
-                                    "EXCHANGE_CORE_FAILURE", List.of()));
-                });
+        trackMatchingFuture(pending.sequence(), future);
     }
 
     void publishMatchingCompletion(
             long sequence,
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         matchingCompletions.offer(sequence, result);
+    }
+
+    private void trackMatchingFuture(
+            long sequence,
+            CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future) {
+        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> tracked = future
+                .handle(CoreProbeState::matchingResult)
+                .thenApply(result -> {
+                    publishMatchingCompletion(sequence, result);
+                    return result;
+                });
+        matchingFutures.put(sequence, tracked);
+    }
+
+    static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingCompletion(
+            CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future) {
+        return future.getNow(null);
+    }
+
+    private static com.surprising.aeron.service.matching.CoreMatchingResult matchingResult(
+            CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future) {
+        if (!future.isDone()) return null;
+        try {
+            return matchingResult(awaitMatchingCompletion(future), null);
+        } catch (RuntimeException failure) {
+            return matchingResult(null, failure);
+        }
+    }
+
+    private static com.surprising.aeron.service.matching.CoreMatchingResult matchingResult(
+            com.surprising.aeron.service.matching.CoreMatchingResult result,
+            Throwable failure) {
+        return failure == null && result != null ? result
+                : new com.surprising.aeron.service.matching.CoreMatchingResult(
+                        false, "EXCHANGE_CORE_FAILURE", List.of());
     }
 
     private CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> submitMatchingNow(
@@ -1949,7 +1975,20 @@ public final class CoreProbeState implements AutoCloseable {
     public com.surprising.aeron.service.matching.CoreMatchingResult takeMatchingResult(long sequence) {
         drainMatchingCompletions();
         if (pendingMatching.isEmpty() || pendingMatching.keySet().iterator().next() != sequence) return null;
-        return completedMatching.remove(sequence);
+        com.surprising.aeron.service.matching.CoreMatchingResult result = completedMatching.remove(sequence);
+        if (result != null) {
+            matchingFutures.remove(sequence);
+            return result;
+        }
+        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future =
+                matchingFutures.get(sequence);
+        if (future == null) return null;
+        result = matchingResult(future);
+        if (result == null) return null;
+        drainMatchingCompletions();
+        completedMatching.remove(sequence);
+        matchingFutures.remove(sequence, future);
+        return result;
     }
 
     public boolean markMatchingTimeout(long sequence, long clusterTimestamp) {
@@ -1976,6 +2015,7 @@ public final class CoreProbeState implements AutoCloseable {
         assertHealthy();
         PendingMatching pending = pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
+        matchingFutures.remove(sequence);
         Long submitNanos = matchingSubmitNanos.remove(sequence);
         if (submitNanos != null) {
             matchingPhaseMetrics.recordExchange(System.nanoTime() - submitNanos);
@@ -3465,6 +3505,8 @@ public final class CoreProbeState implements AutoCloseable {
     public void close() {
         releaseSnapshotFence();
         inFlightMatcherSnapshot.set(null);
+        matchingFutures.values().forEach(future -> future.cancel(true));
+        matchingFutures.clear();
         matchingCompletions.clear();
         completedMatching.clear();
         completedBookQueries.clear();

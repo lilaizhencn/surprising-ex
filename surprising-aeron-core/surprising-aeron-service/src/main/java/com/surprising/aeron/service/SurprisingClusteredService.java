@@ -32,6 +32,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
     private static final long MATCHING_TIMER_DELAY_MS = 10;
+    private static final long MATCHING_WATCHDOG_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     private static final long EGRESS_DRAIN_TIMER_DELAY_MS = 1;
     private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
     private static final long MATCHING_WAKEUP_CORRELATION_ID = Long.MAX_VALUE - 1;
@@ -48,6 +49,8 @@ public final class SurprisingClusteredService implements ClusteredService {
     private final Map<Long, ArrayDeque<PendingClient>> pendingClients = new HashMap<>();
     private long nextEgressDrainCorrelationId = FIRST_EGRESS_DRAIN_CORRELATION_ID;
     private boolean matchingWakeupScheduled;
+    private long matchingWatchSequence;
+    private long matchingWatchStartedNanos;
     private long snapshotFenceNotReadyCount;
     private long snapshotFenceTimeoutCount;
 
@@ -65,6 +68,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingClients.clear();
         nextEgressDrainCorrelationId = FIRST_EGRESS_DRAIN_CORRELATION_ID;
         matchingWakeupScheduled = false;
+        resetMatchingWatchdog();
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
@@ -175,6 +179,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public void onRoleChange(Cluster.Role newRole) {
         role.set(newRole);
+        resetMatchingWatchdog();
         System.out.printf("Aeron core role-change productLine=%s role=%s%n", productLine, newRole);
         schedulePendingMatchingTimers();
     }
@@ -190,9 +195,6 @@ public final class SurprisingClusteredService implements ClusteredService {
                 sessions.remove();
             }
         }
-        if (state.pendingMatchingCount() > 0 && !matchingWakeupScheduled) {
-            scheduleMatchingWakeup();
-        }
         return work;
     }
 
@@ -203,6 +205,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         egressDrainTimers.clear();
         pendingClients.clear();
         matchingWakeupScheduled = false;
+        resetMatchingWatchdog();
         this.cluster = null;
         state.close();
     }
@@ -245,10 +248,10 @@ public final class SurprisingClusteredService implements ClusteredService {
                 if (sequence == 0) break;
                 var matchingResult = state.takeMatchingResult(sequence);
                 if (matchingResult == null) {
-                    state.markMatchingTimeout(sequence, timestamp);
-                    matchingResult = state.takeMatchingResult(sequence);
+                    assertMatchingWatchdogHealthy(sequence);
+                    break;
                 }
-                if (matchingResult == null) break;
+                recordMatchingProgress(sequence);
                 CoreResponse result = state.completeMatching(sequence, matchingResult, timestamp,
                         cluster == null ? 0 : cluster.logPosition());
                 if (result == null) break;
@@ -276,13 +279,11 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
         var matchingResult = state.takeMatchingResult(correlationId);
         if (matchingResult == null) {
-            state.markMatchingTimeout(correlationId, timestamp);
-            matchingResult = state.takeMatchingResult(correlationId);
-        }
-        if (matchingResult == null) {
+            assertMatchingWatchdogHealthy(correlationId);
             scheduleMatchingWakeup();
             return;
         }
+        recordMatchingProgress(correlationId);
         CoreResponse result = state.completeMatching(correlationId, matchingResult, timestamp,
                 cluster == null ? 0 : cluster.logPosition());
         if (result == null) {
@@ -414,14 +415,43 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void scheduleMatchingWakeup() {
-        if (cluster == null || matchingWakeupScheduled || state.pendingMatchingCount() == 0) return;
+        if (state.pendingMatchingCount() == 0) {
+            resetMatchingWatchdog();
+            return;
+        }
+        if (cluster == null || matchingWakeupScheduled) return;
         long delay = Math.max(1L, cluster.timeUnit().convert(MATCHING_TIMER_DELAY_MS,
                 java.util.concurrent.TimeUnit.MILLISECONDS));
         long deadline = cluster.time() + delay;
         idleStrategy.reset();
-        if (cluster.scheduleTimer(MATCHING_WAKEUP_CORRELATION_ID, deadline)) {
-            matchingWakeupScheduled = true;
+        while (!cluster.scheduleTimer(MATCHING_WAKEUP_CORRELATION_ID, deadline)) {
+            idleStrategy.idle();
         }
+        matchingWakeupScheduled = true;
+    }
+
+    private void assertMatchingWatchdogHealthy(long sequence) {
+        long now = System.nanoTime();
+        if (matchingWatchSequence != sequence) {
+            matchingWatchSequence = sequence;
+            matchingWatchStartedNanos = now;
+            return;
+        }
+        if (role.get() == Cluster.Role.LEADER
+                && now - matchingWatchStartedNanos >= MATCHING_WATCHDOG_TIMEOUT_NANOS) {
+            throw new com.surprising.aeron.service.matching.FatalMatchingDivergenceException(
+                    "matching watchdog", sequence, 0, "matcher continuation exceeded local leader timeout");
+        }
+    }
+
+    private void recordMatchingProgress(long sequence) {
+        matchingWatchSequence = sequence;
+        matchingWatchStartedNanos = System.nanoTime();
+    }
+
+    private void resetMatchingWatchdog() {
+        matchingWatchSequence = 0;
+        matchingWatchStartedNanos = 0;
     }
 
     private void deliverMatchingResponse(long sequence, CoreResponse result) {

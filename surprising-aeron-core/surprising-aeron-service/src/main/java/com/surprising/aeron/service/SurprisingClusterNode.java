@@ -22,6 +22,7 @@ public final class SurprisingClusterNode {
     @SuppressWarnings("try")
     public static void main(String[] args) {
         ClusterTopology topology = ClusterTopology.fromSystemProperties();
+        ClusterRecoveryPreflight.verify(topology.nodeDirectory().getParent());
         File nodeDirectory = topology.nodeDirectory().toFile();
         String aeronDirectoryName = topology.aeronDirectoryName();
         ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();

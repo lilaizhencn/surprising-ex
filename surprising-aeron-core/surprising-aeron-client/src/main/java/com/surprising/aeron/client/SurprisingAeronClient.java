@@ -14,10 +14,10 @@ import io.aeron.driver.ThreadingMode;
 import io.aeron.Publication;
 import io.aeron.logbuffer.Header;
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ExecutionException;
@@ -40,12 +40,13 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     private final Duration responseTimeout;
     private final MediaDriver mediaDriver;
     private final boolean closeMediaDriver;
-    private final AeronCluster cluster;
+    private final ClusterOperations cluster;
     private final ScheduledExecutorService keepAliveExecutor;
     private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
-    private final Map<Long, CoreResponse> responses = new HashMap<>();
+    private final Map<Long, CoreResponse> responses = new ConcurrentHashMap<>();
     private UnsafeBuffer ingressBuffer = new UnsafeBuffer(new byte[CoreProtocol.HEADER_LENGTH]);
-    private RuntimeException sessionFailure;
+    private volatile RuntimeException sessionFailure;
+    private boolean closed;
 
     private SurprisingAeronClient(
             ProductLine productLine,
@@ -59,8 +60,8 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
         this.closeMediaDriver = closeMediaDriver;
         try {
-            cluster = AeronCluster.connect(clusterContext(productLine, hostnames, egressHostname,
-                    responseTimeout, mediaDriver, this));
+            cluster = new AeronClusterOperations(AeronCluster.connect(clusterContext(productLine, hostnames,
+                    egressHostname, responseTimeout, mediaDriver, this)));
             keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
         } catch (RuntimeException exception) {
             if (closeMediaDriver) {
@@ -80,8 +81,20 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
         this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
         this.closeMediaDriver = closeMediaDriver;
-        this.cluster = Objects.requireNonNull(cluster, "cluster");
+        this.cluster = new AeronClusterOperations(Objects.requireNonNull(cluster, "cluster"));
         this.keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
+    }
+
+    SurprisingAeronClient(
+            ProductLine productLine,
+            Duration responseTimeout,
+            ClusterOperations cluster) {
+        this.productLine = Objects.requireNonNull(productLine, "productLine");
+        this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
+        this.mediaDriver = null;
+        this.closeMediaDriver = false;
+        this.cluster = Objects.requireNonNull(cluster, "cluster");
+        this.keepAliveExecutor = null;
     }
 
     public static SurprisingAeronClient connect(ProductLine productLine, List<String> hostnames) {
@@ -241,6 +254,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
 
     @Override
     public synchronized long offer(CoreMessage message) {
+        ensureOpen();
         if (message.header().productLine() != productLine) {
             throw new IllegalArgumentException("client and message product line differ");
         }
@@ -261,7 +275,8 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
-    public int pollEgress(int fragmentLimit) {
+    public synchronized int pollEgress(int fragmentLimit) {
+        ensureOpen();
         return pollEgressBounded(fragmentLimit, cluster::pollEgress);
     }
 
@@ -297,7 +312,8 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
-    public boolean keepAlive() {
+    public synchronized boolean keepAlive() {
+        ensureOpen();
         return cluster.sendKeepAlive();
     }
 
@@ -349,7 +365,9 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
         try {
             if (keepAliveExecutor != null) {
                 keepAliveExecutor.shutdownNow();
@@ -370,14 +388,15 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         });
         executor.scheduleAtFixedRate(() -> {
             try {
-                cluster.sendKeepAlive();
+                keepAlive();
             } catch (RuntimeException ignored) {
             }
         }, 1, 1, TimeUnit.SECONDS);
         return executor;
     }
 
-    private void pollAndCheckSession() {
+    private synchronized void pollAndCheckSession() {
+        ensureOpen();
         cluster.pollEgress();
         if (sessionFailure != null) {
             throw sessionFailure;
@@ -387,6 +406,42 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     private ResultUnknownException resultUnknown(CoreMessage message, String detail) {
         return new ResultUnknownException(message.header().commandId(), detail
                 + "; retry or query with the same commandId=" + message.header().commandId());
+    }
+
+    private void ensureOpen() {
+        if (closed) throw new IllegalStateException("Aeron client is closed");
+    }
+
+    interface ClusterOperations {
+        long offer(DirectBuffer buffer, int offset, int length);
+
+        int pollEgress();
+
+        boolean sendKeepAlive();
+
+        void close();
+    }
+
+    private record AeronClusterOperations(AeronCluster cluster) implements ClusterOperations {
+        @Override
+        public long offer(DirectBuffer buffer, int offset, int length) {
+            return cluster.offer(buffer, offset, length);
+        }
+
+        @Override
+        public int pollEgress() {
+            return cluster.pollEgress();
+        }
+
+        @Override
+        public boolean sendKeepAlive() {
+            return cluster.sendKeepAlive();
+        }
+
+        @Override
+        public void close() {
+            cluster.close();
+        }
     }
 
     static final class AsyncConnection implements AeronClientPool.Session, EgressListener {

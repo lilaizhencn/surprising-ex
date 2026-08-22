@@ -8,6 +8,7 @@ import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -25,21 +26,43 @@ import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;
+import io.aeron.cluster.service.ClientSession;
+import io.aeron.logbuffer.Header;
+import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.CRC32C;
 import org.agrona.concurrent.NoOpIdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 
 class SurprisingClusteredServiceTest {
+
+    @Test
+    void timerReplayReturnsBeforeMatchingCompletesAndAppliesExactlyOnce() throws Exception {
+        TimerScenario live = runTimerScenario(false);
+        TimerScenario replay = runTimerScenario(true);
+
+        assertThat(replay).isEqualTo(live);
+        assertThat(replay.appliedCommandCount()).isEqualTo(4);
+        assertThat(replay.pendingMatchingCount()).isZero();
+        assertThat(replay.responseCount()).isOne();
+        assertThat(replay.orderStatus())
+                .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+    }
 
     @Test
     void loadsOneByteSnapshotFragmentsThroughBoundedSectionRecovery() {
@@ -176,11 +199,25 @@ class SurprisingClusteredServiceTest {
             preparePendingPlace(service.state(), 902);
 
             service.onStart(clusterWithTimerBackpressure(attempts, correlationId), null);
-            service.doBackgroundWork(0);
-            service.doBackgroundWork(0);
 
             assertThat(attempts).hasValue(3);
             assertThat(correlationId).hasValue(Long.MAX_VALUE - 1);
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
+    void followerDoesNotSynthesizeHistoricalMatcherTimeoutDuringReplay() {
+        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        service.onStart(cluster(Cluster.Role.FOLLOWER), null);
+        try {
+            long sequence = preparePendingPlace(service.state(), 905);
+            assertThat(awaitMatching(service.state(), sequence)).isNotNull();
+
+            service.onTimerEvent(Long.MAX_VALUE - 1, 31_000);
+
+            assertThat(service.state().pendingMatching(sequence)).isNotNull();
         } finally {
             service.onTerminate(null);
         }
@@ -286,6 +323,170 @@ class SurprisingClusteredServiceTest {
         return state.matchingSequence(commandId);
     }
 
+    private static TimerScenario runTimerScenario(boolean delayedCompletion) throws Exception {
+        CountDownLatch timerReady = new CountDownLatch(1);
+        CountDownLatch timerReturned = new CountDownLatch(1);
+        CountDownLatch continueAfterTimer = new CountDownLatch(1);
+        AtomicReference<CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>
+                matchingReference = new AtomicReference<>();
+        FutureTask<TimerScenario> scenario = new FutureTask<>(() -> runTimerScenarioOnOwner(
+                delayedCompletion, timerReady, timerReturned, continueAfterTimer, matchingReference));
+        Thread.ofVirtual().start(scenario);
+        assertThat(timerReady.await(10, TimeUnit.SECONDS)).isTrue();
+        boolean returnedWithoutCompletion = timerReturned.await(250, TimeUnit.MILLISECONDS);
+        if (!returnedWithoutCompletion) matchingReference.get().complete(acceptedMatchingResult());
+        continueAfterTimer.countDown();
+        TimerScenario result = scenario.get(5, TimeUnit.SECONDS);
+        assertThat(returnedWithoutCompletion || !delayedCompletion)
+                .as("clustered-service timer must not wait for matcher future")
+                .isTrue();
+        return result;
+    }
+
+    private static TimerScenario runTimerScenarioOnOwner(
+            boolean delayedCompletion,
+            CountDownLatch timerReady,
+            CountDownLatch timerReturned,
+            CountDownLatch continueAfterTimer,
+            AtomicReference<CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>
+                    matchingReference) throws Exception {
+        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        List<byte[]> responses = new CopyOnWriteArrayList<>();
+        try {
+            CoreProbeState state = service.state();
+            assertThat(state.apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)),
+                    UUID.fromString("00000000-0000-0000-0000-000000000002"))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT", 1,
+                            "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 2, false,
+                            CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT",
+                            2_000, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 1_000, false,
+                            "timer-replay", 0, 0)),
+                    UUID.fromString("00000000-0000-0000-0000-000000000003"));
+            byte[] encoded = CoreMessageCodec.encode(place);
+            service.onSessionMessage(clientSession(responses), 1_000, new UnsafeBuffer(encoded), 0,
+                    encoded.length, aeronHeader());
+            long sequence = state.matchingSequence(place.header().commandId());
+            assertThat(sequence).isPositive();
+
+            CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> matching =
+                    new CompletableFuture<>();
+            installIncompleteMatchingFuture(state, sequence, matching);
+            matchingReference.set(matching);
+            timerReady.countDown();
+            var accepted = acceptedMatchingResult();
+            if (!delayedCompletion) matching.complete(accepted);
+
+            service.onTimerEvent(sequence, 1_001);
+            timerReturned.countDown();
+            assertThat(continueAfterTimer.await(2, TimeUnit.SECONDS)).isTrue();
+
+            if (delayedCompletion) {
+                matching.complete(accepted);
+                service.onTimerEvent(sequence, 1_002);
+            }
+            long hashAfterCompletion = state.stateHash();
+            long appliedAfterCompletion = state.appliedCommandCount();
+            long exportSequenceAfterCompletion = state.exportState().nextSequence();
+            int exportFactsAfterCompletion = state.exportState().pendingCount();
+            int responsesAfterCompletion = responses.size();
+
+            service.onTimerEvent(sequence, 1_003);
+
+            assertThat(state.stateHash()).isEqualTo(hashAfterCompletion);
+            assertThat(state.appliedCommandCount()).isEqualTo(appliedAfterCompletion);
+            assertThat(state.exportState().nextSequence()).isEqualTo(exportSequenceAfterCompletion);
+            assertThat(state.exportState().pendingCount()).isEqualTo(exportFactsAfterCompletion);
+            assertThat(responses).hasSize(responsesAfterCompletion);
+            assertThat(responses).hasSize(1);
+            CoreMessage response = CoreMessageCodec.decode(responses.getFirst());
+            assertThat(CoreProtocol.decodeResponse(response.payload()).status()).isEqualTo(ResponseStatus.APPLIED);
+            return new TimerScenario(state.stateHash(), state.appliedCommandCount(),
+                    state.exportState().nextSequence(), state.exportState().pendingCount(), responses.size(),
+                    state.pendingMatchingCount(), state.tradingState().order(904).status());
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
+    private static com.surprising.aeron.service.matching.CoreMatchingResult acceptedMatchingResult() {
+        return new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS", List.of());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void installIncompleteMatchingFuture(
+            CoreProbeState state,
+            long sequence,
+            CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> replacement)
+            throws Exception {
+        Field futuresField = CoreProbeState.class.getDeclaredField("matchingFutures");
+        futuresField.setAccessible(true);
+        Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>> futures =
+                (Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>)
+                        futuresField.get(state);
+        CompletableFuture<?> original = futures.get(sequence);
+        assertThat(original).isNotNull();
+        original.cancel(true);
+        Field completionsField = CoreProbeState.class.getDeclaredField("matchingCompletions");
+        completionsField.setAccessible(true);
+        Object completions = completionsField.get(state);
+        var clear = completions.getClass().getDeclaredMethod("clear");
+        clear.setAccessible(true);
+        clear.invoke(completions);
+        Field completedField = CoreProbeState.class.getDeclaredField("completedMatching");
+        completedField.setAccessible(true);
+        ((Map<?, ?>) completedField.get(state)).clear();
+        futures.put(sequence, replacement);
+    }
+
+    private static ClientSession clientSession(List<byte[]> responses) {
+        return (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
+                new Class<?>[]{ClientSession.class}, (proxy, method, arguments) -> switch (method.getName()) {
+                    case "id" -> 91L;
+                    case "isClosing" -> false;
+                    case "offer" -> {
+                        if (arguments.length == 3) {
+                            var buffer = (org.agrona.DirectBuffer) arguments[0];
+                            int offset = (int) arguments[1];
+                            int length = (int) arguments[2];
+                            byte[] response = new byte[length];
+                            buffer.getBytes(offset, response);
+                            responses.add(response);
+                        }
+                        yield 1L;
+                    }
+                    default -> defaultValue(method.getReturnType());
+                });
+    }
+
+    private static Header aeronHeader() {
+        return new Header(0, 0).buffer(new UnsafeBuffer(new byte[64])).offset(0)
+                .initialTermId(0).positionBitsToShift(16);
+    }
+
+    private static CoreMessage timerInstrument() {
+        UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+                ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                100_000, 50_000, 0, 0, 0, -1, 0);
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.UPSERT_INSTRUMENT,
+                UUID.fromString("00000000-0000-0000-0000-000000000001"), ProductLine.SPOT,
+                CommandSource.OPERATIONS, 88, 1, 0, 1_000, 1),
+                TradingCommandCodec.encodeUpsertInstrument(instrument));
+    }
+
+    private record TimerScenario(
+            long stateHash,
+            long appliedCommandCount,
+            long nextExportSequence,
+            int exportFactCount,
+            int responseCount,
+            int pendingMatchingCount,
+            com.surprising.aeron.service.state.CoreOrderStatus orderStatus) {
+    }
+
     private static CoreMessage instrument() {
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
@@ -310,9 +511,13 @@ class SurprisingClusteredServiceTest {
     }
 
     private static Cluster cluster() {
+        return cluster(Cluster.Role.LEADER);
+    }
+
+    private static Cluster cluster(Cluster.Role role) {
         return (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
-                    case "role" -> Cluster.Role.LEADER;
+                    case "role" -> role;
                     case "logPosition" -> 7L;
                     case "idleStrategy" -> NoOpIdleStrategy.INSTANCE;
                     case "timeUnit" -> TimeUnit.MILLISECONDS;
@@ -320,6 +525,17 @@ class SurprisingClusteredServiceTest {
                     case "scheduleTimer" -> true;
                     default -> defaultValue(method.getReturnType());
                 });
+    }
+
+    private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
+            CoreProbeState state, long sequence) {
+        com.surprising.aeron.service.matching.CoreMatchingResult result = null;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (result == null && System.nanoTime() < deadline) {
+            result = state.takeMatchingResult(sequence);
+            if (result == null) Thread.onSpinWait();
+        }
+        return result;
     }
 
     private static Cluster clusterWithTimerBackpressure(AtomicInteger attempts, AtomicLong correlationId) {
