@@ -2,8 +2,26 @@
 set -euo pipefail
 
 fake_java() {
-  local argument name=background state_dir metrics_host metrics_port
+  local argument name=background state_dir metrics_host metrics_port has_gc_log=false has_zgc=false has_jfr=false
+  state_dir="${LAUNCHER_TEST_STATE:-$(cd "$(dirname "$0")/../.." && pwd)/state}"
+  if [[ "${1:-}" == -version ]]; then
+    printf '%s\t%s\n' "${FAKE_JAVA_VENDOR:-HOTSPOT}" "$*" >> "$state_dir/java-version.tsv"
+    case "${FAKE_JAVA_VENDOR:-HOTSPOT}" in
+      HOTSPOT)
+        printf '%s\n' 'openjdk version "25.0.1" 2025-10-21 LTS' 'OpenJDK Runtime Environment' 'OpenJDK 64-Bit Server VM' ;;
+      OPENJ9)
+        printf '%s\n' 'openjdk version "25.0.2" 2026-01-20 LTS' 'IBM Semeru Runtime Open Edition 25.0.2.1' 'Eclipse OpenJ9 VM 25.0.2.1' ;;
+      OLD_HOTSPOT)
+        printf '%s\n' 'openjdk version "21.0.10" 2026-01-20 LTS' 'OpenJDK Runtime Environment' 'OpenJDK 64-Bit Server VM' ;;
+      *)
+        printf '%s\n' 'openjdk version "25.0.1"' 'Unknown JVM implementation' ;;
+    esac
+    exit 0
+  fi
   for argument in "$@"; do
+    [[ "$argument" == -Xlog:gc*,safepoint:* ]] && has_gc_log=true
+    [[ "$argument" == -XX:+UseZGC ]] && has_zgc=true
+    [[ "$argument" == -XX:StartFlightRecording=* ]] && has_jfr=true
     case "$argument" in
       *ClusterProbeMain) exit 0 ;;
       -Dsurprising.aeron.node-id=*) name="core-node${argument##*=}" ;;
@@ -11,6 +29,13 @@ fake_java() {
       *ProjectionMain) name=projector ;;
     esac
   done
+  if [[ "${FAKE_JAVA_VENDOR:-HOTSPOT}" == HOTSPOT ]]; then
+    [[ "$has_gc_log" == true && "$has_zgc" == true && "$has_jfr" == true ]] || {
+      printf 'FAKE_JAVA_FLAGS=FAIL gcLog=%s zgc=%s jfr=%s\n' "$has_gc_log" "$has_zgc" "$has_jfr" >&2
+      exit 66
+    }
+  fi
+  printf '%s\n' "$*" >> "$state_dir/java-start-args.tsv"
   if [[ -n "${SERVER_PORT:-}" ]]; then
     case "$SERVER_PORT" in
       9080) name=instrument ;;
@@ -24,7 +49,6 @@ fake_java() {
       9096) name=maker ;;
     esac
   fi
-  state_dir="${LAUNCHER_TEST_STATE:-$(cd "$(dirname "$0")/../.." && pwd)/state}"
   printf '%s\t%s\n' "$name" "$$" >> "$state_dir/started.tsv"
   if [[ "$name" == exporter ]]; then
     metrics_host="${EXPORTER_METRICS_HOST:-<unset>}"
@@ -106,6 +130,8 @@ common_env=(
   BUILD_CHANGED=false
   JVM_XMS=16m
   JVM_XMX=16m
+  JVM_GC=ZGC
+  JFR_ENABLED=true
   LAUNCHER_TEST_STATE="$LAUNCHER_TEST_STATE"
   LAUNCHER_TEST_RUNTIME="$LAUNCHER_TEST_RUNTIME"
   LAUNCHER_TEST_RUN_ID="$LAUNCHER_TEST_RUN_ID"
@@ -193,6 +219,35 @@ launcher_must_fail_before_ready() {
   fi
 }
 
+jvm_dry_run_must_pass() {
+  local scenario_log="$TEST_ROOT/jvm-hotspot-dry-run.log"
+  "${launcher_env[@]}" FAKE_JAVA_VENDOR=HOTSPOT ACTION=dry-run "$LAUNCHER" > "$scenario_log" 2>&1
+  printf '%s\n' '--- JVM compatibility: HotSpot dry-run ---'
+  cat "$scenario_log"
+  grep -q '^JVM_COMPATIBILITY=PASS implementation=HOTSPOT featureVersion=25 collector=ZGC telemetry=UNIFIED_LOGGING jfr=true$' "$scenario_log"
+  [[ "$(grep -c $'^HOTSPOT\\t-version$' "$LAUNCHER_TEST_STATE/java-version.tsv")" == 1 ]]
+}
+
+jvm_dry_run_must_fail() {
+  local vendor expected scenario_log scenario_exit
+  vendor="$1"
+  expected="$2"
+  scenario_log="$TEST_ROOT/jvm-$vendor-dry-run.log"
+  set +e
+  "${launcher_env[@]}" FAKE_JAVA_VENDOR="$vendor" ACTION=dry-run "$LAUNCHER" > "$scenario_log" 2>&1
+  scenario_exit=$?
+  set -e
+  printf '%s\n' "--- JVM compatibility: $vendor dry-run ---"
+  cat "$scenario_log"
+  printf 'JVM_CASE=%s EXIT=%s EXPECTED=NONZERO\n' "$vendor" "$scenario_exit"
+  [[ "$scenario_exit" != 0 ]] || { printf 'JVM_COMPATIBILITY_REGRESSION=FAIL vendor=%s accepted\n' "$vendor" >&2; exit 1; }
+  grep -q "$expected" "$scenario_log"
+}
+
+jvm_dry_run_must_pass
+jvm_dry_run_must_fail OPENJ9 'ERROR=unsupported JVM implementation=OPENJ9'
+jvm_dry_run_must_fail OLD_HOTSPOT 'ERROR=unsupported JVM feature version=21; require HotSpot feature version 25 or newer'
+
 /usr/bin/python3 - "$LAUNCHER" "$UP_LOG" "$OWNERSHIP_LOG" "${launcher_env[@]}" <<'PY'
 import os
 import signal
@@ -258,7 +313,7 @@ grep -qx 'EXPORTER_METRICS_HOST=127.0.0.1 EXPORTER_METRICS_PORT=9191' \
   "$LAUNCHER_TEST_STATE/exporter-metrics.tsv"
 
 set +e
-"${operational_env[@]}" ACTION=status "$LAUNCHER" > "$STATUS_LOG" 2>&1
+"${operational_env[@]}" JAVA_HOME="$TEST_ROOT/no-java-needed" ACTION=status "$LAUNCHER" > "$STATUS_LOG" 2>&1
 status_exit=$?
 set -e
 cat "$STATUS_LOG"
@@ -270,6 +325,10 @@ if [[ "$status_exit" != 0 ]]; then
   printf 'LAUNCHER_OWNERSHIP_REGRESSION=FAIL reason=status-disagrees-after-session-exit\n' >&2
   exit 1
 fi
+
+grep -q -- '-Xlog:gc\*,safepoint:' "$LAUNCHER_TEST_STATE/java-start-args.tsv"
+grep -q -- '-XX:+UseZGC' "$LAUNCHER_TEST_STATE/java-start-args.tsv"
+grep -q -- '-XX:StartFlightRecording=' "$LAUNCHER_TEST_STATE/java-start-args.tsv"
 if [[ "$(grep -c '^PROCESS=RUNNING ' "$STATUS_LOG")" != 14 ]]; then
   printf 'LAUNCHER_OWNERSHIP_REGRESSION=FAIL reason=owned-process-count\n' >&2
   exit 1
@@ -328,7 +387,7 @@ if [[ "$quick_status_exit" == 0 ]]; then
   exit 1
 fi
 
-"${operational_env[@]}" ACTION=down "$LAUNCHER"
+"${operational_env[@]}" JAVA_HOME="$TEST_ROOT/no-java-needed" ACTION=down "$LAUNCHER"
 [[ ! -e "$LAUNCHER_TEST_RUNTIME/active.lock/owner" ]]
 [[ -z "$(find "$PID_DIR" -type f \( -name '*.pid' -o -name '*.label' \) -print -quit)" ]]
 [[ -z "$(/bin/launchctl list 2>/dev/null | awk -v prefix="com.surprising.product-line.${LAUNCHER_TEST_RUN_ID}." '$3 ~ "^" prefix {print $3}')" ]]

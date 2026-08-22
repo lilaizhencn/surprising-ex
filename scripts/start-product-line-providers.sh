@@ -44,6 +44,9 @@ AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-127.0.0.1}"
 EXPORTER_METRICS_HOST="${EXPORTER_METRICS_HOST:-}"
 EXPORTER_METRICS_PORT="${EXPORTER_METRICS_PORT:-}"
 BUILD_CHANGED="${BUILD_CHANGED:-false}"
+JVM_IMPLEMENTATION=""
+JVM_FEATURE_VERSION=""
+JVM_TELEMETRY_MODE=""
 
 readonly SERVICES=(instrument exporter projector price account trading market-data derivatives-lifecycle funding gateway maker)
 readonly HTTP_SERVICES=(instrument price account trading market-data derivatives-lifecycle funding gateway maker)
@@ -74,6 +77,28 @@ validate_exporter_metrics() {
   [[ "$EXPORTER_METRICS_PORT" =~ ^[0-9]{1,5}$ ]] || fail 'EXPORTER_METRICS_PORT must be numeric'
   (( 10#$EXPORTER_METRICS_PORT >= 1 && 10#$EXPORTER_METRICS_PORT <= 65535 )) || \
     fail 'EXPORTER_METRICS_PORT must be between 1 and 65535'
+}
+
+detect_jvm_campaign_support() {
+  local version_output
+  [[ -x "$JAVA_HOME/bin/java" ]] || fail "JDK 25 unavailable JAVA_HOME=$JAVA_HOME"
+  version_output="$("$JAVA_HOME/bin/java" -version 2>&1)" || fail "unable to inspect JVM JAVA_HOME=$JAVA_HOME"
+  if grep -Eqi 'OpenJ9|IBM Semeru' <<<"$version_output"; then
+    fail "unsupported JVM implementation=OPENJ9; requested collector=$JVM_GC telemetry=GC_SAFEPOINT jfr=$JFR_ENABLED require HotSpot 25+"
+  fi
+  if grep -Eqi 'HotSpot|OpenJDK[[:space:]].*Server VM' <<<"$version_output"; then
+    JVM_IMPLEMENTATION=HOTSPOT
+  else
+    fail 'unsupported JVM implementation; require HotSpot 25+ for GC/safepoint/JFR campaign telemetry'
+  fi
+  if [[ "$version_output" =~ version[[:space:]]\"([0-9]+) ]]; then
+    JVM_FEATURE_VERSION="${BASH_REMATCH[1]}"
+  else
+    fail 'unable to determine JVM feature version; require HotSpot 25+'
+  fi
+  (( JVM_FEATURE_VERSION >= 25 )) || \
+    fail "unsupported JVM feature version=$JVM_FEATURE_VERSION; require HotSpot feature version 25 or newer"
+  JVM_TELEMETRY_MODE=UNIFIED_LOGGING
 }
 
 service_enabled() {
@@ -202,6 +227,8 @@ claim_runtime() {
 
 java_args_for() {
   local service="$1"
+  [[ "$JVM_IMPLEMENTATION" == HOTSPOT && "$JVM_TELEMETRY_MODE" == UNIFIED_LOGGING ]] || \
+    fail 'JVM compatibility was not initialized for startup'
   JVM_ARGS=(
     "-Xms$JVM_XMS"
     "-Xmx$JVM_XMX"
@@ -509,6 +536,8 @@ verify_owned_process() {
 
 print_dry_run() {
   printf 'DRY_RUN=PASS\nPRODUCT_LINE=%s\nRUN_ID=%s\nCORE_MODE=HOST_THREE_NODE_DEDICATED\n' "$PRODUCT_LINE" "$RUN_ID"
+  printf 'JVM_COMPATIBILITY=PASS implementation=%s featureVersion=%s collector=%s telemetry=%s jfr=%s\n' \
+    "$JVM_IMPLEMENTATION" "$JVM_FEATURE_VERSION" "$JVM_GC" "$JVM_TELEMETRY_MODE" "$JFR_ENABLED"
   local service
   printf 'START_ORDER=instrument,host-core-node0,host-core-node1,host-core-node2,exporter,projector,price,account,trading,market-data'
   service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
@@ -520,6 +549,9 @@ print_dry_run() {
 export JAVA_HOME PRODUCT_LINE RUN_ID AERON_CLUSTER_HOSTNAMES AERON_EGRESS_HOSTNAME
 export POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD KAFKA_BOOTSTRAP_SERVERS
 export VALKEY_HOST VALKEY_PORT
+case "$ACTION" in
+  up|fresh|test|dry-run) detect_jvm_campaign_support ;;
+esac
 case "$ACTION" in
   up|fresh|dry-run) validate_exporter_metrics ;;
 esac
