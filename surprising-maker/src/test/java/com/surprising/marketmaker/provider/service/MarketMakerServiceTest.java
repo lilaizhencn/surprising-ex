@@ -217,6 +217,146 @@ class MarketMakerServiceTest {
     }
 
     @Test
+    void staleTwentyLevelLadderReservesBudgetForImmediateReplacements() {
+        Fixtures fixtures = new Fixtures(staleTwentyLevelOrders(), 40);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(20);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(20);
+        assertThat(fixtures.orderRpc.cancelRequests.size() + fixtures.orderRpc.placeRequests.size()).isEqualTo(40);
+    }
+
+    @Test
+    void reconciliationHonorsOperationBudgetBoundariesAndEventuallyDrainsStaleOrders() {
+        for (int budget : List.of(0, 1, 20, 39, 40)) {
+            Fixtures fixtures = new Fixtures(staleTwentyLevelOrders(), budget);
+            fixtures.orderLevels = 20;
+            fixtures.maxOpenOrders = 60;
+            MarketMakerService service = fixtures.service();
+            int cycles = budget == 0 ? 3 : 90;
+
+            for (int cycle = 0; cycle < cycles; cycle++) {
+                int operationsBefore = fixtures.orderRpc.cancelRequests.size()
+                        + fixtures.orderRpc.placeRequests.size();
+                service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+                int operationsAfter = fixtures.orderRpc.cancelRequests.size()
+                        + fixtures.orderRpc.placeRequests.size();
+                assertThat(operationsAfter - operationsBefore)
+                        .as("budget=%s cycle=%s", budget, cycle)
+                        .isLessThanOrEqualTo(budget);
+                if (fixtures.orderRpc.cancelRequests.size() == 40
+                        && fixtures.orderRpc.placeRequests.size() == 40) {
+                    break;
+                }
+            }
+
+            if (budget == 0) {
+                assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
+                assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+            } else {
+                assertThat(fixtures.orderRpc.cancelRequests).hasSize(40);
+                assertThat(fixtures.orderRpc.placeRequests).hasSize(40);
+                int cancels = fixtures.orderRpc.cancelRequests.size();
+                int places = fixtures.orderRpc.placeRequests.size();
+                service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+                assertThat(fixtures.orderRpc.cancelRequests).hasSize(cancels);
+                assertThat(fixtures.orderRpc.placeRequests).hasSize(places);
+            }
+        }
+    }
+
+    @Test
+    void failedStaleCancellationConsumesBudgetWithoutUnnecessaryReplacement() {
+        List<OrderResponse> staleOrders = staleTwentyLevelOrders();
+        Fixtures fixtures = new Fixtures(staleOrders, 40);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.orderRpc.failedCancelOrderIds.add(staleOrders.get(0).orderId());
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(20);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(19);
+        assertThat(fixtures.orderRpc.cancelRequests.size() + fixtures.orderRpc.placeRequests.size())
+                .isLessThanOrEqualTo(40);
+        assertThat(fixtures.orderRpc.placeRequests)
+                .noneMatch(request -> request.side() == staleOrders.get(0).side()
+                        && request.priceTicks() == staleOrders.get(0).priceTicks());
+    }
+
+    @Test
+    void correctedTwentyByTwoLifecycleIsVisibleInAdminMetrics() {
+        Fixtures fixtures = new Fixtures(List.of(), 40);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.priceTickUnits = 10_000_000L;
+        fixtures.markPriceUnits = 7_808_312_833_333L;
+        fixtures.bestBidTicks = 780_820L;
+        fixtures.bestAskTicks = 780_842L;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        var metrics = service.adminMetrics(100);
+
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(40)
+                .allSatisfy(request -> assertThat(request.quantitySteps()).isPositive());
+        assertThat(fixtures.orderRpc.placeRequests.stream().filter(request -> request.side() == OrderSide.BUY)
+                .map(PlaceOrderRequest::priceTicks).distinct()).hasSize(20);
+        assertThat(fixtures.orderRpc.placeRequests.stream().filter(request -> request.side() == OrderSide.SELL)
+                .map(PlaceOrderRequest::priceTicks).distinct()).hasSize(20);
+        long highestBid = fixtures.orderRpc.placeRequests.stream()
+                .filter(request -> request.side() == OrderSide.BUY)
+                .mapToLong(PlaceOrderRequest::priceTicks)
+                .max()
+                .orElseThrow();
+        long lowestAsk = fixtures.orderRpc.placeRequests.stream()
+                .filter(request -> request.side() == OrderSide.SELL)
+                .mapToLong(PlaceOrderRequest::priceTicks)
+                .min()
+                .orElseThrow();
+        assertThat(highestBid).isLessThan(lowestAsk);
+        assertThat(metrics.rows()).singleElement().satisfies(row -> {
+            assertThat(row.ownedOpenOrders()).isEqualTo(40L);
+            assertThat(row.ownedBidOrders()).isEqualTo(20L);
+            assertThat(row.ownedAskOrders()).isEqualTo(20L);
+            assertThat(row.desiredQuoteCount()).isEqualTo(40L);
+            assertThat(row.matchedDesiredQuotes()).isEqualTo(40L);
+            assertThat(row.missingDesiredQuotes()).isZero();
+            assertThat(row.staleOwnedOrders()).isZero();
+            assertThat(row.markPriceTicks()).isEqualTo(780_831L);
+            assertThat(row.bestBidTicks()).isEqualTo(780_820L);
+            assertThat(row.bestAskTicks()).isEqualTo(780_842L);
+            assertThat(row.quoteCoveragePpm()).isEqualTo(1_000_000L);
+        });
+    }
+
+    @Test
+    void tinyAnchorDepthReductionIsVisibleInAdminMetrics() {
+        Fixtures fixtures = new Fixtures(List.of(), 40);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.priceTickUnits = 100_000_000_000L;
+        fixtures.markPriceUnits = 7_808_312_833_333L;
+        fixtures.bestBidTicks = 77L;
+        fixtures.bestAskTicks = 79L;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        var metrics = service.adminMetrics(100);
+
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(2);
+        assertThat(metrics.rows()).singleElement().satisfies(row -> {
+            assertThat(row.desiredBidQuotes()).isEqualTo(1L);
+            assertThat(row.desiredAskQuotes()).isEqualTo(1L);
+        });
+        assertThat(metrics.anomalies()).extracting(MarketMakerService.MarketMakerAnomaly::type)
+                .contains("REDUCED_DISTINCT_DEPTH");
+    }
+
+    @Test
     void restartedProviderDoesNotReuseClientOrderIdsFromPreviousInstance() {
         Fixtures first = new Fixtures(List.of());
         first.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
@@ -365,6 +505,18 @@ class MarketMakerServiceTest {
                 Instant.parse("2026-01-01T00:00:00Z"));
     }
 
+    private static List<OrderResponse> staleTwentyLevelOrders() {
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        List<OrderResponse> orders = new ArrayList<>();
+        for (int level = 0; level < 20; level++) {
+            orders.add(order(1_000L + level, 900001L, prefix + "b" + level + "-1", OrderSide.BUY,
+                    49_995L - 10L * level, 10L, OrderStatus.ACCEPTED));
+            orders.add(order(2_000L + level, 900001L, prefix + "s" + level + "-1", OrderSide.SELL,
+                    50_005L + 10L * level, 10L, OrderStatus.ACCEPTED));
+        }
+        return List.copyOf(orders);
+    }
+
     private static OrderResponse orderAt(long orderId,
                                          long userId,
                                          String clientOrderId,
@@ -385,6 +537,11 @@ class MarketMakerServiceTest {
                 new FakeReferenceSampleRepository();
         private final int maxOrderOperationsPerCycle;
         private int orderLevels = 3;
+        private int maxOpenOrders = 30;
+        private long priceTickUnits = 100L;
+        private long markPriceUnits = 5_000_000L;
+        private long bestBidTicks = 49_990L;
+        private long bestAskTicks = 50_010L;
 
         private Fixtures(List<OrderResponse> openOrders) {
             this(openOrders, 40);
@@ -409,9 +566,9 @@ class MarketMakerServiceTest {
             MarketMakerProperties properties = properties();
             InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
             snapshotCache.replace(ProductLine.LINEAR_PERPETUAL,
-                    List.of(new FakeInstrumentRpc().latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL)));
+                    List.of(new FakeInstrumentRpc(priceTickUnits).latest("BTC-USDT", ProductLine.LINEAR_PERPETUAL)));
             return new MarketMakerService(properties, markPriceCache(),
-                    new FakeMarketDataRpc(), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
+                    new FakeMarketDataRpc(bestBidTicks, bestAskTicks), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
                     referenceMarketProvider, (productLine, strategyId, symbol, ownerId, leaseDuration) -> true,
                     new FakeOverrideStore(), runEventRepository, referenceSampleRepository, snapshotCache);
         }
@@ -424,8 +581,8 @@ class MarketMakerServiceTest {
             Instant now = Instant.now();
             BigDecimal price = BigDecimal.valueOf(50_000L);
             cache.update(new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L,
-                    5_000_000L, 50_000L, price, price, price, price, price,
-                    BigDecimal.valueOf(49_990L), BigDecimal.valueOf(50_010L), BigDecimal.ZERO,
+                    markPriceUnits, 50_000L, price, price, price, price, price,
+                    BigDecimal.valueOf(bestBidTicks), BigDecimal.valueOf(bestAskTicks), BigDecimal.ZERO,
                     now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                     BigDecimal.valueOf(49_000L), BigDecimal.valueOf(51_000L), 1L,
                     PriceStatus.HEALTHY, now, now));
@@ -441,6 +598,7 @@ class MarketMakerServiceTest {
             properties.getQuoting().setLevelSpacingTicks(10L);
             properties.getQuoting().setRefreshThresholdTicks(2L);
             properties.getQuoting().setMaxOrderOperationsPerCycle(maxOrderOperationsPerCycle);
+            properties.getQuoting().setMaxOpenOrdersPerAccountSymbol(maxOpenOrders);
             properties.getRisk().setMaxInventorySteps(1000L);
             MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
             strategy.setStrategyId("btc-usdt-mm-a");
@@ -559,6 +717,7 @@ class MarketMakerServiceTest {
         private final List<ProductLine> productLinesDuringCancel = new ArrayList<>();
         private final List<ProductLine> productLinesDuringOpenOrders = new ArrayList<>();
         private final List<BatchPlaceOrderRequest> batchPlaceRequests = new ArrayList<>();
+        private final List<Long> failedCancelOrderIds = new ArrayList<>();
         private boolean batchSupported = true;
         private boolean jsonRoundTripReceipts;
         private int openOrdersCalls;
@@ -631,11 +790,14 @@ class MarketMakerServiceTest {
                 CancelOrderRequest cancelRequest = request.orders().get(i);
                 productLinesDuringCancel.add(MarketMakerProductLineContext.current());
                 cancelRequests.add(cancelRequest);
-                results.add(new OrderBatchItemResponse(i, true, "completed",
-                        order(cancelRequest.orderId(), cancelRequest.userId(), "canceled", OrderSide.BUY,
-                                1L, 0L, OrderStatus.CANCELED)));
+                boolean success = !failedCancelOrderIds.contains(cancelRequest.orderId());
+                results.add(new OrderBatchItemResponse(i, success, success ? "completed" : "failed", success
+                        ? order(cancelRequest.orderId(), cancelRequest.userId(), "canceled", OrderSide.BUY,
+                                1L, 0L, OrderStatus.CANCELED)
+                        : null));
             }
-            return terminal(new OrderBatchResponse(results.size(), results.size(), 0, results));
+            int succeeded = (int) results.stream().filter(OrderBatchItemResponse::success).count();
+            return terminal(new OrderBatchResponse(results.size(), succeeded, results.size() - succeeded, results));
         }
 
         private OrderCommandReceipt terminal(OrderCommandResult result) {
@@ -707,12 +869,20 @@ class MarketMakerServiceTest {
     }
 
     private static final class FakeMarketDataRpc implements MarketDataRpcApi {
+        private final long bestBidTicks;
+        private final long bestAskTicks;
+
+        private FakeMarketDataRpc(long bestBidTicks, long bestAskTicks) {
+            this.bestBidTicks = bestBidTicks;
+            this.bestAskTicks = bestAskTicks;
+        }
+
         @Override
         public OrderBookSnapshotResponse orderBook(String symbol, int depth) {
             Instant now = Instant.parse("2026-01-01T00:00:00Z");
             return new OrderBookSnapshotResponse(symbol, 1L, depth,
-                    List.of(new OrderBookLevel(49_990L, 100L, 1L)),
-                    List.of(new OrderBookLevel(50_010L, 100L, 1L)), now);
+                    List.of(new OrderBookLevel(bestBidTicks, 100L, 1L)),
+                    List.of(new OrderBookLevel(bestAskTicks, 100L, 1L)), now);
         }
 
         @Override
@@ -730,11 +900,17 @@ class MarketMakerServiceTest {
     }
 
     private static final class FakeInstrumentRpc implements InstrumentRpcApi {
+        private final long priceTickUnits;
+
+        private FakeInstrumentRpc(long priceTickUnits) {
+            this.priceTickUnits = priceTickUnits;
+        }
+
         @Override
         public InstrumentResponse latest(String symbol, ProductLine productLine) {
             Instant now = Instant.parse("2026-01-01T00:00:00Z");
             return new InstrumentResponse(symbol, 1L, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
-                    "BTC", "USDT", "USDT", 1_000_000L, "BTC", 100L, 1L, 1L, 1_000_000L,
+                    "BTC", "USDT", "USDT", 1_000_000L, "BTC", priceTickUnits, 1L, 1L, 1_000_000L,
                     1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTX"), true,
                     true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
                     1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,

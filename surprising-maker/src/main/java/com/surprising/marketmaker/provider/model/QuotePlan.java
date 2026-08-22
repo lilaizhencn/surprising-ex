@@ -5,5 +5,6 @@ import java.util.List;
 public record QuotePlan(
         long anchorPriceTicks,
         long signedPositionSteps,
-        List<DesiredQuote> quotes) {
+        List<DesiredQuote> quotes,
+        int suppressedDuplicateQuotes) {
 }

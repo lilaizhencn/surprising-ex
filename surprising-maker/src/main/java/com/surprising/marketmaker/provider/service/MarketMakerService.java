@@ -378,7 +378,7 @@ public class MarketMakerService {
             MarkPriceResponse markPrice = currentMarkPrice(productLine, symbol, instrument.version());
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, productLine, instrument);
             QuotePlan plan = !isTradableForProduct(instrument, productLine)
-                    ? new QuotePlan(0L, position.signedQuantitySteps(), List.of())
+                    ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                     orderBook, markPrice, position.signedQuantitySteps(), currentVolatility(strategy, symbol),
                     referenceOrderBook);
@@ -415,6 +415,11 @@ public class MarketMakerService {
             if (desiredQuotes > 0 && missingDesired > 0) {
                 rowAnomalies.add(anomaly("WARN", "MISSING_DESIRED_QUOTES", strategyId, productLine, symbol, accountId,
                         missingDesired, desiredQuotes, "some desired quote levels are not live"));
+            }
+            if (plan.suppressedDuplicateQuotes() > 0) {
+                rowAnomalies.add(anomaly("WARN", "REDUCED_DISTINCT_DEPTH", strategyId, productLine, symbol, accountId,
+                        desiredQuotes, desiredQuotes + plan.suppressedDuplicateQuotes(),
+                        "price bounds cannot represent every configured level as a distinct executable price"));
             }
             if (ownedLive.isEmpty() && strategy.isEnabled() && !state.paused()) {
                 rowAnomalies.add(anomaly("CRITICAL", "NO_LIVE_QUOTES", strategyId, productLine, symbol, accountId,
@@ -705,10 +710,16 @@ public class MarketMakerService {
         List<OrderResponse> kept = new ArrayList<>();
         List<CancelOrderRequest> cancelRequests = new ArrayList<>();
         int operationBudget = properties.getQuoting().getMaxOrderOperationsPerCycle();
+        long freshDesiredQuotes = plan.quotes().stream()
+                .filter(quote -> owned.stream().anyMatch(order -> isFreshQuote(order, quote, accountPrefix, now)))
+                .count();
+        int missingDesiredQuotes = Math.toIntExact(plan.quotes().size() - freshDesiredQuotes);
+        int replacementReserve = Math.min(missingDesiredQuotes, operationBudget / 2);
+        int cancellationBudget = operationBudget - replacementReserve;
         for (OrderResponse order : owned) {
             if (shouldKeep(order, plan.quotes(), accountPrefix, now)) {
                 kept.add(order);
-            } else if (cancelRequests.size() < operationBudget) {
+            } else if (cancelRequests.size() < cancellationBudget) {
                 cancelRequests.add(new CancelOrderRequest(accountId, order.orderId()));
             } else {
                 kept.add(order);
@@ -803,10 +814,14 @@ public class MarketMakerService {
                                List<DesiredQuote> desiredQuotes,
                                String accountPrefix,
                                Instant now) {
-        if (!isLive(order) || isStale(order, now)) {
-            return false;
-        }
-        return desiredQuotes.stream().anyMatch(quote -> matchesQuote(order, quote, accountPrefix));
+        return desiredQuotes.stream().anyMatch(quote -> isFreshQuote(order, quote, accountPrefix, now));
+    }
+
+    private boolean isFreshQuote(OrderResponse order,
+                                 DesiredQuote quote,
+                                 String accountPrefix,
+                                 Instant now) {
+        return isLive(order) && !isStale(order, now) && matchesQuote(order, quote, accountPrefix);
     }
 
     private boolean hasLiveQuote(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {

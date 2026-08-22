@@ -62,6 +62,7 @@ public class QuotePlanner {
         long bestBid = bestBid(orderBook);
         long bestAsk = bestAsk(orderBook);
         List<DesiredQuote> quotes = new ArrayList<>(levels * 2);
+        int suppressedDuplicateQuotes = 0;
         // 现货库存是基础资产余额，单位和衍生品持仓不同，不能拿它与合约的
         // maxInventorySteps 比较。现货是否有足够资产由账户预占原子校验，
         // 做市报价只负责生成双边价格；衍生品仍使用持仓库存风控。
@@ -73,34 +74,40 @@ public class QuotePlanner {
             if (bestAsk > 0) {
                 bidPrice = Math.min(bidPrice, bestAsk - 1L);
             }
-            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice, riskPositionSteps,
-                    referenceQuantity(referenceOrderBook, OrderSide.BUY, level));
+            suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.BUY, level, bidPrice,
+                    riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.BUY, level));
 
             long askPrice = Math.min(maxPrice, anchor + (askDistance > 0 ? askDistance : halfSpread + spacing * level));
             if (bestBid > 0) {
                 askPrice = Math.max(askPrice, bestBid + 1L);
             }
-            addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice, riskPositionSteps,
-                    referenceQuantity(referenceOrderBook, OrderSide.SELL, level));
+            suppressedDuplicateQuotes += addQuoteIfAllowed(strategy, risk, quotes, OrderSide.SELL, level, askPrice,
+                    riskPositionSteps, referenceQuantity(referenceOrderBook, OrderSide.SELL, level));
         }
-        return new QuotePlan(anchor, signedPositionSteps, List.copyOf(quotes));
+        return new QuotePlan(anchor, signedPositionSteps, List.copyOf(quotes), suppressedDuplicateQuotes);
     }
 
-    private void addQuoteIfAllowed(MarketMakerProperties.Strategy strategy,
-                                   MarketMakerProperties.Risk risk,
-                                   List<DesiredQuote> quotes,
-                                   OrderSide side,
-                                   int level,
-                                   long priceTicks,
-                                   long signedPositionSteps,
-                                   long referenceQuantitySteps) {
+    private int addQuoteIfAllowed(MarketMakerProperties.Strategy strategy,
+                                  MarketMakerProperties.Risk risk,
+                                  List<DesiredQuote> quotes,
+                                  OrderSide side,
+                                  int level,
+                                  long priceTicks,
+                                  long signedPositionSteps,
+                                  long referenceQuantitySteps) {
         if (priceTicks <= 0 || !sideAllowed(side, strategy, risk, signedPositionSteps)) {
-            return;
+            return 0;
         }
         long quantity = adjustedQuantity(strategy, risk, side, signedPositionSteps, referenceQuantitySteps);
         if (quantity > 0) {
+            boolean duplicatePrice = quotes.stream()
+                    .anyMatch(quote -> quote.side() == side && quote.priceTicks() == priceTicks);
+            if (duplicatePrice) {
+                return 1;
+            }
             quotes.add(new DesiredQuote(side, level, priceTicks, quantity));
         }
+        return 0;
     }
 
     private boolean sideAllowed(OrderSide side,

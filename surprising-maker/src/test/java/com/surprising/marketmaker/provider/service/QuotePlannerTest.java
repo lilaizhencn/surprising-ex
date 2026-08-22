@@ -143,6 +143,54 @@ class QuotePlannerTest {
         assertThat(plan.quotes().get(1).quantitySteps()).isEqualTo(10L);
     }
 
+    @Test
+    void plansTwentyDistinctExecutableLevelsWithinDeviationForLinearPerpetual() {
+        MarketMakerProperties.Strategy strategy = strategy();
+        strategy.setOrderLevels(20);
+        MarketMakerProperties.Quoting quoting = quoting();
+        quoting.setMinSpreadTicks(20L);
+        quoting.setLevelSpacingTicks(8L);
+        quoting.setMaxPriceDeviationPpm(5_000L);
+        long anchor = 780_831L;
+
+        QuotePlan plan = quotePlanner.plan(strategy, quoting, risk(), instrument(10_000_000L),
+                orderBook(780_820L, 780_842L), mark(7_808_312_833_333L), 0L);
+
+        assertThat(plan.anchorPriceTicks()).isEqualTo(anchor);
+        assertThat(plan.quotes()).hasSize(40)
+                .allSatisfy(quote -> {
+                    assertThat(quote.quantitySteps()).isPositive();
+                    assertThat(Math.abs(quote.priceTicks() - anchor)).isLessThanOrEqualTo(3_904L);
+                });
+        assertThat(plan.quotes().stream().filter(quote -> quote.side() == OrderSide.BUY)
+                .map(quote -> quote.priceTicks()).distinct()).hasSize(20).allMatch(price -> price < anchor);
+        assertThat(plan.quotes().stream().filter(quote -> quote.side() == OrderSide.SELL)
+                .map(quote -> quote.priceTicks()).distinct()).hasSize(20).allMatch(price -> price > anchor);
+    }
+
+    @Test
+    void tinyAnchorReportsReducedDistinctDepthWithoutCrossingOrZeroQuantity() {
+        MarketMakerProperties.Strategy strategy = strategy();
+        strategy.setOrderLevels(20);
+        MarketMakerProperties.Quoting quoting = quoting();
+        quoting.setMinSpreadTicks(20L);
+        quoting.setLevelSpacingTicks(8L);
+        quoting.setMaxPriceDeviationPpm(5_000L);
+
+        QuotePlan plan = quotePlanner.plan(strategy, quoting, risk(), instrument(100_000_000_000L),
+                orderBook(77L, 79L), mark(7_808_312_833_333L), 0L);
+
+        assertThat(plan.anchorPriceTicks()).isEqualTo(78L);
+        assertThat(plan.quotes()).hasSize(2)
+                .allSatisfy(quote -> assertThat(quote.quantitySteps()).isPositive());
+        assertThat(plan.quotes()).extracting(quote -> quote.priceTicks()).containsExactly(77L, 79L);
+        assertThat(plan.quotes().stream().map(quote -> quote.priceTicks()).distinct()).hasSize(2);
+        long maxBid = plan.quotes().stream().filter(quote -> quote.side() == OrderSide.BUY)
+                .mapToLong(quote -> quote.priceTicks()).max().orElseThrow();
+        assertThat(maxBid).isLessThan(79L);
+        assertThat(plan.suppressedDuplicateQuotes()).isEqualTo(38);
+    }
+
     private MarketMakerProperties.Strategy strategy() {
         MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
         strategy.setStrategyId("btc-usdt-mm-a");
@@ -170,9 +218,13 @@ class QuotePlannerTest {
     }
 
     private InstrumentResponse instrument() {
+        return instrument(100L);
+    }
+
+    private InstrumentResponse instrument(long priceTickUnits) {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         return new InstrumentResponse("BTC-USDT", 1L, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
-                "BTC", "USDT", "USDT", 1_000_000L, "BTC", 100L, 1L, 1L, 1_000_000L,
+                "BTC", "USDT", "USDT", 1_000_000L, "BTC", priceTickUnits, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTX"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
