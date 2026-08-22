@@ -87,4 +87,35 @@ SELECT symbol, 1, 'OKX', TRUE, 'https://www.okx.com', CASE WHEN spot_index THEN 
   FROM surprising_okx_instruments
 ON CONFLICT (symbol, version, source) DO UPDATE SET enabled=EXCLUDED.enabled, base_url=EXCLUDED.base_url, path=EXCLUDED.path, source_symbol=EXCLUDED.source_symbol, parser=EXCLUDED.parser, quote_currency=EXCLUDED.quote_currency, target_quote_currency=EXCLUDED.target_quote_currency, websocket_subscribe_message=EXCLUDED.websocket_subscribe_message, websocket_parser=EXCLUDED.websocket_parser;
 
+-- BTC-USDT-SWAP three-source public WebSocket matrix
+UPDATE instruments SET min_valid_index_sources = 3
+ WHERE contract_type = 'LINEAR_PERPETUAL' AND symbol = 'BTC-USDT-SWAP' AND version = 1;
+
+INSERT INTO instrument_index_sources (
+    symbol, version, source, enabled, base_url, path, source_symbol, parser,
+    quote_currency, target_quote_currency, conversion_base_url, conversion_path,
+    conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm,
+    websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm
+) VALUES
+('BTC-USDT-SWAP', 1, 'OKX', TRUE, 'https://www.okx.com', '/api/v5/market/index-ticker?instId=BTC-USDT', 'BTC-USDT', 'OKX_INDEX_TICKER',
+ 'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
+ TRUE, 'wss://ws.okx.com:8443/ws/v5/public', '{"op":"subscribe","args":[{"channel":"index-tickers","instId":"BTC-USDT"}]}', 'OKX_INDEX_TICKER', 1000000),
+('BTC-USDT-SWAP', 1, 'BINANCE', TRUE, 'https://api.binance.com', '/api/v3/ticker/bookTicker?symbol=BTCUSDT', 'BTCUSDT', 'BINANCE_BOOK_TICKER',
+ 'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
+ TRUE, 'wss://stream.binance.com:9443/ws', '{"method":"SUBSCRIBE","params":["btcusdt@ticker"],"id":1}', 'BINANCE_BOOK_TICKER', 1000000),
+('BTC-USDT-SWAP', 1, 'BYBIT', TRUE, 'https://api.bybit.com', '/v5/market/tickers?category=spot&symbol=BTCUSDT', 'BTCUSDT', 'BYBIT_TICKER',
+ 'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
+ TRUE, 'wss://stream.bybit.com/v5/public/spot', '{"op":"subscribe","args":["tickers.BTCUSDT"]}', 'BYBIT_TICKER', 1000000)
+ON CONFLICT (symbol, version, source) DO UPDATE SET
+    enabled=EXCLUDED.enabled, base_url=EXCLUDED.base_url, path=EXCLUDED.path,
+    source_symbol=EXCLUDED.source_symbol, parser=EXCLUDED.parser,
+    quote_currency=EXCLUDED.quote_currency, target_quote_currency=EXCLUDED.target_quote_currency,
+    conversion_base_url=EXCLUDED.conversion_base_url, conversion_path=EXCLUDED.conversion_path,
+    conversion_parser=EXCLUDED.conversion_parser, conversion_mode=EXCLUDED.conversion_mode,
+    conversion_operation=EXCLUDED.conversion_operation,
+    fallback_weight_multiplier_ppm=EXCLUDED.fallback_weight_multiplier_ppm,
+    websocket_enabled=EXCLUDED.websocket_enabled, websocket_url=EXCLUDED.websocket_url,
+    websocket_subscribe_message=EXCLUDED.websocket_subscribe_message,
+    websocket_parser=EXCLUDED.websocket_parser, weight_ppm=EXCLUDED.weight_ppm;
+
 -- OKX catalog counts at fetch time: {"SPOT":1349,"INVERSE_PERPETUAL":15,"LINEAR_PERPETUAL":430,"INVERSE_DELIVERY":16,"LINEAR_DELIVERY":148,"OPTION":2847}; skipped=29.

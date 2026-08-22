@@ -18,7 +18,7 @@ public class MarketProbeController {
     @GetMapping
     public MarketProbeService.MarketProbeSnapshot snapshot(@RequestParam("symbol") String symbol,
                                                             @RequestParam(value = "sourceMode",
-                                                                    defaultValue = "OKX_PUBLIC_WEBSOCKET_ONLY")
+                                                                    defaultValue = "PUBLIC_WEBSOCKET_ONLY")
                                                             MarketProbeService.SourceMode sourceMode) {
         return marketProbeService.snapshot(symbol, sourceMode);
     }

@@ -143,7 +143,11 @@ public class ExternalSpotPriceClient {
     private SourceQuote toSourceQuote(IndexPriceProperties.SourceConfig source, String payload, Instant receivedAt,
                                       Long latencyMillis, boolean websocket) throws Exception {
         JsonNode root = objectMapper.readTree(payload);
-        ParsedTicker ticker = parseTicker(parser(source, websocket), root);
+        String parser = parser(source, websocket);
+        if (websocket) {
+            validateWebSocketAncestry(source, parser, root);
+        }
+        ParsedTicker ticker = parseTicker(parser, root);
         if (websocket && ticker.instrument() != null && !sameInstrument(ticker.instrument(), source.getSourceSymbol())) {
             throw new IgnoredPayloadException();
         }
@@ -160,6 +164,33 @@ public class ExternalSpotPriceClient {
             return source.getWebsocketParser();
         }
         return source.getParser();
+    }
+
+    private void validateWebSocketAncestry(IndexPriceProperties.SourceConfig source, String parser, JsonNode root) {
+        switch (parser.toUpperCase(Locale.ROOT)) {
+            case "OKX_INDEX_TICKER" -> {
+                if (!"index-tickers".equals(root.path("arg").path("channel").asString())) {
+                    throw new IgnoredPayloadException();
+                }
+                String sourceSymbol = source.getSourceSymbol();
+                String subscribedInstrument = root.path("arg").path("instId").asString(null);
+                String payloadInstrument = root.path("data").path(0).path("instId").asString(null);
+                if (!sameProtocolInstrument(subscribedInstrument, sourceSymbol)
+                        || !sameProtocolInstrument(payloadInstrument, sourceSymbol)
+                        || !sameProtocolInstrument(payloadInstrument, subscribedInstrument)) {
+                    throw new IgnoredPayloadException();
+                }
+            }
+            case "BYBIT_TICKER" -> {
+                String sourceSymbol = source.getSourceSymbol();
+                if (sourceSymbol == null || sourceSymbol.isBlank()
+                        || !("tickers." + sourceSymbol).equals(root.path("topic").asString())) {
+                    throw new IgnoredPayloadException();
+                }
+            }
+            default -> {
+            }
+        }
     }
 
     private ParsedTicker parseTicker(String parser, JsonNode root) {
@@ -213,7 +244,10 @@ public class ExternalSpotPriceClient {
         BigDecimal bid = decimal(ticker, "bid1Price");
         BigDecimal ask = decimal(ticker, "ask1Price");
         BigDecimal last = decimal(ticker, "lastPrice");
-        return new ParsedTicker(midOrLast(bid, ask, last), bid, ask, Instant.now(), firstText(ticker, "symbol"));
+        Instant sourceTime = root.hasNonNull("ts")
+                ? Instant.ofEpochMilli(root.path("ts").asLong())
+                : Instant.now();
+        return new ParsedTicker(midOrLast(bid, ask, last), bid, ask, sourceTime, firstText(ticker, "symbol"));
     }
 
     private ParsedTicker parseCoinbaseTicker(JsonNode root) {
@@ -380,6 +414,31 @@ public class ExternalSpotPriceClient {
 
     private boolean sameInstrument(String left, String right) {
         return normalizeInstrument(left).equals(normalizeInstrument(right));
+    }
+
+    private boolean sameProtocolInstrument(String actual, String expected) {
+        if (actual == null || actual.isEmpty() || expected == null || expected.isEmpty()
+                || actual.length() != expected.length()) {
+            return false;
+        }
+        for (int index = 0; index < actual.length(); index++) {
+            char actualCharacter = actual.charAt(index);
+            char expectedCharacter = expected.charAt(index);
+            if (actualCharacter != expectedCharacter
+                    && (!isAsciiLetter(actualCharacter) || !isAsciiLetter(expectedCharacter)
+                    || asciiUppercase(actualCharacter) != asciiUppercase(expectedCharacter))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isAsciiLetter(char value) {
+        return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z';
+    }
+
+    private char asciiUppercase(char value) {
+        return value >= 'a' && value <= 'z' ? (char) (value - ('a' - 'A')) : value;
     }
 
     private String normalizeInstrument(String instrument) {

@@ -144,6 +144,11 @@ producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.con
 INVERSE_PERPETUAL 15、LINEAR_DELIVERY 148、INVERSE_DELIVERY 16、OPTION 2847。每个 symbol
 绑定产品线当前版本、三档风险限额和 OKX 指数源；29 个单字符资产因现有账户资产约束被跳过。
 
+`LINEAR_PERPETUAL` 的 `BTC-USDT-SWAP` 在生成快照后应用产品线专用覆盖：`min_valid_index_sources=3`，
+并配置 OKX `index-tickers`（`BTC-USDT`）、Binance Spot `btcusdt@ticker` 和 Bybit Spot
+`tickers.BTCUSDT` 三个相互独立的公共 WebSocket 指数源。价格服务默认关闭 REST fallback，市场探针只将
+来源为 `PUBLIC_WEBSOCKET`、连接健康、时间新鲜且 exchange 唯一的组件计入三源 quorum。
+
 OKX USDⓈ-margined 期权在初始化时统一映射到项目的 USDT 结算路径，coin-margined 期权保留 BTC/ETH
 结算资产。OKX 的交割费、行权费和强平费不等同于 maker/taker 默认费率，现有 `instruments` 字段只
 承载交易默认费率；交割固定费和期权行权费仍需由对应生命周期结算规则读取官方账户费率后处理。

@@ -15,6 +15,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.springframework.stereotype.Service;
@@ -40,7 +41,7 @@ public class MarketProbeService {
     }
 
     public MarketProbeSnapshot snapshot(String symbol) {
-        return snapshot(symbol, SourceMode.OKX_PUBLIC_WEBSOCKET_ONLY);
+        return snapshot(symbol, SourceMode.PUBLIC_WEBSOCKET_ONLY);
     }
 
     public MarketProbeSnapshot snapshot(String symbol, SourceMode sourceMode) {
@@ -55,8 +56,9 @@ public class MarketProbeService {
                 indexPriceProperties.getCalculation().getMaxSourceAge());
         CadenceSummary markCadence = cadence.mark().observe(mark.eventTime(), observedAt,
                 indexPriceProperties.getCalculation().getMaxSourceAge());
+        boolean timestampRegressed = indexCadence.timestampRegressed() || markCadence.timestampRegressed();
         return new MarketProbeSnapshot(observedAt, index, mark, sourceMode, freshSourceCount,
-                freshSourceCount >= 3, indexCadence.timestampRegressed() || markCadence.timestampRegressed(),
+                freshSourceCount >= 3 && !timestampRegressed, timestampRegressed,
                 sourceHealth, indexCadence, markCadence, webSockets);
     }
 
@@ -72,6 +74,9 @@ public class MarketProbeService {
                 .filter(component -> component.transport() != QuoteTransport.PUBLIC_WEBSOCKET
                         || sourceHealth.stream().anyMatch(health -> health.exchange().equalsIgnoreCase(component.source())
                         && health.connected() && health.frameAgeMillis() <= maxAge.toMillis()))
+                .filter(component -> component.source() != null)
+                .map(component -> component.source().toUpperCase(Locale.ROOT))
+                .distinct()
                 .count();
     }
 

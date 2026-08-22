@@ -56,7 +56,7 @@ class MarketProbeControllerTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath(
                         "$.sourceQuorumHealthy").value(false))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath(
-                        "$.sourceMode").value("OKX_PUBLIC_WEBSOCKET_ONLY"))
+                        "$.sourceMode").value("PUBLIC_WEBSOCKET_ONLY"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath(
                         "$.sourceHealth[0].exchange").value("OKX"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath(
