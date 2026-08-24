@@ -13,7 +13,7 @@ public final class RuntimePerpetualMatchProcessor {
     public static TradingRuntimeState simulate(TradingCoreState before, long takerOrderId,
                                                List<CoreMatch> matches,
                                                RuntimeIdentityRegistry identities) {
-        if (before == null || matches == null || identities == null || !before.productLine().isFundingProduct()) {
+        if (before == null || matches == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual match simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
@@ -24,11 +24,15 @@ public final class RuntimePerpetualMatchProcessor {
                                             List<CoreMatch> matches, TradingRuntimeState runtime,
                                             RuntimeIdentityRegistry identities) {
         if (before == null || matches == null || runtime == null || identities == null
-                || !before.productLine().isFundingProduct()) {
+                || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual match apply");
         }
         runtime.assertOwner();
         OrderRuntime taker = requireOpen(runtime, takerOrderId);
+        if (matches.isEmpty() && !taker.timeInForce().immediate()
+                && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
+            return runtime;
+        }
         CoreOrderState takerState = before.orders().get(takerOrderId);
         if (takerState == null) {
             throw new IllegalStateException("runtime match taker is missing from authoritative orders");
@@ -51,8 +55,9 @@ public final class RuntimePerpetualMatchProcessor {
             applyFill(before, runtime, identities, instrument, maker, match.priceTicks(),
                     match.quantitySteps(), false, settleAssetId);
             if (runtime.order(maker.orderId()).canceled()) {
+                long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
                 runtime.releaseTerminalReservation(maker.orderId());
-                runtime.advanceUserRevision(maker.userId());
+                if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
             }
         }
         taker = runtime.order(takerOrderId);
@@ -61,8 +66,9 @@ public final class RuntimePerpetualMatchProcessor {
             runtime.replaceOrder(terminal(taker));
         }
         if (runtime.order(takerOrderId).canceled()) {
+            long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
             runtime.releaseTerminalReservation(takerOrderId);
-            runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
+            if (releaseUnits > 0) runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
         }
         runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
         return runtime;
@@ -115,7 +121,7 @@ public final class RuntimePerpetualMatchProcessor {
                                                        TradingRuntimeState runtime,
                                                        RuntimeIdentityRegistry identities) {
         if (before == null || expected == null || runtime == null || identities == null
-                || !before.productLine().isFundingProduct()
+                || !before.productLine().isDerivative()
                 || expected.productLine() != before.productLine()) {
             throw new IllegalArgumentException("invalid perpetual match transition");
         }

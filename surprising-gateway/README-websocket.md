@@ -5,6 +5,33 @@
 
 这个服务不是计算服务。它消费 Kafka 领域事件，在本节点内存里维护订阅关系，只把实时消息推给连接到当前节点的客户端。
 
+Core 私有事件由 `CoreEventFanoutConsumer` 直接消费产品线的 `core.events.v1` Kafka topic，校验 Core 事件 envelope、产品线、key 和 Kafka offset 后立即 fanout 到 WebSocket。该路径不查询 PostgreSQL，也不要求历史投影已经完成。PostgreSQL 只由独立 projector 用于历史审计、查询和对账，不是实时 WebSocket 的前置依赖。
+
+## Core v7 已签名事实与 fanout 契约
+
+`CoreExportCodec` 的 Core export fact 升级为 **v7**。v7 是 fail-old 合约：gateway 只接受完整、严格的 v7 schema；缺字段、未知字段语义、错误长度、错误产品线/key、哈希不匹配或签名不通过的 fact 必须拒绝并告警，绝不 fanout。不得读取 v6 或更早 envelope，不得添加旧版本兼容解码器或由历史投影补全字段。
+
+每条 v7 fact 都是 Product Core 在一个确定性命令边界产生的不可变事实，至少携带以下可校验身份与状态：
+
+- `productLine`、`Core sequence`、`commandId`、`orderId`、`instrumentVersion`；其中 Core sequence 是同一产品线内的裁决顺序，不能由 Kafka offset、数据库主键或 WebSocket 序号替代。
+- `matcherSequence` 与 matcher 的 `beforeBookHash` / `afterBookHash`，把 Core 命令和 exchange-core 的同一已接受撮合前缀绑定；gateway 不执行撮合，也不从其他订单簿重建该结果。
+- 按 `(asset, ownerKind, ownerId, subledger)` 稳定排序的逐资产 `FundsDelta`；它记录该命令的资金 postings，不可只传聚合余额，也不可由 gateway 或 PostgreSQL 二次计算。
+- `beforeStateHash` / `afterStateHash` 与 `beforeFundsHash` / `afterFundsHash`，分别覆盖命令前后 Product Core 状态和资金状态；每个 hash 都属于事实 payload，不能用本地缓存替换。
+- 完整性 envelope：`algorithm=Ed25519`、`keyId`、公钥 `fingerprint`、canonical `payloadHash` 与 `signature`。私钥不进入 fact、Kafka、WebSocket 或快照；所有消费者按已配置 fingerprint 验证同一 canonical payload。
+
+Gateway 的消费顺序固定为：先验证 v7 schema，再验证产品线与 Kafka key，随后验证 `payloadHash`、before/after state hash、before/after funds hash 和 Ed25519 signature envelope；只有全部通过才把与订阅匹配的 order、match、execution、position 或 trigger 更新 fanout。验证失败不得降级为“尽力推送”，也不得以旧版本、数据库记录或 HTTP 查询修复事实。
+
+```text
+Product Core 产生 v7 signed fact
+  -> reliable direct Core export
+  -> 产品线 core.events.v1 Kafka topic
+  -> CoreEventFanoutConsumer 验证 v7 envelope 后本地 WebSocket fanout
+  -> 独立 History Projector 幂等写入 PostgreSQL（仅历史/审计/查询）
+```
+
+交易当前态仍只能由 Product Core 的 Aeron Cluster 状态、Cluster Log、Archive 与 snapshot 裁决；客户端断线后通过受支持的在线查询获得新快照，再接受后续 WebSocket 事实。
+Kafka 与 PostgreSQL 在这条链路中仅承载 history（历史）、审计和查询投影；gateway 不读 PostgreSQL 做 live fanout，也不重新引入已删除的 audit repository。
+
 ## 模块
 
 WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用一个 Spring Boot 进程、端口和部署单元。
@@ -69,7 +96,7 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 
 `triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime` 和 `traceId`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
 
-撮合逐笔以轻量、允许丢失的 `PublicTradeEvent` 进入公共 `trades` 频道。私有 `matches` 和成交回报只从可靠的 `MatchResultEvent` 重建，因此公共 Kafka 背压或行情消息丢失不会影响用户通知与资金结算。
+撮合逐笔以轻量、允许丢失的 `PublicTradeEvent` 进入公共 `trades` 频道。Core 私有 `matches`、订单和成交回报直接从可靠的 Core export event 重建；公共 Kafka 背压或行情消息丢失不会影响用户通知与资金结算。Core event 的历史 PG 投影失败不会阻塞这条实时推送路径。
 
 ## 盘口深度推送链路
 

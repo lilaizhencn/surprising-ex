@@ -229,14 +229,12 @@ public final class W5FaultQaMain {
                         firstCrashEvent.offset(), replay.offset(), recovered.acknowledgedSequence(),
                         afterCrash.watermark());
 
-                long auditBeforeDuplicate = auditCount();
                 KafkaEvent duplicate = publishDuplicate(firstCrashEvent);
                 waitForCommitted(projectionGroup(), duplicate.offset() + 1, Duration.ofSeconds(15));
                 PgSnapshot afterDuplicate = requirePg("duplicate");
                 require(afterDuplicate.watermark() == afterCrash.watermark(), "duplicate advanced PG watermark");
-                require(auditCount() == auditBeforeDuplicate, "duplicate created a second PG audit fact");
-                System.out.printf("DUPLICATE_REPLAY=PASS originalOffset=%d duplicateOffset=%d key=%s auditCount=%d%n",
-                        firstCrashEvent.offset(), duplicate.offset(), duplicate.key(), auditCount());
+                System.out.printf("DUPLICATE_REPLAY=PASS originalOffset=%d duplicateOffset=%d key=%s%n",
+                        firstCrashEvent.offset(), duplicate.offset(), duplicate.key());
 
                 stopOwnedProcess("projector");
                 CoreExportStatus beforeReorder = exportStatus(core);
@@ -326,8 +324,6 @@ public final class W5FaultQaMain {
                 printGroupOffsets(gatewayEvents.get(gatewayRange.lastSequence()).offset() + 1);
                 KafkaEvent gatewayDuplicate = publishDuplicate(gatewayEvents.get(gatewayRange.lastSequence()));
                 waitForCommitted(websocketGroup(), gatewayDuplicate.offset() + 1, Duration.ofSeconds(15));
-                require(auditCount() == afterGatewayProjection.auditCount(),
-                        "Gateway deterministic replay created a second audit row");
                 System.out.printf("GATEWAY_RESTART_COMMITTED_OFFSET=PASS priorCoreAck=%d eventOffset=%d replayOffset=%d%n",
                         beforeGateway.acknowledgedSequence(), gatewayEvents.get(gatewayRange.lastSequence()).offset(),
                         gatewayDuplicate.offset());
@@ -339,7 +335,6 @@ public final class W5FaultQaMain {
                 System.out.printf("CORE_INDEPENDENCE=PASS stateHashBefore=%016x stateHashAfter=%016x "
                                 + "orders=%d fundsAuthority=CORE matcherAuthority=CORE%n",
                         initialStateHash, afterStateHash, afterGatewayProjection.orderCount());
-                require(auditDistinctCount() == auditCount(), "PG audit event IDs are not unique");
                 runCoreFinancialGate();
                 printMetrics(true);
                 printFinalEvidence(before, afterGatewayProjection, observer);
@@ -404,14 +399,12 @@ public final class W5FaultQaMain {
                         Duration.ofSeconds(20));
                 KafkaEvent duplicate = publishDuplicate(gatewayEvents.get(gatewayRange.lastSequence()));
                 waitForCommitted(websocketGroup(), duplicate.offset() + 1, Duration.ofSeconds(15));
-                require(auditDistinctCount() == auditCount(), "isolation audit identity is not deduplicated");
                 printGroupOffsets(duplicate.offset() + 1);
                 System.out.printf("ISOLATION_GATEWAY_RESTART=PASS eventOffset=%d replayOffset=%d eventId=%s%n",
                         gatewayEvents.get(gatewayRange.lastSequence()).offset(), duplicate.offset(),
                         deterministicEventId(gatewayRange.lastSequence()));
                 long stateHashAfter = stateHash(core);
                 require(stateHashAfter != 0L, "Core unavailable after isolation faults");
-                require(auditCount() >= before.auditCount(), "audit count regressed");
                 printMetrics(false);
                 System.out.printf("ISOLATION_CORE_STATE=PASS before=%016x after=%016x initialAck=%d%n",
                         stateHashBefore, stateHashAfter, beforeStatus.acknowledgedSequence());
@@ -580,23 +573,20 @@ public final class W5FaultQaMain {
             String sql = "SELECT "
                     + "(SELECT last_export_sequence FROM core_projection_watermark WHERE product_line = ?) AS watermark, "
                     + "(SELECT COUNT(*) FROM core_event_projection WHERE product_line = ?) AS events, "
-                    + "(SELECT COUNT(*) FROM core_websocket_audit_projection WHERE product_line = ?) AS audits, "
-                    + "(SELECT COUNT(DISTINCT event_id) FROM core_websocket_audit_projection WHERE product_line = ?) AS audit_ids, "
                     + "(SELECT COUNT(*) FROM core_order_projection WHERE product_line = ?) AS orders, "
                     + "(SELECT COUNT(*) FROM core_user_fact_projection WHERE product_line = ?) AS facts";
             try (Connection connection = DriverManager.getConnection(pgProbeUrl(), databaseUser, databasePassword);
                  PreparedStatement statement = connection.prepareStatement(sql)) {
-                for (int index = 1; index <= 6; index++) {
+                for (int index = 1; index <= 4; index++) {
                     statement.setString(index, productLine.name());
                 }
                 try (ResultSet result = statement.executeQuery()) {
                     require(result.next(), "PG snapshot returned no row label=" + label);
                     PgSnapshot snapshot = new PgSnapshot(result.getLong("watermark"), result.getLong("events"),
-                            result.getLong("audits"), result.getLong("audit_ids"), result.getLong("orders"),
-                            result.getLong("facts"));
-                    System.out.printf("SQL[%s] watermark=%d events=%d audits=%d auditIds=%d orders=%d facts=%d%n",
-                            label, snapshot.watermark(), snapshot.eventCount(), snapshot.auditCount(),
-                            snapshot.auditIdCount(), snapshot.orderCount(), snapshot.factCount());
+                            result.getLong("orders"), result.getLong("facts"));
+                    System.out.printf("SQL[%s] watermark=%d events=%d orders=%d facts=%d%n",
+                            label, snapshot.watermark(), snapshot.eventCount(), snapshot.orderCount(),
+                            snapshot.factCount());
                     return snapshot;
                 }
             } catch (SQLException exception) {
@@ -607,14 +597,6 @@ public final class W5FaultQaMain {
         private String pgProbeUrl() {
             return databaseUrl + (databaseUrl.contains("?") ? '&' : '?')
                     + "connectTimeout=1&socketTimeout=1";
-        }
-
-        private long auditCount() {
-            return requirePg("audit-count").auditCount();
-        }
-
-        private long auditDistinctCount() {
-            return requirePg("audit-distinct-count").auditIdCount();
         }
 
         private void expectGap(JdbcCoreEventProjector projector, CoreMessage event) throws SQLException {
@@ -696,9 +678,9 @@ public final class W5FaultQaMain {
         }
 
         private void printFinalEvidence(PgSnapshot before, PgSnapshot after, KafkaObserver observer) {
-            System.out.printf("EVIDENCE beforeWatermark=%d afterWatermark=%d beforeAudits=%d afterAudits=%d "
+            System.out.printf("EVIDENCE beforeWatermark=%d afterWatermark=%d "
                             + "observedKafkaSequences=%s runDir=%s processDir=%s%n",
-                    before.watermark(), after.watermark(), before.auditCount(), after.auditCount(),
+                    before.watermark(), after.watermark(),
                     observer.sequences(), runDir, pidDir);
         }
 
@@ -1073,8 +1055,7 @@ public final class W5FaultQaMain {
         }
     }
 
-    private record PgSnapshot(long watermark, long eventCount, long auditCount, long auditIdCount,
-                              long orderCount, long factCount) {
+    private record PgSnapshot(long watermark, long eventCount, long orderCount, long factCount) {
     }
 
     private record CoreResponseDuringFault(ResponseStatus commandStatus, long requiredExportSequence,

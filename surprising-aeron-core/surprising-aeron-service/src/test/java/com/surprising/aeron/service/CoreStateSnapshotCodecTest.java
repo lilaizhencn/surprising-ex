@@ -78,7 +78,7 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(9);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(10);
             assertThat(buffer.getInt(8)).isEqualTo(8);
             buffer.position(ENVELOPE_LENGTH);
             int[] sectionIds = new int[8];
@@ -273,7 +273,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(9);
+            assertThat(manifest.schemaVersion()).isEqualTo(10);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
@@ -411,8 +411,32 @@ class CoreStateSnapshotCodecTest {
     }
 
     private static PlaceOrderCommand bid() {
-        return new PlaceOrderCommand(1, "BTC-USDT", 1, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 100, 2, false, ReservationKind.SPOT_ASSET, "USDT", 200);
+        return new PlaceOrderCommand(
+                1,
+                "BTC-USDT",
+                1,
+                "BTC",
+                "USDT",
+                "USDT",
+                CoreOrderSide.BUY,
+                100,
+                100,
+                100,
+                100,
+                2,
+                false,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                ReservationKind.SPOT_ASSET,
+                "USDT",
+                200,
+                com.surprising.aeron.protocol.CoreOrderType.LIMIT,
+                com.surprising.aeron.protocol.CoreTimeInForce.GTC,
+                false,
+                "",
+                0,
+                0
+        );
     }
 
     private static byte[] mutateHeaderByte(byte[] snapshot, int fieldOffset) {

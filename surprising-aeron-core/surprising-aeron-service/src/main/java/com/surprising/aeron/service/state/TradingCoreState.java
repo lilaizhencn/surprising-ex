@@ -400,6 +400,22 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
+        for (Map.Entry<String, Long> entry : treasuryState.liquidationFeeBalances().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        for (Map.Entry<String, Long> entry : treasuryState.fundingResidualBalances().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        for (Map.Entry<String, Long> entry : treasuryState.roundingResidualBalances().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
+        for (Map.Entry<String, Long> entry : treasuryState.clearingPnlBalances().entrySet()) {
+            hash = CoreStateHash.mix(hash, entry.getKey());
+            hash = CoreStateHash.mix(hash, entry.getValue());
+        }
         for (Map.Entry<String, Long> entry : treasuryState.fundingSettlements().entrySet()) {
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, entry.getValue());
@@ -507,6 +523,14 @@ public record TradingCoreState(
         requireLineage("fee balances", before.treasuryState.feeBalances(), treasuryState.feeBalances());
         requireLineage("insurance balances", before.treasuryState.insuranceBalances(), treasuryState.insuranceBalances());
         requireLineage("insurance deficits", before.treasuryState.insuranceDeficits(), treasuryState.insuranceDeficits());
+        requireLineage("liquidation fee balances", before.treasuryState.liquidationFeeBalances(),
+                treasuryState.liquidationFeeBalances());
+        requireLineage("funding residual balances", before.treasuryState.fundingResidualBalances(),
+                treasuryState.fundingResidualBalances());
+        requireLineage("rounding residual balances", before.treasuryState.roundingResidualBalances(),
+                treasuryState.roundingResidualBalances());
+        requireLineage("clearing pnl balances", before.treasuryState.clearingPnlBalances(),
+                treasuryState.clearingPnlBalances());
         requireLineage("funding settlements", before.treasuryState.fundingSettlements(), treasuryState.fundingSettlements());
         requireLineage("lifecycle settlements", before.treasuryState.lifecycleSettlements(), treasuryState.lifecycleSettlements());
         requireLineage("funding progress", before.treasuryState.fundingProgress(), treasuryState.fundingProgress());
@@ -554,6 +578,14 @@ public record TradingCoreState(
         requireOnlineTreasuryLineage("fee balances", before.treasuryState.feeBalances(), treasuryState.feeBalances());
         requireOnlineTreasuryLineage("insurance balances", before.treasuryState.insuranceBalances(), treasuryState.insuranceBalances());
         requireOnlineTreasuryLineage("insurance deficits", before.treasuryState.insuranceDeficits(), treasuryState.insuranceDeficits());
+        requireOnlineTreasuryLineage("liquidation fee balances", before.treasuryState.liquidationFeeBalances(),
+                treasuryState.liquidationFeeBalances());
+        requireOnlineTreasuryLineage("funding residual balances", before.treasuryState.fundingResidualBalances(),
+                treasuryState.fundingResidualBalances());
+        requireOnlineTreasuryLineage("rounding residual balances", before.treasuryState.roundingResidualBalances(),
+                treasuryState.roundingResidualBalances());
+        requireOnlineTreasuryLineage("clearing pnl balances", before.treasuryState.clearingPnlBalances(),
+                treasuryState.clearingPnlBalances());
         requireOnlineTreasuryLineage("funding settlements", before.treasuryState.fundingSettlements(), treasuryState.fundingSettlements());
         requireOnlineTreasuryLineage("lifecycle settlements", before.treasuryState.lifecycleSettlements(), treasuryState.lifecycleSettlements());
         requireOnlineTreasuryLineage("funding progress", before.treasuryState.fundingProgress(), treasuryState.fundingProgress());
@@ -609,6 +641,7 @@ public record TradingCoreState(
         hash = CoreStateHash.mix(hash, order.instrumentVersion());
         hash = CoreStateHash.mix(hash, order.side().wireCode());
         hash = CoreStateHash.mix(hash, order.priceTicks());
+        hash = CoreStateHash.mix(hash, order.matchingPriceTicks());
         hash = CoreStateHash.mix(hash, order.quantitySteps());
         hash = CoreStateHash.mix(hash, order.executedQuantitySteps());
         hash = CoreStateHash.mix(hash, order.remainingQuantitySteps());

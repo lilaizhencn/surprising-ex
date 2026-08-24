@@ -27,9 +27,9 @@ public final class RiskSnapshotIndex {
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.riskState().snapshots() == after.riskState().snapshots()) return;
-        StateMapSupport.requireDeltaLineage(before.riskState().snapshots(), after.riskState().snapshots(),
-                "risk snapshot index snapshots");
-        Set<String> changed = after.changedRiskSnapshotKeys();
+        StateMapSupport.requireDeltaLineage(before.riskState().snapshots(),
+                after.riskState().snapshots(), "risk snapshots");
+        Set<String> changed = StateMapSupport.changedKeys(after.riskState().snapshots());
         for (String key : changed) {
             if (key == null) continue;
             CoreRiskSnapshot previous = before.riskState().snapshots().get(key);

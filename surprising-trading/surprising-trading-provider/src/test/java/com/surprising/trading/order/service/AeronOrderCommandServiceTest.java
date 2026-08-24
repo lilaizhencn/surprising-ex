@@ -79,6 +79,8 @@ class AeronOrderCommandServiceTest {
         lenient().when(aeron.preflight(anyLong(), any(PlaceOrderCommand.class)))
                 .thenReturn(new OrderAeronGateway.PreflightResult(CoreResultCode.NONE,
                         new CoreOrderPreflightView("USDT", 1L)));
+        lenient().when(markPrices.latestMarkPriceTicks(any(), anyLong(), anyLong()))
+                .thenReturn(OptionalLong.of(60_000L));
     }
 
     @Test
@@ -108,8 +110,10 @@ class AeronOrderCommandServiceTest {
         assertThat(preflight.getValue()).isEqualTo(command);
         assertThat(command.orderType()).isEqualTo(CoreOrderType.MARKET);
         assertThat(command.timeInForce()).isEqualTo(CoreTimeInForce.IOC);
-        assertThat(command.priceTicks()).isZero();
-        assertThat(command.matchingPriceTicks()).isGreaterThan(60_000L);
+        assertThat(command.limitPriceTicks()).isEqualTo(60_600L);
+        assertThat(command.executionPriceTicks()).isEqualTo(60_600L);
+        assertThat(command.reservationPriceTicks()).isEqualTo(60_600L);
+        assertThat(command.markPriceTicks()).isEqualTo(60_000L);
         assertThat(command.reservationKind()).isEqualTo(ReservationKind.DERIVATIVE_MARGIN);
         assertThat(command.reservationAsset()).isEqualTo("USDT");
         assertThat(command.reservedUnits()).isZero();
@@ -244,7 +248,9 @@ class AeronOrderCommandServiceTest {
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             ReplaceOrderCommand command = TradingCommandCodec.decodeReplaceOrder(invocation.getArgument(3));
             return new CoreCommandOutcome.Terminal(new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(
+                    1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
+                            UUID.fromString("10000000-0000-0000-0000-000000000001"),
+                            command.replacement().orderId(), 7, 1, 17, 19, List.of(
                             orderView(77, originalRequest),
                             orderView(command.replacement().orderId(), replacementRequest)), List.of()))));
         });
@@ -280,7 +286,9 @@ class AeronOrderCommandServiceTest {
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             AmendOrderCommand command = TradingCommandCodec.decodeAmendOrder(invocation.getArgument(3));
             return new CoreCommandOutcome.Terminal(new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(
+                    1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
+                            UUID.fromString("10000000-0000-0000-0000-000000000002"),
+                            command.replacementOrderId(), 7, 1, 23, 29, List.of(
                             orderView(77, originalRequest), orderView(command.replacementOrderId(), replacementRequest)),
                             List.of()))));
         });
@@ -324,6 +332,8 @@ class AeronOrderCommandServiceTest {
     private static CoreResponse commandResponse(CoreOrderStateView order,
                                                 List<com.surprising.aeron.protocol.CoreExecutionView> executions) {
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(order), executions)));
+                1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
+                        UUID.fromString("10000000-0000-0000-0000-000000000003"),
+                        order.orderId(), order.instrumentVersion(), 1, 31, 37, List.of(order), executions)));
     }
 }

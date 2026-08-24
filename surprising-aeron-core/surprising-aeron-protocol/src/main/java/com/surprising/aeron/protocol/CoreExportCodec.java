@@ -15,7 +15,8 @@ public final class CoreExportCodec {
             CoreMessageCodec.MAX_PAYLOAD_LENGTH - EVENT_FIXED_LENGTH;
     private static final int MAX_BATCH_EVENTS = 4096;
     public static final int MAX_BATCH_ENCODED_LENGTH =
-            CoreMessageCodec.MAX_PAYLOAD_LENGTH - CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH;
+            CoreProtocol.CLUSTER_MAX_MESSAGE_LENGTH - CoreProtocol.HEADER_LENGTH
+                    - CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH;
     public static final int BATCH_STATUS_FIXED_LENGTH = Integer.BYTES + Long.BYTES * 4 + Integer.BYTES * 2;
 
     private CoreExportCodec() {

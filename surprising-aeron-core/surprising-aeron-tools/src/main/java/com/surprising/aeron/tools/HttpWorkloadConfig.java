@@ -2,6 +2,8 @@ package com.surprising.aeron.tools;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.EnumMap;
 import java.util.Locale;
@@ -19,6 +21,8 @@ record HttpWorkloadConfig(
         Duration requestTimeout,
         Duration pollInterval,
         int maxPolls,
+        long limitPriceTicks,
+        long triggerPriceTicks,
         long[] users,
         String[] symbols,
         TrafficSkew skew,
@@ -44,6 +48,8 @@ record HttpWorkloadConfig(
             throw new IllegalArgumentException("pollInterval must be non-negative");
         }
         if (maxPolls <= 0) throw new IllegalArgumentException("maxPolls must be positive");
+        if (limitPriceTicks <= 0) throw new IllegalArgumentException("limitPriceTicks must be positive");
+        if (triggerPriceTicks <= 0) throw new IllegalArgumentException("triggerPriceTicks must be positive");
         users = users == null ? new long[0] : users.clone();
         symbols = symbols == null ? new String[0] : symbols.clone();
         if (users.length == 0 || symbols.length == 0) throw new IllegalArgumentException("users and symbols required");
@@ -73,6 +79,8 @@ record HttpWorkloadConfig(
                 Duration.parse(required(properties, "requestTimeout")),
                 Duration.parse(required(properties, "pollInterval")),
                 Math.toIntExact(parseLong(properties, "maxPolls")),
+                parseLong(properties, "limitPriceTicks"),
+                parseLong(properties, "triggerPriceTicks"),
                 parseLongs(required(properties, "users")),
                 split(required(properties, "symbols")),
                 TrafficSkew.valueOf(properties.getProperty("skew", "UNIFORM").trim().toUpperCase(Locale.ROOT)),
@@ -97,6 +105,37 @@ record HttpWorkloadConfig(
 
     long expectedIntervalNanos() {
         return Math.max(1L, 1_000_000_000L / ratePerSecond);
+    }
+
+    String fingerprint() {
+        String canonical = baseUri.normalize() + "\n" + runId + "\n" + seed + "\n" + ratePerSecond + "\n"
+                + duration + "\n" + maxInFlight + "\n" + requestTimeout + "\n" + pollInterval + "\n"
+                + maxPolls + "\n" + limitPriceTicks + "\n" + triggerPriceTicks + "\n"
+                + java.util.Arrays.toString(users) + "\n"
+                + java.util.Arrays.toString(symbols) + "\n" + skew + "\n" + canonicalTraffic();
+        try {
+            return java.util.HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private String canonicalTraffic() {
+        StringBuilder canonical = new StringBuilder();
+        for (WorkloadOperation operation : WorkloadOperation.values()) {
+            if (!canonical.isEmpty()) canonical.append(',');
+            canonical.append(operation).append('=').append(traffic.get(operation));
+        }
+        return canonical.toString();
+    }
+
+    HttpWorkloadConfig(URI baseUri, Path outputDirectory, String runId, long seed, long ratePerSecond,
+                       Duration duration, int maxInFlight, Duration requestTimeout, Duration pollInterval,
+                       int maxPolls, long[] users, String[] symbols, TrafficSkew skew,
+                       Map<WorkloadOperation, Integer> traffic) {
+        this(baseUri, outputDirectory, runId, seed, ratePerSecond, duration, maxInFlight, requestTimeout,
+                pollInterval, maxPolls, 1L, 1L, users, symbols, skew, traffic);
     }
 
     private static Map<WorkloadOperation, Integer> parseTraffic(String value) {

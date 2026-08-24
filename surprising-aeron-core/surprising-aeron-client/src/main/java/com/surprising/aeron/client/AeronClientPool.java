@@ -903,7 +903,8 @@ public final class AeronClientPool implements AutoCloseable {
                     request.acceptedOneWay(offerResult);
                 }
             } else {
-                if (offerResult == Publication.NOT_CONNECTED && request.isQuery()) {
+                if ((offerResult == Publication.NOT_CONNECTED || offerResult == Publication.CLOSED)
+                        && request.isQuery()) {
                     closeSession(lane);
                     request.prepareForRetry();
                     if (lane.mailbox.offer(request)) {

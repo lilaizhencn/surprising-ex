@@ -44,7 +44,18 @@ public final class TradingRuntimeState {
     private final LongObjectHashMap<IntHashSet> changedBalances = new LongObjectHashMap<>();
     private final LongHashSet changedOrders = new LongHashSet();
     private final LongHashSet changedReservations = new LongHashSet();
+    private final LongHashSet changedPositions = new LongHashSet();
+    private final LongHashSet changedLiquidations = new LongHashSet();
+    private final IntHashSet changedMarkPrices = new IntHashSet();
+    private final LongHashSet changedRiskSnapshots = new LongHashSet();
+    private final IntHashSet changedRiskScans = new IntHashSet();
     private final LongHashSet changedClientOrders = new LongHashSet();
+    private final LongObjectHashMap<LongHashSet> changedClientOrdersByUser = new LongObjectHashMap<>();
+    private final TreeSet<String> changedInstruments = new TreeSet<>();
+    private final TreeSet<CoreLeverageKey> changedLeverages = new TreeSet<>();
+    private final LongHashSet changedAlgoOrders = new LongHashSet();
+    private final TreeSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers = new TreeSet<>();
+    private final LongHashSet changedTriggerOrders = new LongHashSet();
     private Thread owner;
 
     public void bindOwner() {
@@ -58,6 +69,12 @@ public final class TradingRuntimeState {
 
     public void assertOwner() {
         bindOwner();
+    }
+
+    void releaseOwnerForHandoff() {
+        balances.forEachValue(values -> values.forEachValue(BalanceRuntime::releaseOwnerForHandoff));
+        treasury.releaseOwnerForHandoff();
+        owner = null;
     }
 
     public ProductLine productLine() {
@@ -162,32 +179,108 @@ public final class TradingRuntimeState {
         return nextLiquidationId;
     }
 
-    public TreasuryRuntime treasury() {
+    TreasuryRuntime treasury() {
         assertOwner();
         return treasury;
     }
 
-    public Map<String, CoreInstrumentState> instrumentsForRuntime() {
+    public CoreInstrumentState instrument(String symbol) {
+        assertOwner();
+        return instruments.get(OrderReservation.normalizeSymbol(symbol));
+    }
+
+    void putInstrument(CoreInstrumentState instrument) {
+        assertOwner();
+        if (instrument == null) {
+            throw new IllegalArgumentException("invalid runtime instrument");
+        }
+        instruments.put(instrument.symbol(), instrument);
+        changedInstruments.add(instrument.symbol());
+    }
+
+    Long leverage(CoreLeverageKey key) {
+        assertOwner();
+        return leverages.get(key);
+    }
+
+    void putLeverage(CoreLeverageKey key, long leveragePpm) {
+        assertOwner();
+        if (key == null || leveragePpm < 1_000_000L) {
+            throw new IllegalArgumentException("invalid runtime leverage");
+        }
+        leverages.put(key, leveragePpm);
+        changedLeverages.add(key);
+    }
+
+    CoreAlgoOrderState algoOrder(long algoOrderId) {
+        assertOwner();
+        return algoOrders.get(algoOrderId);
+    }
+
+    void putAlgoOrder(CoreAlgoOrderState algoOrder) {
+        assertOwner();
+        if (algoOrder == null) throw new IllegalArgumentException("invalid runtime algo order");
+        algoOrders.put(algoOrder.algoOrderId(), algoOrder);
+        changedAlgoOrders.add(algoOrder.algoOrderId());
+    }
+
+    void removeAlgoOrder(long algoOrderId) {
+        assertOwner();
+        algoOrders.remove(algoOrderId);
+        changedAlgoOrders.add(algoOrderId);
+    }
+
+    CoreCancelAllAfterState cancelAllAfterTimer(CoreCancelAllAfterKey key) {
+        assertOwner();
+        return cancelAllAfterTimers.get(key);
+    }
+
+    void putCancelAllAfterTimer(CoreCancelAllAfterKey key, CoreCancelAllAfterState timer) {
+        assertOwner();
+        if (key == null || timer == null) throw new IllegalArgumentException("invalid runtime cancel-all-after timer");
+        cancelAllAfterTimers.put(key, timer);
+        changedCancelAllAfterTimers.add(key);
+    }
+
+    CoreTriggerOrderState triggerOrder(long triggerOrderId) {
+        assertOwner();
+        return triggerOrders.get(triggerOrderId);
+    }
+
+    void putTriggerOrder(CoreTriggerOrderState triggerOrder) {
+        assertOwner();
+        if (triggerOrder == null) throw new IllegalArgumentException("invalid runtime trigger order");
+        triggerOrders.put(triggerOrder.triggerOrderId(), triggerOrder);
+        changedTriggerOrders.add(triggerOrder.triggerOrderId());
+    }
+
+    void removeTriggerOrder(long triggerOrderId) {
+        assertOwner();
+        triggerOrders.remove(triggerOrderId);
+        changedTriggerOrders.add(triggerOrderId);
+    }
+
+    Map<String, CoreInstrumentState> instrumentsForRuntime() {
         assertOwner();
         return instruments;
     }
 
-    public Map<CoreLeverageKey, Long> leveragesForRuntime() {
+    Map<CoreLeverageKey, Long> leveragesForRuntime() {
         assertOwner();
         return leverages;
     }
 
-    public Map<Long, CoreAlgoOrderState> algoOrdersForRuntime() {
+    Map<Long, CoreAlgoOrderState> algoOrdersForRuntime() {
         assertOwner();
         return algoOrders;
     }
 
-    public Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimersForRuntime() {
+    Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimersForRuntime() {
         assertOwner();
         return cancelAllAfterTimers;
     }
 
-    public Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
+    Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
         assertOwner();
         return triggerOrders;
     }
@@ -230,6 +323,13 @@ public final class TradingRuntimeState {
 
     public void removeUser(long userId) {
         assertOwner();
+        LongObjectHashMap<Long> userClientOrders = clientOrderIndex.get(userId);
+        if (userClientOrders != null) {
+            userClientOrders.forEachKey(clientKey -> {
+                changedClientOrders.add(clientKey);
+                changedClientOrder(userId, clientKey);
+            });
+        }
         users.remove(userId);
         balances.remove(userId);
         clientOrderIndex.remove(userId);
@@ -238,6 +338,7 @@ public final class TradingRuntimeState {
 
     public void putBalance(BalanceRuntime balance) {
         assertOwner();
+        balance.bindOwner();
         IntObjectHashMap<BalanceRuntime> userBalances = balances.get(balance.userId());
         if (userBalances == null) {
             userBalances = new IntObjectHashMap<>();
@@ -257,9 +358,10 @@ public final class TradingRuntimeState {
 
     public void putReservation(ReservationRuntime reservation) {
         assertOwner();
-        reservations.put(reservation.orderId(), reservation);
+        ReservationRuntime previous = reservations.put(reservation.orderId(), reservation);
         changedReservations.add(reservation.orderId());
         changedUsers.add(reservation.userId());
+        if (previous != null) changedUsers.add(previous.userId());
     }
 
     public void replaceOrder(OrderRuntime order) {
@@ -280,9 +382,10 @@ public final class TradingRuntimeState {
 
     public void replaceReservation(ReservationRuntime reservation) {
         assertOwner();
-        reservations.put(reservation.orderId(), reservation);
+        ReservationRuntime previous = reservations.put(reservation.orderId(), reservation);
         changedReservations.add(reservation.orderId());
         changedUsers.add(reservation.userId());
+        if (previous != null) changedUsers.add(previous.userId());
     }
 
     public void removeReservation(long orderId, long userId) {
@@ -321,7 +424,9 @@ public final class TradingRuntimeState {
         if (previous != null) unindexPosition(positionKey, previous);
         positions.put(positionKey, position);
         indexPosition(positionKey, position);
+        changedPositions.add(positionKey);
         changedUsers.add(position.userId());
+        if (previous != null) changedUsers.add(previous.userId());
     }
 
     public void putLiquidation(LiquidationRuntime liquidation) {
@@ -331,22 +436,26 @@ public final class TradingRuntimeState {
         }
         liquidations.put(liquidation.liquidationId(), liquidation);
         indexActiveLiquidation(liquidation);
+        changedLiquidations.add(liquidation.liquidationId());
         changedUsers.add(liquidation.userId());
     }
 
     public void putMarkPrice(MarkPriceRuntime markPrice) {
         assertOwner();
         markPrices.put(markPrice.symbolId(), markPrice);
+        changedMarkPrices.add(markPrice.symbolId());
     }
 
     public void putRiskSnapshot(long positionKey, RiskSnapshotRuntime snapshot) {
         assertOwner();
         riskSnapshots.put(positionKey, snapshot);
+        changedRiskSnapshots.add(positionKey);
     }
 
     public void putRiskScan(RiskScanRuntime scan) {
         assertOwner();
         riskScans.put(scan.symbolId(), scan);
+        changedRiskScans.add(scan.symbolId());
     }
 
     public void setNextLiquidationId(long nextLiquidationId) {
@@ -365,7 +474,9 @@ public final class TradingRuntimeState {
         removeActiveLiquidation(previous);
         liquidations.put(liquidation.liquidationId(), liquidation);
         indexActiveLiquidation(liquidation);
+        changedLiquidations.add(liquidation.liquidationId());
         changedUsers.add(liquidation.userId());
+        changedUsers.add(previous.userId());
     }
 
     public void removePosition(long positionKey, long userId) {
@@ -376,6 +487,7 @@ public final class TradingRuntimeState {
         }
         positions.remove(positionKey);
         unindexPosition(positionKey, current);
+        changedPositions.add(positionKey);
         changedUsers.add(userId);
     }
 
@@ -384,6 +496,7 @@ public final class TradingRuntimeState {
         LiquidationRuntime previous = liquidations.remove(liquidationId);
         if (previous != null) {
             removeActiveLiquidation(previous);
+            changedLiquidations.add(liquidationId);
             changedUsers.add(previous.userId());
         }
     }
@@ -391,16 +504,19 @@ public final class TradingRuntimeState {
     public void removeMarkPrice(int symbolId) {
         assertOwner();
         markPrices.remove(symbolId);
+        changedMarkPrices.add(symbolId);
     }
 
     public void removeRiskSnapshot(long positionKey) {
         assertOwner();
         riskSnapshots.remove(positionKey);
+        changedRiskSnapshots.add(positionKey);
     }
 
     public void removeRiskScan(int symbolId) {
         assertOwner();
         riskScans.remove(symbolId);
+        changedRiskScans.add(symbolId);
     }
 
     public void cancelOrder(long orderId, long userId, long releaseUnits) {
@@ -454,6 +570,7 @@ public final class TradingRuntimeState {
         }
         userClientOrders.put(clientKey, orderId);
         changedClientOrders.add(clientKey);
+        changedClientOrder(userId, clientKey);
         changedUsers.add(userId);
     }
 
@@ -465,6 +582,7 @@ public final class TradingRuntimeState {
             if (userClientOrders.isEmpty()) clientOrderIndex.remove(userId);
         }
         changedClientOrders.add(clientKey);
+        changedClientOrder(userId, clientKey);
         changedUsers.add(userId);
     }
 
@@ -485,6 +603,12 @@ public final class TradingRuntimeState {
         return assets != null && assets.contains(assetId);
     }
 
+    void markBalanceChanged(long userId, int assetId) {
+        assertOwner();
+        changedBalance(userId, assetId);
+        changedUsers.add(userId);
+    }
+
     public LongHashSet changedOrders() {
         assertOwner();
         return new LongHashSet(changedOrders);
@@ -495,9 +619,66 @@ public final class TradingRuntimeState {
         return new LongHashSet(changedReservations);
     }
 
+    LongHashSet changedPositions() {
+        assertOwner();
+        return new LongHashSet(changedPositions);
+    }
+
+    LongHashSet changedLiquidations() {
+        assertOwner();
+        return new LongHashSet(changedLiquidations);
+    }
+
+    IntHashSet changedMarkPrices() {
+        assertOwner();
+        return new IntHashSet(changedMarkPrices);
+    }
+
+    LongHashSet changedRiskSnapshots() {
+        assertOwner();
+        return new LongHashSet(changedRiskSnapshots);
+    }
+
+    IntHashSet changedRiskScans() {
+        assertOwner();
+        return new IntHashSet(changedRiskScans);
+    }
+
     public LongHashSet changedClientOrders() {
         assertOwner();
         return new LongHashSet(changedClientOrders);
+    }
+
+    LongObjectHashMap<LongHashSet> changedClientOrdersByUser() {
+        assertOwner();
+        LongObjectHashMap<LongHashSet> result = new LongObjectHashMap<>();
+        changedClientOrdersByUser.forEachKeyValue((userId, keys) -> result.put(userId, new LongHashSet(keys)));
+        return result;
+    }
+
+    TreeSet<String> changedInstruments() {
+        assertOwner();
+        return new TreeSet<>(changedInstruments);
+    }
+
+    TreeSet<CoreLeverageKey> changedLeverages() {
+        assertOwner();
+        return new TreeSet<>(changedLeverages);
+    }
+
+    LongHashSet changedAlgoOrders() {
+        assertOwner();
+        return new LongHashSet(changedAlgoOrders);
+    }
+
+    TreeSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers() {
+        assertOwner();
+        return new TreeSet<>(changedCancelAllAfterTimers);
+    }
+
+    LongHashSet changedTriggerOrders() {
+        assertOwner();
+        return new LongHashSet(changedTriggerOrders);
     }
 
     public void clearChangedKeys() {
@@ -506,7 +687,19 @@ public final class TradingRuntimeState {
         changedBalances.clear();
         changedOrders.clear();
         changedReservations.clear();
+        changedPositions.clear();
+        changedLiquidations.clear();
+        changedMarkPrices.clear();
+        changedRiskSnapshots.clear();
+        changedRiskScans.clear();
         changedClientOrders.clear();
+        changedClientOrdersByUser.clear();
+        changedInstruments.clear();
+        changedLeverages.clear();
+        changedAlgoOrders.clear();
+        changedCancelAllAfterTimers.clear();
+        changedTriggerOrders.clear();
+        treasury.clearChangedKeys();
     }
 
     TradingRuntimeSnapshot snapshot(long revision) {
@@ -586,7 +779,10 @@ public final class TradingRuntimeState {
         }
         changedOrders.add(orderId);
         changedReservations.add(orderId);
-        if (clientKey != 0) changedClientOrders.add(clientKey);
+        if (clientKey != 0) {
+            changedClientOrders.add(clientKey);
+            changedClientOrder(userId, clientKey);
+        }
         changedUsers.add(userId);
         changedBalance(userId, assetId);
     }
@@ -597,7 +793,9 @@ public final class TradingRuntimeState {
         if (previous != null) unindexPosition(positionKey, previous);
         positions.put(positionKey, position);
         indexPosition(positionKey, position);
+        changedPositions.add(positionKey);
         changedUsers.add(position.userId());
+        if (previous != null) changedUsers.add(previous.userId());
     }
 
     private void indexPosition(long positionKey, PositionRuntime position) {
@@ -630,6 +828,15 @@ public final class TradingRuntimeState {
             changedBalances.put(userId, assets);
         }
         assets.add(assetId);
+    }
+
+    private void changedClientOrder(long userId, long clientKey) {
+        LongHashSet keys = changedClientOrdersByUser.get(userId);
+        if (keys == null) {
+            keys = new LongHashSet();
+            changedClientOrdersByUser.put(userId, keys);
+        }
+        keys.add(clientKey);
     }
 
     private void indexActiveLiquidation(LiquidationRuntime liquidation) {

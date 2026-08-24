@@ -72,7 +72,9 @@ class ClusterFundsReconcileTest {
 
         List<String> overflowingLedger = List.of(
                 row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", Long.MAX_VALUE),
-                row("SEED", "USER", 2, "USDT", "-", "AVAILABLE", 1));
+                row("SEED", "USER", 1, "USDT", "-", "LOCKED", 0),
+                row("SEED", "USER", 2, "USDT", "-", "AVAILABLE", 1),
+                row("SEED", "USER", 2, "USDT", "-", "LOCKED", 0));
         FakeGateway overflowing = new FakeGateway(Map.of(
                 1L, user(1, List.of(new CoreBalanceView("USDT", Long.MAX_VALUE, 0))),
                 2L, user(2, List.of(new CoreBalanceView("USDT", 1, 0)))), List.of(), 7);
@@ -100,6 +102,19 @@ class ClusterFundsReconcileTest {
                 List.of(), 7);
         assertThatThrownBy(() -> FundsReconciliation.reconcile(config("1:2", "", ledger(baseLedger())), oneUnit))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("difference=-1");
+    }
+
+    @Test
+    void hardFailsWhenZeroValuedStateKeySetsDiffer() {
+        FakeGateway gateway = new FakeGateway(
+                Map.of(1L, user(1, List.of(new CoreBalanceView("USDT", 100, 0)))), List.of(), 7);
+
+        assertThatThrownBy(() -> FundsReconciliation.reconcile(
+                config("1:2", "", ledger(List.of(
+                        row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", 100)))), gateway))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("state key set mismatch")
+                .hasMessageContaining("LOCKED");
     }
 
     @Test
@@ -156,6 +171,22 @@ class ClusterFundsReconcileTest {
     }
 
     @Test
+    void reconcilesInsuranceAndAdlResolutionPagesExactly() {
+        List<String> lines = new ArrayList<>(baseLedger());
+        lines.add(row("OPERATION", "TREASURY", 0, "USDT", "-", "LIQUIDATION_INSURANCE", 2));
+        lines.add(row("OPERATION", "TREASURY", 0, "USDT", "-", "LIQUIDATION_ADL", 3));
+        FakeGateway gateway = new FakeGateway(
+                Map.of(1L, user(1, List.of(new CoreBalanceView("USDT", 100, 0)))), resolutions(2), 19);
+        gateway.adlResolutions = resolutions(3, CoreLiquidationWorkView.Purpose.ADL);
+
+        FundsReconciliation.Result result = FundsReconciliation.reconcile(
+                config("1:2", "", ledger(lines)), gateway);
+
+        assertThat(result.fundsDifference()).isZero();
+        assertThat(result.liquidationPages()).isEqualTo(2);
+    }
+
+    @Test
     void stateHashIsIndependentOfLiquidationPageSize() {
         List<CoreLiquidationWorkView.Resolution> resolutions = resolutions(101);
         List<String> lines = new ArrayList<>(baseLedger());
@@ -193,6 +224,12 @@ class ClusterFundsReconcileTest {
                 row("OPERATION", "TREASURY", 0, "USDT", "-", "FEE", 2),
                 row("OPERATION", "USER", 1, "USDT", "-", "FUNDING", -3),
                 row("OPERATION", "MAKER", 2, "USDT", "-", "FUNDING", 3),
+                row("OPERATION", "USER", 1, "USDT", "-", "LIQUIDATION", -5),
+                row("OPERATION", "TREASURY", 0, "USDT", "-", "LIQUIDATION", 5),
+                row("OPERATION", "TREASURY", 0, "USDT", "-", "INSURANCE", -6),
+                row("OPERATION", "USER", 1, "USDT", "-", "INSURANCE", 6),
+                row("OPERATION", "USER", 1, "USDT", "-", "ADL", -7),
+                row("OPERATION", "MAKER", 2, "USDT", "-", "ADL", 7),
                 row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_FEES", 4),
                 row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_INSURANCE", 9),
                 row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_DEFICIT", 12));
@@ -214,6 +251,7 @@ class ClusterFundsReconcileTest {
         Map<Long, CoreUserStateView> users = new HashMap<>();
         for (long userId = 1; userId <= 5; userId++) {
             lines.add(row("SEED", "USER", userId, "USDT", "-", "AVAILABLE", 10));
+            lines.add(row("SEED", "USER", userId, "USDT", "-", "LOCKED", 0));
             users.put(userId, user(userId, List.of(new CoreBalanceView("USDT", 10, 0))));
         }
         Path checkpoint = temporaryDirectory.resolve("resume.properties");
@@ -244,6 +282,7 @@ class ClusterFundsReconcileTest {
         List<String> lines = new ArrayList<>();
         for (long userId = 1; userId <= 3; userId++) {
             lines.add(row("SEED", "USER", userId, "USDT", "-", "AVAILABLE", 10));
+            lines.add(row("SEED", "USER", userId, "USDT", "-", "LOCKED", 0));
         }
         Map<Long, CoreUserStateView> users = Map.of(
                 1L, user(1, List.of(new CoreBalanceView("USDT", 10, 0))),
@@ -264,6 +303,47 @@ class ClusterFundsReconcileTest {
         stuck.nonAdvancingCursor = true;
         assertThatThrownBy(() -> FundsReconciliation.reconcile(config("1:2", "", ledger(baseLedger()), 1, 5, null), stuck))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("cursor did not advance");
+
+        FakeGateway bounded = new FakeGateway(
+                Map.of(1L, user(1, List.of(new CoreBalanceView("USDT", 100, 0)))), resolutions(2), 7);
+        assertThatThrownBy(() -> FundsReconciliation.reconcile(
+                config("1:2", "", ledger(baseLedger()), 1, 1, null), bounded))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("max pages=1");
+        assertThat(bounded.liquidationQueries).isEqualTo(1);
+    }
+
+    @Test
+    void completedCheckpointCannotReturnMisleadingPassForStaleCoreState() {
+        Path checkpoint = temporaryDirectory.resolve("completed.properties");
+        List<String> ledger = List.of(
+                row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", 100),
+                row("SEED", "USER", 1, "USDT", "-", "LOCKED", 0));
+        FundsReconciliation.Config config = config("1:2", "", ledger(ledger), 100, 1_000, checkpoint);
+        FundsReconciliation.reconcile(config, new FakeGateway(
+                Map.of(1L, user(1, List.of(new CoreBalanceView("USDT", 100, 0)))), List.of(), 51));
+        FakeGateway stale = new FakeGateway(
+                Map.of(1L, user(1, List.of(new CoreBalanceView("USDT", 99, 0)))), List.of(), 52);
+
+        assertThatThrownBy(() -> FundsReconciliation.reconcile(config, stale))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("difference=-1");
+        assertThat(stale.userQueries).containsExactly(1L);
+    }
+
+    @Test
+    void rejectsCompletedCheckpointWhenLedgerChanges() {
+        Path checkpoint = temporaryDirectory.resolve("stale-ledger.properties");
+        FundsReconciliation.Config initial = config("1:2", "", ledger(baseLedger()), 100, 1_000, checkpoint);
+        FundsReconciliation.reconcile(initial, new FakeGateway(
+                Map.of(1L, user(1, List.of(new CoreBalanceView("USDT", 100, 0)))), List.of(), 61));
+        FundsReconciliation.Config changed = config("1:2", "", ledger(List.of(
+                row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", 99),
+                row("SEED", "USER", 1, "USDT", "-", "LOCKED", 0))), 100, 1_000, checkpoint);
+
+        assertThatThrownBy(() -> FundsReconciliation.reconcile(changed, new FakeGateway(
+                Map.of(1L, user(1, List.of(new CoreBalanceView("USDT", 99, 0)))), List.of(), 62)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("checkpoint configuration changed");
     }
 
     private FundsReconciliation.Config config(String users, String makers, FundsReconciliation.Ledger ledger) {
@@ -282,7 +362,9 @@ class ClusterFundsReconcileTest {
     }
 
     private static List<String> baseLedger() {
-        return List.of(row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", 100));
+        return List.of(
+                row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", 100),
+                row("SEED", "USER", 1, "USDT", "-", "LOCKED", 0));
     }
 
     private static String row(String kind, String role, long userId, String asset, String symbol,
@@ -296,11 +378,16 @@ class ClusterFundsReconcileTest {
     }
 
     private static List<CoreLiquidationWorkView.Resolution> resolutions(int count) {
+        return resolutions(count, CoreLiquidationWorkView.Purpose.INSURANCE);
+    }
+
+    private static List<CoreLiquidationWorkView.Resolution> resolutions(
+            int count, CoreLiquidationWorkView.Purpose purpose) {
         List<CoreLiquidationWorkView.Resolution> values = new ArrayList<>();
         for (int index = 1; index <= count; index++) {
             values.add(new CoreLiquidationWorkView.Resolution(index, 1, "BTC-USDT", "USDT",
                     CoreMarginMode.CROSS, CorePositionSide.NET, 1, 1, 1, 1,
-                    CoreLiquidationWorkView.Purpose.INSURANCE));
+                    purpose));
         }
         return values;
     }
@@ -315,6 +402,7 @@ class ClusterFundsReconcileTest {
         private int interruptAtUserQuery;
         private int liquidationQueries;
         private boolean nonAdvancingCursor;
+        private List<CoreLiquidationWorkView.Resolution> adlResolutions = List.of();
 
         private FakeGateway(Map<Long, CoreUserStateView> users,
                             List<CoreLiquidationWorkView.Resolution> resolutions,
@@ -352,21 +440,19 @@ class ClusterFundsReconcileTest {
         private CoreResponse liquidationResponse(byte[] payload) {
             liquidationQueries++;
             CoreLiquidationWorkView.Query query = CoreLiquidationWorkCodec.decodeQuery(payload);
-            if (query.purpose() == CoreLiquidationWorkView.Purpose.ADL) {
-                return ok(CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
-                        ProductLine.LINEAR_PERPETUAL, 0, true, null, List.of(), List.of())));
-            }
+            List<CoreLiquidationWorkView.Resolution> selected =
+                    query.purpose() == CoreLiquidationWorkView.Purpose.ADL ? adlResolutions : resolutions;
             int start = Math.toIntExact(query.afterLiquidationId());
-            if (start >= resolutions.size()) {
+            if (start >= selected.size()) {
                 return ok(CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
                         ProductLine.LINEAR_PERPETUAL, query.afterLiquidationId(), true, null,
                         List.of(), List.of())));
             }
-            int end = Math.min(start + query.maxItems(), resolutions.size());
+            int end = Math.min(start + query.maxItems(), selected.size());
             long cursor = nonAdvancingCursor ? query.afterLiquidationId() : end;
             return ok(CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
-                    ProductLine.LINEAR_PERPETUAL, cursor, end == resolutions.size(), null,
-                    List.of(), resolutions.subList(start, end))));
+                    ProductLine.LINEAR_PERPETUAL, cursor, end == selected.size(), null,
+                    List.of(), selected.subList(start, end))));
         }
 
         private CoreResponse ok(byte[] data) {

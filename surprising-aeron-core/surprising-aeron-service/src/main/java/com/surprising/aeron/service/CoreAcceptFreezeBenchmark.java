@@ -83,9 +83,9 @@ public final class CoreAcceptFreezeBenchmark {
 
     private static PlaceOrderCommand place(long orderId) {
         return new PlaceOrderCommand(orderId, SYMBOL, 1, "BTC", "USDT", "USDT", CoreOrderSide.BUY,
-                1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                1_000, 1_001, 1_100, 999, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000, CoreOrderType.LIMIT,
-                CoreTimeInForce.IOC, 1_000, false, "accept-freeze-" + orderId, 0, 0);
+                CoreTimeInForce.IOC, false, "accept-freeze-" + orderId, 0, 0);
     }
 
     private static UpsertInstrumentCommand instrument() {

@@ -78,8 +78,7 @@ class JdbcCoreEventProjectorPostgresTest {
     void clearProjection() throws Exception {
         dropFaultInjection();
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
-            statement.execute("TRUNCATE core_websocket_audit_projection, "
-                    + "core_funding_payment_projection, core_funding_settlement_projection, "
+            statement.execute("TRUNCATE core_funding_payment_projection, core_funding_settlement_projection, "
                     + "core_execution_projection, core_order_projection, core_user_fact_projection, "
                     + "core_liquidation_projection, core_treasury_projection, core_event_projection");
             statement.executeUpdate("UPDATE core_projection_watermark SET last_export_sequence = 0");
@@ -92,20 +91,20 @@ class JdbcCoreEventProjectorPostgresTest {
     }
 
     @Test
-    void commitsContiguousFactsAuditAndWatermark() throws Exception {
+    void commitsContiguousFactsAndWatermark() throws Exception {
         CoreMessage first = event(1, UUID.randomUUID(), List.of(user(17, 1)));
         JdbcCoreEventProjector projector = new JdbcCoreEventProjector(dataSource);
 
         assertThat(projector.project(ProductLine.SPOT, first)).isTrue();
-        assertProjectionState(1, 1, 1, 1);
+        assertProjectionState(1, 1, 1);
         assertThat(projector.project(ProductLine.SPOT, first)).isFalse();
-        assertProjectionState(1, 1, 1, 1);
+        assertProjectionState(1, 1, 1);
 
         CoreMessage second = event(2, UUID.randomUUID(), List.of(user(18, 1)));
         assertThat(new JdbcCoreEventProjector(dataSource).project(ProductLine.SPOT, second)).isTrue();
-        assertProjectionState(2, 2, 2, 2);
+        assertProjectionState(2, 2, 2);
         assertThat(projector.project(ProductLine.SPOT, first)).isFalse();
-        assertProjectionState(2, 2, 2, 2);
+        assertProjectionState(2, 2, 2);
     }
 
     @Test
@@ -118,28 +117,18 @@ class JdbcCoreEventProjectorPostgresTest {
         assertThatThrownBy(() -> projector.project(ProductLine.SPOT,
                 event(3, UUID.randomUUID(), List.of(user(19, 1)))))
                 .isInstanceOf(SQLException.class).hasMessageContaining("sequence gap");
-        assertProjectionState(1, 1, 1, 1);
+        assertProjectionState(1, 1, 1);
 
         assertThatThrownBy(() -> projector.project(ProductLine.SPOT,
                 event(1, commandId, List.of(user(17, 2)))))
                 .isInstanceOf(SQLException.class).hasMessageContaining("conflicting duplicate");
-        assertProjectionState(1, 1, 1, 1);
+        assertProjectionState(1, 1, 1);
 
         CoreUserStateView duplicate = user(20, 1);
         assertThatThrownBy(() -> projector.project(ProductLine.SPOT,
                 event(2, UUID.randomUUID(), List.of(duplicate, duplicate))))
                 .isInstanceOf(SQLException.class);
-        assertProjectionState(1, 1, 1, 1);
-    }
-
-    @Test
-    void rollsBackAuditInsertFailure() throws Exception {
-        installFaultInjection("fail_audit_insert", "core_websocket_audit_projection", "INSERT");
-
-        assertThatThrownBy(() -> new JdbcCoreEventProjector(dataSource).project(ProductLine.SPOT,
-                event(1, UUID.randomUUID(), List.of(user(31, 1)))))
-                .isInstanceOf(SQLException.class).hasMessageContaining("injected projection failure");
-        assertProjectionState(0, 0, 0, 0);
+        assertProjectionState(1, 1, 1);
     }
 
     @Test
@@ -149,7 +138,7 @@ class JdbcCoreEventProjectorPostgresTest {
         assertThatThrownBy(() -> new JdbcCoreEventProjector(dataSource).project(ProductLine.SPOT,
                 event(1, UUID.randomUUID(), List.of(user(32, 1)))))
                 .isInstanceOf(SQLException.class).hasMessageContaining("injected projection failure");
-        assertProjectionState(0, 0, 0, 0);
+        assertProjectionState(0, 0, 0);
     }
 
     private static CoreMessage event(long sequence, UUID commandId, List<CoreUserStateView> users) {
@@ -166,12 +155,11 @@ class JdbcCoreEventProjectorPostgresTest {
                 List.of(new CoreBalanceView("USDT", 100, 0)), List.of(), List.of());
     }
 
-    private static void assertProjectionState(int events, int facts, int audit, long watermark)
+    private static void assertProjectionState(int events, int facts, long watermark)
             throws Exception {
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             assertCount(statement, "core_event_projection", events);
             assertCount(statement, "core_user_fact_projection", facts);
-            assertCount(statement, "core_websocket_audit_projection", audit);
             try (var result = statement.executeQuery("SELECT last_export_sequence "
                     + "FROM core_projection_watermark WHERE product_line = 'SPOT'")) {
                 assertThat(result.next()).isTrue();

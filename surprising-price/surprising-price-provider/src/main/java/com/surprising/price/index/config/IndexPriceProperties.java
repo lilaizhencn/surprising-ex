@@ -9,8 +9,12 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
+@Validated
 @ConfigurationProperties(prefix = "surprising.price.index")
 public class IndexPriceProperties {
 
@@ -166,10 +170,14 @@ public class IndexPriceProperties {
     }
 
     public static class Calculation {
+        @Min(50)
+        @Max(1000)
         private long pollDelayMs = 1000L;
         private Duration pollInterval = Duration.ofSeconds(1);
         private Duration maxSourceAge = Duration.ofSeconds(5);
         private BigDecimal outlierThreshold = new BigDecimal("0.01");
+        @Min(3)
+        @Max(20)
         private int minValidSources = 3;
         private int scale = 18;
         private Duration conversionCacheTtl = Duration.ofSeconds(30);

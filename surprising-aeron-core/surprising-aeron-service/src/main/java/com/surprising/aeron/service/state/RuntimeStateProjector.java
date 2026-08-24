@@ -35,6 +35,14 @@ public final class RuntimeStateProjector {
                 runtime.treasury().setInsurance(identities.assetId(asset), 0, units);
             }
         });
+        source.treasuryState().liquidationFeeBalances().forEach((asset, units) ->
+                runtime.treasury().setLiquidationFee(identities.assetId(asset), units));
+        source.treasuryState().fundingResidualBalances().forEach((asset, units) ->
+                runtime.treasury().setFundingResidual(identities.assetId(asset), units));
+        source.treasuryState().roundingResidualBalances().forEach((asset, units) ->
+                runtime.treasury().setRoundingResidual(identities.assetId(asset), units));
+        source.treasuryState().clearingPnlBalances().forEach((asset, units) ->
+                runtime.treasury().setClearingPnl(identities.assetId(asset), units));
         source.treasuryState().fundingSettlements().forEach((symbol, settlementId) ->
                 runtime.treasury().setFundingSettlement(identities.symbolId(symbol), settlementId));
         source.treasuryState().fundingProgress().forEach((symbol, progress) ->
@@ -82,6 +90,9 @@ public final class RuntimeStateProjector {
             }
         });
         validateClientIndex(source, runtime, identities);
+        runtime.clearChangedKeys();
+        runtime.releaseOwnerForHandoff();
+        identities.releaseOwnerForHandoff();
         return runtime;
     }
 
@@ -100,6 +111,7 @@ public final class RuntimeStateProjector {
     static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities) {
         return new OrderRuntime(order.orderId(), order.productLine(), order.userId(),
                 identities.symbolId(order.symbol()), order.instrumentVersion(), order.side(), order.priceTicks(),
+                order.matchingPriceTicks(),
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                 order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),

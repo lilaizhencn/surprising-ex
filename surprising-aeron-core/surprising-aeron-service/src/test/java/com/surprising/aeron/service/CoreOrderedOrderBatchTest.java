@@ -33,11 +33,184 @@ import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class CoreOrderedOrderBatchTest {
+
+    @Test
+    void isolatesOverlappingBatchesUntilTheActiveBatchCompletes() throws Exception {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            UUID batchId = UUID.randomUUID();
+            CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, batchId, 2,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(9_001, "batch-9001", 1_000),
+                            place(9_002, "batch-9002", 1_000)))));
+            UUID laterId = UUID.randomUUID();
+            CoreMessage later = command(CoreMessageType.PLACE_ORDER_BATCH, laterId, 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(9_003, "later-9003", 1_000)))));
+
+            assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(state.apply(later).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long batchSequence = state.matchingSequence(batchId);
+            long laterSequence = state.matchingSequence(laterId);
+            var first = awaitMatching(state, batchSequence);
+            assertThat(state.completeMatching(batchSequence, first, 2_000, 3)).isNull();
+            var second = awaitMatching(state, batchSequence);
+
+            var completionsField = CoreProbeState.class.getDeclaredField("completedMatching");
+            completionsField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<Long, ?> completions = (Map<Long, ?>) completionsField.get(state);
+            assertThat(completions).doesNotContainKey(laterSequence);
+
+            CoreResponse batchResponse = state.completeMatching(batchSequence, second, 2_001, 4);
+            assertThat(batchResponse).isNotNull();
+            var laterResult = awaitMatching(state, laterSequence);
+            CoreResponse laterResponse = state.completeMatching(laterSequence, laterResult, 2_002, 5);
+            assertThat(laterResponse).isNotNull();
+
+            var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
+                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
+                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_003, 6),
+                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
+                    .filter(event -> event.commandId().equals(batchId) || event.commandId().equals(laterId))
+                    .toList();
+            assertThat(events).hasSize(2);
+            assertThat(events.get(0).changedOrders()).extracting(order -> order.orderId())
+                    .containsExactly(9_001L, 9_002L);
+            assertThat(events.get(1).changedOrders()).extracting(order -> order.orderId())
+                    .containsExactly(9_003L);
+            assertThat(events.get(0).changedUsers().getFirst().reservations()).extracting(value -> value.orderId())
+                    .containsExactly(9_001L, 9_002L);
+            assertThat(events.get(1).changedUsers().getFirst().reservations()).extracting(value -> value.orderId())
+                    .containsExactly(9_003L);
+            assertThat(events).allSatisfy(event -> assertThat(event.changedOrders()).allSatisfy(order -> {
+                assertThat(order.commandId()).isEqualTo(event.commandId());
+                assertThat(order.createdAtEpochMillis()).isPositive();
+                assertThat(order.updatedAtEpochMillis()).isPositive();
+                assertThat(order.clusterPosition()).isPositive();
+            }));
+            assertThat(TradingOrderBatchCodec.decodeResult(batchResponse.data()).items())
+                    .extracting(CoreOrderBatchResult.Item::order)
+                    .containsExactlyElementsOf(events.get(0).changedOrders());
+            assertThat(TradingOrderBatchCodec.decodeResult(laterResponse.data()).items())
+                    .extracting(CoreOrderBatchResult.Item::order)
+                    .containsExactlyElementsOf(events.get(1).changedOrders());
+        }
+    }
+
+    @Test
+    void defersSinglePlacePreparationAndExportUntilTheActiveBatchCompletes() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            UUID batchId = UUID.randomUUID();
+            CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, batchId, 2,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(9_101, "batch-9101", 1_000)))));
+            UUID laterId = UUID.randomUUID();
+            CoreMessage later = command(CoreMessageType.PLACE_ORDER, laterId, 3,
+                    TradingCommandCodec.encodePlaceOrder(place(9_102, "later-9102", 1_000)));
+            UUID lastId = UUID.randomUUID();
+            CoreMessage last = command(CoreMessageType.PLACE_ORDER, lastId, 4,
+                    TradingCommandCodec.encodePlaceOrder(place(9_103, "last-9103", 1_000)));
+
+            assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            CoreResponse deferred = state.apply(later);
+            CoreResponse lastDeferred = state.apply(last);
+            CoreResponse duplicate = state.apply(later);
+            assertThat(state.apply(command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 4,
+                    TradingCommandCodec.encodePlaceOrder(place(9_104, "stale-9104", 1_000)))).resultCode())
+                    .isEqualTo(CoreResultCode.STALE_SOURCE_SEQUENCE);
+            assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+            assertThat(duplicate.appliedCommandCount()).isEqualTo(deferred.appliedCommandCount());
+            assertThat(duplicate.requiredExportSequence()).isEqualTo(deferred.requiredExportSequence());
+            assertThat(duplicate.stateHash()).isEqualTo(deferred.stateHash());
+            assertThat(state.tradingState().order(9_102)).isNull();
+            assertThat(state.tradingState().order(9_103)).isNull();
+            var exportsBeforeBatchCompletion = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
+                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
+                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 1_999, 4),
+                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
+                    .filter(event -> event.commandId().equals(laterId) || event.commandId().equals(lastId))
+                    .toList();
+            assertThat(exportsBeforeBatchCompletion).isEmpty();
+
+            long batchSequence = state.matchingSequence(batchId);
+            var batchMatching = awaitMatching(state, batchSequence);
+            CoreResponse batchResponse = state.completeMatching(batchSequence, batchMatching, 2_000, 4);
+            assertThat(batchResponse).isNotNull();
+            assertThat(state.tradingState().order(9_102)).isNotNull();
+            assertThat(state.tradingState().order(9_103)).isNotNull();
+            assertThat(batchResponse.appliedCommandCount()).isEqualTo(batchSequence);
+            var eventsBeforeCompletions = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
+                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
+                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_001, 5),
+                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
+                    .filter(event -> event.commandId().equals(batchId) || event.commandId().equals(laterId)
+                            || event.commandId().equals(lastId))
+                    .toList();
+            var appliedBeforeCompletions = eventsBeforeCompletions.stream()
+                    .map(event -> event.appliedCommandCount()).toList();
+            assertThat(appliedBeforeCompletions)
+                    .containsExactly(batchSequence, deferred.appliedCommandCount(), lastDeferred.appliedCommandCount());
+            assertThat(java.util.stream.IntStream.range(1, appliedBeforeCompletions.size())
+                    .allMatch(index -> appliedBeforeCompletions.get(index - 1) < appliedBeforeCompletions.get(index)))
+                    .isTrue();
+            assertThat(eventsBeforeCompletions.stream()
+                    .filter(event -> event.resultCode() == CoreResultCode.MATCHING_PENDING).toList())
+                    .extracting(event -> event.commandId())
+                    .containsExactly(laterId, lastId);
+
+            long laterSequence = state.matchingSequence(laterId);
+            var laterMatching = awaitMatching(state, laterSequence);
+            CoreResponse laterResponse = state.completeMatching(laterSequence, laterMatching, 2_002, 6);
+            assertThat(laterResponse).isNotNull();
+            assertThat(laterResponse.status()).isEqualTo(ResponseStatus.APPLIED);
+            long lastSequence = state.matchingSequence(lastId);
+            var lastMatching = awaitMatching(state, lastSequence);
+            CoreResponse lastResponse = state.completeMatching(lastSequence, lastMatching, 2_003, 7);
+            assertThat(lastResponse).isNotNull();
+            assertThat(lastResponse.status()).isEqualTo(ResponseStatus.APPLIED);
+
+            var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
+                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
+                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_004, 8),
+                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
+                    .filter(event -> event.commandId().equals(batchId) || event.commandId().equals(laterId)
+                            || event.commandId().equals(lastId))
+                    .toList();
+            var batchEvent = events.stream().filter(event -> event.commandId().equals(batchId)).findFirst().orElseThrow();
+            var laterEvents = events.stream().filter(event -> event.commandId().equals(laterId)).toList();
+            var lastEvents = events.stream().filter(event -> event.commandId().equals(lastId)).toList();
+            assertThat(batchEvent.changedOrders()).extracting(order -> order.orderId()).containsExactly(9_101L);
+            assertThat(batchEvent.changedUsers().getFirst().reservations()).extracting(value -> value.orderId())
+                    .containsExactly(9_101L);
+            assertThat(laterEvents).hasSize(2);
+            assertThat(lastEvents).hasSize(2);
+            assertThat(batchEvent.exportSequence()).isLessThan(laterEvents.getFirst().exportSequence());
+            assertThat(batchEvent.businessStateHash()).isNotEqualTo(laterEvents.getFirst().businessStateHash());
+            assertThat(laterEvents.getFirst().changedOrders()).extracting(order -> order.orderId())
+                    .containsExactly(9_102L);
+            assertThat(lastEvents.getFirst().changedOrders()).extracting(order -> order.orderId())
+                    .containsExactly(9_103L);
+            var appliedCounts = events.stream().map(event -> event.appliedCommandCount()).toList();
+            assertThat(java.util.stream.IntStream.range(1, appliedCounts.size())
+                    .allMatch(index -> appliedCounts.get(index - 1) < appliedCounts.get(index))).isTrue();
+            assertThat(deferred.requiredExportSequence()).isZero();
+            assertThat(lastDeferred.requiredExportSequence()).isZero();
+        }
+    }
 
     @Test
     void processesMaximumBatchesInInputOrder() {
@@ -313,10 +486,32 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static PlaceOrderCommand place(long orderId, String clientOrderId, long reservedUnits) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                ReservationKind.SPOT_ASSET, "USDT", reservedUnits, CoreOrderType.LIMIT,
-                CoreTimeInForce.GTC, 1_000, false, clientOrderId, 0, 0);
+        return new PlaceOrderCommand(
+                orderId,
+                "BTC-USDT",
+                1,
+                "BTC",
+                "USDT",
+                "USDT",
+                CoreOrderSide.BUY,
+                1_000,
+                1_000,
+                1_000,
+                1_000,
+                1,
+                false,
+                CoreMarginMode.CROSS,
+                CorePositionSide.NET,
+                ReservationKind.SPOT_ASSET,
+                "USDT",
+                reservedUnits,
+                CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC,
+                false,
+                clientOrderId,
+                0,
+                0
+        );
     }
 
     private static void applySpotInstrument(CoreProbeState state) {

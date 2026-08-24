@@ -42,6 +42,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.function.Function;
@@ -62,6 +63,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final AtomicReference<CompletableFuture<Void>> submissionTail =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
+    private final AtomicLong matcherSequence = new AtomicLong();
     private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
             snapshotPersistence;
 
@@ -109,6 +111,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 symbols.put(symbol, symbolId);
             });
             users.addAll(snapshot.users());
+            matcherSequence.set(snapshot.matcherSequence());
             start(snapshot);
             reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
             StateHashes restoredHashes = currentStateHashesAsync().join();
@@ -130,33 +133,65 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return placeUnlanedAsync(userId, command);
     }
 
+    public CompletableFuture<CoreMatchingResult> executeWithEvidence(
+            long coreSequence,
+            java.util.UUID commandId,
+            long orderId,
+            long instrumentVersion,
+            long aeronTimestamp,
+            Supplier<CompletableFuture<CoreMatchingResult>> command) {
+        if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentVersion < 0
+                || aeronTimestamp < 0 || command == null) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher command evidence"));
+        }
+        long sequence = matcherSequence.incrementAndGet();
+        CompletableFuture<CoreMatchingResult> submitted;
+        try {
+            submitted = command.get();
+        } catch (RuntimeException exception) {
+            return CompletableFuture.failedFuture(exception);
+        }
+        if (submitted == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("matcher command returned no future"));
+        }
+        return submitted.thenApply(result -> new CoreMatchingResult(
+                result.accepted(), result.resultCode(), result.matches(), result.cancellations(),
+                result.successfulPrefixCount(), result.matcherStateChanged(),
+                new CoreMatchingResult.NativeCommand(coreSequence, commandId.toString(), orderId,
+                        instrumentVersion, result.nativeCommand().nativeSequence(), sequence, aeronTimestamp),
+                new CoreMatchingResult.BookHashes(0, 0, 0), result.matcherEvents(), result.marketData()));
+    }
+
     private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, PlaceOrderCommand command) {
         return ensureSymbolAsync(command.symbol())
                 .thenCombine(ensureUserAsync(userId), (symbolId, ignored) -> symbolId)
                 .thenCompose(symbolId -> {
-                    return api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
+                    return api.submitCommandAsyncMatcherResult(ApiPlaceOrder.builder()
                         .orderId(command.orderId())
                         .uid(userId)
                         .symbol(symbolId)
                         .action(command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
                         .orderType(orderType(command))
-                        .price(command.matchingPriceTicks())
-                        .reservePrice(command.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : command.matchingPriceTicks())
+                        .price(command.executionPriceTicks())
+                        .reservePrice(command.executionPriceTicks())
                         .size(command.quantitySteps()).build());
                 })
                 .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
     }
 
-    private static CoreMatchingResult matchingResult(exchange.core2.core.common.cmd.OrderCommand response) {
+    private static CoreMatchingResult matchingResult(exchange.core2.core.common.MatcherResult response) {
         List<CoreMatch> matches = new ArrayList<>();
-        response.processMatcherEvents(event -> {
-            if (event.eventType == MatcherEventType.TRADE) {
-                matches.add(new CoreMatch(event.matchedOrderId, event.matchedOrderUid, event.price, event.size,
-                        event.matchedOrderCompleted, event.activeOrderCompleted));
+        response.events().forEach(event -> {
+            if (event.eventType() == MatcherEventType.TRADE) {
+                matches.add(new CoreMatch(event.matchedOrderId(), event.matchedOrderUid(), event.price(), event.size(),
+                        event.matchedOrderCompleted(), event.activeOrderCompleted()));
             }
         });
-        return new CoreMatchingResult(response.resultCode == CommandResultCode.SUCCESS,
-                response.resultCode.name(), matches);
+        return new CoreMatchingResult(response.resultCode() == CommandResultCode.SUCCESS,
+                response.resultCode().name(), matches, List.of(), 0, false,
+                new CoreMatchingResult.NativeCommand(0, "", 0, 0, response.sequence(), 0, 0),
+                new CoreMatchingResult.BookHashes(0, 0, 0), List.of(),
+                new CoreMatchingResult.MarketData(List.of(), List.of()));
     }
 
     private static OrderType orderType(PlaceOrderCommand command) {
@@ -203,11 +238,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private CompletableFuture<CoreMatchingResult> cancelAsync(long userId, long orderId, String symbol) {
         return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
-                    return api.submitCommandAsync(ApiCancelOrder.builder()
+                    return api.submitCommandAsyncMatcherResult(ApiCancelOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).build());
                 }))
-                .thenApply(resultCode -> new CoreMatchingResult(resultCode == CommandResultCode.SUCCESS,
-                        resultCode.name(), List.of()));
+                .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
     }
 
     public CompletableFuture<CoreMatchingResult> cancelAsyncForContinuation(long userId, long orderId,
@@ -227,13 +261,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                     cancelResult.name(), List.of()));
                         }
                         return ensureSymbolAsync(replacement.symbol()).thenCompose(replacementSymbolId -> {
-                            CompletableFuture<exchange.core2.core.common.cmd.OrderCommand> place =
-                                    api.submitCommandAsyncFullResponse(ApiPlaceOrder.builder()
+                            CompletableFuture<exchange.core2.core.common.MatcherResult> place =
+                                    api.submitCommandAsyncMatcherResult(ApiPlaceOrder.builder()
                                             .orderId(replacement.orderId()).uid(userId).symbol(replacementSymbolId)
                                             .action(replacement.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
-                                            .orderType(orderType(replacement)).price(replacement.matchingPriceTicks())
-                                            .reservePrice(replacement.side() == CoreOrderSide.BUY
-                                                    ? Long.MAX_VALUE : replacement.matchingPriceTicks())
+                                            .orderType(orderType(replacement)).price(replacement.executionPriceTicks())
+                                            .reservePrice(replacement.executionPriceTicks())
                                             .size(replacement.quantitySteps()).build());
                             return place.thenApply(response -> {
                                 CoreMatchingResult result = matchingResult(response);
@@ -250,7 +283,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                                                long newPriceTicks) {
         return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
-                    CompletableFuture<exchange.core2.core.common.cmd.OrderCommand> submitted = api.submitCommandAsyncFullResponse(ApiMoveOrder.builder()
+                    CompletableFuture<exchange.core2.core.common.MatcherResult> submitted = api.submitCommandAsyncMatcherResult(ApiMoveOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).newPrice(newPriceTicks).build());
                     return submitted;
                 }))
@@ -356,8 +389,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 }
                 if (expected.put(order.orderId(), new ReconciledOrder(symbolId, order.orderId(), order.userId(),
                         order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
-                        order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
-                        order.side() == CoreOrderSide.BUY ? Long.MAX_VALUE : order.priceTicks())) != null) {
+                        order.matchingPriceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
+                        order.matchingPriceTicks())) != null) {
                     throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
                             "active-order index contains duplicate order ID " + order.orderId());
                 }
@@ -591,7 +624,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (core != null) {
             awaitSnapshotOperations();
             if (api != null) {
-                api.processReport(new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0).join();
+                submitOrdered(() -> api.processReport(
+                        new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0)).join();
             }
             core.shutdown(30, TimeUnit.SECONDS);
             core = null;
@@ -622,7 +656,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             CompletableFuture<T> result;
             try {
                 result = submission.get();
-                gate.complete(null);
+                result.whenComplete((value, failure) -> gate.complete(null));
             } catch (RuntimeException exception) {
                 gate.complete(null);
                 throw exception;

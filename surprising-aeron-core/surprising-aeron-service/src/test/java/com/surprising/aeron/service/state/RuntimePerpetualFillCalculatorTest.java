@@ -80,11 +80,34 @@ class RuntimePerpetualFillCalculatorTest {
         assertThat(position.signedQuantitySteps()).isEqualTo(1);
         assertThat(position.entryPriceTicks()).isEqualTo(100);
         assertThat(position.realizedPnlUnits()).isEqualTo(10);
-        assertThat(position.positionMarginUnits()).isEqualTo(11);
-        assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(917);
-        assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(11);
+        assertThat(position.positionMarginUnits()).isEqualTo(10);
+        assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(918);
+        assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(10);
         assertThat(runtime.treasury().fee(assetId)).isEqualTo(2);
-        assertThat(runtime.treasury().insuranceDeficit(assetId)).isEqualTo(10);
+        assertThat(runtime.treasury().insurance(assetId)).isEqualTo(-10);
+        assertThat(runtime.treasury().insuranceDeficit(assetId)).isZero();
+    }
+
+    @Test
+    void addsMarginOnlyForTheNewQuantityAtItsFillPrice() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        CoreInstrumentState instrument = instrument();
+        int symbolId = identities.symbolId(instrument.symbol());
+        int assetId = identities.assetId(instrument.settleAsset());
+        long positionKey = identities.positionKey(7, instrument.symbol());
+        TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+                CoreOrderSide.BUY, 1, false, 800, 40, 20);
+
+        RuntimePerpetualFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
+                positionKey, 120, 1, true, 10_000_000, assetId);
+        runtime.releaseTerminalReservation(11);
+
+        PositionRuntime position = runtime.position(positionKey);
+        assertThat(position.signedQuantitySteps()).isEqualTo(3);
+        assertThat(position.positionMarginUnits()).isEqualTo(32);
+        assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(806);
+        assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(32);
+        assertThat(runtime.treasury().fee(assetId)).isEqualTo(2);
     }
 
     @Test
@@ -109,7 +132,8 @@ class RuntimePerpetualFillCalculatorTest {
         assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(1_044);
         assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(12);
         assertThat(runtime.treasury().fee(assetId)).isEqualTo(4);
-        assertThat(runtime.treasury().insuranceDeficit(assetId)).isEqualTo(40);
+        assertThat(runtime.treasury().insurance(assetId)).isEqualTo(-40);
+        assertThat(runtime.treasury().insuranceDeficit(assetId)).isZero();
     }
 
     @Test

@@ -69,6 +69,26 @@ class MarketProbeServiceTest {
     }
 
     @Test
+    void configuredFourSourceQuorumDoesNotTreatThreeFreshSourcesAsHealthy() {
+        Instant now = Instant.now();
+        when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now, List.of(
+                component("OKX", QuoteTransport.PUBLIC_WEBSOCKET, now),
+                component("BINANCE", QuoteTransport.PUBLIC_WEBSOCKET, now),
+                component("BYBIT", QuoteTransport.PUBLIC_WEBSOCKET, now))));
+        when(markPriceQueryService.latest("BTC-USDT")).thenReturn(mark(now));
+        when(webSocketManager.health()).thenReturn(List.of(
+                webSocketHealth("OKX", 20, 0), webSocketHealth("BINANCE", 20, 0),
+                webSocketHealth("BYBIT", 20, 0)));
+        IndexPriceProperties properties = new IndexPriceProperties();
+        properties.getCalculation().setMinValidSources(4);
+
+        MarketProbeService.MarketProbeSnapshot snapshot = service(properties).snapshot("BTC-USDT");
+
+        assertThat(snapshot.freshSourceCount()).isEqualTo(3);
+        assertThat(snapshot.sourceQuorumHealthy()).isFalse();
+    }
+
+    @Test
     void reportsDegradedQuorumWhenOneHealthySourceIsStale() {
         Instant now = Instant.now();
         when(indexPriceCache.requireFresh("BTC-USDT")).thenReturn(index(now, List.of(
@@ -260,8 +280,12 @@ class MarketProbeServiceTest {
     }
 
     private MarketProbeService service() {
+        return service(new IndexPriceProperties());
+    }
+
+    private MarketProbeService service(IndexPriceProperties properties) {
         return new MarketProbeService(indexPriceCache, markPriceQueryService, webSocketManager,
-                new IndexPriceProperties());
+                properties);
     }
 
     private IndexPriceResponse index(Instant eventTime, List<IndexComponentSnapshot> components) {

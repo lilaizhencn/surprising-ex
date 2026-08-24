@@ -118,6 +118,15 @@ class CoreExportCodecTest {
                 .isInstanceOf(ProtocolException.class);
     }
 
+    @Test
+    void completeExportResponseFitsTheClusterPublicationMaximum() {
+        int encodedCoreMessageLength = CoreProtocol.HEADER_LENGTH
+                + CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH
+                + CoreExportCodec.MAX_BATCH_ENCODED_LENGTH;
+
+        assertThat(encodedCoreMessageLength).isLessThanOrEqualTo(CoreProtocol.CLUSTER_MAX_MESSAGE_LENGTH);
+    }
+
     private static CoreMessage messageForBatchLength(int batchLength) {
         int payloadLength = batchLength - Integer.BYTES * 2 - CoreProtocol.HEADER_LENGTH;
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,

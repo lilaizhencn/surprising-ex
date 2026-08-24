@@ -23,27 +23,37 @@ final class StableIdentityLedger implements AutoCloseable {
     private static final int CHECKPOINT_INTERVAL = 8_192;
 
     private final Path checkpointPath;
+    private final Path runPath;
     private final String runId;
     private final long seed;
+    private final String configFingerprint;
     private final FileChannel events;
     private final Map<Long, State> states = new LinkedHashMap<>();
     private int eventsSinceCheckpoint;
 
-    private StableIdentityLedger(Path directory, String runId, long seed) throws IOException {
+    private StableIdentityLedger(Path directory, String runId, long seed, String configFingerprint) throws IOException {
         Files.createDirectories(directory);
         this.checkpointPath = directory.resolve("checkpoint.json");
+        this.runPath = directory.resolve("run.json");
         this.runId = runId;
         this.seed = seed;
+        this.configFingerprint = requireText(configFingerprint, "configuration fingerprint");
         Path eventsPath = directory.resolve("events.jsonl");
+        validateOrCreateRun();
         validateCheckpoint(eventsPath);
+        discardInterruptedTail(eventsPath);
         replay(eventsPath);
         this.events = FileChannel.open(eventsPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
                 StandardOpenOption.APPEND);
     }
 
     static StableIdentityLedger open(Path directory, String runId, long seed) {
+        return open(directory, runId, seed, "legacy:" + runId + ':' + seed);
+    }
+
+    static StableIdentityLedger open(Path directory, String runId, long seed, String configFingerprint) {
         try {
-            return new StableIdentityLedger(directory, runId, seed);
+            return new StableIdentityLedger(directory, runId, seed, configFingerprint);
         } catch (IOException exception) {
             throw new IllegalStateException("cannot open identity ledger", exception);
         }
@@ -96,7 +106,7 @@ final class StableIdentityLedger implements AutoCloseable {
 
     synchronized void finished(long sequence, long finalNanos, String finalState, String resourceIdentity) {
         State state = required(sequence);
-        if (state.terminal) return;
+        if (state.terminal || state.aborted) return;
         state.finalNanos = finalNanos;
         state.finalState = finalState;
         state.resourceIdentity = resourceIdentity == null ? "" : resourceIdentity;
@@ -217,6 +227,50 @@ final class StableIdentityLedger implements AutoCloseable {
         }
     }
 
+    private void discardInterruptedTail(Path path) throws IOException {
+        if (!Files.exists(path) || Files.size(path) == 0L) return;
+        try (FileChannel channel = FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+            long size = channel.size();
+            ByteBuffer last = ByteBuffer.allocate(1);
+            channel.read(last, size - 1L);
+            if (last.array()[0] == '\n') return;
+            long cursor = size - 1L;
+            ByteBuffer value = ByteBuffer.allocate(1);
+            while (cursor >= 0L) {
+                value.clear();
+                channel.read(value, cursor);
+                if (value.array()[0] == '\n') {
+                    channel.truncate(cursor + 1L);
+                    return;
+                }
+                cursor--;
+            }
+            channel.truncate(0L);
+        }
+    }
+
+    private void validateOrCreateRun() throws IOException {
+        if (Files.exists(runPath)) {
+            Map<String, String> values = fields(Files.readString(runPath, StandardCharsets.UTF_8).trim());
+            if (!runId.equals(required(values, "runId")) || seed != number(values, "seed")) {
+                throw new IllegalStateException("run identity does not match existing ledger");
+            }
+            if (!configFingerprint.equals(required(values, "configFingerprint"))) {
+                throw new IllegalStateException("workload configuration does not match existing ledger");
+            }
+            return;
+        }
+        Path temporary = runPath.resolveSibling(runPath.getFileName() + ".tmp");
+        Files.writeString(temporary, "{\"runId\":\"" + escape(runId) + "\",\"seed\":" + seed
+                + ",\"configFingerprint\":\"" + escape(configFingerprint) + "\"}\n",
+                StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+        try {
+            Files.move(temporary, runPath, StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+            Files.move(temporary, runPath);
+        }
+    }
+
     private void replay(Map<String, String> fields) {
         String event = required(fields, "event");
         long sequence = number(fields, "sequence");
@@ -245,15 +299,19 @@ final class StableIdentityLedger implements AutoCloseable {
                 state.outcome = HttpOutcome.valueOf(required(fields, "outcome"));
             }
             case "FINAL" -> {
-                state.finalNanos = number(fields, "finalNanos");
-                state.finalState = required(fields, "finalState");
-                state.resourceIdentity = required(fields, "resource");
-                state.terminal = true;
+                if (!state.terminal && !state.aborted) {
+                    state.finalNanos = number(fields, "finalNanos");
+                    state.finalState = required(fields, "finalState");
+                    state.resourceIdentity = required(fields, "resource");
+                    state.terminal = true;
+                }
             }
             case "ABORTED" -> {
-                state.finalNanos = number(fields, "finalNanos");
-                state.finalState = required(fields, "reason");
-                state.aborted = true;
+                if (!state.terminal && !state.aborted) {
+                    state.finalNanos = number(fields, "finalNanos");
+                    state.finalState = required(fields, "reason");
+                    state.aborted = true;
+                }
             }
             default -> throw new IllegalStateException("unknown ledger event " + event);
         }
@@ -303,6 +361,11 @@ final class StableIdentityLedger implements AutoCloseable {
     private static String required(Map<String, String> values, String name) {
         String value = values.get(name);
         if (value == null) throw new IllegalStateException("missing ledger field " + name);
+        return value;
+    }
+
+    private static String requireText(String value, String name) {
+        if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " is required");
         return value;
     }
 

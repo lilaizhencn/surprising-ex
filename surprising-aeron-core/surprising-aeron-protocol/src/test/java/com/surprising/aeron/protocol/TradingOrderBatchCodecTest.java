@@ -118,9 +118,10 @@ class TradingOrderBatchCodecTest {
 
     private static PlaceOrderCommand place(long orderId, String clientOrderId) {
         return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                CoreOrderSide.BUY, 1_000, 1_001, 1_100, 999, 1,
+                false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 ReservationKind.SPOT_ASSET, "USDT", 1_000, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
-                1_000, false, clientOrderId, 0, 0);
+                false, clientOrderId, 0, 0);
     }
 
     private static List<PlaceOrderCommand> repeatedPlaces(int count) {

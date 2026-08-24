@@ -1,14 +1,44 @@
 package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class RuntimeTreasuryDeltaTest {
+
+    @Test
+    void everyTreasurySubledgerContributesToTheBusinessStateHash() {
+        CoreTreasuryState empty = CoreTreasuryState.empty();
+        Set<Long> hashes = Set.of(
+                state(empty, 1).businessStateHash(),
+                state(empty.adjustFee("USDT", 1), 1).businessStateHash(),
+                state(empty.adjustInsurance("USDT", 1), 1).businessStateHash(),
+                state(empty.adjustDeficit("USDT", 1), 1).businessStateHash(),
+                state(empty.adjustLiquidationFee("USDT", 1), 1).businessStateHash(),
+                state(empty.adjustFundingResidual("USDT", 1), 1).businessStateHash(),
+                state(empty.adjustRoundingResidual("USDT", 1), 1).businessStateHash(),
+                state(empty.adjustClearingPnl("USDT", 1), 1).businessStateHash());
+
+        assertThat(hashes).hasSize(8);
+    }
+
+    @Test
+    void projectsEveryTreasurySubledgerWithoutDroppingFunds() {
+        CoreTreasuryState treasury = CoreTreasuryState.ofSubledgers(
+                Map.of("USDT", 1L), Map.of("USDT", 2L), Map.of("USDT", 3L),
+                Map.of("USDT", -4L), Map.of("USDT", 5L), Map.of("USDT", -6L),
+                Map.of("USDT", 7L));
+        TradingCoreState expected = state(treasury, 1);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+
+        TradingRuntimeState runtime = RuntimeStateProjector.project(expected, identities);
+
+        assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
+        assertThat(RollingBusinessStateHash.compute(expected)).isEqualTo(expected.businessStateHash());
+    }
 
     @Test
     void appliesOnlyChangedTreasuryEntriesAndPreservesRuntimeParity() {
@@ -35,31 +65,23 @@ class RuntimeTreasuryDeltaTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeStateDeltaApplier.apply(before, after, runtime, identities);
-
         TreasuryRuntime treasury = runtime.treasury();
+        int usdt = identities.assetId("USDT");
+        treasury.setFee(usdt, 0);
+        treasury.setInsurance(usdt, -50, 0);
+        treasury.setFundingSettlement(identities.symbolId("BTC-USDT"), 8);
+        treasury.setLifecycleSettlement(identities.symbolId("ETH-USDT"), 4);
+        runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 2);
+
         assertThat(treasury.fee(identities.assetId("BTC"))).isEqualTo(200L);
         assertThat(treasury.fee(identities.assetId("USDT"))).isZero();
-        assertThat(treasury.insurance(identities.assetId("USDT"))).isZero();
-        assertThat(treasury.insuranceDeficit(identities.assetId("USDT"))).isEqualTo(50L);
+        assertThat(treasury.insurance(identities.assetId("USDT"))).isEqualTo(-50L);
+        assertThat(treasury.insuranceDeficit(identities.assetId("USDT"))).isZero();
         assertThat(treasury.fundingSettlement(identities.symbolId("BTC-USDT"))).isEqualTo(8L);
         assertThat(treasury.fundingProgress(identities.symbolId("BTC-USDT"))).isNull();
         assertThat(treasury.lifecycleSettlement(identities.symbolId("ETH-USDT"))).isEqualTo(4L);
         assertThat(treasury.lifecycleProgress(identities.symbolId("ETH-USDT"))).isNull();
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(after);
-    }
-
-    @Test
-    void rejectsNonDeltaTreasuryTransitionInsteadOfRebuildingOnlineState() {
-        TradingCoreState before = state(CoreTreasuryState.empty(), 1);
-        TradingCoreState after = state(new CoreTreasuryState(
-                Map.of("USDT", 3L), Map.of(), Map.of(), Map.of(), Map.of()), 2);
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-
-        assertThatThrownBy(() -> RuntimeStateDeltaApplier.apply(before, after, runtime, identities))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("online treasury transition is not a delta");
     }
 
     private static TradingCoreState state(CoreTreasuryState treasury, long revision) {

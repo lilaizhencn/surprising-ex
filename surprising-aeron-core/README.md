@@ -4,7 +4,7 @@
 端口空间、Archive 和数据卷；一个逻辑 Core 固定由三个 Member 组成，并管理该变体全部 symbol。
 
 W1/W2 已完成单一可执行盘口改造：`TradingCoreRuntime` 是 Core 单写边界，撮合命令只进入 fork 的
-exchange-core 0.5.15-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
+exchange-core 0.5.16-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
 matcher 恢复导入 Aeron 配对 snapshot 中的原生 `ME0/RE0`，通过 `fromSnapshotOnly` 启动，不逐单回放。
 
 部署基线不按 margin mode 或热点 symbol 分 Core：CROSS 和 ISOLATED 都由同一个 ProductLine Core 裁决；
@@ -16,7 +16,7 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。当前�
 
 | 模块 | 职责 |
 | --- | --- |
-| `surprising-aeron-protocol` | schema v1 固定小端二进制 envelope、六线 wire code 和端口布局。 |
+| `surprising-aeron-protocol` | P1-P5 目标 schema v3 的固定小端二进制 command/envelope、六线 wire code 和端口布局（当前源码尚未完成此切换）。 |
 | `surprising-aeron-service` | `ClusteredService`、有界幂等状态、Snapshot 和节点启动器。 |
 | `surprising-aeron-client` | Leader 自动发现、切换处理和“超时即结果未知”同步客户端。 |
 | `surprising-aeron-exporter` | P5 可靠 Exporter 的最小 sink 边界。 |
@@ -35,25 +35,35 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 三节点部署与验证入口正在重新整理。一次只启动一条产品线；删除 Archive 或数据卷前必须先确认目标产品线，
 任何迁移工具只能在检测到既有状态时中止，不能自动删除状态。
 
+## 实现状态与版本切换说明
+
+本 README 中“P1-P5 规范契约”和其中的版本号描述目标状态与实现要求，不是当前源码已经完成的能力。当前实现基线见下方明确标注的条款；
+Task 2 不宣称源码已经实现 command/envelope v3、export event marker v7、trading snapshot v22 或 sectioned snapshot v11。
+目标切换完成前，不得把目标条款当作运行时能力。
+
 ## 协议约束
 
 - Cluster Log 权威消息禁止 Java serialization 和无版本 JSON。
-- v1 header 固定包含 `commandId`、`productLine`、`source`、`sourceId`、`sourceSequence`、`userId`、
-  外部提交时间和 `correlationId`。
+- 当前实现基线：旧 v2 header 包含 `commandId`、`productLine`、`source`、`sourceId`、`sourceSequence`、`userId`、
+  外部提交时间和 `correlationId`；该条款只描述切换前现状，不是 P1-P5 目标协议。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
-- exchange-core 0.5.15-emporia 独占价格树/FIFO；`GTX` 使用原生 post-only 语义，外层不得查 book 后模拟。
+- exchange-core 0.5.16-emporia 是唯一可执行订单簿（sole executable order book），独占价格树/FIFO；`GTX` 使用原生
+  post-only 语义，外层不得查 book 后模拟，也不得建立并行可执行 book。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
-- Core owner 线程只提交 exchange-core 异步命令；撮合结果通过 Cluster timer continuation 按序回到 owner，普通下单、撤单、改单、强平、结算和标记价触发子单均不在 owner 线程等待 ring future。adapter 不再提供同步交易入口；恢复和离线工具也通过显式异步 continuation drain 完成。
+- P2 的 same-callback one-in-flight target 要求 Core owner 线程按 Core sequence 串行提交一个 exchange-core 命令，并在同一个
+  same Aeron callback 内等待该命令的 immutable deterministic result；exchange-core 直接产出不可变 `MatcherResult`，不能由异步回调直接写入 Runtime。
+  生产协议不允许同一时刻存在第二个 MATCHING_ONLY command in flight，wall-clock readiness/watchdog 只能由 external health supervisor
+  观察，不能进入复制状态或改变裁决顺序。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
   通过一个 `EXECUTE_LIQUIDATION_BATCH` 同时提交有序 action 和可选 Risk Scan continuation，订单阶段完成后才推进用户阶段。
   每个批次共享最多 `1024` 笔撤单预算，Core 以 `nextCursorOrderId` 保存独占下一页位置。
   生命周期进度保存在 Core 状态中，但 pending matcher continuation 不写入 snapshot。matcher 异常、超时、
   malformed result 或 Core/matcher 分歧直接抛出 `FatalMatchingDivergenceException`，Cluster Member 失败关闭，
   不 rebuild、不 retry、不 resubmit；生命周期期间同 symbol 的普通订单被拒绝，其他 symbol 仍可提交。
-- exchange-core 的异步提交按 symbol lane 串行，同一 symbol 保序、不同 symbol 重叠，snapshot/hash/settlement 等全局操作使用 barrier；
-  当前物理 matcher 保持 `matchingEnginesNum(1)`，lane dispatcher 使用 adapter 自有线程，不依赖公共 ForkJoinPool。
+- exchange-core 的提交边界统一由上述单一 in-flight 门控；即使不同 symbol 也不得重叠，snapshot/hash/settlement 等全局操作必须在
+  同一 Core/book prefix 栅栏之后执行。当前物理 matcher 保持 `matchingEnginesNum(1)`，不得以线程池并发替代 Core sequence。
 
 生命周期批量协议使用 `EXECUTE_LIQUIDATION_BATCH` wire code 43。`CoreLiquidationWorkCodec` 返回 action 的
 `ORDERED` cursor 和精确 Risk Scan token；`CoreLiquidationBatchResultCodec` 返回 offered/applied/pending/obsolete/
@@ -71,6 +81,73 @@ processed 计数。`LIFECYCLE_IN_PROGRESS` 明确拒绝重叠生命周期。旧�
 - 幂等结果窗口有界；窗口外仍用 `(source, sourceId)` 的序列高水位阻止旧命令再次执行。
 - 同步调用超时表示结果未知。调用方必须复用同一 `commandId` 查询或重试，不能生成新 ID。
 - `SurprisingAeronClient` 串行提交消息；Gateway 后续通过固定数量的单线程 client agent 扩展吞吐。
+
+## Product Core P1-P5 规范契约
+
+以下条款是 Aeron Cluster Product Core 的 P1-P5 目标确定性状态机规范（当前源码尚未全部实现，不是现状声明）。目标状态下，Product Core/Aeron 的确定性状态、Cluster Log、Archive 和快照是在线交易
+current state 的唯一权威；PostgreSQL 只负责 Instrument 管理和 history 历史投影，Kafka 只承载审计 history 历史，二者均不得
+参与同步交易裁决或覆盖 Core 内存状态。
+
+### P1：命令、预留与唯一订单簿
+
+- 每个命令按 Aeron `Core sequence` 在 Product Core owner 上执行；命令内同时裁决 User State、Reservation、订单生命周期和
+  订单簿输入，提交给 exchange-core 的结果不得再被业务层否决。
+- 普通衍生品开仓必须为全量数量预留 reservation price 加最坏正手续费的完整 exposure；只有明确 `reduce-only` 命令可以省略
+  开仓保证金。所有平仓侧承诺占用独占的 `PositionCloseCapacity`，冲突的 reduce-only resting order 必须在进入 matcher 前按
+  Core sequence 确定性地从最新到最旧取消或缩量。
+- exchange-core 的 `MATCHING_ONLY` book 是唯一可执行订单簿；Product Core 只保存业务订单元数据和状态，不计算或维护可执行的
+  FIFO book。limit、execution、reservation、mark 四种 price 必须在命令和 Core Fact 中保持不同语义。
+
+### P2：确定性撮合推进与未知结果
+
+- 一个 Aeron callback transaction 内最多有一个 MATCHING_ONLY matcher command in flight。owner 按 Core sequence 提交并等待同一
+  callback 的 immutable copy；该 copy 至少携带 Core sequence、command ID、order ID、instrument version、matcher sequence、
+  before/after book hash，随后才允许提交下一个命令。
+- 缺失、超时、malformed、无法识别或 hash/sequence 不匹配都必须标记为 `unknown result`，立即 poison 当前 Member 并
+  `fail closed`：停止接收会改变交易状态的命令，保留可诊断证据，不 retry、rebuild、re-submit、按订单回放或猜测恢复。
+  wall-clock readiness 和 watchdog 由 external health supervisor 负责告警、摘除和人工恢复，不写入复制状态。
+- 任何 snapshot 只能捕获一个精确匹配的 Core/book prefix（matched book prefix）：Core sequence、matcher sequence、订单簿 before/after hash、instrument
+  version 和 snapshot position 必须来自同一已完成命令边界。恢复时任一字段不匹配即拒绝并 fail closed；pending callback 不得进入快照。
+
+### P3：Runtime 唯一生产写入权与 parity
+
+当前实现状态：P3 已完成。
+
+- `TradingRuntimeState` 是六条产品线生产热路径的唯一 mutation authority。只有 Product Core owner thread 可以原地写入 Runtime State；
+  外围服务、异步 matcher callback、PostgreSQL、Kafka 和 query projection 均不得直接写入。
+- immutable `TradingCoreState` 只能用于 snapshot、online query、replay/reference 和 parity materialization；生产命令不得先计算一份
+  第二个 immutable outcome 再覆盖 Runtime。deterministic parity sampling 必须逐项比较 Runtime 与 materialization 的状态、订单、
+  持仓、余额、预留、book hash 和资金 hash；发布前另行执行 full snapshot/replay parity。
+- `TradingCoreRuntime` 持有 owner-thread Runtime 与 identity registry；生产命令通过 Runtime processors 原地裁决，再按 changed-key
+  增量生成 immutable compatibility state。全量 materialization 只用于快照、恢复、显式查询或 parity，不在每条命令上遍历全局用户、
+  余额、预留和持仓。
+- 主源码不再提供 immutable outcome 反向覆盖 Runtime 的 delta applier。状态索引和 business-state hash 都从 Runtime changed-key
+  增量推进；exchange-core 仍是唯一可执行订单簿，未被 Runtime 或 `TradingCoreState` 复制。
+- 验证命令：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`。2026-08-24 本地结果为
+  295 tests、0 failures、0 errors，覆盖真实 exchange-core、Aeron timer replay、快照、六产品线资金/生命周期矩阵和 Runtime parity。
+
+### P4：六条产品线的结算内核
+
+- 结算输入、输出、ledger posting、integrity envelope 和 idempotency contract 固定；只允许且必须有以下六个 exhaustive kernels：
+  `Spot`、`LinearPerpetual`、`InversePerpetual`、`LinearDelivery`、`InverseDelivery`、`Option`。
+- 六个 kernel 的差异必须保留在各自的资金、持仓、资金费、交割、权利金、行权、到期、强平和 ADL 规则内；不得使用未命名的
+  derivative fallback，也不得把某产品线的订单、账户、instrument、topic 或风险模型混入另一产品线。可共享的仅限纯数学、账本
+  posting、完整性 envelope 和幂等工具。
+
+### P5：事实、资金与版本切换
+
+- 每个 command 产生不可变、按 `(asset, ownerKind, ownerId, subledger)` 排序的 `FundsDelta` 和 Core Fact；before/after state hash、
+  funds hash、Core/book prefix 和 Aeron position 必须共同标识同一裁决。Audit Exporter 从 replicated outbox 发布 Kafka history，
+  History Projector 再幂等写入 PostgreSQL；投影结果不是 current state。
+- P5 目标切换（当前源码尚未宣称完成）：command/envelope 应升级为 v3，export event marker 应升级为 v7，trading snapshot 应升级为 v22，sectioned snapshot 应升级为 v11。
+  目标切换完成后，decoder、snapshot loader 和 startup 必须对所有旧版本 fresh fail-old：旧版本一律拒绝并 fail closed，只能从 fresh compatible
+  Product Core state 启动，不保留旧 codec reader、迁移读取路径或隐式降级。
+
+### P6-P10：本 Task 2 的明确排除项
+
+本 Task 2 只冻结上述 P1-P5 合同，不宣称或实现 P6-P10：P6 randomized properties，P7 fatal/readiness certification，P8 three-node
+recovery，P9 1,000-user/40-minute capacity，P10 sharding/capacity。它们属于后续独立任务；任何 P6-P10 结果都不能改变本 README 已冻结的
+Product Core/Aeron authority、MATCHING_ONLY 唯一 book、单 in-flight progression 或 fresh fail-old cutover。
 
 ## 六产品线资金守恒契约
 
@@ -90,23 +167,25 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 
 ## W1/W2 原生快照契约
 
-- fork 坐标为 `exchange.core2:exchange-core:0.5.15-emporia`，Git SHA
-  `627ddf68fbb0594b07e4b59a1a0e3377354e26b9`，可复现 JAR SHA-256
-  `09e324685e9ae77244939c9f8c4044dc00dda4f03b98b60ff5d48f7e051e2d21`；fork 只允许 clean
+- fork 坐标为 `exchange.core2:exchange-core:0.5.16-emporia`，Git SHA
+  `4c4d163b6ba736a43360b325cdd7b9fb8c20648d`，可复现 JAR SHA-256
+  `d4ab72853924edc32069ab7158e7bcc5d374ecc1bcd594df04128ab459732b86`；fork 只允许 clean
   worktree 构建，从该提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 SHA；
   service 的 Maven `validate` 同时校验 provenance 与整包 hash。
+  matcher 内部启用事件链池化，池对象只在 exchange-core 内复用；对外 `MatcherResult` 为不可变值，普通交易热路径不执行全局状态报告。
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
-- `CoreState v9` 是唯一外层快照写格式，配对保存 Core 状态和 exchange-core 的 `MATCHING_ENGINE_ROUTER/0`、
-  `RISK_ENGINE/0`；`TradingState v20` 不含盘口，并包含版本化 Risk Scan Control。三个 Member 必须运行完全相同的 fork、配置和 schema。
+- P1-P5 目标状态下，`Trading snapshot v22` 是唯一外层交易快照写格式，配对保存 Product Core 状态和 exchange-core 的
+  `MATCHING_ENGINE_ROUTER/0`、`RISK_ENGINE/0`；它不把可执行订单簿复制成业务状态，并包含版本化 Risk Scan Control。
+  `sectioned snapshot v11` 只按相同 Core/book prefix 拆分物理载荷；三个 Member 必须运行完全相同的 fork、配置和 schema。
 - capture 在 `SymbolMatchingLanes.barrier` 内等待全部 lane 和 callback；pending matching 存在时拒绝发布。
 - Aeron fragment 在复制前执行 64 MiB 外层上限；matcher envelope 为 48 MiB、单个原生 module 为 32 MiB，
   超限时 fail closed。修改这些上限必须同步默认 heap 并完成目标活动订单规模的快照容量测试。
   恢复先校验三层 CRC32C、产品线、默认 shard/route、snapshot ID、Core/matcher sequence、Cluster
   timestamp/position、source digest、outbox cursor/pending digest、fork/config/artifact、symbol/user/instrument
   registry、完整 engine/book hash，再以 O(活动订单数) 一次报告逐字段核对 OPEN 订单；全部通过后才替换内存状态。
-- snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；没有 clean-start fallback、订单回放、
+- snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；不允许 clean-start 降级、订单回放、
   隐藏 FIFO、matcher journal 或跨 Member 部分恢复。
-- reader 仅为现有调用方保留显式 `CoreState v8` 读取兼容和 legacy manifest 默认值；writer 只生成 v9。
-  V8/V9 都不允许 PostgreSQL 投影、clean-start 或逐单回放修复不一致状态。
+- P1-P5 目标状态下，只接受 v22/v11 的 fresh compatible state；v3/v7/v22/v11 之前的 codec、export marker 或 snapshot 输入在 decode/startup 立即
+  拒绝并 fail closed。没有旧 reader、迁移读取路径或使用 PostgreSQL 投影、clean-start、逐单回放修复不一致状态的例外。
 - `UPDATE_RISK_SCAN_CONTROL` 使用乐观版本检查，`RISK_SCAN_CONTROL_QUERY` 返回当前版本、启停、续跑间隔、
-  批次上限和审计元数据；状态随 Cluster Log/Archive 与 `TradingState v20` snapshot 恢复。
+  批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v22` 恢复。

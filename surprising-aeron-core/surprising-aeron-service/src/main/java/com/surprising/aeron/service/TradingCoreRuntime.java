@@ -10,8 +10,12 @@ import com.surprising.aeron.service.state.ActiveOrderIndex;
 import com.surprising.aeron.service.state.AdlPositionIndex;
 import com.surprising.aeron.service.state.PositionUserIndex;
 import com.surprising.aeron.service.state.RiskSnapshotIndex;
+import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.CompletableFuture;
@@ -29,7 +33,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final ActiveOrderIndex activeOrders;
     private final AdlPositionIndex adlPositions;
     private final RiskSnapshotIndex riskSnapshots;
-    private TradingCoreState state;
+    private RuntimeIdentityRegistry identities;
+    private TradingRuntimeState runtimeState;
+    private long committedRevision;
+    private long committedBusinessStateHash;
     private final CompletableFuture<Void> matcherReady;
     private Thread owner;
 
@@ -46,7 +53,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
             throw new IllegalArgumentException("invalid trading runtime state");
         }
         this.productLine = productLine;
-        this.state = initialState;
+        this.identities = new RuntimeIdentityRegistry();
+        this.runtimeState = RuntimeStateProjector.project(initialState, identities);
+        this.committedRevision = initialState.revision();
+        this.committedBusinessStateHash = initialState.businessStateHash();
         this.reducer = new TradingCoreReducer();
         this.activeOrders = new ActiveOrderIndex(initialState);
         this.matcher = matcherSnapshot == null
@@ -68,6 +78,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         Thread current = Thread.currentThread();
         if (owner == null) {
             owner = current;
+            runtimeState.bindOwner();
+            identities.assertOwner();
         } else if (owner != current) {
             throw new IllegalStateException("trading runtime is bound to another thread");
         }
@@ -79,7 +91,17 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     public TradingCoreState state() {
         assertOwner();
-        return state;
+        return RuntimeStateMaterializer.materialize(runtimeState, identities);
+    }
+
+    TradingRuntimeState runtimeStateForConstruction() {
+        if (owner != null) assertOwner();
+        return runtimeState;
+    }
+
+    RuntimeIdentityRegistry identitiesForConstruction() {
+        if (owner != null) assertOwner();
+        return identities;
     }
 
     public TradingCoreReducer reducer() {
@@ -185,28 +207,28 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return riskSnapshots;
     }
 
-    public void transition(TradingCoreState before, TradingCoreState after) {
-        transition(before, after, after);
-    }
-
-    public void transition(TradingCoreState before, TradingCoreState deltaAfter, TradingCoreState authoritativeAfter) {
+    void commitRuntimeTransition(TradingCoreState before, TradingCoreState materializedAfter,
+                                 long beforeBusinessStateHash, long afterBusinessStateHash) {
         assertOwner();
-        if (before != state || deltaAfter == null || authoritativeAfter == null
-                || deltaAfter.productLine() != productLine || authoritativeAfter.productLine() != productLine
-                || !deltaAfter.equals(authoritativeAfter)) {
-            throw new IllegalStateException("trading runtime transition is out of order");
+        if (before == null || materializedAfter == null
+                || before.productLine() != productLine || materializedAfter.productLine() != productLine
+                || before.revision() != committedRevision
+                || beforeBusinessStateHash != committedBusinessStateHash
+                || materializedAfter.revision() < before.revision()) {
+            throw new IllegalStateException("runtime transition is out of order");
         }
-        deltaAfter.requireOnlineDeltaLineage(before);
-        positionUsers.update(before, deltaAfter);
-        openInterest.update(before, deltaAfter);
-        triggers.update(before, deltaAfter);
-        algos.update(before, deltaAfter);
-        liquidations.update(before, deltaAfter);
-        timers.update(before, deltaAfter);
-        activeOrders.update(before, deltaAfter);
-        adlPositions.update(before, deltaAfter);
-        riskSnapshots.update(before, deltaAfter);
-        state = authoritativeAfter;
+        positionUsers.update(before, materializedAfter);
+        openInterest.update(before, materializedAfter);
+        triggers.update(before, materializedAfter);
+        algos.update(before, materializedAfter);
+        liquidations.update(before, materializedAfter);
+        timers.update(before, materializedAfter);
+        activeOrders.update(before, materializedAfter);
+        adlPositions.update(before, materializedAfter);
+        riskSnapshots.update(before, materializedAfter);
+        committedRevision = materializedAfter.revision();
+        committedBusinessStateHash = afterBusinessStateHash;
+        runtimeState.clearChangedKeys();
     }
 
     public void restoreStateOnly(TradingCoreState restored) {
@@ -218,7 +240,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     private void restoreIndexes(TradingCoreState restored) {
-        state = restored;
+        identities = new RuntimeIdentityRegistry();
+        runtimeState = RuntimeStateProjector.project(restored, identities);
+        runtimeState.clearChangedKeys();
+        committedRevision = restored.revision();
+        committedBusinessStateHash = restored.businessStateHash();
         positionUsers.rebuild(restored);
         openInterest.rebuild(restored);
         triggers.rebuild(restored);

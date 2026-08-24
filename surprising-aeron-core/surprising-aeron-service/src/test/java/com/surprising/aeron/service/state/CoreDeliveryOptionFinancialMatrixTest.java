@@ -223,8 +223,10 @@ class CoreDeliveryOptionFinancialMatrixTest {
         OrderReservation beforeReservation = beforeUser.reservations().get(701L);
         long beforeCrossCollateral = beforeBalance.totalUnits()
                 - beforeUser.positions().get(isolatedSymbol).positionMarginUnits();
-        assertThat(beforeBalance.availableUnits()).isEqualTo(139);
-        assertThat(beforeBalance.lockedUnits()).isEqualTo(61);
+        assertThat(beforeBalance.availableUnits()).isEqualTo(130);
+        assertThat(beforeBalance.lockedUnits()).isEqualTo(70);
+        assertThat(beforeReservation.reservedUnits()).isEqualTo(10);
+        assertThat(beforeReservation.remainingUnits()).isEqualTo(10);
         assertThat(beforeCrossCollateral).isEqualTo(180);
         long beforeTotal = total(state, "USDT");
 
@@ -239,7 +241,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(afterBalance.availableUnits()).isEqualTo(beforeBalance.availableUnits());
         assertThat(afterBalance.totalUnits() - afterUser.positions().get(isolatedSymbol).positionMarginUnits())
                 .isEqualTo(beforeCrossCollateral);
-        assertThat(afterBalance.lockedUnits()).isEqualTo(41);
+        assertThat(afterBalance.lockedUnits()).isEqualTo(50);
         assertThat(afterUser.positions().get(isolatedSymbol).signedQuantitySteps()).isZero();
         assertThat(afterUser.positions().get(isolatedSymbol).realizedPnlUnits()).isEqualTo(-40);
         assertThat(settled.treasuryState().insuranceBalances()).containsEntry("USDT", 20L);
@@ -361,11 +363,32 @@ class CoreDeliveryOptionFinancialMatrixTest {
     }
 
     private PlaceOrderCommand optionOrder(long orderId, Variant variant, CoreOrderSide side) {
-        return new PlaceOrderCommand(orderId, variant.symbol(), 1, variant.baseAsset(), variant.quoteAsset(),
-                variant.settleAsset(), side, PREMIUM_PRICE, QUANTITY, false, variant.marginMode(),
-                CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, variant.settleAsset(), 0,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTC, PREMIUM_PRICE, false, "", 0,
-                OPTION_FEE_RATE_PPM);
+        return new PlaceOrderCommand(
+                orderId,
+                variant.symbol(),
+                1,
+                variant.baseAsset(),
+                variant.quoteAsset(),
+                variant.settleAsset(),
+                side,
+                PREMIUM_PRICE,
+                PREMIUM_PRICE,
+                PREMIUM_PRICE,
+                PREMIUM_PRICE,
+                QUANTITY,
+                false,
+                variant.marginMode(),
+                CorePositionSide.NET,
+                ReservationKind.DERIVATIVE_MARGIN,
+                variant.settleAsset(),
+                0,
+                CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC,
+                false,
+                "",
+                0,
+                OPTION_FEE_RATE_PPM
+        );
     }
 
     private TradingCoreState oppositePositions(Variant variant, long userWallet, long makerWallet) {
@@ -424,10 +447,32 @@ class CoreDeliveryOptionFinancialMatrixTest {
     }
 
     private PlaceOrderCommand deliveryOrder(long orderId, Variant variant, String symbol) {
-        return new PlaceOrderCommand(orderId, symbol, 1, variant.baseAsset(), variant.quoteAsset(),
-                variant.settleAsset(), CoreOrderSide.BUY, ENTRY_PRICE, 1, false, CoreMarginMode.CROSS,
-                CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, variant.settleAsset(), 0,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTC, ENTRY_PRICE, false, "", 0, 0);
+        return new PlaceOrderCommand(
+                orderId,
+                symbol,
+                1,
+                variant.baseAsset(),
+                variant.quoteAsset(),
+                variant.settleAsset(),
+                CoreOrderSide.BUY,
+                ENTRY_PRICE,
+                ENTRY_PRICE,
+                ENTRY_PRICE,
+                ENTRY_PRICE,
+                1,
+                false,
+                CoreMarginMode.CROSS,
+                CorePositionSide.NET,
+                ReservationKind.DERIVATIVE_MARGIN,
+                variant.settleAsset(),
+                0,
+                CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC,
+                false,
+                "",
+                0,
+                0
+        );
     }
 
     private void assertFundingRejected(Variant variant, long settlementId) {

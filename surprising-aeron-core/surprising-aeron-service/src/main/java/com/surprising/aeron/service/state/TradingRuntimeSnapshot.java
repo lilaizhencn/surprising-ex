@@ -246,12 +246,6 @@ public record TradingRuntimeSnapshot(
     }
 
     public record TreasurySnapshot(long feeUnits, long insuranceUnits, long insuranceDeficitUnits) {
-        public TreasurySnapshot {
-            if (insuranceUnits < 0 || insuranceDeficitUnits < 0
-                    || insuranceUnits != 0 && insuranceDeficitUnits != 0) {
-                throw new IllegalArgumentException("invalid snapshot treasury");
-            }
-        }
     }
 
     public record FundingProgressSnapshot(long settlementId, long instrumentVersion, long fundingRatePpm,

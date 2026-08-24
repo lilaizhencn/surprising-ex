@@ -98,7 +98,7 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.BUY, 0, 1, ReservationKind.SPOT_ASSET, "USDT", 100,
                             CoreOrderType.MARKET, CoreTimeInForce.IOC, 100, false));
 
-            assertThat(state.tradingState().order(202).priceTicks()).isZero();
+            assertThat(state.tradingState().order(202).priceTicks()).isEqualTo(100);
             assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
             assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.tradingState().orders().values())
@@ -262,6 +262,43 @@ class CoreMatchingStateTest {
         }
     }
 
+    @Test
+    void linearPerpetualActiveCloseAcceptsBetterFillThanSellMarketProtectionPrice() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 3, 33, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 4, 11, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(101, CoreOrderSide.SELL, 100, 1, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, false, 0, 100_000));
+            apply(state, 5, 22, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(202, CoreOrderSide.BUY, 0, 1, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000,
+                            CoreOrderType.MARKET, CoreTimeInForce.IOC, 100, false, 0, 100_000));
+            apply(state, 6, 33, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(303, CoreOrderSide.BUY, 110, 1, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, 110, false, 0, 100_000));
+
+            long fundsBeforeClose = total(state, "USDT");
+            apply(state, 7, 22, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(204, CoreOrderSide.SELL, 0, 1, true,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000,
+                            CoreOrderType.MARKET, CoreTimeInForce.IOC, 90, false, 0, 100_000));
+
+            assertThat(state.tradingState().order(204).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
+            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().user(22).reservations().get(204L).remainingUnits()).isZero();
+            assertThat(total(state, "USDT")).isEqualTo(fundsBeforeClose);
+        }
+    }
+
     @ParameterizedTest
     @MethodSource("allProductLines")
     void everyProductLineMatchConservesSettlementFundsWithNonzeroFees(ProductLine productLine) {
@@ -342,9 +379,32 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
             apply(state, 5, 22, CoreMessageType.REPLACE_ORDER,
                     TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(202,
-                            new PlaceOrderCommand(203, "BTC-USDT", 1, "BTC", "USDT", "USDT",
-                                    CoreOrderSide.BUY, 110, 2, false, ReservationKind.SPOT_ASSET,
-                                    "USDT", 220))));
+                            new PlaceOrderCommand(
+                                    203,
+                                    "BTC-USDT",
+                                    1,
+                                    "BTC",
+                                    "USDT",
+                                    "USDT",
+                                    CoreOrderSide.BUY,
+                                    110,
+                                    110,
+                                    110,
+                                    110,
+                                    2,
+                                    false,
+                                    com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                                    com.surprising.aeron.protocol.CorePositionSide.NET,
+                                    ReservationKind.SPOT_ASSET,
+                                    "USDT",
+                                    220,
+                                    com.surprising.aeron.protocol.CoreOrderType.LIMIT,
+                                    com.surprising.aeron.protocol.CoreTimeInForce.GTC,
+                                    false,
+                                    "",
+                                    0,
+                                    0
+                            ))));
 
             assertThat(state.tradingState().orders().values())
                     .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
@@ -428,9 +488,32 @@ class CoreMatchingStateTest {
             String reservationAsset,
             long reservedUnits) {
         String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                "BTC", "USDT", settleAsset, side, priceTicks, quantitySteps, false,
-                reservationKind, reservationAsset, reservedUnits));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                orderId,
+                "BTC-USDT",
+                1,
+                "BTC",
+                "USDT",
+                settleAsset,
+                side,
+                priceTicks,
+                priceTicks,
+                priceTicks,
+                priceTicks,
+                quantitySteps,
+                false,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                reservationKind,
+                reservationAsset,
+                reservedUnits,
+                com.surprising.aeron.protocol.CoreOrderType.LIMIT,
+                com.surprising.aeron.protocol.CoreTimeInForce.GTC,
+                false,
+                "",
+                0,
+                0
+        ));
     }
 
     private static byte[] place(
@@ -446,12 +529,32 @@ class CoreMatchingStateTest {
             long matchingPriceTicks,
             boolean postOnly) {
         String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                "BTC", "USDT", settleAsset, side, priceTicks, quantitySteps, false,
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                orderId,
+                "BTC-USDT",
+                1,
+                "BTC",
+                "USDT",
+                settleAsset,
+                side,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                quantitySteps,
+                false,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
-                reservationKind, reservationAsset, reservedUnits, orderType, timeInForce,
-                matchingPriceTicks, postOnly, "client-" + orderId, 0, 0));
+                reservationKind,
+                reservationAsset,
+                reservedUnits,
+                orderType,
+                timeInForce,
+                postOnly,
+                "client-" + orderId,
+                0,
+                0
+        ));
     }
 
     private static byte[] placeWithFees(
@@ -470,12 +573,32 @@ class CoreMatchingStateTest {
             long makerFeeRatePpm,
             long takerFeeRatePpm) {
         String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                "BTC", "USDT", settleAsset, side, priceTicks, quantitySteps, reduceOnly,
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                orderId,
+                "BTC-USDT",
+                1,
+                "BTC",
+                "USDT",
+                settleAsset,
+                side,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                quantitySteps,
+                reduceOnly,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
-                reservationKind, reservationAsset, reservedUnits, orderType, timeInForce,
-                matchingPriceTicks, postOnly, "client-" + orderId, makerFeeRatePpm, takerFeeRatePpm));
+                reservationKind,
+                reservationAsset,
+                reservedUnits,
+                orderType,
+                timeInForce,
+                postOnly,
+                "client-" + orderId,
+                makerFeeRatePpm,
+                takerFeeRatePpm
+        ));
     }
 
     private static byte[] place(
@@ -488,9 +611,32 @@ class CoreMatchingStateTest {
             String reservationAsset,
             long reservedUnits) {
         String settleAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN ? reservationAsset : "USDT";
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                "BTC", "USDT", settleAsset, side, priceTicks, quantitySteps, reduceOnly,
-                reservationKind, reservationAsset, reservedUnits));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                orderId,
+                "BTC-USDT",
+                1,
+                "BTC",
+                "USDT",
+                settleAsset,
+                side,
+                priceTicks,
+                priceTicks,
+                priceTicks,
+                priceTicks,
+                quantitySteps,
+                reduceOnly,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                reservationKind,
+                reservationAsset,
+                reservedUnits,
+                com.surprising.aeron.protocol.CoreOrderType.LIMIT,
+                com.surprising.aeron.protocol.CoreTimeInForce.GTC,
+                false,
+                "",
+                0,
+                0
+        ));
     }
 
     private static void applyInstrument(CoreProbeState state) {

@@ -4,17 +4,10 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import java.util.Objects;
 
-record PendingMatching(long sequence, Operation operation, CoreMessage command, long attemptDeadline,
-                       CommandFingerprint fingerprint) {
-
-    static final long ATTEMPT_TIMEOUT_MILLIS = 30_000;
+record PendingMatching(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint) {
 
     PendingMatching(long sequence, Operation operation, CoreMessage command) {
-        this(sequence, operation, command, Long.MAX_VALUE, CommandFingerprint.of(command));
-    }
-
-    PendingMatching(long sequence, Operation operation, CoreMessage command, long attemptDeadline) {
-        this(sequence, operation, command, attemptDeadline, CommandFingerprint.of(command));
+        this(sequence, operation, command, CommandFingerprint.of(command));
     }
 
     PendingMatching {
@@ -23,13 +16,10 @@ record PendingMatching(long sequence, Operation operation, CoreMessage command, 
             throw new IllegalArgumentException("invalid pending matching request");
         }
         Objects.requireNonNull(command.header().commandId(), "commandId");
-        if (attemptDeadline < 0) {
-            throw new IllegalArgumentException("invalid matching attempt");
-        }
     }
 
     PendingMatching withCommand(CoreMessage nextCommand) {
-        return new PendingMatching(sequence, operation, nextCommand, attemptDeadline, fingerprint);
+        return new PendingMatching(sequence, operation, nextCommand, fingerprint);
     }
 
     enum Operation {

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
 import io.aeron.Publication;
 import java.time.Duration;
@@ -291,6 +292,47 @@ class AeronClientAgentTest {
                     .get(2, TimeUnit.SECONDS);
             assertThat(secondSession.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(opened.get()).isGreaterThanOrEqualTo(3);
+        }
+    }
+
+    @Test
+    void retriesQueryWhenTheLeaderFailoverClosesItsPublication() {
+        AtomicInteger opened = new AtomicInteger();
+        AtomicInteger offers = new AtomicInteger();
+        AeronClientPool.SessionFactory factory = () -> {
+            if (opened.incrementAndGet() <= 2) {
+                return session(message -> {
+                    offers.incrementAndGet();
+                    return Publication.CLOSED;
+                });
+            }
+            AtomicReference<Long> correlation = new AtomicReference<>();
+            return new AeronClientPool.Session() {
+                @Override public long offer(CoreMessage message) {
+                    offers.incrementAndGet();
+                    correlation.set(message.header().correlationId());
+                    return 1;
+                }
+                @Override public int pollEgress(int fragmentLimit) {
+                    return correlation.get() == null ? 0 : 1;
+                }
+                @Override public CoreResponse takeResponse(long correlationId) {
+                    Long offeredCorrelation = correlation.getAndSet(null);
+                    return offeredCorrelation != null && offeredCorrelation == correlationId
+                            ? new CoreResponse(ResponseStatus.OK, 42, 99)
+                            : null;
+                }
+                @Override public RuntimeException sessionFailure() { return null; }
+                @Override public boolean keepAlive() { return true; }
+                @Override public void close() { }
+            };
+        };
+
+        try (AeronClientPool pool = pool(Duration.ofSeconds(1), factory)) {
+            CoreResponse response = pool.query(CoreMessageType.USER_STATE_QUERY, UUID.randomUUID(), 9, new byte[0]);
+
+            assertThat(response.appliedCommandCount()).isEqualTo(42);
+            assertThat(offers).hasValue(2);
         }
     }
 

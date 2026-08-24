@@ -820,12 +820,32 @@ class CorePerpetualFinancialMatrixTest {
     private PlaceOrderCommand pricedOrder(long orderId, Variant variant, CoreOrderSide side, long quantity,
                                           long priceTicks, boolean reduceOnly,
                                           long makerFeeRatePpm, long takerFeeRatePpm) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, variant.baseAsset(), variant.quoteAsset(),
-                variant.settleAsset(), side, priceTicks, quantity, reduceOnly, variant.marginMode(),
-                CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, variant.settleAsset(), 0,
+        return new PlaceOrderCommand(
+                orderId,
+                SYMBOL,
+                1,
+                variant.baseAsset(),
+                variant.quoteAsset(),
+                variant.settleAsset(),
+                side,
+                priceTicks,
+                priceTicks,
+                priceTicks,
+                priceTicks,
+                quantity,
+                reduceOnly,
+                variant.marginMode(),
+                CorePositionSide.NET,
+                ReservationKind.DERIVATIVE_MARGIN,
+                variant.settleAsset(),
+                0,
                 com.surprising.aeron.protocol.CoreOrderType.LIMIT,
-                com.surprising.aeron.protocol.CoreTimeInForce.GTC, priceTicks, false, "",
-                makerFeeRatePpm, takerFeeRatePpm);
+                com.surprising.aeron.protocol.CoreTimeInForce.GTC,
+                false,
+                "",
+                makerFeeRatePpm,
+                takerFeeRatePpm
+        );
     }
 
     private TradingCoreState mark(TradingCoreState state, Variant variant, long price, long sequence) {

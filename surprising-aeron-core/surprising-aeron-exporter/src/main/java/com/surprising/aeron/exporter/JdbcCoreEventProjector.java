@@ -7,13 +7,11 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.product.api.ProductLine;
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Objects;
-import java.util.UUID;
 import javax.sql.DataSource;
 
 public final class JdbcCoreEventProjector {
@@ -42,6 +40,10 @@ public final class JdbcCoreEventProjector {
                 created_at_epoch_ms = ?, updated_at_epoch_ms = ?, cluster_position = ?,
                 order_revision = ?, export_sequence = ?, raw_order_state = ?
             WHERE product_line = ? AND order_id = ? AND order_revision < ?
+            """;
+    private static final String SELECT_ORDER = """
+            SELECT order_revision, raw_order_state FROM core_order_projection
+            WHERE product_line = ? AND order_id = ?
             """;
     private static final String INSERT_EXECUTION = """
             INSERT INTO core_execution_projection
@@ -111,12 +113,6 @@ public final class JdbcCoreEventProjector {
             SELECT raw_event FROM core_event_projection
             WHERE product_line = ? AND export_sequence = ?
             """;
-    private static final String INSERT_AUDIT = """
-            INSERT INTO core_websocket_audit_projection (
-                product_line, export_sequence, event_id, command_id, event_type,
-                user_id, occurred_at_epoch_ms, raw_event
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """;
     private static final String UPDATE_WATERMARK = """
             UPDATE core_projection_watermark
             SET last_export_sequence = ?, updated_at = CURRENT_TIMESTAMP
@@ -153,7 +149,6 @@ public final class JdbcCoreEventProjector {
                     throw sequenceFailure(productLine, lastExportSequence, event.exportSequence(), "sequence gap");
                 }
                 insertEvent(connection, productLine, message, event);
-                insertAudit(connection, productLine, message, event, rawMessage);
                 insertFacts(connection, productLine, message, event);
                 updateWatermark(connection, productLine, lastExportSequence, event.exportSequence());
                 connection.commit();
@@ -196,23 +191,6 @@ public final class JdbcCoreEventProjector {
                                                 String reason) {
         return new SQLException("projection " + reason + " for " + productLine
                 + ": watermark=" + current + ", received=" + received, "23000");
-    }
-
-    private static void insertAudit(Connection connection, ProductLine productLine, CoreMessage message,
-                                    CoreExportEvent event, byte[] rawMessage) throws SQLException {
-        UUID eventId = UUID.nameUUIDFromBytes((productLine.name() + ':' + event.exportSequence())
-                .getBytes(StandardCharsets.UTF_8));
-        try (PreparedStatement statement = connection.prepareStatement(INSERT_AUDIT)) {
-            statement.setString(1, productLine.name());
-            statement.setLong(2, event.exportSequence());
-            statement.setObject(3, eventId);
-            statement.setObject(4, event.commandId());
-            statement.setString(5, event.commandType().name());
-            statement.setLong(6, event.userId());
-            statement.setLong(7, message.header().submittedAtEpochMillis());
-            statement.setBytes(8, rawMessage);
-            if (statement.executeUpdate() != 1) throw new SQLException("websocket audit was not inserted");
-        }
     }
 
     private static void updateWatermark(Connection connection, ProductLine productLine,
@@ -273,18 +251,10 @@ public final class JdbcCoreEventProjector {
                 update.setLong(12, order.orderId());
                 update.setLong(13, order.revision());
                 if (update.executeUpdate() == 0) {
-                    insert.setString(1, productLine.name());
-                    insert.setLong(2, order.orderId());
-                    insert.setLong(3, order.userId());
-                    setClientOrderId(insert, 4, order.clientOrderId());
-                    insert.setString(5, order.symbol());
-                    insert.setString(6, order.status());
-                    insert.setLong(7, order.createdAtEpochMillis());
-                    insert.setLong(8, order.updatedAtEpochMillis());
-                    insert.setLong(9, order.clusterPosition());
-                    insert.setLong(10, order.revision());
-                    insert.setLong(11, event.exportSequence());
-                    insert.setBytes(12, raw);
+                    if (orderAlreadyProjected(connection, productLine, order.orderId(), order.revision(), raw)) {
+                        continue;
+                    }
+                    bindOrderInsert(insert, productLine, event, order, raw);
                     insert.executeUpdate();
                 }
             }
@@ -319,6 +289,48 @@ public final class JdbcCoreEventProjector {
         insertFundingFacts(connection, productLine, message, event);
         upsertLiquidations(connection, productLine, message, event);
         upsertTreasury(connection, productLine, message, event);
+    }
+
+    private static boolean orderAlreadyProjected(
+            Connection connection,
+            ProductLine productLine,
+            long orderId,
+            long revision,
+            byte[] rawOrderState) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(SELECT_ORDER)) {
+            statement.setString(1, productLine.name());
+            statement.setLong(2, orderId);
+            try (var result = statement.executeQuery()) {
+                if (!result.next()) return false;
+                long projectedRevision = result.getLong(1);
+                if (projectedRevision != revision || !Arrays.equals(result.getBytes(2), rawOrderState)) {
+                    throw new SQLException("conflicting order projection for " + productLine
+                            + "/" + orderId + ": projectedRevision=" + projectedRevision
+                            + ", receivedRevision=" + revision, "23000");
+                }
+                return true;
+            }
+        }
+    }
+
+    private static void bindOrderInsert(
+            PreparedStatement insert,
+            ProductLine productLine,
+            CoreExportEvent event,
+            com.surprising.aeron.protocol.CoreOrderStateView order,
+            byte[] raw) throws SQLException {
+        insert.setString(1, productLine.name());
+        insert.setLong(2, order.orderId());
+        insert.setLong(3, order.userId());
+        setClientOrderId(insert, 4, order.clientOrderId());
+        insert.setString(5, order.symbol());
+        insert.setString(6, order.status());
+        insert.setLong(7, order.createdAtEpochMillis());
+        insert.setLong(8, order.updatedAtEpochMillis());
+        insert.setLong(9, order.clusterPosition());
+        insert.setLong(10, order.revision());
+        insert.setLong(11, event.exportSequence());
+        insert.setBytes(12, raw);
     }
 
     private static com.surprising.aeron.protocol.CoreOrderStateView requireChangedOrder(

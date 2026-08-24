@@ -5,11 +5,15 @@ import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -90,8 +94,9 @@ public final class ClusterDerivativeSmokeMain {
 
     private static byte[] derivativeOrder(long orderId, CoreOrderSide side) {
         return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                "BTC", "USDT", "USDT", side, 100, 10, false,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
+                "BTC", "USDT", "USDT", side, 100, 100, 100, 100, 10, false,
+                CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, "USDT", 100,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", 0, 0));
     }
 
     private static void requirePosition(

@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -66,7 +67,7 @@ final class HttpOpenLoopWorkload {
     Summary run() {
         verifyHttpSurface();
         try (StableIdentityLedger opened = StableIdentityLedger.open(
-                config.outputDirectory(), config.runId(), config.seed())) {
+                config.outputDirectory(), config.runId(), config.seed(), config.fingerprint())) {
             ledger = opened;
             rebuildPools(opened.snapshots());
             for (StableIdentityLedger.Intent intent : opened.outstanding()) {
@@ -89,8 +90,10 @@ final class HttpOpenLoopWorkload {
         HttpRequest request = HttpRequest.newBuilder(config.baseUri().resolve("/actuator/health"))
                 .timeout(config.requestTimeout()).GET().build();
         Response response = send(request);
-        if (response.status() == 0) {
-            throw new IllegalStateException("HTTP workload surface is not reachable: " + response.outcome());
+        boolean healthy = response.status() >= 200 && response.status() < 300;
+        if (!healthy) {
+            throw new IllegalStateException("HTTP workload surface is not healthy: status=" + response.status()
+                    + " outcome=" + response.outcome());
         }
     }
 
@@ -116,8 +119,11 @@ final class HttpOpenLoopWorkload {
             WorkloadOperation operation = operation(sequence);
             long userId = user(sequence);
             String symbol = symbol(sequence);
-            String targetIdentity = pools.reserve(operation, sequence, userId, symbol).orElse("");
-            StableIdentityLedger.Intent intent = current.intent(sequence, operation, userId, symbol,
+            Optional<Resource> reserved = pools.reserve(operation, sequence);
+            long intentUserId = reserved.map(Resource::userId).orElse(userId);
+            String intentSymbol = reserved.map(Resource::symbol).orElse(symbol);
+            String targetIdentity = reserved.map(Resource::identity).orElse("");
+            StableIdentityLedger.Intent intent = current.intent(sequence, operation, intentUserId, intentSymbol,
                     expected(operation), targetIdentity);
             current.scheduled(intent, intended);
             if (requiresPrerequisite(operation, sequence) && targetIdentity.isEmpty()) {
@@ -171,20 +177,20 @@ final class HttpOpenLoopWorkload {
             record(initial);
             ledger.http(intent.sequence(), httpAt, response.status(), initial);
             recordLatency(httpLatency, httpAt - ledgerSnapshot(intent.sequence()).intendedNanos());
-            if (response.status() == 202) response = pollAccepted(response.body());
+            if (shouldPoll(response, intent)) response = pollResult(response, intent);
             if (cancelled.get()) {
                 ledger.aborted(intent.sequence(), EpochNanoClock.now(), "workload cancelled");
                 pools.release(intent);
                 return;
             }
-            if (response.status() == 202) return;
+            if (isUnresolved(response, intent)) return;
             if (response.outcome() != initial || response.status() != ledgerSnapshot(intent.sequence()).httpStatus()) {
                 record(response.outcome());
                 ledger.http(intent.sequence(), EpochNanoClock.now(), response.status(), response.outcome());
             }
             String actual = terminalState(response, intent);
             HttpOutcome terminalOutcome = response.outcome();
-            if (terminalOutcome == HttpOutcome.SUCCESS_2XX && !intent.expectedFinalState().equals(actual)) {
+            if (terminalOutcome == HttpOutcome.SUCCESS_2XX && !isAcceptedTerminalState(intent, actual)) {
                 terminalOutcome = HttpOutcome.ORACLE_MISMATCH;
                 record(terminalOutcome);
             }
@@ -223,19 +229,40 @@ final class HttpOpenLoopWorkload {
         }
     }
 
-    private Response pollAccepted(String initialBody) {
+    private Response pollResult(Response initial, StableIdentityLedger.Intent intent) {
+        String initialBody = initial.body();
         String resultUrl = stringField(initialBody, "commandResultUrl").orElseGet(() ->
                 stringField(initialBody, "commandId").map(id -> "/api/v1/trading/orders/commands/" + id).orElse(""));
-        if (resultUrl.isEmpty()) return new Response(202, initialBody, HttpOutcome.ACCEPTED_202);
+        if (resultUrl.isEmpty()) return initial;
         URI uri = resultUrl.startsWith("http") ? URI.create(resultUrl) : config.baseUri().resolve(resultUrl);
-        Response response = new Response(202, initialBody, HttpOutcome.ACCEPTED_202);
-        for (int attempt = 0; attempt < config.maxPolls() && response.status() == 202 && !cancelled.get(); attempt++) {
+        Response response = initial;
+        for (int attempt = 0; attempt < config.maxPolls() && shouldPoll(response, intent)
+                && !cancelled.get(); attempt++) {
             if (!config.pollInterval().isZero()) LockSupport.parkNanos(config.pollInterval().toNanos());
             HttpRequest request = HttpRequest.newBuilder(uri).timeout(config.requestTimeout()).GET()
                     .header("Accept", "application/json").build();
             response = send(request);
         }
         return response;
+    }
+
+    private boolean shouldPoll(Response response, StableIdentityLedger.Intent intent) {
+        if (response.status() == 202) return true;
+        if (response.outcome() != HttpOutcome.SUCCESS_2XX || isTerminalWrapper(response.body())) return false;
+        if (intent.operation() == WorkloadOperation.TRIGGER || intent.operation() == WorkloadOperation.BATCH_ALGO_CONTROL) {
+            return false;
+        }
+        return isPendingCommandReceipt(response.body());
+    }
+
+    private boolean isUnresolved(Response response, StableIdentityLedger.Intent intent) {
+        if (response.status() == 202) return true;
+        if (response.outcome() != HttpOutcome.SUCCESS_2XX) return false;
+        if (isTerminalWrapper(response.body())) return false;
+        if (intent.operation() == WorkloadOperation.TRIGGER) return stringField(response.body(), "status").isEmpty();
+        if (intent.operation() == WorkloadOperation.BATCH_ALGO_CONTROL) return !isDirectControlResult(response.body());
+        String actual = terminalState(response, intent);
+        return "RESULT_UNKNOWN".equals(actual) || isPendingCommandReceipt(response.body());
     }
 
     private HttpRequest request(StableIdentityLedger.Intent intent) {
@@ -257,11 +284,12 @@ final class HttpOpenLoopWorkload {
                     "{\"userId\":" + intent.userId() + ",\"orderId\":" + intent.targetIdentity() + "}");
             case AMEND -> post("/api/v1/trading/orders/amend",
                     "{\"userId\":" + intent.userId() + ",\"orderId\":" + intent.targetIdentity()
-                            + ",\"newClientOrderId\":\"" + clientId + "\",\"priceTicks\":101,"
+                            + ",\"newClientOrderId\":\"" + clientId + "\",\"priceTicks\":"
+                            + config.limitPriceTicks() + ","
                             + "\"quantitySteps\":1,\"timeInForce\":\"GTC\",\"postOnly\":false,"
                             + "\"clientRequestId\":\"" + clientId + "\"}");
-            case MARKET_IOC_CLOSE -> intent.sequence() % 2 == 0
-                    ? post("/api/v1/trading/orders", orderJson(intent, "MARKET", "IOC", true))
+            case MARKET_IOC_CLOSE -> intent.sequence() % 2 != 0
+                    ? post("/api/v1/trading/orders", orderJson(intent, "MARKET", "IOC", false))
                     : post("/api/v1/trading/orders/close-position",
                             "{\"userId\":" + intent.userId() + ",\"clientOrderId\":\"" + clientId
                                     + "\",\"symbol\":\"" + intent.symbol()
@@ -269,7 +297,8 @@ final class HttpOpenLoopWorkload {
             case TRIGGER -> post("/api/v1/trading/trigger-orders",
                     "{\"userId\":" + intent.userId() + ",\"clientTriggerOrderId\":\"" + clientId
                             + "\",\"symbol\":\"" + intent.symbol() + "\",\"side\":\"SELL\","
-                            + "\"triggerType\":\"STOP_LOSS\",\"triggerPriceTicks\":90,\"orderType\":\"MARKET\","
+                            + "\"triggerType\":\"STOP_LOSS\",\"triggerPriceTicks\":"
+                            + config.triggerPriceTicks() + ",\"orderType\":\"MARKET\","
                             + "\"timeInForce\":\"IOC\",\"priceTicks\":0,\"quantitySteps\":1,"
                             + "\"marginMode\":\"CROSS\",\"positionSide\":\"NET\"}");
             case TRIGGER_CANCEL -> post("/api/v1/trading/trigger-orders/cancel",
@@ -284,10 +313,11 @@ final class HttpOpenLoopWorkload {
                     + "\",\"orders\":[" + orderJson(intent, "LIMIT", "GTC", false) + "]}");
             case 1 -> post("/api/v1/trading/orders/algo", "{\"userId\":" + intent.userId()
                     + ",\"clientAlgoOrderId\":\"" + intent.clientIdentity() + "\",\"symbol\":\""
-                    + intent.symbol() + "\",\"algoType\":\"TWAP\",\"side\":\"BUY\",\"priceTicks\":100,"
+                    + intent.symbol() + "\",\"algoType\":\"TWAP\",\"side\":\"BUY\",\"priceTicks\":"
+                    + config.limitPriceTicks() + ","
                     + "\"quantitySteps\":1,\"childQuantitySteps\":1,\"intervalSeconds\":1,"
                     + "\"durationSeconds\":1,\"marginMode\":\"CROSS\",\"positionSide\":\"NET\","
-                    + "\"reduceOnly\":false,\"postOnly\":true,\"timeInForce\":\"GTC\"}");
+                    + "\"reduceOnly\":false,\"postOnly\":false,\"timeInForce\":\"IOC\"}");
             default -> post("/api/v1/trading/orders/cancel-all-after", "{\"userId\":" + intent.userId()
                     + ",\"symbol\":\"" + intent.symbol() + "\",\"countdownMs\":60000}");
         };
@@ -297,20 +327,36 @@ final class HttpOpenLoopWorkload {
         return "{\"userId\":" + intent.userId() + ",\"clientOrderId\":\"" + intent.clientIdentity()
                 + "\",\"symbol\":\"" + intent.symbol() + "\",\"side\":\"BUY\",\"orderType\":\""
                 + type + "\",\"timeInForce\":\"" + tif + "\",\"priceTicks\":"
-                + ("MARKET".equals(type) ? 0 : 100) + ",\"quantitySteps\":1,\"marginMode\":\"CROSS\","
+                + ("MARKET".equals(type) ? 0 : config.limitPriceTicks())
+                + ",\"quantitySteps\":1,\"marginMode\":\"CROSS\","
                 + "\"positionSide\":\"NET\",\"reduceOnly\":" + reduceOnly + ",\"postOnly\":false}";
     }
 
     private String terminalState(Response response, StableIdentityLedger.Intent intent) {
         if (response.outcome() != HttpOutcome.SUCCESS_2XX) return response.outcome().name();
-        return stringField(response.body(), "code").or(() -> stringField(response.body(), "status"))
-                .orElse(intent.expectedFinalState());
+        Optional<String> nestedOrderState = nestedStringField(response.body(), "result", "status");
+        if (isTerminalWrapper(response.body()) && nestedOrderState.isPresent()) return nestedOrderState.get();
+        return stringField(response.body(), "status").or(() -> stringField(response.body(), "code"))
+                .or(() -> intent.operation() == WorkloadOperation.BATCH_ALGO_CONTROL
+                        && isDirectControlResult(response.body()) ? Optional.of("APPLIED") : Optional.empty())
+                .orElse("RESULT_UNKNOWN");
+    }
+
+    private static boolean isAcceptedTerminalState(StableIdentityLedger.Intent intent, String state) {
+        return switch (intent.operation()) {
+            case PLACE -> state.equals("OPEN") || state.equals("FILLED") || state.equals("APPLIED");
+            case CANCEL -> state.equals("CANCELED") || state.equals("APPLIED");
+            case AMEND -> state.equals("OPEN") || state.equals("APPLIED");
+            case MARKET_IOC_CLOSE -> state.equals("FILLED") || state.equals("APPLIED");
+            case TRIGGER -> state.equals("PENDING");
+            case TRIGGER_CANCEL -> state.equals("CANCELED") || state.equals("APPLIED");
+            case BATCH_ALGO_CONTROL -> state.equals("PENDING") || state.equals("APPLIED") || state.equals("CANCELED");
+        };
     }
 
     private String resourceIdentity(String body, StableIdentityLedger.Intent intent) {
         String field = intent.operation() == WorkloadOperation.TRIGGER ? "triggerOrderId" : "orderId";
-        return numberField(body, field).orElseGet(() ->
-                numberField(body, "prospectiveOrderIds").orElseGet(() -> stablePositive(intent.clientIdentity())));
+        return numberField(body, field).or(() -> firstArrayNumber(body, "prospectiveOrderIds")).orElse("");
     }
 
     private void awaitDrain() {
@@ -344,11 +390,21 @@ final class HttpOpenLoopWorkload {
                     + ",\"scheduled\":" + summary.scheduled() + ",\"completed\":" + summary.completed()
                     + ",\"outstanding\":" + summary.outstanding() + ",\"deliberately_aborted\":"
                     + summary.deliberatelyAborted() + ",\"maxObservedInFlight\":" + summary.maxObservedInFlight()
-                    + ",\"accounting\":\"PASS\",\"classifications\":\"" + summary.classifications() + "\"}\n";
+                    + ",\"accounting\":\"PASS\",\"classifications\":"
+                    + classificationsJson(summary.classifications()) + "}\n";
             Files.writeString(config.outputDirectory().resolve("accounting.json"), json, StandardCharsets.UTF_8);
         } catch (IOException exception) {
             throw new IllegalStateException("cannot write workload artifacts", exception);
         }
+    }
+
+    private static String classificationsJson(Map<HttpOutcome, Long> classifications) {
+        StringBuilder json = new StringBuilder("{");
+        for (HttpOutcome outcome : HttpOutcome.values()) {
+            if (json.length() > 1) json.append(',');
+            json.append('"').append(outcome).append("\":").append(classifications.getOrDefault(outcome, 0L));
+        }
+        return json.append('}').toString();
     }
 
     private void writeHistogram(Path path, Histogram histogram) throws IOException {
@@ -419,8 +475,8 @@ final class HttpOpenLoopWorkload {
 
     private static boolean requiresPrerequisite(WorkloadOperation operation, long sequence) {
         return operation == WorkloadOperation.CANCEL || operation == WorkloadOperation.AMEND
-                || operation == WorkloadOperation.TRIGGER_CANCEL
-                || operation == WorkloadOperation.MARKET_IOC_CLOSE && sequence % 2 != 0;
+                || operation == WorkloadOperation.TRIGGER || operation == WorkloadOperation.TRIGGER_CANCEL
+                || operation == WorkloadOperation.MARKET_IOC_CLOSE && sequence % 2 == 0;
     }
 
     private static RequestSpec post(String path, String body) {
@@ -437,8 +493,33 @@ final class HttpOpenLoopWorkload {
         return matcher.find() ? Optional.of(matcher.group(1)) : Optional.empty();
     }
 
-    private static String stablePositive(String value) {
-        return Long.toString(Math.max(1L, Math.abs((long) value.hashCode()) + 1L));
+    private static Optional<String> firstArrayNumber(String json, String name) {
+        Matcher matcher = Pattern.compile("\\\"" + Pattern.quote(name)
+                + "\\\"\\s*:\\s*\\[\\s*([0-9]+)").matcher(json);
+        return matcher.find() ? Optional.of(matcher.group(1)) : Optional.empty();
+    }
+
+    private static Optional<String> nestedStringField(String json, String objectName, String fieldName) {
+        Matcher matcher = Pattern.compile("\\\"" + Pattern.quote(objectName)
+                + "\\\"\\s*:\\s*\\{[^}]*\\\"" + Pattern.quote(fieldName)
+                + "\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"").matcher(json);
+        return matcher.find() ? Optional.of(matcher.group(1)) : Optional.empty();
+    }
+
+    private static boolean isTerminalWrapper(String json) {
+        return stringField(json, "outcome").map("TERMINAL"::equals).orElse(false);
+    }
+
+    private static boolean isPendingCommandReceipt(String json) {
+        boolean hasCommandReference = stringField(json, "commandId").isPresent()
+                || stringField(json, "commandResultUrl").isPresent();
+        String state = stringField(json, "code").or(() -> stringField(json, "status")).orElse("");
+        return hasCommandReference && (state.equals("PENDING") || state.endsWith("_PENDING"));
+    }
+
+    private static boolean isDirectControlResult(String json) {
+        return stringField(json, "code").isPresent() || stringField(json, "status").isPresent()
+                || json.contains("\"active\"");
     }
 
     private static void waitUntil(long epochNanos) {
@@ -452,6 +533,7 @@ final class HttpOpenLoopWorkload {
     private void rebuildPools(List<StableIdentityLedger.Snapshot> snapshots) {
         for (StableIdentityLedger.Snapshot snapshot : snapshots) {
             if (snapshot.terminal() && snapshot.outcome() == HttpOutcome.SUCCESS_2XX) {
+                pools.replayPrerequisiteConsumption(snapshot.intent());
                 pools.complete(snapshot.intent(), snapshot.resourceIdentity());
             }
         }
@@ -474,37 +556,78 @@ final class HttpOpenLoopWorkload {
         private final Deque<Resource> orders = new ArrayDeque<>();
         private final Deque<Resource> triggers = new ArrayDeque<>();
         private final Deque<Resource> positions = new ArrayDeque<>();
+        private final Map<String, Resource> reservedTriggers = new HashMap<>();
+        private final Map<String, String> triggerPositions = new HashMap<>();
 
-        synchronized Optional<String> reserve(WorkloadOperation operation, long sequence, long userId, String symbol) {
-            Deque<Resource> source = operation == WorkloadOperation.TRIGGER_CANCEL ? triggers
-                    : operation == WorkloadOperation.MARKET_IOC_CLOSE ? positions : orders;
-            if (!requiresPrerequisite(operation, sequence)) return Optional.of("");
-            for (Resource resource : source) {
-                if (resource.userId() == userId && resource.symbol().equals(symbol)) {
-                    if (operation != WorkloadOperation.AMEND) source.remove(resource);
-                    return Optional.of(resource.identity());
+        synchronized Optional<Resource> reserve(WorkloadOperation operation, long sequence) {
+            if (!requiresPrerequisite(operation, sequence)) return Optional.empty();
+            Deque<Resource> source = switch (operation) {
+                case TRIGGER, MARKET_IOC_CLOSE -> positions;
+                case TRIGGER_CANCEL -> triggers;
+                default -> orders;
+            };
+            Resource resource = operation == WorkloadOperation.AMEND ? source.peekFirst() : source.pollFirst();
+            if (resource != null && operation == WorkloadOperation.TRIGGER_CANCEL) {
+                reservedTriggers.put(resource.identity(), resource);
+            }
+            return Optional.ofNullable(resource);
+        }
+
+        synchronized void replayPrerequisiteConsumption(StableIdentityLedger.Intent intent) {
+            if (intent.targetIdentity().isBlank()) return;
+            switch (intent.operation()) {
+                case CANCEL -> removeByIdentity(orders, intent.targetIdentity());
+                case MARKET_IOC_CLOSE -> {
+                    if (intent.sequence() % 2 == 0) removeByIdentity(positions, intent.targetIdentity());
+                }
+                case TRIGGER -> removeByIdentity(positions, intent.targetIdentity());
+                case TRIGGER_CANCEL -> {
+                    Resource trigger = removeByIdentity(triggers, intent.targetIdentity());
+                    if (trigger != null) reservedTriggers.put(trigger.identity(), trigger);
+                }
+                default -> {
                 }
             }
-            return Optional.empty();
         }
 
         synchronized void complete(StableIdentityLedger.Intent intent, String resourceIdentity) {
             if (intent.operation() == WorkloadOperation.PLACE && !resourceIdentity.isBlank()) {
                 orders.addLast(new Resource(intent.userId(), intent.symbol(), resourceIdentity));
-            } else if (intent.operation() == WorkloadOperation.TRIGGER && !resourceIdentity.isBlank()) {
+            } else if (intent.operation() == WorkloadOperation.TRIGGER && !resourceIdentity.isBlank()
+                    && !intent.targetIdentity().isBlank()) {
                 triggers.addLast(new Resource(intent.userId(), intent.symbol(), resourceIdentity));
+                triggerPositions.put(resourceIdentity, intent.targetIdentity());
             } else if (intent.operation() == WorkloadOperation.MARKET_IOC_CLOSE
-                    && intent.sequence() % 2 == 0 && !resourceIdentity.isBlank()) {
+                    && intent.sequence() % 2 != 0 && !resourceIdentity.isBlank()) {
                 positions.addLast(new Resource(intent.userId(), intent.symbol(), resourceIdentity));
+            } else if (intent.operation() == WorkloadOperation.TRIGGER_CANCEL) {
+                Resource trigger = reservedTriggers.remove(intent.targetIdentity());
+                String positionIdentity = triggerPositions.remove(intent.targetIdentity());
+                if (trigger != null && positionIdentity != null) {
+                    positions.addLast(new Resource(trigger.userId(), trigger.symbol(), positionIdentity));
+                }
             }
         }
 
         synchronized void release(StableIdentityLedger.Intent intent) {
             if (intent.targetIdentity().isBlank()) return;
             Resource resource = new Resource(intent.userId(), intent.symbol(), intent.targetIdentity());
-            if (intent.operation() == WorkloadOperation.TRIGGER_CANCEL) triggers.addFirst(resource);
+            if (intent.operation() == WorkloadOperation.TRIGGER_CANCEL) {
+                Resource trigger = reservedTriggers.remove(intent.targetIdentity());
+                if (trigger != null) triggers.addFirst(trigger);
+            } else if (intent.operation() == WorkloadOperation.TRIGGER) positions.addFirst(resource);
             else if (intent.operation() == WorkloadOperation.CANCEL) orders.addFirst(resource);
             else if (intent.operation() == WorkloadOperation.MARKET_IOC_CLOSE) positions.addFirst(resource);
+        }
+
+        private static Resource removeByIdentity(Deque<Resource> source, String identity) {
+            for (Resource resource : source) {
+                if (resource.identity().equals(identity)) {
+                    source.remove(resource);
+                    return resource;
+                }
+            }
+            return null;
         }
     }
 

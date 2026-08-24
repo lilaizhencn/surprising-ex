@@ -50,7 +50,8 @@ public final class RuntimePerpetualRiskProcessor {
             continueScan(before, runtime, instrument, command.priceSequence(),
                     before.riskState().scanControl().scanBatchSize(), indexedUserIds, identities);
         }
-        runtime.setMetadata(before.productLine(), Math.addExact(before.revision(), 2));
+        runtime.setMetadata(before.productLine(), disabled
+                ? Math.incrementExact(before.revision()) : Math.addExact(before.revision(), 2));
     }
 
     public static TradingRuntimeState simulateContinuation(TradingCoreState before, int maxWork,

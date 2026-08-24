@@ -5,9 +5,13 @@ import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreLiquidationActionView;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
+import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
@@ -209,8 +213,9 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
 
     private byte[] order(long orderId, CoreOrderSide side, long reservedUnits) {
         return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, symbol, 1,
-                "BTC", "USDT", settleAsset(), side, 100, 10, false,
-                ReservationKind.DERIVATIVE_MARGIN, settleAsset(), reservedUnits));
+                "BTC", "USDT", settleAsset(), side, 100, 100, 100, 100, 10, false,
+                CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, settleAsset(),
+                reservedUnits, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", 0, 0));
     }
 
     private void adjust(long userId, long units) {

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -86,26 +87,52 @@ class ReliableCoreExporterTest {
     void unknownAckRetainsOriginalIdAndDoesNotAdvanceSuccess() {
         CoreProbeState state = stateWithCommands(1);
         List<UUID> ackIds = new ArrayList<>();
+        List<CoreMessage> published = new ArrayList<>();
+        var unknown = new java.util.concurrent.atomic.AtomicBoolean(true);
         ReliableCoreExporter exporter = new ReliableCoreExporter(
                 ProductLine.SPOT, message -> {
                     if (message.header().messageType() == CoreMessageType.ACK_EXPORT) {
                         ackIds.add(message.header().commandId());
-                        throw new com.surprising.aeron.client.ResultUnknownException(
-                                message.header().commandId(), "ack result unknown");
+                        if (unknown.getAndSet(false)) {
+                            throw new com.surprising.aeron.client.ResultUnknownException(
+                                    message.header().commandId(), "ack result unknown");
+                        }
                     }
                     return state.apply(message);
-                }, (line, events) -> { }, 10);
+                }, (line, events) -> published.addAll(events), 10);
 
         assertThatThrownBy(exporter::exportOnce)
                 .isInstanceOf(com.surprising.aeron.client.ResultUnknownException.class);
-        assertThatThrownBy(exporter::exportOnce)
-                .isInstanceOf(com.surprising.aeron.client.ResultUnknownException.class);
+        try {
+            assertThat(exporter.exportOnce().publishedEvents()).isZero();
+        } catch (Exception exception) {
+            throw new AssertionError(exception);
+        }
 
         assertThat(ackIds).hasSize(2).containsOnly(ackIds.getFirst());
-        assertThat(exporter.status().acknowledgedSequence()).isZero();
-        assertThat(exporter.status().pendingCount()).isEqualTo(1);
-        assertThat(exporter.metrics().unknownCount()).isEqualTo(2);
-        assertThat(exporter.metrics().retryCount()).isEqualTo(2);
+        assertThat(published).hasSize(1);
+        assertThat(exporter.status().acknowledgedSequence()).isEqualTo(1);
+        assertThat(exporter.status().pendingCount()).isZero();
+        assertThat(exporter.metrics().unknownCount()).isEqualTo(1);
+        assertThat(exporter.metrics().retryCount()).isEqualTo(1);
+    }
+
+    @Test
+    void ackSourceSequenceSurvivesAnOlderExporterCursor() throws Exception {
+        CoreProbeState state = stateWithCommands(2);
+        long exporterSourceId = 0x4558504f52544552L;
+        CoreMessage oldAck = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
+                UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS,
+                exporterSourceId, 100, 0, 1, 1),
+                CoreExportCodec.encodeAck(new AckExportCommand(1)));
+        assertThat(state.apply(oldAck).status()).isEqualTo(ResponseStatus.APPLIED);
+        ReliableCoreExporter exporter = new ReliableCoreExporter(
+                ProductLine.SPOT, state::apply, (line, events) -> { }, 10);
+
+        exporter.exportOnce();
+
+        assertThat(exporter.status().acknowledgedSequence()).isEqualTo(2);
+        assertThat(exporter.status().pendingCount()).isZero();
     }
 
     @Test

@@ -34,6 +34,13 @@ public final class ExporterMain {
                             failureMillis = AdaptiveExportLoop.MIN_IDLE_MILLIS;
                         } catch (InterruptedException exception) {
                             Thread.currentThread().interrupt();
+                        } catch (ResultUnknownException exception) {
+                            System.err.printf("Aeron exporter retrying pending acknowledgement "
+                                            + "productLine=%s commandId=%s reason=%s%n",
+                                    productLine, exception.commandId(), exception.getMessage());
+                            Thread.sleep(failureMillis);
+                            failureMillis = AdaptiveExportLoop.nextIdleMillis(failureMillis,
+                                    AdaptiveExportLoop.MAX_IDLE_MILLIS);
                         } catch (Exception exception) {
                             System.err.printf("Aeron exporter cycle failed productLine=%s reason=%s%n",
                                     productLine, exception.getMessage());

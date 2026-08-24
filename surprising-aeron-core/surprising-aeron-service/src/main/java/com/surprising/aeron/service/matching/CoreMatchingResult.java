@@ -4,7 +4,48 @@ import java.util.List;
 
 public record CoreMatchingResult(boolean accepted, String resultCode, List<CoreMatch> matches,
                                  List<CoreCancellationResult> cancellations, int successfulPrefixCount,
-                                 boolean matcherStateChanged) {
+                                 boolean matcherStateChanged, NativeCommand nativeCommand,
+                                 BookHashes bookHashes, List<MatcherEvent> matcherEvents,
+                                 MarketData marketData) {
+
+    public record NativeCommand(long coreSequence, String commandId, long orderId, long instrumentVersion,
+                                long nativeSequence, long matcherSequence, long aeronTimestamp) {
+
+        public NativeCommand {
+            if (coreSequence < 0 || commandId == null || orderId < 0 || instrumentVersion < 0
+                    || nativeSequence < 0 || matcherSequence < 0 || aeronTimestamp < 0) {
+                throw new IllegalArgumentException("invalid native command identity");
+            }
+        }
+    }
+
+    public record BookHashes(long before, long after, long instrumentRegistry) {
+    }
+
+    public record MatcherEvent(String type, int section, boolean activeOrderCompleted, long matchedOrderId,
+                               long matchedOrderUid, boolean matchedOrderCompleted, long price, long size,
+                               long bidderHoldPrice) {
+
+        public MatcherEvent {
+            if (type == null || type.isBlank()) {
+                throw new IllegalArgumentException("invalid matcher event");
+            }
+        }
+    }
+
+    public record MarketData(List<Level> asks, List<Level> bids) {
+
+        public record Level(long price, long volume, long orders) {
+        }
+
+        public MarketData {
+            if (asks == null || bids == null) {
+                throw new IllegalArgumentException("invalid market data");
+            }
+            asks = List.copyOf(asks);
+            bids = List.copyOf(bids);
+        }
+    }
 
     public CoreMatchingResult(boolean accepted, String resultCode, List<CoreMatch> matches,
                               List<CoreCancellationResult> cancellations, int successfulPrefixCount) {
@@ -15,6 +56,14 @@ public record CoreMatchingResult(boolean accepted, String resultCode, List<CoreM
         this(accepted, resultCode, matches, List.of(), 0, false);
     }
 
+    public CoreMatchingResult(boolean accepted, String resultCode, List<CoreMatch> matches,
+                              List<CoreCancellationResult> cancellations, int successfulPrefixCount,
+                              boolean matcherStateChanged) {
+        this(accepted, resultCode, matches, cancellations, successfulPrefixCount, matcherStateChanged,
+                new NativeCommand(0, "", 0, 0, 0, 0, 0), new BookHashes(0, 0, 0), List.of(),
+                new MarketData(List.of(), List.of()));
+    }
+
     public CoreMatchingResult {
         if (resultCode == null || resultCode.isBlank() || matches == null || cancellations == null
                 || successfulPrefixCount < 0 || successfulPrefixCount > cancellations.size()) {
@@ -22,5 +71,9 @@ public record CoreMatchingResult(boolean accepted, String resultCode, List<CoreM
         }
         matches = List.copyOf(matches);
         cancellations = List.copyOf(cancellations);
+        if (nativeCommand == null || bookHashes == null || matcherEvents == null || marketData == null) {
+            throw new IllegalArgumentException("missing immutable matcher callback data");
+        }
+        matcherEvents = List.copyOf(matcherEvents);
     }
 }

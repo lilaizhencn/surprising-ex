@@ -44,17 +44,14 @@ public class CoreEventFanoutConsumer {
 
     private final SubscriptionRegistry registry;
     private final WebSocketProperties properties;
-    private final CoreEventAuditRepository auditRepository;
     private long lastProcessedKafkaOffset = -1L;
     private String lastProcessedKafkaKey;
     private byte[] lastProcessedKafkaValue;
 
     @Autowired
-    public CoreEventFanoutConsumer(SubscriptionRegistry registry, WebSocketProperties properties,
-                                   CoreEventAuditRepository auditRepository) {
+    public CoreEventFanoutConsumer(SubscriptionRegistry registry, WebSocketProperties properties) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.properties = Objects.requireNonNull(properties, "properties");
-        this.auditRepository = Objects.requireNonNull(auditRepository, "auditRepository");
     }
 
     @KafkaListener(
@@ -64,8 +61,6 @@ public class CoreEventFanoutConsumer {
     public synchronized void onCoreEvent(ConsumerRecord<String, byte[]> record) {
         CoreEvent coreEvent = decodeAndValidate(record);
         validateKafkaOffset(record);
-        auditRepository.requireProjected(coreEvent.productLine(), coreEvent.event(), record.value(),
-                coreEvent.message().header().submittedAtEpochMillis());
         fanout(coreEvent);
         if (record.offset() >= 0L) {
             lastProcessedKafkaOffset = record.offset();

@@ -48,10 +48,10 @@ surprising:
         concurrency: 2
         max-poll-records: 500
       calculation:
-        poll-delay-ms: 1000
-        max-source-age: 5s
+        poll-delay-ms: ${PRICE_INDEX_POLL_DELAY_MS:1000}
+        max-source-age: ${PRICE_INDEX_MAX_SOURCE_AGE:5s}
         outlier-threshold: 0.01
-        min-valid-sources: 3
+        min-valid-sources: ${PRICE_INDEX_MIN_VALID_SOURCES:3}
         scale: 18
         conversion-cache-ttl: 30s
       http:
@@ -66,10 +66,10 @@ surprising:
         enabled: true
         rest-fallback-enabled: false
         refresh-delay-ms: 30000
-        idle-timeout: 20s
-        reconnect-initial-delay: 1s
-        reconnect-max-delay: 30s
-        health-check-interval: 5s
+        idle-timeout: ${PRICE_INDEX_WS_IDLE_TIMEOUT:20s}
+        reconnect-initial-delay: ${PRICE_INDEX_WS_RECONNECT_INITIAL_DELAY:1s}
+        reconnect-max-delay: ${PRICE_INDEX_WS_RECONNECT_MAX_DELAY:30s}
+        health-check-interval: ${PRICE_INDEX_WS_HEALTH_CHECK_INTERVAL:5s}
       coordination:
         enabled: true
         node-id:

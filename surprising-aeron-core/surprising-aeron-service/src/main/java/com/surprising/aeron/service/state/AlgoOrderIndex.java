@@ -57,8 +57,8 @@ public final class AlgoOrderIndex {
 
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before.algoOrders() == after.algoOrders()) return;
-        StateMapSupport.requireDeltaLineage(before.algoOrders(), after.algoOrders(), "algo order index orders");
-        Set<Long> changed = after.changedAlgoOrderIds();
+        StateMapSupport.requireDeltaLineage(before.algoOrders(), after.algoOrders(), "algo orders");
+        Set<Long> changed = StateMapSupport.changedKeys(after.algoOrders());
         for (Long id : changed) {
             if (id == null) continue;
             CoreAlgoOrderState previous = before.algoOrders().get(id);

@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 20;
+    private static final int VERSION = 21;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -79,6 +79,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(order.instrumentVersion());
             writer.intValue(order.side().wireCode());
             writer.longValue(order.priceTicks());
+            writer.longValue(order.matchingPriceTicks());
             writer.longValue(order.quantitySteps());
             writer.longValue(order.executedQuantitySteps());
             writer.longValue(order.remainingQuantitySteps());
@@ -333,6 +334,7 @@ public final class TradingStateSnapshotCodec {
             long instrumentVersion = reader.positiveLong("instrument version");
             CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
             long priceTicks = reader.nonNegativeLong("price ticks");
+            long matchingPriceTicks = reader.nonNegativeLong("matching price ticks");
             long quantitySteps = reader.positiveLong("quantity steps");
             long executedSteps = reader.nonNegativeLong("executed steps");
             long remainingSteps = reader.nonNegativeLong("remaining steps");
@@ -355,7 +357,7 @@ public final class TradingStateSnapshotCodec {
             }
             CoreOrderState order = new CoreOrderState(orderId, productLine, userId, symbol,
                     instrumentVersion, side,
-                    priceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
+                    priceTicks, matchingPriceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
                     orderMarginMode, orderPositionSide, orderType, timeInForce, postOnly,
                     clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                     createdAt, updatedAt, clusterPosition,

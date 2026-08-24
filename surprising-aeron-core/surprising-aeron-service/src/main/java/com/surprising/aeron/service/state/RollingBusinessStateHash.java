@@ -24,6 +24,10 @@ public final class RollingBusinessStateHash {
     private final Aggregate feeBalances = new Aggregate();
     private final Aggregate insuranceBalances = new Aggregate();
     private final Aggregate insuranceDeficits = new Aggregate();
+    private final Aggregate liquidationFeeBalances = new Aggregate();
+    private final Aggregate fundingResidualBalances = new Aggregate();
+    private final Aggregate roundingResidualBalances = new Aggregate();
+    private final Aggregate clearingPnlBalances = new Aggregate();
     private final Aggregate fundingSettlements = new Aggregate();
     private final Aggregate lifecycleSettlements = new Aggregate();
     private final Aggregate fundingProgress = new Aggregate();
@@ -75,6 +79,14 @@ public final class RollingBusinessStateHash {
             updateMap(feeBalances, beforeTreasury.feeBalances(), afterTreasury.feeBalances());
             updateMap(insuranceBalances, beforeTreasury.insuranceBalances(), afterTreasury.insuranceBalances());
             updateMap(insuranceDeficits, beforeTreasury.insuranceDeficits(), afterTreasury.insuranceDeficits());
+            updateMap(liquidationFeeBalances, beforeTreasury.liquidationFeeBalances(),
+                    afterTreasury.liquidationFeeBalances());
+            updateMap(fundingResidualBalances, beforeTreasury.fundingResidualBalances(),
+                    afterTreasury.fundingResidualBalances());
+            updateMap(roundingResidualBalances, beforeTreasury.roundingResidualBalances(),
+                    afterTreasury.roundingResidualBalances());
+            updateMap(clearingPnlBalances, beforeTreasury.clearingPnlBalances(),
+                    afterTreasury.clearingPnlBalances());
             updateMap(fundingSettlements, beforeTreasury.fundingSettlements(), afterTreasury.fundingSettlements());
             updateMap(lifecycleSettlements, beforeTreasury.lifecycleSettlements(), afterTreasury.lifecycleSettlements());
             updateMap(fundingProgress, beforeTreasury.fundingProgress(), afterTreasury.fundingProgress());
@@ -110,6 +122,10 @@ public final class RollingBusinessStateHash {
         hash = mixAggregate(hash, "feeBalances", feeBalances);
         hash = mixAggregate(hash, "insuranceBalances", insuranceBalances);
         hash = mixAggregate(hash, "insuranceDeficits", insuranceDeficits);
+        hash = mixAggregate(hash, "liquidationFeeBalances", liquidationFeeBalances);
+        hash = mixAggregate(hash, "fundingResidualBalances", fundingResidualBalances);
+        hash = mixAggregate(hash, "roundingResidualBalances", roundingResidualBalances);
+        hash = mixAggregate(hash, "clearingPnlBalances", clearingPnlBalances);
         hash = mixAggregate(hash, "fundingSettlements", fundingSettlements);
         hash = mixAggregate(hash, "lifecycleSettlements", lifecycleSettlements);
         hash = mixAggregate(hash, "fundingProgress", fundingProgress);
@@ -132,6 +148,10 @@ public final class RollingBusinessStateHash {
         rebuildMap(feeBalances, state.treasuryState().feeBalances());
         rebuildMap(insuranceBalances, state.treasuryState().insuranceBalances());
         rebuildMap(insuranceDeficits, state.treasuryState().insuranceDeficits());
+        rebuildMap(liquidationFeeBalances, state.treasuryState().liquidationFeeBalances());
+        rebuildMap(fundingResidualBalances, state.treasuryState().fundingResidualBalances());
+        rebuildMap(roundingResidualBalances, state.treasuryState().roundingResidualBalances());
+        rebuildMap(clearingPnlBalances, state.treasuryState().clearingPnlBalances());
         rebuildMap(fundingSettlements, state.treasuryState().fundingSettlements());
         rebuildMap(lifecycleSettlements, state.treasuryState().lifecycleSettlements());
         rebuildMap(fundingProgress, state.treasuryState().fundingProgress());

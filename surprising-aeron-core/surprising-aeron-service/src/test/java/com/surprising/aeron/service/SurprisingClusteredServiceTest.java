@@ -314,11 +314,32 @@ class SurprisingClusteredServiceTest {
                 .status()).isEqualTo(ResponseStatus.APPLIED);
         UUID commandId = UUID.randomUUID();
         CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                        "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 2, false,
-                        CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT",
-                        2_000, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 1_000, false,
-                        "service-" + orderId, 0, 0)), commandId);
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                        orderId,
+                        "BTC-USDT",
+                        1,
+                        "BTC",
+                        "USDT",
+                        "USDT",
+                        CoreOrderSide.BUY,
+                        1_000,
+                        1_000,
+                        1_000,
+                        1_000,
+                        2,
+                        false,
+                        CoreMarginMode.CROSS,
+                        CorePositionSide.NET,
+                        ReservationKind.SPOT_ASSET,
+                        "USDT",
+                        2_000,
+                        CoreOrderType.LIMIT,
+                        CoreTimeInForce.GTC,
+                        false,
+                        "service-" + orderId,
+                        0,
+                        0
+                )), commandId);
         assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         return state.matchingSequence(commandId);
     }
@@ -360,11 +381,32 @@ class SurprisingClusteredServiceTest {
                     UUID.fromString("00000000-0000-0000-0000-000000000002"))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT", 1,
-                            "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 2, false,
-                            CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT",
-                            2_000, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 1_000, false,
-                            "timer-replay", 0, 0)),
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                            904,
+                            "BTC-USDT",
+                            1,
+                            "BTC",
+                            "USDT",
+                            "USDT",
+                            CoreOrderSide.BUY,
+                            1_000,
+                            1_000,
+                            1_000,
+                            1_000,
+                            2,
+                            false,
+                            CoreMarginMode.CROSS,
+                            CorePositionSide.NET,
+                            ReservationKind.SPOT_ASSET,
+                            "USDT",
+                            2_000,
+                            CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC,
+                            false,
+                            "timer-replay",
+                            0,
+                            0
+                    )),
                     UUID.fromString("00000000-0000-0000-0000-000000000003"));
             byte[] encoded = CoreMessageCodec.encode(place);
             service.onSessionMessage(clientSession(responses), 1_000, new UnsafeBuffer(encoded), 0,

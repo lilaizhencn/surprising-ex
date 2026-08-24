@@ -19,8 +19,20 @@ public final class RuntimeIdentityRegistry {
     private int nextSymbolId;
     private long nextClientKey = 1;
     private long nextPositionKey = 1;
+    private Thread owner;
+
+    public void assertOwner() {
+        Thread current = Thread.currentThread();
+        if (owner == null) owner = current;
+        else if (owner != current) throw new IllegalStateException("runtime identities are bound to another thread");
+    }
+
+    void releaseOwnerForHandoff() {
+        owner = null;
+    }
 
     public int assetId(String asset) {
+        assertOwner();
         String normalized = AssetBalance.normalizeAsset(asset);
         Integer existing = assetIds.get(normalized);
         if (existing != null) return existing;
@@ -31,12 +43,14 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String asset(int assetId) {
+        assertOwner();
         String asset = assets.get(assetId);
         if (asset == null) throw new IllegalArgumentException("unknown runtime asset id: " + assetId);
         return asset;
     }
 
     public int symbolId(String symbol) {
+        assertOwner();
         String normalized = OrderReservation.normalizeSymbol(symbol);
         Integer existing = symbolIds.get(normalized);
         if (existing != null) return existing;
@@ -47,12 +61,14 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String symbol(int symbolId) {
+        assertOwner();
         String symbol = symbols.get(symbolId);
         if (symbol == null) throw new IllegalArgumentException("unknown runtime symbol id: " + symbolId);
         return symbol;
     }
 
     public long clientKey(long userId, String clientOrderId) {
+        assertOwner();
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         if (clientOrderId == null || clientOrderId.isBlank()) return 0;
         ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
@@ -65,6 +81,7 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String clientOrderId(long userId, long clientKey) {
+        assertOwner();
         if (clientKey == 0) return "";
         ClientIdentity identity = clients.get(clientKey);
         if (identity == null || identity.userId() != userId) {
@@ -74,6 +91,7 @@ public final class RuntimeIdentityRegistry {
     }
 
     public long positionKey(long userId, String positionKey) {
+        assertOwner();
         if (userId <= 0 || positionKey == null || positionKey.isBlank()) {
             throw new IllegalArgumentException("invalid position identity");
         }
@@ -87,6 +105,7 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String positionKey(long userId, long positionKey) {
+        assertOwner();
         PositionIdentity identity = positions.get(positionKey);
         if (identity == null || identity.userId() != userId) {
             throw new IllegalArgumentException("unknown runtime position key: " + userId + '/' + positionKey);
@@ -94,7 +113,17 @@ public final class RuntimeIdentityRegistry {
         return identity.positionKey();
     }
 
+    PositionIdentity positionIdentity(long positionKey) {
+        assertOwner();
+        PositionIdentity identity = positions.get(positionKey);
+        if (identity == null) {
+            throw new IllegalArgumentException("unknown runtime position key: " + positionKey);
+        }
+        return identity;
+    }
+
     public Snapshot snapshot() {
+        assertOwner();
         return new Snapshot(assetIds, symbolIds, clientKeys, positionKeys,
                 nextAssetId, nextSymbolId, nextClientKey, nextPositionKey);
     }

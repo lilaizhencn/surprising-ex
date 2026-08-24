@@ -123,13 +123,15 @@ class StableOrderIdentityTest {
 
     private static CoreResponse commandResponse(PlaceOrderCommand command, String clientOrderId) {
         CoreOrderStateView order = new CoreOrderStateView(command.orderId(), ProductLine.LINEAR_PERPETUAL,
-                1001, command.symbol(), command.instrumentVersion(), command.side(), command.priceTicks(),
+                1001, command.symbol(), command.instrumentVersion(), command.side(), command.limitPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(), clientOrderId,
                 UUID.randomUUID(), command.makerFeeRatePpm(), command.takerFeeRatePpm(), 1_000, 1_000, 1,
                 "OPEN", 1);
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(order), List.of())));
+                1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
+                        UUID.fromString("20000000-0000-0000-0000-000000000001"), command.orderId(),
+                        command.instrumentVersion(), 1, 41, 43, List.of(order), List.of())));
     }
 
     private static InstrumentRule perpetualRule() {

@@ -161,10 +161,9 @@ public final class CorePerpetualEndToEndBenchmark {
     private static PlaceOrderCommand order(long orderId, CoreOrderSide side, CoreTimeInForce timeInForce,
                                            long quantity) {
         return new PlaceOrderCommand(orderId, SYMBOL, 1, "BTC", "USDT", "USDT", side,
-                1_000, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                1_000, 1_001, 1_100, 999, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", Math.multiplyExact(1_000, quantity),
-                CoreOrderType.LIMIT, timeInForce,
-                1_000, false, "perpetual-e2e-" + orderId, 0, 0);
+                CoreOrderType.LIMIT, timeInForce, false, "perpetual-e2e-" + orderId, 0, 0);
     }
 
     private static UpsertInstrumentCommand instrument() {

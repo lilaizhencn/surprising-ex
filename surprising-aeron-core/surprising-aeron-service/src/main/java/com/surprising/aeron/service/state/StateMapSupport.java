@@ -68,7 +68,7 @@ public final class StateMapSupport {
      * Returns every key changed between two related persistent-map versions. A single state transition may
      * create several nested deltas for the same map, for example while pruning multiple orders of one user.
      */
-    static <K> Set<K> changedKeys(Map<K, ?> before, Map<K, ?> after) {
+    public static <K> Set<K> changedKeys(Map<K, ?> before, Map<K, ?> after) {
         if (before == after) return Set.of();
         NavigableMap<K, ?> rawBefore = (NavigableMap<K, ?>) rawUntyped(before);
         NavigableMap<K, ?> current = (NavigableMap<K, ?>) rawUntyped(after);

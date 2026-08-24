@@ -24,13 +24,32 @@ class TradingStateSnapshotCodecTest {
                         CoreStateTestFixtures.instrument(ProductLine.OPTION,
                                 "BTC-OPTION", "BTC", "USDT", "USDT", 4)), 7,
                 new BalanceAdjustmentCommand("USDT", 50_000));
-        state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "BTC-OPTION", 4, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 500, 2, false,
+        state = reducer.placeOrder(state, 7, new PlaceOrderCommand(
+                71,
+                "BTC-OPTION",
+                4,
+                "BTC",
+                "USDT",
+                "USDT",
+                CoreOrderSide.BUY,
+                500,
+                500,
+                500,
+                500,
+                2,
+                false,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_500,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTX, 500, true,
-                "option-client-71", -10, 20));
+                ReservationKind.DERIVATIVE_MARGIN,
+                "USDT",
+                1_500,
+                CoreOrderType.LIMIT,
+                CoreTimeInForce.GTX,
+                true,
+                "option-client-71",
+                -10,
+                20
+        ));
 
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(state), ProductLine.OPTION);

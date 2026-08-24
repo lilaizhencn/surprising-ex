@@ -4119,26 +4119,6 @@ VALUES ('SPOT', 0), ('LINEAR_PERPETUAL', 0), ('INVERSE_PERPETUAL', 0),
        ('LINEAR_DELIVERY', 0), ('INVERSE_DELIVERY', 0), ('OPTION', 0)
 ON CONFLICT (product_line) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS core_websocket_audit_projection (
-    product_line VARCHAR(32) NOT NULL,
-    export_sequence BIGINT NOT NULL,
-    event_id UUID NOT NULL,
-    command_id UUID NOT NULL,
-    event_type VARCHAR(64) NOT NULL,
-    user_id BIGINT NOT NULL,
-    occurred_at_epoch_ms BIGINT NOT NULL,
-    raw_event BYTEA NOT NULL,
-    projected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (product_line, export_sequence),
-    UNIQUE (product_line, event_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_core_websocket_audit_sequence
-    ON core_websocket_audit_projection (product_line, export_sequence DESC);
-
-CREATE INDEX IF NOT EXISTS idx_core_websocket_audit_event
-    ON core_websocket_audit_projection (product_line, event_id);
-
 -- 10. Baseline identity. Application upgrades use migrations/ after launch.
 
 CREATE TABLE IF NOT EXISTS surprising_schema_metadata (

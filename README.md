@@ -7,11 +7,41 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 
 本 README 与各模块 README 记录当前架构和验收边界；真实 provider、做市进程和基础设施由部署编排单独管理。
 
+## P0-P10 规范阶段注册（当前权威）
+
+下列阶段名称是本分支唯一的 P0-P10 注册表。P0-P5 是 Product Core 正确性闭环的默认交付顺序；P6-P10
+是后续、相互不替代的验证或容量工作。历史草案只能按这里的名称解释，不能重新定义 P0-P5。
+
+| 阶段 | 当前唯一名称与默认边界 |
+|---|---|
+| P0 | canonical 中文 P0-P5 规范注册与分支安全：先发布根 README 契约，保留既有脏改动。 |
+| P1 | reservation、`PositionCloseCapacity`、价格分离与累计手续费：衍生品普通单为全量开仓风险预留，reduce-only 才可省略开仓保证金。 |
+| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：每次仅一个按 Core sequence 的 matcher 命令在同一 Aeron callback 内取得不可变结果。 |
+| P3 | TradingRuntimeState 生产写入权威：六条产品线的 Runtime owner 线程是唯一生产 mutation 权威，immutable `TradingCoreState` 仅用于快照、查询、回放/参考与 parity。 |
+| P4 | six isolated settlement kernels：Spot、LinearPerpetual、InversePerpetual、LinearDelivery、InverseDelivery、Option 各有穷尽且隔离的结算内核。 |
+| P5 | FundsDelta、Treasury、操作级舍入与 integrity：每命令/资产资金变动不可变且确定性排序，Treasury 子账本、残差和 Ed25519 完整性封套显式核算。 |
+| P6 | randomized properties / model campaign：随机化属性与模型验证，不是 P0-P5 行为改动。 |
+| P7 | fatal / readiness campaign：致命故障和就绪性验证，不是 P0-P5 行为改动。 |
+| P8 | three-node recovery certification：三节点恢复认证，不是 P0-P5 行为改动。 |
+| P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
+| P10 | sharding / capacity：分片与容量工作；任何分片提案只能属于 P10，不能标为 P0-P5。 |
+
+当前实现状态：P3 已完成。`TradingRuntimeState` 是唯一可变交易权威；`TradingCoreState` 继续保留，但只承担不可变
+快照、查询、恢复/回放、参考计算和 parity，不构成第二套可变权威。P3 完成不代表 P1、P2、P4、P5 或 P6-P10
+已经完成。
+
+### 分支安全与验证契约
+
+- 当前工作树中的脏改动是必需输入；不得新建 fresh worktree，也不得 stash、reset 或 checkout 以清理它们。
+- `CoreProbeState`、`SurprisingClusteredService`、运行时/快照/hash codec、export/projector、gateway fanout 和
+  `init.sql` 等共享 hot files 同一时刻只能有一名 serial owner 修改；其他任务必须避开这些文件。
+- 文档和实现验证均直接记录精确的 Maven 或 Java 命令及输出 artifact，不以 `scripts/` 作为验证入口，亦不以
+  `docs/` 链接作为权威规范。验证前先保存既有 dirty patch，提交时只显式选择本任务文件。
+
 ## 已确认架构基线
 
-- Runtime 状态与 immutable Snapshot 状态的分层迁移方案见 [`docs/runtime-state-migration.md`](docs/runtime-state-migration.md)，架构决策见 [`docs/adr/0004-runtime-state-and-deterministic-snapshots.md`](docs/adr/0004-runtime-state-and-deterministic-snapshots.md)。
-- exchange-core 设计对照、当前热路径性能出口、JVM/恢复风险和 100k/s 验收口径见
-  [`docs/exchange-core-trading-hot-path-review.md`](docs/exchange-core-trading-hot-path-review.md)。
+- Runtime 状态、immutable Snapshot 状态和 exchange-core 热路径的当前约束由本文、对应模块 README、源码和 Maven
+  测试共同记录；不存在可替代这些约束的独立文档入口。
 
 - 一个 `ProductLine` 变体对应一个逻辑 ProductExecutionCore；逻辑 Core 是一套三 Member Aeron Cluster，
   不是单进程。该 Core 管理本产品线全部 symbol、账户、订单元数据、持仓、风险和生命周期。
@@ -150,8 +180,8 @@ Runtime 是在线状态权威，materialize 后的 Core 视图通过完整 equal
 Repository 默认只操作一张物理表，由 Service 在事务内聚合。在线交易、风控和结算链路若因一致性或原子性
 必须跨表，源码需要逐项写明中文“不可拆原因”。后台订单时间线、资金对账和运营报表不得在交易主库新增
 多表 JOIN；后续财务运营模块应消费领域事件，并使用独立数据库建立查询投影。
-边界约束由对应模块的源码、Maven 测试和主规格维护；canonical 检查脚本按单产品线、资金对账、恢复和
-容量职责执行。
+边界约束由对应模块的源码、Maven 测试和本 README 的阶段注册维护；按单产品线、资金对账、恢复和容量职责
+执行直接 Maven/Java 验证命令并保存输出 artifact。
 
 Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，不直接访问 Repository，也不承载事务或
 业务编排。`task` 包只负责声明定时触发时机，所有实际执行都委托给 Service。入口层边界由源码审查和
@@ -196,32 +226,22 @@ LINK、DOT、LTC、BCH、TRX、TON、SUI、APT、NEAR、UNI、AAVE、ETC，共 2
 mvn -pl surprising-aeron-core/surprising-aeron-service -am test
 ```
 
-### 增量 JAR 构建
+### 受影响模块构建
 
-不要直接执行根目录 `mvn package`。使用 `scripts/build-incremental.sh` 指定修改的模块；脚本会读取 Maven reactor
-依赖关系，同时加入所有直接或间接依赖该模块的下游消费者，最后交给 Maven `-am` 补齐必要的上游模块。没有受影响的
-模块时不会启动 Maven，也不会删除其他模块的 `target/`。
+不要在未界定影响范围时直接执行根目录 `mvn package`。先按变更边界选择 Maven module，再使用 `-am` 补齐必要
+上游模块；文档改动只运行静态检查。每次验证都要保存完整命令和输出 artifact，不删除其他模块的 `target/`。
 
 ```bash
-# 只改了一个模块，默认跳过测试并生成受影响模块的 JAR
-scripts/build-incremental.sh surprising-trading/surprising-trading-provider
-
-# 也可以使用 artifactId 或多个模块
-scripts/build-incremental.sh :surprising-aeron-client :surprising-aeron-tools
-
-# 从当前工作区变更自动解析模块；文档、脚本、报告和日志不会触发 Maven
-scripts/build-incremental.sh --changed
-
-# 先查看计划，不执行构建；需要测试时显式打开
-scripts/build-incremental.sh --changed --dry-run
-scripts/build-incremental.sh --with-tests :surprising-aeron-service
+# 受影响模块的构建和测试
+mvn -pl surprising-trading/surprising-trading-provider -am package
+mvn -pl surprising-aeron-core/surprising-aeron-service -am test
 ```
 
-源码或模块 `pom.xml` 变化只会构建影响闭包；根 `pom.xml`、`surprising-parent/pom.xml` 或共享公共 API 变化会安全地
-扩大范围，这是依赖传播而不是无条件全量构建。`package` 是默认目标；需要发布到本地仓库时显式使用
-`--goal install`。脚本默认 `-DskipTests`，跨账户、撮合、风控或协议变更必须使用 `--with-tests` 执行受影响模块测试。
+源码或模块 `pom.xml` 变化按 Maven reactor 依赖闭包扩大范围；根 `pom.xml`、`surprising-parent/pom.xml` 或共享公共
+API 变化需要重新界定直接受影响消费者。`package` 是默认构建目标；需要发布到本地仓库时显式使用 `install`。跨账户、
+撮合、风控或协议变更必须执行受影响模块测试。
 
-matching 使用 `exchange.core2:exchange-core:0.5.15-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
+matching 使用 `exchange.core2:exchange-core:0.5.16-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
 以下 JVM 参数：
 
 ```text
@@ -239,8 +259,9 @@ JFR，并同时记录 GC/safepoint 日志：
 PRODUCT_LINE=LINEAR_PERPETUAL RUN_ID=mm-lp-jfr-<run> ACTION=up \
   POSTGRES_MODE=native POSTGRES_DB=surprising_exchange_qa_linear_perp \
   JAVA_HOME=/path/to/jdk-25 JVM_GC=ZGC JFR_ENABLED=true \
-  PRICE_HTTP_PROXY_ENABLED=false PRICE_INDEX_REQUIRED_SYMBOLS=BTC-USDT \
-  PRICE_CONSUMER_REQUIRED_SYMBOLS=BTC-USDT MM_BASE_QUANTITY_STEPS=20 MM_ORDER_LEVELS=20 \
+  PRICE_HTTP_PROXY_ENABLED=false PRICE_INDEX_REQUIRED_SYMBOLS=BTC-USDT-SWAP \
+  PRICE_CONSUMER_REQUIRED_SYMBOLS=BTC-USDT-SWAP MM_SYMBOL=BTC-USDT-SWAP \
+  MM_BASE_QUANTITY_STEPS=20 MM_ORDER_LEVELS=20 \
   bash scripts/start-product-line-providers.sh up
 ```
 
@@ -314,9 +335,9 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
 
 ### W1/W2 快照与发布契约
 
-- fork 固定为 `exchange-core 0.5.15-emporia`，源码提交
-  `627ddf68fbb0594b07e4b59a1a0e3377354e26b9`，可复现 JAR SHA-256
-  `09e324685e9ae77244939c9f8c4044dc00dda4f03b98b60ff5d48f7e051e2d21`；fork 构建拒绝 dirty
+- fork 固定为 `exchange-core 0.5.16-emporia`，源码提交
+  `4c4d163b6ba736a43360b325cdd7b9fb8c20648d`，可复现 JAR SHA-256
+  `d4ab72853924edc32069ab7158e7bcc5d374ecc1bcd594df04128ab459732b86`；fork 构建拒绝 dirty
   worktree，从已认证提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 provenance；
   Aeron service 的 Maven `validate` 阶段同时校验 provenance 与整包 hash。
 - `CoreState v9` 同时封装 Core 业务状态和 exchange-core 原生 `ME0/RE0`；reader 显式兼容现有 V8 快照，writer 只生成 V9；`TradingState v20` 不包含盘口，并持久化版本化 Risk Scan Control。

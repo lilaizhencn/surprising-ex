@@ -24,6 +24,29 @@ import org.junit.jupiter.api.Test;
 class RuntimeStateProjectorTest {
 
     @Test
+    void materializesOneRuntimeCommandAsADeltaWithoutTraversingGlobalState() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        before = reducer.adjustBalance(before, 7, new BalanceAdjustmentCommand("USDT", 1_000));
+        before = reducer.adjustBalance(before, 9, new BalanceAdjustmentCommand("USDT", 2_000));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        RuntimeStateMaterializer.SnapshotTraversalProbe traversalProbe =
+                new RuntimeStateMaterializer.SnapshotTraversalProbe();
+
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
+                new BalanceAdjustmentCommand("USDT", 250));
+        TradingCoreState after = RuntimeStateMaterializer.materializeTransition(
+                runtime, identities, before, traversalProbe);
+
+        assertThat(after).isEqualTo(RuntimeStateMaterializer.materialize(runtime, identities));
+        assertThat(after.user(9)).isSameAs(before.user(9));
+        assertThat(StateMapSupport.changedKeys(before.users(), after.users())).containsExactly(7L);
+        assertThat(traversalProbe.reservationTraversals()).isZero();
+        assertThat(traversalProbe.positionTraversals()).isZero();
+    }
+
+    @Test
     void keepsRuntimeInParityAcrossIncrementalPlaceAndStampTransitions() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
@@ -36,16 +59,39 @@ class RuntimeStateProjectorTest {
 
         for (int index = 0; index < 50; index++) {
             long orderId = 10_000 + index;
-            PlaceOrderCommand command = new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                    "BTC", "USDT", "USDT", CoreOrderSide.BUY, 1_000, 1, false,
-                    CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN,
-                    "USDT", 1_000, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 1_000, false,
-                    "incremental-" + orderId, 0, 0);
-            TradingCoreState placed = reducer.placeOrder(state, 7, command, new UUID(0, orderId), 0);
-            RuntimeStateDeltaApplier.apply(state, placed, runtime, identities);
-            TradingCoreState stamped = placed.stampOrderChanges(state, 1_000 + index, 2_000 + index,
-                    java.util.List.of(orderId));
-            RuntimeStateDeltaApplier.apply(placed, stamped, runtime, identities);
+            PlaceOrderCommand command = new PlaceOrderCommand(
+                    orderId,
+                    "BTC-USDT",
+                    1,
+                    "BTC",
+                    "USDT",
+                    "USDT",
+                    CoreOrderSide.BUY,
+                    1_000,
+                    1_000,
+                    1_000,
+                    1_000,
+                    1,
+                    false,
+                    CoreMarginMode.CROSS,
+                    CorePositionSide.NET,
+                    ReservationKind.DERIVATIVE_MARGIN,
+                    "USDT",
+                    1_000,
+                    CoreOrderType.LIMIT,
+                    CoreTimeInForce.IOC,
+                    false,
+                    "incremental-" + orderId,
+                    0,
+                    0
+            );
+            RuntimeCommandProcessor.placeOrder(runtime, identities, 7, command, new UUID(0, orderId), 100);
+            TradingCoreState placed = RuntimeStateMaterializer.materializeTransition(runtime, identities, state);
+            runtime.clearChangedKeys();
+            RuntimeCommandProcessor.stampOrderChanges(runtime, identities, state,
+                    1_000 + index, 2_000 + index, java.util.List.of(orderId));
+            TradingCoreState stamped = RuntimeStateMaterializer.materializeTransition(runtime, identities, placed);
+            runtime.clearChangedKeys();
             state = stamped;
         }
 
@@ -93,76 +139,6 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
-    void appliesOnlyThePlaceOrderDeltaToRuntime() {
-        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
-                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(), Map.of());
-        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(7L, beforeUser), Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-
-        OrderReservation reservation = OrderReservation.create(11, "BTC-USDT", 1,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 200, 2);
-        CoreUserState afterUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 2,
-                Map.of("USDT", new AssetBalance("USDT", 800, 200)),
-                Map.of(11L, reservation), Map.of());
-        CoreOrderState order = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 2, 0, 2, false,
-                CoreOrderStatus.OPEN, 1);
-        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
-                Map.of(7L, afterUser), Map.of(11L, order), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        RuntimePlaceOrderDeltaApplier.apply(before, after, 7, 11, runtime, identities);
-
-        assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(800);
-        assertThat(runtime.balance(7, identities.assetId("USDT")).lockedUnits()).isEqualTo(200);
-        assertThat(runtime.order(11).quantitySteps()).isEqualTo(2);
-    }
-
-    @Test
-    void rejectsMismatchedPlaceOrderDeltaBeforeRuntimeMutation() {
-        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
-                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(), Map.of());
-        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(7L, beforeUser), Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-        OrderReservation reservation = OrderReservation.create(11, "BTC-USDT", 1,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 2);
-        CoreUserState afterUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 2,
-                Map.of("USDT", new AssetBalance("USDT", 800, 200)), Map.of(11L, reservation), Map.of());
-        CoreOrderState order = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 2, 0, 2, false,
-                CoreOrderStatus.OPEN, 1);
-        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
-                Map.of(7L, afterUser), Map.of(11L, order), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-
-        assertThatThrownBy(() -> RuntimePlaceOrderDeltaApplier.apply(before, after, 7, 11, runtime, identities))
-                .isInstanceOf(IllegalStateException.class);
-        assertThat(runtime.order(11)).isNull();
-        assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(1_000);
-        assertThat(runtime.balance(7, identities.assetId("USDT")).lockedUnits()).isZero();
-    }
-
-    @Test
-    void rejectsNonDeltaOnlineTransitionBeforeRuntimeMutation() {
-        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
-                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(), Map.of());
-        CoreUserState afterUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 2,
-                Map.of("USDT", new AssetBalance("USDT", 900, 100)), Map.of(), Map.of());
-        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(7L, beforeUser), Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
-                Map.of(7L, afterUser), Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-
-        assertThatThrownBy(() -> RuntimeStateDeltaApplier.apply(before, after, runtime, identities))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("online runtime transition is not a delta: users");
-    }
-
-    @Test
     void appliesCancellationReleaseAndMarksRuntimeOrderTerminal() {
         OrderReservation reservation = OrderReservation.create(11, "BTC-USDT", 1,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 200, 2);
@@ -181,7 +157,7 @@ class RuntimeStateProjectorTest {
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        RuntimeCancelOrderDeltaApplier.apply(before, after, 7, 11, runtime, identities);
+        RuntimeCommandProcessor.cancelOrder(runtime, 7, 11);
 
         assertThat(runtime.order(11).canceled()).isTrue();
         assertThat(runtime.reservation(11).reservedUnits()).isZero();
@@ -213,7 +189,7 @@ class RuntimeStateProjectorTest {
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        RuntimeCancelOrderDeltaApplier.apply(before, after, 7, 11, runtime, identities);
+        RuntimeCommandProcessor.cancelOrder(runtime, 7, 11);
 
         assertThat(runtime.order(11).canceled()).isTrue();
         assertThat(runtime.order(11).executedQuantitySteps()).isEqualTo(1);
@@ -223,35 +199,6 @@ class RuntimeStateProjectorTest {
         assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(900);
         assertThat(runtime.balance(7, identities.assetId("USDT")).lockedUnits()).isZero();
         RuntimeStateParityChecker.assertMatches(after, identities, runtime);
-    }
-
-    @Test
-    void rejectsInvalidCancellationWithoutChangingRuntime() {
-        OrderReservation reservation = OrderReservation.create(11, "BTC-USDT", 1,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 200, 2);
-        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
-                Map.of("USDT", new AssetBalance("USDT", 800, 200)), Map.of(11L, reservation), Map.of());
-        CoreOrderState open = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 2, 0, 2, false,
-                CoreOrderStatus.OPEN, 1);
-        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(7L, beforeUser), Map.of(11L, open), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-        CoreUserState invalidAfterUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 2,
-                Map.of("USDT", new AssetBalance("USDT", 999, 0)),
-                Map.of(11L, reservation.releaseAll()), Map.of());
-        TradingCoreState invalidAfter = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
-                Map.of(7L, invalidAfterUser), Map.of(11L, open.cancel()), Map.of(),
-                CoreRiskState.empty(), CoreTreasuryState.empty());
-
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-
-        assertThatThrownBy(() -> RuntimeCancelOrderDeltaApplier.apply(before, invalidAfter,
-                7, 11, runtime, identities)).isInstanceOf(IllegalStateException.class);
-        assertThat(runtime.order(11).canceled()).isFalse();
-        assertThat(runtime.reservation(11).reservedUnits()).isEqualTo(200);
-        assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(800);
-        assertThat(runtime.balance(7, identities.assetId("USDT")).lockedUnits()).isEqualTo(200);
     }
 
     @Test
@@ -421,81 +368,6 @@ class RuntimeStateProjectorTest {
         assertThat(restored.positionKey(7, positionKey)).isEqualTo("BTC-USDT:LONG");
         assertThat(restored.assetId("USDT")).isEqualTo(assetId);
         assertThat(restored.symbolId("BTC-USDT")).isEqualTo(symbolId);
-    }
-
-    @Test
-    void appliesGenericDeltaAndMaterializesTheExactNextState() {
-        OrderReservation reservation = OrderReservation.create(11, "BTC-USDT", 1,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 200, 2);
-        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
-                Map.of("USDT", new AssetBalance("USDT", 800, 200)), Map.of(11L, reservation), Map.of());
-        CoreOrderState open = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
-        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(7L, beforeUser), Map.of(11L, open), Map.of(), CoreRiskState.empty(),
-                CoreTreasuryState.empty());
-        Map<String, AssetBalance> afterBalances = StateMapSupport.delta(beforeUser.balances());
-        afterBalances.put("USDT", new AssetBalance("USDT", 1_000, 0));
-        Map<Long, OrderReservation> afterReservations = StateMapSupport.delta(beforeUser.reservations());
-        afterReservations.put(11L, reservation.releaseAll());
-        CoreUserState afterUser = beforeUser.transition(2, afterBalances, afterReservations,
-                beforeUser.positions(), beforeUser.positionMode());
-        Map<Long, CoreUserState> afterUsers = StateMapSupport.delta(before.users());
-        afterUsers.put(7L, afterUser);
-        Map<Long, CoreOrderState> afterOrders = StateMapSupport.delta(before.orders());
-        afterOrders.put(11L, open.cancel());
-        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2,
-                afterUsers, afterOrders, before.instruments(), CoreRiskState.empty(),
-                before.treasuryState().adjustFee("USDT", 3));
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-
-        RuntimeStateDeltaApplier.apply(before, after, runtime, identities);
-
-        assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(after);
-        RuntimeStateParityChecker.assertMatches(after, identities, runtime);
-    }
-
-    @Test
-    void appliesAllNestedReservationRemovalsForOneUser() {
-        OrderReservation first = OrderReservation.create(11, "BTC-USDT", 1,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 1).consume(100);
-        OrderReservation second = OrderReservation.create(12, "BTC-USDT", 1,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 1).consume(100);
-        CoreUserState beforeUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
-                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(11L, first, 12L, second), Map.of());
-        CoreOrderState firstOrder = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7,
-                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1).fill(1);
-        CoreOrderState secondOrder = new CoreOrderState(12, ProductLine.LINEAR_PERPETUAL, 7,
-                "BTC-USDT", 1, CoreOrderSide.SELL, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1).fill(1);
-        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(7L, beforeUser), Map.of(11L, firstOrder, 12L, secondOrder), Map.of(), CoreRiskState.empty(),
-                CoreTreasuryState.empty());
-
-        Map<Long, OrderReservation> firstRemoval = StateMapSupport.delta(beforeUser.reservations());
-        firstRemoval.remove(11L);
-        CoreUserState intermediate = beforeUser.transition(2, beforeUser.balances(), firstRemoval,
-                beforeUser.positions(), beforeUser.positionMode());
-        Map<Long, OrderReservation> secondRemoval = StateMapSupport.delta(intermediate.reservations());
-        secondRemoval.remove(12L);
-        CoreUserState afterUser = intermediate.transition(3, intermediate.balances(), secondRemoval,
-                intermediate.positions(), intermediate.positionMode());
-        Map<Long, CoreUserState> users = StateMapSupport.delta(before.users());
-        users.put(7L, intermediate);
-        users.put(7L, afterUser);
-        Map<Long, CoreOrderState> orders = StateMapSupport.delta(before.orders());
-        orders.remove(11L);
-        orders.remove(12L);
-        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, users, orders, Map.of(),
-                CoreRiskState.empty(), before.treasuryState());
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-
-        RuntimeStateDeltaApplier.apply(before, after, runtime, identities);
-
-        assertThat(runtime.reservation(11)).isNull();
-        assertThat(runtime.reservation(12)).isNull();
-        RuntimeStateParityChecker.assertMatches(after, identities, runtime);
     }
 
 }

@@ -37,6 +37,25 @@ class StableIdentityLedgerTest {
     }
 
     @Test
+    void abortedIntentCannotLaterBecomeCompleted() {
+        Path ledgerDirectory = temporaryDirectory.resolve("exclusive-terminal-state");
+        try (StableIdentityLedger ledger = StableIdentityLedger.open(
+                ledgerDirectory, "exclusive-terminal-run", 70L, "config-a")) {
+            StableIdentityLedger.Intent intent = ledger.intent(
+                    1L, WorkloadOperation.PLACE, 9_001L, "BTC-USDT", "APPLIED");
+            ledger.scheduled(intent, 10L);
+
+            ledger.aborted(intent.sequence(), 20L, "operator interruption");
+            ledger.finished(intent.sequence(), 30L, "APPLIED", "7001");
+
+            assertThat(ledger.completedCount()).isZero();
+            assertThat(ledger.abortedCount()).isEqualTo(1L);
+            assertThat(ledger.scheduledCount()).isEqualTo(
+                    ledger.completedCount() + ledger.outstandingCount() + ledger.abortedCount());
+        }
+    }
+
+    @Test
     void rejectsCorruptionButReplaysPastAStaleCheckpoint() throws Exception {
         Path staleDirectory = temporaryDirectory.resolve("stale");
         try (StableIdentityLedger ledger = StableIdentityLedger.open(staleDirectory, "stale-run", 72L)) {
@@ -61,6 +80,33 @@ class StableIdentityLedgerTest {
         assertThatThrownBy(() -> StableIdentityLedger.open(corruptDirectory, "corrupt-run", 73L))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("corrupt ledger");
+    }
+
+    @Test
+    void recoversAnInterruptedTrailingAppendWithoutDiscardingCommittedEvents() throws Exception {
+        Path directory = temporaryDirectory.resolve("torn-tail");
+        StableIdentityLedger.Intent intent;
+        try (StableIdentityLedger ledger = StableIdentityLedger.open(directory, "torn-run", 74L, "config-a")) {
+            intent = ledger.intent(1L, WorkloadOperation.PLACE, 7L, "BTC-USDT", "APPLIED");
+            ledger.scheduled(intent, 10L);
+        }
+        Files.writeString(directory.resolve("events.jsonl"), "{\"event\":\"SENT\",\"sequence\":1",
+                StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.APPEND);
+
+        try (StableIdentityLedger resumed = StableIdentityLedger.open(directory, "torn-run", 74L, "config-a")) {
+            assertThat(resumed.outstanding()).containsExactly(intent);
+        }
+        assertThat(Files.readString(directory.resolve("events.jsonl"))).endsWith("}\n");
+    }
+
+    @Test
+    void rejectsResumeWhenTheWorkloadConfigurationChanges() throws Exception {
+        Path directory = temporaryDirectory.resolve("config-mismatch");
+        try (StableIdentityLedger ignored = StableIdentityLedger.open(directory, "same-run", 75L, "config-a")) {
+        }
+        assertThatThrownBy(() -> StableIdentityLedger.open(directory, "same-run", 75L, "config-b"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("configuration");
     }
 
     @Test
@@ -90,6 +136,8 @@ class StableIdentityLedgerTest {
         properties.setProperty("requestTimeout", "PT0.1S");
         properties.setProperty("pollInterval", "PT0.01S");
         properties.setProperty("maxPolls", "2");
+        properties.setProperty("limitPriceTicks", "1");
+        properties.setProperty("triggerPriceTicks", "1");
         properties.setProperty("users", "1");
         properties.setProperty("symbols", "BTC-USDT");
         return properties;

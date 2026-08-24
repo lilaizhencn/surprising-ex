@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String CURRENT_GOLDEN = "5845585302000102010001004c000100"
+    private static final String CURRENT_GOLDEN = "5845585303000102010001004c000100"
             + "7766554433221100ffeeddccbbaa9988"
             + "0800000000000000"
             + "2a00000000000000e903000000000000"

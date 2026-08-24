@@ -133,9 +133,10 @@ public final class CoreAcceptFreezeConcurrentBenchmark {
     private static CoreMessage place(int index, int producer, long sourceSequence) {
         long orderId = 10_000_000L + index;
         PlaceOrderCommand order = new PlaceOrderCommand(orderId, SYMBOL, 1, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                CoreOrderSide.BUY, 1_000, 1_001, 1_100, 999, 1,
+                false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000, CoreOrderType.LIMIT,
-                CoreTimeInForce.IOC, 1_000, false, "accept-freeze-concurrent-" + orderId, 0, 0);
+                CoreTimeInForce.IOC, false, "accept-freeze-concurrent-" + orderId, 0, 0);
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(),
                 ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 100 + producer, sourceSequence, USER_ID,
                 1_000, 1_000_000L + index), TradingCommandCodec.encodePlaceOrder(order));

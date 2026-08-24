@@ -3,12 +3,14 @@ package com.surprising.aeron.service.state;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.service.matching.CoreMatch;
@@ -101,6 +103,14 @@ class RuntimePerpetualMatchProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState simulated = RuntimePerpetualMatchProcessor.simulate(before, 11, matches, identities);
 
+        int assetId = identities.assetId("USDT");
+        assertThat(simulated.treasury().fee(assetId))
+                .isEqualTo(after.treasuryState().feeBalances().getOrDefault("USDT", 0L));
+        assertThat(simulated.treasury().insurance(assetId))
+                .isEqualTo(after.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
+        assertThat(simulated.treasury().insuranceDeficit(assetId))
+                .isEqualTo(after.treasuryState().insuranceDeficits().getOrDefault("USDT", 0L));
+
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);
     }
 
@@ -130,6 +140,70 @@ class RuntimePerpetualMatchProcessorTest {
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);
     }
 
+    @Test
+    void betterPricedSellActiveCloseSettlesExactFeeAndMatchesRuntime() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                liveInstrument());
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 10_000_000_000L));
+        state = reducer.adjustBalance(state, 8, new BalanceAdjustmentCommand("USDT", 2_000_000_000_000L));
+        PlaceOrderCommand open = marketOrder(11, CoreOrderSide.BUY, false, 788_640);
+        TradingCoreState underfunded = state;
+        assertThatThrownBy(() -> reducer.placeOrder(underfunded, 7, open))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("INSUFFICIENT_AVAILABLE_BALANCE"));
+
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 990_000_000_000L));
+        TradingCoreState invalidOpen = reducer.placeOrder(state, 8,
+                limitOrder(21, CoreOrderSide.SELL, 773_332, false));
+        invalidOpen = reducer.placeOrder(invalidOpen, 7,
+                marketOrder(22, CoreOrderSide.BUY, false, 773_022));
+        TradingCoreState invalidOpenFill = invalidOpen;
+        assertThatThrownBy(() -> reducer.applyMatches(invalidOpenFill, 22, "BTC", "USDT",
+                List.of(new CoreMatch(21, 8, 773_332, 1, true, true))))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("INSUFFICIENT_ORDER_RESERVATION"));
+
+        state = reducer.placeOrder(state, 8, limitOrder(12, CoreOrderSide.SELL, 773_333, false));
+        state = reducer.placeOrder(state, 7, open);
+        state = reducer.applyMatches(state, 11, "BTC", "USDT",
+                List.of(new CoreMatch(12, 8, 773_333, 1, true, true)));
+        assertThat(state.user(7).balances().get("USDT"))
+                .isEqualTo(new AssetBalance("USDT", 918_800_035_000L, 77_333_300_000L));
+
+        state = reducer.placeOrder(state, 8, limitOrder(13, CoreOrderSide.BUY, 773_332, true));
+        state = reducer.placeOrder(state, 7, marketOrder(14, CoreOrderSide.SELL, true, 773_022));
+        assertThat(state.user(7).reservations().get(14L).remainingUnits()).isEqualTo(3_865_110_000L);
+
+        TradingCoreState readyToClose = state;
+        TradingCoreState boundaryFill = reducer.applyMatches(readyToClose, 14, "BTC", "USDT",
+                List.of(new CoreMatch(13, 8, 773_022, 1, true, true)));
+        assertThat(boundaryFill.user(7).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
+
+        List<CoreMatch> betterFill = List.of(new CoreMatch(13, 8, 773_332, 1, true, true));
+        long availableBeforeClose = readyToClose.user(7).balances().get("USDT").availableUnits();
+        TradingCoreState marginFundedClose = reducer.adjustBalance(readyToClose, 7,
+                new BalanceAdjustmentCommand("USDT", Math.negateExact(availableBeforeClose)));
+        marginFundedClose = reducer.applyMatches(marginFundedClose, 14, "BTC", "USDT", betterFill);
+        assertThat(marginFundedClose.user(7).balances().get("USDT"))
+                .isEqualTo(new AssetBalance("USDT", 77_321_750_000L, 0));
+
+        TradingCoreState closed = reducer.applyMatches(readyToClose, 14, "BTC", "USDT", betterFill);
+        assertThat(closed.user(7).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
+        assertThat(closed.user(7).reservations().get(14L).reservedUnits()).isEqualTo(3_865_110_000L);
+        assertThat(closed.user(7).reservations().get(14L).remainingUnits()).isZero();
+        assertThat(closed.user(7).balances().get("USDT"))
+                .isEqualTo(new AssetBalance("USDT", 992_256_675_000L, 0));
+        assertThat(closed.treasuryState().feeBalances()).containsEntry("USDT", 7_733_325_000L);
+        assertThat(closed.user(7).totalUnits("USDT") + closed.user(8).totalUnits("USDT")
+                + closed.treasuryState().feeBalances().get("USDT")).isEqualTo(3_000_000_000_000L);
+
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimePerpetualMatchProcessor.simulateTransition(
+                readyToClose, closed, 14, betterFill, identities);
+        RuntimeStateParityChecker.assertMatches(closed, identities, runtime);
+    }
+
     private static void assertCloseParity(long quantity, long takerReservation) {
         CoreInstrumentState instrument = instrument();
         CoreOrderState taker = order(11, 7, CoreOrderSide.SELL, quantity);
@@ -149,6 +223,14 @@ class RuntimePerpetualMatchProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
         TradingRuntimeState simulated = RuntimePerpetualMatchProcessor.simulate(before, 11, matches, identities);
+
+        int assetId = identities.assetId("USDT");
+        assertThat(simulated.treasury().fee(assetId))
+                .isEqualTo(after.treasuryState().feeBalances().getOrDefault("USDT", 0L));
+        assertThat(simulated.treasury().insurance(assetId))
+                .isEqualTo(after.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
+        assertThat(simulated.treasury().insuranceDeficit(assetId))
+                .isEqualTo(after.treasuryState().insuranceDeficits().getOrDefault("USDT", 0L));
 
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);
     }
@@ -182,5 +264,74 @@ class RuntimePerpetualMatchProcessorTest {
                         10_000_000, 10_000, 0, 1,
                         List.of(new CoreRiskLimitBracket(1, 0, 10_000,
                                 10_000_000, 100_000, 50_000))));
+    }
+
+    private static UpsertInstrumentCommand liveInstrument() {
+        return new UpsertInstrumentCommand("BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+                        "BTC", "USDT", "USDT", 10_000_000L, 10_000_000L, 100_000_000L,
+                        10_000L, 5_000L, 0, 500L, 0, -1, 0,
+                        100_000_000L, 1_000_000_000_000_000L, 1_000_000L, 25_000_000_000_000L,
+                        List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L,
+                                100_000_000L, 5_000L, 5_000L)));
+    }
+
+    private static PlaceOrderCommand marketOrder(long orderId, CoreOrderSide side,
+                                                  boolean reduceOnly, long matchingPriceTicks) {
+        return new PlaceOrderCommand(
+                orderId,
+                "BTC-USDT",
+                1,
+                "BTC",
+                "USDT",
+                "USDT",
+                side,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                matchingPriceTicks,
+                1,
+                reduceOnly,
+                CoreMarginMode.CROSS,
+                CorePositionSide.NET,
+                ReservationKind.DERIVATIVE_MARGIN,
+                "USDT",
+                0,
+                CoreOrderType.MARKET,
+                CoreTimeInForce.IOC,
+                false,
+                "order-" + orderId,
+                0,
+                500
+        );
+    }
+
+    private static PlaceOrderCommand limitOrder(long orderId, CoreOrderSide side,
+                                                 long priceTicks, boolean reduceOnly) {
+        return new PlaceOrderCommand(
+                orderId,
+                "BTC-USDT",
+                1,
+                "BTC",
+                "USDT",
+                "USDT",
+                side,
+                priceTicks,
+                priceTicks,
+                priceTicks,
+                priceTicks,
+                1,
+                reduceOnly,
+                CoreMarginMode.CROSS,
+                CorePositionSide.NET,
+                ReservationKind.DERIVATIVE_MARGIN,
+                "USDT",
+                0,
+                CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC,
+                false,
+                "order-" + orderId,
+                0,
+                0
+        );
     }
 }

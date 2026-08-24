@@ -3,11 +3,15 @@ package com.surprising.aeron.tools;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -70,8 +74,9 @@ public final class ClusterSpotMatchSmokeMain {
 
     private static byte[] order(long orderId, CoreOrderSide side, long quantity, String asset, long reserved) {
         return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                "BTC", "USDT", "USDT", side, 100, quantity, false,
-                ReservationKind.SPOT_ASSET, asset, reserved));
+                "BTC", "USDT", "USDT", side, 100, 100, 100, 100, quantity, false,
+                CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, asset, reserved,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", 0, 0));
     }
 
     private static CoreMessage command(long sourceId, long sequence, long userId,

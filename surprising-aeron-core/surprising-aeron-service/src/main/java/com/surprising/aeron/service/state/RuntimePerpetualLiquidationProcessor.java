@@ -25,7 +25,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                                                         ExecuteLiquidationCommand command,
                                                         Collection<CoreOrderState> canceledOrders,
                                                         RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || identities == null || !before.productLine().isFundingProduct()) {
+        if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual liquidation simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
@@ -38,7 +38,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                                                      TradingRuntimeState runtime,
                                                      RuntimeIdentityRegistry identities) {
         if (before == null || command == null || runtime == null || identities == null
-                || !before.productLine().isFundingProduct()) {
+                || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual liquidation apply");
         }
         runtime.assertOwner();
@@ -116,7 +116,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                                                                   long nextCursorOrderId,
                                                                   RuntimeIdentityRegistry identities) {
         if (before == null || command == null || identities == null || nextCursorOrderId <= 0
-                || !before.productLine().isFundingProduct()) {
+                || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation cancellation simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
@@ -130,7 +130,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                                                                TradingRuntimeState runtime,
                                                                RuntimeIdentityRegistry identities) {
         if (before == null || command == null || runtime == null || identities == null || nextCursorOrderId <= 0
-                || !before.productLine().isFundingProduct()) {
+                || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation cancellation apply");
         }
         runtime.assertOwner();
@@ -157,7 +157,7 @@ public final class RuntimePerpetualLiquidationProcessor {
     public static TradingRuntimeState simulateResolution(TradingCoreState before,
                                                          ResolveLiquidationCommand command,
                                                          RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || identities == null || !before.productLine().isFundingProduct()) {
+        if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
@@ -169,7 +169,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                                                       TradingRuntimeState runtime,
                                                       RuntimeIdentityRegistry identities) {
         if (before == null || command == null || runtime == null || identities == null
-                || !before.productLine().isFundingProduct()) {
+                || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
         runtime.assertOwner();
@@ -234,7 +234,7 @@ public final class RuntimePerpetualLiquidationProcessor {
 
     public static TradingRuntimeState simulateAdl(TradingCoreState before, ExecuteAdlCommand command,
                                                   RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || identities == null || !before.productLine().isFundingProduct()) {
+        if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
@@ -245,7 +245,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                                                TradingRuntimeState runtime,
                                                RuntimeIdentityRegistry identities) {
         if (before == null || command == null || runtime == null || identities == null
-                || !before.productLine().isFundingProduct()) {
+                || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL apply");
         }
         runtime.assertOwner();

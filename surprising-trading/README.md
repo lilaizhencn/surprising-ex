@@ -32,6 +32,37 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 允许使用小数的地方只在系统边界：外部行情/汇率解析、管理后台录入、REST 展示和报表输出。进入订单、撮合、账户、风控、强平、资金费、保险基金、ADL 前，必须先转换为 instrument 定义的 tick、step、ppm 或 asset unit。
 关键核心链路聚合使用 checked long addition。matching 成交总量和 reduce-only 待平数量溢出时会失败，而不是回绕成更小的值。
 
+## P1 价格、预占、平仓容量与费用契约
+
+本节冻结普通订单进入 Product Core 前的交易语义。`trading_orders`、账户投影、Kafka 和 PostgreSQL 都是异步事实或查询投影；它们不得覆盖、补齐或反向裁决 Product Core 的下单预检。价格、预占、平仓容量和费用的最终事实均由同一条 Product Core 命令状态转换产生。
+
+### 四个互不混用的价格
+
+- **限价（limit price）**：客户端为 `LIMIT` 订单提交的 `priceTicks`；它是订单簿价格约束。`MARKET` 不存在限价，且必须保持 `priceTicks=0`，不得把标记价或预占价伪装成限价。
+- **执行价（execution price）**：exchange-core 对每个实际成交片段裁决出的价格；它只在成交后出现，用于成交、PnL 和实际成交名义值，不能用提交时的价格预先代替。
+- **预占价（reservation price）**：Product Core 预检普通开仓风险时使用的保守价格。限价单按其可发生的最坏不利成交边界确定；市价单从新鲜标记价和最大滑点确定可成交边界。预占价只服务于完整开仓敞口和费用预留，不改写限价或执行价。
+- **标记价（mark price）**：由 Product Core 接收并校验时效/序列的风险参考价；它用于市价保护区间、价格带和风险计算。标记价不是限价、执行价或预占价；四种值数值相等时也必须保留各自语义和来源。
+
+### 全量普通开仓预占
+
+- 每个非 `reduceOnly` 的普通订单必须按**全量** `quantitySteps` 在 `reservation price` 计算可能形成的开仓敞口，再加该全量敞口的 **worst positive fee**，一次性形成不可变 reservation。不得只按预计立即成交量、盘口可见量、历史平均成交率或 provider 投影缩小预占。
+- `reduceOnly=true` 是唯一可以省略新增开仓保证金的路径；它并不省略仓位、方向、持仓版本、产品/结算资产或 `PositionCloseCapacity` 校验。强平和触发生成的用户平仓单同样必须由 Core 明确标记为 reduce-only，不能以“预计不成交”为理由跳过校验。
+- 成交、撤单、拒绝或 IOC/FOK 未成交结束时，Core 只按实际状态转换释放未使用 reservation；价格改善或实际正费用小于预留上限时的差额在同一事实链路释放。任何 reservation 缺失、负数或溢出都是 fail-closed 会计错误。
+
+### `PositionCloseCapacity`：独占的可平承诺
+
+- `PositionCloseCapacity` 是 Product Core 按 `userId + symbol + marginMode + positionSide + positionRevision` 维护的独占可平数量承诺，不是 provider 本地缓存、数据库行锁或账户投影推算值。每一笔活动 reduce-only 订单占用其尚未成交的可平数量；同一数量不得被两笔订单重复承诺。
+- 只有与当前持仓相反的 reduce-only 方向可以申请容量：多仓对应 `SELL`，空仓对应 `BUY`。申请、缩减、成交消耗、撤单释放、强平/ADL/持仓变更后的重新裁决必须在同一个 Core owner-thread 状态转换中完成。
+- 当持仓减少、版本变化或新 reduce-only 请求造成已承诺数量超过当前可平数量时，Core 必须在向 matcher 提交任何受影响订单之前，按 **newest-first** 的确定性顺序处理冲突：先比较较新的 Core command sequence；序列相同再比较较大的 `orderId`；依次取消或缩减最新活动订单，直到每个 `PositionCloseCapacity` 都不超过可平数量。不得按数据库更新时间、网络到达顺序或 provider 实例本地时间决定赢家。
+- 旧持仓版本、错误方向、容量不足或无法确定排序的请求必须拒绝或由上述 newest-first 规则收敛；不得把超额部分留给 matcher、延后到异步投影，或让多个 reduce-only 订单竞争同一仓位。
+
+### 累计 maker/taker 费用与返佣
+
+- 每个订单分别维护 `maker bucket` 与 `taker bucket`：每个 bucket 只累计该订单以相应角色实际执行的 executed-notional，并保存已经过账的累计费用。角色改变时进入另一 bucket，不能把 maker 与 taker 名义值净额合并。
+- 每次成交的费用增量必须由“本次角色 bucket 的累计 executed-notional 按该订单已冻结费率计算的累计费用”减去“该 bucket 已过账费用”得到；因此任意碎片化成交、重放或部分成交的总费用与把同一 executed-notional 一次成交的结果一致。不得对每个 fragment 单独取整，也不得按 fragment 改写费率。
+- 正费率产生费用借记；负费率是 `rebate`，必须作为对对应资产/所有者的明确贷记事实，而不是负向扣费、隐藏净额或对另一 bucket 的抵消。maker rebate 只能影响 maker bucket，taker rebate 只能影响 taker bucket。
+- 订单接受时冻结的 maker/taker 费率快照、累计 executed-notional、累计费用和 rebate 贷记都属于 Core/结算事实；后续费率表、VIP、做市计划或查询投影变化不得重算已经执行的成交。
+
 ## 核心链路
 
 ```text

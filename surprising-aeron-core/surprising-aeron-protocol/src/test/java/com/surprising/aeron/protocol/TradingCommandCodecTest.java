@@ -10,12 +10,43 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
+    void roundTripsFourIndependentPrices() {
+        PlaceOrderCommand command = new PlaceOrderCommand(71, "BTC-USDT", 9, "BTC", "USDT", "USDT",
+                CoreOrderSide.BUY, 101, 102, 110, 99, 6, false, CoreMarginMode.CROSS,
+                CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, "USDT", 660,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-71", -10, 20);
+
+        PlaceOrderCommand restored = TradingCommandCodec.decodePlaceOrder(
+                TradingCommandCodec.encodePlaceOrder(command));
+
+        assertThat(restored.limitPriceTicks()).isEqualTo(101);
+        assertThat(restored.executionPriceTicks()).isEqualTo(102);
+        assertThat(restored.reservationPriceTicks()).isEqualTo(110);
+        assertThat(restored.markPriceTicks()).isEqualTo(99);
+    }
+
+    @Test
+    void rejectsV2PlaceOrder() {
+        PlaceOrderCommand command = new PlaceOrderCommand(72, "BTC-USDT", 9, "BTC", "USDT", "USDT",
+                CoreOrderSide.SELL, 101, 102, 110, 99, 2, false, CoreMarginMode.CROSS,
+                CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, "USDT", 220,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-72", 0, 20);
+        byte[] encoded = TradingCommandCodec.encodePlaceOrder(command);
+        ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).putInt(0, 2);
+
+        assertThatThrownBy(() -> TradingCommandCodec.decodePlaceOrder(encoded))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("unsupported Core protocol version: 2");
+    }
+
+    @Test
     void roundTripsAllP2Commands() {
         BalanceAdjustmentCommand adjustment = new BalanceAdjustmentCommand("USDT", 10_000);
         PlaceOrderCommand placeOrder = new PlaceOrderCommand(7, "BTC-USDT", 3, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 0, 3, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG,
+                CoreOrderSide.BUY, 60_000, 60_001, 61_000, 59_000, 3,
+                false, CoreMarginMode.ISOLATED, CorePositionSide.LONG,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 2_000,
-                CoreOrderType.MARKET, CoreTimeInForce.FOK, 60_000, false,
+                CoreOrderType.MARKET, CoreTimeInForce.FOK, false,
                 "client-7", -10, 20);
         CancelOrderCommand cancelOrder = new CancelOrderCommand(7);
         ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(6, placeOrder);

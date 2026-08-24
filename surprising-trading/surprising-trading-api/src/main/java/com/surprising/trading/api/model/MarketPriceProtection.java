@@ -19,7 +19,10 @@ public final class MarketPriceProtection {
                     : slippage.value();
             return Math.addExact(markPriceTicks, roundedUpSlippage);
         }
-        return Math.max(1L, Math.subtractExact(markPriceTicks, slippage.value()));
+        long roundedUpSlippage = slippage.hasRemainder()
+                ? Math.addExact(slippage.value(), 1L)
+                : slippage.value();
+        return Math.max(1L, Math.subtractExact(markPriceTicks, roundedUpSlippage));
     }
 
     private static DivisionResult multiplyDivide(long left, long right, long divisor) {

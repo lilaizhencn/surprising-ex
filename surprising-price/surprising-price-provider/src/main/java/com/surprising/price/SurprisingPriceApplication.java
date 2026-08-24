@@ -53,11 +53,21 @@ public class SurprisingPriceApplication {
                 || consumerProperties.getProductLine() != markProperties.getKafka().getProductLine()) {
             throw new IllegalStateException("index and mark price product-line configuration must match");
         }
-        log.info("Effective mark matrix configuration publishIntervalMs={} indexWebSocketEnabled={} "
-                        + "indexRestFallbackEnabled={} indexMaxSourceAge={}",
-                markProperties.getCalculation().getPublishIntervalMs(), indexProperties.getWebSocket().isEnabled(),
+        log.info("Effective price matrix configuration markPublishIntervalMs={} indexPollDelayMs={} "
+                        + "indexMinValidSources={} indexMaxSourceAge={} indexWebSocketEnabled={} "
+                        + "indexRestFallbackEnabled={} indexWebSocketIdleTimeout={} "
+                        + "indexWebSocketReconnectInitialDelay={} indexWebSocketReconnectMaxDelay={} "
+                        + "indexWebSocketHealthCheckInterval={}",
+                markProperties.getCalculation().getPublishIntervalMs(),
+                indexProperties.getCalculation().getPollDelayMs(),
+                indexProperties.getCalculation().getMinValidSources(),
+                indexProperties.getCalculation().getMaxSourceAge(),
+                indexProperties.getWebSocket().isEnabled(),
                 indexProperties.getWebSocket().isRestFallbackEnabled(),
-                indexProperties.getCalculation().getMaxSourceAge());
+                indexProperties.getWebSocket().getIdleTimeout(),
+                indexProperties.getWebSocket().getReconnectInitialDelay(),
+                indexProperties.getWebSocket().getReconnectMaxDelay(),
+                indexProperties.getWebSocket().getHealthCheckInterval());
     }
 
     public static void main(String[] args) {

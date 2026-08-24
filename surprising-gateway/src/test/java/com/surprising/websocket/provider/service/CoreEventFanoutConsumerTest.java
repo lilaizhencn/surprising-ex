@@ -3,13 +3,10 @@ package com.surprising.websocket.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreBalanceView;
@@ -39,7 +36,6 @@ import java.util.UUID;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 import tools.jackson.databind.ObjectMapper;
 
 class CoreEventFanoutConsumerTest {
@@ -48,7 +44,7 @@ class CoreEventFanoutConsumerTest {
     void fansOutAuthoritativeOrdersExecutionsAndPositionsWithStableReplayIds() {
         SubscriptionRegistry registry = mock(SubscriptionRegistry.class);
         WebSocketProperties properties = properties(ProductLine.LINEAR_PERPETUAL);
-        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties, auditRepository());
+        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties);
         ConsumerRecord<String, byte[]> record = record(ProductLine.LINEAR_PERPETUAL, 7, true);
 
         consumer.onCoreEvent(record);
@@ -68,8 +64,7 @@ class CoreEventFanoutConsumerTest {
     @Test
     void rejectsWrongProductKeyAndDoesNotPublishSpotPositions() {
         SubscriptionRegistry registry = mock(SubscriptionRegistry.class);
-        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties(ProductLine.SPOT),
-                auditRepository());
+        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties(ProductLine.SPOT));
         ConsumerRecord<String, byte[]> valid = record(ProductLine.SPOT, 1, false);
         ConsumerRecord<String, byte[]> wrongKey = new ConsumerRecord<>(valid.topic(), 0, 0,
                 "LINEAR_PERPETUAL:1", valid.value());
@@ -91,8 +86,8 @@ class CoreEventFanoutConsumerTest {
         WebSocketProperties properties = properties(ProductLine.LINEAR_PERPETUAL);
         ConsumerRecord<String, byte[]> replay = record(ProductLine.LINEAR_PERPETUAL, 7, true, 27);
 
-        new CoreEventFanoutConsumer(firstRegistry, properties, auditRepository()).onCoreEvent(replay);
-        new CoreEventFanoutConsumer(restartedRegistry, properties, auditRepository()).onCoreEvent(replay);
+        new CoreEventFanoutConsumer(firstRegistry, properties).onCoreEvent(replay);
+        new CoreEventFanoutConsumer(restartedRegistry, properties).onCoreEvent(replay);
 
         ArgumentCaptor<Object> firstPayload = ArgumentCaptor.forClass(Object.class);
         ArgumentCaptor<Object> replayedPayload = ArgumentCaptor.forClass(Object.class);
@@ -112,41 +107,17 @@ class CoreEventFanoutConsumerTest {
     }
 
     @Test
-    void auditsBeforeFanoutAndAuditFailureLeavesRecordUnprocessed() {
-        SubscriptionRegistry registry = mock(SubscriptionRegistry.class);
-        CoreEventAuditRepository audit = mock(CoreEventAuditRepository.class);
-        WebSocketProperties properties = properties(ProductLine.LINEAR_PERPETUAL);
-        ConsumerRecord<String, byte[]> record = record(ProductLine.LINEAR_PERPETUAL, 7, true, 12);
-        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties, audit);
-
-        consumer.onCoreEvent(record);
-
-        InOrder inOrder = org.mockito.Mockito.inOrder(audit, registry);
-        inOrder.verify(audit).requireProjected(eq(ProductLine.LINEAR_PERPETUAL), any(CoreExportEvent.class),
-                any(byte[].class), eq(1_700_000_000_000L));
-        inOrder.verify(registry, times(8)).publish(any(SubscriptionTopic.class), any(), any(Instant.class));
-
-        doThrow(new IllegalStateException("audit unavailable")).when(audit).requireProjected(
-                any(ProductLine.class), any(CoreExportEvent.class), any(byte[].class), anyLong());
-        SubscriptionRegistry failedRegistry = mock(SubscriptionRegistry.class);
-        CoreEventFanoutConsumer failedConsumer = new CoreEventFanoutConsumer(failedRegistry, properties, audit);
-        assertThatThrownBy(() -> failedConsumer.onCoreEvent(record)).isInstanceOf(IllegalStateException.class)
-                .hasMessage("audit unavailable");
-        verifyNoInteractions(failedRegistry);
-    }
-
-    @Test
     void rejectsKafkaOffsetGapButReconstructedConsumerAcceptsCommittedStartingOffset() {
         SubscriptionRegistry registry = mock(SubscriptionRegistry.class);
         WebSocketProperties properties = properties(ProductLine.SPOT);
-        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties, auditRepository());
+        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties);
 
         consumer.onCoreEvent(record(ProductLine.SPOT, 1, false, 12));
         assertThatThrownBy(() -> consumer.onCoreEvent(record(ProductLine.SPOT, 2, false, 14)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Kafka Core event offsets");
 
-        new CoreEventFanoutConsumer(mock(SubscriptionRegistry.class), properties, auditRepository())
+        new CoreEventFanoutConsumer(mock(SubscriptionRegistry.class), properties)
                 .onCoreEvent(record(ProductLine.SPOT, 2, false, 14));
     }
 
@@ -170,10 +141,6 @@ class CoreEventFanoutConsumerTest {
         properties.getKafka().setProductLine(productLine);
         properties.getKafka().setGroupId("p8-node");
         return properties;
-    }
-
-    private static CoreEventAuditRepository auditRepository() {
-        return mock(CoreEventAuditRepository.class);
     }
 
     private static ConsumerRecord<String, byte[]> record(ProductLine productLine, long sequence,

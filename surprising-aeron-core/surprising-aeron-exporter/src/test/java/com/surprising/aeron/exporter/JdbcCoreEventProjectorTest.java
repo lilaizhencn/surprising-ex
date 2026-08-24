@@ -101,6 +101,32 @@ class JdbcCoreEventProjectorTest {
     }
 
     @Test
+    void acceptsAnUnchangedOrderRevisionInTheNextContiguousEvent() throws Exception {
+        JdbcDataSource dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:mem:unchanged_order_revision;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+        migrate(dataSource);
+        var order = new CoreOrderStateView(71, ProductLine.SPOT, 17, "BTC-USDT", 3,
+                CoreOrderSide.BUY, 60_000, 2, 0, 2, false, "OPEN", 1);
+        CoreMessage first = orderEvent(1, CoreMessageType.PLACE_ORDER, order);
+        CoreMessage second = orderEvent(2, CoreMessageType.CANCEL_ORDER_BATCH, order);
+        var projector = new JdbcCoreEventProjector(dataSource);
+
+        assertThat(projector.project(ProductLine.SPOT, first)).isTrue();
+        assertThat(projector.project(ProductLine.SPOT, second)).isTrue();
+
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            assertCount(statement, "core_event_projection", 2);
+            assertCount(statement, "core_order_projection", 1);
+            try (var result = statement.executeQuery("SELECT order_revision, export_sequence "
+                    + "FROM core_order_projection WHERE product_line = 'SPOT' AND order_id = 71")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getLong(1)).isEqualTo(1);
+                assertThat(result.getLong(2)).isEqualTo(1);
+            }
+        }
+    }
+
+    @Test
     void projectsFundingSettlementAndPaymentsFromAuthoritativeEvent() throws Exception {
         JdbcDataSource dataSource = new JdbcDataSource();
         dataSource.setURL("jdbc:h2:mem:funding_projection;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
@@ -197,6 +223,18 @@ class JdbcCoreEventProjectorTest {
                 }
             }
         }
+    }
+
+    private static CoreMessage orderEvent(long exportSequence, CoreMessageType type,
+                                          CoreOrderStateView order) {
+        UUID commandId = UUID.randomUUID();
+        var event = new CoreExportEvent(exportSequence, exportSequence, exportSequence * 17,
+                commandId, type, ResponseStatus.APPLIED, CoreResultCode.NONE, order.userId(),
+                new byte[] {(byte) exportSequence}, java.util.List.of(), java.util.List.of(order),
+                java.util.List.of());
+        return new CoreMessage(CoreMessageHeader.command(type, commandId, ProductLine.SPOT,
+                CommandSource.GATEWAY, 1, exportSequence, order.userId(), exportSequence, exportSequence)
+                .exportEvent(exportSequence), CoreExportCodec.encodeEvent(event));
     }
 
     private static void assertCount(java.sql.Statement statement, String table, int expected) throws Exception {

@@ -8,8 +8,10 @@ import io.aeron.cluster.ConsensusModule;
 import io.aeron.cluster.service.ClusteredServiceContainer;
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
+import io.aeron.exceptions.AeronException;
 import java.io.File;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import org.agrona.ErrorHandler;
 import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
@@ -22,7 +24,6 @@ public final class SurprisingClusterNode {
     @SuppressWarnings("try")
     public static void main(String[] args) {
         ClusterTopology topology = ClusterTopology.fromSystemProperties();
-        ClusterRecoveryPreflight.verify(topology.nodeDirectory().getParent());
         File nodeDirectory = topology.nodeDirectory().toFile();
         String aeronDirectoryName = topology.aeronDirectoryName();
         ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
@@ -30,6 +31,8 @@ public final class SurprisingClusterNode {
         MediaDriver.Context mediaDriverContext = new MediaDriver.Context()
                 .aeronDirectoryName(aeronDirectoryName)
                 .threadingMode(coreThreadingMode())
+                .clientLivenessTimeoutNs(coreClientLivenessTimeoutNs())
+                .publicationUnblockTimeoutNs(corePublicationUnblockTimeoutNs())
                 .termBufferSparseFile(true)
                 .errorHandler(errorHandler("media-driver"));
 
@@ -67,28 +70,36 @@ public final class SurprisingClusterNode {
                 .archiveContext(localArchiveClient.clone())
                 .errorHandler(errorHandler("consensus-module"));
 
-        ClusteredServiceContainer.Context serviceContext = new ClusteredServiceContainer.Context()
-                .clusterId(topology.clusterId())
-                .aeronDirectoryName(aeronDirectoryName)
-                .archiveContext(localArchiveClient.clone())
-                .clusterDir(clusterDirectory)
-                .clusteredService(new SurprisingClusteredService(topology.productLine()))
-                .errorHandler(errorHandler("clustered-service"));
-
         try (ClusteredMediaDriver ignored = ClusteredMediaDriver.launch(
                     mediaDriverContext.terminationHook(barrier::signalAll),
                     archiveContext,
-                    consensusContext.terminationHook(barrier::signalAll));
-             ClusteredServiceContainer ignoredContainer = ClusteredServiceContainer.launch(
-                     serviceContext.terminationHook(barrier::signalAll))) {
-            System.out.printf("Aeron core started productLine=%s nodeId=%d clusterId=%d host=%s%n",
-                    topology.productLine(), topology.nodeId(), topology.clusterId(), topology.hostname());
-            barrier.await();
+                    consensusContext.terminationHook(barrier::signalAll))) {
+            ClusteredServiceContainer.Context serviceContext = new ClusteredServiceContainer.Context()
+                    .clusterId(topology.clusterId())
+                    .aeronDirectoryName(aeronDirectoryName)
+                    .archiveContext(localArchiveClient.clone())
+                    .clusterDir(clusterDirectory)
+                    .clusteredService(new SurprisingClusteredService(topology.productLine()))
+                    .errorHandler(errorHandler("clustered-service"));
+            try (ClusteredServiceContainer ignoredContainer = ClusteredServiceContainer.launch(
+                    serviceContext.terminationHook(barrier::signalAll))) {
+                System.out.printf("Aeron core started productLine=%s nodeId=%d clusterId=%d host=%s%n",
+                        topology.productLine(), topology.nodeId(), topology.clusterId(), topology.hostname());
+                barrier.await();
+            }
+        } finally {
+            barrier.close();
         }
     }
 
     private static ErrorHandler errorHandler(String component) {
         return throwable -> {
+            if (throwable instanceof AeronException aeronException
+                    && aeronException.category() == AeronException.Category.WARN) {
+                System.err.println("Aeron " + component + " warning");
+                System.err.println(aeronException);
+                return;
+            }
             System.err.println("Aeron " + component + " failure");
             throwable.printStackTrace(System.err);
         };
@@ -106,5 +117,13 @@ public final class SurprisingClusterNode {
                     "surprising.aeron.core.threading-mode must be a valid Aeron ThreadingMode: " + configured,
                     exception);
         }
+    }
+
+    static long coreClientLivenessTimeoutNs() {
+        return TimeUnit.SECONDS.toNanos(30);
+    }
+
+    static long corePublicationUnblockTimeoutNs() {
+        return TimeUnit.SECONDS.toNanos(60);
     }
 }

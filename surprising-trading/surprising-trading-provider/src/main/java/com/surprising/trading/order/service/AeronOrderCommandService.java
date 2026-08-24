@@ -159,17 +159,18 @@ public class AeronOrderCommandService {
         if (instrument.version() != validation.instrumentVersion()) {
             throw new IllegalStateException("instrument snapshot changed before Aeron submit");
         }
-        long matchingPriceTicks = matchingPriceTicks(request, validation.instrumentVersion());
+        OrderPricePreflight prices = preflightPrices(request, validation, instrument);
         String reservationAsset = instrument.spot()
                 ? (request.side() == OrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset())
                 : instrument.settleAsset();
         return new PlaceOrderCommand(orderId, request.symbol(), validation.instrumentVersion(),
                 instrument.baseAsset(), instrument.quoteAsset(), instrument.settleAsset(), side(request.side()),
-                request.priceTicks(), request.quantitySteps(), request.reduceOnly(), marginMode(request.marginMode()),
+                prices.limitPriceTicks(), prices.executionPriceTicks(), prices.reservationPriceTicks(),
+                prices.markPriceTicks(), request.quantitySteps(), request.reduceOnly(), marginMode(request.marginMode()),
                 positionSide(request.positionSide()), instrument.spot() ? ReservationKind.SPOT_ASSET
                 : ReservationKind.DERIVATIVE_MARGIN, reservationAsset, 0,
-                orderType(request.orderType()), timeInForce(request.timeInForce()), matchingPriceTicks,
-                request.postOnly(), requireClientKey(request.clientOrderId(), "clientOrderId"),
+                orderType(request.orderType()), timeInForce(request.timeInForce()), request.postOnly(),
+                requireClientKey(request.clientOrderId(), "clientOrderId"),
                 fee.makerFeeRatePpm(), fee.takerFeeRatePpm());
     }
 
@@ -383,13 +384,28 @@ public class AeronOrderCommandService {
         return view == null ? null : requireOrder(view, "order query returned no order");
     }
 
-    private long matchingPriceTicks(com.surprising.trading.api.model.PlaceOrderRequest request, long version) {
-        if (request.orderType() == OrderType.LIMIT) return request.priceTicks();
-        long mark = markPrices.latestMarkPriceTicks(request.symbol(), version,
+    private OrderPricePreflight preflightPrices(
+            com.surprising.trading.api.model.PlaceOrderRequest request,
+            ValidationResult validation,
+            InstrumentRule instrument) {
+        long mark = markPrices.latestMarkPriceTicks(request.symbol(), validation.instrumentVersion(),
                         properties.getRisk().getMarketMaxMarkAgeMs())
                 .orElseThrow(() -> new IllegalStateException("mark price unavailable"));
-        return MarketPriceProtection.protectedPriceTicks(request.side(), mark,
-                properties.getRisk().getMarketMaxSlippagePpm());
+        long executionPrice = request.orderType() == OrderType.LIMIT
+                ? request.priceTicks()
+                : MarketPriceProtection.protectedPriceTicks(request.side(), mark,
+                        properties.getRisk().getMarketMaxSlippagePpm());
+        long reservationPrice = instrument.spot()
+                ? executionPrice
+                : OrderMarginMath.collateralPriceTicks(request.side(), request.orderType(), request.priceTicks(), mark,
+                        properties.getRisk().getMarketMaxSlippagePpm(), validation.contractType());
+        return new OrderPricePreflight(executionPrice, executionPrice, reservationPrice, mark);
+    }
+
+    private record OrderPricePreflight(long limitPriceTicks,
+                                       long executionPriceTicks,
+                                       long reservationPriceTicks,
+                                       long markPriceTicks) {
     }
 
     private static OrderResponse requireOrder(CoreOrderStateView view, String message) {

@@ -16,7 +16,7 @@ public final class RuntimePerpetualFillCalculator {
                 || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("invalid perpetual fill arguments");
         }
-        if (!instrument.contractType().isPerpetual()
+        if (!instrument.contractType().productLine().isDerivative()
                 || order.symbolId() != identities.symbolId(instrument.symbol())
                 || settleAssetId != identities.assetId(instrument.settleAsset())) {
             throw new IllegalArgumentException("runtime fill instrument identity mismatch");
@@ -54,23 +54,54 @@ public final class RuntimePerpetualFillCalculator {
                 : proportional(current.positionMarginUnits(), closeSteps, currentAbs);
         long nextQuantity = Math.addExact(currentQuantity, signedFill);
         long remainingMargin = Math.subtractExact(current == null ? 0 : current.positionMarginUnits(), releasedMargin);
-        long requiredMargin = positionMarginRequirement(instrument, nextQuantity, fillPriceTicks, leveragePpm);
-        long marginIncrease = Math.max(0, Math.subtractExact(requiredMargin, remainingMargin));
+        long marginIncrease = openingMarginForFill(instrument, nextQuantity, signedFill, openSteps,
+                fillPriceTicks, leveragePpm);
         long feeRatePpm = taker ? order.takerFeeRatePpm() : order.makerFeeRatePpm();
+        long premiumDelta = instrument.contractType().isOption()
+                ? (order.side() == CoreOrderSide.BUY
+                ? Math.negateExact(CoreContractMath.optionPremiumUnits(
+                instrument, fillPriceTicks, fillQuantitySteps))
+                : CoreContractMath.optionPremiumUnits(instrument, fillPriceTicks, fillQuantitySteps))
+                : 0;
         long feeDelta = CoreContractMath.feeDeltaUnits(instrument, fillPriceTicks, fillQuantitySteps, feeRatePpm);
-        long reservationDebit = Math.addExact(marginIncrease, Math.max(0, Math.negateExact(feeDelta)));
-        if (reservationDebit > reservation.reservedUnits()) {
-            throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION", "runtime reservation is insufficient");
+        long premiumDebit = Math.max(0, Math.negateExact(premiumDelta));
+        long feeDebit = Math.max(0, Math.negateExact(feeDelta));
+        long proportionalBudget = proportional(reservation.reservedUnits(), fillQuantitySteps,
+                order.remainingQuantitySteps());
+        long fillReservationBudget = Math.min(reservation.reservedUnits(),
+                Math.max(feeDebit, proportionalBudget));
+        // The accepted reservation is authoritative when a better execution price raises the price-based formula.
+        boolean betterFill = order.side() == CoreOrderSide.BUY
+                ? fillPriceTicks < order.matchingPriceTicks()
+                : fillPriceTicks > order.matchingPriceTicks();
+        if (betterFill) {
+            marginIncrease = Math.min(marginIncrease, Math.max(0,
+                    Math.subtractExact(fillReservationBudget, Math.addExact(premiumDebit, feeDebit))));
         }
+        long reservationDebit = Math.addExact(marginIncrease, Math.addExact(premiumDebit, feeDebit));
+        long reservationShortfall = Math.max(0,
+                Math.subtractExact(reservationDebit, reservation.reservedUnits()));
+        if (reservationShortfall > 0
+                && (!order.reduceOnly() || closeSteps == 0 || reservationShortfall > feeDebit)) {
+            throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
+                    "runtime reservation is insufficient");
+        }
+        long releasedMarginDebit = reservationShortfall;
+        if (releasedMarginDebit > releasedMargin) {
+            throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
+                    "runtime reservation and released position margin are insufficient");
+        }
+        long orderReservationDebit = Math.subtractExact(reservationDebit, releasedMarginDebit);
         long nextAvailable = balance.availableUnits();
         long nextLocked = balance.lockedUnits();
-        if (releasedMargin > 0) {
-            nextAvailable = Math.addExact(nextAvailable, releasedMargin);
-            nextLocked = Math.subtractExact(nextLocked, releasedMargin);
+        long marginReleaseUnits = Math.subtractExact(releasedMargin, releasedMarginDebit);
+        if (marginReleaseUnits > 0) {
+            nextAvailable = Math.addExact(nextAvailable, marginReleaseUnits);
+            nextLocked = Math.subtractExact(nextLocked, marginReleaseUnits);
         }
 
         long realizedPnl = 0;
-        if (closeSteps > 0) {
+        if (closeSteps > 0 && !instrument.contractType().isOption()) {
             long signedClose = currentQuantity > 0 ? closeSteps : Math.negateExact(closeSteps);
             realizedPnl = CoreContractMath.pnlUnits(instrument, signedClose,
                     current.entryPriceTicks(), fillPriceTicks);
@@ -84,16 +115,14 @@ public final class RuntimePerpetualFillCalculator {
             nextAvailable = Math.subtractExact(nextAvailable, debit);
             appliedPnl = Math.negateExact(debit);
         }
+        if (premiumDelta < 0) nextLocked = Math.subtractExact(nextLocked, Math.negateExact(premiumDelta));
+        else if (premiumDelta > 0) nextAvailable = Math.addExact(nextAvailable, premiumDelta);
         if (feeDelta < 0) nextLocked = Math.subtractExact(nextLocked, Math.negateExact(feeDelta));
         else if (feeDelta > 0) nextAvailable = Math.addExact(nextAvailable, feeDelta);
         if (nextAvailable < 0 || nextLocked < 0) {
             throw new IllegalStateException("runtime fill balance would become negative");
         }
         long feeUnits = Math.addExact(runtime.treasury().fee(settleAssetId), Math.negateExact(feeDelta));
-        long insuranceNet = Math.subtractExact(runtime.treasury().insurance(settleAssetId),
-                runtime.treasury().insuranceDeficit(settleAssetId));
-        long nextInsuranceNet = Math.addExact(insuranceNet, Math.negateExact(appliedPnl));
-
         long nextEntryPrice;
         long nextEntryValue;
         if (nextQuantity == 0) {
@@ -121,12 +150,10 @@ public final class RuntimePerpetualFillCalculator {
                 nextRemainingQuantity == 0 ? CoreOrderStatus.FILLED : order.status(),
                 Math.incrementExact(order.revision()));
 
-        // Commit only after every arithmetic and business precondition has succeeded.
-        runtime.replaceReservation(reservation.consume(reservationDebit));
-        balance.replace(nextAvailable, nextLocked);
+        runtime.replaceReservation(reservation.consume(orderReservationDebit));
+        runtime.replaceBalance(new BalanceRuntime(order.userId(), settleAssetId, nextAvailable, nextLocked));
         runtime.treasury().setFee(settleAssetId, feeUnits);
-        runtime.treasury().setInsurance(settleAssetId, nextInsuranceNet >= 0 ? nextInsuranceNet : 0,
-                nextInsuranceNet < 0 ? Math.negateExact(nextInsuranceNet) : 0);
+        runtime.treasury().adjustInsurance(settleAssetId, Math.negateExact(appliedPnl));
         runtime.replacePosition(positionKey, next);
         runtime.replaceOrder(nextOrder);
         runtime.advanceUserRevision(order.userId());
@@ -136,12 +163,17 @@ public final class RuntimePerpetualFillCalculator {
         return part == total ? units : Math.multiplyExact(units, part) / total;
     }
 
-    private static long positionMarginRequirement(CoreInstrumentState instrument, long signedQuantitySteps,
-                                                   long priceTicks, long leveragePpm) {
-        if (signedQuantitySteps == 0) return 0;
-        long quantitySteps = Math.absExact(signedQuantitySteps);
-        long notional = CoreContractMath.notionalUnits(instrument, quantitySteps, priceTicks);
-        long bracketRate = CoreContractMath.maintenanceRiskBracket(instrument, notional).initialMarginRatePpm();
+    private static long openingMarginForFill(CoreInstrumentState instrument,
+                                             long projectedQuantitySteps,
+                                             long signedFillSteps,
+                                             long openSteps,
+                                             long priceTicks,
+                                             long leveragePpm) {
+        if (openSteps == 0) return 0;
+        long projectedNotional = CoreContractMath.notionalUnits(
+                instrument, Math.absExact(projectedQuantitySteps), priceTicks);
+        long bracketRate = CoreContractMath.maintenanceRiskBracket(
+                instrument, projectedNotional).initialMarginRatePpm();
         java.math.BigInteger numerator = java.math.BigInteger.valueOf(1_000_000L)
                 .multiply(java.math.BigInteger.valueOf(1_000_000L));
         java.math.BigInteger[] division = numerator.divideAndRemainder(java.math.BigInteger.valueOf(leveragePpm));
@@ -149,7 +181,7 @@ public final class RuntimePerpetualFillCalculator {
                 : division[0].add(java.math.BigInteger.ONE).longValueExact();
         long effectiveRate = Math.max(Math.max(instrument.initialMarginRatePpm(), bracketRate), leverageRate);
         return CoreContractMath.openingMarginUnits(instrument,
-                signedQuantitySteps > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL,
-                priceTicks, quantitySteps, effectiveRate);
+                signedFillSteps > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL,
+                priceTicks, openSteps, effectiveRate);
     }
 }

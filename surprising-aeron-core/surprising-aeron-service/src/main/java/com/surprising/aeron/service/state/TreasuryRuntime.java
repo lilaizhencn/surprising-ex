@@ -2,191 +2,192 @@ package com.surprising.aeron.service.state;
 
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
+import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
 
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 
 public final class TreasuryRuntime {
     private final IntLongHashMap feeBalances = new IntLongHashMap();
     private final IntLongHashMap insuranceBalances = new IntLongHashMap();
     private final IntLongHashMap insuranceDeficits = new IntLongHashMap();
+    private final IntLongHashMap liquidationFeeBalances = new IntLongHashMap();
+    private final IntLongHashMap fundingResidualBalances = new IntLongHashMap();
+    private final IntLongHashMap roundingResidualBalances = new IntLongHashMap();
+    private final IntLongHashMap clearingPnlBalances = new IntLongHashMap();
     private final IntLongHashMap fundingSettlements = new IntLongHashMap();
     private final IntLongHashMap lifecycleSettlements = new IntLongHashMap();
     private final IntObjectHashMap<FundingProgressRuntime> fundingProgress = new IntObjectHashMap<>();
     private final IntObjectHashMap<LifecycleProgressRuntime> lifecycleProgress = new IntObjectHashMap<>();
+    private final IntHashSet changedAssets = new IntHashSet();
+    private final IntHashSet changedFundingSymbols = new IntHashSet();
+    private final IntHashSet changedLifecycleSymbols = new IntHashSet();
+    private Thread owner;
 
-    public long fee(int assetId) { return feeBalances.get(assetId); }
-    public long insurance(int assetId) { return insuranceBalances.get(assetId); }
-    public long insuranceDeficit(int assetId) { return insuranceDeficits.get(assetId); }
-    public long fundingSettlement(int symbolId) { return fundingSettlements.get(symbolId); }
-    public FundingProgressRuntime fundingProgress(int symbolId) { return fundingProgress.get(symbolId); }
-    public long lifecycleSettlement(int symbolId) { return lifecycleSettlements.get(symbolId); }
-    public LifecycleProgressRuntime lifecycleProgress(int symbolId) { return lifecycleProgress.get(symbolId); }
+    void assertOwner() {
+        Thread current = Thread.currentThread();
+        if (owner == null) owner = current;
+        else if (owner != current) throw new IllegalStateException("treasury runtime is bound to another thread");
+    }
+
+    void releaseOwnerForHandoff() {
+        owner = null;
+    }
+
+    public long fee(int assetId) { assertOwner(); return feeBalances.get(assetId); }
+    public long insurance(int assetId) { assertOwner(); return insuranceBalances.get(assetId); }
+    public long insuranceDeficit(int assetId) { assertOwner(); return insuranceDeficits.get(assetId); }
+    public long deficit(int assetId) { assertOwner(); return insuranceDeficits.get(assetId); }
+    public long liquidationFee(int assetId) { assertOwner(); return liquidationFeeBalances.get(assetId); }
+    public long fundingResidual(int assetId) { assertOwner(); return fundingResidualBalances.get(assetId); }
+    public long roundingResidual(int assetId) { assertOwner(); return roundingResidualBalances.get(assetId); }
+    public long clearingPnl(int assetId) { assertOwner(); return clearingPnlBalances.get(assetId); }
+    public long fundingSettlement(int symbolId) { assertOwner(); return fundingSettlements.get(symbolId); }
+    public FundingProgressRuntime fundingProgress(int symbolId) { assertOwner(); return fundingProgress.get(symbolId); }
+    public long lifecycleSettlement(int symbolId) { assertOwner(); return lifecycleSettlements.get(symbolId); }
+    public LifecycleProgressRuntime lifecycleProgress(int symbolId) { assertOwner(); return lifecycleProgress.get(symbolId); }
 
     public void setFee(int assetId, long units) {
-        if (assetId < 0) throw new IllegalArgumentException("invalid treasury asset");
-        if (units == 0) feeBalances.remove(assetId); else feeBalances.put(assetId, units);
+        assertOwner();
+        setSigned(feeBalances, assetId, units);
+        changedAssets.add(assetId);
     }
 
     public void setInsurance(int assetId, long units, long deficit) {
-        if (assetId < 0 || units < 0 || deficit < 0 || units != 0 && deficit != 0) {
-            throw new IllegalArgumentException("invalid insurance treasury state");
-        }
-        if (units == 0) insuranceBalances.remove(assetId); else insuranceBalances.put(assetId, units);
-        if (deficit == 0) insuranceDeficits.remove(assetId); else insuranceDeficits.put(assetId, deficit);
+        assertOwner();
+        setSigned(insuranceBalances, assetId, units);
+        setSigned(insuranceDeficits, assetId, deficit);
+        changedAssets.add(assetId);
     }
 
     public void adjustInsurance(int assetId, long deltaUnits) {
-        long current = Math.subtractExact(insurance(assetId), insuranceDeficit(assetId));
-        long next = Math.addExact(current, deltaUnits);
-        setInsurance(assetId, Math.max(next, 0), next < 0 ? Math.negateExact(next) : 0);
+        assertOwner();
+        setSigned(insuranceBalances, assetId, Math.addExact(insurance(assetId), deltaUnits));
+        changedAssets.add(assetId);
+    }
+
+    public void setLiquidationFee(int assetId, long units) {
+        assertOwner();
+        setSigned(liquidationFeeBalances, assetId, units);
+        changedAssets.add(assetId);
+    }
+
+    public void setFundingResidual(int assetId, long units) {
+        assertOwner();
+        setSigned(fundingResidualBalances, assetId, units);
+        changedAssets.add(assetId);
+    }
+
+    public void setRoundingResidual(int assetId, long units) {
+        assertOwner();
+        setSigned(roundingResidualBalances, assetId, units);
+        changedAssets.add(assetId);
+    }
+
+    public void setClearingPnl(int assetId, long units) {
+        assertOwner();
+        setSigned(clearingPnlBalances, assetId, units);
+        changedAssets.add(assetId);
+    }
+
+    public void setDeficit(int assetId, long units) {
+        assertOwner();
+        setSigned(insuranceDeficits, assetId, units);
+        changedAssets.add(assetId);
     }
 
     public void setFundingSettlement(int symbolId, long settlementId) {
+        assertOwner();
         if (symbolId < 0 || settlementId <= 0) {
             throw new IllegalArgumentException("invalid runtime funding settlement");
         }
         fundingSettlements.put(symbolId, settlementId);
         fundingProgress.remove(symbolId);
+        changedFundingSymbols.add(symbolId);
     }
 
     public void setFundingProgress(int symbolId, FundingProgressRuntime progress) {
+        assertOwner();
         if (symbolId < 0 || progress == null) {
             throw new IllegalArgumentException("invalid runtime funding progress");
         }
         fundingProgress.put(symbolId, progress);
+        changedFundingSymbols.add(symbolId);
     }
 
     public void setLifecycleSettlement(int symbolId, long settlementId) {
+        assertOwner();
         if (symbolId < 0 || settlementId <= 0) throw new IllegalArgumentException("invalid lifecycle settlement");
         lifecycleSettlements.put(symbolId, settlementId);
         lifecycleProgress.remove(symbolId);
+        changedLifecycleSymbols.add(symbolId);
     }
 
     public void setLifecycleProgress(int symbolId, LifecycleProgressRuntime progress) {
+        assertOwner();
         if (symbolId < 0 || progress == null) throw new IllegalArgumentException("invalid lifecycle progress");
         lifecycleProgress.put(symbolId, progress);
+        changedLifecycleSymbols.add(symbolId);
     }
 
-    void applyDelta(CoreTreasuryState before, CoreTreasuryState after, RuntimeIdentityRegistry identities) {
-        if (before == null || after == null || identities == null) {
-            throw new IllegalArgumentException("invalid treasury transition");
-        }
-        requireDelta("feeBalances", before.feeBalances(), after.feeBalances());
-        requireDelta("insuranceBalances", before.insuranceBalances(), after.insuranceBalances());
-        requireDelta("insuranceDeficits", before.insuranceDeficits(), after.insuranceDeficits());
-        requireDelta("fundingSettlements", before.fundingSettlements(), after.fundingSettlements());
-        requireDelta("lifecycleSettlements", before.lifecycleSettlements(), after.lifecycleSettlements());
-        requireDelta("fundingProgress", before.fundingProgress(), after.fundingProgress());
-        requireDelta("lifecycleProgress", before.lifecycleProgress(), after.lifecycleProgress());
-
-        syncFeeBalances(before.feeBalances(), after.feeBalances(), identities);
-        syncInsurance(before, after, identities);
-        syncFunding(before, after, identities);
-        syncLifecycle(before, after, identities);
+    IntHashSet changedAssets() {
+        assertOwner();
+        return new IntHashSet(changedAssets);
     }
 
-    private void syncFeeBalances(Map<String, Long> before, Map<String, Long> after,
-                                 RuntimeIdentityRegistry identities) {
-        for (String asset : StateMapSupport.changedKeys(before, after)) {
-            Long units = after.get(asset);
-            setFee(identities.assetId(asset), units == null ? 0 : units);
-        }
+    IntHashSet changedFundingSymbols() {
+        assertOwner();
+        return new IntHashSet(changedFundingSymbols);
     }
 
-    private void syncInsurance(CoreTreasuryState before, CoreTreasuryState after,
-                               RuntimeIdentityRegistry identities) {
-        Set<String> changedAssets = new TreeSet<>(StateMapSupport.changedKeys(
-                before.insuranceBalances(), after.insuranceBalances()));
-        changedAssets.addAll(StateMapSupport.changedKeys(before.insuranceDeficits(), after.insuranceDeficits()));
-        for (String asset : changedAssets) {
-            setInsurance(identities.assetId(asset),
-                    after.insuranceBalances().getOrDefault(asset, 0L),
-                    after.insuranceDeficits().getOrDefault(asset, 0L));
-        }
+    IntHashSet changedLifecycleSymbols() {
+        assertOwner();
+        return new IntHashSet(changedLifecycleSymbols);
     }
 
-    private void syncFunding(CoreTreasuryState before, CoreTreasuryState after,
-                             RuntimeIdentityRegistry identities) {
-        Set<String> changedSymbols = new TreeSet<>(StateMapSupport.changedKeys(
-                before.fundingSettlements(), after.fundingSettlements()));
-        changedSymbols.addAll(StateMapSupport.changedKeys(before.fundingProgress(), after.fundingProgress()));
-        for (String symbol : changedSymbols) {
-            Long settlementId = after.fundingSettlements().get(symbol);
-            int symbolId = identities.symbolId(symbol);
-            if (settlementId == null) removeFundingSettlement(symbolId);
-            else setFundingSettlement(symbolId, settlementId);
-            CoreTreasuryState.FundingProgress progress = after.fundingProgress().get(symbol);
-            if (progress == null) removeFundingProgress(symbolId);
-            else setFundingProgress(symbolId, new FundingProgressRuntime(progress.settlementId(),
-                    progress.instrumentVersion(), progress.fundingRatePpm(), progress.nextCursorUserId(),
-                    progress.commandId()));
-        }
-    }
-
-    private void syncLifecycle(CoreTreasuryState before, CoreTreasuryState after,
-                               RuntimeIdentityRegistry identities) {
-        Set<String> changedSymbols = new TreeSet<>(StateMapSupport.changedKeys(
-                before.lifecycleSettlements(), after.lifecycleSettlements()));
-        changedSymbols.addAll(StateMapSupport.changedKeys(before.lifecycleProgress(), after.lifecycleProgress()));
-        for (String symbol : changedSymbols) {
-            Long settlementId = after.lifecycleSettlements().get(symbol);
-            int symbolId = identities.symbolId(symbol);
-            if (settlementId == null) removeLifecycleSettlement(symbolId);
-            else setLifecycleSettlement(symbolId, settlementId);
-            CoreTreasuryState.LifecycleProgress progress = after.lifecycleProgress().get(symbol);
-            if (progress == null) removeLifecycleProgress(symbolId);
-            else setLifecycleProgress(symbolId, new LifecycleProgressRuntime(progress.settlementId(),
-                    progress.instrumentVersion(), progress.settlementPriceTicks(), progress.optionCashUnitsPerContract(),
-                    progress.ordersComplete(), progress.nextCursorOrderId(), progress.nextCursorUserId(),
-                    progress.commandId()));
-        }
-    }
-
-    private void removeFundingSettlement(int symbolId) {
-        fundingSettlements.remove(symbolId);
-    }
-
-    private void removeFundingProgress(int symbolId) {
-        fundingProgress.remove(symbolId);
-    }
-
-    private void removeLifecycleSettlement(int symbolId) {
-        lifecycleSettlements.remove(symbolId);
-    }
-
-    private void removeLifecycleProgress(int symbolId) {
-        lifecycleProgress.remove(symbolId);
-    }
-
-    private static void requireDelta(String field, Map<?, ?> before, Map<?, ?> after) {
-        if (!StateMapSupport.isDeltaDescendantOf(before, after)) {
-            throw new IllegalStateException("online treasury transition is not a delta: " + field);
-        }
+    void clearChangedKeys() {
+        assertOwner();
+        changedAssets.clear();
+        changedFundingSymbols.clear();
+        changedLifecycleSymbols.clear();
     }
 
     public void clear() {
+        assertOwner();
         feeBalances.clear();
         insuranceBalances.clear();
         insuranceDeficits.clear();
+        liquidationFeeBalances.clear();
+        fundingResidualBalances.clear();
+        roundingResidualBalances.clear();
+        clearingPnlBalances.clear();
         fundingSettlements.clear();
         lifecycleSettlements.clear();
         fundingProgress.clear();
         lifecycleProgress.clear();
     }
 
-    public IntLongHashMap feeBalances() { return new IntLongHashMap(feeBalances); }
-    public IntLongHashMap insuranceBalances() { return new IntLongHashMap(insuranceBalances); }
-    public IntLongHashMap insuranceDeficits() { return new IntLongHashMap(insuranceDeficits); }
-    public IntLongHashMap fundingSettlements() { return new IntLongHashMap(fundingSettlements); }
+    public IntLongHashMap feeBalances() { assertOwner(); return new IntLongHashMap(feeBalances); }
+    public IntLongHashMap insuranceBalances() { assertOwner(); return new IntLongHashMap(insuranceBalances); }
+    public IntLongHashMap insuranceDeficits() { assertOwner(); return new IntLongHashMap(insuranceDeficits); }
+    public IntLongHashMap deficitBalances() { assertOwner(); return new IntLongHashMap(insuranceDeficits); }
+    public IntLongHashMap liquidationFeeBalances() { assertOwner(); return new IntLongHashMap(liquidationFeeBalances); }
+    public IntLongHashMap fundingResidualBalances() { assertOwner(); return new IntLongHashMap(fundingResidualBalances); }
+    public IntLongHashMap roundingResidualBalances() { assertOwner(); return new IntLongHashMap(roundingResidualBalances); }
+    public IntLongHashMap clearingPnlBalances() { assertOwner(); return new IntLongHashMap(clearingPnlBalances); }
+    public IntLongHashMap fundingSettlements() { assertOwner(); return new IntLongHashMap(fundingSettlements); }
     public IntObjectHashMap<FundingProgressRuntime> fundingProgresses() {
+        assertOwner();
         return new IntObjectHashMap<>(fundingProgress);
     }
-    public IntLongHashMap lifecycleSettlements() { return new IntLongHashMap(lifecycleSettlements); }
+    public IntLongHashMap lifecycleSettlements() { assertOwner(); return new IntLongHashMap(lifecycleSettlements); }
     public IntObjectHashMap<LifecycleProgressRuntime> lifecycleProgresses() {
+        assertOwner();
         return new IntObjectHashMap<>(lifecycleProgress);
+    }
+
+    private static void setSigned(IntLongHashMap balances, int assetId, long units) {
+        if (assetId < 0) throw new IllegalArgumentException("invalid treasury asset");
+        if (units == 0) balances.remove(assetId); else balances.put(assetId, units);
     }
 
     public record FundingProgressRuntime(long settlementId, long instrumentVersion, long fundingRatePpm,

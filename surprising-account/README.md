@@ -186,6 +186,89 @@ surprising:
 PostgreSQL 连接池只供账本、审计、异步投影和历史查询使用。排障时同时观察 Aeron Cluster 状态、
 Core Export backlog、Kafka 投影延迟和 PostgreSQL 投影延迟；数据库投影故障不能作为余额失败或余额恢复依据。
 
+## P4/P5 结算内核、FundsDelta 与完整性契约
+
+以下是六条产品线共同遵守的冻结资金契约。它描述 Core reducer 的输入、输出和审计事实；Provider、
+数据库投影和 Kafka 消费者不得自行补算或改变结果。
+
+### 冻结的结算内核输入/输出
+
+- 每次结算只接受一个不可变 `SettlementKernelInput`：`productLine`、`operationId`、Core sequence、
+  `instrumentVersion`、命令前的用户/做市账户余额、冻结、预占、持仓、持仓保证金、订单生命周期、
+  Treasury 七账和本次操作所需的成交/资金费/强平/交割/行权参数。缺字段、版本不匹配、重复的
+  `operationId` 或算术溢出必须拒绝，不能以数据库或缓存值补齐。
+- 内核只返回不可变 `SettlementKernelOutput`：命令后的账户/持仓/Treasury 状态、按资产排序的
+  `FundsDelta`、before/after state hash、before/after funds hash、幂等结果和完整性 envelope。
+  输出中的每个 posting 都来自同一个输入和同一个 Core sequence；重放相同 `operationId` 必须得到
+  字节一致的输出，新的 `operationId` 才能产生新的资金事实。
+- 结算内核必须且仅能按以下六个实现注册和 dispatch：`Spot`、`LinearPerpetual`、
+  `InversePerpetual`、`LinearDelivery`、`InverseDelivery`、`Option`。六个实现分别拥有自己的
+  账户资产、合约数学、风险边界和生命周期；未命中产品线或合约类型立即 fail-closed，不得把不同
+  产品线合并成默认实现。纯数学函数、posting 排序、哈希、签名和幂等工具可以共享，但不能共享
+  未命名的结算业务分支。
+
+### FundsDelta posting 身份与逐资产守恒
+
+- `FundsDelta` 是命令级不可变值。每个 posting 的唯一键严格为
+  `(asset, ownerKind, ownerId, subledger)`；`ownerKind` 至少区分 `USER`、`MAKER`、`TREASURY`
+  和显式外部调整主体，`ownerId` 在同一主体内唯一，金额是该 `asset` 最小单位的有符号 long。
+- 内核先按完全相同的 key 用 exact arithmetic 合并，零值 posting 删除；禁止重复 key、浮点数、
+  依赖 Map 迭代顺序或按聚合余额反推 posting。最终排序固定为 `asset`、`ownerKind`、`ownerId`、
+  `subledger` 的字典序/枚举序，排序结果参与 funds hash 和签名，任何消费者必须保留该顺序。
+- 对每一个资产 `a`，所有用户、做市、Treasury 和外部调整 posting 必须满足
+  `sum(Δ for asset a) = 0`。唯一允许的跨系统边界是显式的 `external adjustment source/sink`：
+  充值、冲正或受控出金必须使用专门 ownerKind、全局唯一 referenceId、原因、操作者和方向；
+  source 是正向注入、sink 是负向移出，二者必须在同一资产守恒式中出现。任何未带 source/sink
+  身份的余额凭空增加或减少都必须拒绝。
+- 一笔成交、资金费、强平、交割或行权可以改变资金归属、持仓和生命周期状态，但不得把多资产
+  抵销成一个总额；每个资产单独验证 `sum` 为 `0`，并在状态安装前验证 posting 数量、顺序、金额
+  和 operationId 的 canonical 编码。
+
+### Treasury 七账与强平工作债务
+
+Treasury 维护七个相互独立、可审计且允许有符号变动的 subledger；每一笔 `FundsDelta` 必须标明
+其中一个 subledger，禁止把不同用途先净额化后只留下一个 Treasury 余额：
+
+1. `fee`：maker/taker 手续费收入和返佣抵扣后的净手续费事实。
+2. `insurance`：保险基金可用资产；只能接收实际收取的金额或显式外部调整。
+3. `liquidation fee`：强平成交实际收上的强平费，不得按应收金额预先入账。
+4. `funding residual`：资金费按用户/持仓分配后的除法余数和结转，不能并入普通 funding 总额。
+5. `rounding residual`：手续费、价格换算或合约单位换算产生的舍入余数，必须保留原操作引用。
+6. `clearing PnL`：交割、期权结算及清算价导致的结算盈亏，必须保留产品线和 instrumentVersion。
+7. `deficit`：保险基金或清算资产无法覆盖的已确认缺口；金额和产生该缺口的 operationId 必须可追溯。
+
+`liquidation-work debt` 是 `CoreLiquidationState` 中按 liquidationId、purpose、cursor 和剩余金额
+跟踪的未完成强平/保险/ADL 工作，不是第七账的别名，也不是 Treasury 余额。工作债务只能由同一
+purpose 的有序 Core 命令和幂等 reference 消解；它不得与 aggregate Treasury deficit、保险基金
+余额或用户 deficit 合并。强平费只按实际从用户 collateral 收上的金额进入 `liquidation fee`，
+未收部分仍是工作债务/业务状态，不得伪造为 insurance 收入。
+
+### 操作专属取整、余数和亏损
+
+- 每种操作使用固定的整数数学函数并在输入的 instrumentVersion 下执行：正向 fee charge 使用
+  `ceiling`；资金费分摊使用朝零的 `truncate`；反向合约和既有价格公式需要的有符号金额使用
+  `half-up`。不得把一种操作的取整模式套到另一种操作。
+- 每次除法都返回商和 exact `residual`。资金费余数写入 `funding residual`，其他金额/价格
+  换算余数写入 `rounding residual`，posting 携带原 operationId、asset 和方向；余数不能丢弃、
+  跨资产转移或被下一笔操作悄悄吸收。溢出、非法分母和超出 long 范围必须拒绝整笔操作。
+- 不存在 `loss cap`：亏损超过可用余额和持仓保证金时记录完整亏损，并在适用资产的 `deficit`
+  账中记录精确缺口；不得截断损失、把未成交订单冻结资金当作可扣资产，或用负余额掩盖缺口。
+
+### Ed25519 完整性 envelope 与启动门禁
+
+- 每个可复制的 settlement fact 和 Snapshot 只携带 canonical payload 的
+  `algorithm=Ed25519`、`keyId`、公钥 `fingerprint`、canonical payload hash、signature，
+  以及 before/after state/funds hash。canonical payload 必须包含 productLine、Core sequence、
+  operationId、instrumentVersion、严格排序的 `FundsDelta` 和七账结果；签名覆盖完整 envelope
+  字段，验证顺序不能由消费者自行改变。
+- 所有 Cluster member 启动前从受控配置载入签名私钥和 keyId，派生公钥 fingerprint，与复制的
+  integrity manifest 比较；缺失、算法不匹配、fingerprint 不一致、签名不通过或 canonical
+  payload hash 不一致时，在服务 admission 前 fail-closed。启动后不得按每条事实重新读取配置。
+- `private key 不得进入任何复制状态或事实载荷`；私钥不得序列化到 Runtime State、Snapshot State
+  或 Core Fact，只有公钥 fingerprint 和签名元数据可被复制或导出。`exchange-core` 的 aggregate
+  hash 只能作为结构性比对字段，不是 `cryptographic proof`，不能替代 FundsDelta 守恒或 Ed25519
+  验签。
+
 ## 本地运行
 
 ```bash

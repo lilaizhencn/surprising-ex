@@ -51,14 +51,15 @@ public class MarketProbeService {
         List<ExternalSpotWebSocketManager.WebSocketHealth> webSockets = webSocketManager.health();
         List<SourceHealth> sourceHealth = sourceHealth(index.components(), webSockets);
         int freshSourceCount = freshSourceCount(index.components(), sourceHealth, sourceMode, observedAt);
+        int requiredSourceQuorum = indexPriceProperties.getCalculation().getMinValidSources();
         CadenceWindows cadence = cadenceBySymbol.computeIfAbsent(index.symbol(), ignored -> new CadenceWindows());
         CadenceSummary indexCadence = cadence.index().observe(index.eventTime(), observedAt,
                 indexPriceProperties.getCalculation().getMaxSourceAge());
         CadenceSummary markCadence = cadence.mark().observe(mark.eventTime(), observedAt,
                 indexPriceProperties.getCalculation().getMaxSourceAge());
         boolean timestampRegressed = indexCadence.timestampRegressed() || markCadence.timestampRegressed();
-        return new MarketProbeSnapshot(observedAt, index, mark, sourceMode, freshSourceCount,
-                freshSourceCount >= 3 && !timestampRegressed, timestampRegressed,
+        return new MarketProbeSnapshot(observedAt, index, mark, sourceMode, freshSourceCount, requiredSourceQuorum,
+                freshSourceCount >= requiredSourceQuorum && !timestampRegressed, timestampRegressed,
                 sourceHealth, indexCadence, markCadence, webSockets);
     }
 
@@ -98,7 +99,8 @@ public class MarketProbeService {
     }
 
     public record MarketProbeSnapshot(Instant observedAt, IndexPriceResponse index, MarkPriceResponse mark,
-                                      SourceMode sourceMode, int freshSourceCount, boolean sourceQuorumHealthy,
+                                      SourceMode sourceMode, int freshSourceCount, int requiredSourceQuorum,
+                                      boolean sourceQuorumHealthy,
                                       boolean timestampRegressed,
                                       List<SourceHealth> sourceHealth, CadenceSummary indexCadence,
                                       CadenceSummary markCadence,

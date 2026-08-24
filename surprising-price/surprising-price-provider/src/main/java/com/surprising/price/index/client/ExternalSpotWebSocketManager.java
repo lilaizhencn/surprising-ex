@@ -70,14 +70,14 @@ import org.springframework.stereotype.Component;
             log.info("External spot WebSocket collector is disabled");
             return;
         }
+        running = true;
         Map<String, List<TrackedSource>> grouped = groupedSources();
         if (grouped.isEmpty()) {
             log.info("No external spot WebSocket sources configured");
-            return;
+        } else {
+            refreshConnections(grouped);
         }
 
-        running = true;
-        refreshConnections(grouped);
         long intervalMs = Math.max(1000L, properties.getWebSocket().getHealthCheckInterval().toMillis());
         scheduler.scheduleAtFixedRate(this::checkIdleSessions, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
     }

@@ -11,6 +11,10 @@ public record CoreTreasuryState(
         Map<String, Long> feeBalances,
         Map<String, Long> insuranceBalances,
         Map<String, Long> insuranceDeficits,
+        Map<String, Long> liquidationFeeBalances,
+        Map<String, Long> fundingResidualBalances,
+        Map<String, Long> roundingResidualBalances,
+        Map<String, Long> clearingPnlBalances,
         Map<String, Long> fundingSettlements,
         Map<String, Long> lifecycleSettlements,
         Map<String, FundingProgress> fundingProgress,
@@ -18,13 +22,19 @@ public record CoreTreasuryState(
 
     public CoreTreasuryState {
         if (feeBalances == null || insuranceBalances == null || insuranceDeficits == null
+                || liquidationFeeBalances == null || fundingResidualBalances == null
+                || roundingResidualBalances == null || clearingPnlBalances == null
                 || fundingSettlements == null || lifecycleSettlements == null || fundingProgress == null
                 || lifecycleProgress == null) {
             throw new IllegalArgumentException("invalid treasury state");
         }
         feeBalances = normalized(feeBalances, true);
-        insuranceBalances = normalized(insuranceBalances, false);
-        insuranceDeficits = normalized(insuranceDeficits, false);
+        insuranceBalances = normalized(insuranceBalances, true);
+        insuranceDeficits = normalized(insuranceDeficits, true);
+        liquidationFeeBalances = normalized(liquidationFeeBalances, true);
+        fundingResidualBalances = normalized(fundingResidualBalances, true);
+        roundingResidualBalances = normalized(roundingResidualBalances, true);
+        clearingPnlBalances = normalized(clearingPnlBalances, true);
         fundingSettlements = markers(fundingSettlements);
         lifecycleSettlements = markers(lifecycleSettlements);
         fundingProgress = progresses(fundingProgress);
@@ -50,44 +60,88 @@ public record CoreTreasuryState(
                 fundingProgress, Map.of());
     }
 
+    public CoreTreasuryState(Map<String, Long> feeBalances,
+                             Map<String, Long> insuranceBalances,
+                             Map<String, Long> insuranceDeficits,
+                             Map<String, Long> fundingSettlements,
+                             Map<String, Long> lifecycleSettlements,
+                             Map<String, FundingProgress> fundingProgress,
+                             Map<String, LifecycleProgress> lifecycleProgress) {
+        this(feeBalances, insuranceBalances, insuranceDeficits,
+                Map.of(), Map.of(), Map.of(), Map.of(),
+                fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
+    }
+
+    public static CoreTreasuryState ofSubledgers(
+            Map<String, Long> feeBalances,
+            Map<String, Long> insuranceBalances,
+            Map<String, Long> liquidationFeeBalances,
+            Map<String, Long> fundingResidualBalances,
+            Map<String, Long> roundingResidualBalances,
+            Map<String, Long> clearingPnlBalances,
+            Map<String, Long> deficitBalances) {
+        return new CoreTreasuryState(feeBalances, insuranceBalances, deficitBalances,
+                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
+                Map.of(), Map.of(), Map.of(), Map.of());
+    }
+
     public static CoreTreasuryState empty() {
-        return new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+        return ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+    }
+
+    public Map<String, Long> deficitBalances() {
+        return insuranceDeficits;
     }
 
     public CoreTreasuryState adjustFee(String asset, long deltaUnits) {
         return new CoreTreasuryState(adjust(feeBalances, asset, deltaUnits, true),
-                insuranceBalances, insuranceDeficits, fundingSettlements, lifecycleSettlements,
+                insuranceBalances, insuranceDeficits, liquidationFeeBalances, fundingResidualBalances,
+                roundingResidualBalances, clearingPnlBalances, fundingSettlements, lifecycleSettlements,
                 fundingProgress, lifecycleProgress);
     }
 
     public CoreTreasuryState adjustInsurance(String asset, long deltaUnits) {
-        String normalizedAsset = AssetBalance.normalizeAsset(asset);
-        long current = Math.subtractExact(insuranceBalances.getOrDefault(normalizedAsset, 0L),
-                insuranceDeficits.getOrDefault(normalizedAsset, 0L));
-        long next = Math.addExact(current, deltaUnits);
-        Map<String, Long> balances = StateMapSupport.delta(insuranceBalances);
-        Map<String, Long> deficits = StateMapSupport.delta(insuranceDeficits);
-        if (next >= 0) {
-            putOrRemove(balances, normalizedAsset, next);
-            deficits.remove(normalizedAsset);
-        } else {
-            balances.remove(normalizedAsset);
-            deficits.put(normalizedAsset, Math.negateExact(next));
-        }
-        return new CoreTreasuryState(feeBalances, balances, deficits, fundingSettlements, lifecycleSettlements,
+        return new CoreTreasuryState(feeBalances, adjust(insuranceBalances, asset, deltaUnits, true),
+                insuranceDeficits, liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances,
+                clearingPnlBalances, fundingSettlements, lifecycleSettlements,
                 fundingProgress, lifecycleProgress);
+    }
+
+    public CoreTreasuryState adjustLiquidationFee(String asset, long deltaUnits) {
+        return withSubledger(liquidationFeeBalances, adjust(liquidationFeeBalances, asset, deltaUnits, true), 0);
+    }
+
+    public CoreTreasuryState adjustFundingResidual(String asset, long deltaUnits) {
+        return withSubledger(fundingResidualBalances, adjust(fundingResidualBalances, asset, deltaUnits, true), 1);
+    }
+
+    public CoreTreasuryState adjustRoundingResidual(String asset, long deltaUnits) {
+        return withSubledger(roundingResidualBalances, adjust(roundingResidualBalances, asset, deltaUnits, true), 2);
+    }
+
+    public CoreTreasuryState adjustClearingPnl(String asset, long deltaUnits) {
+        return withSubledger(clearingPnlBalances, adjust(clearingPnlBalances, asset, deltaUnits, true), 3);
+    }
+
+    public CoreTreasuryState adjustDeficit(String asset, long deltaUnits) {
+        return new CoreTreasuryState(feeBalances, insuranceBalances,
+                adjust(insuranceDeficits, asset, deltaUnits, true), liquidationFeeBalances,
+                fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
+                fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
     }
 
     public CoreTreasuryState recordFunding(String symbol, long settlementId) {
         Map<String, FundingProgress> progress = StateMapSupport.delta(fundingProgress);
         progress.remove(OrderReservation.normalizeSymbol(symbol));
         return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
+                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
                 recordMarker(fundingSettlements, symbol, settlementId), lifecycleSettlements, progress,
                 lifecycleProgress);
     }
 
     public CoreTreasuryState recordLifecycle(String symbol, long settlementId) {
         return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
+                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
                 fundingSettlements, recordMarker(lifecycleSettlements, symbol, settlementId), fundingProgress,
                 clearLifecycleProgress(symbol));
     }
@@ -114,6 +168,7 @@ public record CoreTreasuryState(
         if (progress == null) next.remove(normalizedSymbol);
         else next.put(normalizedSymbol, progress);
         return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
+                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
                 fundingSettlements, lifecycleSettlements, next, lifecycleProgress);
     }
 
@@ -123,6 +178,7 @@ public record CoreTreasuryState(
         if (progress == null) next.remove(normalizedSymbol);
         else next.put(normalizedSymbol, progress);
         return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
+                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
                 fundingSettlements, lifecycleSettlements, fundingProgress, next);
     }
 
@@ -134,7 +190,21 @@ public record CoreTreasuryState(
         assets.addAll(fee);
         assets.addAll(insurance);
         assets.addAll(deficits);
+        assets.addAll(StateMapSupport.changedKeys(liquidationFeeBalances));
+        assets.addAll(StateMapSupport.changedKeys(fundingResidualBalances));
+        assets.addAll(StateMapSupport.changedKeys(roundingResidualBalances));
+        assets.addAll(StateMapSupport.changedKeys(clearingPnlBalances));
         return Collections.unmodifiableSet(assets);
+    }
+
+    private CoreTreasuryState withSubledger(Map<String, Long> current, Map<String, Long> next, int ledger) {
+        if (current == next) return this;
+        return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
+                ledger == 0 ? next : liquidationFeeBalances,
+                ledger == 1 ? next : fundingResidualBalances,
+                ledger == 2 ? next : roundingResidualBalances,
+                ledger == 3 ? next : clearingPnlBalances,
+                fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
     }
 
     private static Map<String, Long> adjust(

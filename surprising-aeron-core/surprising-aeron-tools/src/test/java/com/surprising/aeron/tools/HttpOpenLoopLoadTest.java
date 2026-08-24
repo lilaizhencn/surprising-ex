@@ -70,6 +70,71 @@ class HttpOpenLoopLoadTest {
     }
 
     @Test
+    void pollsMisleadingOkReceiptUntilTheAuthoritativeCommandResultIsTerminal() throws Exception {
+        AtomicInteger polls = new AtomicInteger();
+        try (Loopback server = new Loopback(exchange -> {
+            if (health(exchange)) return;
+            if (exchange.getRequestURI().getPath().contains("/commands/")) {
+                polls.incrementAndGet();
+                respond(exchange, 200, receipt("APPLIED"));
+            } else {
+                respond(exchange, 200, "{\"commandId\":\"00000000-0000-0000-0000-000000000001\","
+                        + "\"code\":\"MATCHING_PENDING\",\"commandResultUrl\":"
+                        + "\"/api/v1/trading/orders/commands/00000000-0000-0000-0000-000000000001\"}");
+            }
+        })) {
+            HttpWorkloadConfig config = config(server.uri(), temporaryDirectory.resolve("misleading-ok"),
+                    "misleading-ok-run", 1, Duration.ofSeconds(1), 1, Duration.ofMillis(200), 2);
+            HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload(config).run();
+
+            assertThat(polls).hasValue(1);
+            assertThat(summary.completed()).isEqualTo(1);
+            assertThat(summary.classifications().get(HttpOutcome.ORACLE_MISMATCH)).isZero();
+        }
+    }
+
+    @Test
+    void terminalWrapperUsesNestedOrderStateWithoutPolling() throws Exception {
+        AtomicInteger resultPolls = new AtomicInteger();
+        try (Loopback server = new Loopback(exchange -> {
+            if (health(exchange)) return;
+            if (exchange.getRequestURI().getPath().contains("/commands/")) {
+                resultPolls.incrementAndGet();
+                respond(exchange, 500, "{\"code\":\"UNEXPECTED\"}");
+            } else {
+                respond(exchange, 200, "{\"outcome\":\"TERMINAL\",\"code\":\"NONE\",\"result\":{"
+                        + "\"resultType\":\"order\",\"status\":\"FILLED\",\"orderId\":9001}}");
+            }
+        })) {
+            HttpWorkloadConfig config = config(server.uri(), temporaryDirectory.resolve("terminal-wrapper"),
+                    "terminal-wrapper-run", 1, Duration.ofSeconds(1), 1, Duration.ofMillis(200), 4);
+
+            HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload(config).run();
+
+            assertThat(resultPolls).hasValue(0);
+            assertThat(summary.completed()).isEqualTo(1);
+            assertThat(summary.classifications().get(HttpOutcome.ORACLE_MISMATCH)).isZero();
+        }
+    }
+
+    @Test
+    void aBareOkBodyIsNotSilentlyAcceptedAsTheExpectedFinalState() throws Exception {
+        try (Loopback server = new Loopback(exchange -> {
+            if (health(exchange)) return;
+            respond(exchange, 200, "{\"message\":\"queued\"}");
+        })) {
+            HttpWorkloadConfig config = config(server.uri(), temporaryDirectory.resolve("bare-ok"),
+                    "bare-ok-run", 1, Duration.ofSeconds(1), 1, Duration.ofMillis(200), 1);
+            HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload(config).run();
+
+            assertThat(summary.completed()).isZero();
+            assertThat(summary.outstanding()).isEqualTo(1);
+            assertThat(summary.scheduled()).isEqualTo(summary.completed() + summary.outstanding()
+                    + summary.deliberatelyAborted());
+        }
+    }
+
+    @Test
     void classifiesRateLimitTimeoutAndServerFailure() throws Exception {
         AtomicInteger requests = new AtomicInteger();
         try (Loopback server = new Loopback(exchange -> {
@@ -134,13 +199,6 @@ class HttpOpenLoopLoadTest {
     @Test
     void resumesOutstandingIntentWithoutChangingOrDuplicatingIdentity() throws Exception {
         Path output = temporaryDirectory.resolve("resume");
-        StableIdentityLedger.Intent original;
-        try (StableIdentityLedger ledger = StableIdentityLedger.open(output, "restart-run", 41L)) {
-            original = ledger.intent(1L, WorkloadOperation.PLACE, 1_001L, "BTC-USDT", "OPEN");
-            ledger.scheduled(original, System.nanoTime());
-            ledger.sent(original.sequence(), System.nanoTime());
-        }
-
         Set<String> receivedIntentIds = ConcurrentHashMap.newKeySet();
         try (Loopback server = new Loopback(exchange -> {
             if (health(exchange)) return;
@@ -149,25 +207,32 @@ class HttpOpenLoopLoadTest {
         })) {
             HttpWorkloadConfig config = config(server.uri(), output, "restart-run",
                     1, Duration.ofSeconds(1), 2, Duration.ofMillis(200), 2);
+            StableIdentityLedger.Intent original;
+            try (StableIdentityLedger ledger = StableIdentityLedger.open(
+                    output, "restart-run", 41L, config.fingerprint())) {
+                original = ledger.intent(1L, WorkloadOperation.PLACE, 1_001L, "BTC-USDT", "APPLIED");
+                ledger.scheduled(original, System.nanoTime());
+                ledger.sent(original.sequence(), System.nanoTime());
+            }
             HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload(config).run();
             assertThat(summary.scheduled()).isEqualTo(1);
             assertThat(summary.completed()).isEqualTo(1);
             assertThat(receivedIntentIds).containsExactly(original.intentId().toString());
-        }
 
-        Set<String> scheduledIds = new HashSet<>();
-        for (String line : Files.readAllLines(output.resolve("events.jsonl"))) {
-            if (line.contains("\"event\":\"SCHEDULED\"")) {
-                scheduledIds.add(extract(line, "intentId"));
+            Set<String> scheduledIds = new HashSet<>();
+            for (String line : Files.readAllLines(output.resolve("events.jsonl"))) {
+                if (line.contains("\"event\":\"SCHEDULED\"")) {
+                    scheduledIds.add(extract(line, "intentId"));
+                }
             }
+            assertThat(scheduledIds).containsExactly(original.intentId().toString());
         }
-        assertThat(scheduledIds).containsExactly(original.intentId().toString());
     }
 
     private static HttpWorkloadConfig config(URI baseUri, Path output, String runId, long rate,
                                              Duration duration, int maxInFlight, Duration timeout, int maxPolls) {
         return new HttpWorkloadConfig(baseUri, output, runId, 41L, rate, duration, maxInFlight,
-                timeout, Duration.ofMillis(5), maxPolls, new long[] {1_001L, 1_002L},
+                timeout, Duration.ofMillis(5), maxPolls, 700_000L, 700_000L, new long[] {1_001L, 1_002L},
                 new String[] {"BTC-USDT", "ETH-USDT"}, TrafficSkew.UNIFORM,
                 HttpWorkloadConfig.defaultTraffic());
     }

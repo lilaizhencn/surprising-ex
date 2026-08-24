@@ -47,7 +47,7 @@ class KafkaProjectionWorkerTest {
         assertThatThrownBy(() -> worker.pollOnce(Duration.ZERO)).isInstanceOf(SQLException.class);
         assertThat(consumer.commitCalls).isZero();
         assertThat(consumer.committed(java.util.Set.of(PARTITION)).get(PARTITION)).isNull();
-        assertProjectionState(dataSource, 0, 0, 0, 0);
+        assertProjectionState(dataSource, 0, 0, 0);
     }
 
     @Test
@@ -62,7 +62,7 @@ class KafkaProjectionWorkerTest {
         assertThat(consumer.commitCalls).isEqualTo(1);
         assertThat(consumer.projectionVisibleAtCommit).isTrue();
         assertThat(consumer.committed(java.util.Set.of(PARTITION)).get(PARTITION).offset()).isEqualTo(42);
-        assertProjectionState(dataSource, 1, 1, 1, 1);
+        assertProjectionState(dataSource, 1, 1, 1);
     }
 
     private static TrackingConsumer consumer(JdbcDataSource dataSource) {
@@ -114,11 +114,10 @@ class KafkaProjectionWorkerTest {
     }
 
     private static void assertProjectionState(JdbcDataSource dataSource, int events, int facts,
-                                              int audit, long watermark) throws Exception {
+                                              long watermark) throws Exception {
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             assertCount(statement, "core_event_projection", events);
             assertCount(statement, "core_user_fact_projection", facts);
-            assertCount(statement, "core_websocket_audit_projection", audit);
             try (var result = statement.executeQuery("SELECT last_export_sequence "
                     + "FROM core_projection_watermark WHERE product_line = 'SPOT'")) {
                 assertThat(result.next()).isTrue();
@@ -149,7 +148,7 @@ class KafkaProjectionWorkerTest {
         public synchronized void commitSync(Map<TopicPartition, OffsetAndMetadata> offsets) {
             commitCalls++;
             try {
-                assertProjectionState(dataSource, 1, 1, 1, 1);
+                assertProjectionState(dataSource, 1, 1, 1);
                 projectionVisibleAtCommit = true;
             } catch (Exception exception) {
                 throw new AssertionError("projection transaction was not visible before offset commit", exception);

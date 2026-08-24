@@ -16,6 +16,7 @@ public record CoreOrderState(
         long instrumentVersion,
         CoreOrderSide side,
         long priceTicks,
+        long matchingPriceTicks,
         long quantitySteps,
         long executedQuantitySteps,
         long remainingQuantitySteps,
@@ -37,7 +38,7 @@ public record CoreOrderState(
 
     public CoreOrderState {
         if (orderId <= 0 || productLine == null || userId <= 0 || instrumentVersion <= 0
-                || side == null || priceTicks < 0
+                || side == null || priceTicks < 0 || matchingPriceTicks < 0
                 || quantitySteps <= 0 || executedQuantitySteps < 0 || remainingQuantitySteps < 0
                 || Math.addExact(executedQuantitySteps, remainingQuantitySteps) != quantitySteps
                 || marginMode == null || positionSide == null || orderType == null || timeInForce == null
@@ -68,9 +69,35 @@ public record CoreOrderState(
                           long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
                           CoreMarginMode marginMode, CorePositionSide positionSide, CoreOrderType orderType,
                           CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId, UUID commandId,
-                          long makerFeeRatePpm, long takerFeeRatePpm, CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, quantitySteps,
+                          long makerFeeRatePpm, long takerFeeRatePpm, long createdAtEpochMillis,
+                          long updatedAtEpochMillis, long clusterPosition, CoreOrderStatus status, long revision) {
+        this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
+                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+    }
+
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+                          long instrumentVersion, CoreOrderSide side, long priceTicks, long quantitySteps,
+                          long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
+                          CoreMarginMode marginMode, CorePositionSide positionSide, CoreOrderType orderType,
+                          CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId, UUID commandId,
+                          long makerFeeRatePpm, long takerFeeRatePpm, CoreOrderStatus status, long revision) {
+        this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, priceTicks, quantitySteps,
+                executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
+                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                0, 0, 0, status, revision);
+    }
+
+    public CoreOrderState(long orderId, ProductLine productLine, long userId, String symbol,
+                          long instrumentVersion, CoreOrderSide side, long priceTicks, long matchingPriceTicks,
+                          long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
+                          boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
+                          CoreOrderType orderType, CoreTimeInForce timeInForce, boolean postOnly,
+                          String clientOrderId, UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
+                          CoreOrderStatus status, long revision) {
+        this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, matchingPriceTicks,
+                quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 0, 0, 0, status, revision);
     }
@@ -80,7 +107,7 @@ public record CoreOrderState(
                           long executedQuantitySteps, long remainingQuantitySteps, boolean reduceOnly,
                           CoreMarginMode marginMode, CorePositionSide positionSide,
                           CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, quantitySteps,
+        this(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks, priceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
                 "", new UUID(0, orderId), 0, 0, 0, 0, 0, status, revision);
@@ -91,7 +118,7 @@ public record CoreOrderState(
             return this;
         }
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
-                side, priceTicks, quantitySteps,
+                side, priceTicks, matchingPriceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
@@ -104,7 +131,7 @@ public record CoreOrderState(
             return this;
         }
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
-                side, priceTicks, quantitySteps,
+                side, priceTicks, matchingPriceTicks, quantitySteps,
                 executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
@@ -119,7 +146,8 @@ public record CoreOrderState(
         long nextExecuted = Math.addExact(executedQuantitySteps, quantitySteps);
         long nextRemaining = Math.subtractExact(remainingQuantitySteps, quantitySteps);
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
-                side, priceTicks, quantitySteps(), nextExecuted, nextRemaining, reduceOnly, marginMode, positionSide,
+                side, priceTicks, matchingPriceTicks, quantitySteps(), nextExecuted, nextRemaining,
+                reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly,
                 clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
@@ -132,7 +160,7 @@ public record CoreOrderState(
             throw new IllegalStateException("invalid order replace");
         }
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion,
-                side, newPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
+                side, newPriceTicks, newPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly,
                 clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
@@ -141,6 +169,7 @@ public record CoreOrderState(
 
     public CoreOrderState withCommitMetadata(long timestamp, long position) {
         return new CoreOrderState(orderId, productLine, userId, symbol, instrumentVersion, side, priceTicks,
+                matchingPriceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 createdAtEpochMillis == 0 ? timestamp : createdAtEpochMillis, timestamp, position, status, revision);

@@ -30,6 +30,9 @@ public final class ReliableCoreExporter {
     private final ExporterMetrics metrics;
     private final UUID queryEpoch = UUID.randomUUID();
     private final AtomicLong correlations = new AtomicLong();
+    private final AtomicLong sourceSequences = new AtomicLong(
+            Math.multiplyExact(System.currentTimeMillis(), 1_000L));
+    private long pendingAcknowledgementSequence;
 
     public ReliableCoreExporter(
             ProductLine productLine,
@@ -59,6 +62,9 @@ public final class ReliableCoreExporter {
 
     private ExportCycleResult exportOnce(CoreExportStatus before) throws Exception {
         try {
+            if (pendingAcknowledgementSequence != 0) {
+                return acknowledgePublishedBatch(pendingAcknowledgementSequence, 0, null, List.of());
+            }
             CoreResponse batchResponse = submitQuery(CoreMessageType.EXPORT_BATCH_QUERY,
                     CoreExportCodec.encodeBatchQuery(batchSize));
             requireOk(batchResponse, "export batch query");
@@ -79,18 +85,8 @@ public final class ReliableCoreExporter {
             sink.publish(productLine, events);
             long throughSequence = CoreExportCodec.decodeEvent(events.getLast().payload()).exportSequence();
             metrics.recordPublished(events.size(), throughSequence);
-            CoreResponse ackResponse = core.submit(ack(throughSequence));
-            if (ackResponse.commandStatus() != ResponseStatus.APPLIED
-                    && ackResponse.commandStatus() != ResponseStatus.DUPLICATE) {
-                throw new IllegalStateException("export ack rejected: " + ackResponse.resultCode());
-            }
-            if (ackResponse.commandStatus() == ResponseStatus.DUPLICATE) {
-                metrics.recordDuplicate(1);
-            }
-            CoreExportStatus after = ackResponse.data().length == 0
-                    ? statusAfterAck(queryStatus, events) : CoreExportCodec.decodeStatus(ackResponse.data());
-            metrics.recordAcknowledged(after);
-            return new ExportCycleResult(events.size(), after);
+            pendingAcknowledgementSequence = throughSequence;
+            return acknowledgePublishedBatch(throughSequence, events.size(), queryStatus, events);
         } catch (ResultUnknownException exception) {
             metrics.recordUnknown();
             metrics.recordRetry();
@@ -154,9 +150,40 @@ public final class ReliableCoreExporter {
         UUID commandId = UUID.nameUUIDFromBytes((productLine + ":export-ack:" + throughSequence)
                 .getBytes(StandardCharsets.UTF_8));
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT, commandId,
-                productLine, CommandSource.OPERATIONS, SOURCE_ID, throughSequence, 0,
+                productLine, CommandSource.OPERATIONS, SOURCE_ID, sourceSequences.incrementAndGet(), 0,
                 System.currentTimeMillis(), correlations.incrementAndGet()),
                 CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)));
+    }
+
+    private ExportCycleResult acknowledgePublishedBatch(
+            long throughSequence,
+            int publishedEvents,
+            CoreExportStatus queryStatus,
+            List<CoreMessage> events) {
+        CoreMessage acknowledgement = ack(throughSequence);
+        CoreResponse response = core.submit(acknowledgement);
+        if (response.commandStatus() != ResponseStatus.APPLIED
+                && response.commandStatus() != ResponseStatus.DUPLICATE) {
+            throw new IllegalStateException("export ack rejected: " + response.resultCode());
+        }
+        if (response.commandStatus() == ResponseStatus.DUPLICATE) {
+            metrics.recordDuplicate(1);
+        }
+        CoreExportStatus after;
+        if (response.data().length != 0) {
+            after = CoreExportCodec.decodeStatus(response.data());
+        } else if (response.commandStatus() == ResponseStatus.APPLIED && queryStatus != null) {
+            after = statusAfterAck(queryStatus, events);
+        } else {
+            after = status();
+        }
+        if (after.acknowledgedSequence() < throughSequence) {
+            throw new ResultUnknownException(acknowledgement.header().commandId(),
+                    "export acknowledgement did not advance authoritative cursor to " + throughSequence);
+        }
+        pendingAcknowledgementSequence = 0;
+        metrics.recordAcknowledged(after);
+        return new ExportCycleResult(publishedEvents, after);
     }
 
     private static CoreExportStatus statusAfterAck(CoreExportStatus before, List<CoreMessage> events) {

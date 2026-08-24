@@ -133,14 +133,16 @@ class CoreStateQueryCodecTest {
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-71", UUID.randomUUID(),
                 -10, 20, 1_000, 1_001, 99, "OPEN", 1);
         CoreExecutionView execution = new CoreExecutionView(71, 70, 7, 8, 60_000, 1);
-        CoreCommandResultView result = new CoreCommandResultView(List.of(order), List.of(execution));
+        CoreCommandResultView result = new CoreCommandResultView(99, UUID.randomUUID(), 71, 3, 100,
+                17, 19, List.of(order), List.of(execution));
 
         assertThat(CoreCommandResultCodec.decode(CoreCommandResultCodec.encode(result))).isEqualTo(result);
     }
 
     @Test
     void rejectsTruncatedCommandResult() {
-        CoreCommandResultView result = new CoreCommandResultView(List.of(), List.of());
+        CoreCommandResultView result = new CoreCommandResultView(99, UUID.randomUUID(), 71, 3, 100,
+                17, 19, List.of(), List.of());
         byte[] encoded = CoreCommandResultCodec.encode(result);
 
         assertThatThrownBy(() -> CoreCommandResultCodec.decode(

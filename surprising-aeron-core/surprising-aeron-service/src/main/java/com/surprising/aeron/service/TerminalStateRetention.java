@@ -1,5 +1,6 @@
 package com.surprising.aeron.service;
 
+import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.service.state.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderState;
@@ -18,25 +19,30 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 final class TerminalStateRetention {
 
     static final int MAX_TOMBSTONES = 65_536;
     static final int MAX_PRUNE_PER_ACK = 4_096;
-    private static final int VERSION = 1;
+    static final int MAX_FUNDS_COMMANDS = 131_072;
+    private static final int VERSION = 2;
     private static final int MAX_CLIENT_ID_BYTES = 256;
     private final LinkedHashMap<EntityKey, RetainedEntity> candidates;
     private final LinkedHashMap<EntityKey, RetainedEntity> tombstones;
     private final Map<ClientIdentity, EntityKey> tombstonesByClient;
+    private final LinkedHashMap<UUID, CommandFingerprint> fundsCommands;
 
     TerminalStateRetention() {
-        this(new LinkedHashMap<>(), new LinkedHashMap<>());
+        this(new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
     }
 
     private TerminalStateRetention(LinkedHashMap<EntityKey, RetainedEntity> candidates,
-                                   LinkedHashMap<EntityKey, RetainedEntity> tombstones) {
+                                   LinkedHashMap<EntityKey, RetainedEntity> tombstones,
+                                   LinkedHashMap<UUID, CommandFingerprint> fundsCommands) {
         this.candidates = candidates;
         this.tombstones = tombstones;
+        this.fundsCommands = fundsCommands;
         this.tombstonesByClient = new HashMap<>();
         tombstones.values().forEach(this::indexTombstone);
     }
@@ -115,11 +121,37 @@ final class TerminalStateRetention {
         return tombstones.size();
     }
 
+    CommandFingerprint fundsCommand(UUID commandId) {
+        return fundsCommands.get(commandId);
+    }
+
+    boolean hasFundsCommandCapacity(UUID commandId) {
+        return fundsCommands.containsKey(commandId) || fundsCommands.size() < MAX_FUNDS_COMMANDS;
+    }
+
+    void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
+        if (commandId == null || fingerprint == null || !hasFundsCommandCapacity(commandId)) {
+            throw new IllegalStateException("funds command retention is full");
+        }
+        CommandFingerprint previous = fundsCommands.putIfAbsent(commandId, fingerprint);
+        if (previous != null && !previous.equals(fingerprint)) {
+            throw new IllegalStateException("funds command fingerprint conflict");
+        }
+    }
+
     long digest() {
         long hash = 0xcbf29ce484222325L;
         for (RetainedEntity value : candidates.values()) hash = mix(hash, value);
         hash ^= 0x9e3779b97f4a7c15L;
         for (RetainedEntity value : tombstones.values()) hash = mix(hash, value);
+        hash ^= 0x517cc1b727220a95L;
+        for (Map.Entry<UUID, CommandFingerprint> entry : fundsCommands.entrySet()) {
+            hash ^= entry.getKey().getMostSignificantBits(); hash *= 0x100000001b3L;
+            hash ^= entry.getKey().getLeastSignificantBits(); hash *= 0x100000001b3L;
+            for (byte value : entry.getValue().bytes()) {
+                hash ^= Byte.toUnsignedInt(value); hash *= 0x100000001b3L;
+            }
+        }
         return hash;
     }
 
@@ -130,6 +162,12 @@ final class TerminalStateRetention {
             output.writeInt(VERSION);
             write(output, candidates);
             write(output, tombstones);
+            output.writeInt(fundsCommands.size());
+            for (Map.Entry<UUID, CommandFingerprint> entry : fundsCommands.entrySet()) {
+                output.writeLong(entry.getKey().getMostSignificantBits());
+                output.writeLong(entry.getKey().getLeastSignificantBits());
+                output.write(entry.getValue().bytes());
+            }
             output.flush();
             return bytes.toByteArray();
         } catch (IOException exception) {
@@ -144,8 +182,21 @@ final class TerminalStateRetention {
             if (input.readInt() != VERSION) throw new IllegalArgumentException("unsupported terminal retention version");
             LinkedHashMap<EntityKey, RetainedEntity> candidates = read(input, Integer.MAX_VALUE);
             LinkedHashMap<EntityKey, RetainedEntity> tombstones = read(input, MAX_TOMBSTONES);
+            int fundsCommandCount = input.readInt();
+            if (fundsCommandCount < 0 || fundsCommandCount > MAX_FUNDS_COMMANDS) {
+                throw new IllegalArgumentException("invalid funds command retention count");
+            }
+            LinkedHashMap<UUID, CommandFingerprint> fundsCommands = new LinkedHashMap<>();
+            for (int index = 0; index < fundsCommandCount; index++) {
+                UUID commandId = new UUID(input.readLong(), input.readLong());
+                byte[] fingerprint = input.readNBytes(CommandFingerprint.LENGTH);
+                if (fingerprint.length != CommandFingerprint.LENGTH
+                        || fundsCommands.put(commandId, CommandFingerprint.fromBytes(fingerprint)) != null) {
+                    throw new IllegalArgumentException("invalid retained funds command");
+                }
+            }
             if (input.available() != 0) throw new IllegalArgumentException("trailing terminal retention bytes");
-            return new TerminalStateRetention(candidates, tombstones);
+            return new TerminalStateRetention(candidates, tombstones, fundsCommands);
         } catch (IOException exception) {
             throw new IllegalArgumentException("invalid terminal retention payload", exception);
         }

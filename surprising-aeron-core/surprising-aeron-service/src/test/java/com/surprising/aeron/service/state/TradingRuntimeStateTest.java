@@ -49,6 +49,46 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void retainedTreasuryReferenceStillEnforcesRuntimeOwner() throws InterruptedException {
+        TradingRuntimeState state = new TradingRuntimeState();
+        TreasuryRuntime treasury = state.treasury();
+        treasury.setFee(3, 7);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread other = new Thread(() -> {
+            try {
+                treasury.setFee(3, 8);
+            } catch (Throwable throwable) {
+                failure.set(throwable);
+            }
+        });
+
+        other.start();
+        other.join();
+
+        assertThat(failure.get()).isInstanceOf(IllegalStateException.class);
+        assertThat(treasury.fee(3)).isEqualTo(7);
+    }
+
+    @Test
+    void identityRegistryRejectsCrossThreadMutation() throws InterruptedException {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        identities.assetId("USDT");
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread other = new Thread(() -> {
+            try {
+                identities.assetId("BTC");
+            } catch (Throwable throwable) {
+                failure.set(throwable);
+            }
+        });
+
+        other.start();
+        other.join();
+
+        assertThat(failure.get()).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void reservesAndReleasesWithoutOverflow() {
         BalanceRuntime balance = new BalanceRuntime(7, 3, 1_000, 0);
         balance.reserve(250);

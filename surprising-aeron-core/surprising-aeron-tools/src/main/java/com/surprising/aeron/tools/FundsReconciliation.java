@@ -52,7 +52,7 @@ final class FundsReconciliation {
     static Result reconcile(Config config, QueryGateway gateway) {
         if (config == null || gateway == null) throw new IllegalArgumentException("config and gateway are required");
         Progress progress = Progress.load(config);
-        if (progress.phase == Phase.DONE) return progress.result(config);
+        if (progress.phase == Phase.DONE) progress = new Progress();
 
         processAccounts(config, gateway, progress, Role.USER, config.users);
         processAccounts(config, gateway, progress, Role.MAKER, config.makers);
@@ -263,6 +263,12 @@ final class FundsReconciliation {
     }
 
     private static void compareExact(String label, Map<StateKey, Long> expected, Map<StateKey, Long> actual) {
+        Set<StateKey> expectedKeys = new TreeSet<>(expected.keySet());
+        Set<StateKey> actualKeys = new TreeSet<>(actual.keySet());
+        if (!actualKeys.equals(expectedKeys)) {
+            throw new IllegalStateException(label + " state key set mismatch expected=" + expectedKeys
+                    + " actual=" + actualKeys);
+        }
         Set<StateKey> keys = new TreeSet<>();
         keys.addAll(expected.keySet());
         keys.addAll(actual.keySet());
