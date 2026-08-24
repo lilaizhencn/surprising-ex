@@ -16,7 +16,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 |---|---|
 | P0 | canonical 中文 P0-P5 规范注册与分支安全：先发布根 README 契约，保留既有脏改动。 |
 | P1 | reservation、`PositionCloseCapacity`、价格分离与累计手续费：衍生品普通单为全量开仓风险预留，reduce-only 才可省略开仓保证金。 |
-| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：每次仅一个按 Core sequence 的 matcher 命令在同一 Aeron callback 内取得不可变结果。 |
+| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：adapter 每次仅执行一个按 Core sequence 排序的 matcher 命令，先取得不可变结果并推进可恢复的 matcher prefix digest，才执行下一条。 |
 | P3 | TradingRuntimeState 生产写入权威：六条产品线的 Runtime owner 线程是唯一生产 mutation 权威，immutable `TradingCoreState` 仅用于快照、查询、回放/参考与 parity。 |
 | P4 | six isolated settlement kernels：Spot、LinearPerpetual、InversePerpetual、LinearDelivery、InverseDelivery、Option 各有穷尽且隔离的结算内核。 |
 | P5 | FundsDelta、Treasury、操作级舍入与 integrity：每命令/资产资金变动不可变且确定性排序，Treasury 子账本、残差和 Ed25519 完整性封套显式核算。 |
@@ -26,9 +26,12 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
 | P10 | sharding / capacity：分片与容量工作；任何分片提案只能属于 P10，不能标为 P0-P5。 |
 
-当前实现状态：P3 已完成。`TradingRuntimeState` 是唯一可变交易权威；`TradingCoreState` 继续保留，但只承担不可变
-快照、查询、恢复/回放、参考计算和 parity，不构成第二套可变权威。P3 完成不代表 P1、P2、P4、P5 或 P6-P10
-已经完成。
+当前实现状态：P2、P3 已完成。P2 在 `DeterministicExchangeCoreAdapter` 边界串行化实际 matcher 提交，直接消费
+exchange-core 产出的不可变 `MatcherResult`，并用 `matcherSequence + MatcherPrefix(before, after)` 绑定命令结果；prefix
+digest 随配对快照恢复，断裂或 malformed 结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes`，完整
+`bookStateHash` 只保留在 snapshot、恢复和显式审计边界。`TradingRuntimeState` 是唯一可变交易权威；
+`TradingCoreState` 继续保留，但只承担不可变快照、查询、恢复/回放、参考计算和 parity，不构成第二套可变权威。
+P2、P3 完成不代表 P1、P4、P5 或 P6-P10 已经完成。
 
 ### 分支安全与验证契约
 

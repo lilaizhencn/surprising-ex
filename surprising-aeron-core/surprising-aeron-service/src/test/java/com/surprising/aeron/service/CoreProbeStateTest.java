@@ -610,7 +610,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void snapshotFenceFinalizesReverseCompletionsInGlobalSequenceOrder() {
+    void snapshotFenceFinalizesSerializedCompletionsInGlobalSequenceOrder() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
             assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
@@ -676,21 +676,20 @@ class CoreProbeStateTest {
                     )));
             assertThat(state.apply(firstPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             assertThat(state.apply(secondPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            long firstSequence = state.matchingSequence(firstCommandId);
-            long secondSequence = state.matchingSequence(secondCommandId);
-            var accepted = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    true, "SUCCESS", List.of());
-            state.publishMatchingCompletion(secondSequence, accepted);
-            state.publishMatchingCompletion(firstSequence, accepted);
 
             state.beginSnapshot(715, Long.MAX_VALUE);
             assertThatThrownBy(() -> state.apply(command(UUID.randomUUID(), 3, 1)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessage("snapshot fence is active");
-
-            assertThatThrownBy(() -> state.captureSnapshot(2_000, 3, System.nanoTime()))
-                    .isInstanceOf(CoreProbeState.SnapshotNotReadyException.class)
-                    .hasMessage("snapshot not ready");
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (!state.pendingMatching().isEmpty() && System.nanoTime() < deadline) {
+                try {
+                    state.captureSnapshot(2_000, 3, System.nanoTime());
+                } catch (CoreProbeState.SnapshotNotReadyException expected) {
+                    Thread.onSpinWait();
+                }
+                if (!state.pendingMatching().isEmpty()) state.beginSnapshot(715, Long.MAX_VALUE);
+            }
             assertThat(state.pendingMatching()).isEmpty();
             assertThat(state.commandResults().get(firstCommandId).appliedCommandCount())
                     .isEqualTo(fixtureStartingCount + 3);
@@ -829,6 +828,72 @@ class CoreProbeStateTest {
             assertThat(state.pendingMatching()).containsOnlyKeys(sequence);
             assertThat(state.tradingState().order(714).status())
                     .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+        }
+    }
+
+    @Test
+    void failsClosedWhenMatcherPrefixDoesNotContinueAppliedPrefix() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            UUID commandId = UUID.randomUUID();
+            CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, commandId, 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                            715,
+                            "BTC-USDT",
+                            1,
+                            "BTC",
+                            "USDT",
+                            "USDT",
+                            CoreOrderSide.BUY,
+                            1_000,
+                            1_000,
+                            1_000,
+                            1_000,
+                            2,
+                            false,
+                            CoreMarginMode.CROSS,
+                            CorePositionSide.NET,
+                            ReservationKind.SPOT_ASSET,
+                            "USDT",
+                            2_000,
+                            CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC,
+                            false,
+                            "prefix-715",
+                            0,
+                            0
+                    )));
+            assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.matchingSequence(commandId);
+            var result = state.takeMatchingResult(sequence);
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (result == null && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+                result = state.takeMatchingResult(sequence);
+            }
+            assertThat(result).isNotNull();
+            long tamperedBefore = result.matcherPrefix().before() ^ 1L;
+            if (tamperedBefore == 0 || tamperedBefore == result.matcherPrefix().after()) {
+                tamperedBefore ^= 2L;
+            }
+            var tampered = new com.surprising.aeron.service.matching.CoreMatchingResult(
+                    result.accepted(), result.resultCode(), result.matches(), result.cancellations(),
+                    result.successfulPrefixCount(), result.matcherStateChanged(), result.nativeCommand(),
+                    new com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix(
+                            tamperedBefore, result.matcherPrefix().after()),
+                    result.matcherEvents(), result.marketData());
+
+            Throwable fatal = catchThrowable(() -> state.completeMatching(sequence, tampered, 2_000, 3));
+
+            assertThat(fatal).isInstanceOf(
+                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class)
+                    .hasMessageContaining("matcher result prefix does not continue the applied prefix");
+            assertThatThrownBy(() -> state.apply(command(UUID.randomUUID(), 3, 1)))
+                    .isSameAs(fatal);
+            assertThatThrownBy(state::snapshot).isSameAs(fatal);
         }
     }
 

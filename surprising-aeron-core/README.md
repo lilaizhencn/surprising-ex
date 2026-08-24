@@ -37,7 +37,8 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 
 ## 实现状态与版本切换说明
 
-本 README 中“P1-P5 规范契约”和其中的版本号描述目标状态与实现要求，不是当前源码已经完成的能力。当前实现基线见下方明确标注的条款；
+本 README 中“P1-P5 规范契约”和其中的版本号描述目标状态与实现要求，不是当前源码已经全部完成的能力。P2、P3
+已经完成，当前实现基线见下方明确标注的条款；
 Task 2 不宣称源码已经实现 command/envelope v3、export event marker v7、trading snapshot v22 或 sectioned snapshot v11。
 目标切换完成前，不得把目标条款当作运行时能力。
 
@@ -52,10 +53,11 @@ Task 2 不宣称源码已经实现 command/envelope v3、export event marker v7�
   post-only 语义，外层不得查 book 后模拟，也不得建立并行可执行 book。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
-- P2 的 same-callback one-in-flight target 要求 Core owner 线程按 Core sequence 串行提交一个 exchange-core 命令，并在同一个
-  same Aeron callback 内等待该命令的 immutable deterministic result；exchange-core 直接产出不可变 `MatcherResult`，不能由异步回调直接写入 Runtime。
-  生产协议不允许同一时刻存在第二个 MATCHING_ONLY command in flight，wall-clock readiness/watchdog 只能由 external health supervisor
-  观察，不能进入复制状态或改变裁决顺序。
+- P2 的 one-in-flight 边界由 `DeterministicExchangeCoreAdapter` 执行：Core owner 按 Core sequence 排队，adapter 只向
+  exchange-core 提交当前一条命令；exchange-core 返回不可变 `MatcherResult` 并绑定 `matcherSequence` 与滚动
+  `MatcherPrefix(before, after)` 后，才放行下一条实际 matcher 提交。异步完成只进入有界 completion queue，仍由 owner
+  按 Core sequence 校验并写入 Runtime，不能由回调直接写状态。wall-clock readiness/watchdog 只能由 external health
+  supervisor 观察，不能进入复制状态或改变裁决顺序。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
   通过一个 `EXECUTE_LIQUIDATION_BATCH` 同时提交有序 action 和可选 Risk Scan continuation，订单阶段完成后才推进用户阶段。
   每个批次共享最多 `1024` 笔撤单预算，Core 以 `nextCursorOrderId` 保存独占下一页位置。
@@ -100,14 +102,23 @@ current state 的唯一权威；PostgreSQL 只负责 Instrument 管理和 histor
 
 ### P2：确定性撮合推进与未知结果
 
-- 一个 Aeron callback transaction 内最多有一个 MATCHING_ONLY matcher command in flight。owner 按 Core sequence 提交并等待同一
-  callback 的 immutable copy；该 copy 至少携带 Core sequence、command ID、order ID、instrument version、matcher sequence、
-  before/after book hash，随后才允许提交下一个命令。
-- 缺失、超时、malformed、无法识别或 hash/sequence 不匹配都必须标记为 `unknown result`，立即 poison 当前 Member 并
+当前实现状态：P2 已完成。
+
+- 同一时刻最多有一个实际 MATCHING_ONLY matcher command in flight。adapter 按 Core sequence 串行提交，直接取得
+  exchange-core 的不可变 `MatcherResult`；结果至少携带 Core sequence、command ID、order ID、instrument version、
+  process-local native sequence、可恢复 matcher sequence 和滚动 `MatcherPrefix(before, after)`，随后才允许执行下一条
+  matcher 命令。事件链对象可以在 exchange-core 内池化，但越过 adapter 边界的结果、事件和 market data 都是不可变值。
+- 滚动 prefix digest 覆盖前一 digest、命令身份、结果码、成交、撤单和完整 matcher event；Product Core 应用时必须
+  验证 `before` 等于当前已应用 digest 且 matcher sequence 单调递增。process-local native sequence 与按本地刷新节奏
+  附带的可选 market data 只用于诊断/行情，不参与跨 Member prefix。普通命令不调用全量 order-book report，不再生成
+  或传输逐命令 `BookHashes`。
+- 缺失、超时、malformed、无法识别或 prefix/sequence 不匹配都必须标记为 `unknown result`，立即 poison 当前 Member 并
   `fail closed`：停止接收会改变交易状态的命令，保留可诊断证据，不 retry、rebuild、re-submit、按订单回放或猜测恢复。
   wall-clock readiness 和 watchdog 由 external health supervisor 负责告警、摘除和人工恢复，不写入复制状态。
-- 任何 snapshot 只能捕获一个精确匹配的 Core/book prefix（matched book prefix）：Core sequence、matcher sequence、订单簿 before/after hash、instrument
-  version 和 snapshot position 必须来自同一已完成命令边界。恢复时任一字段不匹配即拒绝并 fail closed；pending callback 不得进入快照。
+- 任何 snapshot 只能捕获一个精确匹配的 Core/book prefix（matched book prefix）：Core sequence、matcher sequence、
+  matcher prefix digest、snapshot position、matcher module hash 和完整 `bookStateHash` 必须来自同一已完成命令边界。
+  恢复时任一字段不匹配即拒绝并 fail closed；pending callback 不得进入快照。完整订单簿 hash 只在 snapshot、恢复和
+  显式审计边界计算，不进入普通交易命令热路径。
 
 ### P3：Runtime 唯一生产写入权与 parity
 

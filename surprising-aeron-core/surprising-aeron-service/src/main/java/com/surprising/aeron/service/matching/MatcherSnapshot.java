@@ -19,6 +19,7 @@ public record MatcherSnapshot(
         long snapshotId,
         long coreSequence,
         long matcherSequence,
+        long matcherPrefixDigest,
         long coreBusinessStateHash,
         int engineStateHash,
         int bookStateHash,
@@ -44,7 +45,7 @@ public record MatcherSnapshot(
     public MatcherSnapshot {
         if (productLine == null || !CORE_SHARD_ID.equals(coreShardId)
                 || routeVersion != ROUTE_VERSION || snapshotId <= 0 || coreSequence < 0
-                || matcherSequence < 0 || !FORK_GIT_SHA.equals(forkGitSha)
+                || matcherSequence < 0 || matcherPrefixDigest == 0 || !FORK_GIT_SHA.equals(forkGitSha)
                 || !ARTIFACT_SHA256.equals(artifactSha256)
                 || matcherConfigHash != MATCHER_CONFIG_HASH || symbols == null || users == null
                 || modules == null || modules.isEmpty()) {

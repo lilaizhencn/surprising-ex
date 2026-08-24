@@ -24,7 +24,7 @@ import java.util.zip.CRC32C;
 public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
@@ -44,6 +44,7 @@ public final class MatcherSnapshotCodec {
                 output.writeLong(snapshot.snapshotId());
                 output.writeLong(snapshot.coreSequence());
                 output.writeLong(snapshot.matcherSequence());
+                output.writeLong(snapshot.matcherPrefixDigest());
                 output.writeLong(snapshot.coreBusinessStateHash());
                 output.writeInt(snapshot.engineStateHash());
                 output.writeInt(snapshot.bookStateHash());
@@ -112,6 +113,7 @@ public final class MatcherSnapshotCodec {
             long snapshotId = input.readLong();
             long coreSequence = input.readLong();
             long matcherSequence = input.readLong();
+            long matcherPrefixDigest = input.readLong();
             long businessHash = input.readLong();
             int engineHash = input.readInt();
             int bookHash = input.readInt();
@@ -163,7 +165,8 @@ public final class MatcherSnapshotCodec {
             }
             if (input.available() != 0) throw new ProtocolException("trailing matcher snapshot bytes");
             return new MatcherSnapshot(productLine, coreShardId, routeVersion, snapshotId, coreSequence,
-                    matcherSequence, businessHash, engineHash, bookHash, symbolHash, userHash, instrumentHash,
+                    matcherSequence, matcherPrefixDigest, businessHash, engineHash, bookHash,
+                    symbolHash, userHash, instrumentHash,
                     activeOrderHash, forkGitSha, artifactSha256, configHash, symbols, users, modules);
         } catch (EOFException exception) {
             throw new ProtocolException("matcher snapshot is truncated: " + exception.getMessage());

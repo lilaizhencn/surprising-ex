@@ -34,8 +34,8 @@ public final class CoreCommandResultCodec {
         buffer.putLong(result.orderId());
         buffer.putLong(result.instrumentVersion());
         buffer.putLong(result.matcherSequence());
-        buffer.putLong(result.beforeBookHash());
-        buffer.putLong(result.afterBookHash());
+        buffer.putLong(result.matcherPrefixBefore());
+        buffer.putLong(result.matcherPrefixAfter());
         buffer.putInt(orders.length);
         buffer.put(orders);
         buffer.putInt(result.executions().size());
@@ -65,8 +65,8 @@ public final class CoreCommandResultCodec {
         long orderId = buffer.getLong();
         long instrumentVersion = buffer.getLong();
         long matcherSequence = buffer.getLong();
-        long beforeBookHash = buffer.getLong();
-        long afterBookHash = buffer.getLong();
+        long matcherPrefixBefore = buffer.getLong();
+        long matcherPrefixAfter = buffer.getLong();
         int ordersLength = buffer.getInt();
         if (ordersLength < 0 || ordersLength > buffer.remaining() - Integer.BYTES) {
             throw new ProtocolException("invalid command result orders length: " + ordersLength);
@@ -86,7 +86,7 @@ public final class CoreCommandResultCodec {
                     buffer.getLong(), buffer.getLong(), buffer.getLong()));
         }
         return new CoreCommandResultView(coreSequence, commandId, orderId, instrumentVersion, matcherSequence,
-                beforeBookHash, afterBookHash, orderViews, executions);
+                matcherPrefixBefore, matcherPrefixAfter, orderViews, executions);
     }
 
     private static void requireRemaining(ByteBuffer buffer, int length) {

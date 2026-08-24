@@ -123,6 +123,8 @@ public final class CoreProbeState implements AutoCloseable {
     private long commandResultsDigest;
     private long nextResultRetentionSequence;
     private long nextResultRetentionWeight;
+    private long appliedMatcherSequence;
+    private long appliedMatcherPrefixDigest;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final LinkedHashMap<Long, PendingMatching> pendingMatching;
     private final Map<UUID, Long> pendingMatchingByCommandId;
@@ -236,6 +238,10 @@ public final class CoreProbeState implements AutoCloseable {
         this.rollingBusinessStateHash = com.surprising.aeron.service.state.RollingBusinessStateHash.create(tradingState);
         this.cachedBusinessStateHash = rollingBusinessStateHash.value();
         this.lastSourceSequenceDigest = sourceSequenceDigest(lastSourceSequences);
+        this.appliedMatcherSequence = matcherSnapshot == null ? 0 : matcherSnapshot.matcherSequence();
+        this.appliedMatcherPrefixDigest = matcherSnapshot == null
+                ? com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix.initialDigest()
+                : matcherSnapshot.matcherPrefixDigest();
         this.exportState = exportState;
         this.terminalRetention = terminalRetention;
         this.runtime = matcherSnapshot == null
@@ -2221,11 +2227,16 @@ public final class CoreProbeState implements AutoCloseable {
             matchingPhaseMetrics.recordExchange(System.nanoTime() - submitNanos);
         }
         long applyStartNanos = System.nanoTime();
-        if (pendingOrderBatches.containsKey(sequence)) {
-            return completeOrderBatchMatching(sequence, matchingResult, clusterTimestamp, clusterPosition);
-        }
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
             throw failMatching(pending, "matcher continuation returned " + matchingResult.resultCode(), null);
+        }
+        if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
+            validateMatchingEvidence(pending, matchingResult);
+            appliedMatcherSequence = matchingResult.nativeCommand().matcherSequence();
+            appliedMatcherPrefixDigest = matchingResult.matcherPrefix().after();
+        }
+        if (pendingOrderBatches.containsKey(sequence)) {
+            return completeOrderBatchMatching(sequence, matchingResult, clusterTimestamp, clusterPosition);
         }
         TradingCoreState before = tradingState;
         commandOrderViews = List.of();
@@ -2602,6 +2613,27 @@ public final class CoreProbeState implements AutoCloseable {
                 || pending.operation() == PendingMatching.Operation.SETTLEMENT) return true;
         return "EXCHANGE_CORE_FAILURE".equals(result.resultCode())
                 || "MATCHING_TIMEOUT".equals(result.resultCode());
+    }
+
+    private void validateMatchingEvidence(
+            PendingMatching pending,
+            com.surprising.aeron.service.matching.CoreMatchingResult result) {
+        var nativeCommand = result.nativeCommand();
+        var prefix = result.matcherPrefix();
+        UUID commandId;
+        try {
+            commandId = UUID.fromString(nativeCommand.commandId());
+        } catch (IllegalArgumentException exception) {
+            throw failMatching(pending, "matcher result command identity is malformed", exception);
+        }
+        if (nativeCommand.coreSequence() != pending.sequence()
+                || !commandId.equals(pending.command().header().commandId())
+                || nativeCommand.matcherSequence() <= appliedMatcherSequence
+                || !prefix.bound()
+                || prefix.before() != appliedMatcherPrefixDigest
+                || prefix.after() == prefix.before()) {
+            throw failMatching(pending, "matcher result prefix does not continue the applied prefix", null);
+        }
     }
 
     boolean isMatchingPending(UUID commandId) {
@@ -3993,7 +4025,7 @@ public final class CoreProbeState implements AutoCloseable {
             return new byte[0];
         }
         var nativeCommand = matchingResult.nativeCommand();
-        var bookHashes = matchingResult.bookHashes();
+        var matcherPrefix = matchingResult.matcherPrefix();
         UUID commandId;
         try {
             commandId = UUID.fromString(nativeCommand.commandId());
@@ -4003,7 +4035,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (nativeCommand.coreSequence() != pending.sequence()
                 || !commandId.equals(pending.command().header().commandId())
                 || nativeCommand.orderId() <= 0 || nativeCommand.instrumentVersion() <= 0
-                || nativeCommand.matcherSequence() <= 0) {
+                || nativeCommand.matcherSequence() <= 0 || !matcherPrefix.bound()) {
             return new byte[0];
         }
         List<CoreOrderStateView> finalOrders = commandOrderViews.stream()
@@ -4015,7 +4047,7 @@ public final class CoreProbeState implements AutoCloseable {
         try {
             return CoreCommandResultCodec.encode(new CoreCommandResultView(pending.sequence(), commandId,
                     nativeCommand.orderId(), nativeCommand.instrumentVersion(), nativeCommand.matcherSequence(),
-                    bookHashes.before(), bookHashes.after(), finalOrders, commandExecutions));
+                    matcherPrefix.before(), matcherPrefix.after(), finalOrders, commandExecutions));
         } catch (IllegalArgumentException exception) {
             return new byte[0];
         }

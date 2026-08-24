@@ -63,7 +63,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final AtomicReference<CompletableFuture<Void>> submissionTail =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
+    private final AtomicReference<CompletableFuture<Void>> matcherTail =
+            new AtomicReference<>(CompletableFuture.completedFuture(null));
+    private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
     private final AtomicLong matcherSequence = new AtomicLong();
+    private final AtomicLong matcherPrefixDigest = new AtomicLong(MatcherPrefixDigest.initial());
+    private final AtomicLong lastNativeSequence = new AtomicLong();
     private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
             snapshotPersistence;
 
@@ -112,6 +117,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             });
             users.addAll(snapshot.users());
             matcherSequence.set(snapshot.matcherSequence());
+            matcherPrefixDigest.set(snapshot.matcherPrefixDigest());
             start(snapshot);
             reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
             StateHashes restoredHashes = currentStateHashesAsync().join();
@@ -144,22 +150,89 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 || aeronTimestamp < 0 || command == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher command evidence"));
         }
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        CompletableFuture<Void> previous = reserve(matcherTail, gate);
+        CompletableFuture<CoreMatchingResult> pipeline = previous.thenCompose(ignored -> {
+            Throwable failure = matcherFailure.get();
+            if (failure != null) {
+                return CompletableFuture.failedFuture(
+                        new IllegalStateException("matcher is poisoned by an earlier command", failure));
+            }
+            return executeWithEvidenceNow(coreSequence, commandId, orderId, instrumentVersion,
+                    aeronTimestamp, command);
+        });
+        NonCancellableFuture<CoreMatchingResult> view = new NonCancellableFuture<>();
+        pipeline.whenComplete((result, failure) -> {
+            if (failure == null) view.complete(result);
+            else {
+                matcherFailure.compareAndSet(null, unwrap(failure));
+                view.completeExceptionally(failure);
+            }
+            gate.complete(null);
+        });
+        return view;
+    }
+
+    private CompletableFuture<CoreMatchingResult> executeWithEvidenceNow(
+            long coreSequence,
+            java.util.UUID commandId,
+            long orderId,
+            long instrumentVersion,
+            long aeronTimestamp,
+            Supplier<CompletableFuture<CoreMatchingResult>> command) {
         long sequence = matcherSequence.incrementAndGet();
         CompletableFuture<CoreMatchingResult> submitted;
         try {
             submitted = command.get();
         } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
             return CompletableFuture.failedFuture(exception);
         }
         if (submitted == null) {
-            return CompletableFuture.failedFuture(new IllegalStateException("matcher command returned no future"));
+            IllegalStateException failure = new IllegalStateException("matcher command returned no future");
+            matcherFailure.compareAndSet(null, failure);
+            return CompletableFuture.failedFuture(failure);
         }
-        return submitted.thenApply(result -> new CoreMatchingResult(
+        return submitted.thenApply(result -> bindMatcherEvidence(coreSequence, commandId, orderId,
+                instrumentVersion, aeronTimestamp, sequence, result));
+    }
+
+    private CoreMatchingResult bindMatcherEvidence(
+            long coreSequence,
+            java.util.UUID commandId,
+            long orderId,
+            long instrumentVersion,
+            long aeronTimestamp,
+            long sequence,
+            CoreMatchingResult result) {
+        if (result == null) throw new IllegalStateException("matcher command returned no result");
+        long nativeSequence = result.nativeCommand().nativeSequence();
+        if (nativeSequence > 0) {
+            long previousNativeSequence = lastNativeSequence.get();
+            if (nativeSequence <= previousNativeSequence
+                    || !lastNativeSequence.compareAndSet(previousNativeSequence, nativeSequence)) {
+                throw new IllegalStateException("matcher native sequence is not strictly increasing");
+            }
+        }
+        CoreMatchingResult.NativeCommand nativeCommand = new CoreMatchingResult.NativeCommand(
+                coreSequence, commandId.toString(), orderId, instrumentVersion,
+                nativeSequence, sequence, aeronTimestamp);
+        long before = matcherPrefixDigest.get();
+        long after = MatcherPrefixDigest.next(before, nativeCommand, result);
+        if (!matcherPrefixDigest.compareAndSet(before, after)) {
+            throw new IllegalStateException("matcher prefix advanced outside the single in-flight gate");
+        }
+        CoreMatchingResult bound = new CoreMatchingResult(
                 result.accepted(), result.resultCode(), result.matches(), result.cancellations(),
-                result.successfulPrefixCount(), result.matcherStateChanged(),
-                new CoreMatchingResult.NativeCommand(coreSequence, commandId.toString(), orderId,
-                        instrumentVersion, result.nativeCommand().nativeSequence(), sequence, aeronTimestamp),
-                new CoreMatchingResult.BookHashes(0, 0, 0), result.matcherEvents(), result.marketData()));
+                result.successfulPrefixCount(), result.matcherStateChanged(), nativeCommand,
+                new CoreMatchingResult.MatcherPrefix(before, after), result.matcherEvents(), result.marketData());
+        if ("EXCHANGE_CORE_FAILURE".equals(bound.resultCode())
+                || "MATCHING_TIMEOUT".equals(bound.resultCode())
+                || !bound.accepted() && bound.matcherStateChanged()) {
+            matcherFailure.compareAndSet(null,
+                    new IllegalStateException("fatal matcher result: " + bound.resultCode()));
+        }
+        return bound;
     }
 
     private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, PlaceOrderCommand command) {
@@ -181,17 +254,27 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private static CoreMatchingResult matchingResult(exchange.core2.core.common.MatcherResult response) {
         List<CoreMatch> matches = new ArrayList<>();
+        List<CoreMatchingResult.MatcherEvent> events = new ArrayList<>(response.events().size());
         response.events().forEach(event -> {
+            events.add(new CoreMatchingResult.MatcherEvent(event.eventType().name(), event.section(),
+                    event.activeOrderCompleted(), event.matchedOrderId(), event.matchedOrderUid(),
+                    event.matchedOrderCompleted(), event.price(), event.size(), event.bidderHoldPrice()));
             if (event.eventType() == MatcherEventType.TRADE) {
                 matches.add(new CoreMatch(event.matchedOrderId(), event.matchedOrderUid(), event.price(), event.size(),
                         event.matchedOrderCompleted(), event.activeOrderCompleted()));
             }
         });
+        List<CoreMatchingResult.MarketData.Level> asks = response.marketData().asks().stream()
+                .map(level -> new CoreMatchingResult.MarketData.Level(
+                        level.price(), level.volume(), level.orders())).toList();
+        List<CoreMatchingResult.MarketData.Level> bids = response.marketData().bids().stream()
+                .map(level -> new CoreMatchingResult.MarketData.Level(
+                        level.price(), level.volume(), level.orders())).toList();
         return new CoreMatchingResult(response.resultCode() == CommandResultCode.SUCCESS,
                 response.resultCode().name(), matches, List.of(), 0, false,
                 new CoreMatchingResult.NativeCommand(0, "", 0, 0, response.sequence(), 0, 0),
-                new CoreMatchingResult.BookHashes(0, 0, 0), List.of(),
-                new CoreMatchingResult.MarketData(List.of(), List.of()));
+                new CoreMatchingResult.MatcherPrefix(0, 0), events,
+                new CoreMatchingResult.MarketData(asks, bids));
     }
 
     private static OrderType orderType(PlaceOrderCommand command) {
@@ -209,21 +292,31 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public CompletableFuture<CoreMatchingResult> cancelBatchAsync(List<CoreOrderState> orders) {
         List<CoreOrderState> requested = orders == null ? List.of() : List.copyOf(orders);
-        return cancelBatchOrderedAsync(requested).thenApply(outcome -> {
-            List<CoreCancellationResult> cancellations = new ArrayList<>(requested.size());
-            for (int index = 0; index < requested.size(); index++) {
-                CoreMatchingResult result = outcome.results().get(index);
-                cancellations.add(new CoreCancellationResult(requested.get(index).orderId(), result.accepted(),
-                        result.resultCode()));
-            }
-            if (outcome.exception() != null) {
-                return new CoreMatchingResult(false, "EXCHANGE_CORE_FAILURE", List.of(), cancellations,
-                        outcome.successfulPrefix().size());
-            }
-            CoreMatchingResult failure = outcome.failedResult();
-            return new CoreMatchingResult(failure == null, failure == null ? "SUCCESS" : failure.resultCode(),
-                    List.of(), cancellations, outcome.successfulPrefix().size());
-        });
+        return cancelBatchOrderedAsync(requested).thenApply(outcome -> aggregateCancellationResult(requested, outcome));
+    }
+
+    private static CoreMatchingResult aggregateCancellationResult(
+            List<CoreOrderState> requested,
+            CancelBatchOutcome outcome) {
+        List<CoreCancellationResult> cancellations = new ArrayList<>(requested.size());
+        for (int index = 0; index < requested.size(); index++) {
+            CoreMatchingResult result = outcome.results().get(index);
+            cancellations.add(new CoreCancellationResult(requested.get(index).orderId(), result.accepted(),
+                    result.resultCode()));
+        }
+        List<CoreMatchingResult.MatcherEvent> events = outcome.results().stream()
+                .flatMap(result -> result.matcherEvents().stream()).toList();
+        long nativeSequence = outcome.results().stream()
+                .mapToLong(result -> result.nativeCommand().nativeSequence()).max().orElse(0);
+        CoreMatchingResult failure = outcome.failedResult();
+        boolean accepted = outcome.exception() == null && failure == null;
+        String resultCode = outcome.exception() != null ? "EXCHANGE_CORE_FAILURE"
+                : failure == null ? "SUCCESS" : failure.resultCode();
+        return new CoreMatchingResult(accepted, resultCode, List.of(), cancellations,
+                outcome.successfulPrefix().size(), !accepted && !outcome.successfulPrefix().isEmpty(),
+                new CoreMatchingResult.NativeCommand(0, "", 0, 0, nativeSequence, 0, 0),
+                new CoreMatchingResult.MatcherPrefix(0, 0), events,
+                new CoreMatchingResult.MarketData(List.of(), List.of()));
     }
 
     public CompletableFuture<CancelBatchOutcome> cancelBatchOrderedAsync(List<CoreOrderState> orders) {
@@ -253,12 +346,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                                                     PlaceOrderCommand replacement) {
         return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
-                    CompletableFuture<CommandResultCode> cancel = api.submitCommandAsync(ApiCancelOrder.builder()
+                    CompletableFuture<exchange.core2.core.common.MatcherResult> cancel =
+                            api.submitCommandAsyncMatcherResult(ApiCancelOrder.builder()
                             .orderId(orderId).uid(userId).symbol(symbolId).build());
-                    return cancel.thenCompose(cancelResult -> {
-                        if (cancelResult != CommandResultCode.SUCCESS) {
-                            return CompletableFuture.completedFuture(new CoreMatchingResult(false,
-                                    cancelResult.name(), List.of()));
+                    return cancel.thenCompose(cancelResponse -> {
+                        CoreMatchingResult cancelResult = matchingResult(cancelResponse);
+                        if (!cancelResult.accepted()) {
+                            return CompletableFuture.completedFuture(cancelResult);
                         }
                         return ensureSymbolAsync(replacement.symbol()).thenCompose(replacementSymbolId -> {
                             CompletableFuture<exchange.core2.core.common.MatcherResult> place =
@@ -270,9 +364,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                             .size(replacement.quantitySteps()).build());
                             return place.thenApply(response -> {
                                 CoreMatchingResult result = matchingResult(response);
-                                return result.accepted() ? result : new CoreMatchingResult(false,
-                                        result.resultCode(), result.matches(), result.cancellations(),
-                                        result.successfulPrefixCount(), true);
+                                List<CoreCancellationResult> cancellations = List.of(
+                                        new CoreCancellationResult(orderId, true, cancelResult.resultCode()));
+                                List<CoreMatchingResult.MatcherEvent> events = new ArrayList<>(
+                                        cancelResult.matcherEvents().size() + result.matcherEvents().size());
+                                events.addAll(cancelResult.matcherEvents());
+                                events.addAll(result.matcherEvents());
+                                return new CoreMatchingResult(result.accepted(), result.resultCode(),
+                                        result.matches(), cancellations, 1, !result.accepted(),
+                                        result.nativeCommand(), new CoreMatchingResult.MatcherPrefix(0, 0),
+                                        events, result.marketData());
                             });
                         });
                     });
@@ -344,7 +445,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                             .max().orElseThrow();
                                     return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
                                             MatcherSnapshot.ROUTE_VERSION, snapshotId, coreSequence, matcherSequence,
-                                            state.businessStateHash(), hashes.engineHash(), hashes.bookHash(),
+                                            matcherPrefixDigest.get(), state.businessStateHash(),
+                                            hashes.engineHash(), hashes.bookHash(),
                                             MatcherSnapshot.symbolRegistryHash(symbols),
                                             MatcherSnapshot.userRegistryHash(users),
                                             MatcherSnapshot.instrumentRegistryHash(state),
@@ -633,6 +735,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             symbolRegistrations.clear();
             userRegistrations.clear();
             submissionTail.set(CompletableFuture.completedFuture(null));
+            matcherTail.set(CompletableFuture.completedFuture(null));
         }
     }
 

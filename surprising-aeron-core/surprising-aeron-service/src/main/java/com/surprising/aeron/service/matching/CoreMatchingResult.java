@@ -5,7 +5,7 @@ import java.util.List;
 public record CoreMatchingResult(boolean accepted, String resultCode, List<CoreMatch> matches,
                                  List<CoreCancellationResult> cancellations, int successfulPrefixCount,
                                  boolean matcherStateChanged, NativeCommand nativeCommand,
-                                 BookHashes bookHashes, List<MatcherEvent> matcherEvents,
+                                 MatcherPrefix matcherPrefix, List<MatcherEvent> matcherEvents,
                                  MarketData marketData) {
 
     public record NativeCommand(long coreSequence, String commandId, long orderId, long instrumentVersion,
@@ -19,7 +19,15 @@ public record CoreMatchingResult(boolean accepted, String resultCode, List<CoreM
         }
     }
 
-    public record BookHashes(long before, long after, long instrumentRegistry) {
+    public record MatcherPrefix(long before, long after) {
+
+        public static long initialDigest() {
+            return MatcherPrefixDigest.initial();
+        }
+
+        public boolean bound() {
+            return before != 0 && after != 0;
+        }
     }
 
     public record MatcherEvent(String type, int section, boolean activeOrderCompleted, long matchedOrderId,
@@ -60,7 +68,7 @@ public record CoreMatchingResult(boolean accepted, String resultCode, List<CoreM
                               List<CoreCancellationResult> cancellations, int successfulPrefixCount,
                               boolean matcherStateChanged) {
         this(accepted, resultCode, matches, cancellations, successfulPrefixCount, matcherStateChanged,
-                new NativeCommand(0, "", 0, 0, 0, 0, 0), new BookHashes(0, 0, 0), List.of(),
+                new NativeCommand(0, "", 0, 0, 0, 0, 0), new MatcherPrefix(0, 0), List.of(),
                 new MarketData(List.of(), List.of()));
     }
 
@@ -71,7 +79,7 @@ public record CoreMatchingResult(boolean accepted, String resultCode, List<CoreM
         }
         matches = List.copyOf(matches);
         cancellations = List.copyOf(cancellations);
-        if (nativeCommand == null || bookHashes == null || matcherEvents == null || marketData == null) {
+        if (nativeCommand == null || matcherPrefix == null || matcherEvents == null || marketData == null) {
             throw new IllegalArgumentException("missing immutable matcher callback data");
         }
         matcherEvents = List.copyOf(matcherEvents);

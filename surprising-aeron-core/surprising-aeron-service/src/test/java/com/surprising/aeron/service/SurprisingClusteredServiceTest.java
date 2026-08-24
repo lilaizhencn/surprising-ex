@@ -267,8 +267,9 @@ class SurprisingClusteredServiceTest {
         service.onStart(cluster(), null);
         try {
             long pendingSequence = preparePendingPlace(service.state(), 903);
-            service.state().publishMatchingCompletion(pendingSequence,
-                    new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS", List.of()));
+            var matchingResult = awaitMatching(service.state(), pendingSequence);
+            assertThat(matchingResult).isNotNull();
+            service.state().publishMatchingCompletion(pendingSequence, matchingResult);
 
             // When
             assertThatThrownBy(() -> service.captureSnapshot(8))
@@ -350,12 +351,17 @@ class SurprisingClusteredServiceTest {
         CountDownLatch continueAfterTimer = new CountDownLatch(1);
         AtomicReference<CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>
                 matchingReference = new AtomicReference<>();
+        AtomicReference<com.surprising.aeron.service.matching.CoreMatchingResult> resultReference =
+                new AtomicReference<>();
         FutureTask<TimerScenario> scenario = new FutureTask<>(() -> runTimerScenarioOnOwner(
-                delayedCompletion, timerReady, timerReturned, continueAfterTimer, matchingReference));
+                delayedCompletion, timerReady, timerReturned, continueAfterTimer, matchingReference,
+                resultReference));
         Thread.ofVirtual().start(scenario);
-        assertThat(timerReady.await(10, TimeUnit.SECONDS)).isTrue();
+        boolean ready = timerReady.await(10, TimeUnit.SECONDS);
+        if (!ready && scenario.isDone()) scenario.get();
+        assertThat(ready).isTrue();
         boolean returnedWithoutCompletion = timerReturned.await(250, TimeUnit.MILLISECONDS);
-        if (!returnedWithoutCompletion) matchingReference.get().complete(acceptedMatchingResult());
+        if (!returnedWithoutCompletion) matchingReference.get().complete(resultReference.get());
         continueAfterTimer.countDown();
         TimerScenario result = scenario.get(5, TimeUnit.SECONDS);
         assertThat(returnedWithoutCompletion || !delayedCompletion)
@@ -370,7 +376,9 @@ class SurprisingClusteredServiceTest {
             CountDownLatch timerReturned,
             CountDownLatch continueAfterTimer,
             AtomicReference<CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>
-                    matchingReference) throws Exception {
+                    matchingReference,
+            AtomicReference<com.surprising.aeron.service.matching.CoreMatchingResult> resultReference)
+            throws Exception {
         SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         try {
@@ -413,13 +421,15 @@ class SurprisingClusteredServiceTest {
                     encoded.length, aeronHeader());
             long sequence = state.matchingSequence(place.header().commandId());
             assertThat(sequence).isPositive();
+            var accepted = awaitSubmittedMatching(state, sequence);
+            assertThat(accepted).isNotNull();
 
             CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> matching =
                     new CompletableFuture<>();
             installIncompleteMatchingFuture(state, sequence, matching);
             matchingReference.set(matching);
+            resultReference.set(accepted);
             timerReady.countDown();
-            var accepted = acceptedMatchingResult();
             if (!delayedCompletion) matching.complete(accepted);
 
             service.onTimerEvent(sequence, 1_001);
@@ -454,8 +464,18 @@ class SurprisingClusteredServiceTest {
         }
     }
 
-    private static com.surprising.aeron.service.matching.CoreMatchingResult acceptedMatchingResult() {
-        return new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS", List.of());
+    @SuppressWarnings("unchecked")
+    private static com.surprising.aeron.service.matching.CoreMatchingResult awaitSubmittedMatching(
+            CoreProbeState state,
+            long sequence) throws Exception {
+        Field futuresField = CoreProbeState.class.getDeclaredField("matchingFutures");
+        futuresField.setAccessible(true);
+        Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>> futures =
+                (Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>)
+                        futuresField.get(state);
+        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future = futures.get(sequence);
+        assertThat(future).isNotNull();
+        return future.get(5, TimeUnit.SECONDS);
     }
 
     @SuppressWarnings("unchecked")

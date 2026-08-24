@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class CoreCommandResultCodecTest {
 
     @Test
-    void roundTripsMatcherIntegrityFields() {
+    void roundTripsMatcherPrefixIntegrityFields() {
         UUID commandId = UUID.fromString("00112233-4455-6677-8899-aabbccddeeff");
         CoreCommandResultView result = new CoreCommandResultView(41, commandId, 71, 9, 83,
                 0x1020_3040_5060_7080L, 0x1121_3141_5161_7181L, List.of(),
@@ -26,8 +26,8 @@ class CoreCommandResultCodecTest {
         assertThat(restored.orderId()).isEqualTo(71);
         assertThat(restored.instrumentVersion()).isEqualTo(9);
         assertThat(restored.matcherSequence()).isEqualTo(83);
-        assertThat(restored.beforeBookHash()).isEqualTo(0x1020_3040_5060_7080L);
-        assertThat(restored.afterBookHash()).isEqualTo(0x1121_3141_5161_7181L);
+        assertThat(restored.matcherPrefixBefore()).isEqualTo(0x1020_3040_5060_7080L);
+        assertThat(restored.matcherPrefixAfter()).isEqualTo(0x1121_3141_5161_7181L);
     }
 
     @Test

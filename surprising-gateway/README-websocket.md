@@ -14,7 +14,7 @@ Core 私有事件由 `CoreEventFanoutConsumer` 直接消费产品线的 `core.ev
 每条 v7 fact 都是 Product Core 在一个确定性命令边界产生的不可变事实，至少携带以下可校验身份与状态：
 
 - `productLine`、`Core sequence`、`commandId`、`orderId`、`instrumentVersion`；其中 Core sequence 是同一产品线内的裁决顺序，不能由 Kafka offset、数据库主键或 WebSocket 序号替代。
-- `matcherSequence` 与 matcher 的 `beforeBookHash` / `afterBookHash`，把 Core 命令和 exchange-core 的同一已接受撮合前缀绑定；gateway 不执行撮合，也不从其他订单簿重建该结果。
+- `matcherSequence` 与 matcher 的 `matcherPrefixBefore` / `matcherPrefixAfter`，把 Core 命令和 exchange-core 的同一已接受撮合前缀绑定；gateway 不执行撮合，也不从其他订单簿重建该结果。逐命令事实不携带全量订单簿 hash；完整 `bookStateHash` 只属于 snapshot、恢复和显式审计边界。
 - 按 `(asset, ownerKind, ownerId, subledger)` 稳定排序的逐资产 `FundsDelta`；它记录该命令的资金 postings，不可只传聚合余额，也不可由 gateway 或 PostgreSQL 二次计算。
 - `beforeStateHash` / `afterStateHash` 与 `beforeFundsHash` / `afterFundsHash`，分别覆盖命令前后 Product Core 状态和资金状态；每个 hash 都属于事实 payload，不能用本地缓存替换。
 - 完整性 envelope：`algorithm=Ed25519`、`keyId`、公钥 `fingerprint`、canonical `payloadHash` 与 `signature`。私钥不进入 fact、Kafka、WebSocket 或快照；所有消费者按已配置 fingerprint 验证同一 canonical payload。

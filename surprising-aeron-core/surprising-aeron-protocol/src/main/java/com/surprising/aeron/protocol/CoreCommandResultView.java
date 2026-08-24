@@ -9,15 +9,15 @@ public record CoreCommandResultView(
         long orderId,
         long instrumentVersion,
         long matcherSequence,
-        long beforeBookHash,
-        long afterBookHash,
+        long matcherPrefixBefore,
+        long matcherPrefixAfter,
         List<CoreOrderStateView> orders,
         List<CoreExecutionView> executions) {
 
     public CoreCommandResultView {
         if (coreSequence <= 0 || commandId == null || commandId.equals(new UUID(0, 0))
                 || orderId <= 0 || instrumentVersion <= 0 || matcherSequence <= 0
-                || beforeBookHash < 0 || afterBookHash < 0) {
+                || matcherPrefixBefore == 0 || matcherPrefixAfter == 0) {
             throw new IllegalArgumentException("invalid command result identity");
         }
         orders = orders == null ? List.of() : List.copyOf(orders);
