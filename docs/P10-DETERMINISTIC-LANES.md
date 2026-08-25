@@ -56,11 +56,11 @@ Aeron Cluster owner 接收的 command 先得到唯一 `coreSequence`。所有 La
 sequence。
 
 一个命令可以产生多个内部 posting，但只能产生一个全局终态结果和一组确定排序的 `FundsDelta`。matcher 前的
-reservation 是该命令固定 transaction slot 内的 provisional state：它阻止同一用户的冲突命令，但不对 query、
-Core Fact 或 snapshot 可见。matcher 和结算完成后，reservation、订单、成交、持仓和资金一次提交为一个 terminal
-Core Fact；matcher 拒绝时丢弃 provisional state。Aeron Cluster Log 已保存原始命令，snapshot fence 又禁止携带
-pending transaction，因此不需要额外 reservation fact。若未来产品明确要求等待撮合期间立即展示冻结余额，必须另行
-评审双事实模型，不能暗中改变此边界。
+reservation 由用户所属 Account Lane 以 `coreSequence` 标记为 pending：它参与同一用户后续命令的权威校验，但在该
+sequence 全局提交前不对 query、Core Fact 或 snapshot 可见。matcher 和结算完成后，reservation、订单、成交、持仓和
+资金一次提交为一个 terminal Core Fact；matcher 拒绝时由同一 owner 释放 pending reservation。Aeron Cluster Log 已保存
+原始命令，snapshot fence 又禁止携带未提交命令，因此不需要额外 reservation fact、通用事务对象或第二份 Runtime。
+若未来产品明确要求等待撮合期间立即对外展示冻结余额，必须另行评审双事实模型，不能暗中改变此边界。
 
 ## 3. Lane 拓扑与确定性路由
 
@@ -95,7 +95,8 @@ Aeron Cluster owner / Sequencer
   shard count、shard mask 和映射 hash 进入 snapshot manifest。热点 symbol 如需独占 shard，只能在 instrument 首次
   注册前选择满足低位约束且无冲突的稳定 symbolId；运行中不能迁移。
 - Account route 固定为
-  `accountLaneId = mix64(userId XOR accountLaneSeed) & (accountLaneCount - 1)`；`accountLaneCount` 必须是 2 的幂。
+  `accountLaneId = mix64(userId XOR accountLaneSeed) & (accountLaneCount - 1)`；`accountLaneCount` 必须是 2 的幂且不超过
+  64，P10 v1 使用一个 primitive `long` 表示 Lane mask。
 - `routeVersion`、matchingEngineCount、shardMask、Account Lane count/seed 和 route hash 写入 Cluster state、Core Fact
   证据和 snapshot manifest。没有 Treasury lane count/seed。
 - 外部 API 不接受也不返回 Lane ID；Provider 只提交业务 identity，防止客户端绑定内部拓扑。
@@ -109,8 +110,9 @@ Aeron Cluster owner / Sequencer
 - **进入 Cluster Log 后**：命令不得因为某个 Member 的本地 queue depth、worker 速度、GC 或 wall clock timeout 被业务
   拒绝。三个 Member 的调度不同，本地容量判断不能成为确定性状态输入。
 
-Sequencer 使用固定 transaction slots 和有界 matcher dispatch window。window 只控制何时派发已记录命令，不改变命令
-业务结果；溢出表示容量配置或节点健康故障，必须 fail closed，不能生成拒绝 Core Fact。Account Lane credits
+Sequencer 使用有界 in-flight command context 和 matcher dispatch window。context 只保存命令身份、不可变结果引用、
+`expectedLaneMask/ackLaneMask` 及 Lane 返回值，不保存第二份订单、资金或 event。window 只控制何时派发已记录命令，
+不改变命令业务结果；溢出表示容量配置或节点健康故障，必须 fail closed，不能生成拒绝 Core Fact。Account Lane credits
 只由 Sequencer 按逻辑 dispatched/committed sequence 维护，Lane 完成时归还；不得用本地瞬时 queue occupancy 决定业务结果。
 
 ## 4. 线程、队列和内存模型
@@ -127,36 +129,44 @@ Sequencer 使用固定 transaction slots 和有界 matcher dispatch window。win
 ### 4.2 队列
 
 Matcher command 由 Sequencer 直接提交共享 `ExchangeApi`；不在 Core 外再建 per-shard command queue。exchange-core
-原生 ResultsHandler 产生不可变 `MatcherResult`，通过一个有界 completion queue 返回 Sequencer。只有验证所有正常和
-失败完成都来自同一 producer thread 后才能将该队列收敛为 SPSC；否则保留当前有界 MPSC，不能为追求形式上的无锁
-而破坏完成交付。
+原生 ResultsHandler 每个 native command 只产生一个不可变 `MatcherResult`。`MatchingCompletionQueue` 只把包含
+`coreSequence` 的 `CoreMatchingResult` 引用返回 Sequencer，不再分配 `Completion` wrapper，也不复制 event list 或
+market data。这个有界引用队列用于隔离 exchange-core callback thread 与 Product Core owner，并保持后续 Account Lane
+队列为 Sequencer 单写；它不是第二条事实流。只有验证正常和失败完成都来自同一 producer thread 后才能收敛为 SPSC，
+否则保留有界 MPSC。in-flight command context 持有结果强引用，直到 `ackLaneMask == expectedLaneMask` 并完成全局提交后
+才清零，保证任一 Lane 消费期间对象都不会被归还、覆盖或复用。
 
 | 方向 | 队列 | 单写者 | 单读者 |
 |---|---|---|---|
-| Sequencer -> Account Lane | posting/query queue | Sequencer | Account owner |
+| Sequencer -> Account Lane | result/command/query reference queue | Sequencer | Account owner |
 | Account Lane -> Sequencer | ACK/query result queue | Account owner | Sequencer |
-| exchange-core ResultsHandler -> Sequencer | completion queue | 需验证为单 producer | Sequencer |
+| exchange-core ResultsHandler -> Sequencer | `CoreMatchingResult` reference queue | 需验证为单 producer | Sequencer |
 
 Account Lane 队列必须保持 Sequencer 单写、Lane owner 单读。禁止
 `synchronized`、`Lock`、`ConcurrentHashMap` 业务状态、`parallelStream`、Future join、基于 wall clock 的批次提交。
 
 ### 4.3 分配约束
 
-- command、matcher result、posting、ACK 和 transaction context 使用固定 ring/array slot；终态后清零引用并归还。
+- command、matcher result reference、ACK 和有界 in-flight context 使用固定 ring/array slot；终态后清零引用并归还。
 - exchange-core 开启 `EVENTS_POOLING`；`MatcherResult`、event list 与 market data 在发布后不可变，Core 直接消费，
   不再进行第二次 event/market-data 复制。
-- `FundsDelta` 和 Snapshot State 只在事实或快照边界物化；普通处理中使用 primitive posting buffer。
+- 同一个不可变 `CoreMatchingResult` 引用可以扇出到多个 Account Lane；不创建 per-Lane event list、fill DTO 或
+  `SettlementPlan`。Lane 只处理 userId 路由归自己所有的 active/maker side。
+- 默认 4 个 Lane 各自扫描同一只读 event list，接受最多 4 倍的简单线性读取以换取零复制和更小状态机；只有 JFR 证明
+  该扫描成为瓶颈后，才允许用预分配 primitive event-index bucket 优化，仍不得复制 event 或改变事实顺序。
+- `FundsDelta` 和 Snapshot State 只在事实或快照边界物化；Lane ACK 使用固定 primitive 字段返回局部资金和 Treasury
+  增量。
 - 风险扫描不得执行 `Set.copyOf`、`toArray` 或全局排序；使用 Lane 内稳定 primitive cursor。
 - 所有容量都必须配置上限并导出 high-water mark、拒绝数和占用率。
 
 ### 4.4 复杂度预算
 
-Lane 化只允许增加四类必要概念：静态 `LaneTopology`、`AccountLaneState[]`、不可变 `SettlementPlan` 和固定容量
-transaction slot。不得增加第二个 ExchangeCore、Treasury worker、actor framework、通用事务协调器、动态 rebalance、
-分布式锁、MVCC 版本链、补偿 Saga、第二套 Runtime 或 Lane 专用业务 kernel。
+Lane 化只允许增加三类必要概念：静态 `LaneTopology`、`AccountLaneState[]` 和只保存引用/位图/ACK 聚合的有界
+in-flight command context。不得增加 `SettlementPlan` 对象图、第二个 ExchangeCore、Treasury worker、actor framework、
+通用事务协调器、动态 rebalance、分布式锁、MVCC 版本链、补偿 Saga、第二套 Runtime 或 Lane 专用业务 kernel。
 
 现有 facade、processor、六个 settlement kernel、Core Fact 和 snapshot codec 应原位演进；公共行为通过 primitive
-posting/applier 复用。每个阶段如果需要多级 callback、递归调度、跨 Lane 直接调用或超过一个 prepared slot 才能正确，
+owner-filtered applier 复用。每个阶段如果需要多级 callback、递归调度、跨 Lane 直接调用、结果复制或回滚链才能正确，
 说明阶段边界设计错误，应停止实施并收窄 in-flight，而不是继续叠加抽象。
 
 ## 5. 命令执行模型
@@ -164,24 +174,32 @@ posting/applier 复用。每个阶段如果需要多级 callback、递归调度�
 ### 5.1 单 Lane 命令
 
 1. Sequencer 验证 envelope、source identity 和 routeVersion；进入 Log 后不再执行本地容量业务拒绝。
-2. 分配 `coreSequence` 与 transaction slot，发送不可变 posting。
-3. Lane owner 校验本地 revision，原地应用并返回 hash/revision ACK。
-4. Treasury posting 由 Sequencer owner 同步应用。
+2. 分配 `coreSequence` 与有界 command context，把不可变命令引用发送到目标 Lane。
+3. Lane owner 校验本地 revision，原地应用所属用户变化并返回 revision、hash、资金和 Treasury 增量 ACK。
+4. Sequencer 收齐 `expectedLaneMask` 后一次应用聚合 Treasury 增量。
 5. Sequencer 按全局 sequence 提交可见性，生成结果、FundsDelta、Core Fact 和 outbox。
 
 ### 5.2 下单与撤单
 
 普通下单不增加独立 Core preflight 往返。正式 `PLACE_ORDER` 的权威流程为：
 
-1. Sequencer 固定 `coreSequence`，解析 native matcher shard 和 user route，取得固定 transaction slot。
-2. Account owner 在一次转换中验证余额、平仓容量、风险参数、identity 和订单状态，将 reservation 写入 provisional slot；
-   该状态阻止同用户冲突命令，但不进入 query、snapshot 或 Core Fact。
+1. Sequencer 固定 `coreSequence`，解析 native matcher shard 和 active user route，创建有界 command context。
+2. Account owner 在一次转换中验证余额、平仓容量、风险参数、identity 和订单状态，将 reservation 写成该用户的 pending
+   状态；它阻止同用户冲突命令，但在全局提交前不进入 query、snapshot 或 Core Fact。
 3. Sequencer 依 Core sequence 顺序把命令提交给唯一共享 `ExchangeApi`；exchange-core 原生 shard 根据 symbolId 路由。
 4. 共享 ExchangeCore 只执行一次 command，返回 fork 直接产生的不可变 `MatcherResult`、native sequence 和全局
    matcher prefix before/after。
-5. Sequencer 从结果生成确定的 `SettlementPlan`，发往涉及的 Account Lane；Treasury posting 保留在 Sequencer slot。
-6. 所有 Account Lane ACK 后，Sequencer 同步应用 Treasury posting，按 sequence 一次发布 reservation/order/fill/
-   position/funds 的 commit visibility、状态 hash 和 terminal Core Fact。
+5. Sequencer 只扫描一次 result：active/taker user 来自 command，maker user 来自 native event 的
+   `matchedOrderUid`；据此计算 `expectedLaneMask`，把同一个不可变 `CoreMatchingResult` 引用扇出到所有受影响 Lane。
+   一个结果可能同时涉及 taker Lane、多个 maker Lane 和 Sequencer-owned Treasury，不能按单一 userId 只投递一个 Lane。
+6. 每个 Lane 再按 owner route 过滤 result，只处理本 Lane 用户，并返回一个包含局部 revision/hash、资金增量和 Treasury
+   增量的 ACK；不创建 per-Lane event 副本。同一用户的 taker/maker side 仍由同一个 Lane 串行处理。
+7. `ackLaneMask == expectedLaneMask` 后，Sequencer 校验逐资产守恒并一次应用聚合 Treasury 增量，再按 sequence 发布
+   reservation/order/fill/position/funds 的 commit visibility、状态 hash 和 terminal Core Fact。
+
+`MatcherResult` 的唯一性边界是 native matcher command。批量撤单、cancel-then-place 等一个高层 Core command 展开成
+多个 native command 时，每个 native command 各有一个唯一 result；现有 pending-command context 按
+`coreSequence + native part order` 聚合完整后，才执行上述 Lane 扇出并生成一个 terminal Core Fact。
 
 撤单沿用相同边界：先由 matcher 产生权威结果，再释放 Account Lane reservation。禁止外层先根据缓存订单状态推断撤单
 成功。
@@ -197,43 +215,43 @@ posting/applier 复用。每个阶段如果需要多级 callback、递归调度�
 链的明确代价，不能通过乱序事实或第二个 ExchangeCore 绕过。watchdog 只能触发节点 fail closed，不能把本地超时转换成
 不同 Member 可能不一致的业务拒绝。
 
-## 6. SettlementPlan 与跨 Lane 原子可见性
+## 6. 不可变结果扇出与跨 Lane 原子可见性
 
-### 6.1 Plan 内容
+### 6.1 唯一结果与 Lane-local apply
 
-`SettlementPlan` 是 Sequencer 根据不可变 MatcherResult 和命令前状态生成的不可变值，至少包含：
+- exchange-core 对每个 native command 发布一个不可变 `MatcherResult`；Product Core 不重建 event、market data 或 fill。
+- Sequencer 的一次线性扫描只计算受影响用户的 `expectedLaneMask`，不计算或物化全局 `SettlementPlan`。
+- 同一 `CoreMatchingResult` 引用发送给 mask 中的每个 Lane。Lane 使用 command context、native event 和现有产品线
+  `SettlementKernel`，只计算并应用 owner route 归本 Lane 的用户侧变化。
+- 六个 `SettlementKernel` 继续是唯一产品差异边界；它们增加 owner filter/局部 accumulator 输入，不复制成 Lane 专用
+  kernel。每个成交 side 只由其 userId 的 owner Lane 处理一次。
+- Lane ACK 通过固定 primitive 字段返回局部 revision/hash、逐资产资金增量和应计入 Treasury 的 fee、insurance、
+  deficit、funding/rounding residual、delivery/exercise clearing 增量；Sequencer 只做聚合、守恒校验和一次 Treasury apply。
 
-- `coreSequence`、`commandId`、`productLine`、`symbolId`、`routeVersion`、派生 `matcherShardId`；
-- matcher sequence、prefix before/after、order/trade identities；
-- 每个目标 Account Lane 的期望 before revision/hash，以及 Sequencer-owned Treasury 的 before hash；
-- 按 `(accountLaneId, asset, ownerKind, ownerId, subledger)` 排序的 Account posting 和 Treasury posting；
-- 订单状态、reservation 消耗/释放、持仓变化、费用、资金费、强平费、保险基金与舍入残差；
-- 预期 after revision、局部 funds delta/hash 和最终结果类型。
-
-六个 `SettlementKernel` 继续是唯一产品差异边界。Lane 化不能复制六套业务逻辑；kernel 负责计算 plan，统一 posting
-applier 负责 owner-thread 原地应用。
-
-### 6.2 Account prepare、ACK、Commit
+### 6.2 Apply、ACK 与全局 Commit
 
 跨 Lane 原子性通过确定性可见性屏障实现，不通过锁或数据库事务实现：
 
-1. Sequencer 先完整计算并验证 plan；所有会导致正常业务拒绝的检查必须在派发前完成。
-2. 各 Account Lane owner 校验 expected revision，然后将确定的 after-value 写入自己的固定 staged slot，记录
-   `preparedSequence`，返回 ACK；此时不能修改 committed Map。
-3. prepared 数据不对 query、风险扫描、下一条冲突命令或事实 hash 可见。
-4. Sequencer 收齐全部 ACK 后发布该 sequence 的 commit marker。
-5. 各 Account Lane owner 将 staged revision 提升为 committed revision；Sequencer 收齐 commit ACK 后同步应用
-   Treasury posting，推进全局 `committedCoreSequence`，再发布结果和 Core Fact。
-6. revision 不匹配、重复/缺失 ACK、posting 不平衡或 commit gap 都是确定性致命错误；member fail closed，从上一完整
+1. 所有会导致正常业务拒绝的 active-user 校验必须在 matcher 前由其 Account Lane 完成；matcher 后的状态不一致不是
+   可继续业务拒绝，而是确定性致命错误。
+2. Sequencer 计算 `expectedLaneMask` 并扇出同一不可变结果引用；每个 Account Lane 按收到的 coreSequence 顺序原地应用
+   本 Lane 用户变化，更新 `appliedSequence`，然后返回一次 ACK。
+3. Lane 已应用但全局尚未提交的 sequence 不对外可见。query/read fence 由 Sequencer 按序插入 Lane 队列，只能在目标
+   sequence 已全局提交、且该 query 之前没有更晚 Lane work 时执行，因此无需 staged Map、MVCC 或旧版本副本。
+4. Sequencer 以 `ackLaneMask |= 1L << laneId` 收集 ACK；重复 ACK、未知 Lane 或 mask 越界立即 fail closed。
+5. `ackLaneMask == expectedLaneMask` 后，Sequencer 校验各 Lane 资金增量与聚合 Treasury 增量，原地应用唯一 Treasury
+   Runtime，推进 `committedCoreSequence`，再发布结果、状态 hash 和 Core Fact。无需第二轮 commit ACK。
+6. revision 不匹配、缺失 ACK、资金不平或 commit gap 都是确定性致命错误；member fail closed，从上一完整
    snapshot + log 恢复，不做回滚、补偿或部分继续。
 
-P10 v1 每个 Account Lane 只允许一个 prepared transaction；Sequencer 不向该 Lane 派发下一条 posting，其他不相交
-Lane 仍可前进。Treasury 没有 prepare queue，由 Sequencer 在 Account ACK 完整后一次应用。这样只需固定
-after-value slot，不需要锁、undo、版本链或通用事务管理器。
+Account Lane 可以按 Lane-local coreSequence 顺序连续处理有界 work；同一用户天然串行，不相交 Lane 可以并行。
+Sequencer 的 bounded window 限制未提交 context 数，并在 query、snapshot 和 lifecycle fence 前停止新派发并排空。
+由于未提交状态绝不进入 snapshot，节点在部分 Lane 已应用时崩溃只需从上一完整 snapshot + Cluster Log 重演，不需要
+undo、版本链、prepare state 或通用事务管理器。
 
 ### 6.3 资金守恒
 
-每个 plan 在派发前和提交后都验证：
+每个 command context 在提交前都验证：
 
 ```text
 用户可用 + 用户冻结 + 手续费 + 保险基金 + 亏损缺口
@@ -257,17 +275,18 @@ after-value slot，不需要锁、undo、版本链或通用事务管理器。
 - 仓位、开仓保证金、reduce-only close capacity 和未实现/已实现 PnL 归 Account Lane。
 - 手续费、资金费残差、强平费和保险基金归 Sequencer-owned settlement asset Treasury Runtime。
 - 资金费扫描按 `(accountLaneId, userId, positionId)` 稳定 cursor 推进并记录进度。
-- 交割先对 symbol 建立 lifecycle fence，排空共享 ExchangeCore 中该 symbol 的在途命令，再向相关 Account Lane 派发结算 plan。
+- 交割先对 symbol 建立 lifecycle fence，排空共享 ExchangeCore 中该 symbol 的在途命令，再向相关 Account Lane 扇出
+  不可变生命周期命令引用。
 
 ### 7.3 币本位永续与交割
 
 - 币本位 PnL、保证金和费用只能由对应 inverse kernel 以整数/定点规则计算。
 - 反向除法残差明确进入 Treasury rounding/funding residual，不允许由不同 Lane 各自舍入后丢失。
-- 到期结算同样使用 symbol fence、matcher drain 和全局 commit barrier。
+- 到期结算同样使用 symbol fence、matcher drain 和 ACK 位图全局 commit barrier。
 
 ### 7.4 期权
 
-- 权利金在买卖双方 Account Lane 与 Sequencer-owned Treasury 间作为同一 plan 结算。
+- 权利金由买卖双方 Account Lane 在同一 command context 中结算，Treasury 由 Sequencer 汇总后一次应用。
 - 行权/到期失效先 fence symbol，冻结新订单和触发激活，排空 matcher，再按稳定 position cursor 计算。
 - 买方权益、卖方保证金、exercise settlement 和 residual 必须在同一 sequence 的跨 Lane barrier 后可见。
 
@@ -294,7 +313,7 @@ after-value slot，不需要锁、undo、版本链或通用事务管理器。
 - matcher global dispatch window、completion queue depth/capacity/high-water mark，以及每 Account Lane queue depth；
 - 每 Lane command/settlement/query/risk scan 延迟及最老 pending sequence；
 - shared ExchangeCore in-flight、native shard 数、每 shard CPU/book/order size、全局 native sequence/prefix continuity；
-- Account prepared sequence、ACK/commit gap、revision mismatch；
+- Account applied/uncommitted sequence、expected/ack Lane mask、commit gap、revision mismatch；
 - global dispatched/committed/exported sequence 与 lag；
 - outbox depth/oldest age、Kafka publish lag、Projector lag、WebSocket fanout lag；
 - heap、allocation rate、G1/ZGC pause、direct memory、Aeron buffers、thread CPU、context switch；
@@ -310,7 +329,7 @@ Snapshot 只能在完整全局提交边界发布：
 
 1. 记录 `snapshotFenceSequence`，停止接收会改变状态的新 command；只允许有界状态查询。
 2. 停止向共享 ExchangeCore 派发新命令，排空 matcher dispatch window、completion queue 和 completion gap。
-3. 排空已派发 Account posting；等待所有 Account Lane `preparedSequence=0`、commit ACK 收齐且
+3. 排空已派发 Account work；等待所有 context 的 `ackLaneMask == expectedLaneMask`、Lane 无 applied/uncommitted gap 且
    `committedCoreSequence=snapshotFenceSequence`。
 4. 验证 deferred command、lifecycle partial batch、risk batch、pending matcher transaction 和 lane queue 全部为空。
 5. 冻结 topology、instrument registry、identity ledger、outbox watermark、terminal retention 和 risk scan cursor。
@@ -334,7 +353,7 @@ snapshot 失败。旧快照继续有效；不得发布“其余 Lane 成功”�
 1. Header：magic、schema、productLine、`coreShardId=default`、snapshotId、fence/committed sequence。
 2. Topology：routeVersion、matchingEngineCount/shardMask、symbolId-to-shard hash、Account Lane count/seed、
    matcher window 和 queue capacities、配置 hash。
-3. Sequencer：command/source identity ledger、global prefix、pending slot 必须为空、risk/lifecycle global cursor。
+3. Sequencer：command/source identity ledger、global prefix、in-flight context 必须为空、risk/lifecycle global cursor。
 4. Instrument/identity registries：symbol、asset、user technical mapping 与版本 hash。
 5. Account Lane sections：users、balances、orders、reservations、positions、triggers、risk、liquidations、ADL、indexes、
    revision、local state/funds hash。
@@ -354,7 +373,7 @@ snapshot 失败。旧快照继续有效；不得发布“其余 Lane 成功”�
 - 每个 user 只存在于 hash 路由指定的 Account Lane；Treasury asset 在 Sequencer Runtime 中只存在一次。
 - position、trigger、risk/ADL index 与主状态双向一致。
 - 每资产 Account + Treasury 资金守恒，Lane local hash 组合值等于 global funds hash。
-- 所有 matcher prefix、Core fact prefix、outbox sequence 连续，snapshot 不包含 prepared transaction。
+- 所有 matcher prefix、Core fact prefix、outbox sequence 连续，snapshot 不包含未提交 context 或 pending reservation。
 
 ## 10. 恢复与 READY 门禁
 
@@ -363,7 +382,7 @@ snapshot 失败。旧快照继续有效；不得发布“其余 Lane 成功”�
 1. 读取 header、section directory、长度、CRC 和整体 digest；拒绝未知主版本和截断数据。
 2. 校验 productLine、`coreShardId=default`、routeVersion、matchingEngineCount/shardMask、Account Lane count/seed、
    symbolId-to-shard hash、fork/JAR/config hash。
-3. 构造一个共享 Adapter/ExchangeCore、固定 Account topology、预分配 slots 和 queues；不接收流量。
+3. 构造一个共享 Adapter/ExchangeCore、固定 Account topology、预分配有界 contexts 和 queues；不接收流量。
 4. 恢复 instrument、asset、technical user 和 identity registry，并校验无重复 ID 和 route hash。
 5. 按 accountLaneId 恢复 Account Lane，逐用户重算 owner route，重建局部索引并验证 local state/funds hash。
 6. 在 Sequencer owner 恢复唯一 Treasury Runtime，验证子账本和 funds hash。
@@ -373,7 +392,8 @@ snapshot 失败。旧快照继续有效；不得发布“其余 Lane 成功”�
 9. 执行订单/reservation/book、position/risk index、Account/Treasury 资金及 global hash 的全量交叉核对。
 10. 恢复 command/source identity、outbox、terminal retention、risk/lifecycle cursor 和 exported watermark。
 11. 从 snapshot position 继续按 Cluster Log 顺序 replay；路由和 commit barrier 与在线路径完全相同。
-12. replay 结束后验证所有队列空、prepared=0、无 sequence/ACK gap、matcher/Core/outbox prefix 连续。
+12. replay 结束后验证所有队列和 in-flight context 为空、无 applied/uncommitted 或 sequence/ACK gap、
+    matcher/Core/outbox prefix 连续。
 13. 三个 Member 完成相同门禁，leader 才发布 READY；Provider 在 READY 前不能降级到 clean start。
 
 ### 10.1 崩溃边界
@@ -381,10 +401,10 @@ snapshot 失败。旧快照继续有效；不得发布“其余 Lane 成功”�
 | 崩溃位置 | 恢复结果 |
 |---|---|
 | reservation 之前 | command 未产生状态；按 identity 正常 replay |
-| provisional reservation 之后、matcher 之前 | snapshot 不包含 provisional state；从 Log 命令重新确定性执行 |
+| pending reservation 之后、matcher 之前 | snapshot 不包含 pending state；从 Log 命令重新确定性执行 |
 | matcher 提交后结果未知 | 依赖 Cluster Log 顺序和 native matcher snapshot/prefix 判定；不得盲目 resubmit |
-| 部分 Lane prepared、commit 前 | 未发布 snapshot；fail closed，从上一完整 snapshot + log 重演 |
-| commit marker 后、terminal fact 前 | replay 按 sequence 完成相同 commit/fact，不做补偿事务 |
+| 部分 Lane 已 apply、全局 commit 前 | 未发布 snapshot；fail closed，从上一完整 snapshot + log 重演 |
+| 全局 commit 后、terminal fact 前 | replay 按 sequence 完成相同 commit/fact，不做补偿事务 |
 | Core Fact 已入 outbox、Kafka ACK 前 | replicated outbox 用 fact identity 幂等重发 |
 | snapshot 任一 Lane capture 失败 | 整组 snapshot 丢弃，上一快照保持可恢复 |
 
@@ -402,15 +422,17 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 - `CoreMatcherTransition`：保留共享 ExchangeCore 的全局 native sequence/prefix，可附带派生 matcherShardId 作为证据，
   但 shardId 不形成第二条事实序列。
 - `CoreExportEvent` 与 codec：加入 topology hash、Lane revision/hash 和 committed sequence；升级 marker 并 fail-old。
-- query/snapshot view：明确 committed sequence 和 routeVersion，不能返回 prepared 数据。
+- query/snapshot view：明确 committed sequence 和 routeVersion，不能返回 applied-but-uncommitted Lane 数据。
 
 ### 11.2 `surprising-aeron-service/CoreProbeState`
 
-- 保留一个 Adapter；把“一组全局 pending matching + 全局完成门”改为固定 transaction slot ring、共享 matcher
-  dispatch window、按 coreSequence 的 completion buffer 和 commit cursor。
+- 保留一个 Adapter；把“一组全局 pending matching + 全局完成门”改为有界 in-flight context ring、共享 matcher
+  dispatch window、按 coreSequence 的 result-reference buffer 和 commit cursor。context 仅保存引用、
+  `expectedLaneMask/ackLaneMask` 及 ACK 聚合字段。
 - 不创建 `MatcherLane[]` 或 `TreasuryLane[]`；P10-C 必须创建固定 `AccountLane[]`。
 - ingress、credit、route、ACK、commit cursor、fact/outbox 和 snapshot fence 只由 Cluster owner 修改。
-- callback 只写有界 completion queue；不能修改 Runtime。snapshot 实现第 9 节共享 ExchangeCore barrier。
+- callback 只把 `CoreMatchingResult` 引用写入有界 completion queue；不能修改 Runtime，也不分配 `Completion` wrapper。
+  snapshot 实现第 9 节共享 ExchangeCore barrier。
 
 ### 11.3 `TradingCoreRuntime` 与 `TradingRuntimeState`
 
@@ -420,7 +442,8 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 - users、balances、orders、reservations、positions、triggers、liquidations、risk/ADL 和用户索引移动到 Account Lane。
 - fee/insurance/deficit/funding residual/rounding/clearing 不移动，不创建 Treasury worker。
 - 风险扫描集合复制/`toArray` 改成 Lane 内稳定 primitive cursor，并让 cursor 进入 snapshot。
-- `RuntimeCommandProcessor` 拆成 plan 计算与 lane-local posting apply；不能直接跨 Lane 修改 Map。
+- `RuntimeCommandProcessor` 改为 Sequencer route/mask 计算与 owner-filtered lane-local apply；不能物化全局
+  `SettlementPlan`，也不能直接跨 Lane 修改 Map。
 
 ### 11.4 Matcher 边界
 
@@ -429,15 +452,18 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
   Sequencer 单写的有界 dispatch window，不能创建多个 Adapter。
 - `CoreMatchingResult` 直接携带不可变 fork `MatcherResult` 和派生 shard identity；结算直接遍历 native events，删除
   `CoreMatch` 中间列表及第二次 fill 分配。
-- `MatchingCompletionQueue` 保持一个有界结果出口；只有证明单 producer 后才改 SPSC。
+- `MatchingCompletionQueue` 保持一个有界引用出口，队列元素直接为 `CoreMatchingResult`，删除 `Completion` record；只有
+  证明单 producer 后才改 SPSC。
 - `MatcherSnapshot` 升级为一个共享 manifest，接受 N 个 `MATCHING_ENGINE_ROUTER` module 和一个 `RISK_ENGINE/0`；
   仍要求 native snapshot-only recovery。
 - `EVENTS_POOLING` 必须开启，以不可变发布契约、对象生命周期测试和 JFR 分配证据证明不会复用已发布事件。
 
 ### 11.5 结算、风险与索引
 
-- 六个 `SettlementKernel` 输出统一 `SettlementPlan`，不能直接修改多个 Lane。
-- P10-C/D 新增轻量 primitive posting/applier 和固定 transaction slot；不引入通用 Saga、事务框架或对象图。
+- 六个 `SettlementKernel` 复用同一 owner-filtered apply 入口，直接消费 command context 与不可变 native events；每个
+  kernel 只修改调用它的 owner Lane，不输出全局 `SettlementPlan`。
+- P10-C/D 新增固定字段 Lane ACK accumulator 与有界 command context；不引入 per-Lane event copy、通用 Saga、事务框架
+  或 posting 对象图。
 - 活动订单索引支持 `user -> orders` 与 `symbol -> affected accountLane bitset`，由 owner 增量维护。
 - funding、delivery、exercise、liquidation、ADL、trigger cursor 全部带 laneId 并可快照恢复。
 - 跨 Account Lane 业务测试逐资产核对 Account posting、Sequencer Treasury posting 和 `FundsDelta` 完全相等。
@@ -482,12 +508,14 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 
 - 本阶段是固定必做项，不以账户 CPU 是否已成为瓶颈为前置条件。
 - 生产默认创建 4 个 Account Lane，按 userId 分离 owner state、identity、reservation 和 query。
-- reservation 使用 provisional transaction slot，不产生单独 Core Fact；覆盖充值/调整/下单/撤单。
+- reservation 使用 user-owned pending state 并绑定 coreSequence，不产生单独 Core Fact；覆盖充值/调整/下单/撤单。
 - 热点 maker 必须通过多个业务独立的 maker 子账户扩展；同一用户不能跨 Lane 并发。
 
-### P10-D：SettlementPlan 与 Commit barrier
+### P10-D：不可变结果扇出与 ACK barrier
 
-- 六 kernel 输出 plan；实现固定 slot、prepare/ACK/commit visibility。
+- Sequencer 一次扫描 immutable result 得到 `expectedLaneMask`，同一引用扇出；Lane owner-filtered apply 后返回一次 ACK。
+- 实现有界 context、`ackLaneMask`、Treasury 聚合和单一 `committedCoreSequence` 可见性；不实现 SettlementPlan、
+  prepare Map 或第二轮 commit ACK。
 - 覆盖 maker/taker 跨 Account Lane、Sequencer Treasury posting 和相同用户自成交策略。
 - mismatch fail closed，不实现回滚框架。
 
@@ -545,8 +573,8 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 
 - P10-A 至 P10-G 的生产代码和协议/快照版本全部落地；Account Lane 默认启用且生产默认数为 4，不存在兼容 fallback。
 - 一个 ProductLine 仍只有一个物理三节点 Product Core、一个 global Core sequence 和一条 Core Fact 链。
-- 一个共享 ExchangeCore、native matcher shard、bounded dispatch window、默认 Account ownership、
-  prepare/commit、Sequencer Treasury 和 query visibility 均有自动化和真实表面证据。
+- 一个共享 ExchangeCore、native matcher shard、bounded dispatch window、不可变结果引用扇出、默认 Account ownership、
+  expected/ack mask commit barrier、Sequencer Treasury 和 query visibility 均有自动化和真实表面证据。
 - 六产品线资金、持仓、平仓/爆仓/触发/资金费/交割/行权全部正确且逐资产守恒。
 - snapshot、恢复、Archive replay 和三节点故障矩阵全部 fail-safe，并通过 hash/prefix 连续性核对。
 - 真实 API 生产模拟达到容量门禁，GC、堆外内存、延迟和吞吐有可复核报告。

@@ -42,7 +42,9 @@ sectioned snapshot v13；decoder 和 startup 对旧主版本 fail closed，不�
 
 P10 的目标不是物理 Core shard；每个三节点 Product Core 仍只运行一个共享的 Adapter/ExchangeCore，按 symbol 的
 Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Account Lane 是默认必须实施的运行时边界，
-生产默认 `accountLaneCount=4`；Treasury 保持 Sequencer owner。全局 Core sequence、Core Fact、snapshot 和恢复仍由一个
+生产默认 `accountLaneCount=4`；Sequencer 扫描一次 userId 后把同一不可变 matcher result 引用扇出到受影响 Lane，
+以 expected/ack Lane mask 提交，不生成 `SettlementPlan` 或 event 副本；Treasury 保持 Sequencer owner。全局 Core
+sequence、Core Fact、snapshot 和恢复仍由一个
 确定性 Sequencer 协调。该方案当前仅完成设计、尚未实施；完整所有权、无锁队列、资金提交、快照一致性、恢复门禁、
 代码修改清单和验收矩阵见 [P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)。在该文档
 完成定义全部通过前，运行时仍保持 `routeVersion=1`、单 Runtime owner 和全局 one-in-flight matcher。
@@ -60,8 +62,10 @@ Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Acco
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
 - P2 的 one-in-flight 边界由 `DeterministicExchangeCoreAdapter` 执行：Core owner 按 Core sequence 排队，adapter 只向
   exchange-core 提交当前一条命令；exchange-core 返回不可变 `MatcherResult` 并绑定 `matcherSequence` 与滚动
-  `MatcherPrefix(before, after)` 后，才放行下一条实际 matcher 提交。异步完成只进入有界 completion queue，仍由 owner
-  按 Core sequence 校验并写入 Runtime，不能由回调直接写状态。wall-clock readiness/watchdog 只能由 external health
+  `MatcherPrefix(before, after)` 后，才放行下一条实际 matcher 提交。异步完成只把同一个结果引用放入有界 completion
+  queue，仍由 owner 按 Core sequence 校验并写入 Runtime，不能由回调直接写状态。P10 将删除 `Completion` wrapper，
+  由 Sequencer 扫描一次 userId 并把同一不可变结果引用扇出给受影响 Account Lane；不复制 event，也不物化
+  `SettlementPlan`。wall-clock readiness/watchdog 只能由 external health
   supervisor 观察，不能进入复制状态或改变裁决顺序。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
   通过一个 `EXECUTE_LIQUIDATION_BATCH` 同时提交有序 action 和可选 Risk Scan continuation，订单阶段完成后才推进用户阶段。
