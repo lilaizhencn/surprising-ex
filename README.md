@@ -24,7 +24,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P7 | fatal / readiness campaign：致命故障和就绪性验证，不是 P0-P5 行为改动。 |
 | P8 | three-node recovery certification：三节点恢复认证，不是 P0-P5 行为改动。 |
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
-| P10 | single-Core deterministic lanes / capacity：单物理 Product Core 内按 symbol/user/asset 建立无锁确定性 Lane 并完成容量认证；不包含物理 Core shard。实施规范见 [`docs/P10-DETERMINISTIC-LANES.md`](docs/P10-DETERMINISTIC-LANES.md)。 |
+| P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个共享 ExchangeCore，以原生 symbol matcher shard 和证据触发的 user Account Lane 扩展；Treasury 默认保持 Sequencer owner，不包含物理 Core shard。实施规范见 [`docs/P10-DETERMINISTIC-LANES.md`](docs/P10-DETERMINISTIC-LANES.md)。 |
 
 当前实现状态：P0-P5 已完成；P6-P10 仍是后续验证和容量工作。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
@@ -357,7 +357,7 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   Aeron service 的 Maven `validate` 阶段同时校验 provenance 与整包 hash。
 - `CoreState v9` 同时封装 Core 业务状态和 exchange-core 原生 `ME0/RE0`；reader 显式兼容现有 V8 快照，writer 只生成 V9；`TradingState v20` 不包含盘口，并持久化版本化 Risk Scan Control。
   恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，不允许 clean-start、活动订单回放或第二本 FIFO。
-- capture 在 symbol-lane barrier 内完成；存在 pending matching 时精确拒绝快照。恢复在开放流量前执行
+- capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内完成；存在 pending matching 时精确拒绝快照。恢复在开放流量前执行
   CRC32C、产品线/路由、snapshot ID、Core/matcher sequence、Cluster position、source/outbox digest、
   fork/config/artifact、注册表、完整引擎哈希、盘口哈希和全部 OPEN 订单逐字段对账；全部通过后才替换内存状态。
 - V8 兼容只读取快照中的权威状态，不允许从 PostgreSQL 投影、clean-start 或逐单回放修复；V9 检测到任一配对不一致时直接中止。

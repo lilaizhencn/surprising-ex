@@ -40,9 +40,10 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 P0-P5 已完成。当前写格式为 command/envelope schema v3、export event marker v8、trading snapshot v23 和
 sectioned snapshot v13；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
 
-P10 的目标不是物理 Core shard，而是在同一个三节点 Product Core 内建立按 symbol 的 Matcher Lane、按 userId 的
-Account Lane 和按 asset 的 Treasury Lane；全局 Core sequence、Core Fact、snapshot 和恢复仍由一个确定性
-Sequencer 协调。该方案当前仅完成设计、尚未实施；完整所有权、无锁队列、资金提交、快照一致性、恢复门禁、
+P10 的目标不是物理 Core shard；每个三节点 Product Core 仍只运行一个共享的 Adapter/ExchangeCore，按 symbol 的
+Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Account Lane 只在账户阶段性能证据达到门槛后
+实施，Treasury 默认保持 Sequencer owner。全局 Core sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer
+协调。该方案当前仅完成设计、尚未实施；完整所有权、无锁队列、资金提交、快照一致性、恢复门禁、
 代码修改清单和验收矩阵见 [P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)。在该文档
 完成定义全部通过前，运行时仍保持 `routeVersion=1`、单 Runtime owner 和全局 one-in-flight matcher。
 
@@ -203,7 +204,8 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 - `Trading snapshot v23` 是唯一外层交易快照写格式，配对保存 Product Core 状态和 exchange-core 的
   `MATCHING_ENGINE_ROUTER/0`、`RISK_ENGINE/0`；它不把可执行订单簿复制成业务状态，并包含版本化 Risk Scan Control。
   `sectioned snapshot v13` 只按相同 Core/book prefix 拆分物理载荷；三个 Member 必须运行完全相同的 fork、配置和 schema。
-- capture 在 `SymbolMatchingLanes.barrier` 内等待全部 lane 和 callback；pending matching 存在时拒绝发布。
+- capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内等待全部 native shard module 和 callback；
+  pending matching 存在时拒绝发布。当前不存在第二个 ExchangeCore 或 `SymbolMatchingLanes` 运行时。
 - Aeron fragment 在复制前执行 64 MiB 外层上限；matcher envelope 为 48 MiB、单个原生 module 为 32 MiB，
   超限时 fail closed。修改这些上限必须同步默认 heap 并完成目标活动订单规模的快照容量测试。
   恢复先校验三层 CRC32C、产品线、默认 shard/route、snapshot ID、Core/matcher sequence、Cluster
