@@ -66,6 +66,10 @@ P2、P3 完成不代表 P1、P4、P5 或 P6-P10 已经完成。
   matcher 技术状态，不能成为业务余额、持仓、保证金、强平或对账来源。
 - PostgreSQL 只保存 Core Export 查询投影、审计、报表和对账数据；投影延迟或不可用不能改变交易裁决。
 - Kafka 保留外部输入缓冲与 WebSocket、K 线、通知、数据仓库等外围事件分发，不恢复核心资金状态。
+- 公共逐笔统一使用产品线 `match.trades` / `PublicTradeEvent`：Gateway、标记价与 K 线不再消费
+  `trade.events`。K 线逐笔链路只生成并落库关闭的 1 分钟数据，高周期由 `candle.events` 上的
+  `CLOSED + 1m` 事件异步聚合；已关闭 K 线不可修订，水位线之前的迟到实时数据允许丢弃，历史高周期查询
+  从 PostgreSQL 的 1 分钟行计算。
 - Valkey 只承担限流和非权威缓存，不保存 Risk 状态、强平候选、资金或订单恢复进度。
 - Risk 按 symbol 保存确定性有界扫描游标；强平 Work、触发价格序列、仓位身份、执行、强平费和
   Insurance Treasury 全部由 Aeron 校验并原子提交。
