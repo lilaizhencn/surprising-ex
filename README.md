@@ -19,7 +19,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P2 | deterministic `MATCHING_ONLY` 推进与成对快照：adapter 每次仅执行一个按 Core sequence 排序的 matcher 命令，先取得不可变结果并推进可恢复的 matcher prefix digest，才执行下一条。 |
 | P3 | TradingRuntimeState 生产写入权威：六条产品线的 Runtime owner 线程是唯一生产 mutation 权威，immutable `TradingCoreState` 仅用于快照、查询、回放/参考与 parity。 |
 | P4 | six isolated settlement kernels：Spot、LinearPerpetual、InversePerpetual、LinearDelivery、InverseDelivery、Option 各有穷尽且隔离的结算内核。 |
-| P5 | FundsDelta、Treasury、操作级舍入与 integrity：每命令/资产资金变动不可变且确定性排序，Treasury 子账本、残差和 Ed25519 完整性封套显式核算。 |
+| P5 | FundsDelta、Treasury、操作级舍入与连续性：每命令/资产资金变动不可变且确定性排序，Treasury 子账本、残差和 Core Fact 前后状态证据显式核算。 |
 | P6 | randomized properties / model campaign：随机化属性与模型验证，不是 P0-P5 行为改动。 |
 | P7 | fatal / readiness campaign：致命故障和就绪性验证，不是 P0-P5 行为改动。 |
 | P8 | three-node recovery certification：三节点恢复认证，不是 P0-P5 行为改动。 |

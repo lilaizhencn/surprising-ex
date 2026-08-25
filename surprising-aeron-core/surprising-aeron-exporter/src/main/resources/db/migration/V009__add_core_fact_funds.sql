@@ -14,14 +14,6 @@ ALTER TABLE core_event_projection
     ADD COLUMN IF NOT EXISTS matcher_prefix_after BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE core_event_projection
     ADD COLUMN IF NOT EXISTS cluster_position BIGINT NOT NULL DEFAULT 0;
-ALTER TABLE core_event_projection
-    ADD COLUMN IF NOT EXISTS integrity_key_id VARCHAR(128) NOT NULL DEFAULT '';
-ALTER TABLE core_event_projection
-    ADD COLUMN IF NOT EXISTS integrity_key_fingerprint VARCHAR(64) NOT NULL DEFAULT '';
-ALTER TABLE core_event_projection
-    ADD COLUMN IF NOT EXISTS integrity_payload_hash BYTEA NOT NULL DEFAULT CAST('' AS BYTEA);
-ALTER TABLE core_event_projection
-    ADD COLUMN IF NOT EXISTS integrity_signature BYTEA NOT NULL DEFAULT CAST('' AS BYTEA);
 
 ALTER TABLE core_event_projection
     ALTER COLUMN before_business_state_hash DROP DEFAULT;
@@ -39,14 +31,6 @@ ALTER TABLE core_event_projection
     ALTER COLUMN matcher_prefix_after DROP DEFAULT;
 ALTER TABLE core_event_projection
     ALTER COLUMN cluster_position DROP DEFAULT;
-ALTER TABLE core_event_projection
-    ALTER COLUMN integrity_key_id DROP DEFAULT;
-ALTER TABLE core_event_projection
-    ALTER COLUMN integrity_key_fingerprint DROP DEFAULT;
-ALTER TABLE core_event_projection
-    ALTER COLUMN integrity_payload_hash DROP DEFAULT;
-ALTER TABLE core_event_projection
-    ALTER COLUMN integrity_signature DROP DEFAULT;
 
 COMMENT ON COLUMN core_event_projection.before_business_state_hash
     IS '应用当前 Core Fact 前的确定性业务状态哈希。';
@@ -62,14 +46,6 @@ COMMENT ON COLUMN core_event_projection.matcher_prefix_before
     IS '当前 Core Fact 覆盖撮合结果前的不可变前缀摘要。';
 COMMENT ON COLUMN core_event_projection.matcher_prefix_after
     IS '当前 Core Fact 覆盖撮合结果后的不可变前缀摘要。';
-COMMENT ON COLUMN core_event_projection.integrity_key_id
-    IS '签署 Core Fact 的完整性密钥稳定标识。';
-COMMENT ON COLUMN core_event_projection.integrity_key_fingerprint
-    IS '签署 Core Fact 的公钥 SHA-256 指纹。';
-COMMENT ON COLUMN core_event_projection.integrity_payload_hash
-    IS 'Core Fact 规范化签名载荷的 SHA-256 摘要。';
-COMMENT ON COLUMN core_event_projection.integrity_signature
-    IS 'Core Fact 规范化载荷的 Ed25519 签名。';
 
 CREATE TABLE IF NOT EXISTS core_funds_posting_projection (
     product_line VARCHAR(32) NOT NULL,

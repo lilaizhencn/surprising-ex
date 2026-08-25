@@ -11,7 +11,6 @@ import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
-import com.surprising.aeron.service.state.CoreFactSigner;
 import com.surprising.aeron.service.state.FundsDelta;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
@@ -70,7 +69,7 @@ final class CoreExportState {
                 long appliedCommandCount, long businessStateHash,
                 long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
                 CoreMatcherTransition matcherTransition, long clusterPosition,
-                FundsDelta fundsDelta, CoreFactSigner signer,
+                FundsDelta fundsDelta,
                 List<com.surprising.aeron.protocol.CoreUserStateView> changedUsers,
                 List<com.surprising.aeron.protocol.CoreOrderStateView> changedOrders,
                 List<com.surprising.aeron.protocol.CoreExecutionView> executions,
@@ -82,22 +81,15 @@ final class CoreExportState {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached hard limit");
         }
         long sequence = nextSequence;
-        if (fundsDelta == null || signer == null || matcherTransition == null) {
-            throw new IllegalArgumentException("core fact funds and signer are required");
+        if (fundsDelta == null || matcherTransition == null) {
+            throw new IllegalArgumentException("core fact funds and matcher transition are required");
         }
-        CoreExportEvent unsigned = new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
-                command.header().commandId(), command.header().messageType(), status, resultCode,
-                command.header().userId(), command.payloadUnsafe(), changedUsers, changedOrders, executions,
-                fundingPayments, changedLiquidations, changedTreasuryAssets, changedTriggerOrders,
-                beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash, matcherTransition,
-                clusterPosition, fundsDelta.views(), null);
-        var integrity = signer.sign(CoreExportCodec.integrityPayload(unsigned));
         CoreExportEvent event = new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
                 command.header().commandId(), command.header().messageType(), status, resultCode,
                 command.header().userId(), command.payloadUnsafe(), changedUsers, changedOrders, executions,
                 fundingPayments, changedLiquidations, changedTreasuryAssets, changedTriggerOrders,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash, matcherTransition,
-                clusterPosition, fundsDelta.views(), integrity);
+                clusterPosition, fundsDelta.views());
         CoreMessage message;
         try {
             message = CoreMessage.owned(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));

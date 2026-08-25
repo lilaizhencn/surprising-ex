@@ -1551,15 +1551,13 @@ class CoreProbeStateTest {
 
     private static void fillExportBacklogCapacity(CoreExportState exportState) {
         byte[] payload = new byte[CoreExportCodec.MAX_COMMAND_PAYLOAD / 2];
-        com.surprising.aeron.service.state.CoreFactSigner signer =
-                com.surprising.aeron.service.state.CoreFactSigner.inMemory();
         for (long sequence = 1; sequence <= 6; sequence++) {
             exportState.append(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 91, sequence,
                     0, 1_000, sequence), payload), ResponseStatus.APPLIED, CoreResultCode.NONE,
                     sequence, 0, 0, 0, 0,
                     com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), sequence,
-                    new com.surprising.aeron.service.state.FundsDelta(List.of()), signer,
+                    new com.surprising.aeron.service.state.FundsDelta(List.of()),
                     List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
         assertThat(exportState.hasCapacityFor()).isFalse();

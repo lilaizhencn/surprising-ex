@@ -5,27 +5,26 @@
 
 这个服务不是计算服务。它消费 Kafka 领域事件，在本节点内存里维护订阅关系，只把实时消息推给连接到当前节点的客户端。
 
-Core 私有事件由 `CoreEventFanoutConsumer` 直接消费产品线的 `core.events.v1` Kafka topic，校验 Core 事件 envelope、产品线、key 和 Kafka offset 后立即 fanout 到 WebSocket。该路径不查询 PostgreSQL，也不要求历史投影已经完成。PostgreSQL 只由独立 projector 用于历史审计、查询和对账，不是实时 WebSocket 的前置依赖。
+Core 私有事件由 `CoreEventFanoutConsumer` 直接消费产品线的 `core.events.v1` Kafka topic，校验 Core 事件格式、产品线、key 和 Kafka offset 后立即 fanout 到 WebSocket。该路径不查询 PostgreSQL，也不要求历史投影已经完成。PostgreSQL 只由独立 projector 用于历史审计、查询和对账，不是实时 WebSocket 的前置依赖。
 
-## Core v7 已签名事实与 fanout 契约
+## Core v8 事实与 fanout 契约
 
-`CoreExportCodec` 的 Core export fact 升级为 **v7**。v7 是 fail-old 合约：gateway 只接受完整、严格的 v7 schema；缺字段、未知字段语义、错误长度、错误产品线/key、哈希不匹配或签名不通过的 fact 必须拒绝并告警，绝不 fanout。不得读取 v6 或更早 envelope，不得添加旧版本兼容解码器或由历史投影补全字段。
+`CoreExportCodec` 的 Core export fact 升级为 **v8**。v8 不包含签名 envelope，也不兼容 v7 或更早格式；gateway 只接受完整、严格的 v8 schema。缺字段、未知字段语义、错误长度或错误产品线/key 的 fact 必须拒绝并告警，绝不 fanout，也不得由历史投影补全字段。
 
-每条 v7 fact 都是 Product Core 在一个确定性命令边界产生的不可变事实，至少携带以下可校验身份与状态：
+每条 v8 fact 都是 Product Core 在一个确定性命令边界产生的不可变事实，至少携带以下可校验身份与状态：
 
 - `productLine`、`Core sequence`、`commandId`、`orderId`、`instrumentVersion`；其中 Core sequence 是同一产品线内的裁决顺序，不能由 Kafka offset、数据库主键或 WebSocket 序号替代。
 - `matcherSequence` 与 matcher 的 `matcherPrefixBefore` / `matcherPrefixAfter`，把 Core 命令和 exchange-core 的同一已接受撮合前缀绑定；gateway 不执行撮合，也不从其他订单簿重建该结果。逐命令事实不携带全量订单簿 hash；完整 `bookStateHash` 只属于 snapshot、恢复和显式审计边界。
 - 按 `(asset, ownerKind, ownerId, subledger)` 稳定排序的逐资产 `FundsDelta`；它记录该命令的资金 postings，不可只传聚合余额，也不可由 gateway 或 PostgreSQL 二次计算。
 - `beforeStateHash` / `afterStateHash` 与 `beforeFundsHash` / `afterFundsHash`，分别覆盖命令前后 Product Core 状态和资金状态；每个 hash 都属于事实 payload，不能用本地缓存替换。
-- 完整性 envelope：`algorithm=Ed25519`、`keyId`、公钥 `fingerprint`、canonical `payloadHash` 与 `signature`。私钥不进入 fact、Kafka、WebSocket 或快照；所有消费者按已配置 fingerprint 验证同一 canonical payload。
 
-Gateway 的消费顺序固定为：先验证 v7 schema，再验证产品线与 Kafka key，随后验证 `payloadHash`、before/after state hash、before/after funds hash 和 Ed25519 signature envelope；只有全部通过才把与订阅匹配的 order、match、execution、position 或 trigger 更新 fanout。验证失败不得降级为“尽力推送”，也不得以旧版本、数据库记录或 HTTP 查询修复事实。
+Gateway 的消费顺序固定为：先验证 v8 schema，再验证产品线与 Kafka key，随后按事实内容生成与订阅匹配的 order、match、execution、position 或 trigger 更新。History Projector 独立验证 export sequence、state/funds hash、matcher prefix 和 cluster position 连续性；验证失败不得降级为“尽力投影”，也不得以旧版本、数据库记录或 HTTP 查询修复事实。
 
 ```text
-Product Core 产生 v7 signed fact
+Product Core 产生 v8 fact
   -> reliable direct Core export
   -> 产品线 core.events.v1 Kafka topic
-  -> CoreEventFanoutConsumer 验证 v7 envelope 后本地 WebSocket fanout
+  -> CoreEventFanoutConsumer 验证 v8 identity 后本地 WebSocket fanout
   -> 独立 History Projector 幂等写入 PostgreSQL（仅历史/审计/查询）
 ```
 

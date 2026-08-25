@@ -139,18 +139,18 @@ current state 的唯一权威；PostgreSQL 只负责 Instrument 管理和 histor
 
 ### P4：六条产品线的结算内核
 
-- 结算输入、输出、ledger posting、integrity envelope 和 idempotency contract 固定；只允许且必须有以下六个 exhaustive kernels：
+- 结算输入、输出、ledger posting、连续性证据和 idempotency contract 固定；只允许且必须有以下六个 exhaustive kernels：
   `Spot`、`LinearPerpetual`、`InversePerpetual`、`LinearDelivery`、`InverseDelivery`、`Option`。
 - 六个 kernel 的差异必须保留在各自的资金、持仓、资金费、交割、权利金、行权、到期、强平和 ADL 规则内；不得使用未命名的
   derivative fallback，也不得把某产品线的订单、账户、instrument、topic 或风险模型混入另一产品线。可共享的仅限纯数学、账本
-  posting、完整性 envelope 和幂等工具。
+  posting、连续性校验和幂等工具。
 
 ### P5：事实、资金与版本切换
 
 - 每个 command 产生不可变、按 `(asset, ownerKind, ownerId, subledger)` 排序的 `FundsDelta` 和 Core Fact；before/after state hash、
   funds hash、Core/book prefix 和 Aeron position 必须共同标识同一裁决。Audit Exporter 从 replicated outbox 发布 Kafka history，
   History Projector 再幂等写入 PostgreSQL；投影结果不是 current state。
-- P5 目标切换（当前源码尚未宣称完成）：command/envelope 应升级为 v3，export event marker 应升级为 v7，trading snapshot 应升级为 v22，sectioned snapshot 应升级为 v11。
+- P5 目标切换（当前源码尚未宣称完成）：command/envelope 应升级为 v3，export event marker 应升级为 v8，trading snapshot 应升级为 v22，sectioned snapshot 应升级为 v11。
   目标切换完成后，decoder、snapshot loader 和 startup 必须对所有旧版本 fresh fail-old：旧版本一律拒绝并 fail closed，只能从 fresh compatible
   Product Core state 启动，不保留旧 codec reader、迁移读取路径或隐式降级。
 

@@ -3962,10 +3962,6 @@ CREATE TABLE IF NOT EXISTS core_event_projection (
     matcher_prefix_before BIGINT NOT NULL,
     matcher_prefix_after BIGINT NOT NULL,
     cluster_position BIGINT NOT NULL,
-    integrity_key_id VARCHAR(128) NOT NULL,
-    integrity_key_fingerprint VARCHAR(64) NOT NULL,
-    integrity_payload_hash BYTEA NOT NULL,
-    integrity_signature BYTEA NOT NULL,
     raw_event BYTEA NOT NULL,
     projected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (product_line, export_sequence)
@@ -4285,10 +4281,6 @@ BEGIN
             WHEN 'matcher_sequence' THEN '当前 Core Fact 应用后的撮合结果累计序列。'
             WHEN 'matcher_prefix_before' THEN '当前 Core Fact 覆盖撮合结果前的不可变前缀摘要。'
             WHEN 'matcher_prefix_after' THEN '当前 Core Fact 覆盖撮合结果后的不可变前缀摘要。'
-            WHEN 'integrity_key_id' THEN '签署 Core Fact 的完整性密钥稳定标识。'
-            WHEN 'integrity_key_fingerprint' THEN '签署 Core Fact 的公钥 SHA-256 指纹。'
-            WHEN 'integrity_payload_hash' THEN 'Core Fact 规范化签名载荷的 SHA-256 摘要。'
-            WHEN 'integrity_signature' THEN 'Core Fact 规范化载荷的 Ed25519 签名。'
             WHEN 'posting_index' THEN '同一 Core Fact 内资金分录的零基连续索引。'
             WHEN 'owner_kind' THEN '资金分录所有者类型：用户或 Treasury。'
             WHEN 'subledger' THEN '资金分录所属的可用、冻结、费用、保险等子账本。'

@@ -22,10 +22,8 @@ public final class JdbcCoreEventProjector {
                 command_id, command_type, command_status, result_code, user_id,
                 before_business_state_hash, before_funds_state_hash, funds_state_hash,
                 matcher_sequence_before, matcher_sequence, matcher_prefix_before, matcher_prefix_after,
-                cluster_position,
-                integrity_key_id, integrity_key_fingerprint, integrity_payload_hash, integrity_signature,
-                raw_event
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                cluster_position, raw_event
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
     private static final String INSERT_FUNDS_POSTING = """
             INSERT INTO core_funds_posting_projection
@@ -137,22 +135,13 @@ public final class JdbcCoreEventProjector {
             """;
 
     private final DataSource dataSource;
-    private final com.surprising.aeron.protocol.CoreFactVerifier factVerifier;
 
     public JdbcCoreEventProjector(DataSource dataSource) {
-        this(dataSource, com.surprising.aeron.protocol.CoreFactVerifier.configured());
-    }
-
-    JdbcCoreEventProjector(
-            DataSource dataSource,
-            com.surprising.aeron.protocol.CoreFactVerifier factVerifier) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
-        this.factVerifier = Objects.requireNonNull(factVerifier, "factVerifier");
     }
 
     public boolean project(ProductLine productLine, CoreMessage message) throws SQLException {
         CoreExportEvent event = CoreExportCodec.decodeEvent(message.payload());
-        factVerifier.verify(event);
         if (message.header().productLine() != productLine
                 || message.header().sourceSequence() != event.exportSequence()) {
             throw new IllegalArgumentException("export event identity mismatch");
@@ -286,11 +275,7 @@ public final class JdbcCoreEventProjector {
             statement.setLong(15, matcher.prefixBefore());
             statement.setLong(16, matcher.prefixAfter());
             statement.setLong(17, event.clusterPosition());
-            statement.setString(18, event.integrity().keyId());
-            statement.setString(19, event.integrity().keyFingerprint());
-            statement.setBytes(20, event.integrity().payloadHash());
-            statement.setBytes(21, event.integrity().signature());
-            statement.setBytes(22, CoreMessageCodec.encode(message));
+            statement.setBytes(18, CoreMessageCodec.encode(message));
             if (statement.executeUpdate() != 1) throw new SQLException("core event projection was not inserted");
         }
     }

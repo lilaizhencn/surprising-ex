@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public final class CoreExportCodec {
 
-    private static final int EVENT_V7_MARKER = 0xC0E7_0007;
+    private static final int EVENT_V8_MARKER = 0xC0E7_0008;
     private static final int BATCH_V3_MARKER = 0xC0B2_0003;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
@@ -46,14 +46,6 @@ public final class CoreExportCodec {
     }
 
     public static byte[] encodeEvent(CoreExportEvent event) {
-        return encodeEvent(event, true);
-    }
-
-    public static byte[] integrityPayload(CoreExportEvent event) {
-        return encodeEvent(event, false);
-    }
-
-    private static byte[] encodeEvent(CoreExportEvent event, boolean includeIntegrity) {
         byte[] payload = event.commandPayloadUnsafe();
         List<byte[]> users = new ArrayList<>(event.changedUsers().size());
         for (CoreUserStateView user : event.changedUsers()) users.add(CoreStateQueryCodec.encodeUserState(user));
@@ -76,20 +68,15 @@ public final class CoreExportCodec {
             byte[] encoded = CoreTriggerOrderCodec.encodeState(trigger);
             length = Math.addExact(length, Integer.BYTES + encoded.length);
         }
-        length = Math.addExact(length, Long.BYTES * 8L + Integer.BYTES + 1L);
+        length = Math.addExact(length, Long.BYTES * 8L + Integer.BYTES);
         for (CoreFundsPostingView posting : event.fundsPostings()) {
             length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 2L + utf8(posting.asset()).length);
-        }
-        CoreFactIntegrityView integrity = includeIntegrity ? event.integrity() : null;
-        if (integrity != null) {
-            length = Math.addExact(length, Integer.BYTES * 4L + 32L + integrity.signatureUnsafe().length
-                    + utf8(integrity.keyId()).length + utf8(integrity.keyFingerprint()).length);
         }
         if (payload.length > MAX_COMMAND_PAYLOAD || length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("export event payload is too large");
         }
         ByteBuffer output = littleEndian(Math.toIntExact(length));
-        output.putInt(EVENT_V7_MARKER);
+        output.putInt(EVENT_V8_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
         output.putLong(event.businessStateHash());
@@ -130,13 +117,6 @@ public final class CoreExportCodec {
             output.putInt(posting.ownerKind().wireCode()).putLong(posting.ownerId())
                     .putInt(posting.subledger().wireCode()).putLong(posting.units());
         });
-        output.put((byte) (integrity == null ? 0 : 1));
-        if (integrity != null) {
-            putString(output, integrity.keyId());
-            putString(output, integrity.keyFingerprint());
-            output.putInt(integrity.payloadHashUnsafe().length).put(integrity.payloadHashUnsafe());
-            output.putInt(integrity.signatureUnsafe().length).put(integrity.signatureUnsafe());
-        }
         return output.array();
     }
 
@@ -145,7 +125,7 @@ public final class CoreExportCodec {
             throw new ProtocolException("export event is truncated");
         }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
-        if (input.getInt() != EVENT_V7_MARKER) {
+        if (input.getInt() != EVENT_V8_MARKER) {
             throw new ProtocolException("unsupported export event version");
         }
         long sequence = input.getLong();
@@ -194,8 +174,8 @@ public final class CoreExportCodec {
             byte[] triggerPayload = new byte[length]; input.get(triggerPayload);
             triggerOrders.add(CoreTriggerOrderCodec.decodeState(triggerPayload));
         }
-        if (input.remaining() < Long.BYTES * 8 + Integer.BYTES + 1) {
-            throw new ProtocolException("core fact integrity metadata is truncated");
+        if (input.remaining() < Long.BYTES * 8 + Integer.BYTES) {
+            throw new ProtocolException("core fact continuity metadata is truncated");
         }
         long beforeBusinessHash = input.getLong();
         long beforeFundsHash = input.getLong();
@@ -216,35 +196,13 @@ public final class CoreExportCodec {
                     CoreFundsPostingView.OwnerKind.fromWireCode(input.getInt()), input.getLong(),
                     CoreFundsPostingView.Subledger.fromWireCode(input.getInt()), input.getLong()));
         }
-        if (!input.hasRemaining()) throw new ProtocolException("core fact integrity flag is truncated");
-        int integrityFlag = Byte.toUnsignedInt(input.get());
-        CoreFactIntegrityView integrity = null;
-        if (integrityFlag == 1) {
-            String keyId = readString(input);
-            String fingerprint = readString(input);
-            int hashLength = readCount(input);
-            if (hashLength != 32 || input.remaining() < hashLength + Integer.BYTES) {
-                throw new ProtocolException("invalid core fact payload hash");
-            }
-            byte[] payloadHash = new byte[hashLength];
-            input.get(payloadHash);
-            int signatureLength = readCount(input);
-            if (signatureLength == 0 || input.remaining() < signatureLength) {
-                throw new ProtocolException("invalid core fact signature");
-            }
-            byte[] signature = new byte[signatureLength];
-            input.get(signature);
-            integrity = new CoreFactIntegrityView(keyId, fingerprint, payloadHash, signature);
-        } else if (integrityFlag != 0) {
-            throw new ProtocolException("invalid core fact integrity flag");
-        }
         if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                 commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
                 liquidations, treasuryAssets, triggerOrders, beforeBusinessHash, beforeFundsHash, fundsHash,
                 new CoreMatcherTransition(matcherSequenceBefore, matcherSequenceAfter,
                         matcherPrefixBefore, matcherPrefixAfter),
-                clusterPosition, fundsPostings, integrity);
+                clusterPosition, fundsPostings);
     }
 
     private static int liquidationLength(CoreLiquidationView liquidation) {

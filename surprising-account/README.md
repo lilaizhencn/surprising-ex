@@ -198,13 +198,13 @@ Core Export backlog、Kafka 投影延迟和 PostgreSQL 投影延迟；数据库�
   Treasury 七账和本次操作所需的成交/资金费/强平/交割/行权参数。缺字段、版本不匹配、重复的
   `operationId` 或算术溢出必须拒绝，不能以数据库或缓存值补齐。
 - 内核只返回不可变 `SettlementKernelOutput`：命令后的账户/持仓/Treasury 状态、按资产排序的
-  `FundsDelta`、before/after state hash、before/after funds hash、幂等结果和完整性 envelope。
+  `FundsDelta`、before/after state hash、before/after funds hash、matcher prefix 和幂等结果。
   输出中的每个 posting 都来自同一个输入和同一个 Core sequence；重放相同 `operationId` 必须得到
   字节一致的输出，新的 `operationId` 才能产生新的资金事实。
 - 结算内核必须且仅能按以下六个实现注册和 dispatch：`Spot`、`LinearPerpetual`、
   `InversePerpetual`、`LinearDelivery`、`InverseDelivery`、`Option`。六个实现分别拥有自己的
   账户资产、合约数学、风险边界和生命周期；未命中产品线或合约类型立即 fail-closed，不得把不同
-  产品线合并成默认实现。纯数学函数、posting 排序、哈希、签名和幂等工具可以共享，但不能共享
+  产品线合并成默认实现。纯数学函数、posting 排序、哈希和幂等工具可以共享，但不能共享
   未命名的结算业务分支。
 
 ### FundsDelta posting 身份与逐资产守恒
@@ -254,20 +254,15 @@ purpose 的有序 Core 命令和幂等 reference 消解；它不得与 aggregate
 - 不存在 `loss cap`：亏损超过可用余额和持仓保证金时记录完整亏损，并在适用资产的 `deficit`
   账中记录精确缺口；不得截断损失、把未成交订单冻结资金当作可扣资产，或用负余额掩盖缺口。
 
-### Ed25519 完整性 envelope 与启动门禁
+### Core Fact 连续性门禁
 
-- 每个可复制的 settlement fact 和 Snapshot 只携带 canonical payload 的
-  `algorithm=Ed25519`、`keyId`、公钥 `fingerprint`、canonical payload hash、signature，
-  以及 before/after state/funds hash。canonical payload 必须包含 productLine、Core sequence、
-  operationId、instrumentVersion、严格排序的 `FundsDelta` 和七账结果；签名覆盖完整 envelope
-  字段，验证顺序不能由消费者自行改变。
-- 所有 Cluster member 启动前从受控配置载入签名私钥和 keyId，派生公钥 fingerprint，与复制的
-  integrity manifest 比较；缺失、算法不匹配、fingerprint 不一致、签名不通过或 canonical
-  payload hash 不一致时，在服务 admission 前 fail-closed。启动后不得按每条事实重新读取配置。
-- `private key 不得进入任何复制状态或事实载荷`；私钥不得序列化到 Runtime State、Snapshot State
-  或 Core Fact，只有公钥 fingerprint 和签名元数据可被复制或导出。`exchange-core` 的 aggregate
-  hash 只能作为结构性比对字段，不是 `cryptographic proof`，不能替代 FundsDelta 守恒或 Ed25519
-  验签。
+- 每个 settlement fact 携带产品线内连续递增的 export sequence、Aeron Cluster position、
+  before/after state hash、before/after funds hash、matcher sequence/prefix 和严格排序的
+  `FundsDelta`。History Projector 必须在同一数据库事务内验证这些连续性字段并推进 watermark。
+- Core Fact 不携带签名、公钥、密钥标识或私钥配置。资金正确性由 Product Core、FundsDelta 守恒、
+  Cluster Log/Archive、配对快照和连续性字段共同验证，不能由 Kafka offset 或数据库聚合余额替代。
+- `exchange-core` 的 aggregate hash 只用于 snapshot、恢复和显式审计边界；逐命令事实使用可恢复的
+  matcher prefix 绑定已接受撮合结果，不在交易热链路计算全量订单簿 hash。
 
 ## 本地运行
 

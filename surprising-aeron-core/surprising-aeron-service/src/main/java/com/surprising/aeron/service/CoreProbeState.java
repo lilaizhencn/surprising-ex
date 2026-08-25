@@ -168,7 +168,6 @@ public final class CoreProbeState implements AutoCloseable {
     private final TerminalStateRetention terminalRetention;
     private final com.surprising.aeron.service.state.RollingBusinessStateHash rollingBusinessStateHash;
     private final com.surprising.aeron.service.state.RollingFundsStateHash rollingFundsStateHash;
-    private com.surprising.aeron.service.state.CoreFactSigner factSigner;
     private long appliedCommandCount;
     private long probeValue;
     private long cachedBusinessStateHash;
@@ -245,7 +244,6 @@ public final class CoreProbeState implements AutoCloseable {
         this.tradingState = tradingState;
         this.rollingBusinessStateHash = com.surprising.aeron.service.state.RollingBusinessStateHash.create(tradingState);
         this.rollingFundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.create(tradingState);
-        this.factSigner = com.surprising.aeron.service.state.CoreFactSigner.inMemory();
         this.cachedBusinessStateHash = rollingBusinessStateHash.value();
         this.lastSourceSequenceDigest = sourceSequenceDigest(lastSourceSequences);
         this.appliedMatcherSequence = matcherSnapshot == null ? 0 : matcherSnapshot.matcherSequence();
@@ -274,10 +272,6 @@ public final class CoreProbeState implements AutoCloseable {
         this.runtimePlaceOrderIdentities = runtime.identitiesForConstruction();
         this.runtimePlaceOrderState = runtime.runtimeStateForConstruction();
         this.runtimePlaceOrderCoreState = tradingState;
-    }
-
-    void installFactSigner(com.surprising.aeron.service.state.CoreFactSigner signer) {
-        factSigner = java.util.Objects.requireNonNull(signer, "signer");
     }
 
     static CoreProbeState restore(
@@ -3952,7 +3946,7 @@ public final class CoreProbeState implements AutoCloseable {
         return exportState.append(command, status, resultCode, appliedCount, businessStateHash,
                 commandBeforeBusinessStateHash, commandBeforeFundsStateHash, fundsStateHash,
                 matcherTransition,
-                currentClusterPosition, fundsDelta, factSigner, delta.changedUsers(), delta.changedOrders(),
+                currentClusterPosition, fundsDelta, delta.changedUsers(), delta.changedOrders(),
                 delta.executions(), delta.fundingPayments(), delta.changedLiquidations(),
                 delta.changedTreasuryAssets(), delta.changedTriggerOrders());
     }

@@ -23,7 +23,6 @@ import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.CoreProbeState;
-import com.surprising.aeron.service.state.CoreFactSigner;
 import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -32,8 +31,6 @@ import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.Test;
 
 class JdbcCoreEventProjectorTest {
-
-    private static final CoreFactSigner SIGNER = CoreFactSigner.inMemory();
 
     @Test
     void duplicateDeliveryCreatesOneProjectionRow() throws Exception {
@@ -47,7 +44,7 @@ class JdbcCoreEventProjectorTest {
                     "/db/migration/V006__enrich_core_liquidation_projection.sql",
                     "/db/migration/V007__add_projection_watermark_and_websocket_audit.sql",
                     "/db/migration/V008__drop_websocket_audit_projection.sql",
-                    "/db/migration/V009__add_core_fact_integrity_and_funds.sql")) {
+                    "/db/migration/V009__add_core_fact_funds.sql")) {
                 try (var stream = getClass().getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) {
@@ -87,7 +84,7 @@ class JdbcCoreEventProjectorTest {
         var maker = new CoreOrderStateView(72, ProductLine.SPOT, 18, "BTC-USDT", 3,
                 CoreOrderSide.SELL, 60_000, 2, 1, 1, false, "OPEN", 2);
         var execution = new CoreExecutionView(71, 72, 17, 18, 60_000, 1);
-        var event = signed(new CoreExportEvent(1, 1, 9, commandId, CoreMessageType.PLACE_ORDER,
+        var event = withContinuity(new CoreExportEvent(1, 1, 9, commandId, CoreMessageType.PLACE_ORDER,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17, new byte[] {1},
                 java.util.List.of(user), java.util.List.of(order, maker), java.util.List.of(execution)), 0);
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
@@ -142,7 +139,7 @@ class JdbcCoreEventProjectorTest {
                 CorePositionSide.NET, "USDT", 2, 120_000, 100, -12);
         var shortPayment = new CoreFundingPaymentView(81, 18, "BTC-USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, "USDT", -2, 120_000, 100, 12);
-        var event = signed(new CoreExportEvent(1, 3, 9, commandId, CoreMessageType.APPLY_FUNDING,
+        var event = withContinuity(new CoreExportEvent(1, 3, 9, commandId, CoreMessageType.APPLY_FUNDING,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 0, TradingCommandCodec.encodeApplyFunding(command),
                 java.util.List.of(), java.util.List.of(), java.util.List.of(),
                 java.util.List.of(longPayment, shortPayment)), 0);
@@ -154,7 +151,7 @@ class JdbcCoreEventProjectorTest {
         var continuationCommand = new ApplyFundingCommand(81, "BTC-USDT", 7, 100, 18, 128);
         var continuationPayment = new CoreFundingPaymentView(81, 19, "BTC-USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, "USDT", 1, 60_000, 100, -6);
-        var continuation = signed(new CoreExportEvent(2, 4, 10, UUID.randomUUID(), CoreMessageType.APPLY_FUNDING,
+        var continuation = withContinuity(new CoreExportEvent(2, 4, 10, UUID.randomUUID(), CoreMessageType.APPLY_FUNDING,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 0,
                 TradingCommandCodec.encodeApplyFunding(continuationCommand), java.util.List.of(),
                 java.util.List.of(), java.util.List.of(), java.util.List.of(continuationPayment)), 9);
@@ -185,7 +182,7 @@ class JdbcCoreEventProjectorTest {
                 com.surprising.aeron.protocol.CoreMarginMode.ISOLATED, CorePositionSide.NET,
                 3, 8, 2, 2, 12, 60_000, 25_000, 3, "INSURANCE_REQUIRED");
         var treasury = new com.surprising.aeron.protocol.CoreTreasuryAssetView("USDT", 4, 9, 12);
-        var event = signed(new CoreExportEvent(1, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
+        var event = withContinuity(new CoreExportEvent(1, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17,
                 TradingCommandCodec.encodeExecuteLiquidation(
                         new com.surprising.aeron.protocol.ExecuteLiquidationCommand(9, 1, 60_000, 25_000)),
@@ -223,7 +220,7 @@ class JdbcCoreEventProjectorTest {
                     "/db/migration/V006__enrich_core_liquidation_projection.sql",
                     "/db/migration/V007__add_projection_watermark_and_websocket_audit.sql",
                     "/db/migration/V008__drop_websocket_audit_projection.sql",
-                    "/db/migration/V009__add_core_fact_integrity_and_funds.sql")) {
+                    "/db/migration/V009__add_core_fact_funds.sql")) {
                 try (var stream = JdbcCoreEventProjectorTest.class.getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) if (!sql.isBlank()) statement.execute(sql);
@@ -235,7 +232,7 @@ class JdbcCoreEventProjectorTest {
     private static CoreMessage orderEvent(long exportSequence, CoreMessageType type,
                                           CoreOrderStateView order) {
         UUID commandId = UUID.randomUUID();
-        var event = signed(new CoreExportEvent(exportSequence, exportSequence, exportSequence * 17,
+        var event = withContinuity(new CoreExportEvent(exportSequence, exportSequence, exportSequence * 17,
                 commandId, type, ResponseStatus.APPLIED, CoreResultCode.NONE, order.userId(),
                 new byte[] {(byte) exportSequence}, java.util.List.of(), java.util.List.of(order),
                 java.util.List.of()), (exportSequence - 1) * 17);
@@ -245,26 +242,17 @@ class JdbcCoreEventProjectorTest {
     }
 
     private static JdbcCoreEventProjector projector(JdbcDataSource dataSource) {
-        return new JdbcCoreEventProjector(dataSource, SIGNER.verifier());
+        return new JdbcCoreEventProjector(dataSource);
     }
 
-    private static CoreExportEvent signed(CoreExportEvent event, long beforeBusinessStateHash) {
-        CoreExportEvent unsigned = new CoreExportEvent(event.exportSequence(), event.appliedCommandCount(),
+    private static CoreExportEvent withContinuity(CoreExportEvent event, long beforeBusinessStateHash) {
+        return new CoreExportEvent(event.exportSequence(), event.appliedCommandCount(),
                 event.businessStateHash(), event.commandId(), event.commandType(), event.commandStatus(),
                 event.resultCode(), event.userId(), event.commandPayload(), event.changedUsers(),
                 event.changedOrders(), event.executions(), event.fundingPayments(), event.changedLiquidations(),
                 event.changedTreasuryAssets(), event.changedTriggerOrders(), beforeBusinessStateHash, 0, 0,
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
-                event.exportSequence(), java.util.List.of(), null);
-        return new CoreExportEvent(unsigned.exportSequence(), unsigned.appliedCommandCount(),
-                unsigned.businessStateHash(), unsigned.commandId(), unsigned.commandType(),
-                unsigned.commandStatus(), unsigned.resultCode(), unsigned.userId(), unsigned.commandPayload(),
-                unsigned.changedUsers(), unsigned.changedOrders(), unsigned.executions(),
-                unsigned.fundingPayments(), unsigned.changedLiquidations(), unsigned.changedTreasuryAssets(),
-                unsigned.changedTriggerOrders(), unsigned.beforeBusinessStateHash(),
-                unsigned.beforeFundsStateHash(), unsigned.fundsStateHash(), unsigned.matcherTransition(),
-                unsigned.clusterPosition(),
-                unsigned.fundsPostings(), SIGNER.sign(CoreExportCodec.integrityPayload(unsigned)));
+                event.exportSequence(), java.util.List.of());
     }
 
     private static void assertCount(java.sql.Statement statement, String table, int expected) throws Exception {

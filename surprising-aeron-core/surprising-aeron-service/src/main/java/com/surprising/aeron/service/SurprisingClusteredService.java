@@ -39,7 +39,6 @@ public final class SurprisingClusteredService implements ClusteredService {
     private static final long FIRST_EGRESS_DRAIN_CORRELATION_ID = Long.MIN_VALUE + 1;
 
     private final ProductLine productLine;
-    private final com.surprising.aeron.service.state.CoreFactSigner factSigner;
     private final AtomicReference<Cluster.Role> role = new AtomicReference<>();
     private CoreProbeState state;
     private Cluster cluster;
@@ -56,18 +55,11 @@ public final class SurprisingClusteredService implements ClusteredService {
     private long snapshotFenceTimeoutCount;
 
     public SurprisingClusteredService(ProductLine productLine) {
-        this(productLine, com.surprising.aeron.service.state.CoreFactSigner.configured());
-    }
-
-    SurprisingClusteredService(ProductLine productLine,
-                               com.surprising.aeron.service.state.CoreFactSigner factSigner) {
-        if (productLine == null || factSigner == null) {
-            throw new IllegalArgumentException("product line and core fact signer are required");
+        if (productLine == null) {
+            throw new IllegalArgumentException("product line is required");
         }
         this.productLine = productLine;
-        this.factSigner = factSigner;
         this.state = new CoreProbeState(productLine);
-        this.state.installFactSigner(factSigner);
     }
 
     @Override
@@ -339,7 +331,6 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void replaceState(CoreProbeState restored) {
         state.close();
         state = restored;
-        state.installFactSigner(factSigner);
     }
 
     @FunctionalInterface

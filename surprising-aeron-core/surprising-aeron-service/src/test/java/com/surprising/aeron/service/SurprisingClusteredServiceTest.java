@@ -657,8 +657,7 @@ class SurprisingClusteredServiceTest {
     }
 
     private static SurprisingClusteredService service() {
-        return new SurprisingClusteredService(ProductLine.SPOT,
-                com.surprising.aeron.service.state.CoreFactSigner.inMemory());
+        return new SurprisingClusteredService(ProductLine.SPOT);
     }
 
     private static Cluster cluster(Cluster.Role role) {

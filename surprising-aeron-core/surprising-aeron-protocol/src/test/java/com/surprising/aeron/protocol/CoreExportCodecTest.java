@@ -14,6 +14,32 @@ import org.junit.jupiter.api.Test;
 class CoreExportCodecTest {
 
     @Test
+    void encodesUnsignedEventWithoutIntegrityTrailer() {
+        CoreExportEvent event = new CoreExportEvent(1, 1, 0, UUID.randomUUID(),
+                CoreMessageType.PROBE_INCREMENT, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                0, new byte[0]);
+
+        byte[] encoded = CoreExportCodec.encodeEvent(event);
+
+        assertThat(ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt())
+                .isEqualTo(0xC0E7_0008);
+        assertThat(encoded).hasSize(164);
+    }
+
+    @Test
+    void rejectsLegacySignedEventVersion() {
+        CoreExportEvent event = new CoreExportEvent(1, 1, 0, UUID.randomUUID(),
+                CoreMessageType.PROBE_INCREMENT, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                0, new byte[0]);
+        byte[] legacy = CoreExportCodec.encodeEvent(event);
+        ByteBuffer.wrap(legacy).order(ByteOrder.LITTLE_ENDIAN).putInt(0xC0E7_0007);
+
+        assertThatThrownBy(() -> CoreExportCodec.decodeEvent(legacy))
+                .isInstanceOf(ProtocolException.class)
+                .hasMessage("unsupported export event version");
+    }
+
+    @Test
     void roundTripsEventBatchAckAndStatus() {
         UUID commandId = UUID.randomUUID();
         CoreUserStateView user = new CoreUserStateView(ProductLine.SPOT, 17, 2,
@@ -32,7 +58,7 @@ class CoreExportCodecTest {
                 17, new byte[]{1, 2, 3}, List.of(user), List.of(order), List.of(execution), List.of(funding),
                 List.of(liquidation), List.of(treasury), List.of(), 10, 20, 21,
                 new CoreMatcherTransition(40, 42, 0x1020_3040_5060_7080L, 0x1121_3141_5161_7181L),
-                23, List.of(), null);
+                23, List.of());
         CoreMessage message = new CoreMessage(new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION,
                 WireMessageKind.EXPORT_EVENT, CoreMessageType.CORE_EVENT, commandId, ProductLine.SPOT,
                 CoreRoute.DEFAULT, CommandSource.GATEWAY, 1, 7, 17, 19, 23), CoreExportCodec.encodeEvent(event));
