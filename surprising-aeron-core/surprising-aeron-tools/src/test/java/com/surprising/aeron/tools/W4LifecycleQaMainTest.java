@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.product.api.ProductLine;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class W4LifecycleQaMainTest {
@@ -54,6 +56,29 @@ class W4LifecycleQaMainTest {
                 .containsExactly(ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
                         ProductLine.INVERSE_PERPETUAL, ProductLine.LINEAR_DELIVERY,
                         ProductLine.INVERSE_DELIVERY, ProductLine.OPTION);
+    }
+
+    @Test
+    void initializesEveryConfiguredMakerAccount() {
+        List<Long> initialized = new ArrayList<>();
+
+        W4LifecycleQaMain.initializeMakerUsers(
+                List.of(900001L, 900002L, 910001L, 910002L), initialized::add);
+
+        assertThat(initialized).containsExactly(900001L, 900002L, 910001L, 910002L);
+    }
+
+    @Test
+    void usesTheProtectedMakerRunOnceContract() {
+        assertThat(W4LifecycleQaMain.makerRunOncePath())
+                .isEqualTo("/api/v1/admin/market-maker/run-once");
+    }
+
+    @Test
+    void derivativeScenarioSymbolsUseTheMakerAcceptedAlphabet() {
+        assertThat(W4LifecycleQaMain.scenarioSymbol(ProductLine.LINEAR_PERPETUAL, "CROSS", 29303))
+                .isEqualTo("W4-LINEAR-PERPETUAL-CROSS-29303")
+                .matches("[A-Z0-9-]{3,64}");
     }
 
     private static void restoreProperty(String name, String value) {

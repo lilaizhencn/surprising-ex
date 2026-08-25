@@ -4,7 +4,6 @@ import com.surprising.aeron.client.AeronLifecycleCoordinator;
 import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
-import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreAdlQueryCodec;
@@ -31,7 +30,11 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -47,10 +50,15 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongConsumer;
 
-public final class W4LifecycleQaMain {
+public final class W4LifecycleQaMain implements AutoCloseable {
 
     static final List<ProductLine> REQUIRED_PRODUCT_LINES = List.of(
             ProductLine.SPOT,
@@ -62,11 +70,11 @@ public final class W4LifecycleQaMain {
 
     private static final String BASE_ASSET = "BTC";
     private static final String SYMBOL = "BTC-USDT";
-    private static final long VERSION = 1;
     private static final long STRIKE = 100;
     private static final long MAKER_FEE_RATE_PPM = 100_000;
     private static final long TAKER_FEE_RATE_PPM = 200_000;
     private static final long FUNDING_RATE_PPM = 10_000;
+    private static final long QUOTE_SCALE_UNITS = 100_000_000L;
     private static final long SOURCE_ID_BASE = 160_000;
     private static final String REAL_CAPABILITY_PENDING =
             "provider-to-core-lifecycle,cursor-repeat-gap,pg-selected,maker-user-treasury-reconciliation";
@@ -77,13 +85,16 @@ public final class W4LifecycleQaMain {
     private final long seed;
     private final long sourceId;
     private final long makerUserId;
+    private final List<Long> makerUserIds;
     private final HttpClient httpClient;
     private final Map<String, String> providerUrls;
+    private final ControlledIndexFeed indexFeed;
     private long sequence;
     private final Set<Long> participantUsers = new LinkedHashSet<>();
     private final Map<String, Long> expectedFunds = new LinkedHashMap<>();
     private final List<String> rows = new ArrayList<>();
     private final List<SpotOrder> spotOrders = new ArrayList<>();
+    private final Map<String, Long> instrumentVersions = new LinkedHashMap<>();
     private boolean reconciliationObserved;
     private boolean makerReconciliationObserved;
     private boolean providerBoundaryObserved;
@@ -94,10 +105,12 @@ public final class W4LifecycleQaMain {
         this.client = client;
         this.seed = seed;
         this.sourceId = SOURCE_ID_BASE + seed;
-        this.makerUserId = configuredPositiveLong("surprising.aeron.w4-maker-user-id");
+        this.makerUserIds = configuredMakerUserIds();
+        this.makerUserId = makerUserIds.getFirst();
         this.sequence = Math.multiplyExact(seed, 10_000L);
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         this.providerUrls = providerUrls();
+        this.indexFeed = ControlledIndexFeed.start();
     }
 
     public static void main(String[] args) throws IOException {
@@ -138,13 +151,15 @@ public final class W4LifecycleQaMain {
         try (SurprisingAeronClient client = SurprisingAeronClient.connect(
                 productLine, hosts, egress, Duration.ofSeconds(10))) {
             W4LifecycleQaMain qa = new W4LifecycleQaMain(productLine, client, seed);
-            qa.requireProviderCapabilities(mode);
-            if (mode.equals("faults")) {
-                qa.runFaults();
-            } else if (mode.equals("execute") || mode.equals("verify")) {
-                qa.run(mode.equals("verify"));
+            try (qa) {
+                qa.requireProviderCapabilities(mode);
+                if (mode.equals("faults")) {
+                    qa.runFaults();
+                } else if (mode.equals("execute") || mode.equals("verify")) {
+                    qa.run(mode.equals("verify"));
+                }
+                qa.writeManifest(manifest, mode);
             }
-            qa.writeManifest(manifest, mode);
         }
         System.out.printf("W4_MANIFEST=REAL_PASS productLine=%s path=%s FUNDS_DIFFERENCE=0%n",
                 productLine, manifest);
@@ -181,6 +196,7 @@ public final class W4LifecycleQaMain {
             urls.put(entry.getKey(), (configured == null || configured.isBlank())
                     ? "http://127.0.0.1:" + entry.getValue() : configured.trim());
         }
+        urls.put("command", urls.get("trading"));
         return Map.copyOf(urls);
     }
 
@@ -239,6 +255,7 @@ public final class W4LifecycleQaMain {
             throw new IllegalStateException("W4_VERIFY_REQUIRES_REAL_RECONCILIATION");
         }
         if (!verifyOnly) {
+            captureBaselineFunds();
             seedMakerAccount();
             switch (productLine) {
                 case SPOT -> runSpot();
@@ -260,7 +277,7 @@ public final class W4LifecycleQaMain {
         if (makerUserId <= 0) {
             throw new IllegalStateException("MAKER_USER_ID_REQUIRED");
         }
-        adjust(makerUserId, settleAsset(), 1_000);
+        initializeMakerUsers(makerUserIds, userId -> adjust(userId, settleAsset(), 1_000));
         if (productLine == ProductLine.INVERSE_PERPETUAL || productLine == ProductLine.INVERSE_DELIVERY) {
             long insuranceSeed = 2_000;
             command(CoreMessageType.ADJUST_INSURANCE_FUND, 0,
@@ -272,12 +289,51 @@ public final class W4LifecycleQaMain {
         rows.add("MAKER_ACCOUNT_SEEDED");
     }
 
+    private void captureBaselineFunds() {
+        for (long userId : makerUserIds) {
+            existingUserState(userId).ifPresent(state -> state.balances().forEach(balance ->
+                    expectedFunds.merge(balance.asset(),
+                            Math.addExact(balance.availableUnits(), balance.lockedUnits()), Math::addExact)));
+        }
+        for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
+                query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
+            expectedFunds.merge(treasury.asset(), Math.subtractExact(
+                    Math.addExact(treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()),
+                    treasury.insuranceDeficitUnits()), Math::addExact);
+        }
+        rows.add("MAKER_TREASURY_BASELINE_CAPTURED users=" + makerUserIds);
+    }
+
+    static void initializeMakerUsers(List<Long> userIds, LongConsumer initializer) {
+        userIds.forEach(initializer::accept);
+    }
+
+    static String makerRunOncePath() {
+        return "/api/v1/admin/market-maker/run-once";
+    }
+
+    static String scenarioSymbol(ProductLine productLine, String scenario, long seed) {
+        return "W4-" + productLine.name().replace('_', '-') + '-' + scenario + '-' + seed;
+    }
+
+    private Optional<CoreUserStateView> existingUserState(long userId) {
+        try {
+            return Optional.of(CoreStateQueryCodec.decodeUserState(
+                    query(CoreMessageType.USER_STATE_QUERY, userId, new byte[0])));
+        } catch (IllegalStateException exception) {
+            if (exception.getMessage() != null && exception.getMessage().contains("result=ENTITY_NOT_FOUND")) {
+                return Optional.empty();
+            }
+            throw exception;
+        }
+    }
+
     private void runFaults() {
         requireProviderCapabilities("faults");
     }
 
     private void runSpot() {
-        String symbol = "W4-SPOT-BTC-USDT";
+        String symbol = scenarioSymbol(productLine, "BTC-USDT", seed);
         setupInstrument(symbol, ContractType.SPOT, -1, 0, 0);
         long seller = user(1);
         long buyer = user(2);
@@ -288,7 +344,7 @@ public final class W4LifecycleQaMain {
         place(buyer, order(2), symbol, CoreOrderSide.BUY, CoreMarginMode.CROSS,
                 ReservationKind.SPOT_ASSET, "USDT", 500, 5);
         awaitSpotOrdersFilled();
-        requireBookEmpty();
+        requireBookEmpty(symbol);
         reconcile();
         rows.add("SPOT:CONSERVATION");
         rows.add("SPOT:CONTROL_GUARD");
@@ -297,28 +353,28 @@ public final class W4LifecycleQaMain {
     private void runPerpetual() {
         for (CoreMarginMode marginMode : List.of(CoreMarginMode.CROSS, CoreMarginMode.ISOLATED)) {
             String mode = marginMode.name();
-            String symbol = "W4-" + productLine.name() + '-' + mode;
+            String symbol = scenarioSymbol(productLine, mode, seed);
             long shortUser = user(10 + marginMode.ordinal() * 10);
             long longUser = user(11 + marginMode.ordinal() * 10);
             setupInstrument(symbol, ContractType.valueOf(productLine.contractTypeCode()), -1, 0, 0);
+            applyMark(symbol, 100);
             adjust(shortUser, settleAsset(), 1_000);
             adjust(longUser, settleAsset(), 1_000);
             place(shortUser, order(10 + marginMode.ordinal() * 10), symbol, CoreOrderSide.SELL,
                     marginMode, ReservationKind.DERIVATIVE_MARGIN, settleAsset(), 100, 10);
             place(longUser, order(11 + marginMode.ordinal() * 10), symbol, CoreOrderSide.BUY,
                     marginMode, ReservationKind.DERIVATIVE_MARGIN, settleAsset(), 100, 10);
-            applyMark(symbol, 1, 100);
             queryRisk(shortUser);
             queryRisk(longUser);
             applyFunding(symbol, 20_000L + marginMode.ordinal(), FUNDING_RATE_PPM);
             readFundingProgress(symbol);
             applyFunding(symbol, 20_100L + marginMode.ordinal(), Math.negateExact(FUNDING_RATE_PPM));
             readFundingProgress(symbol);
-            applyMark(symbol, 2, productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80);
+            applyMark(symbol, productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80);
             resolveBoundedLiquidationWork(symbol);
             queryAdlCandidates();
             runProviderCycles(symbol, shortUser);
-            requireBookEmpty();
+            requireBookEmpty(symbol);
             rows.add(productLine + ":" + mode + ":FUNDING_POSITIVE");
             rows.add(productLine + ":" + mode + ":FUNDING_NEGATIVE");
             rows.add(productLine + ":" + mode + ":MARK");
@@ -333,10 +389,11 @@ public final class W4LifecycleQaMain {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         for (CoreMarginMode marginMode : List.of(CoreMarginMode.CROSS, CoreMarginMode.ISOLATED)) {
             String mode = marginMode.name();
-            String symbol = "W4-" + productLine.name() + '-' + mode;
+            String symbol = scenarioSymbol(productLine, mode, seed);
             long buyer = user(30 + marginMode.ordinal() * 10);
             long seller = user(31 + marginMode.ordinal() * 10);
             setupInstrument(symbol, type, -1, 0, 2_000_000_000_000L);
+            applyMark(symbol, 100);
             adjust(buyer, settleAsset(), 1_000);
             adjust(seller, settleAsset(), 1_000);
             place(seller, order(30 + marginMode.ordinal() * 10), symbol, CoreOrderSide.SELL,
@@ -346,7 +403,7 @@ public final class W4LifecycleQaMain {
             settle(symbol, 110, 0, 1_000L + marginMode.ordinal());
             readSettlementProgress(symbol);
             runProviderCycles(symbol, buyer);
-            requireBookEmpty();
+            requireBookEmpty(symbol);
             rows.add(productLine + ":" + mode + ":SETTLEMENT");
         }
     }
@@ -354,13 +411,14 @@ public final class W4LifecycleQaMain {
     private void runOptions() {
         for (String optionType : List.of("CALL", "PUT")) {
             for (String moneyness : List.of("ITM", "ATM", "OTM")) {
-                String symbol = "W4-OPTION-" + optionType + '-' + moneyness;
+                String symbol = scenarioSymbol(productLine, optionType + '-' + moneyness, seed);
                 long buyer = user(100 + optionTypeOffset(optionType) + moneynessOffset(moneyness));
                 long seller = user(110 + optionTypeOffset(optionType) + moneynessOffset(moneyness));
                 int optionCode = optionType.equals("CALL") ? 0 : 1;
                 long settlementPrice = optionSettlementPrice(optionType, moneyness);
                 setupInstrument(symbol, ContractType.VANILLA_OPTION, optionCode, STRIKE,
                         2_000_000_000_000L);
+                applyMark(symbol, 100);
                 adjust(buyer, "USDT", 2_000);
                 adjust(seller, "USDT", 2_000);
                 place(seller, order(100 + optionTypeOffset(optionType) + moneynessOffset(moneyness)),
@@ -373,20 +431,15 @@ public final class W4LifecycleQaMain {
                         2_000L + optionTypeOffset(optionType) + moneynessOffset(moneyness));
                 readSettlementProgress(symbol);
                 runProviderCycles(symbol, buyer);
+                requireBookEmpty(symbol);
                 rows.add("OPTION:" + optionType + ':' + moneyness);
             }
         }
-        requireBookEmpty();
     }
 
     private void setupInstrument(String symbol, ContractType type, int optionCode,
                                  long strike, long expiry) {
-        upsertInstrumentViaProvider(symbol, type, optionCode, strike, expiry);
-        upsertCoreInstrument(symbol, type, optionCode, strike, expiry, VERSION);
-    }
-
-    private void upsertCoreInstrument(String symbol, ContractType type, int optionCode,
-                                      long strike, long expiry, long version) {
+        long version = upsertInstrumentViaProvider(symbol, type, optionCode, strike, expiry);
         command(CoreMessageType.UPSERT_INSTRUMENT, 0,
                 TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
                         symbol, version, type.ordinal(), BASE_ASSET,
@@ -394,9 +447,34 @@ public final class W4LifecycleQaMain {
                         type.isInverse() ? 100 : 1, 1, type.isInverse() ? 100 : 1,
                         100_000, 100_000, MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
                         expiry, optionCode, strike)));
+        awaitTradingInstrumentVersion(symbol, version);
+        instrumentVersions.put(symbol, version);
     }
 
-    private void upsertInstrumentViaProvider(String symbol, ContractType type, int optionCode,
+    private void awaitTradingInstrumentVersion(String symbol, long version) {
+        String body = "{\"userId\":" + makerUserId + ",\"clientOrderId\":"
+                + json("w4-version-probe-" + seed + '-' + symbol) + ",\"symbol\":" + json(symbol)
+                + ",\"side\":\"BUY\",\"orderType\":\"LIMIT\",\"timeInForce\":\"GTC\""
+                + ",\"priceTicks\":100,\"quantitySteps\":1,\"marginMode\":\"CROSS\""
+                + ",\"positionSide\":\"NET\",\"reduceOnly\":false,\"postOnly\":false}";
+        Instant deadline = Instant.now().plusSeconds(15);
+        long observed = 0;
+        while (Instant.now().isBefore(deadline)) {
+            String response = request("command", "POST", "/api/v1/trading/orders/test", body, Map.of());
+            observed = jsonLong(response, "\"instrumentVersion\":", ',');
+            if (observed == version) return;
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("instrument version wait interrupted", exception);
+            }
+        }
+        throw new IllegalStateException("trading instrument snapshot timeout symbol=" + symbol
+                + " expectedVersion=" + version + " observedVersion=" + observed);
+    }
+
+    private long upsertInstrumentViaProvider(String symbol, ContractType type, int optionCode,
                                              long strike, long expiry) {
         boolean spot = type == ContractType.SPOT;
         boolean perpetual = type.isPerpetual();
@@ -414,14 +492,14 @@ public final class W4LifecycleQaMain {
                 + ",\"maxLeveragePpm\":100000000,\"initialMarginRatePpm\":10000"
                 + ",\"maintenanceMarginRatePpm\":5000}]";
         String sources = spot ? "[]"
-                : "[{\"source\":\"W4-A\",\"enabled\":true,\"baseUrl\":\"http://127.0.0.1\","
-                + "\"path\":\"/health\",\"sourceSymbol\":\"BTCUSDT\",\"parser\":\"PLAIN\","
+                : "[{\"source\":\"W4-A\",\"enabled\":true,\"baseUrl\":" + json(indexFeed.baseUrl()) + ","
+                + "\"path\":\"/w4-a\",\"sourceSymbol\":\"BTCUSDT\",\"parser\":\"BINANCE_BOOK_TICKER\","
                 + "\"quoteCurrency\":\"USDT\",\"targetQuoteCurrency\":\"USDT\",\"conversionBaseUrl\":null,"
                 + "\"conversionPath\":null,\"conversionParser\":null,\"conversionMode\":null,"
                 + "\"conversionOperation\":null,\"fallbackWeightMultiplierPpm\":0,\"websocketEnabled\":false,"
                 + "\"websocketUrl\":null,\"websocketSubscribeMessage\":null,\"websocketParser\":null,\"weightPpm\":500000},"
-                + "{\"source\":\"W4-B\",\"enabled\":true,\"baseUrl\":\"http://127.0.0.1\","
-                + "\"path\":\"/health\",\"sourceSymbol\":\"BTCUSDT\",\"parser\":\"PLAIN\","
+                + "{\"source\":\"W4-B\",\"enabled\":true,\"baseUrl\":" + json(indexFeed.baseUrl()) + ","
+                + "\"path\":\"/w4-b\",\"sourceSymbol\":\"BTCUSDT\",\"parser\":\"BINANCE_BOOK_TICKER\","
                 + "\"quoteCurrency\":\"USDT\",\"targetQuoteCurrency\":\"USDT\",\"conversionBaseUrl\":null,"
                 + "\"conversionPath\":null,\"conversionParser\":null,\"conversionMode\":null,"
                 + "\"conversionOperation\":null,\"fallbackWeightMultiplierPpm\":0,\"websocketEnabled\":false,"
@@ -448,7 +526,8 @@ public final class W4LifecycleQaMain {
                 + ",\"optionExerciseStyle\":" + optionStyleJson + ",\"settlementMethod\":" + settlementJson
                 + ",\"status\":\"TRADING\",\"effectiveTime\":null,\"riskLimitBrackets\":" + brackets
                 + ",\"indexSources\":" + sources + "}";
-        request("instrument", "POST", "/api/v1/instruments/admin/upsert", body, Map.of());
+        String response = request("instrument", "POST", "/api/v1/instruments/admin/upsert", body, Map.of());
+        return jsonLong(response, "\"version\":", ',');
     }
 
     private void adjust(long userId, String asset, long units) {
@@ -527,7 +606,7 @@ public final class W4LifecycleQaMain {
             String identityResponse = acceptedResponse.contains("\"prospectiveOrderIds\":[]")
                     ? response : acceptedResponse;
             spotOrders.add(new SpotOrder(userId, jsonLong(identityResponse, "\"prospectiveOrderIds\":[", ']'),
-                    jsonLong(response, "\"requiredExportSequence\":", ',')));
+                    symbol, jsonLong(response, "\"requiredExportSequence\":", ',')));
         }
         providerBoundaryObserved = true;
     }
@@ -558,16 +637,55 @@ public final class W4LifecycleQaMain {
         return response;
     }
 
-    private void applyMark(String symbol, long priceSequence, long price) {
-        command(CoreMessageType.APPLY_MARK_PRICE, 0,
-                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, VERSION, price, priceSequence, 1_700_000_000_000L)));
+    private void applyMark(String symbol, long price) {
+        indexFeed.setMarkPriceTicks(price);
+        awaitPublishedMark(symbol, price);
+    }
+
+    private void awaitPublishedMark(String symbol, long expectedMarkPriceTicks) {
+        String probe = "{\"userId\":" + makerUserId + ",\"clientOrderId\":"
+                + json("w4-mark-probe-" + seed + '-' + symbol + '-' + expectedMarkPriceTicks)
+                + ",\"symbol\":" + json(symbol)
+                + ",\"side\":\"BUY\",\"orderType\":\"LIMIT\",\"timeInForce\":\"GTC\""
+                + ",\"priceTicks\":100,\"quantitySteps\":1,\"marginMode\":\"CROSS\""
+                + ",\"positionSide\":\"NET\",\"reduceOnly\":false,\"postOnly\":false}";
+        Instant deadline = Instant.now().plusSeconds(30);
+        String observed = "unavailable";
+        while (Instant.now().isBefore(deadline)) {
+            try {
+                String mark = request("price", "GET", "/api/v1/price/mark/latest?symbol=" + symbol,
+                        null, Map.of());
+                long units = jsonLong(mark, "\"markPriceUnits\":", ',');
+                String validation = request("trading", "POST", "/api/v1/trading/orders/test", probe, Map.of());
+                observed = "markPriceUnits=" + units + " validation=" + validation;
+                if (units == expectedMarkPriceTicks && !validation.contains("mark price unavailable")) {
+                    rows.add(productLine + ":" + symbol + ":REAL_PRICE_PIPELINE_MARK=" + expectedMarkPriceTicks);
+                    return;
+                }
+            } catch (IllegalStateException unavailable) {
+                observed = unavailable.getMessage();
+            }
+            try {
+                Thread.sleep(200L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("mark price pipeline wait interrupted", interrupted);
+            }
+        }
+        throw new IllegalStateException("mark price pipeline timeout symbol=" + symbol
+                + " expectedTicks=" + expectedMarkPriceTicks + " observed=" + observed);
     }
 
     private void applyFunding(String symbol, long settlementId, long fundingRatePpm) {
         command(CoreMessageType.APPLY_FUNDING, 0,
                 TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                        settlementId, symbol, VERSION, fundingRatePpm, 0, 256)));
+                        settlementId, symbol, instrumentVersion(symbol), fundingRatePpm, 0, 256)));
+    }
+
+    private long instrumentVersion(String symbol) {
+        Long version = instrumentVersions.get(symbol);
+        if (version == null) throw new IllegalStateException("instrument version unavailable: " + symbol);
+        return version;
     }
 
     private void settle(String symbol, long price, long underlyingSettlementPrice, long settlementId) {
@@ -599,9 +717,9 @@ public final class W4LifecycleQaMain {
         request("risk", "GET", "/api/v1/risk/account/latest?userId=" + userId
                 + "&accountType=" + productLine.accountTypeCode()
                 + "&settleAsset=" + settleAsset(), null, Map.of());
-        request("maker", "POST", "/api/v1/market-maker/run-once",
+        request("maker", "POST", makerRunOncePath(),
                 "{\"strategyId\":null,\"symbol\":" + json(symbol)
-                        + ",\"productLine\":" + json(productLine.name()) + "}", Map.of());
+                        + ",\"productLine\":" + json(productLine.name()) + "}", adminHeaders());
         providerBoundaryObserved = true;
         if (productLine == ProductLine.LINEAR_PERPETUAL || productLine == ProductLine.INVERSE_PERPETUAL) {
             request("funding", "POST", "/api/v1/funding/admin/run-cycle", null, adminHeaders());
@@ -687,63 +805,77 @@ public final class W4LifecycleQaMain {
         if (makerUserId <= 0) {
             throw new IllegalStateException("MAKER_USER_ID_REQUIRED");
         }
-        Map<String, Long> actual = new LinkedHashMap<>();
-        Map<String, Long> users = new LinkedHashMap<>();
-        Map<String, Long> fees = new LinkedHashMap<>();
-        Map<String, Long> insurance = new LinkedHashMap<>();
-        Map<String, Long> deficits = new LinkedHashMap<>();
         Set<Long> reconciliationUsers = new LinkedHashSet<>(participantUsers);
-        reconciliationUsers.add(makerUserId);
-        for (long userId : reconciliationUsers) {
-            CoreUserStateView state = CoreStateQueryCodec.decodeUserState(
-                    query(CoreMessageType.USER_STATE_QUERY, userId, new byte[0]));
-            rows.add("USER_STATE userId=" + userId + " balances=" + state.balances()
-                    + " reservations=" + state.reservations() + " positions=" + state.positions());
-            for (var balance : state.balances()) {
-                long total = Math.addExact(balance.availableUnits(), balance.lockedUnits());
-                users.merge(balance.asset(), total, Math::addExact);
-                actual.merge(balance.asset(), total, Math::addExact);
+        reconciliationUsers.addAll(makerUserIds);
+        for (int attempt = 1; attempt <= 100; attempt++) {
+            long hashBefore = queryResponse(CoreMessageType.BUSINESS_STATE_HASH_QUERY, 0, new byte[0]).stateHash();
+            Map<String, Long> actual = new LinkedHashMap<>();
+            Map<String, Long> users = new LinkedHashMap<>();
+            Map<String, Long> fees = new LinkedHashMap<>();
+            Map<String, Long> insurance = new LinkedHashMap<>();
+            Map<String, Long> deficits = new LinkedHashMap<>();
+            List<String> userRows = new ArrayList<>();
+            for (long userId : reconciliationUsers) {
+                CoreUserStateView state = CoreStateQueryCodec.decodeUserState(
+                        query(CoreMessageType.USER_STATE_QUERY, userId, new byte[0]));
+                userRows.add("USER_STATE userId=" + userId + " balances=" + state.balances()
+                        + " reservations=" + state.reservations() + " positions=" + state.positions());
+                for (var balance : state.balances()) {
+                    long total = Math.addExact(balance.availableUnits(), balance.lockedUnits());
+                    users.merge(balance.asset(), total, Math::addExact);
+                    actual.merge(balance.asset(), total, Math::addExact);
+                }
             }
+            for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
+                    query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
+                if (treasury.feeBalanceUnits() != 0) {
+                    feeLedgerObserved = true;
+                }
+                fees.put(treasury.asset(), treasury.feeBalanceUnits());
+                insurance.put(treasury.asset(), treasury.insuranceBalanceUnits());
+                deficits.put(treasury.asset(), treasury.insuranceDeficitUnits());
+                actual.merge(treasury.asset(), Math.subtractExact(
+                        Math.addExact(treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()),
+                        treasury.insuranceDeficitUnits()), Math::addExact);
+            }
+            long hashAfter = queryResponse(CoreMessageType.BUSINESS_STATE_HASH_QUERY, 0, new byte[0]).stateHash();
+            if (hashBefore != hashAfter) {
+                if (attempt == 100) {
+                    throw new IllegalStateException("RECONCILIATION_SNAPSHOT_UNSTABLE users="
+                            + reconciliationUsers);
+                }
+                continue;
+            }
+            Set<String> assets = new LinkedHashSet<>(expectedFunds.keySet());
+            assets.addAll(actual.keySet());
+            for (String asset : assets) {
+                long difference = Math.subtractExact(actual.getOrDefault(asset, 0L),
+                        expectedFunds.getOrDefault(asset, 0L));
+                if (difference != 0) {
+                    throw new IllegalStateException("FUNDS_DIFFERENCE asset=" + asset
+                            + " expected=" + expectedFunds.getOrDefault(asset, 0L)
+                            + " actual=" + actual.getOrDefault(asset, 0L)
+                            + " difference=" + difference
+                            + " users=" + users.getOrDefault(asset, 0L)
+                            + " fees=" + fees.getOrDefault(asset, 0L)
+                            + " insurance=" + insurance.getOrDefault(asset, 0L)
+                            + " deficit=" + deficits.getOrDefault(asset, 0L)
+                            + " reconciliationUsers=" + reconciliationUsers);
+                }
+                if (deficits.getOrDefault(asset, 0L) != 0) {
+                    throw new IllegalStateException("INSURANCE_DEFICIT_REMAINS asset=" + asset
+                            + " deficit=" + deficits.get(asset));
+                }
+            }
+            rows.addAll(userRows);
+            rows.add("USER_RECONCILIATION_OBSERVED");
+            rows.add("MAKER_RECONCILIATION_OBSERVED");
+            rows.add("TREASURY_RECONCILIATION_OBSERVED");
+            makerReconciliationObserved = true;
+            reconciliationObserved = true;
+            rows.add("FUNDS_DIFFERENCE=0");
+            return;
         }
-        rows.add("USER_RECONCILIATION_OBSERVED");
-        rows.add("MAKER_RECONCILIATION_OBSERVED");
-        makerReconciliationObserved = true;
-        for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
-                query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
-            if (treasury.feeBalanceUnits() != 0) {
-                feeLedgerObserved = true;
-            }
-            fees.put(treasury.asset(), treasury.feeBalanceUnits());
-            insurance.put(treasury.asset(), treasury.insuranceBalanceUnits());
-            deficits.put(treasury.asset(), treasury.insuranceDeficitUnits());
-            actual.merge(treasury.asset(), Math.subtractExact(
-                    Math.addExact(treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()),
-                    treasury.insuranceDeficitUnits()), Math::addExact);
-        }
-        Set<String> assets = new LinkedHashSet<>(expectedFunds.keySet());
-        assets.addAll(actual.keySet());
-        for (String asset : assets) {
-            long difference = Math.subtractExact(actual.getOrDefault(asset, 0L),
-                    expectedFunds.getOrDefault(asset, 0L));
-            if (difference != 0) {
-                throw new IllegalStateException("FUNDS_DIFFERENCE asset=" + asset
-                        + " expected=" + expectedFunds.getOrDefault(asset, 0L)
-                        + " actual=" + actual.getOrDefault(asset, 0L)
-                        + " difference=" + difference
-                        + " users=" + users.getOrDefault(asset, 0L)
-                        + " fees=" + fees.getOrDefault(asset, 0L)
-                        + " insurance=" + insurance.getOrDefault(asset, 0L)
-                        + " deficit=" + deficits.getOrDefault(asset, 0L)
-                        + " reconciliationUsers=" + reconciliationUsers);
-            }
-            if (deficits.getOrDefault(asset, 0L) != 0) {
-                throw new IllegalStateException("INSURANCE_DEFICIT_REMAINS asset=" + asset
-                        + " deficit=" + deficits.get(asset));
-            }
-        }
-        rows.add("TREASURY_RECONCILIATION_OBSERVED");
-        reconciliationObserved = true;
-        rows.add("FUNDS_DIFFERENCE=0");
     }
 
     private void requireFeeLedgerObserved() {
@@ -767,14 +899,15 @@ public final class W4LifecycleQaMain {
         }
     }
 
-    private void requireBookEmpty() {
+    private void requireBookEmpty(String symbol) {
         Instant deadline = Instant.now().plusSeconds(10);
         int levels;
         Object levelDetails = List.of();
         do {
             var book = OrderBookBootstrapLoader.load((type, payload) -> query(type, 0, payload));
-            levels = book.levels().size();
-            levelDetails = book.levels();
+            var symbolLevels = book.levels().stream().filter(level -> symbol.equals(level.symbol())).toList();
+            levels = symbolLevels.size();
+            levelDetails = symbolLevels;
             if (levels == 0) {
                 return;
             }
@@ -795,11 +928,17 @@ public final class W4LifecycleQaMain {
         while (Instant.now().isBefore(deadline)) {
             boolean allFilled = true;
             for (SpotOrder order : spotOrders) {
-                String path = "/api/v1/trading/orders/" + order.orderId()
-                        + "?userId=" + order.userId() + "&minExportSequence=" + order.requiredExportSequence();
+                String path = "/api/v1/trading/orders/history?userId=" + order.userId()
+                        + "&symbol=" + order.symbol() + "&limit=100&orderId=" + order.orderId()
+                        + "&minExportSequence=" + order.requiredExportSequence();
                 try {
                     String response = request("command", "GET", path, null, Map.of());
-                    String status = jsonString(response, "\"status\":\"");
+                    int orderStart = response.indexOf("\"orderId\":" + order.orderId());
+                    if (orderStart < 0) {
+                        allFilled = false;
+                        continue;
+                    }
+                    String status = jsonString(response.substring(orderStart), "\"status\":\"");
                     if ("REJECTED".equals(status)) {
                         throw new IllegalStateException("spot order rejected after command acceptance: " + response);
                     }
@@ -807,7 +946,8 @@ public final class W4LifecycleQaMain {
                         allFilled = false;
                     }
                 } catch (IllegalStateException exception) {
-                    if (!exception.getMessage().startsWith("HTTP_409")) {
+                    String message = exception.getMessage();
+                    if (!message.startsWith("HTTP_404") && !message.startsWith("HTTP_409")) {
                         throw exception;
                     }
                     allFilled = false;
@@ -836,6 +976,19 @@ public final class W4LifecycleQaMain {
         return Long.parseLong(body.substring(start, end).replaceAll("[^0-9-].*", ""));
     }
 
+    private static List<Long> configuredMakerUserIds() {
+        String configured = System.getProperty("surprising.aeron.w4-maker-user-ids");
+        if (configured == null || configured.isBlank()) {
+            return List.of(configuredPositiveLong("surprising.aeron.w4-maker-user-id"));
+        }
+        List<Long> values = Arrays.stream(configured.split(",")).map(String::trim)
+                .filter(value -> !value.isEmpty()).map(Long::parseLong).toList();
+        if (values.isEmpty() || values.stream().anyMatch(value -> value <= 0)) {
+            throw new IllegalArgumentException("surprising.aeron.w4-maker-user-ids must contain positive ids");
+        }
+        return values;
+    }
+
     private static String jsonString(String body, String prefix) {
         int start = body.indexOf(prefix);
         if (start < 0) throw new IllegalStateException("missing JSON field " + prefix + " body=" + body);
@@ -844,7 +997,74 @@ public final class W4LifecycleQaMain {
         return body.substring(start, end);
     }
 
-    private record SpotOrder(long userId, long orderId, long requiredExportSequence) {
+    @Override
+    public void close() {
+        indexFeed.close();
+    }
+
+    private static final class ControlledIndexFeed implements AutoCloseable {
+        private final AtomicLong markPriceTicks = new AtomicLong(100L);
+        private final HttpServer server;
+        private final ExecutorService executor;
+
+        private ControlledIndexFeed(HttpServer server, ExecutorService executor) {
+            this.server = server;
+            this.executor = executor;
+        }
+
+        static ControlledIndexFeed start() {
+            try {
+                HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 16);
+                ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+                ControlledIndexFeed feed = new ControlledIndexFeed(server, executor);
+                server.createContext("/w4-a", feed::respond);
+                server.createContext("/w4-b", feed::respond);
+                server.setExecutor(executor);
+                server.start();
+                return feed;
+            } catch (IOException exception) {
+                throw new IllegalStateException("failed to start controlled index-price feed", exception);
+            }
+        }
+
+        String baseUrl() {
+            return "http://127.0.0.1:" + server.getAddress().getPort();
+        }
+
+        void setMarkPriceTicks(long value) {
+            if (value <= 0) throw new IllegalArgumentException("mark price ticks must be positive");
+            markPriceTicks.set(value);
+        }
+
+        private void respond(HttpExchange exchange) throws IOException {
+            byte[] response;
+            int status;
+            if (!"GET".equals(exchange.getRequestMethod())) {
+                status = 405;
+                response = new byte[0];
+            } else {
+                status = 200;
+                String price = BigDecimal.valueOf(markPriceTicks.get())
+                        .divide(BigDecimal.valueOf(QUOTE_SCALE_UNITS)).toPlainString();
+                response = ("{\"symbol\":\"BTCUSDT\",\"bidPrice\":" + json(price)
+                        + ",\"askPrice\":" + json(price) + ",\"E\":" + System.currentTimeMillis() + '}')
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.getResponseHeaders().set("Cache-Control", "no-store");
+            }
+            exchange.sendResponseHeaders(status, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        }
+
+        @Override
+        public void close() {
+            server.stop(0);
+            executor.shutdownNow();
+        }
+    }
+
+    private record SpotOrder(long userId, long orderId, String symbol, long requiredExportSequence) {
     }
 
     private void command(CoreMessageType type, long userId, byte[] payload) {
@@ -898,6 +1118,10 @@ public final class W4LifecycleQaMain {
     }
 
     private byte[] query(CoreMessageType type, long userId, byte[] payload) {
+        return queryResponse(type, userId, payload).data();
+    }
+
+    private CoreResponse queryResponse(CoreMessageType type, long userId, byte[] payload) {
         long correlation = nextSequence();
         CoreMessage message = new CoreMessage(CoreMessageHeader.query(
                 type, UUID.nameUUIDFromBytes((productLine + ":query:" + correlation + ':' + type)
@@ -910,7 +1134,7 @@ public final class W4LifecycleQaMain {
                 if (response.status() != ResponseStatus.OK) {
                     throw new IllegalStateException(type + " query rejected result=" + response.resultCode());
                 }
-                return response.data();
+                return response;
             } catch (ResultUnknownException exception) {
                 last = exception;
                 if (attempt == 20) throw exception;
