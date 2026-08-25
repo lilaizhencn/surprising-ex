@@ -54,10 +54,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("funding.rate");
     }
 
-    public String publicTradesTopic() {
-        return topic("trade.events");
-    }
-
     public String coreEventsTopic() {
         return topic("core.events");
     }
