@@ -136,7 +136,7 @@ curl 'http://localhost:9082/api/v1/price/fx/convert?amount=100&fromCurrency=USDT
 ```text
 surprising.linear-perp.price.events.v1 (INDEX_PRICE branch)
 surprising.linear-perp.book.ticker.v1
-surprising.linear-perp.trade.events.v1
+surprising.linear-perp.match.trades.v1
 surprising.linear-perp.funding.rate.v1
 ```
 

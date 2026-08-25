@@ -21,14 +21,17 @@ class MarkPriceEncodingServiceTest {
         MarkPriceProperties properties = new MarkPriceProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
         InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
-        cache.replace(ProductLine.INVERSE_PERPETUAL, List.of(instrument()), Map.of("USD", 100_000_000L));
+        cache.replace(ProductLine.INVERSE_PERPETUAL, List.of(instrument()),
+                Map.of("BTC", 100_000_000L, "USD", 100_000_000L));
         MarkPriceEncodingService service = new MarkPriceEncodingService(properties, cache);
 
-        MarkPriceEncoding encoding = service.encoding("BTC-USD");
+        MarkPriceEncoding encoding = service.encoding("BTC-USD", 8L);
 
         assertThat(encoding.instrumentVersion()).isEqualTo(8L);
         assertThat(encoding.quoteScaleUnits()).isEqualTo(100_000_000L);
         assertThat(encoding.priceTickUnits()).isEqualTo(10L);
+        assertThat(encoding.baseScaleUnits()).isEqualTo(100_000_000L);
+        assertThat(encoding.quantityStepUnits()).isEqualTo(1L);
     }
 
     private InstrumentResponse instrument() {

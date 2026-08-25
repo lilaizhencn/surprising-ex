@@ -10,8 +10,8 @@ import java.time.Instant;
 /**
  * Last-trade input for mark price calculation.
  *
- * <p>This intentionally matches the core fields of the candlestick trade event so the mark price
- * service can consume the same perpetual trade topic and ignore unneeded fields.</p>
+ * <p>This is the internal calculation and audit representation after canonical matcher trades
+ * have been converted from their fixed-point wire encoding.</p>
  */
 public record PerpTradeEvent(
         @NotBlank String symbol,

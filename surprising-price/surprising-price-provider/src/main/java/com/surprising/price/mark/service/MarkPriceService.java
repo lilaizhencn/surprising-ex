@@ -12,6 +12,8 @@ import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.BasisWindow;
 import com.surprising.price.mark.model.MarkPriceEncoding;
+import com.surprising.trading.api.KafkaSymbolKeyValidator;
+import com.surprising.trading.api.model.PublicTradeEvent;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -39,6 +41,7 @@ import tools.jackson.databind.ObjectMapper;
     private final MarkPriceCoordinationService coordinationService;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final LatestMarkPriceCache latestMarkPriceCache;
+    private final PublicTradeEventMapper publicTradeEventMapper;
     private MarkPriceCorePublisher corePublisher = null;
     private final String nodeId;
 
@@ -55,13 +58,15 @@ import tools.jackson.databind.ObjectMapper;
                             MarkPriceCalculator markPriceCalculator,
                             MarkPriceCoordinationService coordinationService,
                             @Qualifier("markKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
-                            LatestMarkPriceCache latestMarkPriceCache) {
+                            LatestMarkPriceCache latestMarkPriceCache,
+                            PublicTradeEventMapper publicTradeEventMapper) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.markPriceCalculator = markPriceCalculator;
         this.coordinationService = coordinationService;
         this.kafkaTemplate = kafkaTemplate;
         this.latestMarkPriceCache = latestMarkPriceCache;
+        this.publicTradeEventMapper = publicTradeEventMapper;
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
     }
 
@@ -88,14 +93,23 @@ import tools.jackson.databind.ObjectMapper;
         parse(payload, PerpBookTickerEvent.class, "book ticker", event -> bookTickers.put(event.symbol(), event));
     }
 
-    @KafkaListener(topics = "#{__listener.tradeTopic()}", groupId = "#{__listener.groupId()}")
+    @KafkaListener(topics = "#{__listener.matchTradesTopic()}", groupId = "#{__listener.groupId()}")
     public void onTrade(ConsumerRecord<String, String> record) {
-        requireCurrentProductTopic(record.topic(), tradeTopic(), "trade");
-        onTrade(record.value());
+        requireCurrentProductTopic(record.topic(), matchTradesTopic(), "match trade");
+        try {
+            PublicTradeEvent event = objectMapper.readValue(record.value(), PublicTradeEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match trade");
+            acceptTrade(publicTradeEventMapper.toPerpTradeEvent(event));
+        } catch (Exception ex) {
+            log.warn("Dropped invalid match trade payload: {}", ex.getMessage());
+        }
     }
 
-    void onTrade(String payload) {
-        parse(payload, PerpTradeEvent.class, "trade", event -> trades.put(event.symbol(), event));
+    void acceptTrade(PerpTradeEvent event) {
+        if (event == null || event.symbol() == null || event.symbol().isBlank()) {
+            throw new IllegalArgumentException("trade event is required");
+        }
+        trades.put(event.symbol(), event);
     }
 
     @KafkaListener(topics = "#{__listener.fundingRateTopic()}",
@@ -128,7 +142,7 @@ import tools.jackson.databind.ObjectMapper;
         }
         MarkPriceEncoding encoding;
         try {
-            encoding = coordinationService.encoding(symbol);
+            encoding = coordinationService.currentEncoding(symbol);
         } catch (IllegalStateException ex) {
             if (ex.getMessage() != null && ex.getMessage().startsWith("mark price encoding not found for ")) {
                 return false;
@@ -172,8 +186,8 @@ import tools.jackson.databind.ObjectMapper;
         return properties.bookTickerTopic();
     }
 
-    public String tradeTopic() {
-        return properties.tradeTopic();
+    public String matchTradesTopic() {
+        return properties.matchTradesTopic();
     }
 
     public String fundingRateTopic() {

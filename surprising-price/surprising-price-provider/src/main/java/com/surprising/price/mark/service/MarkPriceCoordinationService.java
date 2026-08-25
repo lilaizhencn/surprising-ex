@@ -34,7 +34,7 @@ public class MarkPriceCoordinationService {
         return leaseRepository.acquire(module, symbol, ownerId, leaseDuration);
     }
 
-    public MarkPriceEncoding encoding(String symbol) {
-        return encodingService.encoding(symbol);
+    public MarkPriceEncoding currentEncoding(String symbol) {
+        return encodingService.currentEncoding(symbol);
     }
 }

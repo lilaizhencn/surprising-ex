@@ -129,7 +129,6 @@ surprising:
         max-poll-records: 500
       topics:
         book-ticker-topic: surprising.perp.book.ticker.v1
-        trade-topic: surprising.perp.trade.events.v1
         funding-rate-topic: surprising.perp.funding.rate.v1
         price-events-topic: surprising.perp.price.events.v1
       calculation:

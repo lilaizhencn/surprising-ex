@@ -26,7 +26,7 @@ class MarkKafkaConfigurationTest {
 
         assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-linear-perp-mark-price-v1");
         assertThat(properties.bookTickerTopic()).isEqualTo("surprising.linear-perp.book.ticker.v1");
-        assertThat(properties.tradeTopic()).isEqualTo("surprising.linear-perp.trade.events.v1");
+        assertThat(properties.matchTradesTopic()).isEqualTo("surprising.linear-perp.match.trades.v1");
         assertThat(properties.isFundingRateExpected()).isTrue();
         assertThat(properties.fundingRateTopic()).isEqualTo("surprising.linear-perp.funding.rate.v1");
         assertThat(properties.priceEventsTopic()).isEqualTo("surprising.linear-perp.price.events.v1");
@@ -42,7 +42,7 @@ class MarkKafkaConfigurationTest {
 
         assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-inverse-delivery-mark-price-v1");
         assertThat(properties.bookTickerTopic()).isEqualTo("surprising.inverse-delivery.book.ticker.v1");
-        assertThat(properties.tradeTopic()).isEqualTo("surprising.inverse-delivery.trade.events.v1");
+        assertThat(properties.matchTradesTopic()).isEqualTo("surprising.inverse-delivery.match.trades.v1");
         assertThat(properties.isFundingRateExpected()).isFalse();
         assertThat(properties.fundingRateTopic()).isEqualTo("surprising.inverse-delivery.funding.rate.v1");
         assertThat(properties.priceEventsTopic()).isEqualTo("surprising.inverse-delivery.price.events.v1");

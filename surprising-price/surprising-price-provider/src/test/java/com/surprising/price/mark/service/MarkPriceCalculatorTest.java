@@ -32,7 +32,7 @@ class MarkPriceCalculatorTest {
                 new PerpTradeEvent("BTC-USDT", "t1", 1, now, new BigDecimal("101.00"), BigDecimal.ONE, "BUY"),
                 new PerpFundingRateEvent("BTC-USDT", BigDecimal.ZERO, now.plusSeconds(3600), 8, 1, now),
                 BigDecimal.ONE,
-                new MarkPriceEncoding(7L, 100_000_000L, 1_000_000L),
+                new MarkPriceEncoding(7L, 100_000_000L, 1_000_000L, 100_000_000L, 1L),
                 now);
 
         assertThat(event.price1()).isEqualByComparingTo("100.000000000000000000");
@@ -64,7 +64,7 @@ class MarkPriceCalculatorTest {
                         new BigDecimal("100.00"), BigDecimal.ONE, "BUY"),
                 null,
                 BigDecimal.ZERO,
-                new MarkPriceEncoding(3L, 100_000_000L, 1_000_000L),
+                new MarkPriceEncoding(3L, 100_000_000L, 1_000_000L, 100_000_000L, 1L),
                 now);
 
         assertThat(event.status()).isEqualTo(PriceStatus.HEALTHY);
@@ -85,7 +85,7 @@ class MarkPriceCalculatorTest {
                 new PerpTradeEvent("BTC-USDT", "t1", 1, now, new BigDecimal("100.00"), BigDecimal.ONE, "BUY"),
                 null,
                 BigDecimal.ZERO,
-                new MarkPriceEncoding(1L, 100_000_000L, 1_000_000L),
+                new MarkPriceEncoding(1L, 100_000_000L, 1_000_000L, 100_000_000L, 1L),
                 now);
 
         assertThat(event.nextFundingTime()).isEqualTo(Instant.parse("2026-06-30T16:00:00Z"));

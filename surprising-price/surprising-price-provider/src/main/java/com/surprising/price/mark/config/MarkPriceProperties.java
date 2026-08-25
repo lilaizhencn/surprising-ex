@@ -108,8 +108,8 @@ public class MarkPriceProperties {
         return productTopics().bookTickerTopic();
     }
 
-    public String tradeTopic() {
-        return productTopics().publicTradesTopic();
+    public String matchTradesTopic() {
+        return productTopics().matchTradesTopic();
     }
 
     public String fundingRateTopic() {
@@ -177,7 +177,6 @@ public class MarkPriceProperties {
 
     public static class Topics {
         private String bookTickerTopic = "surprising.perp.book.ticker.v1";
-        private String tradeTopic = "surprising.perp.trade.events.v1";
         private String fundingRateTopic = "surprising.perp.funding.rate.v1";
         private String priceEventsTopic = "surprising.perp.price.events.v1";
 
@@ -187,14 +186,6 @@ public class MarkPriceProperties {
 
         public void setBookTickerTopic(String bookTickerTopic) {
             this.bookTickerTopic = bookTickerTopic;
-        }
-
-        public String getTradeTopic() {
-            return tradeTopic;
-        }
-
-        public void setTradeTopic(String tradeTopic) {
-            this.tradeTopic = tradeTopic;
         }
 
         public String getFundingRateTopic() {
