@@ -41,9 +41,9 @@ P0-P5 已完成。当前写格式为 command/envelope schema v3、export event m
 sectioned snapshot v13；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
 
 P10 的目标不是物理 Core shard；每个三节点 Product Core 仍只运行一个共享的 Adapter/ExchangeCore，按 symbol 的
-Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Account Lane 只在账户阶段性能证据达到门槛后
-实施，Treasury 默认保持 Sequencer owner。全局 Core sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer
-协调。该方案当前仅完成设计、尚未实施；完整所有权、无锁队列、资金提交、快照一致性、恢复门禁、
+Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Account Lane 是默认必须实施的运行时边界，
+生产默认 `accountLaneCount=4`；Treasury 保持 Sequencer owner。全局 Core sequence、Core Fact、snapshot 和恢复仍由一个
+确定性 Sequencer 协调。该方案当前仅完成设计、尚未实施；完整所有权、无锁队列、资金提交、快照一致性、恢复门禁、
 代码修改清单和验收矩阵见 [P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)。在该文档
 完成定义全部通过前，运行时仍保持 `routeVersion=1`、单 Runtime owner 和全局 one-in-flight matcher。
 

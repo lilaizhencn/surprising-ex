@@ -4,7 +4,7 @@
 >
 > 本文定义 P10 的唯一实施方向。P10 不拆分物理 Product Core，不改变“一条产品线对应一个三节点
 > Aeron Cluster”的部署边界。每个 Product Core 只运行一个共享的 `ExchangeCore`；Matcher Lane 仅指该实例内部
-> exchange-core 原生 `MatchingEngineRouter` shard。Account Lane 必须由性能证据触发后再实施，Treasury 默认继续由
+> exchange-core 原生 `MatchingEngineRouter` shard。Account Lane 是 P10 默认且必须实施的运行时边界，Treasury 继续由
 > Sequencer 串行裁决。本文不是当前运行能力声明；只有完成文末全部门禁后，才能把 P10 标记为完成。
 
 ## 1. 目标与非目标
@@ -14,7 +14,7 @@
 - 保持一个 ProductLine 一个三节点 Product Core、一个 Aeron Cluster Log、一个全局 Core sequence 和一条事实链。
 - 在一个共享 `ExchangeCore` 内按 symbol 使用原生 matching shard，并允许有界 matcher pipeline；不复制 engine。
 - 按 userId 将余额、冻结、订单元数据、持仓、风险和生命周期状态分给固定 owner 线程；同一用户严格串行，
-  不同 Account Lane 可以并行。只有基准证明账户热路径成为瓶颈时才实施这一阶段。
+  不同 Account Lane 可以并行。生产默认 `accountLaneCount=4`，只能在 fresh compatible state 启动前配置为其他 2 的幂。
 - 手续费、保险基金、亏损缺口、资金费残差、交割/行权和舍入残差默认保留在 Sequencer owner；不为低成本 O(1)
   posting 预先引入 Treasury worker 或跨 Lane 事务。
 - 跨 Lane 成交仍具有确定的原子可见性、资金守恒和唯一 Core Fact，不使用业务锁，不创建第二套权威状态。
@@ -73,7 +73,7 @@ Aeron Cluster owner / Sequencer
           |      `-- one ExchangeCore
           |             +-- MatchingEngineRouter[0..N-1]
           |             `-- RiskEngine[0] (MATCHING_ONLY technical state)
-          +-- AccountLane[0..M-1]（可选，证据触发）
+          +-- AccountLane[0..M-1]（P10 默认必需）
           `-- Treasury Runtime（Sequencer owner）
 ```
 
@@ -83,8 +83,8 @@ Aeron Cluster owner / Sequencer
   `MatchingEngineRouter` 根据 `symbolId & shardMask` 处理各自 symbol；所有 shard 共享一个 API/ring、technical
   registry、native sequence、不可变结果出口和配对 snapshot。一个 symbol 始终由一个 native shard 串行处理。
 - **Account Lane**：独占所属用户的余额、冻结、活动订单元数据、reservation、持仓、条件单、风险状态、强平状态、
-  client-order/source identity 的用户侧索引。P10 默认先保持 `accountLaneCount=1`；只有账户阶段 CPU/延迟证据达到
-  实施门槛后才增加。
+  client-order/source identity 的用户侧索引。P10 生产默认 `accountLaneCount=4`；`accountLaneCount=1` 只用于
+  P10-A 等价性 characterization，不能作为 P10 完成后的生产配置。
 - **Treasury Runtime**：fee、insurance、deficit、funding residual、rounding residual、delivery/exercise clearing
   继续由 Sequencer owner O(1) 更新。U 本位全部集中于 USDT，按 asset 创建 worker 不能消除热点，反而增加提交协议。
 
@@ -110,7 +110,7 @@ Aeron Cluster owner / Sequencer
   拒绝。三个 Member 的调度不同，本地容量判断不能成为确定性状态输入。
 
 Sequencer 使用固定 transaction slots 和有界 matcher dispatch window。window 只控制何时派发已记录命令，不改变命令
-业务结果；溢出表示容量配置或节点健康故障，必须 fail closed，不能生成拒绝 Core Fact。Account Lane 启用后，credits
+业务结果；溢出表示容量配置或节点健康故障，必须 fail closed，不能生成拒绝 Core Fact。Account Lane credits
 只由 Sequencer 按逻辑 dispatched/committed sequence 维护，Lane 完成时归还；不得用本地瞬时 queue occupancy 决定业务结果。
 
 ## 4. 线程、队列和内存模型
@@ -118,7 +118,7 @@ Sequencer 使用固定 transaction slots 和有界 matcher dispatch window。win
 ### 4.1 Owner 规则
 
 - 共享 `ExchangeCore` 只由 exchange-core 自己的 Disruptor/MatchingEngineRouter 线程修改；Core 不再创建 matcher owner。
-- 每个已启用 Account Lane 只有一个固定 owner thread；只有 owner 能修改其 primitive collections。
+- 每个 Account Lane 只有一个固定 owner thread；只有 owner 能修改其 primitive collections。
 - Sequencer 与 Lane 间只传递不可变值对象或预分配槽位的只读句柄。
 - Lane 之间不能直接调用彼此的可变对象，也不能直接写另一 Lane 的 ACK、余额或状态。
 - Query 不直接读取 Lane Map。Query 由 Sequencer 路由到有界 query queue，只返回已全局 commit 的版本。
@@ -151,7 +151,7 @@ Account Lane 队列必须保持 Sequencer 单写、Lane owner 单读。禁止
 
 ### 4.4 复杂度预算
 
-Lane 化只允许增加四类必要概念：静态 `LaneTopology`、可选 `AccountLaneState[]`、不可变 `SettlementPlan` 和固定容量
+Lane 化只允许增加四类必要概念：静态 `LaneTopology`、`AccountLaneState[]`、不可变 `SettlementPlan` 和固定容量
 transaction slot。不得增加第二个 ExchangeCore、Treasury worker、actor framework、通用事务协调器、动态 rebalance、
 分布式锁、MVCC 版本链、补偿 Saga、第二套 Runtime 或 Lane 专用业务 kernel。
 
@@ -408,15 +408,15 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 
 - 保留一个 Adapter；把“一组全局 pending matching + 全局完成门”改为固定 transaction slot ring、共享 matcher
   dispatch window、按 coreSequence 的 completion buffer 和 commit cursor。
-- 不创建 `MatcherLane[]` 或 `TreasuryLane[]`。只有账户阶段证据通过后才创建固定 `AccountLane[]`。
+- 不创建 `MatcherLane[]` 或 `TreasuryLane[]`；P10-C 必须创建固定 `AccountLane[]`。
 - ingress、credit、route、ACK、commit cursor、fact/outbox 和 snapshot fence 只由 Cluster owner 修改。
 - callback 只写有界 completion queue；不能修改 Runtime。snapshot 实现第 9 节共享 ExchangeCore barrier。
 
 ### 11.3 `TradingCoreRuntime` 与 `TradingRuntimeState`
 
-- `TradingCoreRuntime` 继续是统一 facade，新增 matcher topology、可选 account route、committed sequence 和 read fence。
-- `TradingRuntimeState` 不删除、不复制；默认保持单 owner。账户阶段通过后才在内部拆成 `AccountLaneState[]` 与只读
-  topology；Treasury 始终由 Sequencer owner 持有。
+- `TradingCoreRuntime` 继续是统一 facade，新增 matcher topology、account route、committed sequence 和 read fence。
+- `TradingRuntimeState` 不删除、不复制；P10-C 在内部拆成固定 `AccountLaneState[]` 与只读 topology；Treasury 始终由
+  Sequencer owner 持有。
 - users、balances、orders、reservations、positions、triggers、liquidations、risk/ADL 和用户索引移动到 Account Lane。
 - fee/insurance/deficit/funding residual/rounding/clearing 不移动，不创建 Treasury worker。
 - 风险扫描集合复制/`toArray` 改成 Lane 内稳定 primitive cursor，并让 cursor 进入 snapshot。
@@ -437,7 +437,7 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 ### 11.5 结算、风险与索引
 
 - 六个 `SettlementKernel` 输出统一 `SettlementPlan`，不能直接修改多个 Lane。
-- Account Lane 阶段才新增轻量 primitive posting/applier 和固定 transaction slot；不引入通用 Saga、事务框架或对象图。
+- P10-C/D 新增轻量 primitive posting/applier 和固定 transaction slot；不引入通用 Saga、事务框架或对象图。
 - 活动订单索引支持 `user -> orders` 与 `symbol -> affected accountLane bitset`，由 owner 增量维护。
 - funding、delivery、exercise、liquidation、ADL、trigger cursor 全部带 laneId 并可快照恢复。
 - 跨 Account Lane 业务测试逐资产核对 Account posting、Sequencer Treasury posting 和 `FundsDelta` 完全相等。
@@ -461,9 +461,8 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 
 ## 12. 实施阶段
 
-不得一次性重写整个 Core。每阶段保持唯一权威和可恢复性，完成已触发阶段的代码后统一进入测试波次。P10-A、
-P10-B、P10-F、P10-G 是固定阶段；P10-C、P10-D、P10-E 只有账户 owner 的 CPU/尾延迟证据超过验收阈值时才触发。
-未触发不是省略：必须保存基准证据，并验证 `accountLaneCount=1` 的现有串行账户、风险和生命周期路径。
+不得一次性重写整个 Core。P10-A 至 P10-G 全部是固定必做阶段；每阶段保持唯一权威和可恢复性，所有阶段代码完成后
+统一进入测试波次。`accountLaneCount=1` 只用于 P10-A characterization，P10-C 起生产默认使用 4 个 Account Lane。
 
 ### P10-A：共享 ExchangeCore topology 与等价基线
 
@@ -481,8 +480,8 @@ P10-B、P10-F、P10-G 是固定阶段；P10-C、P10-D、P10-E 只有账户 owner
 
 ### P10-C：Account Lane 预占与单 Lane 命令
 
-- 只有 P10-B 压测证明账户处理已经成为主要 CPU/尾延迟瓶颈时才启动本阶段；否则记录证据并保持单 owner。
-- 按 userId 分离 owner state、identity、reservation 和 query。
+- 本阶段是固定必做项，不以账户 CPU 是否已成为瓶颈为前置条件。
+- 生产默认创建 4 个 Account Lane，按 userId 分离 owner state、identity、reservation 和 query。
 - reservation 使用 provisional transaction slot，不产生单独 Core Fact；覆盖充值/调整/下单/撤单。
 - 热点 maker 必须通过多个业务独立的 maker 子账户扩展；同一用户不能跨 Lane 并发。
 
@@ -544,10 +543,9 @@ P10-B、P10-F、P10-G 是固定阶段；P10-C、P10-D、P10-E 只有账户 owner
 
 只有以下条件全部满足，P10 才能从“设计冻结，尚未实施”改为“完成”：
 
-- P10-A、P10-B、P10-F、P10-G 全部落地；P10-C、P10-D、P10-E 若被性能证据触发则全部落地，未触发时必须有
-  可复核基准和 `accountLaneCount=1` 的完整业务验证。不存在兼容 fallback。
+- P10-A 至 P10-G 的生产代码和协议/快照版本全部落地；Account Lane 默认启用且生产默认数为 4，不存在兼容 fallback。
 - 一个 ProductLine 仍只有一个物理三节点 Product Core、一个 global Core sequence 和一条 Core Fact 链。
-- 一个共享 ExchangeCore、native matcher shard、bounded dispatch window、Account ownership（如启用）、
+- 一个共享 ExchangeCore、native matcher shard、bounded dispatch window、默认 Account ownership、
   prepare/commit、Sequencer Treasury 和 query visibility 均有自动化和真实表面证据。
 - 六产品线资金、持仓、平仓/爆仓/触发/资金费/交割/行权全部正确且逐资产守恒。
 - snapshot、恢复、Archive replay 和三节点故障矩阵全部 fail-safe，并通过 hash/prefix 连续性核对。

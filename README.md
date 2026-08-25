@@ -24,7 +24,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P7 | fatal / readiness campaign：致命故障和就绪性验证，不是 P0-P5 行为改动。 |
 | P8 | three-node recovery certification：三节点恢复认证，不是 P0-P5 行为改动。 |
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
-| P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个共享 ExchangeCore，以原生 symbol matcher shard 和证据触发的 user Account Lane 扩展；Treasury 默认保持 Sequencer owner，不包含物理 Core shard。实施规范见 [`docs/P10-DETERMINISTIC-LANES.md`](docs/P10-DETERMINISTIC-LANES.md)。 |
+| P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个共享 ExchangeCore，以原生 symbol matcher shard 和默认启用的 user Account Lane 扩展；Treasury 保持 Sequencer owner，不包含物理 Core shard。实施规范见 [`docs/P10-DETERMINISTIC-LANES.md`](docs/P10-DETERMINISTIC-LANES.md)。 |
 
 当前实现状态：P0-P5 已完成；P6-P10 仍是后续验证和容量工作。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
