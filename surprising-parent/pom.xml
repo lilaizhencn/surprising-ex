@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.0</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
 
@@ -25,12 +25,12 @@
         <rpc.version>1.0.0-SNAPSHOT</rpc.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <spring-boot.version>4.1.0</spring-boot.version>
+        <spring-boot.version>4.1.1</spring-boot.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <tomcat.version>11.0.21</tomcat.version>
         <hibernate-validator.version>9.1.0.Final</hibernate-validator.version>
         <postgresql.version>42.7.11</postgresql.version>
-        <spring-cloud.version>2025.1.2</spring-cloud.version>
+        <spring-cloud.version>2025.1.3</spring-cloud.version>
         <bouncycastle.version>1.82</bouncycastle.version>
         <exchange-core.version>0.5.16-emporia</exchange-core.version>
         <exchange-core.repository>https://github.com/lilaizhencn/exchange-core.git</exchange-core.repository>
