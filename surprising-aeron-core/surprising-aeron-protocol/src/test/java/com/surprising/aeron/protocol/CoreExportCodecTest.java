@@ -30,7 +30,9 @@ class CoreExportCodecTest {
         CoreExportEvent event = new CoreExportEvent(7, 11, 13, commandId,
                 CoreMessageType.ADJUST_BALANCE, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 17, new byte[]{1, 2, 3}, List.of(user), List.of(order), List.of(execution), List.of(funding),
-                List.of(liquidation), List.of(treasury));
+                List.of(liquidation), List.of(treasury), List.of(), 10, 20, 21,
+                new CoreMatcherTransition(40, 42, 0x1020_3040_5060_7080L, 0x1121_3141_5161_7181L),
+                23, List.of(), null);
         CoreMessage message = new CoreMessage(new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION,
                 WireMessageKind.EXPORT_EVENT, CoreMessageType.CORE_EVENT, commandId, ProductLine.SPOT,
                 CoreRoute.DEFAULT, CommandSource.GATEWAY, 1, 7, 17, 19, 23), CoreExportCodec.encodeEvent(event));
@@ -49,6 +51,7 @@ class CoreExportCodecTest {
         assertThat(restored.fundingPayments()).containsExactly(funding);
         assertThat(restored.changedLiquidations()).containsExactly(liquidation);
         assertThat(restored.changedTreasuryAssets()).containsExactly(treasury);
+        assertThat(restored.matcherTransition()).isEqualTo(event.matcherTransition());
         assertThat(batch).containsExactly(message);
         assertThat(batch.getFirst().header().route()).isEqualTo(CoreRoute.DEFAULT);
         assertThat(batchWithStatus.acknowledgedSequence()).isEqualTo(6);

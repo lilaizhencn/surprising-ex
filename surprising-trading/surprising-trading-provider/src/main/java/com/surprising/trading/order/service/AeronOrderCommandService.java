@@ -388,9 +388,11 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation,
             InstrumentRule instrument) {
-        long mark = markPrices.latestMarkPriceTicks(request.symbol(), validation.instrumentVersion(),
-                        properties.getRisk().getMarketMaxMarkAgeMs())
-                .orElseThrow(() -> new IllegalStateException("mark price unavailable"));
+        long mark = instrument.spot() && request.orderType() == OrderType.LIMIT
+                ? request.priceTicks()
+                : markPrices.latestMarkPriceTicks(request.symbol(), validation.instrumentVersion(),
+                                properties.getRisk().getMarketMaxMarkAgeMs())
+                        .orElseThrow(() -> new IllegalStateException("mark price unavailable"));
         long executionPrice = request.orderType() == OrderType.LIMIT
                 ? request.priceTicks()
                 : MarketPriceProtection.protectedPriceTicks(request.side(), mark,

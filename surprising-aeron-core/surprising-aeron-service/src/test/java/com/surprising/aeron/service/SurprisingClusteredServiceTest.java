@@ -127,7 +127,10 @@ class SurprisingClusteredServiceTest {
                 var current = facts.get(index);
                 assertThat(current.beforeBusinessStateHash()).isEqualTo(previous.businessStateHash());
                 assertThat(current.beforeFundsStateHash()).isEqualTo(previous.fundsStateHash());
-                assertThat(current.matcherPrefixBefore()).isEqualTo(previous.matcherPrefixAfter());
+                assertThat(current.matcherTransition().sequenceBefore())
+                        .isEqualTo(previous.matcherTransition().sequenceAfter());
+                assertThat(current.matcherTransition().prefixBefore())
+                        .isEqualTo(previous.matcherTransition().prefixAfter());
             }
         } finally {
             service.onTerminate(null);

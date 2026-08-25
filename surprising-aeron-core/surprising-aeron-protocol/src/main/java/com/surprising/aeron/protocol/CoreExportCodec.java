@@ -76,7 +76,7 @@ public final class CoreExportCodec {
             byte[] encoded = CoreTriggerOrderCodec.encodeState(trigger);
             length = Math.addExact(length, Integer.BYTES + encoded.length);
         }
-        length = Math.addExact(length, Long.BYTES * 7L + Integer.BYTES + 1L);
+        length = Math.addExact(length, Long.BYTES * 8L + Integer.BYTES + 1L);
         for (CoreFundsPostingView posting : event.fundsPostings()) {
             length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 2L + utf8(posting.asset()).length);
         }
@@ -119,9 +119,10 @@ public final class CoreExportCodec {
             byte[] encoded = CoreTriggerOrderCodec.encodeState(trigger);
             output.putInt(encoded.length).put(encoded);
         });
+        CoreMatcherTransition matcher = event.matcherTransition();
         output.putLong(event.beforeBusinessStateHash()).putLong(event.beforeFundsStateHash())
-                .putLong(event.fundsStateHash()).putLong(event.matcherSequence())
-                .putLong(event.matcherPrefixBefore()).putLong(event.matcherPrefixAfter())
+                .putLong(event.fundsStateHash()).putLong(matcher.sequenceBefore())
+                .putLong(matcher.sequenceAfter()).putLong(matcher.prefixBefore()).putLong(matcher.prefixAfter())
                 .putLong(event.clusterPosition());
         output.putInt(event.fundsPostings().size());
         event.fundsPostings().forEach(posting -> {
@@ -193,13 +194,14 @@ public final class CoreExportCodec {
             byte[] triggerPayload = new byte[length]; input.get(triggerPayload);
             triggerOrders.add(CoreTriggerOrderCodec.decodeState(triggerPayload));
         }
-        if (input.remaining() < Long.BYTES * 7 + Integer.BYTES + 1) {
+        if (input.remaining() < Long.BYTES * 8 + Integer.BYTES + 1) {
             throw new ProtocolException("core fact integrity metadata is truncated");
         }
         long beforeBusinessHash = input.getLong();
         long beforeFundsHash = input.getLong();
         long fundsHash = input.getLong();
-        long matcherSequence = input.getLong();
+        long matcherSequenceBefore = input.getLong();
+        long matcherSequenceAfter = input.getLong();
         long matcherPrefixBefore = input.getLong();
         long matcherPrefixAfter = input.getLong();
         long clusterPosition = input.getLong();
@@ -240,7 +242,9 @@ public final class CoreExportCodec {
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                 commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
                 liquidations, treasuryAssets, triggerOrders, beforeBusinessHash, beforeFundsHash, fundsHash,
-                matcherSequence, matcherPrefixBefore, matcherPrefixAfter, clusterPosition, fundsPostings, integrity);
+                new CoreMatcherTransition(matcherSequenceBefore, matcherSequenceAfter,
+                        matcherPrefixBefore, matcherPrefixAfter),
+                clusterPosition, fundsPostings, integrity);
     }
 
     private static int liquidationLength(CoreLiquidationView liquidation) {

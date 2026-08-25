@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 
 public final class RollingBusinessStateHash {
 
@@ -15,7 +16,6 @@ public final class RollingBusinessStateHash {
     private final Aggregate leverages = new Aggregate();
     private final Aggregate algoOrders = new Aggregate();
     private final Aggregate timers = new Aggregate();
-    private final Aggregate clientOrderIndex = new Aggregate();
     private final Aggregate triggers = new Aggregate();
     private final Aggregate markPrices = new Aggregate();
     private final Aggregate riskSnapshots = new Aggregate();
@@ -57,18 +57,18 @@ public final class RollingBusinessStateHash {
         if (before == after) return;
         revision = after.revision();
         updateUsers(before.users(), after.users());
-        updateMap(orders, before.orders(), after.orders());
+        updateMap(orders, before.orders(), after.orders(), order -> !order.status().terminal());
         updateMap(instruments, before.instruments(), after.instruments());
         updateMap(leverages, before.leverages(), after.leverages());
-        updateMap(algoOrders, before.algoOrders(), after.algoOrders());
+        updateMap(algoOrders, before.algoOrders(), after.algoOrders(), algo -> !algo.terminal());
         updateMap(timers, before.cancelAllAfterTimers(), after.cancelAllAfterTimers());
-        updateMap(clientOrderIndex, before.clientOrderIndex(), after.clientOrderIndex());
-        updateMap(triggers, before.triggerOrders(), after.triggerOrders());
+        updateMap(triggers, before.triggerOrders(), after.triggerOrders(), trigger -> trigger.status().open());
 
         if (before.riskState() != after.riskState()) {
             updateMap(markPrices, before.riskState().markPrices(), after.riskState().markPrices());
             updateMap(riskSnapshots, before.riskState().snapshots(), after.riskState().snapshots());
-            updateMap(liquidations, before.riskState().liquidations(), after.riskState().liquidations());
+            updateMap(liquidations, before.riskState().liquidations(), after.riskState().liquidations(),
+                    liquidation -> !liquidation.terminal());
             updateMap(riskScans, before.riskState().scans(), after.riskState().scans());
             nextLiquidationId = after.riskState().nextLiquidationId();
             riskScanControlHash = stable(after.riskState().scanControl());
@@ -111,7 +111,6 @@ public final class RollingBusinessStateHash {
         hash = mixAggregate(hash, "leverages", leverages);
         hash = mixAggregate(hash, "algo", algoOrders);
         hash = mixAggregate(hash, "timers", timers);
-        hash = mixAggregate(hash, "clientOrderIndex", clientOrderIndex);
         hash = mixAggregate(hash, "triggers", triggers);
         hash = mixAggregate(hash, "markPrices", markPrices);
         hash = mixAggregate(hash, "riskSnapshots", riskSnapshots);
@@ -134,16 +133,15 @@ public final class RollingBusinessStateHash {
 
     private void rebuild(TradingCoreState state) {
         rebuildUsers(state.users());
-        rebuildMap(orders, state.orders());
+        rebuildMap(orders, state.orders(), order -> !order.status().terminal());
         rebuildMap(instruments, state.instruments());
         rebuildMap(leverages, state.leverages());
-        rebuildMap(algoOrders, state.algoOrders());
+        rebuildMap(algoOrders, state.algoOrders(), algo -> !algo.terminal());
         rebuildMap(timers, state.cancelAllAfterTimers());
-        rebuildMap(clientOrderIndex, state.clientOrderIndex());
-        rebuildMap(triggers, state.triggerOrders());
+        rebuildMap(triggers, state.triggerOrders(), trigger -> trigger.status().open());
         rebuildMap(markPrices, state.riskState().markPrices());
         rebuildMap(riskSnapshots, state.riskState().snapshots());
-        rebuildMap(liquidations, state.riskState().liquidations());
+        rebuildMap(liquidations, state.riskState().liquidations(), liquidation -> !liquidation.terminal());
         rebuildMap(riskScans, state.riskState().scans());
         rebuildMap(feeBalances, state.treasuryState().feeBalances());
         rebuildMap(insuranceBalances, state.treasuryState().insuranceBalances());
@@ -161,6 +159,13 @@ public final class RollingBusinessStateHash {
     private static <K, V> void rebuildMap(Aggregate target, Map<K, V> values) {
         target.clear();
         values.forEach((key, value) -> target.add(entryHash(key, value)));
+    }
+
+    private static <K, V> void rebuildMap(Aggregate target, Map<K, V> values, Predicate<V> included) {
+        target.clear();
+        values.forEach((key, value) -> {
+            if (included.test(value)) target.add(entryHash(key, value));
+        });
     }
 
     private void rebuildUsers(Map<Long, CoreUserState> values) {
@@ -202,6 +207,22 @@ public final class RollingBusinessStateHash {
         for (K key : changed) {
             if (before.containsKey(key)) target.remove(entryHash(key, before.get(key)));
             if (after.containsKey(key)) target.add(entryHash(key, after.get(key)));
+        }
+    }
+
+    private static <K, V> void updateMap(Aggregate target, Map<K, V> before, Map<K, V> after,
+                                         Predicate<V> included) {
+        if (before == after) return;
+        if (!StateMapSupport.isDelta(after)) {
+            rebuildMap(target, after, included);
+            return;
+        }
+        Set<K> changed = StateMapSupport.changedKeys(after);
+        for (K key : changed) {
+            V previous = before.get(key);
+            if (previous != null && included.test(previous)) target.remove(entryHash(key, previous));
+            V next = after.get(key);
+            if (next != null && included.test(next)) target.add(entryHash(key, next));
         }
     }
 
@@ -270,7 +291,7 @@ public final class RollingBusinessStateHash {
             Aggregate reservations = new Aggregate();
             Aggregate positions = new Aggregate();
             rebuildMap(balances, user.balances());
-            rebuildMap(reservations, user.reservations());
+            rebuildMap(reservations, user.reservations(), reservation -> reservation.remainingUnits() > 0);
             rebuildMap(positions, user.positions());
             return new UserHash(user.productLine().ordinal(), user.userId(), user.revision(),
                     user.positionMode().wireCode(), balances, reservations, positions);
@@ -282,7 +303,8 @@ public final class RollingBusinessStateHash {
             Aggregate nextReservations = reservations.copy();
             Aggregate nextPositions = positions.copy();
             updateMap(nextBalances, before.balances(), after.balances());
-            updateMap(nextReservations, before.reservations(), after.reservations());
+            updateMap(nextReservations, before.reservations(), after.reservations(),
+                    reservation -> reservation.remainingUnits() > 0);
             updateMap(nextPositions, before.positions(), after.positions());
             return new UserHash(after.productLine().ordinal(), after.userId(), after.revision(),
                     after.positionMode().wireCode(), nextBalances, nextReservations, nextPositions);

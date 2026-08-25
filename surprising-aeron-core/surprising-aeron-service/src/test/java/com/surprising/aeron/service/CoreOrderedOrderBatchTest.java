@@ -83,6 +83,17 @@ class CoreOrderedOrderBatchTest {
                     .filter(event -> event.commandId().equals(batchId) || event.commandId().equals(laterId))
                     .toList();
             assertThat(events).hasSize(2);
+            assertThat(events).extracting(event -> event.matcherTransition().sequenceAfter())
+                    .containsExactly(2L, 3L);
+            assertThat(events.getFirst().matcherTransition().sequenceBefore()).isZero();
+            assertThat(events.getFirst().matcherTransition().prefixAfter())
+                    .isNotEqualTo(events.getFirst().matcherTransition().prefixBefore());
+            assertThat(events.get(1).matcherTransition().sequenceBefore())
+                    .isEqualTo(events.getFirst().matcherTransition().sequenceAfter());
+            assertThat(events.get(1).matcherTransition().prefixBefore())
+                    .isEqualTo(events.getFirst().matcherTransition().prefixAfter());
+            assertThat(events.get(1).matcherTransition().prefixAfter())
+                    .isNotEqualTo(events.get(1).matcherTransition().prefixBefore());
             assertThat(events.get(0).changedOrders()).extracting(order -> order.orderId())
                     .containsExactly(9_001L, 9_002L);
             assertThat(events.get(1).changedOrders()).extracting(order -> order.orderId())

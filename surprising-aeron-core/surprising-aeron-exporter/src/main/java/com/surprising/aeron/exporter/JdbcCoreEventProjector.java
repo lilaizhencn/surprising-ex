@@ -21,10 +21,11 @@ public final class JdbcCoreEventProjector {
                 product_line, export_sequence, applied_command_count, business_state_hash,
                 command_id, command_type, command_status, result_code, user_id,
                 before_business_state_hash, before_funds_state_hash, funds_state_hash,
-                matcher_sequence, matcher_prefix_before, matcher_prefix_after, cluster_position,
+                matcher_sequence_before, matcher_sequence, matcher_prefix_before, matcher_prefix_after,
+                cluster_position,
                 integrity_key_id, integrity_key_fingerprint, integrity_payload_hash, integrity_signature,
                 raw_event
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
     private static final String INSERT_FUNDS_POSTING = """
             INSERT INTO core_funds_posting_projection
@@ -224,7 +225,13 @@ public final class JdbcCoreEventProjector {
             ProductLine productLine,
             long previousSequence,
             CoreExportEvent event) throws SQLException {
-        if (previousSequence == 0) return;
+        var matcher = event.matcherTransition();
+        if (previousSequence == 0) {
+            if (matcher.sequenceBefore() != 0) {
+                throw new SQLException("first Core fact matcher transition does not start at zero", "23000");
+            }
+            return;
+        }
         try (PreparedStatement statement = connection.prepareStatement(SELECT_PREVIOUS_INTEGRITY)) {
             statement.setString(1, productLine.name());
             statement.setLong(2, previousSequence);
@@ -235,10 +242,8 @@ public final class JdbcCoreEventProjector {
                 long previousMatcherSequence = result.getLong(3);
                 long previousMatcherPrefix = result.getLong(4);
                 long previousClusterPosition = result.getLong(5);
-                boolean matcherContinuous = event.matcherSequence() >= previousMatcherSequence
-                        && event.matcherPrefixBefore() == previousMatcherPrefix
-                        && (event.matcherSequence() != previousMatcherSequence
-                        || event.matcherPrefixAfter() == previousMatcherPrefix);
+                boolean matcherContinuous = matcher.sequenceBefore() == previousMatcherSequence
+                        && matcher.prefixBefore() == previousMatcherPrefix;
                 if (event.beforeBusinessStateHash() != previousBusinessHash
                         || event.beforeFundsStateHash() != previousFundsHash
                         || event.clusterPosition() < previousClusterPosition
@@ -275,15 +280,17 @@ public final class JdbcCoreEventProjector {
             statement.setLong(10, event.beforeBusinessStateHash());
             statement.setLong(11, event.beforeFundsStateHash());
             statement.setLong(12, event.fundsStateHash());
-            statement.setLong(13, event.matcherSequence());
-            statement.setLong(14, event.matcherPrefixBefore());
-            statement.setLong(15, event.matcherPrefixAfter());
-            statement.setLong(16, event.clusterPosition());
-            statement.setString(17, event.integrity().keyId());
-            statement.setString(18, event.integrity().keyFingerprint());
-            statement.setBytes(19, event.integrity().payloadHash());
-            statement.setBytes(20, event.integrity().signature());
-            statement.setBytes(21, CoreMessageCodec.encode(message));
+            var matcher = event.matcherTransition();
+            statement.setLong(13, matcher.sequenceBefore());
+            statement.setLong(14, matcher.sequenceAfter());
+            statement.setLong(15, matcher.prefixBefore());
+            statement.setLong(16, matcher.prefixAfter());
+            statement.setLong(17, event.clusterPosition());
+            statement.setString(18, event.integrity().keyId());
+            statement.setString(19, event.integrity().keyFingerprint());
+            statement.setBytes(20, event.integrity().payloadHash());
+            statement.setBytes(21, event.integrity().signature());
+            statement.setBytes(22, CoreMessageCodec.encode(message));
             if (statement.executeUpdate() != 1) throw new SQLException("core event projection was not inserted");
         }
     }

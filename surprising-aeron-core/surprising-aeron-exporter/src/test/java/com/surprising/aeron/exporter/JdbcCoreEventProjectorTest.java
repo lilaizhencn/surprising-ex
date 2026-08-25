@@ -253,16 +253,17 @@ class JdbcCoreEventProjectorTest {
                 event.businessStateHash(), event.commandId(), event.commandType(), event.commandStatus(),
                 event.resultCode(), event.userId(), event.commandPayload(), event.changedUsers(),
                 event.changedOrders(), event.executions(), event.fundingPayments(), event.changedLiquidations(),
-                event.changedTreasuryAssets(), event.changedTriggerOrders(), beforeBusinessStateHash, 0, 0, 0,
-                0, 0, event.exportSequence(), java.util.List.of(), null);
+                event.changedTreasuryAssets(), event.changedTriggerOrders(), beforeBusinessStateHash, 0, 0,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
+                event.exportSequence(), java.util.List.of(), null);
         return new CoreExportEvent(unsigned.exportSequence(), unsigned.appliedCommandCount(),
                 unsigned.businessStateHash(), unsigned.commandId(), unsigned.commandType(),
                 unsigned.commandStatus(), unsigned.resultCode(), unsigned.userId(), unsigned.commandPayload(),
                 unsigned.changedUsers(), unsigned.changedOrders(), unsigned.executions(),
                 unsigned.fundingPayments(), unsigned.changedLiquidations(), unsigned.changedTreasuryAssets(),
                 unsigned.changedTriggerOrders(), unsigned.beforeBusinessStateHash(),
-                unsigned.beforeFundsStateHash(), unsigned.fundsStateHash(), unsigned.matcherSequence(),
-                unsigned.matcherPrefixBefore(), unsigned.matcherPrefixAfter(), unsigned.clusterPosition(),
+                unsigned.beforeFundsStateHash(), unsigned.fundsStateHash(), unsigned.matcherTransition(),
+                unsigned.clusterPosition(),
                 unsigned.fundsPostings(), SIGNER.sign(CoreExportCodec.integrityPayload(unsigned)));
     }
 

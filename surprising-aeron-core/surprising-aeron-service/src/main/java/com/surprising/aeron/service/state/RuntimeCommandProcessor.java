@@ -374,7 +374,6 @@ public final class RuntimeCommandProcessor {
                     throw new IllegalStateException("terminal order retains funded reservation: " + orderId);
                 }
                 runtime.removeReservation(orderId, order.userId());
-                runtime.advanceUserRevision(order.userId());
             }
             runtime.removeOrder(orderId);
             long clientKey = identities.clientKey(order.userId(), order.clientOrderId());
@@ -406,7 +405,6 @@ public final class RuntimeCommandProcessor {
             }
             runtime.removeLiquidation(liquidationId);
         }
-        incrementRevision(runtime);
     }
 
     public static void replaceRiskScan(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,

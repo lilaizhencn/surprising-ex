@@ -3957,6 +3957,7 @@ CREATE TABLE IF NOT EXISTS core_event_projection (
     before_business_state_hash BIGINT NOT NULL,
     before_funds_state_hash BIGINT NOT NULL,
     funds_state_hash BIGINT NOT NULL,
+    matcher_sequence_before BIGINT NOT NULL,
     matcher_sequence BIGINT NOT NULL,
     matcher_prefix_before BIGINT NOT NULL,
     matcher_prefix_after BIGINT NOT NULL,
@@ -4170,6 +4171,7 @@ DECLARE
     table_description TEXT;
     column_description TEXT;
     constraint_name TEXT;
+    generic_columns TEXT;
 BEGIN
     FOR item IN
         SELECT c.relname AS table_name
@@ -4276,6 +4278,21 @@ BEGIN
             WHEN 'idempotency_key' THEN '调用方提供的幂等键。'
             WHEN 'request_fingerprint' THEN '规范化请求内容的指纹，用于检测幂等键冲突。'
             WHEN 'export_sequence' THEN 'Aeron Core Export 在产品线内连续递增的序列号。'
+            WHEN 'before_business_state_hash' THEN '应用当前 Core Fact 前的确定性业务状态哈希。'
+            WHEN 'before_funds_state_hash' THEN '应用当前 Core Fact 前的确定性资金状态哈希。'
+            WHEN 'funds_state_hash' THEN '应用当前 Core Fact 后的确定性资金状态哈希。'
+            WHEN 'matcher_sequence_before' THEN '当前 Core Fact 覆盖的撮合结果区间起始序列；等于上一条事实的 matcher_sequence。'
+            WHEN 'matcher_sequence' THEN '当前 Core Fact 应用后的撮合结果累计序列。'
+            WHEN 'matcher_prefix_before' THEN '当前 Core Fact 覆盖撮合结果前的不可变前缀摘要。'
+            WHEN 'matcher_prefix_after' THEN '当前 Core Fact 覆盖撮合结果后的不可变前缀摘要。'
+            WHEN 'integrity_key_id' THEN '签署 Core Fact 的完整性密钥稳定标识。'
+            WHEN 'integrity_key_fingerprint' THEN '签署 Core Fact 的公钥 SHA-256 指纹。'
+            WHEN 'integrity_payload_hash' THEN 'Core Fact 规范化签名载荷的 SHA-256 摘要。'
+            WHEN 'integrity_signature' THEN 'Core Fact 规范化载荷的 Ed25519 签名。'
+            WHEN 'posting_index' THEN '同一 Core Fact 内资金分录的零基连续索引。'
+            WHEN 'owner_kind' THEN '资金分录所有者类型：用户或 Treasury。'
+            WHEN 'subledger' THEN '资金分录所属的可用、冻结、费用、保险等子账本。'
+            WHEN 'units' THEN '资金分录的有符号最小精度整数金额。'
             WHEN 'source_sequence' THEN '事件源在 source_id 范围内单调递增的序列号。'
             WHEN 'cluster_position' THEN 'Aeron Cluster Log 中提交该状态的逻辑位置。'
             WHEN 'revision' THEN '业务实体修订号；每次权威变更递增。'
@@ -4501,19 +4518,20 @@ BEGIN
         RAISE EXCEPTION 'schema documentation gate failed: uncommented columns remain';
     END IF;
 
-    IF EXISTS (
-        SELECT 1
-          FROM pg_attribute a
-          JOIN pg_class c ON c.oid = a.attrelid
-          JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
-         WHERE c.relnamespace = 'public'::regnamespace
-           AND c.relkind IN ('r', 'p')
-           AND a.attnum > 0
-           AND NOT a.attisdropped
-           AND d.description LIKE '表 `%` 的 `%` 业务属性，存储类型为 %'
-    ) THEN
-        RAISE EXCEPTION 'schema documentation gate failed: generic column descriptions remain';
+    SELECT string_agg(c.relname || '.' || a.attname, ', ' ORDER BY c.relname, a.attnum)
+      INTO generic_columns
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+     WHERE c.relnamespace = 'public'::regnamespace
+       AND c.relkind IN ('r', 'p')
+       AND a.attnum > 0
+       AND NOT a.attisdropped
+       AND d.description LIKE '表 `%` 的 `%` 业务属性，存储类型为 %';
+    IF generic_columns IS NOT NULL THEN
+        RAISE EXCEPTION 'schema documentation gate failed: generic column descriptions remain: %', generic_columns;
     END IF;
+
 END $$;
 
 COMMIT;

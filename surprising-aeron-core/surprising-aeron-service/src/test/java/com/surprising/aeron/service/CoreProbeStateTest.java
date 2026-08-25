@@ -566,6 +566,13 @@ class CoreProbeStateTest {
                 com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
         assertThat(state.tradingState().order(712).status()).isEqualTo(
                 com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+        var firstOrderFacts = state.exportState().pending().stream()
+                .map(event -> CoreExportCodec.decodeEvent(event.payloadUnsafe()))
+                .filter(event -> event.commandId().equals(commandId))
+                .toList();
+        assertThat(firstOrderFacts).hasSize(2);
+        assertThat(firstOrderFacts.get(0).changedOrders())
+                .isEqualTo(firstOrderFacts.get(1).changedOrders());
         state.close();
     }
 
@@ -1490,11 +1497,15 @@ class CoreProbeStateTest {
         assertThat(state.tradingState().user(1001).reservations()).containsKey(901L);
 
         long throughSequence = state.exportState().nextSequence() - 1;
+        long businessHashBeforeAck = state.tradingState().businessStateHash();
+        long revisionBeforeAck = state.tradingState().revision();
         CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 2, 0, 1_000, 5),
                 CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)));
 
         assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(state.tradingState().businessStateHash()).isEqualTo(businessHashBeforeAck);
+        assertThat(state.tradingState().revision()).isEqualTo(revisionBeforeAck);
         assertThat(state.tradingState().user(1001).reservations()).doesNotContainKey(901L);
         assertThat(state.tradingState().order(901)).isNull();
         assertThat(state.tradingState().order(1001, "client-901")).isNull();
@@ -1546,7 +1557,8 @@ class CoreProbeStateTest {
             exportState.append(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 91, sequence,
                     0, 1_000, sequence), payload), ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    sequence, 0, 0, 0, 0, 0, 0, 0, sequence,
+                    sequence, 0, 0, 0, 0,
+                    com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), sequence,
                     new com.surprising.aeron.service.state.FundsDelta(List.of()), signer,
                     List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }

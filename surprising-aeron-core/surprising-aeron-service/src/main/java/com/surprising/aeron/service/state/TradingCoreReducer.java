@@ -785,7 +785,7 @@ public final class TradingCoreReducer {
                 }
                 Map<Long, OrderReservation> reservations = StateMapSupport.delta(user.reservations());
                 reservations.remove(orderId);
-                users.put(user.userId(), user.transition(Math.incrementExact(user.revision()),
+                users.put(user.userId(), user.transition(user.revision(),
                         user.balances(), reservations, user.positions(), user.positionMode()));
             }
             orders.remove(orderId);
@@ -818,7 +818,7 @@ public final class TradingCoreReducer {
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(),
                 state.riskState().scanControl());
-        return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users, orders,
+        return new TradingCoreState(state.productLine(), state.revision(), users, orders,
                 state.instruments(), risk, state.treasuryState(), state.leverages(), algoOrders,
                 state.cancelAllAfterTimers(), clientOrderIndex, triggerOrders);
     }

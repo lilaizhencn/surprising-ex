@@ -202,9 +202,7 @@ public final class CoreProbeState implements AutoCloseable {
     private CoreCommandDelta commandDelta = CoreCommandDelta.empty();
     private long commandBeforeBusinessStateHash;
     private long commandBeforeFundsStateHash;
-    private long commandMatcherSequence;
-    private long commandMatcherPrefixBefore;
-    private long commandMatcherPrefixAfter;
+    private com.surprising.aeron.protocol.CoreMatcherTransition commandMatcherTransition;
     private long currentClusterPosition;
 
     public CoreProbeState(ProductLine productLine) {
@@ -876,7 +874,7 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 requiredExportSequence = appendCoreFact(message, status, resultCode,
                         Math.incrementExact(appliedCommandCount), businessStateHash,
-                        beforeTradingState, tradingState, commandDelta);
+                        beforeTradingState, tradingState, commandDelta, commandMatcherTransition);
                 if (tradingStateChanged) {
                     terminalRetention.observe(beforeTradingState, tradingState, requiredExportSequence,
                             commandDelta.orderIds(), commandDelta.liquidationIds(), commandDelta.triggerOrderIds());
@@ -921,11 +919,11 @@ public final class CoreProbeState implements AutoCloseable {
             long sequence = Math.incrementExact(appliedCommandCount);
             commandBeforeBusinessStateHash = rollingBusinessStateHash.value();
             commandBeforeFundsStateHash = rollingFundsStateHash.value();
-            commandMatcherSequence = appliedMatcherSequence;
-            commandMatcherPrefixBefore = appliedMatcherPrefixDigest;
-            commandMatcherPrefixAfter = appliedMatcherPrefixDigest;
+            commandMatcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
+                    appliedMatcherSequence, appliedMatcherPrefixDigest);
             appendCoreFact(command, ResponseStatus.APPLIED, matchingPendingCode(), sequence,
-                    businessStateHash, tradingState, tradingState, CoreCommandDelta.empty());
+                    businessStateHash, tradingState, tradingState, CoreCommandDelta.empty(),
+                    commandMatcherTransition);
             PendingMatching pending = newPendingMatching(sequence, PendingMatching.Operation.TRIGGER, command);
             putPendingMatching(pending);
             registerPendingLifecycle(pending);
@@ -988,6 +986,8 @@ public final class CoreProbeState implements AutoCloseable {
         commandDelta = CoreCommandDelta.empty();
         resetChangeAccumulators();
         batch.beforeState = tradingState;
+        batch.matcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
+                appliedMatcherSequence, appliedMatcherPrefixDigest);
         batch.started = true;
         return startOrderBatchItem(batch, pending, batch.clusterTimestamp, batch.clusterPosition);
     }
@@ -1185,6 +1185,13 @@ public final class CoreProbeState implements AutoCloseable {
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
             throw failMatching(pending, "matcher continuation returned " + matchingResult.resultCode(), null);
         }
+        if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
+            try {
+                batch.advanceMatcher(matchingResult);
+            } catch (IllegalArgumentException exception) {
+                throw failMatching(pending, "order batch matcher transition is not contiguous", exception);
+            }
+        }
         OrderBatchItem item = batch.items.get(batch.nextIndex);
         TradingCoreState before = batch.currentBefore;
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
@@ -1278,7 +1285,8 @@ public final class CoreProbeState implements AutoCloseable {
         long businessStateHash = tradingState == batch.beforeState
                 ? cachedBusinessStateHash : rollingBusinessStateHash.value();
         long requiredExportSequence = appendCoreFact(pending.command(), ResponseStatus.APPLIED,
-                CoreResultCode.NONE, batch.sequence, businessStateHash, batch.beforeState, tradingState, delta);
+                CoreResultCode.NONE, batch.sequence, businessStateHash, batch.beforeState, tradingState, delta,
+                batch.matcherTransition);
         if (tradingState != batch.beforeState) {
             terminalRetention.observe(batch.beforeState, tradingState, requiredExportSequence,
                     delta.orderIds(), delta.liquidationIds(), delta.triggerOrderIds());
@@ -1476,7 +1484,7 @@ public final class CoreProbeState implements AutoCloseable {
         long requiredExportSequence;
         try {
             requiredExportSequence = appendCoreFact(message, ResponseStatus.APPLIED, matchingPendingCode(), sequence,
-                    businessStateHash, before, tradingState, commandDelta);
+                    businessStateHash, before, tradingState, commandDelta, commandMatcherTransition);
             if (tradingStateChanged) {
                 terminalRetention.observe(before, tradingState, requiredExportSequence,
                         commandDelta.orderIds(), commandDelta.liquidationIds(), commandDelta.triggerOrderIds());
@@ -2382,6 +2390,8 @@ public final class CoreProbeState implements AutoCloseable {
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
             throw failMatching(pending, "matcher continuation returned " + matchingResult.resultCode(), null);
         }
+        long matcherSequenceBefore = appliedMatcherSequence;
+        long matcherPrefixBefore = appliedMatcherPrefixDigest;
         if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
             validateMatchingEvidence(pending, matchingResult);
             appliedMatcherSequence = matchingResult.nativeCommand().matcherSequence();
@@ -2403,9 +2413,9 @@ public final class CoreProbeState implements AutoCloseable {
         commandRiskScanControl = null;
         resetChangeAccumulators();
         if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
-            commandMatcherSequence = matchingResult.nativeCommand().matcherSequence();
-            commandMatcherPrefixBefore = matchingResult.matcherPrefix().before();
-            commandMatcherPrefixAfter = matchingResult.matcherPrefix().after();
+            commandMatcherTransition = new com.surprising.aeron.protocol.CoreMatcherTransition(
+                    matcherSequenceBefore, matchingResult.nativeCommand().matcherSequence(),
+                    matcherPrefixBefore, matchingResult.matcherPrefix().after());
         }
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
@@ -2546,7 +2556,7 @@ public final class CoreProbeState implements AutoCloseable {
         long businessStateHash = tradingState == before ? cachedBusinessStateHash : rollingBusinessStateHash.value();
         long applied = Math.incrementExact(appliedCommandCount);
         long requiredExportSequence = appendCoreFact(pending.command(), status, resultCode, applied,
-                businessStateHash, before, tradingState, commandDelta);
+                businessStateHash, before, tradingState, commandDelta, commandMatcherTransition);
         if (tradingState != before) {
             terminalRetention.observe(before, tradingState, requiredExportSequence,
                     commandDelta.orderIds(), commandDelta.liquidationIds(), commandDelta.triggerOrderIds());
@@ -3915,9 +3925,8 @@ public final class CoreProbeState implements AutoCloseable {
     private void resetChangeAccumulators() {
         commandBeforeBusinessStateHash = rollingBusinessStateHash.value();
         commandBeforeFundsStateHash = rollingFundsStateHash.value();
-        commandMatcherSequence = appliedMatcherSequence;
-        commandMatcherPrefixBefore = appliedMatcherPrefixDigest;
-        commandMatcherPrefixAfter = appliedMatcherPrefixDigest;
+        commandMatcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
+                appliedMatcherSequence, appliedMatcherPrefixDigest);
         changedUserIds.clear();
         changedOrderIds.clear();
         changedLiquidationIds.clear();
@@ -3927,7 +3936,8 @@ public final class CoreProbeState implements AutoCloseable {
 
     private long appendCoreFact(CoreMessage command, ResponseStatus status, CoreResultCode resultCode,
                                 long appliedCount, long businessStateHash, TradingCoreState before,
-                                TradingCoreState after, CoreCommandDelta delta) {
+                                TradingCoreState after, CoreCommandDelta delta,
+                                com.surprising.aeron.protocol.CoreMatcherTransition matcherTransition) {
         java.util.Set<Long> changedUsers = delta.userIds() == null
                 ? StateMapSupport.changedKeys(before.users(), after.users())
                 : new java.util.LinkedHashSet<>(delta.userIds());
@@ -3941,7 +3951,7 @@ public final class CoreProbeState implements AutoCloseable {
                 : com.surprising.aeron.service.state.RollingFundsStateHash.compute(after);
         return exportState.append(command, status, resultCode, appliedCount, businessStateHash,
                 commandBeforeBusinessStateHash, commandBeforeFundsStateHash, fundsStateHash,
-                commandMatcherSequence, commandMatcherPrefixBefore, commandMatcherPrefixAfter,
+                matcherTransition,
                 currentClusterPosition, fundsDelta, factSigner, delta.changedUsers(), delta.changedOrders(),
                 delta.executions(), delta.fundingPayments(), delta.changedLiquidations(),
                 delta.changedTreasuryAssets(), delta.changedTriggerOrders());
@@ -3950,11 +3960,11 @@ public final class CoreProbeState implements AutoCloseable {
     private long appendRejectedCoreFact(CoreMessage command, CoreResultCode resultCode, long appliedCount) {
         commandBeforeBusinessStateHash = rollingBusinessStateHash.value();
         commandBeforeFundsStateHash = rollingFundsStateHash.value();
-        commandMatcherSequence = appliedMatcherSequence;
-        commandMatcherPrefixBefore = appliedMatcherPrefixDigest;
-        commandMatcherPrefixAfter = appliedMatcherPrefixDigest;
+        commandMatcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
+                appliedMatcherSequence, appliedMatcherPrefixDigest);
         return appendCoreFact(command, ResponseStatus.REJECTED, resultCode, appliedCount,
-                cachedBusinessStateHash, tradingState, tradingState, CoreCommandDelta.empty());
+                cachedBusinessStateHash, tradingState, tradingState, CoreCommandDelta.empty(),
+                commandMatcherTransition);
     }
 
     private void seedChangeAccumulators() {
@@ -4105,7 +4115,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (includeViews && !commandOrderViews.isEmpty()) {
             java.util.LinkedHashMap<Long, CoreOrderStateView> ordersById = new java.util.LinkedHashMap<>();
             changedOrders.forEach(order -> ordersById.put(order.orderId(), order));
-            commandOrderViews.forEach(order -> ordersById.put(order.orderId(), order));
+            commandOrderViews.forEach(order -> ordersById.putIfAbsent(order.orderId(), order));
             changedOrders = List.copyOf(ordersById.values());
         }
         List<com.surprising.aeron.protocol.CoreLiquidationView> changedLiquidations = includeViews
@@ -4574,6 +4584,7 @@ public final class CoreProbeState implements AutoCloseable {
         private TradingCoreState currentBefore;
         private List<Long> currentPreMatchingCancellationOrderIds = List.of();
         private boolean started;
+        private com.surprising.aeron.protocol.CoreMatcherTransition matcherTransition;
 
         private OrderBatchPending(OrderBatchKind kind, List<OrderBatchItem> items,
                                   TradingCoreState beforeState, long clusterTimestamp,
@@ -4584,6 +4595,20 @@ public final class CoreProbeState implements AutoCloseable {
             this.clusterTimestamp = clusterTimestamp;
             this.clusterPosition = clusterPosition;
             this.operation = operation;
+        }
+
+        private void advanceMatcher(
+                com.surprising.aeron.service.matching.CoreMatchingResult result) {
+            long nextSequence = result.nativeCommand().matcherSequence();
+            long nextPrefix = result.matcherPrefix().after();
+            if (matcherTransition == null
+                    || nextSequence != Math.incrementExact(matcherTransition.sequenceAfter())
+                    || result.matcherPrefix().before() != matcherTransition.prefixAfter()) {
+                throw new IllegalArgumentException("order batch matcher transition is not contiguous");
+            }
+            matcherTransition = new com.surprising.aeron.protocol.CoreMatcherTransition(
+                    matcherTransition.sequenceBefore(), nextSequence,
+                    matcherTransition.prefixBefore(), nextPrefix);
         }
 
         private List<Long> changedOrderIdsFor(

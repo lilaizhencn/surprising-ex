@@ -23,9 +23,7 @@ public record CoreExportEvent(
         long beforeBusinessStateHash,
         long beforeFundsStateHash,
         long fundsStateHash,
-        long matcherSequence,
-        long matcherPrefixBefore,
-        long matcherPrefixAfter,
+        CoreMatcherTransition matcherTransition,
         long clusterPosition,
         List<CoreFundsPostingView> fundsPostings,
         CoreFactIntegrityView integrity) {
@@ -35,7 +33,7 @@ public record CoreExportEvent(
                 || commandType.kind() != WireMessageKind.COMMAND || commandStatus == null || resultCode == null
                 || commandPayload == null || changedUsers == null || changedOrders == null || executions == null
                 || fundingPayments == null || changedLiquidations == null || changedTreasuryAssets == null
-                || changedTriggerOrders == null || matcherSequence < 0 || clusterPosition < 0
+                || changedTriggerOrders == null || matcherTransition == null || clusterPosition < 0
                 || fundsPostings == null) {
             throw new IllegalArgumentException("invalid core export event");
         }
@@ -55,7 +53,8 @@ public record CoreExportEvent(
                            CoreResultCode resultCode, long userId, byte[] commandPayload) {
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
                 commandStatus, resultCode, userId, commandPayload, List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of(), businessStateHash, 0, 0, 0, 0, 0, 0, List.of(), null);
+                List.of(), List.of(), List.of(), businessStateHash, 0, 0,
+                CoreMatcherTransition.unchanged(0, 0), 0, List.of(), null);
     }
 
     public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
@@ -66,7 +65,7 @@ public record CoreExportEvent(
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
                 commandStatus, resultCode, userId, commandPayload, changedUsers, changedOrders,
                 executions, List.of(), List.of(), List.of(), List.of(), businessStateHash,
-                0, 0, 0, 0, 0, 0, List.of(), null);
+                0, 0, CoreMatcherTransition.unchanged(0, 0), 0, List.of(), null);
     }
 
     public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
@@ -77,7 +76,7 @@ public record CoreExportEvent(
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
                 commandStatus, resultCode, userId, commandPayload, changedUsers, changedOrders,
                 executions, fundingPayments, List.of(), List.of(), List.of(), businessStateHash,
-                0, 0, 0, 0, 0, 0, List.of(), null);
+                0, 0, CoreMatcherTransition.unchanged(0, 0), 0, List.of(), null);
     }
 
     public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
@@ -90,7 +89,7 @@ public record CoreExportEvent(
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
                 commandStatus, resultCode, userId, commandPayload, changedUsers, changedOrders,
                 executions, fundingPayments, changedLiquidations, changedTreasuryAssets, List.of(),
-                businessStateHash, 0, 0, 0, 0, 0, 0, List.of(), null);
+                businessStateHash, 0, 0, CoreMatcherTransition.unchanged(0, 0), 0, List.of(), null);
     }
 
     @Override

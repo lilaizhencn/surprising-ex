@@ -248,6 +248,7 @@ public record TradingCoreState(
             hash = hashUser(hash, user);
         }
         for (CoreOrderState order : orders.values()) {
+            if (order.status().terminal()) continue;
             hash = hashOrder(hash, order);
         }
         for (CoreInstrumentState instrument : instruments.values()) {
@@ -287,6 +288,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, entry.getValue());
         }
         for (CoreAlgoOrderState algo : algoOrders.values()) {
+            if (algo.terminal()) continue;
             hash = CoreStateHash.mix(hash, algo.algoOrderId()); hash = CoreStateHash.mix(hash, algo.userId());
             hash = CoreStateHash.mix(hash, algo.symbol()); hash = CoreStateHash.mix(hash, algo.statusCode());
             hash = CoreStateHash.mix(hash, algo.updatedAtEpochMillis()); hash = CoreStateHash.mix(hash, algo.revision());
@@ -304,6 +306,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, timer.revision());
         }
         for (CoreTriggerOrderState trigger : triggerOrders.values()) {
+            if (!trigger.status().open()) continue;
             hash = CoreStateHash.mix(hash, trigger.triggerOrderId());
             hash = CoreStateHash.mix(hash, trigger.userId());
             hash = CoreStateHash.mix(hash, trigger.symbol());
@@ -338,6 +341,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, risk.status().ordinal());
         }
         for (CoreLiquidationState liquidation : riskState.liquidations().values()) {
+            if (liquidation.terminal()) continue;
             hash = CoreStateHash.mix(hash, liquidation.liquidationId());
             hash = CoreStateHash.mix(hash, liquidation.userId());
             hash = CoreStateHash.mix(hash, liquidation.symbol());
@@ -608,6 +612,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, balance.lockedUnits());
         }
         for (OrderReservation reservation : user.reservations().values()) {
+            if (reservation.remainingUnits() == 0) continue;
             hash = CoreStateHash.mix(hash, reservation.orderId());
             hash = CoreStateHash.mix(hash, reservation.symbol());
             hash = CoreStateHash.mix(hash, reservation.instrumentVersion());

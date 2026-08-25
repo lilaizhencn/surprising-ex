@@ -84,15 +84,17 @@ class KafkaProjectionWorkerTest {
         var unsigned = new CoreExportEvent(sequence, sequence, sequence * 17, commandId,
                 CoreMessageType.PROBE_INCREMENT, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 users.getFirst().userId(), new byte[] {(byte) sequence}, users, List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of(), (sequence - 1) * 17, 0, 0, 0, 0, 0, sequence, List.of(), null);
+                List.of(), List.of(), List.of(), (sequence - 1) * 17, 0, 0,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
+                sequence, List.of(), null);
         var event = new CoreExportEvent(unsigned.exportSequence(), unsigned.appliedCommandCount(),
                 unsigned.businessStateHash(), unsigned.commandId(), unsigned.commandType(),
                 unsigned.commandStatus(), unsigned.resultCode(), unsigned.userId(), unsigned.commandPayload(),
                 unsigned.changedUsers(), unsigned.changedOrders(), unsigned.executions(),
                 unsigned.fundingPayments(), unsigned.changedLiquidations(), unsigned.changedTreasuryAssets(),
                 unsigned.changedTriggerOrders(), unsigned.beforeBusinessStateHash(),
-                unsigned.beforeFundsStateHash(), unsigned.fundsStateHash(), unsigned.matcherSequence(),
-                unsigned.matcherPrefixBefore(), unsigned.matcherPrefixAfter(), unsigned.clusterPosition(),
+                unsigned.beforeFundsStateHash(), unsigned.fundsStateHash(), unsigned.matcherTransition(),
+                unsigned.clusterPosition(),
                 unsigned.fundsPostings(), SIGNER.sign(CoreExportCodec.integrityPayload(unsigned)));
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
                 ProductLine.SPOT, CommandSource.OPERATIONS, 1, sequence, users.getFirst().userId(),

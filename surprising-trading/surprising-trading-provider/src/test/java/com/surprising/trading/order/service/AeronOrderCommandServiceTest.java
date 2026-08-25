@@ -123,6 +123,25 @@ class AeronOrderCommandServiceTest {
     }
 
     @Test
+    void spotLimitPreflightUsesLimitPriceWhenMarkPriceIsUnavailable() {
+        PlaceOrderRequest request = new PlaceOrderRequest(1001, "spot-limit", "BTC-USDT", OrderSide.SELL,
+                OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
+                false, false);
+        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(spotRule()));
+
+        service.preflight(request,
+                ValidationResult.ok(7, InstrumentType.SPOT, ContractType.SPOT),
+                new OrderFeeSnapshot(ProductLine.SPOT, -10, 25, "test"));
+
+        ArgumentCaptor<PlaceOrderCommand> command = ArgumentCaptor.forClass(PlaceOrderCommand.class);
+        verify(aeron).preflight(eq(1001L), command.capture());
+        assertThat(command.getValue().markPriceTicks()).isEqualTo(60_000L);
+        assertThat(command.getValue().reservationPriceTicks()).isEqualTo(60_000L);
+        assertThat(command.getValue().reservationKind()).isEqualTo(ReservationKind.SPOT_ASSET);
+        verify(markPrices, never()).latestMarkPriceTicks(any(), anyLong(), anyLong());
+    }
+
+    @Test
     void placeUsesAuthoritativeCommandResponseWithoutOrderQuery() {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-response", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
@@ -314,6 +333,13 @@ class AeronOrderCommandServiceTest {
                 ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
                 Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC", "FOK", "GTX"),
                 true, true, true, 1, 1, 1_000_000, 1, Long.MAX_VALUE, 1, 100_000_000, 10_000);
+    }
+
+    private static InstrumentRule spotRule() {
+        return new InstrumentRule("BTC-USDT", 7, "TRADING", InstrumentType.SPOT,
+                ContractType.SPOT, "BTC", "USDT", "USDT",
+                Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC", "FOK", "GTX"),
+                true, false, true, 1, 1, 1_000_000, 1, Long.MAX_VALUE, 1, 100_000_000, 0);
     }
 
     private static CoreOrderStateView orderView(long orderId, PlaceOrderRequest request) {
