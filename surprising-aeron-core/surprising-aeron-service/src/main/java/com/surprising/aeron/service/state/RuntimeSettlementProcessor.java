@@ -20,7 +20,21 @@ public final class RuntimeSettlementProcessor {
         if (before == null || command == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid runtime settlement");
         }
-        CoreInstrumentState instrument = requireInstrument(before, command);
+        Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
+        ActiveOrderIndex orders = activeOrderIndex == null ? new ActiveOrderIndex(before) : activeOrderIndex;
+        return applyRuntime(command, users, chunkCommandId, orders, runtime, identities);
+    }
+
+    public static CoreSettlementProgressView applyRuntime(SettleInstrumentCommand command,
+                                                          Iterable<Long> indexedUserIds, UUID chunkCommandId,
+                                                          ActiveOrderIndex activeOrderIndex,
+                                                          TradingRuntimeState runtime,
+                                                          RuntimeIdentityRegistry identities) {
+        if (command == null || indexedUserIds == null || activeOrderIndex == null
+                || runtime == null || identities == null) {
+            throw new IllegalArgumentException("invalid runtime settlement");
+        }
+        CoreInstrumentState instrument = requireInstrument(runtime, command);
         int symbolId = identities.symbolId(instrument.symbol());
         long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
         if (command.settlementId() < previousSettlement) {
@@ -38,14 +52,15 @@ public final class RuntimeSettlementProcessor {
         List<CoreOrderState> selectedOrders = List.of();
         boolean moreOrders = false;
         if (!chunked) {
-            selectedOrders = openOrders(before, activeOrderIndex, instrument.symbol());
+            selectedOrders = openOrders(runtime, identities, activeOrderIndex, instrument.symbol());
             cancelOrders(runtime, selectedOrders);
             ordersComplete = true;
         } else if (!ordersComplete) {
             ActiveOrderIndex.Page page = activeOrderIndex.page(
                     0, instrument.symbol(), command.cursorOrderId(), command.maxOrders());
-            selectedOrders = page.orderIds().stream().map(before::order)
-                    .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN).toList();
+            selectedOrders = page.orderIds().stream().map(runtime::order)
+                    .filter(order -> order != null && !order.canceled())
+                    .map(order -> RuntimeStateMaterializer.orderSnapshot(order, identities)).toList();
             moreOrders = page.nextCursorOrderId() != 0;
             cancelOrders(runtime, selectedOrders);
             if (moreOrders) {
@@ -54,17 +69,17 @@ public final class RuntimeSettlementProcessor {
                         new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
                                 command.instrumentVersion(), command.settlementPriceTicks(),
                                 command.optionCashUnitsPerContract(), false, nextCursor, 0, chunkCommandId));
-                runtime.setMetadata(before.productLine(), Math.addExact(before.revision(),
+                runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
                         selectedOrders.isEmpty() ? 1 : 2));
                 return new CoreSettlementProgressView(command.settlementId(), false, false, nextCursor, 0,
                         selectedOrders.size(), 0);
             }
             ordersComplete = true;
         }
-        ArrayList<Long> selectedUserIds = selectUsers(before, indexedUserIds, command, chunked);
+        ArrayList<Long> selectedUserIds = selectUsers(indexedUserIds, command, chunked);
         boolean moreUsers = chunked && hasMoreUsers(indexedUserIds, selectedUserIds, command.cursorUserId());
         for (long userId : selectedUserIds) {
-            settleUser(before, runtime, identities, instrument, kernel, command, userId);
+            settleUser(runtime, identities, instrument, kernel, command, userId);
         }
         boolean complete = !chunked || !moreUsers;
         long nextCursorUserId = complete ? 0 : selectedUserIds.getLast();
@@ -76,7 +91,8 @@ public final class RuntimeSettlementProcessor {
                             command.instrumentVersion(), command.settlementPriceTicks(),
                             command.optionCashUnitsPerContract(), true, 0, nextCursorUserId, chunkCommandId));
         }
-        runtime.setMetadata(before.productLine(), Math.addExact(before.revision(), selectedOrders.isEmpty() ? 1 : 2));
+        runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
+                selectedOrders.isEmpty() ? 1 : 2));
         return new CoreSettlementProgressView(command.settlementId(), complete, ordersComplete, 0,
                 nextCursorUserId, selectedOrders.size(), selectedUserIds.size());
     }
@@ -88,7 +104,21 @@ public final class RuntimeSettlementProcessor {
         if (nextCursorOrderId <= 0 || chunkCommandId == null) {
             throw new IllegalArgumentException("settlement cursor must advance");
         }
-        CoreInstrumentState instrument = requireInstrument(before, command);
+        if (before == null || runtime == null || before.productLine() != runtime.productLine()
+                || before.revision() != runtime.revision()) {
+            throw new IllegalArgumentException("invalid runtime settlement cancellation");
+        }
+        advanceCancellationRuntime(command, orders, nextCursorOrderId, chunkCommandId, runtime, identities);
+    }
+
+    public static void advanceCancellationRuntime(SettleInstrumentCommand command,
+                                                  Collection<CoreOrderState> orders, long nextCursorOrderId,
+                                                  UUID chunkCommandId, TradingRuntimeState runtime,
+                                                  RuntimeIdentityRegistry identities) {
+        if (nextCursorOrderId <= 0 || chunkCommandId == null || runtime == null || identities == null) {
+            throw new IllegalArgumentException("settlement cursor must advance");
+        }
+        CoreInstrumentState instrument = requireInstrument(runtime, command);
         validateSettlement(SettlementKernels.forInstrument(instrument), command);
         int symbolId = identities.symbolId(instrument.symbol());
         TreasuryRuntime.LifecycleProgressRuntime progress = runtime.treasury().lifecycleProgress(symbolId);
@@ -98,18 +128,20 @@ public final class RuntimeSettlementProcessor {
                 new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.instrumentVersion(),
                         command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
                         nextCursorOrderId, 0, chunkCommandId));
-        runtime.setMetadata(before.productLine(), Math.addExact(before.revision(),
+        runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
                 orders == null || orders.isEmpty() ? 1 : 2));
     }
 
-    private static void settleUser(TradingCoreState before, TradingRuntimeState runtime,
+    private static void settleUser(TradingRuntimeState runtime,
                                    RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
                                    SettlementKernel kernel, SettleInstrumentCommand command, long userId) {
-        CoreUserState referenceUser = before.user(userId);
-        if (referenceUser == null) return;
-        List<CorePositionState> positions = referenceUser.positions().values().stream()
-                .filter(position -> position.symbol().equals(instrument.symbol())
-                        && position.signedQuantitySteps() != 0).toList();
+        if (runtime.user(userId) == null) return;
+        int symbolId = identities.symbolId(instrument.symbol());
+        ArrayList<PositionRuntime> positions = new ArrayList<>();
+        for (long positionKey : runtime.positionKeysForUserAndSymbol(userId, symbolId)) {
+            PositionRuntime position = runtime.position(positionKey);
+            if (position != null && position.signedQuantitySteps() != 0) positions.add(position);
+        }
         if (positions.isEmpty()) return;
         int assetId = identities.assetId(instrument.settleAsset());
         BalanceRuntime balance = runtime.balance(userId, assetId);
@@ -118,7 +150,7 @@ public final class RuntimeSettlementProcessor {
         long locked = balance.lockedUnits();
         long clearingPnl = runtime.treasury().clearingPnl(assetId);
         long deficit = runtime.treasury().insuranceDeficit(assetId);
-        for (CorePositionState position : positions) {
+        for (PositionRuntime position : positions) {
             long cashDelta = kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
                     position.entryPriceTicks(), command.settlementPriceTicks());
             Cash cash = applyCash(available, locked, position.marginMode(),
@@ -126,11 +158,12 @@ public final class RuntimeSettlementProcessor {
             available = cash.available();
             locked = cash.locked();
             clearingPnl = Math.addExact(clearingPnl, Math.negateExact(cash.appliedDelta()));
-            long positionKey = identities.positionKey(userId, position.key());
-            PositionRuntime current = runtime.position(positionKey);
-            runtime.replacePosition(positionKey, new PositionRuntime(userId, identities.symbolId(position.symbol()),
+            String positionName = position.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
+                    ? instrument.symbol() : instrument.symbol() + ':' + position.positionSide().name();
+            long positionKey = identities.positionKey(userId, positionName);
+            runtime.replacePosition(positionKey, new PositionRuntime(userId, position.symbolId(),
                     assetId, position.marginMode(), position.positionSide(), 0, 0, 0, 0,
-                    Math.addExact(current == null ? position.realizedPnlUnits() : current.realizedPnlUnits(), cashDelta),
+                    Math.addExact(position.realizedPnlUnits(), cashDelta),
                     0));
         }
         runtime.replaceBalance(new BalanceRuntime(userId, assetId, available, locked));
@@ -169,11 +202,10 @@ public final class RuntimeSettlementProcessor {
         return new Cash(available, locked, applied);
     }
 
-    private static ArrayList<Long> selectUsers(TradingCoreState before, Iterable<Long> indexedUserIds,
+    private static ArrayList<Long> selectUsers(Iterable<Long> indexedUserIds,
                                                SettleInstrumentCommand command, boolean chunked) {
         ArrayList<Long> selected = new ArrayList<>();
-        Iterable<Long> source = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
-        for (Long userId : source) {
+        for (Long userId : indexedUserIds) {
             if (userId == null || chunked && userId <= command.cursorUserId()) continue;
             if (!chunked || selected.size() < command.maxUsers()) selected.add(userId);
             else break;
@@ -188,11 +220,12 @@ public final class RuntimeSettlementProcessor {
         return false;
     }
 
-    private static List<CoreOrderState> openOrders(TradingCoreState before, ActiveOrderIndex index, String symbol) {
-        return index == null
-                ? before.orders().values().stream()
-                .filter(order -> order.status() == CoreOrderStatus.OPEN && order.symbol().equals(symbol)).toList()
-                : index.ids(symbol).stream().map(before::order).filter(java.util.Objects::nonNull).toList();
+    private static List<CoreOrderState> openOrders(TradingRuntimeState runtime,
+                                                   RuntimeIdentityRegistry identities,
+                                                   ActiveOrderIndex index, String symbol) {
+        return index.ids(symbol).stream().map(runtime::order)
+                .filter(order -> order != null && !order.canceled())
+                .map(order -> RuntimeStateMaterializer.orderSnapshot(order, identities)).toList();
     }
 
     private static void cancelOrders(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
@@ -204,8 +237,9 @@ public final class RuntimeSettlementProcessor {
         }
     }
 
-    private static CoreInstrumentState requireInstrument(TradingCoreState before, SettleInstrumentCommand command) {
-        CoreInstrumentState instrument = before.instruments().get(OrderReservation.normalizeSymbol(command.symbol()));
+    private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime,
+                                                         SettleInstrumentCommand command) {
+        CoreInstrumentState instrument = runtime.instrument(command.symbol());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }

@@ -1,17 +1,17 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 
 final class MatchingCompletionQueue {
 
-    private final ArrayBlockingQueue<Completion> queue;
+    private final ManyToOneConcurrentArrayQueue<Completion> queue;
     private final AtomicBoolean overflowed = new AtomicBoolean();
 
     MatchingCompletionQueue(int capacity) {
         if (capacity <= 0) throw new IllegalArgumentException("matching completion capacity must be positive");
-        queue = new ArrayBlockingQueue<>(capacity);
+        queue = new ManyToOneConcurrentArrayQueue<>(capacity);
     }
 
     boolean offer(long sequence, CoreMatchingResult result) {

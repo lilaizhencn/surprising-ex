@@ -14,8 +14,16 @@ public final class RuntimeSpotMatchProcessor {
     public static void apply(TradingCoreState before, long takerOrderId, String baseAsset, String quoteAsset,
                              List<CoreMatch> matches, TradingRuntimeState runtime,
                              RuntimeIdentityRegistry identities) {
-        if (before == null || matches == null || runtime == null || identities == null
-                || before.productLine().isDerivative()) {
+        if (before == null || runtime == null || before.productLine() != runtime.productLine()
+                || before.revision() != runtime.revision()) {
+            throw new IllegalArgumentException("invalid spot match apply");
+        }
+        applyRuntime(takerOrderId, matches, runtime, identities);
+    }
+
+    public static void applyRuntime(long takerOrderId, List<CoreMatch> matches,
+                                    TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (matches == null || runtime == null || identities == null || runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid spot match apply");
         }
         runtime.assertOwner();
@@ -24,7 +32,7 @@ public final class RuntimeSpotMatchProcessor {
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return;
         }
-        CoreInstrumentState instrument = before.instruments().get(identities.symbol(taker.symbolId()));
+        CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
         if (instrument == null || instrument.version() != taker.instrumentVersion()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
@@ -32,8 +40,8 @@ public final class RuntimeSpotMatchProcessor {
                 != com.surprising.product.api.ProductLine.SPOT) {
             throw new IllegalStateException("spot matcher received a non-spot settlement kernel");
         }
-        int baseAssetId = identities.assetId(baseAsset);
-        int quoteAssetId = identities.assetId(quoteAsset);
+        int baseAssetId = identities.assetId(instrument.baseAsset());
+        int quoteAssetId = identities.assetId(instrument.quoteAsset());
         validateMatches(runtime, taker, matches);
         for (CoreMatch match : matches) {
             taker = requireOpen(runtime, takerOrderId);
@@ -52,7 +60,7 @@ public final class RuntimeSpotMatchProcessor {
             runtime.replaceOrder(taker.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(taker.revision())));
         }
         releaseTerminalReservation(runtime, takerOrderId);
-        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
     }
 
     private static void applyFill(TradingRuntimeState runtime, CoreInstrumentState instrument, OrderRuntime order,

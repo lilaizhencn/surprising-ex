@@ -36,6 +36,9 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 
 本节冻结普通订单进入 Product Core 前的交易语义。`trading_orders`、账户投影、Kafka 和 PostgreSQL 都是异步事实或查询投影；它们不得覆盖、补齐或反向裁决 Product Core 的下单预检。价格、预占、平仓容量和费用的最终事实均由同一条 Product Core 命令状态转换产生。
 
+正式下单路径不先调用独立 Core preflight；Provider 直接提交一次正式 `PLACE_ORDER`，由该命令完成权威校验、
+预占和撮合。`preflight` 仅保留给显式 test/dry-run API，结果不作为后续正式下单的授权或缓存。
+
 ### 四个互不混用的价格
 
 - **限价（limit price）**：客户端为 `LIMIT` 订单提交的 `priceTicks`；它是订单簿价格约束。`MARKET` 不存在限价，且必须保持 `priceTicks=0`，不得把标记价或预占价伪装成限价。
@@ -401,6 +404,9 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 adapter 关闭 exchange-core 内置业务风险、保证金和手续费；这些仍由 ProductExecutionCore 权威裁决。
 exchange-core 内的 user/symbol/risk module 只是 matcher 技术状态，随原生 snapshot 恢复，不能作为业务资金查询源。
+adapter 直接持有 fork 返回的不可变 `MatcherResult`、event list 和 market data；业务层只派生结算所需的紧凑
+`CoreMatch`，不会再次复制 matcher event 或盘口数据。exchange-core 的事件池仅在 fork 内部使用，越过 adapter
+边界的结果不可变。
 
 ### 盘口深度
 

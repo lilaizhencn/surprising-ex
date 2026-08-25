@@ -26,14 +26,15 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
 | P10 | sharding / capacity：分片与容量工作；任何分片提案只能属于 P10，不能标为 P0-P5。 |
 
-当前实现状态：P2、P3 已完成。P2 在 `DeterministicExchangeCoreAdapter` 边界串行化实际 matcher 提交，直接消费
-exchange-core 产出的不可变 `MatcherResult`，并用 `matcherSequence + MatcherPrefix(before, after)` 绑定命令结果；prefix
-digest 随配对快照恢复，断裂或 malformed 结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes`，完整
-`bookStateHash` 只保留在 snapshot、恢复和显式审计边界。`TradingRuntimeState` 是唯一交易裁决权威；
-`TradingCoreState` 只承担不可变快照、Core Fact 增量、恢复/回放、状态 hash 和对账，不参与在线查询或外围裁决。
-在线当前态查询在 Product Core owner 上通过 Runtime 索引读取，并对用户实体、风险快照和工作页设置硬上限；
-查询不触发全量 materialization、数据库、Valkey、Kafka 或异步等待。
-P2、P3 完成不代表 P1、P4、P5 或 P6-P10 已经完成。
+当前实现状态：P0-P5 已完成；P6-P10 仍是后续验证和容量工作。普通下单只提交一次正式 `PLACE_ORDER`，
+由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
+但不在正式下单前额外往返 Core。P2 在 `DeterministicExchangeCoreAdapter` 边界串行化实际 matcher 提交，直接持有
+exchange-core 产出的不可变 `MatcherResult`、event list 和 market data，不再复制 matcher 证据，并用
+`matcherSequence + MatcherPrefix(before, after)` 绑定命令结果；prefix digest 随配对快照恢复，断裂或 malformed
+结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes`，完整 `bookStateHash` 只保留在 snapshot、恢复和
+显式审计边界。`TradingRuntimeState` 是 P3 唯一交易裁决权威；`TradingCoreState` 仅在每个事实边界按 changed-key
+生成一次不可变投影，承担 Cluster snapshot、Core Fact、恢复、状态 hash 和对账。P4 使用六个穷尽且隔离的
+`SettlementKernel`。P5 以确定性 `FundsDelta`、Treasury 子账本、状态/资金 hash 和 replicated outbox 形成连续事实链。
 
 ### 分支安全与验证契约
 

@@ -17,6 +17,7 @@ import com.surprising.aeron.service.state.CoreTreasuryState;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
+import exchange.core2.core.common.MatcherResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -89,6 +90,9 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(result.nativeCommand().nativeSequence()).isPositive();
             assertThat(result.matcherPrefix().before()).isNotZero();
             assertThat(result.matcherPrefix().after()).isNotEqualTo(result.matcherPrefix().before());
+            assertThat(result.nativeMatcherResult()).isNotNull();
+            assertThat(result.matcherEvents()).isSameAs(result.nativeMatcherResult().events());
+            assertThat(result.marketData()).isSameAs(result.nativeMatcherResult().marketData());
         }
     }
 
@@ -135,8 +139,9 @@ class DeterministicExchangeCoreAdapterTest {
         CoreMatchingResult resultWithMarketData = new CoreMatchingResult(
                 result.accepted(), result.resultCode(), result.matches(), result.cancellations(),
                 result.successfulPrefixCount(), result.matcherStateChanged(), result.nativeCommand(),
-                result.matcherPrefix(), result.matcherEvents(), new CoreMatchingResult.MarketData(
-                        List.of(), List.of(new CoreMatchingResult.MarketData.Level(100, 2, 1))));
+                result.matcherPrefix(), result.nativeMatcherResult(), result.matcherEvents(),
+                new MatcherResult.MarketData(
+                        List.of(), List.of(new MatcherResult.Level(100, 2, 1)), 0, 0));
         var firstProcess = new CoreMatchingResult.NativeCommand(
                 7, "00000000-0000-0000-0000-000000000007", 101, 3, 41, 9, 1_000);
         var restoredProcess = new CoreMatchingResult.NativeCommand(

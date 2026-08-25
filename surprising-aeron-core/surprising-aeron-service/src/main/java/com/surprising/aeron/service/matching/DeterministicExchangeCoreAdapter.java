@@ -222,10 +222,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (!matcherPrefixDigest.compareAndSet(before, after)) {
             throw new IllegalStateException("matcher prefix advanced outside the single in-flight gate");
         }
-        CoreMatchingResult bound = new CoreMatchingResult(
-                result.accepted(), result.resultCode(), result.matches(), result.cancellations(),
-                result.successfulPrefixCount(), result.matcherStateChanged(), nativeCommand,
-                new CoreMatchingResult.MatcherPrefix(before, after), result.matcherEvents(), result.marketData());
+        CoreMatchingResult bound = result.withEvidence(
+                nativeCommand, new CoreMatchingResult.MatcherPrefix(before, after));
         if ("EXCHANGE_CORE_FAILURE".equals(bound.resultCode())
                 || "MATCHING_TIMEOUT".equals(bound.resultCode())
                 || !bound.accepted() && bound.matcherStateChanged()) {
@@ -253,28 +251,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private static CoreMatchingResult matchingResult(exchange.core2.core.common.MatcherResult response) {
-        List<CoreMatch> matches = new ArrayList<>();
-        List<CoreMatchingResult.MatcherEvent> events = new ArrayList<>(response.events().size());
-        response.events().forEach(event -> {
-            events.add(new CoreMatchingResult.MatcherEvent(event.eventType().name(), event.section(),
-                    event.activeOrderCompleted(), event.matchedOrderId(), event.matchedOrderUid(),
-                    event.matchedOrderCompleted(), event.price(), event.size(), event.bidderHoldPrice()));
-            if (event.eventType() == MatcherEventType.TRADE) {
-                matches.add(new CoreMatch(event.matchedOrderId(), event.matchedOrderUid(), event.price(), event.size(),
-                        event.matchedOrderCompleted(), event.activeOrderCompleted()));
-            }
-        });
-        List<CoreMatchingResult.MarketData.Level> asks = response.marketData().asks().stream()
-                .map(level -> new CoreMatchingResult.MarketData.Level(
-                        level.price(), level.volume(), level.orders())).toList();
-        List<CoreMatchingResult.MarketData.Level> bids = response.marketData().bids().stream()
-                .map(level -> new CoreMatchingResult.MarketData.Level(
-                        level.price(), level.volume(), level.orders())).toList();
-        return new CoreMatchingResult(response.resultCode() == CommandResultCode.SUCCESS,
-                response.resultCode().name(), matches, List.of(), 0, false,
-                new CoreMatchingResult.NativeCommand(0, "", 0, 0, response.sequence(), 0, 0),
-                new CoreMatchingResult.MatcherPrefix(0, 0), events,
-                new CoreMatchingResult.MarketData(asks, bids));
+        List<CoreMatch> matches = response.events().stream()
+                .filter(event -> event.eventType() == MatcherEventType.TRADE)
+                .map(event -> new CoreMatch(event.matchedOrderId(), event.matchedOrderUid(), event.price(), event.size(),
+                        event.matchedOrderCompleted(), event.activeOrderCompleted()))
+                .toList();
+        return CoreMatchingResult.fromNative(response, matches);
     }
 
     private static OrderType orderType(CoreMatchingOrder command) {
@@ -315,10 +297,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 cancellations.cancellations().size() + result.cancellations().size());
         combinedCancellations.addAll(cancellations.cancellations());
         combinedCancellations.addAll(result.cancellations());
-        List<CoreMatchingResult.MatcherEvent> events = new ArrayList<>(
-                cancellations.matcherEvents().size() + result.matcherEvents().size());
-        events.addAll(cancellations.matcherEvents());
-        events.addAll(result.matcherEvents());
+        List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
+                CoreMatchingResult.concatenateEvents(cancellations.matcherEvents(), result.matcherEvents());
         long nativeSequence = Math.max(cancellations.nativeCommand().nativeSequence(),
                 result.nativeCommand().nativeSequence());
         return new CoreMatchingResult(result.accepted(), result.resultCode(), result.matches(),
@@ -327,7 +307,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 cancellations.matcherStateChanged() || result.matcherStateChanged()
                         || !cancellations.cancellations().isEmpty(),
                 new CoreMatchingResult.NativeCommand(0, "", 0, 0, nativeSequence, 0, 0),
-                new CoreMatchingResult.MatcherPrefix(0, 0), events, result.marketData());
+                new CoreMatchingResult.MatcherPrefix(0, 0), result.nativeMatcherResult(), events,
+                result.marketData());
     }
 
     private static CoreMatchingResult aggregateCancellationResult(
@@ -339,8 +320,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             cancellations.add(new CoreCancellationResult(requested.get(index).orderId(), result.accepted(),
                     result.resultCode()));
         }
-        List<CoreMatchingResult.MatcherEvent> events = outcome.results().stream()
-                .flatMap(result -> result.matcherEvents().stream()).toList();
+        List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
+                CoreMatchingResult.concatenateEvents(outcome.results());
         long nativeSequence = outcome.results().stream()
                 .mapToLong(result -> result.nativeCommand().nativeSequence()).max().orElse(0);
         CoreMatchingResult failure = outcome.failedResult();
@@ -350,8 +331,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return new CoreMatchingResult(accepted, resultCode, List.of(), cancellations,
                 outcome.successfulPrefix().size(), !accepted && !outcome.successfulPrefix().isEmpty(),
                 new CoreMatchingResult.NativeCommand(0, "", 0, 0, nativeSequence, 0, 0),
-                new CoreMatchingResult.MatcherPrefix(0, 0), events,
-                new CoreMatchingResult.MarketData(List.of(), List.of()));
+                new CoreMatchingResult.MatcherPrefix(0, 0), null, events,
+                new exchange.core2.core.common.MatcherResult.MarketData(List.of(), List.of(), 0, 0));
     }
 
     public CompletableFuture<CancelBatchOutcome> cancelBatchOrderedAsync(List<CoreOrderState> orders) {
@@ -401,14 +382,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                 CoreMatchingResult result = matchingResult(response);
                                 List<CoreCancellationResult> cancellations = List.of(
                                         new CoreCancellationResult(orderId, true, cancelResult.resultCode()));
-                                List<CoreMatchingResult.MatcherEvent> events = new ArrayList<>(
-                                        cancelResult.matcherEvents().size() + result.matcherEvents().size());
-                                events.addAll(cancelResult.matcherEvents());
-                                events.addAll(result.matcherEvents());
+                                List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
+                                        CoreMatchingResult.concatenateEvents(
+                                                cancelResult.matcherEvents(), result.matcherEvents());
                                 return new CoreMatchingResult(result.accepted(), result.resultCode(),
                                         result.matches(), cancellations, 1, !result.accepted(),
                                         result.nativeCommand(), new CoreMatchingResult.MatcherPrefix(0, 0),
-                                        events, result.marketData());
+                                        result.nativeMatcherResult(), events, result.marketData());
                             });
                         });
                     });

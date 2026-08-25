@@ -423,6 +423,14 @@ public final class RuntimeCommandProcessor {
         incrementRevision(runtime);
     }
 
+    public static void replaceRiskScan(TradingRuntimeState runtime, RiskScanRuntime scan) {
+        if (runtime == null || scan == null) {
+            throw new IllegalArgumentException("invalid runtime risk scan");
+        }
+        runtime.putRiskScan(scan);
+        incrementRevision(runtime);
+    }
+
     public static void updateCancelAllAfter(TradingRuntimeState runtime, long userId,
                                             CoreCancelAllAfterCommand command) {
         if (runtime == null || command == null || userId <= 0) {

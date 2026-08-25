@@ -666,7 +666,7 @@ class CoreProbeStateTest {
                     result.successfulPrefixCount(), result.matcherStateChanged(), result.nativeCommand(),
                     new com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix(
                             tamperedBefore, result.matcherPrefix().after()),
-                    result.matcherEvents(), result.marketData());
+                    result.nativeMatcherResult(), result.matcherEvents(), result.marketData());
 
             Throwable fatal = catchThrowable(() -> state.completeMatching(sequence, tampered, 2_000, 3));
 

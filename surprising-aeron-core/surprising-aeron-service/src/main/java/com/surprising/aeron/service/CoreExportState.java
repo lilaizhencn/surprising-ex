@@ -51,9 +51,10 @@ final class CoreExportState {
                     || decoded.exportSequence() != expectedSequence) {
                 throw new IllegalArgumentException("non-contiguous export state");
             }
-            this.pending.add(new PendingExport(event, terminalOrderIds(decoded)));
-            pendingBytes = Math.addExact(pendingBytes, encodedLength(event));
-            pendingDigest ^= eventDigest(event);
+            PendingExport restored = pendingExport(event, terminalOrderIds(decoded));
+            this.pending.add(restored);
+            pendingBytes = Math.addExact(pendingBytes, restored.encodedLength());
+            pendingDigest ^= restored.digest();
             expectedSequence = Math.incrementExact(expectedSequence);
         }
         if (pendingBytes > MAX_PENDING_BYTES) {
@@ -96,13 +97,15 @@ final class CoreExportState {
         } catch (IllegalArgumentException exception) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export fact exceeds event limit");
         }
-        long eventBytes = encodedLength(message);
+        int eventBytes = encodedLength(message);
         if (pendingBytes + eventBytes > MAX_PENDING_BYTES) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached byte limit");
         }
-        pending.add(new PendingExport(message, terminalOrderIds(event)));
+        PendingExport appended = new PendingExport(message, terminalOrderIds(event), eventBytes,
+                eventDigest(message));
+        pending.add(appended);
         pendingBytes = Math.addExact(pendingBytes, eventBytes);
-        pendingDigest ^= eventDigest(message);
+        pendingDigest ^= appended.digest();
         nextSequence = Math.incrementExact(nextSequence);
         return sequence;
     }
@@ -135,8 +138,8 @@ final class CoreExportState {
         for (int index = 0; index < removeCount; index++) {
             PendingExport removed = pending.removeFirst();
             terminalOrderIds.addAll(removed.terminalOrderIds());
-            pendingBytes = Math.subtractExact(pendingBytes, encodedLength(removed.message()));
-            pendingDigest ^= eventDigest(removed.message());
+            pendingBytes = Math.subtractExact(pendingBytes, removed.encodedLength());
+            pendingDigest ^= removed.digest();
         }
         acknowledgedSequence = command.throughSequence();
         return List.copyOf(terminalOrderIds);
@@ -149,8 +152,9 @@ final class CoreExportState {
         ArrayList<CoreMessage> batch = new ArrayList<>(limit);
         Iterator<PendingExport> iterator = pending.iterator();
         while (count < limit && iterator.hasNext()) {
-            CoreMessage event = iterator.next().message();
-            int eventLength = encodedLength(event);
+            PendingExport pendingEvent = iterator.next();
+            CoreMessage event = pendingEvent.message();
+            int eventLength = pendingEvent.encodedLength();
             long nextLength = Math.addExact(encodedLength, Math.addExact(Integer.BYTES, eventLength));
             if (nextLength > CoreExportCodec.MAX_BATCH_ENCODED_LENGTH - CoreExportCodec.BATCH_STATUS_FIXED_LENGTH) {
                 break;
@@ -236,9 +240,17 @@ final class CoreExportState {
         return List.copyOf(terminal);
     }
 
-    private record PendingExport(CoreMessage message, List<Long> terminalOrderIds) {
+    private static PendingExport pendingExport(CoreMessage message, List<Long> terminalOrderIds) {
+        return new PendingExport(message, terminalOrderIds, encodedLength(message), eventDigest(message));
+    }
+
+    private record PendingExport(CoreMessage message, List<Long> terminalOrderIds,
+                                 int encodedLength, long digest) {
         private PendingExport {
             terminalOrderIds = List.copyOf(terminalOrderIds);
+            if (encodedLength < CoreProtocol.HEADER_LENGTH) {
+                throw new IllegalArgumentException("invalid pending export length");
+            }
         }
     }
 }

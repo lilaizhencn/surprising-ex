@@ -38,8 +38,8 @@ class RuntimePerpetualMatchProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        TradingRuntimeState applied = RuntimePerpetualMatchProcessor.apply(
-                before, 11, matches, runtime, identities);
+        TradingRuntimeState applied = RuntimePerpetualMatchProcessor.applyRuntime(
+                11, matches, runtime, identities);
 
         assertThat(applied).isSameAs(runtime);
         RuntimeStateParityChecker.assertMatches(expected, identities, applied);

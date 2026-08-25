@@ -200,6 +200,21 @@ public final class TradingRuntimeState {
         return liquidationId == null ? null : liquidations.get(liquidationId);
     }
 
+    public boolean hasActiveLiquidationConflict(long userId, int symbolId, long excludedLiquidationId) {
+        assertOwner();
+        boolean[] conflict = new boolean[1];
+        liquidations.forEachValue(liquidation -> {
+            if (!conflict[0] && liquidation.liquidationId() != excludedLiquidationId
+                    && (liquidation.status() == CoreLiquidationState.Status.PLANNED
+                    || liquidation.status() == CoreLiquidationState.Status.ORDERED)
+                    && (userId == 0 || liquidation.userId() == userId)
+                    && (symbolId < 0 || liquidation.symbolId() == symbolId)) {
+                conflict[0] = true;
+            }
+        });
+        return conflict[0];
+    }
+
     public MarkPriceRuntime markPrice(int symbolId) {
         assertOwner();
         return markPrices.get(symbolId);
@@ -213,6 +228,39 @@ public final class TradingRuntimeState {
     public RiskScanRuntime riskScan(int symbolId) {
         assertOwner();
         return riskScans.get(symbolId);
+    }
+
+    public RiskScanRuntime firstIncompleteRiskScan() {
+        assertOwner();
+        RiskScanRuntime[] selected = new RiskScanRuntime[1];
+        riskScans.forEachKeyValue((symbolId, scan) -> {
+            if (!scan.complete()
+                    && (selected[0] == null || symbolId < selected[0].symbolId())) {
+                selected[0] = scan;
+            }
+        });
+        return selected[0];
+    }
+
+    public RiskScanRuntime firstRiskIncompleteScan() {
+        assertOwner();
+        RiskScanRuntime[] selected = new RiskScanRuntime[1];
+        riskScans.forEachKeyValue((symbolId, scan) -> {
+            if (!scan.riskComplete()
+                    && (selected[0] == null || symbolId < selected[0].symbolId())) {
+                selected[0] = scan;
+            }
+        });
+        return selected[0];
+    }
+
+    public int incompleteRiskScanCount() {
+        assertOwner();
+        int[] count = new int[1];
+        riskScans.forEachValue(scan -> {
+            if (!scan.complete()) count[0]++;
+        });
+        return count[0];
     }
 
     public long nextLiquidationId() {

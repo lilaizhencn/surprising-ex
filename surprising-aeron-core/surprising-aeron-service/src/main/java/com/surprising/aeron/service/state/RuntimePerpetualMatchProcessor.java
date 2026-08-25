@@ -17,14 +17,23 @@ public final class RuntimePerpetualMatchProcessor {
             throw new IllegalArgumentException("invalid perpetual match simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return apply(before, takerOrderId, matches, runtime, identities);
+        return applyRuntime(takerOrderId, matches, runtime, identities);
     }
 
     public static TradingRuntimeState apply(TradingCoreState before, long takerOrderId,
                                             List<CoreMatch> matches, TradingRuntimeState runtime,
                                             RuntimeIdentityRegistry identities) {
-        if (before == null || matches == null || runtime == null || identities == null
-                || !before.productLine().isDerivative()) {
+        if (before == null || runtime == null || before.productLine() != runtime.productLine()
+                || before.revision() != runtime.revision()) {
+            throw new IllegalArgumentException("invalid perpetual match apply");
+        }
+        return applyRuntime(takerOrderId, matches, runtime, identities);
+    }
+
+    public static TradingRuntimeState applyRuntime(long takerOrderId, List<CoreMatch> matches,
+                                                   TradingRuntimeState runtime,
+                                                   RuntimeIdentityRegistry identities) {
+        if (matches == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual match apply");
         }
         runtime.assertOwner();
@@ -33,11 +42,7 @@ public final class RuntimePerpetualMatchProcessor {
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return runtime;
         }
-        CoreOrderState takerState = before.orders().get(takerOrderId);
-        if (takerState == null) {
-            throw new IllegalStateException("runtime match taker is missing from authoritative orders");
-        }
-        CoreInstrumentState instrument = before.instruments().get(takerState.symbol());
+        CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
         if (instrument == null || instrument.version() != taker.instrumentVersion()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
@@ -50,9 +55,9 @@ public final class RuntimePerpetualMatchProcessor {
                     || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                 throw new IllegalStateException("runtime match does not match authoritative orders");
             }
-            applyFill(before, runtime, identities, instrument, taker, match.priceTicks(),
+            applyFill(runtime, identities, instrument, taker, match.priceTicks(),
                     match.quantitySteps(), true, settleAssetId);
-            applyFill(before, runtime, identities, instrument, maker, match.priceTicks(),
+            applyFill(runtime, identities, instrument, maker, match.priceTicks(),
                     match.quantitySteps(), false, settleAssetId);
             if (runtime.order(maker.orderId()).canceled()) {
                 long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
@@ -70,7 +75,7 @@ public final class RuntimePerpetualMatchProcessor {
             runtime.releaseTerminalReservation(takerOrderId);
             if (releaseUnits > 0) runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
         }
-        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return runtime;
     }
 
@@ -125,7 +130,7 @@ public final class RuntimePerpetualMatchProcessor {
                 || expected.productLine() != before.productLine()) {
             throw new IllegalArgumentException("invalid perpetual match transition");
         }
-        apply(before, takerOrderId, matches, runtime, identities);
+        applyRuntime(takerOrderId, matches, runtime, identities);
         for (Long userId : expected.changedUserIds()) {
             CoreUserState planned = expected.users().get(userId);
             if (planned == null) {
@@ -144,13 +149,13 @@ public final class RuntimePerpetualMatchProcessor {
         return runtime;
     }
 
-    private static void applyFill(TradingCoreState before, TradingRuntimeState runtime,
+    private static void applyFill(TradingRuntimeState runtime,
                                   RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId) {
-        long leverage = before.leverages().getOrDefault(
-                new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()),
-                instrument.maxLeveragePpm());
+        Long configuredLeverage = runtime.leverage(
+                new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
+        long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
         RuntimePerpetualFillCalculator.apply(runtime, identities, instrument, order,
                 identities.positionKey(order.userId(), positionKey(instrument.symbol(), order.positionSide())),
                 priceTicks, quantitySteps, taker, leverage, settleAssetId);

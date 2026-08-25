@@ -74,15 +74,28 @@ public final class FundsDelta {
     }
 
     public List<com.surprising.aeron.protocol.CoreFundsPostingView> views() {
-        return postings.stream().map(posting -> new com.surprising.aeron.protocol.CoreFundsPostingView(
-                posting.asset(), ownerKind(posting.ownerKind()), posting.ownerId(),
-                subledger(posting.subledger()), posting.units())).toList();
+        ArrayList<com.surprising.aeron.protocol.CoreFundsPostingView> result = new ArrayList<>(postings.size());
+        for (FundsPosting posting : postings) {
+            result.add(new com.surprising.aeron.protocol.CoreFundsPostingView(
+                    posting.asset(), ownerKind(posting.ownerKind()), posting.ownerId(),
+                    subledger(posting.subledger()), posting.units()));
+        }
+        return List.copyOf(result);
     }
 
     public static FundsDelta between(TradingCoreState before, TradingCoreState after,
                                      Set<Long> changedUserIds, boolean externalAdjustment) {
+        TreeSet<String> changedTreasuryAssets = new TreeSet<>();
+        addTreasuryAssets(changedTreasuryAssets, before.treasuryState());
+        addTreasuryAssets(changedTreasuryAssets, after.treasuryState());
+        return between(before, after, changedUserIds, changedTreasuryAssets, externalAdjustment);
+    }
+
+    public static FundsDelta between(TradingCoreState before, TradingCoreState after,
+                                     Set<Long> changedUserIds, Set<String> changedTreasuryAssets,
+                                     boolean externalAdjustment) {
         if (before == null || after == null || before.productLine() != after.productLine()
-                || changedUserIds == null) {
+                || changedUserIds == null || changedTreasuryAssets == null) {
             throw new IllegalArgumentException("invalid funds delta transition");
         }
         ArrayList<FundsPosting> result = new ArrayList<>();
@@ -105,19 +118,23 @@ public final class FundsDelta {
             }
         }
         treasury(result, before.treasuryState().feeBalances(), after.treasuryState().feeBalances(),
-                FundsPosting.Subledger.FEE, false);
+                changedTreasuryAssets, FundsPosting.Subledger.FEE, false);
         treasury(result, before.treasuryState().insuranceBalances(), after.treasuryState().insuranceBalances(),
-                FundsPosting.Subledger.INSURANCE, false);
+                changedTreasuryAssets, FundsPosting.Subledger.INSURANCE, false);
         treasury(result, before.treasuryState().insuranceDeficits(), after.treasuryState().insuranceDeficits(),
-                FundsPosting.Subledger.DEFICIT, true);
+                changedTreasuryAssets, FundsPosting.Subledger.DEFICIT, true);
         treasury(result, before.treasuryState().liquidationFeeBalances(),
-                after.treasuryState().liquidationFeeBalances(), FundsPosting.Subledger.LIQUIDATION_FEE, false);
+                after.treasuryState().liquidationFeeBalances(), changedTreasuryAssets,
+                FundsPosting.Subledger.LIQUIDATION_FEE, false);
         treasury(result, before.treasuryState().fundingResidualBalances(),
-                after.treasuryState().fundingResidualBalances(), FundsPosting.Subledger.FUNDING_RESIDUAL, false);
+                after.treasuryState().fundingResidualBalances(), changedTreasuryAssets,
+                FundsPosting.Subledger.FUNDING_RESIDUAL, false);
         treasury(result, before.treasuryState().roundingResidualBalances(),
-                after.treasuryState().roundingResidualBalances(), FundsPosting.Subledger.ROUNDING_RESIDUAL, false);
+                after.treasuryState().roundingResidualBalances(), changedTreasuryAssets,
+                FundsPosting.Subledger.ROUNDING_RESIDUAL, false);
         treasury(result, before.treasuryState().clearingPnlBalances(),
-                after.treasuryState().clearingPnlBalances(), FundsPosting.Subledger.CLEARING_PNL, false);
+                after.treasuryState().clearingPnlBalances(), changedTreasuryAssets,
+                FundsPosting.Subledger.CLEARING_PNL, false);
         if (externalAdjustment) {
             TreeMap<String, Long> totals = totals(result);
             totals.forEach((asset, units) -> add(result, asset, FundsPosting.OwnerKind.EXTERNAL, 0,
@@ -164,14 +181,23 @@ public final class FundsDelta {
     }
 
     private static void treasury(List<FundsPosting> target, Map<String, Long> before, Map<String, Long> after,
+                                 Set<String> changedAssets,
                                  FundsPosting.Subledger subledger, boolean negate) {
-        TreeSet<String> assets = new TreeSet<>(before.keySet());
-        assets.addAll(after.keySet());
-        for (String asset : assets) {
+        for (String asset : new TreeSet<>(changedAssets)) {
             long delta = Math.subtractExact(after.getOrDefault(asset, 0L), before.getOrDefault(asset, 0L));
             add(target, asset, FundsPosting.OwnerKind.TREASURY, 0, subledger,
                     negate ? Math.negateExact(delta) : delta);
         }
+    }
+
+    private static void addTreasuryAssets(Set<String> target, CoreTreasuryState treasury) {
+        target.addAll(treasury.feeBalances().keySet());
+        target.addAll(treasury.insuranceBalances().keySet());
+        target.addAll(treasury.insuranceDeficits().keySet());
+        target.addAll(treasury.liquidationFeeBalances().keySet());
+        target.addAll(treasury.fundingResidualBalances().keySet());
+        target.addAll(treasury.roundingResidualBalances().keySet());
+        target.addAll(treasury.clearingPnlBalances().keySet());
     }
 
     private static TreeMap<String, Long> totals(List<FundsPosting> postings) {

@@ -159,16 +159,6 @@ public class AeronOrderCommandService {
         long orderId = StableOrderIdentity.orderId(productLine, request.userId(), clientOrderId);
         PlaceOrderCommand command = buildPlaceCommand(orderId, request, validation);
         UUID commandId = StableOrderIdentity.commandId(productLine, request.userId(), clientOrderId);
-        OrderAeronGateway.PreflightResult preflight = aeron.preflight(request.userId(), command);
-        if (preflight == null || preflight.resultCode() == null) {
-            throw new IllegalStateException("order preflight response is missing");
-        }
-        if (!preflight.accepted()) {
-            return new CommandExecution(commandId, List.of(orderId),
-                    new CoreCommandOutcome.Terminal(new CoreResponse(
-                            ResponseStatus.REJECTED, ResponseStatus.REJECTED, preflight.resultCode(),
-                            0L, 0L, 0L, new byte[0])), CommandKind.PLACE);
-        }
         CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodePlaceOrder(command));
         return new CommandExecution(commandId, List.of(orderId), outcome, CommandKind.PLACE);

@@ -22,20 +22,32 @@ public final class RuntimePerpetualFundingProcessor {
             throw new IllegalArgumentException("invalid perpetual funding simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return apply(before, command, indexedUserIds, chunkCommandId, runtime, identities);
+        Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
+        return applyRuntime(command, users, chunkCommandId, runtime, identities);
     }
 
     public static FundingResult apply(TradingCoreState before, ApplyFundingCommand command,
                                       Iterable<Long> indexedUserIds, UUID chunkCommandId,
                                       TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || runtime == null || identities == null) {
+        if (before == null || runtime == null || before.productLine() != runtime.productLine()
+                || before.revision() != runtime.revision()) {
+            throw new IllegalArgumentException("invalid perpetual funding apply");
+        }
+        Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
+        return applyRuntime(command, users, chunkCommandId, runtime, identities);
+    }
+
+    public static FundingResult applyRuntime(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
+                                             UUID chunkCommandId, TradingRuntimeState runtime,
+                                             RuntimeIdentityRegistry identities) {
+        if (command == null || indexedUserIds == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual funding apply");
         }
         runtime.assertOwner();
-        if (!before.productLine().isFundingProduct()) {
+        if (!runtime.productLine().isFundingProduct()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
-        CoreInstrumentState instrument = before.instruments().get(OrderReservation.normalizeSymbol(command.symbol()));
+        CoreInstrumentState instrument = runtime.instrument(command.symbol());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
@@ -43,12 +55,12 @@ public final class RuntimePerpetualFundingProcessor {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
         }
         SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
-        CoreMarkPriceState mark = before.riskState().markPrices().get(instrument.symbol());
+        int symbolId = identities.symbolId(instrument.symbol());
+        MarkPriceRuntime mark = runtime.markPrice(symbolId);
         if (mark == null) {
             throw new CoreStateRejectedException("MARK_PRICE_NOT_FOUND", "funding requires mark price");
         }
 
-        int symbolId = identities.symbolId(instrument.symbol());
         int settleAssetId = identities.assetId(instrument.settleAsset());
         long previousSettlement = runtime.treasury().fundingSettlement(symbolId);
         if (command.settlementId() <= previousSettlement) {
@@ -56,7 +68,7 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         TreasuryRuntime.FundingProgressRuntime previousProgress = runtime.treasury().fundingProgress(symbolId);
-        boolean chunked = indexedUserIds != null && chunkCommandId != null;
+        boolean chunked = chunkCommandId != null;
         if (chunked) {
             if (previousProgress == null && command.cursorUserId() != 0) {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
@@ -71,16 +83,12 @@ public final class RuntimePerpetualFundingProcessor {
 
         ArrayList<Long> selectedUserIds = new ArrayList<>();
         boolean moreUsers = false;
-        if (!chunked) {
-            before.users().keySet().forEach(selectedUserIds::add);
-        } else {
-            for (Long userId : indexedUserIds) {
-                if (userId == null || userId <= command.cursorUserId()) continue;
-                if (selectedUserIds.size() < command.maxUsers()) selectedUserIds.add(userId);
-                else {
-                    moreUsers = true;
-                    break;
-                }
+        for (Long userId : indexedUserIds) {
+            if (userId == null || chunked && userId <= command.cursorUserId()) continue;
+            if (!chunked || selectedUserIds.size() < command.maxUsers()) selectedUserIds.add(userId);
+            else {
+                moreUsers = true;
+                break;
             }
         }
 
@@ -144,7 +152,7 @@ public final class RuntimePerpetualFundingProcessor {
                     command.settlementId(), command.instrumentVersion(), command.fundingRatePpm(),
                     nextCursorUserId, chunkCommandId));
         }
-        runtime.setMetadata(before.productLine(), Math.incrementExact(before.revision()));
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
                 nextCursorUserId, selectedUserIds.size()));
     }

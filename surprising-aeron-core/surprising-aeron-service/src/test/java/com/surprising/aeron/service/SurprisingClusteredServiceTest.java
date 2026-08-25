@@ -520,7 +520,10 @@ class SurprisingClusteredServiceTest {
         Field completedField = CoreProbeState.class.getDeclaredField("completedMatching");
         completedField.setAccessible(true);
         ((Map<?, ?>) completedField.get(state)).clear();
-        futures.put(sequence, replacement);
+        var track = CoreProbeState.class.getDeclaredMethod(
+                "trackMatchingFuture", long.class, CompletableFuture.class);
+        track.setAccessible(true);
+        track.invoke(state, sequence, replacement);
     }
 
     private static ClientSession clientSession(List<byte[]> responses) {

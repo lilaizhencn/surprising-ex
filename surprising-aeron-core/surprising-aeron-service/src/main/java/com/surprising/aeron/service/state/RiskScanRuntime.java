@@ -39,4 +39,22 @@ public record RiskScanRuntime(int symbolId, long priceSequence, long scanStartPr
                 triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
                 triggerOcoOrderId, triggerOcoCursor);
     }
+
+    public RiskScanRuntime withTriggerProgress(boolean complete, int phase, long priceCursor, long orderCursor,
+                                               long upperId, long markPriceTicks,
+                                               long generatedAtEpochMillis) {
+        return new RiskScanRuntime(symbolId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete,
+                riskUserId, riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
+                riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
+                complete, phase, priceCursor, orderCursor, upperId, markPriceTicks, generatedAtEpochMillis,
+                triggerOcoOrderId, triggerOcoCursor);
+    }
+
+    public RiskScanRuntime withTriggerOcoProgress(long orderId, long cursor) {
+        return new RiskScanRuntime(symbolId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete,
+                riskUserId, riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
+                riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
+                triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
+                triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, orderId, cursor);
+    }
 }

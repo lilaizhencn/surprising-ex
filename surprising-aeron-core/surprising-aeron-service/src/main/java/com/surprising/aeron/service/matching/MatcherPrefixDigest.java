@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.matching;
 
+import exchange.core2.core.common.MatcherResult;
+
 final class MatcherPrefixDigest {
 
     private static final long OFFSET_BASIS = 0xcbf29ce484222325L;
@@ -44,8 +46,8 @@ final class MatcherPrefixDigest {
             hash = mix(hash, cancellation.resultCode());
         }
         hash = mix(hash, result.matcherEvents().size());
-        for (CoreMatchingResult.MatcherEvent event : result.matcherEvents()) {
-            hash = mix(hash, event.type());
+        for (MatcherResult.MatcherEvent event : result.matcherEvents()) {
+            hash = mix(hash, event.eventType().name());
             hash = mix(hash, event.section());
             hash = mix(hash, event.activeOrderCompleted());
             hash = mix(hash, event.matchedOrderId());
