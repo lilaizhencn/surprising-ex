@@ -20,7 +20,6 @@ class KafkaFanoutConsumerTopicTest {
 
         assertThat(consumer.groupId()).isEqualTo("surprising-inverse-delivery-websocket-v1-node-b");
         assertThat(consumer.candleTopic()).isEqualTo("surprising.inverse-delivery.candle.events.v1");
-        assertThat(consumer.tradeTopic()).isEqualTo("surprising.inverse-delivery.trade.events.v1");
         assertThat(consumer.orderBookDepthTopic()).isEqualTo("surprising.inverse-delivery.orderbook.depth.v1");
         assertThat(consumer.priceEventsTopic()).isEqualTo("surprising.inverse-delivery.price.events.v1");
         assertThat(consumer.fundingRateListenerEnabled()).isFalse();

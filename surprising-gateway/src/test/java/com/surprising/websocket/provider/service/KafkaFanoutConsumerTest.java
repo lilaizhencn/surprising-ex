@@ -235,6 +235,50 @@ class KafkaFanoutConsumerTest {
     }
 
     @Test
+    void fansOutPublicTradeBatchFromMatchTradesTopic() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant firstEventTime = Instant.parse("2026-07-01T00:00:00Z");
+        Instant secondEventTime = firstEventTime.plusMillis(1);
+        PublicTradeEvent firstEvent = new PublicTradeEvent("11:1", 11_000_001L, "BTC-USDT", 7L,
+                OrderSide.BUY, 600_000L, 3L, firstEventTime, "trace-trade-1");
+        PublicTradeEvent secondEvent = new PublicTradeEvent("11:2", 11_000_002L, "BTC-USDT", 7L,
+                OrderSide.SELL, 600_100L, 2L, secondEventTime, "trace-trade-2");
+
+        consumer.onPublicTradeBatch(List.of(
+                new ConsumerRecord<>("surprising.linear-perp.match.trades.v1", 0, 0L,
+                        "BTC-USDT", objectMapper.writeValueAsString(firstEvent)),
+                new ConsumerRecord<>("surprising.linear-perp.match.trades.v1", 0, 1L,
+                        "BTC-USDT", objectMapper.writeValueAsString(secondEvent))));
+
+        ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
+        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null,
+                ProductLine.LINEAR_PERPETUAL)), events.capture());
+        assertThat(events.getValue()).containsExactly(
+                new SubscriptionRegistry.TimedPayload(firstEvent, firstEventTime),
+                new SubscriptionRegistry.TimedPayload(secondEvent, secondEventTime));
+    }
+
+    @Test
+    void rejectsPublicTradeBatchFromLegacyTradeTopic() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        PublicTradeEvent event = new PublicTradeEvent("11:1", 11_000_001L, "BTC-USDT", 7L,
+                OrderSide.BUY, 600_000L, 3L, eventTime, "trace-trade-1");
+
+        assertThatThrownBy(() -> consumer.onPublicTradeBatch(List.of(new ConsumerRecord<>(
+                "surprising.linear-perp.trade.events.v1", 0, 0L,
+                "BTC-USDT", objectMapper.writeValueAsString(event)))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to batch fanout public trade")
+                .hasRootCauseMessage("public trade topic must match current product line: expected="
+                        + "surprising.linear-perp.match.trades.v1 actual=surprising.linear-perp.trade.events.v1");
+
+        verifyNoInteractions(registry);
+    }
+
+    @Test
     void fansOutPrivateFinancialTradesOnlyFromDurableMatchResult() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);

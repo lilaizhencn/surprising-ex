@@ -106,10 +106,6 @@ public class WebSocketProperties {
             return productTopics().candleEventsTopic();
         }
 
-        public String getTradeTopic() {
-            return productTopics().publicTradesTopic();
-        }
-
         public String getOrderBookDepthTopic() {
             return productTopics().orderBookDepthTopic();
         }

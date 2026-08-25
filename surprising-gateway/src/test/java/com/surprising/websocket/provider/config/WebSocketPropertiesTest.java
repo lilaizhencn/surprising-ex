@@ -32,8 +32,6 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising-linear-delivery-websocket-v1-node-a");
         assertThat(properties.getKafka().getCandleTopic())
                 .isEqualTo("surprising.linear-delivery.candle.events.v1");
-        assertThat(properties.getKafka().getTradeTopic())
-                .isEqualTo("surprising.linear-delivery.trade.events.v1");
         assertThat(properties.getKafka().getOrderBookDepthTopic())
                 .isEqualTo("surprising.linear-delivery.orderbook.depth.v1");
         assertThat(properties.getKafka().getPriceEventsTopic())

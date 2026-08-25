@@ -80,7 +80,7 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 | 频道 | 公共频道 | 必填字段 | 来源 topic |
 | --- | --- | --- | --- |
 | `candles` | 是 | `symbol`, `period` | `surprising.linear-perp.candle.events.v1` |
-| `trades` | 是 | `symbol` | `surprising.linear-perp.trade.events.v1`, `surprising.linear-perp.match.trades.v1` |
+| `trades` | 是 | `symbol` | `surprising.linear-perp.match.trades.v1` |
 | `depth` | 是 | `symbol` | `surprising.linear-perp.orderbook.depth.v1` |
 | `index` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=INDEX_PRICE`) |
 | `mark` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=MARK_PRICE`) |

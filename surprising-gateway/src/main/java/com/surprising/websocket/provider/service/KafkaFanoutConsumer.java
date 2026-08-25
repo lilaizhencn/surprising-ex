@@ -2,7 +2,6 @@ package com.surprising.websocket.provider.service;
 
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
-import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -97,38 +96,6 @@ public class KafkaFanoutConsumer {
     public void onCandleBatch(List<ConsumerRecord<String, String>> records) {
         for (ConsumerRecord<String, String> record : records) {
             onCandle(record);
-        }
-    }
-
-    public void onTrade(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), tradeTopic(), "public trade");
-            TradeEvent event = objectMapper.readValue(record.value(), TradeEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
-            registry.publish(topic(WsChannel.TRADES, event.symbol(), null), event, event.tradeTime());
-        } catch (Exception ex) {
-            log.error("Failed to fanout public trade: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout public trade", ex);
-        }
-    }
-
-    @KafkaListener(
-            topics = "#{__listener.tradeTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
-    public void onTradeBatch(List<ConsumerRecord<String, String>> records) {
-        try {
-            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
-            for (ConsumerRecord<String, String> record : records) {
-                requireCurrentProductTopic(record.topic(), tradeTopic(), "public trade");
-                TradeEvent event = objectMapper.readValue(record.value(), TradeEvent.class);
-                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
-                addBatch(grouped, topic(WsChannel.TRADES, event.symbol(), null), event, event.tradeTime());
-            }
-            publishBatches(grouped);
-        } catch (Exception ex) {
-            log.error("Failed to batch fanout public trade: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to batch fanout public trade", ex);
         }
     }
 
@@ -421,10 +388,6 @@ public class KafkaFanoutConsumer {
 
     public String candleTopic() {
         return properties.getKafka().getCandleTopic();
-    }
-
-    public String tradeTopic() {
-        return properties.getKafka().getTradeTopic();
     }
 
     public String orderBookDepthTopic() {
