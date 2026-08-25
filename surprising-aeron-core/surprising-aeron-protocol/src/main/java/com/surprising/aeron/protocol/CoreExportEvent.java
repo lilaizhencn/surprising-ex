@@ -19,14 +19,24 @@ public record CoreExportEvent(
         List<CoreFundingPaymentView> fundingPayments,
         List<CoreLiquidationView> changedLiquidations,
         List<CoreTreasuryAssetView> changedTreasuryAssets,
-        List<CoreTriggerOrderStateView> changedTriggerOrders) {
+        List<CoreTriggerOrderStateView> changedTriggerOrders,
+        long beforeBusinessStateHash,
+        long beforeFundsStateHash,
+        long fundsStateHash,
+        long matcherSequence,
+        long matcherPrefixBefore,
+        long matcherPrefixAfter,
+        long clusterPosition,
+        List<CoreFundsPostingView> fundsPostings,
+        CoreFactIntegrityView integrity) {
 
     public CoreExportEvent {
         if (exportSequence <= 0 || appliedCommandCount <= 0 || commandId == null || commandType == null
                 || commandType.kind() != WireMessageKind.COMMAND || commandStatus == null || resultCode == null
                 || commandPayload == null || changedUsers == null || changedOrders == null || executions == null
                 || fundingPayments == null || changedLiquidations == null || changedTreasuryAssets == null
-                || changedTriggerOrders == null) {
+                || changedTriggerOrders == null || matcherSequence < 0 || clusterPosition < 0
+                || fundsPostings == null) {
             throw new IllegalArgumentException("invalid core export event");
         }
         commandPayload = commandPayload.clone();
@@ -37,6 +47,7 @@ public record CoreExportEvent(
         changedLiquidations = List.copyOf(changedLiquidations);
         changedTreasuryAssets = List.copyOf(changedTreasuryAssets);
         changedTriggerOrders = List.copyOf(changedTriggerOrders);
+        fundsPostings = List.copyOf(fundsPostings);
     }
 
     public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
@@ -44,7 +55,7 @@ public record CoreExportEvent(
                            CoreResultCode resultCode, long userId, byte[] commandPayload) {
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
                 commandStatus, resultCode, userId, commandPayload, List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), businessStateHash, 0, 0, 0, 0, 0, 0, List.of(), null);
     }
 
     public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
@@ -54,7 +65,8 @@ public record CoreExportEvent(
                            List<CoreExecutionView> executions) {
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
                 commandStatus, resultCode, userId, commandPayload, changedUsers, changedOrders,
-                executions, List.of(), List.of(), List.of(), List.of());
+                executions, List.of(), List.of(), List.of(), List.of(), businessStateHash,
+                0, 0, 0, 0, 0, 0, List.of(), null);
     }
 
     public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
@@ -64,7 +76,8 @@ public record CoreExportEvent(
                            List<CoreExecutionView> executions, List<CoreFundingPaymentView> fundingPayments) {
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
                 commandStatus, resultCode, userId, commandPayload, changedUsers, changedOrders,
-                executions, fundingPayments, List.of(), List.of(), List.of());
+                executions, fundingPayments, List.of(), List.of(), List.of(), businessStateHash,
+                0, 0, 0, 0, 0, 0, List.of(), null);
     }
 
     public CoreExportEvent(long exportSequence, long appliedCommandCount, long businessStateHash,
@@ -76,7 +89,8 @@ public record CoreExportEvent(
                            List<CoreTreasuryAssetView> changedTreasuryAssets) {
         this(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
                 commandStatus, resultCode, userId, commandPayload, changedUsers, changedOrders,
-                executions, fundingPayments, changedLiquidations, changedTreasuryAssets, List.of());
+                executions, fundingPayments, changedLiquidations, changedTreasuryAssets, List.of(),
+                businessStateHash, 0, 0, 0, 0, 0, 0, List.of(), null);
     }
 
     @Override

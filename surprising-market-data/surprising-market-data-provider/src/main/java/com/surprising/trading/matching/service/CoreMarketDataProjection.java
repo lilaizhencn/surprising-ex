@@ -126,6 +126,10 @@ public class CoreMarketDataProjection {
             throw new IllegalStateException("non-contiguous Core events: expected="
                     + expectedSequence + " actual=" + event.exportSequence());
         }
+        if (event.resultCode() == com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING) {
+            appliedExportSequence = event.exportSequence();
+            return;
+        }
         Map<Long, CoreOrderStateView> eventOrders = new HashMap<>();
         Set<String> changedSymbols = new LinkedHashSet<>();
         Map<LevelKey, Level> stagedLevels = new LinkedHashMap<>();
@@ -139,7 +143,9 @@ public class CoreMarketDataProjection {
             if (executionChanges.makerOrderIds().contains(order.orderId())) continue;
             boolean createdByCommand = order.commandId().equals(event.commandId());
             if ("OPEN".equals(order.status())) {
-                if (createdByCommand) {
+                if (createdByCommand
+                        && order.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
+                        && !order.timeInForce().immediate()) {
                     stageLevel(stagedLevels, normalizeSymbol(order.symbol()), order.side(), order.priceTicks(),
                             order.remainingQuantitySteps(), 1);
                 }

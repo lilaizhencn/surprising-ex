@@ -1218,9 +1218,8 @@ public class MarketMakerService {
         return accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(), PositionSide.NET.name());
     }
 
-    /** 现货报价锚定盘口，不消费标记价 Topic。 */
     private MarkPriceResponse currentMarkPrice(ProductLine productLine, String symbol, long instrumentVersion) {
-        return productLine == ProductLine.SPOT ? null : latestMarkPrice(symbol, instrumentVersion);
+        return latestMarkPrice(symbol, instrumentVersion);
     }
 
     private void requireTradable(InstrumentResponse instrument, ProductLine productLine) {

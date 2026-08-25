@@ -29,10 +29,8 @@ public final class RuntimeSettlementProcessor {
         if (command.settlementId() == previousSettlement) {
             return new CoreSettlementProgressView(command.settlementId(), true, true, 0, 0, 0, 0);
         }
-        validateSettlement(instrument, command);
-        long optionSettlementCashUnits = instrument.contractType().isOption()
-                ? CoreContractMath.optionSettlementCashUnits(instrument, command.settlementPriceTicks())
-                : command.optionCashUnitsPerContract();
+        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        validateSettlement(kernel, command);
         TreasuryRuntime.LifecycleProgressRuntime previousProgress = runtime.treasury().lifecycleProgress(symbolId);
         boolean chunked = indexedUserIds != null && chunkCommandId != null;
         validateProgress(previousProgress, command, chunked);
@@ -66,7 +64,7 @@ public final class RuntimeSettlementProcessor {
         ArrayList<Long> selectedUserIds = selectUsers(before, indexedUserIds, command, chunked);
         boolean moreUsers = chunked && hasMoreUsers(indexedUserIds, selectedUserIds, command.cursorUserId());
         for (long userId : selectedUserIds) {
-            settleUser(before, runtime, identities, instrument, command, optionSettlementCashUnits, userId);
+            settleUser(before, runtime, identities, instrument, kernel, command, userId);
         }
         boolean complete = !chunked || !moreUsers;
         long nextCursorUserId = complete ? 0 : selectedUserIds.getLast();
@@ -91,7 +89,7 @@ public final class RuntimeSettlementProcessor {
             throw new IllegalArgumentException("settlement cursor must advance");
         }
         CoreInstrumentState instrument = requireInstrument(before, command);
-        validateSettlement(instrument, command);
+        validateSettlement(SettlementKernels.forInstrument(instrument), command);
         int symbolId = identities.symbolId(instrument.symbol());
         TreasuryRuntime.LifecycleProgressRuntime progress = runtime.treasury().lifecycleProgress(symbolId);
         validateProgress(progress, command, true);
@@ -106,7 +104,7 @@ public final class RuntimeSettlementProcessor {
 
     private static void settleUser(TradingCoreState before, TradingRuntimeState runtime,
                                    RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
-                                   SettleInstrumentCommand command, long optionSettlementCashUnits, long userId) {
+                                   SettlementKernel kernel, SettleInstrumentCommand command, long userId) {
         CoreUserState referenceUser = before.user(userId);
         if (referenceUser == null) return;
         List<CorePositionState> positions = referenceUser.positions().values().stream()
@@ -118,18 +116,16 @@ public final class RuntimeSettlementProcessor {
         if (balance == null) throw new IllegalStateException("settlement balance is missing");
         long available = balance.availableUnits();
         long locked = balance.lockedUnits();
-        long insurance = runtime.treasury().insurance(assetId);
+        long clearingPnl = runtime.treasury().clearingPnl(assetId);
         long deficit = runtime.treasury().insuranceDeficit(assetId);
         for (CorePositionState position : positions) {
-            long cashDelta = instrument.contractType().isOption()
-                    ? Math.multiplyExact(optionSettlementCashUnits, position.signedQuantitySteps())
-                    : CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
+            long cashDelta = kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
                     position.entryPriceTicks(), command.settlementPriceTicks());
             Cash cash = applyCash(available, locked, position.marginMode(),
                     position.positionMarginUnits(), cashDelta);
             available = cash.available();
             locked = cash.locked();
-            insurance = Math.addExact(insurance, Math.negateExact(cash.appliedDelta()));
+            clearingPnl = Math.addExact(clearingPnl, Math.negateExact(cash.appliedDelta()));
             long positionKey = identities.positionKey(userId, position.key());
             PositionRuntime current = runtime.position(positionKey);
             runtime.replacePosition(positionKey, new PositionRuntime(userId, identities.symbolId(position.symbol()),
@@ -138,7 +134,8 @@ public final class RuntimeSettlementProcessor {
                     0));
         }
         runtime.replaceBalance(new BalanceRuntime(userId, assetId, available, locked));
-        runtime.treasury().setInsurance(assetId, insurance, deficit);
+        runtime.treasury().setClearingPnl(assetId, clearingPnl);
+        runtime.treasury().setDeficit(assetId, deficit);
         runtime.advanceUserRevision(userId);
     }
 
@@ -219,10 +216,11 @@ public final class RuntimeSettlementProcessor {
         return instrument;
     }
 
-    private static void validateSettlement(CoreInstrumentState instrument, SettleInstrumentCommand command) {
-        if (!instrument.contractType().isDelivery() && !instrument.contractType().isOption()) {
-            throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
-                    "instrument settlement requires delivery or option product");
+    private static void validateSettlement(SettlementKernel kernel, SettleInstrumentCommand command) {
+        switch (kernel.productLine()) {
+            case LINEAR_DELIVERY, INVERSE_DELIVERY, OPTION -> { }
+            case SPOT, LINEAR_PERPETUAL, INVERSE_PERPETUAL -> throw new CoreStateRejectedException(
+                    "PRODUCT_LINE_UNSUPPORTED", "instrument settlement requires delivery or option product");
         }
         if (command.settlementPriceTicks() <= 0) {
             throw new CoreStateRejectedException("INVALID_SETTLEMENT_PRICE", "delivery price must be positive");

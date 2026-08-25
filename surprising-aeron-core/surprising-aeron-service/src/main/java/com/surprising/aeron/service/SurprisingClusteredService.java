@@ -39,6 +39,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private static final long FIRST_EGRESS_DRAIN_CORRELATION_ID = Long.MIN_VALUE + 1;
 
     private final ProductLine productLine;
+    private final com.surprising.aeron.service.state.CoreFactSigner factSigner;
     private final AtomicReference<Cluster.Role> role = new AtomicReference<>();
     private CoreProbeState state;
     private Cluster cluster;
@@ -55,8 +56,18 @@ public final class SurprisingClusteredService implements ClusteredService {
     private long snapshotFenceTimeoutCount;
 
     public SurprisingClusteredService(ProductLine productLine) {
+        this(productLine, com.surprising.aeron.service.state.CoreFactSigner.configured());
+    }
+
+    SurprisingClusteredService(ProductLine productLine,
+                               com.surprising.aeron.service.state.CoreFactSigner factSigner) {
+        if (productLine == null || factSigner == null) {
+            throw new IllegalArgumentException("product line and core fact signer are required");
+        }
         this.productLine = productLine;
+        this.factSigner = factSigner;
         this.state = new CoreProbeState(productLine);
+        this.state.installFactSigner(factSigner);
     }
 
     @Override
@@ -94,6 +105,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         } catch (IllegalArgumentException exception) {
             return;
         }
+        completeEarlierMatching(timestamp, header.position());
         var result = state.apply(request, timestamp, header.position());
         long matchingSequence = state.matchingSequence(request.header().commandId());
         if (matchingSequence > 0) {
@@ -246,7 +258,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             for (int completed = 0; completed < 64; completed++) {
                 long sequence = state.firstPendingMatchingSequence();
                 if (sequence == 0) break;
-                var matchingResult = state.takeMatchingResult(sequence);
+                var matchingResult = state.awaitMatchingResult(sequence);
                 if (matchingResult == null) {
                     assertMatchingWatchdogHealthy(sequence);
                     break;
@@ -277,7 +289,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             }
             return;
         }
-        var matchingResult = state.takeMatchingResult(correlationId);
+        var matchingResult = state.awaitMatchingResult(correlationId);
         if (matchingResult == null) {
             assertMatchingWatchdogHealthy(correlationId);
             scheduleMatchingWakeup();
@@ -327,6 +339,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void replaceState(CoreProbeState restored) {
         state.close();
         state = restored;
+        state.installFactSigner(factSigner);
     }
 
     @FunctionalInterface
@@ -462,6 +475,26 @@ public final class SurprisingClusteredService implements ClusteredService {
             CoreMessage response = new CoreMessage(pendingClient.requestHeader().response(
                     responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(result));
             offer(pendingClient.session(), response);
+        }
+    }
+
+    private void completeEarlierMatching(long timestamp, long clusterPosition) {
+        state.drainMatchingCompletions();
+        while (true) {
+            long sequence = state.firstPendingMatchingSequence();
+            if (sequence == 0) {
+                return;
+            }
+            var matchingResult = state.awaitMatchingResult(sequence);
+            if (matchingResult == null) {
+                throw new com.surprising.aeron.service.matching.FatalMatchingDivergenceException(
+                        "matching command fence", sequence, 0, "pending matcher continuation is unavailable");
+            }
+            recordMatchingProgress(sequence);
+            CoreResponse result = state.completeMatching(sequence, matchingResult, timestamp, clusterPosition);
+            if (result != null) {
+                deliverMatchingResponse(sequence, result);
+            }
         }
     }
 

@@ -21,6 +21,11 @@ public class IndexPriceTickRepository {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (symbol, sequence) DO NOTHING
             """;
+    private static final String DELETE_SQL = """
+            DELETE FROM price_index_ticks
+             WHERE symbol = ?
+               AND sequence = ?
+            """;
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -94,25 +99,34 @@ public class IndexPriceTickRepository {
         if (keys == null || keys.isEmpty()) {
             return 0;
         }
-        List<Object> args = new java.util.ArrayList<>(keys.size() * 2);
-        return jdbcTemplate.update("""
-                DELETE FROM price_index_ticks
-                 WHERE (symbol, sequence) IN (%s)
-                """.formatted(tuplePredicate(keys, args)), args.toArray());
+        int[] results = jdbcTemplate.batchUpdate(DELETE_SQL, new TickKeyBatchSetter(keys));
+        return affectedRows(results);
     }
 
-    private String tuplePredicate(List<TickKey> keys, List<Object> args) {
-        StringBuilder sql = new StringBuilder();
-        for (int index = 0; index < keys.size(); index++) {
-            if (index > 0) {
-                sql.append(", ");
+    private int affectedRows(int[] results) {
+        int affected = 0;
+        for (int result : results) {
+            if (result == java.sql.Statement.SUCCESS_NO_INFO) {
+                affected++;
+            } else if (result > 0) {
+                affected += result;
             }
-            sql.append("(?, ?)");
-            TickKey key = keys.get(index);
-            args.add(key.symbol());
-            args.add(key.sequence());
         }
-        return sql.toString();
+        return affected;
+    }
+
+    private record TickKeyBatchSetter(List<TickKey> keys) implements BatchPreparedStatementSetter {
+        @Override
+        public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
+            TickKey key = keys.get(index);
+            statement.setString(1, key.symbol());
+            statement.setLong(2, key.sequence());
+        }
+
+        @Override
+        public int getBatchSize() {
+            return keys.size();
+        }
     }
 
     public record IndexPriceTick(String symbol,

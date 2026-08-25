@@ -155,6 +155,37 @@ class CoreMarketDataProjectionTest {
     }
 
     @Test
+    void neverProjectsImmediateOrdersAsRestingLevels() {
+        ProjectionFixture fixture = fixture(new CoreOrderBookView(0, List.of()));
+        UUID commandId = new UUID(0, 800);
+        CoreOrderStateView immediate = new CoreOrderStateView(8, ProductLine.SPOT, 808,
+                "BTC-USDT", 1, CoreOrderSide.SELL, 10, 7, 0, 7, false,
+                CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
+                false, "client-8", commandId, 0, 0, 0, 900, 1_000, 2, "OPEN", 2);
+
+        fixture.projection().apply(message(1, commandId, List.of(immediate), List.of()));
+
+        assertThat(fixture.projection().snapshot("BTC-USDT", 10).asks()).isEmpty();
+    }
+
+    @Test
+    void projectsAnOrderOnlyAfterItsMatcherContinuationIsApplied() {
+        ProjectionFixture fixture = fixture(new CoreOrderBookView(0, List.of()));
+        UUID commandId = new UUID(0, 801);
+        CoreOrderStateView resting = order(9, 809, CoreOrderSide.BUY, 0, 7, "OPEN", 0, 0, commandId);
+
+        fixture.projection().apply(message(1, commandId, CoreResultCode.MATCHING_PENDING,
+                List.of(resting), List.of()));
+
+        assertThat(fixture.projection().snapshot("BTC-USDT", 10).bids()).isEmpty();
+
+        fixture.projection().apply(message(2, commandId, CoreResultCode.NONE, List.of(resting), List.of()));
+
+        assertThat(fixture.projection().snapshot("BTC-USDT", 10).bids()).singleElement()
+                .satisfies(level -> assertThat(level.quantitySteps()).isEqualTo(7));
+    }
+
+    @Test
     void removesFullyFilledMakerLevel() {
         ProjectionFixture fixture = fixture(new CoreOrderBookView(1,
                 List.of(new CoreBookLevelView("BTC-USDT", CoreOrderSide.SELL, 10, 6, 1))));
@@ -206,9 +237,14 @@ class CoreMarketDataProjectionTest {
 
     private static CoreMessage message(long exportSequence, UUID commandId,
                                        List<CoreOrderStateView> orders, List<CoreExecutionView> executions) {
+        return message(exportSequence, commandId, CoreResultCode.NONE, orders, executions);
+    }
+
+    private static CoreMessage message(long exportSequence, UUID commandId, CoreResultCode resultCode,
+                                       List<CoreOrderStateView> orders, List<CoreExecutionView> executions) {
         long userId = orders.isEmpty() ? 1 : orders.getFirst().userId();
         CoreExportEvent event = new CoreExportEvent(exportSequence, exportSequence, 99, commandId,
-                CoreMessageType.PLACE_ORDER, ResponseStatus.APPLIED, CoreResultCode.NONE, userId,
+                CoreMessageType.PLACE_ORDER, ResponseStatus.APPLIED, resultCode, userId,
                 new byte[0], List.of(), orders, executions);
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
                 ProductLine.SPOT, CommandSource.GATEWAY, 7, exportSequence, userId, 1_000, exportSequence)

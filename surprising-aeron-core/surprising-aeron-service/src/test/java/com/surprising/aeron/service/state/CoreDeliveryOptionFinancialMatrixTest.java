@@ -244,7 +244,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(afterBalance.lockedUnits()).isEqualTo(50);
         assertThat(afterUser.positions().get(isolatedSymbol).signedQuantitySteps()).isZero();
         assertThat(afterUser.positions().get(isolatedSymbol).realizedPnlUnits()).isEqualTo(-40);
-        assertThat(settled.treasuryState().insuranceBalances()).containsEntry("USDT", 20L);
+        assertThat(settled.treasuryState().insuranceBalances()).doesNotContainKey("USDT");
+        assertThat(settled.treasuryState().clearingPnlBalances()).containsEntry("USDT", 20L);
         assertThat(total(settled, "USDT")).isEqualTo(beforeTotal);
     }
 
@@ -560,10 +561,15 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
     private long total(TradingCoreState state, String asset) {
         long users = state.users().values().stream().mapToLong(user -> user.totalUnits(asset)).sum();
-        long fee = state.treasuryState().feeBalances().getOrDefault(asset, 0L);
-        long insurance = state.treasuryState().insuranceBalances().getOrDefault(asset, 0L);
-        long deficit = state.treasuryState().insuranceDeficits().getOrDefault(asset, 0L);
-        return users + fee + insurance - deficit;
+        CoreTreasuryState treasury = state.treasuryState();
+        long total = users;
+        total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.insuranceBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.liquidationFeeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.fundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.roundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.clearingPnlBalances().getOrDefault(asset, 0L));
+        return Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(asset, 0L));
     }
 
     private static String rowKey(Variant variant) {

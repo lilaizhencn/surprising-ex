@@ -42,6 +42,7 @@ public final class RuntimePerpetualFundingProcessor {
         if (instrument.version() != command.instrumentVersion()) {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
         }
+        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
         CoreMarkPriceState mark = before.riskState().markPrices().get(instrument.symbol());
         if (mark == null) {
             throw new CoreStateRejectedException("MARK_PRICE_NOT_FOUND", "funding requires mark price");
@@ -90,7 +91,7 @@ public final class RuntimePerpetualFundingProcessor {
             long requestedDelta = 0;
             for (long positionKey : positionKeys) {
                 PositionRuntime position = runtime.position(positionKey);
-                long positionDelta = CoreContractMath.fundingDeltaUnits(instrument,
+                long positionDelta = kernel.fundingDeltaUnits(instrument,
                         position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
                 requestedDelta = Math.addExact(requestedDelta, positionDelta);
             }
@@ -104,14 +105,15 @@ public final class RuntimePerpetualFundingProcessor {
             if (appliedDelta != 0) {
                 runtime.replaceBalance(new BalanceRuntime(userId, settleAssetId,
                         Math.addExact(balance.availableUnits(), appliedDelta), balance.lockedUnits()));
-                runtime.treasury().adjustInsurance(settleAssetId, Math.negateExact(appliedDelta));
+                runtime.treasury().setFundingResidual(settleAssetId, Math.addExact(
+                        runtime.treasury().fundingResidual(settleAssetId), Math.negateExact(appliedDelta)));
                 runtime.advanceUserRevision(userId);
             }
 
             long debitRelief = Math.subtractExact(appliedDelta, requestedDelta);
             for (long positionKey : positionKeys) {
                 PositionRuntime position = runtime.position(positionKey);
-                long amount = CoreContractMath.fundingDeltaUnits(instrument,
+                long amount = kernel.fundingDeltaUnits(instrument,
                         position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
                 if (amount < 0 && debitRelief > 0) {
                     long relief = Math.min(Math.negateExact(amount), debitRelief);

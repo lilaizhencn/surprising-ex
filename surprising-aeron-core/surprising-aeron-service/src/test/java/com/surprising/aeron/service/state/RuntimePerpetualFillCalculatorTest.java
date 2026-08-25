@@ -84,7 +84,8 @@ class RuntimePerpetualFillCalculatorTest {
         assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(918);
         assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(10);
         assertThat(runtime.treasury().fee(assetId)).isEqualTo(2);
-        assertThat(runtime.treasury().insurance(assetId)).isEqualTo(-10);
+        assertThat(runtime.treasury().insurance(assetId)).isZero();
+        assertThat(runtime.treasury().clearingPnl(assetId)).isEqualTo(-10);
         assertThat(runtime.treasury().insuranceDeficit(assetId)).isZero();
     }
 
@@ -132,7 +133,8 @@ class RuntimePerpetualFillCalculatorTest {
         assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(1_044);
         assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(12);
         assertThat(runtime.treasury().fee(assetId)).isEqualTo(4);
-        assertThat(runtime.treasury().insurance(assetId)).isEqualTo(-40);
+        assertThat(runtime.treasury().insurance(assetId)).isZero();
+        assertThat(runtime.treasury().clearingPnl(assetId)).isEqualTo(-40);
         assertThat(runtime.treasury().insuranceDeficit(assetId)).isZero();
     }
 

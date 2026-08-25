@@ -1402,7 +1402,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(10);
+        assertThat(manifest.schemaVersion()).isEqualTo(11);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();
@@ -1540,11 +1540,15 @@ class CoreProbeStateTest {
 
     private static void fillExportBacklogCapacity(CoreExportState exportState) {
         byte[] payload = new byte[CoreExportCodec.MAX_COMMAND_PAYLOAD / 2];
+        com.surprising.aeron.service.state.CoreFactSigner signer =
+                com.surprising.aeron.service.state.CoreFactSigner.inMemory();
         for (long sequence = 1; sequence <= 6; sequence++) {
             exportState.append(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 91, sequence,
                     0, 1_000, sequence), payload), ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    sequence, 0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+                    sequence, 0, 0, 0, 0, 0, 0, 0, sequence,
+                    new com.surprising.aeron.service.state.FundsDelta(List.of()), signer,
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
         assertThat(exportState.hasCapacityFor()).isFalse();
     }

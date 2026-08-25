@@ -24,6 +24,11 @@ public class IndexPriceComponentRepository {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (symbol, sequence, source) DO NOTHING
             """;
+    private static final String DELETE_SQL = """
+            DELETE FROM price_index_components
+             WHERE symbol = ?
+               AND sequence = ?
+            """;
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -95,25 +100,8 @@ public class IndexPriceComponentRepository {
         if (keys == null || keys.isEmpty()) {
             return 0;
         }
-        List<Object> args = new ArrayList<>(keys.size() * 2);
-        return jdbcTemplate.update("""
-                DELETE FROM price_index_components
-                 WHERE (symbol, sequence) IN (%s)
-                """.formatted(tuplePredicate(keys, args)), args.toArray());
-    }
-
-    private String tuplePredicate(List<TickKey> keys, List<Object> args) {
-        StringBuilder sql = new StringBuilder();
-        for (int index = 0; index < keys.size(); index++) {
-            if (index > 0) {
-                sql.append(", ");
-            }
-            sql.append("(?, ?)");
-            TickKey key = keys.get(index);
-            args.add(key.symbol());
-            args.add(key.sequence());
-        }
-        return sql.toString();
+        int[] results = jdbcTemplate.batchUpdate(DELETE_SQL, new TickKeyBatchSetter(keys));
+        return affectedRows(results);
     }
 
     private List<IndexComponentRow> rows(List<IndexPriceEvent> events) {
@@ -148,6 +136,32 @@ public class IndexPriceComponentRepository {
     private Long nullableLong(java.sql.ResultSet resultSet, String column) throws java.sql.SQLException {
         long value = resultSet.getLong(column);
         return resultSet.wasNull() ? null : value;
+    }
+
+    private int affectedRows(int[] results) {
+        int affected = 0;
+        for (int result : results) {
+            if (result == java.sql.Statement.SUCCESS_NO_INFO) {
+                affected++;
+            } else if (result > 0) {
+                affected += result;
+            }
+        }
+        return affected;
+    }
+
+    private record TickKeyBatchSetter(List<TickKey> keys) implements BatchPreparedStatementSetter {
+        @Override
+        public void setValues(PreparedStatement statement, int index) throws java.sql.SQLException {
+            TickKey key = keys.get(index);
+            statement.setString(1, key.symbol());
+            statement.setLong(2, key.sequence());
+        }
+
+        @Override
+        public int getBatchSize() {
+            return keys.size();
+        }
     }
 
     private record IndexComponentRow(IndexPriceEvent event, IndexComponentSnapshot component) {

@@ -83,6 +83,11 @@ public final class ClusterInstrumentSeedMain {
                 while (rows.next()) {
                     List<CoreRiskLimitBracket> brackets = loadBrackets(connection, rows.getString("symbol"),
                             rows.getLong("version"));
+                    if (brackets.isEmpty()) {
+                        brackets = List.of(new CoreRiskLimitBracket(1, 0,
+                                rows.getLong("max_position_notional_units"), rows.getLong("max_leverage_ppm"),
+                                rows.getLong("initial_margin_rate_ppm"), rows.getLong("maintenance_margin_rate_ppm")));
+                    }
                     ContractType contractType = ContractType.valueOf(rows.getString("contract_type"));
                     var expiryTimestamp = rows.getTimestamp("expiry_time");
                     long expiry = expiryTimestamp == null ? 0 : expiryTimestamp.toInstant().toEpochMilli();

@@ -16,7 +16,8 @@ public final class RuntimePerpetualFillCalculator {
                 || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("invalid perpetual fill arguments");
         }
-        if (!instrument.contractType().productLine().isDerivative()
+        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        if (kernel.productLine() == com.surprising.product.api.ProductLine.SPOT
                 || order.symbolId() != identities.symbolId(instrument.symbol())
                 || settleAssetId != identities.assetId(instrument.settleAsset())) {
             throw new IllegalArgumentException("runtime fill instrument identity mismatch");
@@ -57,12 +58,7 @@ public final class RuntimePerpetualFillCalculator {
         long marginIncrease = openingMarginForFill(instrument, nextQuantity, signedFill, openSteps,
                 fillPriceTicks, leveragePpm);
         long feeRatePpm = taker ? order.takerFeeRatePpm() : order.makerFeeRatePpm();
-        long premiumDelta = instrument.contractType().isOption()
-                ? (order.side() == CoreOrderSide.BUY
-                ? Math.negateExact(CoreContractMath.optionPremiumUnits(
-                instrument, fillPriceTicks, fillQuantitySteps))
-                : CoreContractMath.optionPremiumUnits(instrument, fillPriceTicks, fillQuantitySteps))
-                : 0;
+        long premiumDelta = kernel.premiumDeltaUnits(instrument, order.side(), fillPriceTicks, fillQuantitySteps);
         long feeDelta = CoreContractMath.feeDeltaUnits(instrument, fillPriceTicks, fillQuantitySteps, feeRatePpm);
         long premiumDebit = Math.max(0, Math.negateExact(premiumDelta));
         long feeDebit = Math.max(0, Math.negateExact(feeDelta));
@@ -101,10 +97,10 @@ public final class RuntimePerpetualFillCalculator {
         }
 
         long realizedPnl = 0;
-        if (closeSteps > 0 && !instrument.contractType().isOption()) {
+        if (closeSteps > 0) {
             long signedClose = currentQuantity > 0 ? closeSteps : Math.negateExact(closeSteps);
-            realizedPnl = CoreContractMath.pnlUnits(instrument, signedClose,
-                    current.entryPriceTicks(), fillPriceTicks);
+            realizedPnl = kernel.realizedPnlUnits(
+                    instrument, signedClose, current.entryPriceTicks(), fillPriceTicks);
         }
         long appliedPnl;
         if (realizedPnl >= 0) {
@@ -145,15 +141,17 @@ public final class RuntimePerpetualFillCalculator {
                 Math.addExact(current == null ? 0 : current.realizedPnlUnits(), realizedPnl),
                 Math.addExact(remainingMargin, marginIncrease));
         long nextRemainingQuantity = Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps);
-        OrderRuntime nextOrder = order.withExecution(
+        OrderRuntime nextOrder = order.withFill(
                 Math.addExact(order.executedQuantitySteps(), fillQuantitySteps), nextRemainingQuantity,
+                Math.negateExact(feeDelta),
                 nextRemainingQuantity == 0 ? CoreOrderStatus.FILLED : order.status(),
                 Math.incrementExact(order.revision()));
 
         runtime.replaceReservation(reservation.consume(orderReservationDebit));
         runtime.replaceBalance(new BalanceRuntime(order.userId(), settleAssetId, nextAvailable, nextLocked));
         runtime.treasury().setFee(settleAssetId, feeUnits);
-        runtime.treasury().adjustInsurance(settleAssetId, Math.negateExact(appliedPnl));
+        runtime.treasury().setClearingPnl(settleAssetId, Math.addExact(
+                runtime.treasury().clearingPnl(settleAssetId), Math.negateExact(appliedPnl)));
         runtime.replacePosition(positionKey, next);
         runtime.replaceOrder(nextOrder);
         runtime.advanceUserRevision(order.userId());

@@ -266,6 +266,47 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
+    void exportsConservedFundsWhenABatchMatchesAnotherUser() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 2_000_000);
+            applyBalance(state, 1002, "BTC", 2_000, 2);
+            PlaceOrderCommand sell = spotOrder(10_501, "batch-maker-sell", CoreOrderSide.SELL,
+                    1_000, 1_000, "BTC", 1_000, 200, 500);
+            CoreMessage makerBatch = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(sell))), 1002);
+            assertThat(drainBatch(state, makerBatch).status()).isEqualTo(ResponseStatus.APPLIED);
+
+            PlaceOrderCommand crossingBuy = spotOrder(10_502, "batch-crossing-buy", CoreOrderSide.BUY,
+                    1_000, 1_000, "USDT", 1_000_500, 200, 500);
+            PlaceOrderCommand restingBuy = spotOrder(10_503, "batch-resting-buy", CoreOrderSide.BUY,
+                    900, 100, "USDT", 90_045, 200, 500);
+            UUID takerBatchId = UUID.randomUUID();
+            CoreMessage takerBatch = command(CoreMessageType.PLACE_ORDER_BATCH, takerBatchId, 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(
+                            new PlaceOrderBatchCommand(List.of(crossingBuy, restingBuy))), 1001);
+
+            CoreResponse response = drainBatch(state, takerBatch);
+
+            assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+            var event = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
+                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
+                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_000, 5),
+                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
+                    .filter(value -> value.commandId().equals(takerBatchId))
+                    .findFirst().orElseThrow();
+            assertThat(event.fundsPostings()).isNotEmpty();
+            assertThat(event.fundsPostings().stream()
+                    .collect(java.util.stream.Collectors.groupingBy(
+                            com.surprising.aeron.protocol.CoreFundsPostingView::asset,
+                            java.util.stream.Collectors.summingLong(
+                                    com.surprising.aeron.protocol.CoreFundsPostingView::units))))
+                    .allSatisfy((asset, units) -> assertThat(units).as(asset).isZero());
+        }
+    }
+
+    @Test
     void keepsPriorItemsButFailsStickyAfterMatcherDivergence() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
@@ -514,6 +555,16 @@ class CoreOrderedOrderBatchTest {
         );
     }
 
+    private static PlaceOrderCommand spotOrder(long orderId, String clientOrderId, CoreOrderSide side,
+                                                long priceTicks, long quantitySteps, String reservationAsset,
+                                                long reservedUnits, long makerFeeRatePpm, long takerFeeRatePpm) {
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT", side,
+                priceTicks, priceTicks, priceTicks, priceTicks, quantitySteps, false,
+                CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET,
+                reservationAsset, reservedUnits, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
+                clientOrderId, makerFeeRatePpm, takerFeeRatePpm);
+    }
+
     private static void applySpotInstrument(CoreProbeState state) {
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
@@ -530,8 +581,13 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static void applyBalance(CoreProbeState state, long userId, long units, long sourceSequence) {
+        applyBalance(state, userId, "USDT", units, sourceSequence);
+    }
+
+    private static void applyBalance(CoreProbeState state, long userId, String asset, long units,
+                                     long sourceSequence) {
         assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), sourceSequence,
-                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", units)), userId))
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units)), userId))
                 .status()).isEqualTo(ResponseStatus.APPLIED);
     }
 

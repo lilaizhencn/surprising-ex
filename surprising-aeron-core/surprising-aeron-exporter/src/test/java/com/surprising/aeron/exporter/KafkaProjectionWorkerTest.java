@@ -16,6 +16,7 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
+import com.surprising.aeron.service.state.CoreFactSigner;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -34,6 +35,7 @@ class KafkaProjectionWorkerTest {
 
     private static final String TOPIC = "core.export.spot.v1";
     private static final TopicPartition PARTITION = new TopicPartition(TOPIC, 0);
+    private static final CoreFactSigner SIGNER = CoreFactSigner.inMemory();
 
     @Test
     void projectorFailureCommitsNoOffset() throws Exception {
@@ -42,7 +44,7 @@ class KafkaProjectionWorkerTest {
         CoreUserStateView duplicate = user(17);
         consumer.addRecord(record(41, event(1, List.of(duplicate, duplicate))));
         var worker = new KafkaProjectionWorker(ProductLine.SPOT, consumer,
-                new JdbcCoreEventProjector(dataSource));
+                new JdbcCoreEventProjector(dataSource, SIGNER.verifier()));
 
         assertThatThrownBy(() -> worker.pollOnce(Duration.ZERO)).isInstanceOf(SQLException.class);
         assertThat(consumer.commitCalls).isZero();
@@ -56,7 +58,7 @@ class KafkaProjectionWorkerTest {
         TrackingConsumer consumer = consumer(dataSource);
         consumer.addRecord(record(41, event(1, List.of(user(18)))));
         var worker = new KafkaProjectionWorker(ProductLine.SPOT, consumer,
-                new JdbcCoreEventProjector(dataSource));
+                new JdbcCoreEventProjector(dataSource, SIGNER.verifier()));
 
         assertThat(worker.pollOnce(Duration.ZERO)).isEqualTo(1);
         assertThat(consumer.commitCalls).isEqualTo(1);
@@ -79,9 +81,19 @@ class KafkaProjectionWorkerTest {
 
     private static CoreMessage event(long sequence, List<CoreUserStateView> users) {
         UUID commandId = UUID.randomUUID();
-        var event = new CoreExportEvent(sequence, sequence, sequence * 17, commandId,
+        var unsigned = new CoreExportEvent(sequence, sequence, sequence * 17, commandId,
                 CoreMessageType.PROBE_INCREMENT, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                users.getFirst().userId(), new byte[] {(byte) sequence}, users, List.of(), List.of());
+                users.getFirst().userId(), new byte[] {(byte) sequence}, users, List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), (sequence - 1) * 17, 0, 0, 0, 0, 0, sequence, List.of(), null);
+        var event = new CoreExportEvent(unsigned.exportSequence(), unsigned.appliedCommandCount(),
+                unsigned.businessStateHash(), unsigned.commandId(), unsigned.commandType(),
+                unsigned.commandStatus(), unsigned.resultCode(), unsigned.userId(), unsigned.commandPayload(),
+                unsigned.changedUsers(), unsigned.changedOrders(), unsigned.executions(),
+                unsigned.fundingPayments(), unsigned.changedLiquidations(), unsigned.changedTreasuryAssets(),
+                unsigned.changedTriggerOrders(), unsigned.beforeBusinessStateHash(),
+                unsigned.beforeFundsStateHash(), unsigned.fundsStateHash(), unsigned.matcherSequence(),
+                unsigned.matcherPrefixBefore(), unsigned.matcherPrefixAfter(), unsigned.clusterPosition(),
+                unsigned.fundsPostings(), SIGNER.sign(CoreExportCodec.integrityPayload(unsigned)));
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
                 ProductLine.SPOT, CommandSource.OPERATIONS, 1, sequence, users.getFirst().userId(),
                 1_700_000_000_000L + sequence, 1).exportEvent(sequence), CoreExportCodec.encodeEvent(event));
@@ -103,7 +115,9 @@ class KafkaProjectionWorkerTest {
                     "/db/migration/V004__create_core_liquidation_projections.sql",
                     "/db/migration/V005__enrich_core_execution_projection.sql",
                     "/db/migration/V006__enrich_core_liquidation_projection.sql",
-                    "/db/migration/V007__add_projection_watermark_and_websocket_audit.sql")) {
+                    "/db/migration/V007__add_projection_watermark_and_websocket_audit.sql",
+                    "/db/migration/V008__drop_websocket_audit_projection.sql",
+                    "/db/migration/V009__add_core_fact_integrity_and_funds.sql")) {
                 try (var stream = KafkaProjectionWorkerTest.class.getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) if (!sql.isBlank()) statement.execute(sql);

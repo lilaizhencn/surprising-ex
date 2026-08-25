@@ -115,7 +115,8 @@ public final class RuntimeStateProjector {
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                 order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
-                order.takerFeeRatePpm(), order.createdAtEpochMillis(), order.updatedAtEpochMillis(),
+                order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.createdAtEpochMillis(),
+                order.updatedAtEpochMillis(),
                 order.clusterPosition(), order.status(), order.revision());
     }
 

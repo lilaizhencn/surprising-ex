@@ -64,11 +64,13 @@ class ClusterFundsReconcileTest {
     }
 
     @Test
-    void rejectsNonLinearProductLineActualAmountOverflowAndUnbalancedFlow() {
-        assertThatThrownBy(() -> new FundsReconciliation.Config(ProductLine.SPOT,
-                FundsReconciliation.UserRanges.parse("1:2"), FundsReconciliation.UserRanges.parse(""),
-                ledger(baseLedger()), 100, 1_000, null))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("LINEAR_PERPETUAL");
+    void supportsEveryProductLineAndRejectsActualAmountOverflowAndUnbalancedFlow() {
+        for (ProductLine productLine : ProductLine.values()) {
+            FundsReconciliation.Config config = new FundsReconciliation.Config(productLine,
+                    FundsReconciliation.UserRanges.parse("1:2"), FundsReconciliation.UserRanges.parse(""),
+                    ledger(baseLedger()), 100, 1_000, null);
+            assertThat(config.productLine()).isEqualTo(productLine);
+        }
 
         List<String> overflowingLedger = List.of(
                 row("SEED", "USER", 1, "USDT", "-", "AVAILABLE", Long.MAX_VALUE),
@@ -232,7 +234,11 @@ class ClusterFundsReconcileTest {
                 row("OPERATION", "MAKER", 2, "USDT", "-", "ADL", 7),
                 row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_FEES", 4),
                 row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_INSURANCE", 9),
-                row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_DEFICIT", 12));
+                row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_DEFICIT", 12),
+                row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_LIQUIDATION_FEES", 0),
+                row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_FUNDING_RESIDUAL", 0),
+                row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_ROUNDING_RESIDUAL", 0),
+                row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_CLEARING_PNL", 0));
         CoreUserStateView maker = user(2, List.of());
         FakeGateway gateway = new FakeGateway(Map.of(1L, state, 2L, maker), List.of(), 23);
         gateway.treasury = List.of(new CoreTreasuryAssetView("USDT", 4, 9, 12));

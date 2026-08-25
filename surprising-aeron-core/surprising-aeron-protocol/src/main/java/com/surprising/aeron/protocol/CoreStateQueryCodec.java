@@ -9,7 +9,7 @@ import java.util.UUID;
 
 public final class CoreStateQueryCodec {
 
-    private static final int VERSION = 4;
+    private static final int VERSION = 5;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreStateQueryCodec() {
@@ -68,24 +68,29 @@ public final class CoreStateQueryCodec {
 
     public static byte[] encodeTreasuryState(List<CoreTreasuryAssetView> assets) {
         Writer writer = new Writer();
-        writer.intValue(1);
+        writer.intValue(2);
         writer.intValue(assets.size());
         assets.forEach(asset -> {
             writer.text(asset.asset());
             writer.longValue(asset.feeBalanceUnits());
             writer.longValue(asset.insuranceBalanceUnits());
             writer.longValue(asset.insuranceDeficitUnits());
+            writer.longValue(asset.liquidationFeeBalanceUnits());
+            writer.longValue(asset.fundingResidualBalanceUnits());
+            writer.longValue(asset.roundingResidualBalanceUnits());
+            writer.longValue(asset.clearingPnlBalanceUnits());
         });
         return writer.toByteArray();
     }
 
     public static List<CoreTreasuryAssetView> decodeTreasuryState(byte[] encoded) {
         Reader reader = new Reader(encoded);
-        reader.version(1);
+        reader.version(2);
         List<CoreTreasuryAssetView> assets = new ArrayList<>();
         for (int index = 0, count = reader.count("treasury assets"); index < count; index++) {
             assets.add(new CoreTreasuryAssetView(reader.text(), reader.longValue(),
-                    reader.nonNegativeLong("insurance balance"), reader.nonNegativeLong("insurance deficit")));
+                    reader.nonNegativeLong("insurance balance"), reader.nonNegativeLong("insurance deficit"),
+                    reader.longValue(), reader.longValue(), reader.longValue(), reader.longValue()));
         }
         reader.requireConsumed();
         return List.copyOf(assets);
@@ -208,6 +213,7 @@ public final class CoreStateQueryCodec {
         writer.longValue(state.commandId().getLeastSignificantBits());
         writer.longValue(state.makerFeeRatePpm());
         writer.longValue(state.takerFeeRatePpm());
+        writer.longValue(state.cumulativeFeeUnits());
         writer.longValue(state.createdAtEpochMillis());
         writer.longValue(state.updatedAtEpochMillis());
         writer.longValue(state.clusterPosition());
@@ -244,13 +250,15 @@ public final class CoreStateQueryCodec {
         java.util.UUID commandId = new java.util.UUID(reader.longValue(), reader.longValue());
         long makerFee = reader.longValue();
         long takerFee = reader.longValue();
+        long cumulativeFee = reader.longValue();
         long createdAt = reader.nonNegativeLong("createdAt");
         long updatedAt = reader.nonNegativeLong("updatedAt");
         long clusterPosition = reader.nonNegativeLong("clusterPosition");
         return new CoreOrderStateView(orderId, productLine, userId, symbol,
                 instrumentVersion, side, priceTicks, quantitySteps, executed, remaining, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
-                makerFee, takerFee, createdAt, updatedAt, clusterPosition, reader.text(), reader.positiveLong("revision"));
+                makerFee, takerFee, cumulativeFee, createdAt, updatedAt, clusterPosition,
+                reader.text(), reader.positiveLong("revision"));
     }
 
     public static byte[] encodeOpenOrdersQuery(CoreOpenOrdersQuery query) {

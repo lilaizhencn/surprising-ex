@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 final class RuntimeSnapshotBuilder {
 
@@ -30,7 +31,8 @@ final class RuntimeSnapshotBuilder {
                         order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
                         order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                         order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
-                        order.takerFeeRatePpm(), order.createdAtEpochMillis(), order.updatedAtEpochMillis(),
+                        order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.createdAtEpochMillis(),
+                        order.updatedAtEpochMillis(),
                         order.clusterPosition(), order.status(), order.revision())));
 
         Map<Long, TradingRuntimeSnapshot.ReservationSnapshot> reservations = new TreeMap<>();
@@ -85,15 +87,19 @@ final class RuntimeSnapshotBuilder {
                         scan.triggerOcoCursor())));
         
         Map<Integer, TradingRuntimeSnapshot.TreasurySnapshot> treasury = new TreeMap<>();
-        state.treasury().feeBalances().forEachKeyValue((assetId, units) -> treasury.put(assetId,
-                new TradingRuntimeSnapshot.TreasurySnapshot(units, state.treasury().insurance(assetId),
-                        state.treasury().insuranceDeficit(assetId))));
-        state.treasury().insuranceBalances().forEachKeyValue((assetId, units) -> treasury.putIfAbsent(assetId,
-                new TradingRuntimeSnapshot.TreasurySnapshot(state.treasury().fee(assetId), units,
-                        state.treasury().insuranceDeficit(assetId))));
-        state.treasury().insuranceDeficits().forEachKeyValue((assetId, units) -> treasury.putIfAbsent(assetId,
-                new TradingRuntimeSnapshot.TreasurySnapshot(state.treasury().fee(assetId),
-                        state.treasury().insurance(assetId), units)));
+        TreeSet<Integer> treasuryAssets = new TreeSet<>();
+        state.treasury().feeBalances().forEachKeyValue((assetId, units) -> treasuryAssets.add(assetId));
+        state.treasury().insuranceBalances().forEachKeyValue((assetId, units) -> treasuryAssets.add(assetId));
+        state.treasury().insuranceDeficits().forEachKeyValue((assetId, units) -> treasuryAssets.add(assetId));
+        state.treasury().liquidationFeeBalances().forEachKeyValue((assetId, units) -> treasuryAssets.add(assetId));
+        state.treasury().fundingResidualBalances().forEachKeyValue((assetId, units) -> treasuryAssets.add(assetId));
+        state.treasury().roundingResidualBalances().forEachKeyValue((assetId, units) -> treasuryAssets.add(assetId));
+        state.treasury().clearingPnlBalances().forEachKeyValue((assetId, units) -> treasuryAssets.add(assetId));
+        treasuryAssets.forEach(assetId -> treasury.put(assetId, new TradingRuntimeSnapshot.TreasurySnapshot(
+                state.treasury().fee(assetId), state.treasury().insurance(assetId),
+                state.treasury().insuranceDeficit(assetId), state.treasury().liquidationFee(assetId),
+                state.treasury().fundingResidual(assetId), state.treasury().roundingResidual(assetId),
+                state.treasury().clearingPnl(assetId))));
         Map<Integer, Long> fundingSettlements = new TreeMap<>();
         state.treasury().fundingSettlements().forEachKeyValue(fundingSettlements::put);
         Map<Integer, TradingRuntimeSnapshot.FundingProgressSnapshot> fundingProgress = new TreeMap<>();
@@ -101,10 +107,19 @@ final class RuntimeSnapshotBuilder {
                 new TradingRuntimeSnapshot.FundingProgressSnapshot(progress.settlementId(),
                         progress.instrumentVersion(), progress.fundingRatePpm(), progress.nextCursorUserId(),
                         progress.commandId())));
+        Map<Integer, Long> lifecycleSettlements = new TreeMap<>();
+        state.treasury().lifecycleSettlements().forEachKeyValue(lifecycleSettlements::put);
+        Map<Integer, TradingRuntimeSnapshot.LifecycleProgressSnapshot> lifecycleProgress = new TreeMap<>();
+        state.treasury().lifecycleProgresses().forEachKeyValue((symbolId, progress) -> lifecycleProgress.put(symbolId,
+                new TradingRuntimeSnapshot.LifecycleProgressSnapshot(progress.settlementId(),
+                        progress.instrumentVersion(), progress.settlementPriceTicks(),
+                        progress.optionCashUnitsPerContract(), progress.ordersComplete(),
+                        progress.nextCursorOrderId(), progress.nextCursorUserId(), progress.commandId())));
         return new TradingRuntimeSnapshot(revision, users, balances, orders, reservations, clientOrderIndex,
                 positions, liquidations, markPrices, riskSnapshots, riskScans, state.nextLiquidationId(),
                 new TreeMap<>(state.instrumentsForRuntime()), new TreeMap<>(state.leveragesForRuntime()),
                 new TreeMap<>(state.algoOrdersForRuntime()), new TreeMap<>(state.cancelAllAfterTimersForRuntime()),
-                new TreeMap<>(state.triggerOrdersForRuntime()), treasury, fundingSettlements, fundingProgress);
+                new TreeMap<>(state.triggerOrdersForRuntime()), treasury, fundingSettlements, fundingProgress,
+                lifecycleSettlements, lifecycleProgress);
     }
 }

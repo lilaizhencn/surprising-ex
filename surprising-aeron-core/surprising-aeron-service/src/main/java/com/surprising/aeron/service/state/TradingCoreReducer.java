@@ -886,8 +886,12 @@ public final class TradingCoreReducer {
                 users.put(sellerOrder.userId(), sellerFill.user());
                 treasury = sellerFill.treasury();
             }
-            taker = taker.fill(match.quantitySteps());
-            maker = maker.fill(match.quantitySteps());
+            long takerFeeUnits = Math.negateExact(CoreContractMath.feeDeltaUnits(
+                    instrument, match.priceTicks(), match.quantitySteps(), taker.takerFeeRatePpm()));
+            long makerFeeUnits = Math.negateExact(CoreContractMath.feeDeltaUnits(
+                    instrument, match.priceTicks(), match.quantitySteps(), maker.makerFeeRatePpm()));
+            taker = taker.fill(match.quantitySteps(), takerFeeUnits);
+            maker = maker.fill(match.quantitySteps(), makerFeeUnits);
             orders.put(taker.orderId(), taker);
             orders.put(maker.orderId(), maker);
             if (maker.status() != CoreOrderStatus.OPEN) {
@@ -1288,6 +1292,7 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
         CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
+        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
         long previousSettlement = state.treasuryState().fundingSettlements()
                 .getOrDefault(instrument.symbol(), 0L);
         if (command.settlementId() <= previousSettlement) {
@@ -1337,7 +1342,7 @@ public final class TradingCoreReducer {
             java.util.List<CorePositionState> positions = positionsForSymbol(user, instrument.symbol());
             java.util.ArrayList<Long> positionDeltas = new java.util.ArrayList<>(positions.size());
             for (CorePositionState position : positions) {
-                long positionDelta = CoreContractMath.fundingDeltaUnits(instrument,
+                long positionDelta = kernel.fundingDeltaUnits(instrument,
                         position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
                 positionDeltas.add(positionDelta);
                 delta = Math.addExact(delta, positionDelta);
@@ -1349,7 +1354,8 @@ public final class TradingCoreReducer {
                 balances.put(instrument.settleAsset(), result.balance());
                 users.put(user.userId(), user.transition(Math.incrementExact(user.revision()),
                         balances, user.reservations(), user.positions(), user.positionMode()));
-                treasury = treasury.adjustInsurance(instrument.settleAsset(), Math.negateExact(result.appliedDelta()));
+                treasury = treasury.adjustFundingResidual(
+                        instrument.settleAsset(), Math.negateExact(result.appliedDelta()));
             }
             long debitRelief = Math.subtractExact(result.appliedDelta(), delta);
             for (int index = 0; index < positions.size(); index++) {
@@ -1424,6 +1430,7 @@ public final class TradingCoreReducer {
                                                               ActiveOrderIndex activeOrderIndex) {
         CoreInstrumentState instrument = requireLifecycleInstrument(state, command.symbol(),
                 command.instrumentVersion());
+        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
         long previousSettlement = state.treasuryState().lifecycleSettlements()
                 .getOrDefault(instrument.symbol(), 0L);
         if (command.settlementId() < previousSettlement) {
@@ -1433,17 +1440,14 @@ public final class TradingCoreReducer {
             return new SettlementApplication(state, new com.surprising.aeron.protocol.CoreSettlementProgressView(
                     command.settlementId(), true, true, 0, 0, 0, 0));
         }
-        if (!instrument.contractType().isDelivery() && !instrument.contractType().isOption()) {
-            throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
-                    "instrument settlement requires delivery or option product");
+        switch (kernel.productLine()) {
+            case LINEAR_DELIVERY, INVERSE_DELIVERY, OPTION -> { }
+            case SPOT, LINEAR_PERPETUAL, INVERSE_PERPETUAL -> throw new CoreStateRejectedException(
+                    "PRODUCT_LINE_UNSUPPORTED", "instrument settlement requires delivery or option product");
         }
-        if ((instrument.contractType().isDelivery() || instrument.contractType().isOption())
-                && command.settlementPriceTicks() <= 0) {
+        if (command.settlementPriceTicks() <= 0) {
             throw new CoreStateRejectedException("INVALID_SETTLEMENT_PRICE", "delivery price must be positive");
         }
-        long optionSettlementCashUnits = instrument.contractType().isOption()
-                ? CoreContractMath.optionSettlementCashUnits(instrument, command.settlementPriceTicks())
-                : command.optionCashUnitsPerContract();
         CoreTreasuryState.LifecycleProgress previousProgress = state.treasuryState()
                 .lifecycleProgress(instrument.symbol());
         boolean chunked = indexedUserIds != null && chunkCommandId != null;
@@ -1519,14 +1523,12 @@ public final class TradingCoreReducer {
             Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
             Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
             for (CorePositionState position : settling) {
-                long cashDelta = instrument.contractType().isOption()
-                        ? Math.multiplyExact(optionSettlementCashUnits, position.signedQuantitySteps())
-                        : CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
+                long cashDelta = kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
                         position.entryPriceTicks(), command.settlementPriceTicks());
                 LiquidationCashResult cash = applyLiquidationCash(balance, position.marginMode(),
                         position.positionMarginUnits(), cashDelta, 0);
                 balance = cash.balance();
-                treasury = treasury.adjustInsurance(instrument.settleAsset(),
+                treasury = treasury.adjustClearingPnl(instrument.settleAsset(),
                         Math.negateExact(cash.appliedDelta()));
                 positions.put(position.key(), new CorePositionState(instrument.symbol(), instrument.settleAsset(),
                         position.marginMode(), position.positionSide(), 0, 0, 0, 0,
@@ -2126,7 +2128,8 @@ public final class TradingCoreReducer {
         reservations.put(order.orderId(), reservation.consume(reservationDebit));
         CoreUserState nextUser = user.transition(Math.incrementExact(user.revision()),
                 balances, reservations, user.positions(), user.positionMode());
-        return new SpotFillResult(nextUser, treasury.adjustFee(quoteAsset, Math.negateExact(feeDelta)));
+        return new SpotFillResult(nextUser, treasury.adjustFee(quoteAsset, Math.negateExact(feeDelta)),
+                Math.negateExact(feeDelta));
     }
 
     private static AssetBalance applySpotFee(AssetBalance balance, long feeDelta, boolean consumeLocked) {
@@ -2165,10 +2168,8 @@ public final class TradingCoreReducer {
         long remainingMargin = Math.subtractExact(current == null ? 0 : current.positionMarginUnits(), releasedMargin);
         long marginIncrease = openingMarginForFill(instrument, nextQuantity, signedFill, openSteps,
                 fillPriceTicks, leveragePpm);
-        long premiumDelta = instrument.contractType().isOption()
-                ? (order.side() == CoreOrderSide.BUY ? Math.negateExact(
-                CoreContractMath.optionPremiumUnits(instrument, fillPriceTicks, fillQuantitySteps))
-                : CoreContractMath.optionPremiumUnits(instrument, fillPriceTicks, fillQuantitySteps)) : 0;
+        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        long premiumDelta = kernel.premiumDeltaUnits(instrument, order.side(), fillPriceTicks, fillQuantitySteps);
         long feeRatePpm = taker ? order.takerFeeRatePpm() : order.makerFeeRatePpm();
         long feeDelta = CoreContractMath.feeDeltaUnits(instrument, fillPriceTicks, fillQuantitySteps, feeRatePpm);
         long premiumDebit = Math.max(0, Math.negateExact(premiumDelta));
@@ -2210,14 +2211,15 @@ public final class TradingCoreReducer {
             balance = balance.release(marginReleaseUnits);
         }
         long realizedPnl = 0;
-        if (closeSteps > 0 && !instrument.contractType().isOption()) {
+        if (closeSteps > 0) {
             long signedClose = currentQuantity > 0 ? closeSteps : Math.negateExact(closeSteps);
-            realizedPnl = CoreContractMath.pnlUnits(instrument, signedClose,
+            realizedPnl = kernel.realizedPnlUnits(instrument, signedClose,
                     current.entryPriceTicks(), fillPriceTicks);
         }
         CashResult pnlCash = applyCash(balance, realizedPnl);
         balance = pnlCash.balance();
-        treasury = treasury.adjustInsurance(instrument.settleAsset(), Math.negateExact(pnlCash.appliedDelta()));
+        treasury = treasury.adjustClearingPnl(
+                instrument.settleAsset(), Math.negateExact(pnlCash.appliedDelta()));
         if (premiumDelta < 0) {
             balance = balance.consumeLocked(Math.negateExact(premiumDelta));
         } else if (premiumDelta > 0) {
@@ -2256,7 +2258,7 @@ public final class TradingCoreReducer {
         Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
         positions.put(positionKey, position);
         return new DerivativeFillResult(user.transition(Math.incrementExact(user.revision()),
-                balances, reservations, positions, user.positionMode()), treasury);
+                balances, reservations, positions, user.positionMode()), treasury, Math.negateExact(feeDelta));
     }
 
     private static CashResult applyCash(AssetBalance balance, long delta) {
@@ -2303,10 +2305,10 @@ public final class TradingCoreReducer {
         return part == total ? units : Math.multiplyExact(units, part) / total;
     }
 
-    private record DerivativeFillResult(CoreUserState user, CoreTreasuryState treasury) {
+    private record DerivativeFillResult(CoreUserState user, CoreTreasuryState treasury, long feeUnits) {
     }
 
-    private record SpotFillResult(CoreUserState user, CoreTreasuryState treasury) {
+    private record SpotFillResult(CoreUserState user, CoreTreasuryState treasury, long feeUnits) {
     }
 
     private record CashResult(AssetBalance balance, long appliedDelta) {
@@ -2429,15 +2431,12 @@ public final class TradingCoreReducer {
         long currentQuantity = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = command.side() == CoreOrderSide.BUY
                 ? command.quantitySteps() : Math.negateExact(command.quantitySteps());
-        long closeSteps = currentQuantity != 0 && Long.signum(currentQuantity) != Long.signum(signedOrder)
-                ? Math.min(Math.absExact(currentQuantity), command.quantitySteps()) : 0;
-        long openSteps = Math.subtractExact(command.quantitySteps(), closeSteps);
+        long openSteps = command.reduceOnly() ? 0 : command.quantitySteps();
         long leverage = state.leverages().getOrDefault(
                 new CoreLeverageKey(user.userId(), instrument.symbol(), command.marginMode()),
                 instrument.maxLeveragePpm());
-        // Every open order owns an independent reservation because price-time priority can make a newly placed
-        // order fill before older orders. Sharing pending-order margin makes the fill result depend on fill order.
-        long projectedSteps = Math.addExact(currentQuantity, signedOrder);
+        long projectedRiskQuantity = Math.addExact(Math.absExact(currentQuantity), command.quantitySteps());
+        long projectedSteps = signedOrder > 0 ? projectedRiskQuantity : Math.negateExact(projectedRiskQuantity);
         long margin = openingMarginForFill(instrument, projectedSteps, signedOrder, openSteps,
                 command.reservationPriceTicks(), leverage);
         long premium = instrument.contractType().isOption() && command.side() == CoreOrderSide.BUY
@@ -2600,18 +2599,8 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("REDUCE_ONLY_REQUIRES_POSITION_STATE",
                     "reduce-only side must close an existing position");
         }
-        long alreadyOpen = activeOrderIndex == null ? userOrders(state, user).stream()
-                .filter(order -> order.reduceOnly() && order.status() == CoreOrderStatus.OPEN
-                        && order.symbol().equals(position.symbol())
-                        && order.side() == command.side())
-                .mapToLong(CoreOrderState::remainingQuantitySteps)
-                .reduce(0L, Math::addExact)
-                : activeOrderIndex.reduceOnlyQuantity(user.userId(), position.symbol(), command.side());
-        long capacity = Math.subtractExact(Math.absExact(position.signedQuantitySteps()), alreadyOpen);
-        if (command.quantitySteps() > capacity) {
-            throw new CoreStateRejectedException("REDUCE_ONLY_CAPACITY_EXCEEDED",
-                    "reduce-only open quantity exceeds position capacity");
-        }
+        PositionCloseCapacity.inspect(state, user, position.symbol(), command.positionSide(), command.side(),
+                activeOrderIndex).require(command.quantitySteps());
     }
 
     private static void validatePositionIdentity(TradingCoreState state, CoreUserState user,

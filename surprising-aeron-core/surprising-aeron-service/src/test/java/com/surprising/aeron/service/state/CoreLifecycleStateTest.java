@@ -116,7 +116,8 @@ class CoreLifecycleStateTest {
         assertThat(capped.payments()).singleElement().satisfies(payment ->
                 assertThat(payment.amountUnits()).isEqualTo(-5));
         assertThat(capped.state().user(1).totalUnits("USDT")).isZero();
-        assertThat(capped.state().treasuryState().insuranceBalances()).containsEntry("USDT", 5L);
+        assertThat(capped.state().treasuryState().insuranceBalances()).doesNotContainKey("USDT");
+        assertThat(capped.state().treasuryState().fundingResidualBalances()).containsEntry("USDT", 5L);
     }
 
     @Test

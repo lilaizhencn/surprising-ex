@@ -42,7 +42,9 @@ final class FundsReconciliation {
             Metric.AVAILABLE, Metric.LOCKED, Metric.RESERVATION,
             Metric.POSITION_QUANTITY, Metric.POSITION_MARGIN, Metric.REALIZED_PNL);
     private static final Set<Metric> TREASURY_METRICS = EnumSet.of(
-            Metric.TREASURY_FEES, Metric.TREASURY_INSURANCE, Metric.TREASURY_DEFICIT);
+            Metric.TREASURY_FEES, Metric.TREASURY_INSURANCE, Metric.TREASURY_DEFICIT,
+            Metric.TREASURY_LIQUIDATION_FEES, Metric.TREASURY_FUNDING_RESIDUAL,
+            Metric.TREASURY_ROUNDING_RESIDUAL, Metric.TREASURY_CLEARING_PNL);
     private static final Set<Metric> FLOW_METRICS = EnumSet.of(
             Metric.FEE, Metric.FUNDING, Metric.LIQUIDATION, Metric.INSURANCE, Metric.ADL);
 
@@ -57,6 +59,10 @@ final class FundsReconciliation {
         processAccounts(config, gateway, progress, Role.USER, config.users);
         processAccounts(config, gateway, progress, Role.MAKER, config.makers);
         if (progress.phase == Phase.TREASURY) processTreasury(config, gateway, progress);
+        if (config.productLine == ProductLine.SPOT && progress.phase == Phase.INSURANCE) {
+            progress.phase = Phase.VALIDATE;
+            progress.save(config);
+        }
         if (progress.phase == Phase.INSURANCE) {
             processLiquidation(config, gateway, progress, CoreLiquidationWorkView.Purpose.INSURANCE);
         }
@@ -81,7 +87,7 @@ final class FundsReconciliation {
             long userId = users.next();
             CoreResponse userResponse = checked(gateway, progress, CoreMessageType.USER_STATE_QUERY, userId, new byte[0]);
             CoreUserStateView state = CoreStateQueryCodec.decodeUserState(userResponse.data());
-            if (state.productLine() != ProductLine.LINEAR_PERPETUAL || state.userId() != userId) {
+            if (state.productLine() != config.productLine || state.userId() != userId) {
                 throw new IllegalStateException("user state identity mismatch user=" + userId);
             }
             CoreResponse riskResponse = checked(gateway, progress, CoreMessageType.RISK_STATE_QUERY, userId, new byte[0]);
@@ -151,8 +157,19 @@ final class FundsReconciliation {
             putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_FEES), treasury.feeBalanceUnits());
             putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_INSURANCE), treasury.insuranceBalanceUnits());
             putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_DEFICIT), treasury.insuranceDeficitUnits());
-            long economic = Math.subtractExact(Math.addExact(
-                    treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()), treasury.insuranceDeficitUnits());
+            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_LIQUIDATION_FEES),
+                    treasury.liquidationFeeBalanceUnits());
+            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_FUNDING_RESIDUAL),
+                    treasury.fundingResidualBalanceUnits());
+            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_ROUNDING_RESIDUAL),
+                    treasury.roundingResidualBalanceUnits());
+            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_CLEARING_PNL),
+                    treasury.clearingPnlBalanceUnits());
+            long economic = Math.subtractExact(Math.addExact(Math.addExact(Math.addExact(Math.addExact(
+                    treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()), treasury.liquidationFeeBalanceUnits()),
+                    treasury.fundingResidualBalanceUnits()), treasury.roundingResidualBalanceUnits()),
+                    treasury.insuranceDeficitUnits());
+            economic = Math.addExact(economic, treasury.clearingPnlBalanceUnits());
             merge(progress.funds, asset, economic);
         }
         compareExact("Treasury", config.ledger.treasuryState(), actual);
@@ -178,7 +195,7 @@ final class FundsReconciliation {
                     progress.liquidationCursor, config.liquidationPageSize, 1_048_576);
             CoreResponse response = checked(gateway, progress, CoreMessageType.LIQUIDATION_WORK_QUERY, 0, payload);
             CoreLiquidationWorkView page = CoreLiquidationWorkCodec.decodeWork(response.data());
-            if (page.productLine() != ProductLine.LINEAR_PERPETUAL) {
+            if (page.productLine() != config.productLine) {
                 throw new IllegalStateException("liquidation product line mismatch");
             }
             if (!page.actions().isEmpty() || page.riskScanPending()) {
@@ -204,7 +221,7 @@ final class FundsReconciliation {
                         resolution.deficitUnits());
                 merge(progress.funds, asset, resolution.deficitUnits());
                 progress.stateHash = chained(progress.stateHash, CoreLiquidationWorkCodec.encodeWork(
-                        new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL, 0, true, null,
+                        new CoreLiquidationWorkView(config.productLine, 0, true, null,
                                 List.of(), List.of(resolution))));
             }
             if (page.nextCursorLiquidationId() < lastResolutionId) {
@@ -345,9 +362,7 @@ final class FundsReconciliation {
     record Config(ProductLine productLine, UserRanges users, UserRanges makers, Ledger ledger,
                   int liquidationPageSize, int maxLiquidationPages, Path checkpoint) {
         Config {
-            if (productLine != ProductLine.LINEAR_PERPETUAL) {
-                throw new IllegalArgumentException("funds reconciliation requires LINEAR_PERPETUAL");
-            }
+            if (productLine == null) throw new IllegalArgumentException("product line is required");
             if (users == null || makers == null || ledger == null) {
                 throw new IllegalArgumentException("ranges and ledger are required");
             }
@@ -391,6 +406,10 @@ final class FundsReconciliation {
         TREASURY_FEES,
         TREASURY_INSURANCE,
         TREASURY_DEFICIT,
+        TREASURY_LIQUIDATION_FEES,
+        TREASURY_FUNDING_RESIDUAL,
+        TREASURY_ROUNDING_RESIDUAL,
+        TREASURY_CLEARING_PNL,
         LIQUIDATION_INSURANCE,
         LIQUIDATION_ADL,
         FEE,
@@ -581,6 +600,10 @@ final class FundsReconciliation {
                 long amount = entry.getValue();
                 if (key.metric == Metric.AVAILABLE || key.metric == Metric.LOCKED
                         || key.metric == Metric.TREASURY_FEES || key.metric == Metric.TREASURY_INSURANCE
+                        || key.metric == Metric.TREASURY_LIQUIDATION_FEES
+                        || key.metric == Metric.TREASURY_FUNDING_RESIDUAL
+                        || key.metric == Metric.TREASURY_ROUNDING_RESIDUAL
+                        || key.metric == Metric.TREASURY_CLEARING_PNL
                         || key.metric == Metric.LIQUIDATION_INSURANCE || key.metric == Metric.LIQUIDATION_ADL) {
                     total = Math.addExact(total, amount);
                 } else if (key.metric == Metric.TREASURY_DEFICIT) {

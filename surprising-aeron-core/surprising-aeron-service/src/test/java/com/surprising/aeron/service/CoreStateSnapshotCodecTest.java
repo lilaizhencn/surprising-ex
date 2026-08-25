@@ -78,7 +78,7 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(10);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(11);
             assertThat(buffer.getInt(8)).isEqualTo(8);
             buffer.position(ENVELOPE_LENGTH);
             int[] sectionIds = new int[8];
@@ -163,7 +163,7 @@ class CoreStateSnapshotCodecTest {
     }
 
     @Test
-    void decodesLegacyVersionEightSnapshot() {
+    void rejectsLegacyVersionEightSnapshot() {
         TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
@@ -171,18 +171,13 @@ class CoreStateSnapshotCodecTest {
         }
         byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
 
-        CoreProbeState restored = CoreStateSnapshotCodec.decode(legacy, ProductLine.SPOT);
-        try {
-            assertThat(restored.appliedCommandCount()).isZero();
-            assertThat(restored.tradingState().businessStateHash()).isEqualTo(tradingState.businessStateHash());
-            assertThat(CoreStateSnapshotCodec.manifest(legacy, ProductLine.SPOT).schemaVersion()).isEqualTo(8);
-        } finally {
-            restored.close();
-        }
+        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(legacy, ProductLine.SPOT))
+                .isInstanceOf(ProtocolException.class)
+                .hasMessageContaining("unsupported snapshot version: 8");
     }
 
     @Test
-    void fragmentedVersionEightRecoveryAllocatesForReceivedPayloadInsteadOfMaximum() {
+    void fragmentedVersionEightRecoveryFailsClosed() {
         TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
@@ -191,19 +186,9 @@ class CoreStateSnapshotCodecTest {
         byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
         UnsafeBuffer encoded = new UnsafeBuffer(legacy);
         SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
-        for (int offset = 0; offset < legacy.length; offset += 7) {
-            recovery.accept(encoded, offset, Math.min(7, legacy.length - offset));
-        }
-
-        assertThat(recovery.allocatedBytes()).isLessThan(CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES);
-        assertThat(recovery.allocatedBytes()).isLessThanOrEqualTo(legacy.length * 2);
-        CoreProbeState restored = recovery.decode(ProductLine.SPOT);
-        try {
-            assertThat(restored.appliedCommandCount()).isZero();
-            assertThat(restored.tradingState().businessStateHash()).isEqualTo(tradingState.businessStateHash());
-        } finally {
-            restored.close();
-        }
+        assertThatThrownBy(() -> recovery.accept(encoded, 0, legacy.length))
+                .isInstanceOf(ProtocolException.class)
+                .hasMessageContaining("unsupported snapshot version: 8");
     }
 
     @Test
@@ -273,7 +258,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(10);
+            assertThat(manifest.schemaVersion()).isEqualTo(11);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
@@ -374,32 +359,17 @@ class CoreStateSnapshotCodecTest {
     }
 
     @Test
-    void legacyManifestUsesExplicitVersionEightPairingDefaults() {
+    void legacyManifestFailsClosed() {
         TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             matcherSnapshot = adapter.snapshotAsync(47, 0, tradingState, List.of()).join();
         }
 
-        CoreSnapshotManifest manifest = CoreStateSnapshotCodec.manifest(
-                legacySnapshot(tradingState, matcherSnapshot), ProductLine.SPOT);
-
-        assertThat(manifest.schemaVersion()).isEqualTo(8);
-        assertThat(manifest.snapshotId()).isZero();
-        assertThat(manifest.coreSequence()).isEqualTo(manifest.appliedCommandCount());
-        assertThat(manifest.clusterTimestamp()).isZero();
-        assertThat(manifest.clusterPosition()).isZero();
-        assertThat(manifest.sourceSequenceDigest()).isZero();
-        assertThat(manifest.outboxPendingDigest()).isZero();
-
-        CoreSnapshotManifest compatibility = new CoreSnapshotManifest(
-                manifest.productLine(), 9, manifest.coreShardId(), manifest.routeVersion(),
-                manifest.appliedCommandCount(), manifest.matcherSequence(), manifest.businessStateHash(),
-                manifest.engineStateHash(), manifest.bookStateHash(), manifest.symbolRegistryHash(),
-                manifest.userRegistryHash(), manifest.instrumentRegistryHash(), manifest.activeOrderHash(),
-                manifest.forkGitSha(), manifest.artifactSha256(), manifest.matcherConfigHash(),
-                manifest.exportStatus(), manifest.checksum());
-        assertThat(compatibility.snapshotId()).isZero();
+        byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
+        assertThatThrownBy(() -> CoreStateSnapshotCodec.manifest(legacy, ProductLine.SPOT))
+                .isInstanceOf(ProtocolException.class)
+                .hasMessageContaining("unsupported snapshot version: 8");
     }
 
     private static TradingCoreState stateWithOpenBid() {

@@ -24,7 +24,7 @@ import java.util.zip.CRC32C;
 final class CoreStateSnapshotCodec {
 
     private static final int MAGIC = 0x5358534E;
-    private static final int VERSION = 8;
+    private static final int VERSION = 0;
     private static final int FIXED_LENGTH = 48;
     private static final int SOURCE_SEQUENCE_LENGTH = 24;
     static final int RESULT_FIXED_LENGTH = 92;

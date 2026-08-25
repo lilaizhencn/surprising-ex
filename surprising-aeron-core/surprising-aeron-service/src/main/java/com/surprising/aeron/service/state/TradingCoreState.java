@@ -656,6 +656,7 @@ public record TradingCoreState(
         hash = CoreStateHash.mix(hash, order.commandId().getLeastSignificantBits());
         hash = CoreStateHash.mix(hash, order.makerFeeRatePpm());
         hash = CoreStateHash.mix(hash, order.takerFeeRatePpm());
+        hash = CoreStateHash.mix(hash, order.cumulativeFeeUnits());
         hash = CoreStateHash.mix(hash, order.createdAtEpochMillis());
         hash = CoreStateHash.mix(hash, order.updatedAtEpochMillis());
         hash = CoreStateHash.mix(hash, order.clusterPosition());

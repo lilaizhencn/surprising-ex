@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -15,6 +16,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreProtocol;
+import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -52,7 +54,31 @@ import org.junit.jupiter.api.Test;
 class SurprisingClusteredServiceTest {
 
     @Test
-    void timerReplayReturnsBeforeMatchingCompletesAndAppliesExactlyOnce() throws Exception {
+    void handsRuntimeOwnershipFromConstructionThreadToClusterServiceThread() throws Exception {
+        SurprisingClusteredService service = service();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicReference<CoreResponse> response = new AtomicReference<>();
+        Thread serviceThread = new Thread(() -> {
+            try {
+                response.set(service.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
+                        CoreProtocol.probePayload(1))));
+            } catch (Throwable throwable) {
+                failure.set(throwable);
+            } finally {
+                service.onTerminate(null);
+            }
+        }, "clustered-service-owner-test");
+
+        serviceThread.start();
+        serviceThread.join();
+
+        assertThat(failure.get()).isNull();
+        assertThat(response.get()).isNotNull();
+        assertThat(response.get().status()).isEqualTo(ResponseStatus.APPLIED);
+    }
+
+    @Test
+    void timerReplayFencesFollowingLogEntriesUntilMatchingCompletesAndAppliesExactlyOnce() throws Exception {
         TimerScenario live = runTimerScenario(false);
         TimerScenario replay = runTimerScenario(true);
 
@@ -65,9 +91,53 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
+    void followingSessionMessageCompletesEarlierMatchingBeforeAppendingItsFact() throws Exception {
+        SurprisingClusteredService service = service();
+        List<byte[]> responses = new CopyOnWriteArrayList<>();
+        service.onStart(cluster(), null);
+        try {
+            CoreProbeState state = service.state();
+            assertThat(state.apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)),
+                    UUID.fromString("00000000-0000-0000-0000-000000000012"))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                            906, "BTC-USDT", 1, "BTC", "USDT", "USDT", CoreOrderSide.BUY,
+                            1_000, 1_000, 1_000, 1_000, 2, false, CoreMarginMode.CROSS,
+                            CorePositionSide.NET, ReservationKind.SPOT_ASSET, "USDT", 2_000,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence", 0, 0)),
+                    UUID.fromString("00000000-0000-0000-0000-000000000013"));
+            onSessionMessage(service, responses, place);
+            assertThat(awaitSubmittedMatching(state, state.matchingSequence(place.header().commandId())))
+                    .isNotNull();
+
+            onSessionMessage(service, responses, command(CoreMessageType.PROBE_INCREMENT, 3, 1001,
+                    CoreProtocol.probePayload(1),
+                    UUID.fromString("00000000-0000-0000-0000-000000000014")));
+
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(responses).hasSize(2);
+            var facts = state.exportState().pending().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
+                    .toList();
+            for (int index = 1; index < facts.size(); index++) {
+                var previous = facts.get(index - 1);
+                var current = facts.get(index);
+                assertThat(current.beforeBusinessStateHash()).isEqualTo(previous.businessStateHash());
+                assertThat(current.beforeFundsStateHash()).isEqualTo(previous.fundsStateHash());
+                assertThat(current.matcherPrefixBefore()).isEqualTo(previous.matcherPrefixAfter());
+            }
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
     void loadsOneByteSnapshotFragmentsThroughBoundedSectionRecovery() {
-        SurprisingClusteredService source = new SurprisingClusteredService(ProductLine.SPOT);
-        SurprisingClusteredService target = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService source = service();
+        SurprisingClusteredService target = service();
         try {
             assertThat(source.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                     CoreProtocol.probePayload(9))).status()).isEqualTo(ResponseStatus.APPLIED);
@@ -94,7 +164,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void emptyAndIncompleteFragmentSourcesFailBeforeStateReplacement() {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         try {
             CoreProbeState before = service.state();
             service.onStart(cluster(), null);
@@ -129,7 +199,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void doesNotReplaceStateAfterCorruptSnapshot() {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         try {
             CoreProbeState before = service.state();
             byte[] snapshot = before.snapshot();
@@ -146,7 +216,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void pairedManifestMismatchFailsBeforeLiveStateReplacement() {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         try {
             CoreProbeState before = service.state();
             assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
@@ -173,7 +243,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void propagatesFatalMatcherDivergenceFromSnapshotCallback() {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         service.onStart(cluster(), null);
         try {
             CoreProbeState state = service.state();
@@ -192,7 +262,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void retriesTimerSchedulingUntilAeronBackpressureClears() {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         AtomicInteger attempts = new AtomicInteger();
         AtomicLong correlationId = new AtomicLong();
         try {
@@ -209,7 +279,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void followerDoesNotSynthesizeHistoricalMatcherTimeoutDuringReplay() {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         service.onStart(cluster(Cluster.Role.FOLLOWER), null);
         try {
             long sequence = preparePendingPlace(service.state(), 905);
@@ -225,7 +295,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void incompleteMatcherSnapshotFailsClosedAndReleasesCommandAdmission() {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         service.onStart(cluster(), null);
         try {
             assertThatThrownBy(() -> service.captureSnapshot(7))
@@ -242,7 +312,7 @@ class SurprisingClusteredServiceTest {
 
     @Test
     void snapshotCaptureTimeoutIsFailClosedAndObservable() {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         service.onStart(cluster(), null);
         try {
             assertThatThrownBy(() -> service.captureSnapshot(9, System.nanoTime()))
@@ -263,7 +333,7 @@ class SurprisingClusteredServiceTest {
     @Test
     void snapshotCallbackSurfaceDrainsQueuedMatcherCompletionWithSinglePoll() {
         // Given
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         service.onStart(cluster(), null);
         try {
             long pendingSequence = preparePendingPlace(service.state(), 903);
@@ -289,7 +359,7 @@ class SurprisingClusteredServiceTest {
     @Test
     void restoresSuccessfulSnapshotRoundTripWithoutTimingPoll() {
         // Given
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         try {
             CoreProbeState before = service.state();
             assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
@@ -364,9 +434,9 @@ class SurprisingClusteredServiceTest {
         if (!returnedWithoutCompletion) matchingReference.get().complete(resultReference.get());
         continueAfterTimer.countDown();
         TimerScenario result = scenario.get(5, TimeUnit.SECONDS);
-        assertThat(returnedWithoutCompletion || !delayedCompletion)
-                .as("clustered-service timer must not wait for matcher future")
-                .isTrue();
+        assertThat(returnedWithoutCompletion)
+                .as("a matching timer must fence later cluster-log entries until the local matcher result is ready")
+                .isEqualTo(!delayedCompletion);
         return result;
     }
 
@@ -379,7 +449,7 @@ class SurprisingClusteredServiceTest {
                     matchingReference,
             AtomicReference<com.surprising.aeron.service.matching.CoreMatchingResult> resultReference)
             throws Exception {
-        SurprisingClusteredService service = new SurprisingClusteredService(ProductLine.SPOT);
+        SurprisingClusteredService service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         try {
             CoreProbeState state = service.state();
@@ -524,6 +594,13 @@ class SurprisingClusteredServiceTest {
                 });
     }
 
+    private static void onSessionMessage(
+            SurprisingClusteredService service, List<byte[]> responses, CoreMessage request) {
+        byte[] encoded = CoreMessageCodec.encode(request);
+        service.onSessionMessage(clientSession(responses), 1_000, new UnsafeBuffer(encoded), 0,
+                encoded.length, aeronHeader());
+    }
+
     private static Header aeronHeader() {
         return new Header(0, 0).buffer(new UnsafeBuffer(new byte[64])).offset(0)
                 .initialTermId(0).positionBitsToShift(16);
@@ -574,6 +651,11 @@ class SurprisingClusteredServiceTest {
 
     private static Cluster cluster() {
         return cluster(Cluster.Role.LEADER);
+    }
+
+    private static SurprisingClusteredService service() {
+        return new SurprisingClusteredService(ProductLine.SPOT,
+                com.surprising.aeron.service.state.CoreFactSigner.inMemory());
     }
 
     private static Cluster cluster(Cluster.Role role) {

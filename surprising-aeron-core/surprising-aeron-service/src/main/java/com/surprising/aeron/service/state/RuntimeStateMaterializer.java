@@ -71,7 +71,8 @@ public final class RuntimeStateMaterializer {
                         order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
                         order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                         order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
-                        order.takerFeeRatePpm(), order.createdAtEpochMillis(), order.updatedAtEpochMillis(),
+                        order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.createdAtEpochMillis(),
+                        order.updatedAtEpochMillis(),
                         order.clusterPosition(), order.status(), order.revision())));
 
         Map<String, CoreMarkPriceState> marks = new TreeMap<>();
@@ -330,7 +331,7 @@ public final class RuntimeStateMaterializer {
                 value.matchingPriceTicks(), value.quantitySteps(), value.executedQuantitySteps(),
                 value.remainingQuantitySteps(), value.reduceOnly(), value.marginMode(), value.positionSide(),
                 value.orderType(), value.timeInForce(), value.postOnly(), value.clientOrderId(), value.commandId(),
-                value.makerFeeRatePpm(), value.takerFeeRatePpm(), value.createdAtEpochMillis(),
+                value.makerFeeRatePpm(), value.takerFeeRatePpm(), value.cumulativeFeeUnits(), value.createdAtEpochMillis(),
                 value.updatedAtEpochMillis(), value.clusterPosition(), value.status(), value.revision());
     }
 

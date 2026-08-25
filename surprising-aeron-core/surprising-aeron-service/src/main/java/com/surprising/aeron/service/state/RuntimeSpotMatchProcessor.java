@@ -28,6 +28,10 @@ public final class RuntimeSpotMatchProcessor {
         if (instrument == null || instrument.version() != taker.instrumentVersion()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
+        if (SettlementKernels.forInstrument(instrument).productLine()
+                != com.surprising.product.api.ProductLine.SPOT) {
+            throw new IllegalStateException("spot matcher received a non-spot settlement kernel");
+        }
         int baseAssetId = identities.assetId(baseAsset);
         int quoteAssetId = identities.assetId(quoteAsset);
         validateMatches(runtime, taker, matches);
@@ -90,9 +94,10 @@ public final class RuntimeSpotMatchProcessor {
             throw new IllegalStateException("runtime spot fill balance would become negative");
         }
         ReservationRuntime nextReservation = reservation.consume(reservationDebit);
-        OrderRuntime nextOrder = order.withExecution(
+        OrderRuntime nextOrder = order.withFill(
                 Math.addExact(order.executedQuantitySteps(), fillQuantitySteps),
                 Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps),
+                Math.negateExact(feeDelta),
                 order.remainingQuantitySteps() == fillQuantitySteps ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN,
                 Math.incrementExact(order.revision()));
         long nextFee = Math.addExact(runtime.treasury().fee(quoteAssetId), Math.negateExact(feeDelta));

@@ -15,6 +15,7 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
                            boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
                            CoreOrderType orderType, CoreTimeInForce timeInForce, boolean postOnly,
                            String clientOrderId, UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
+                           long cumulativeFeeUnits,
                            long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
                            CoreOrderStatus status, long revision) {
 
@@ -38,7 +39,7 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
                 priceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode,
                 positionSide, orderType, timeInForce, false, "", new UUID(0, orderId), makerFeeRatePpm,
-                takerFeeRatePpm, 0, 0, 0, canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
+                takerFeeRatePpm, 0, 0, 0, 0, canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
     }
 
     public OrderRuntime {
@@ -68,7 +69,21 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
         this(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks, priceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode,
                 positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm,
-                takerFeeRatePpm, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+                takerFeeRatePpm, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+    }
+
+    public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
+                        long instrumentVersion, CoreOrderSide side, long priceTicks, long matchingPriceTicks,
+                        long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
+                        boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
+                        CoreOrderType orderType, CoreTimeInForce timeInForce, boolean postOnly,
+                        String clientOrderId, UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
+                        long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
+                        CoreOrderStatus status, long revision) {
+        this(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks, matchingPriceTicks,
+                quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode,
+                positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm,
+                takerFeeRatePpm, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
     }
 
     public boolean canceled() {
@@ -79,8 +94,18 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks,
                 matchingPriceTicks,
                 quantitySteps, executed, remaining, reduceOnly, marginMode, positionSide, orderType, timeInForce,
-                postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, createdAtEpochMillis,
+                postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits,
+                createdAtEpochMillis,
                 updatedAtEpochMillis, clusterPosition, nextStatus, nextRevision);
+    }
+
+    public OrderRuntime withFill(long executed, long remaining, long feeUnits,
+                                 CoreOrderStatus nextStatus, long nextRevision) {
+        return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks,
+                matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly, marginMode, positionSide,
+                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
+                Math.addExact(cumulativeFeeUnits, feeUnits), createdAtEpochMillis, updatedAtEpochMillis,
+                clusterPosition, nextStatus, nextRevision);
     }
 
     public OrderRuntime withStatus(CoreOrderStatus nextStatus, long nextRevision) {
@@ -91,6 +116,6 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks,
                 matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
-                makerFeeRatePpm, takerFeeRatePpm, timestamp, timestamp, position, status, revision);
+                makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, timestamp, timestamp, position, status, revision);
     }
 }

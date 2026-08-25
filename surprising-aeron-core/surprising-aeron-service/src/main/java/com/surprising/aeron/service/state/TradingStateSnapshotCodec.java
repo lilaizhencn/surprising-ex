@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 21;
+    private static final int VERSION = 22;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -94,6 +94,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(order.commandId().getLeastSignificantBits());
             writer.longValue(order.makerFeeRatePpm());
             writer.longValue(order.takerFeeRatePpm());
+            writer.longValue(order.cumulativeFeeUnits());
             writer.longValue(order.createdAtEpochMillis());
             writer.longValue(order.updatedAtEpochMillis());
             writer.longValue(order.clusterPosition());
@@ -207,6 +208,10 @@ public final class TradingStateSnapshotCodec {
         writeUnits(writer, state.treasuryState().feeBalances());
         writeUnits(writer, state.treasuryState().insuranceBalances());
         writeUnits(writer, state.treasuryState().insuranceDeficits());
+        writeUnits(writer, state.treasuryState().liquidationFeeBalances());
+        writeUnits(writer, state.treasuryState().fundingResidualBalances());
+        writeUnits(writer, state.treasuryState().roundingResidualBalances());
+        writeUnits(writer, state.treasuryState().clearingPnlBalances());
         writeUnits(writer, state.treasuryState().fundingSettlements());
         writeUnits(writer, state.treasuryState().lifecycleSettlements());
         writer.intValue(state.treasuryState().fundingProgress().size());
@@ -348,6 +353,7 @@ public final class TradingStateSnapshotCodec {
             UUID commandId = new UUID(reader.longValue(), reader.longValue());
             long makerFeeRatePpm = reader.longValue();
             long takerFeeRatePpm = reader.longValue();
+            long cumulativeFeeUnits = reader.longValue();
             long createdAt = reader.nonNegativeLong("order created time");
             long updatedAt = reader.nonNegativeLong("order updated time");
             long clusterPosition = reader.nonNegativeLong("order cluster position");
@@ -360,7 +366,7 @@ public final class TradingStateSnapshotCodec {
                     priceTicks, matchingPriceTicks, quantitySteps, executedSteps, remainingSteps, reduceOnly,
                     orderMarginMode, orderPositionSide, orderType, timeInForce, postOnly,
                     clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                    createdAt, updatedAt, clusterPosition,
+                    cumulativeFeeUnits, createdAt, updatedAt, clusterPosition,
                     CoreOrderStatus.values()[statusCode], reader.positiveLong("order revision"));
             putUnique(orders, orderId, order);
         }
@@ -499,6 +505,10 @@ public final class TradingStateSnapshotCodec {
         Map<String, Long> feeBalances = readUnits(reader, "fee balances");
         Map<String, Long> insuranceBalances = readUnits(reader, "insurance balances");
         Map<String, Long> insuranceDeficits = readUnits(reader, "insurance deficits");
+        Map<String, Long> liquidationFeeBalances = readUnits(reader, "liquidation fee balances");
+        Map<String, Long> fundingResidualBalances = readUnits(reader, "funding residual balances");
+        Map<String, Long> roundingResidualBalances = readUnits(reader, "rounding residual balances");
+        Map<String, Long> clearingPnlBalances = readUnits(reader, "clearing pnl balances");
         Map<String, Long> fundingSettlements = readUnits(reader, "funding settlements");
         Map<String, Long> lifecycleSettlements = readUnits(reader, "lifecycle settlements");
         Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
@@ -527,7 +537,8 @@ public final class TradingStateSnapshotCodec {
             putUnique(lifecycleProgress, symbol, progress);
         }
         CoreTreasuryState treasuryState = new CoreTreasuryState(feeBalances, insuranceBalances,
-                insuranceDeficits, fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
+                insuranceDeficits, liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances,
+                clearingPnlBalances, fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
         Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
         int leverageCount = reader.count("leverages");
         for (int index = 0; index < leverageCount; index++) {

@@ -29,7 +29,9 @@ public record TradingRuntimeSnapshot(
         Map<Long, CoreTriggerOrderState> triggerOrders,
         Map<Integer, TreasurySnapshot> treasury,
         Map<Integer, Long> fundingSettlements,
-        Map<Integer, FundingProgressSnapshot> fundingProgress) {
+        Map<Integer, FundingProgressSnapshot> fundingProgress,
+        Map<Integer, Long> lifecycleSettlements,
+        Map<Integer, LifecycleProgressSnapshot> lifecycleProgress) {
 
     public TradingRuntimeSnapshot {
         if (revision < 0 || users == null || balances == null || orders == null
@@ -38,7 +40,8 @@ public record TradingRuntimeSnapshot(
                 || instruments == null || leverages == null || algoOrders == null
                 || cancelAllAfterTimers == null || triggerOrders == null
                 || treasury == null
-                || fundingSettlements == null || fundingProgress == null) {
+                || fundingSettlements == null || fundingProgress == null
+                || lifecycleSettlements == null || lifecycleProgress == null) {
             throw new IllegalArgumentException("invalid runtime snapshot");
         }
         users = immutableSorted(users);
@@ -59,6 +62,8 @@ public record TradingRuntimeSnapshot(
         treasury = immutableSorted(treasury);
         fundingSettlements = immutableSorted(fundingSettlements);
         fundingProgress = immutableSorted(fundingProgress);
+        lifecycleSettlements = immutableSorted(lifecycleSettlements);
+        lifecycleProgress = immutableSorted(lifecycleProgress);
     }
 
     public long totalAvailableUnits() {
@@ -125,6 +130,7 @@ public record TradingRuntimeSnapshot(
                                 com.surprising.aeron.protocol.CoreTimeInForce timeInForce,
                                 boolean postOnly, String clientOrderId, UUID commandId,
                                 long makerFeeRatePpm, long takerFeeRatePpm,
+                                long cumulativeFeeUnits,
                                 long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
                                 CoreOrderStatus status, long revision) {
         public OrderSnapshot(long userId, int symbolId, long quantitySteps, boolean canceled) {
@@ -134,7 +140,7 @@ public record TradingRuntimeSnapshot(
                     com.surprising.aeron.protocol.CorePositionSide.NET,
                     com.surprising.aeron.protocol.CoreOrderType.LIMIT,
                     com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "", new UUID(0, 1), 0, 0,
-                    0, 0, 0, canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
+                    0, 0, 0, 0, canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
         }
 
         public OrderSnapshot(long userId, int symbolId, long quantitySteps) {
@@ -245,7 +251,9 @@ public record TradingRuntimeSnapshot(
                                    long triggerOcoCursor) {
     }
 
-    public record TreasurySnapshot(long feeUnits, long insuranceUnits, long insuranceDeficitUnits) {
+    public record TreasurySnapshot(long feeUnits, long insuranceUnits, long insuranceDeficitUnits,
+                                   long liquidationFeeUnits, long fundingResidualUnits,
+                                   long roundingResidualUnits, long clearingPnlUnits) {
     }
 
     public record FundingProgressSnapshot(long settlementId, long instrumentVersion, long fundingRatePpm,
@@ -254,6 +262,20 @@ public record TradingRuntimeSnapshot(
             if (settlementId <= 0 || instrumentVersion <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
                     || nextCursorUserId < 0 || commandId == null) {
                 throw new IllegalArgumentException("invalid snapshot funding progress");
+            }
+        }
+    }
+
+    public record LifecycleProgressSnapshot(long settlementId, long instrumentVersion,
+                                            long settlementPriceTicks, long optionCashUnitsPerContract,
+                                            boolean ordersComplete, long nextCursorOrderId,
+                                            long nextCursorUserId, UUID commandId) {
+        public LifecycleProgressSnapshot {
+            if (settlementId <= 0 || instrumentVersion <= 0 || settlementPriceTicks < 0
+                    || optionCashUnitsPerContract < 0 || nextCursorOrderId < 0 || nextCursorUserId < 0
+                    || (!ordersComplete && nextCursorUserId != 0)
+                    || (ordersComplete && nextCursorOrderId != 0) || commandId == null) {
+                throw new IllegalArgumentException("invalid snapshot lifecycle progress");
             }
         }
     }

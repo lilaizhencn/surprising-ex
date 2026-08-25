@@ -295,6 +295,41 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return cancelBatchOrderedAsync(requested).thenApply(outcome -> aggregateCancellationResult(requested, outcome));
     }
 
+    public CompletableFuture<CoreMatchingResult> executeAfterCancellations(
+            List<CoreOrderState> orders,
+            Supplier<CompletableFuture<CoreMatchingResult>> submission) {
+        List<CoreOrderState> requested = orders == null ? List.of() : List.copyOf(orders);
+        if (requested.isEmpty()) return submission.get();
+        return cancelBatchOrderedAsync(requested).thenCompose(outcome -> {
+            CoreMatchingResult cancellations = aggregateCancellationResult(requested, outcome);
+            if (!cancellations.accepted()) return CompletableFuture.completedFuture(cancellations);
+            return submission.get().thenApply(result -> combineCancellationPrefix(cancellations, result));
+        });
+    }
+
+    private static CoreMatchingResult combineCancellationPrefix(
+            CoreMatchingResult cancellations,
+            CoreMatchingResult result) {
+        if (result == null) throw new IllegalStateException("matcher command returned no result");
+        List<CoreCancellationResult> combinedCancellations = new ArrayList<>(
+                cancellations.cancellations().size() + result.cancellations().size());
+        combinedCancellations.addAll(cancellations.cancellations());
+        combinedCancellations.addAll(result.cancellations());
+        List<CoreMatchingResult.MatcherEvent> events = new ArrayList<>(
+                cancellations.matcherEvents().size() + result.matcherEvents().size());
+        events.addAll(cancellations.matcherEvents());
+        events.addAll(result.matcherEvents());
+        long nativeSequence = Math.max(cancellations.nativeCommand().nativeSequence(),
+                result.nativeCommand().nativeSequence());
+        return new CoreMatchingResult(result.accepted(), result.resultCode(), result.matches(),
+                combinedCancellations,
+                Math.addExact(cancellations.successfulPrefixCount(), result.successfulPrefixCount()),
+                cancellations.matcherStateChanged() || result.matcherStateChanged()
+                        || !cancellations.cancellations().isEmpty(),
+                new CoreMatchingResult.NativeCommand(0, "", 0, 0, nativeSequence, 0, 0),
+                new CoreMatchingResult.MatcherPrefix(0, 0), events, result.marketData());
+    }
+
     private static CoreMatchingResult aggregateCancellationResult(
             List<CoreOrderState> requested,
             CancelBatchOutcome outcome) {

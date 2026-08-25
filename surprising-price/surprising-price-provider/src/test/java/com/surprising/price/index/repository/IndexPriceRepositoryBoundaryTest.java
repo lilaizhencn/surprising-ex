@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import com.surprising.price.api.model.IndexPriceEvent;
@@ -64,13 +65,14 @@ class IndexPriceRepositoryBoundaryTest {
     @Test
     void tickDeletionOnlyTouchesTickTable() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
+        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[] {1});
         IndexPriceTickRepository repository = new IndexPriceTickRepository(jdbcTemplate);
 
         repository.deleteByKeys(List.of(new TickKey("BTC-USDT", 7L)));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        verify(jdbcTemplate).batchUpdate(sql.capture(), any(BatchPreparedStatementSetter.class));
         assertThat(sql.getValue())
                 .contains("DELETE FROM price_index_ticks")
                 .doesNotContain("price_index_components");
@@ -79,16 +81,42 @@ class IndexPriceRepositoryBoundaryTest {
     @Test
     void componentDeletionOnlyTouchesComponentTable() {
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-        when(jdbcTemplate.update(any(String.class), any(Object[].class))).thenReturn(1);
+        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(new int[] {1});
         IndexPriceComponentRepository repository = new IndexPriceComponentRepository(jdbcTemplate);
 
         repository.deleteByKeys(List.of(new TickKey("BTC-USDT", 7L)));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).update(sql.capture(), any(Object[].class));
+        verify(jdbcTemplate).batchUpdate(sql.capture(), any(BatchPreparedStatementSetter.class));
         assertThat(sql.getValue())
                 .contains("DELETE FROM price_index_components")
                 .doesNotContain("price_index_ticks");
+    }
+
+    @Test
+    void largeDeletionUsesOneBoundedPreparedStatementBatch() throws Exception {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        int[] results = new int[1_000];
+        java.util.Arrays.fill(results, 1);
+        when(jdbcTemplate.batchUpdate(any(String.class), any(BatchPreparedStatementSetter.class)))
+                .thenReturn(results);
+        IndexPriceComponentRepository repository = new IndexPriceComponentRepository(jdbcTemplate);
+        List<TickKey> keys = java.util.stream.LongStream.range(0, 1_000)
+                .mapToObj(sequence -> new TickKey("BTC-USDT", sequence))
+                .toList();
+
+        assertThat(repository.deleteByKeys(keys)).isEqualTo(1_000);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<BatchPreparedStatementSetter> setter = ArgumentCaptor.forClass(BatchPreparedStatementSetter.class);
+        verify(jdbcTemplate, times(1)).batchUpdate(sql.capture(), setter.capture());
+        assertThat(sql.getValue()).doesNotContain(" IN (").contains("symbol = ?").contains("sequence = ?");
+        assertThat(setter.getValue().getBatchSize()).isEqualTo(1_000);
+        PreparedStatement statement = mock(PreparedStatement.class);
+        setter.getValue().setValues(statement, 999);
+        verify(statement).setString(1, "BTC-USDT");
+        verify(statement).setLong(2, 999L);
     }
 
     private static IndexPriceEvent event() {

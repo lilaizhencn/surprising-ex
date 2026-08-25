@@ -73,6 +73,11 @@ public final class CoreIntegrityEnvelope {
         }
     }
 
+    public static void verifyDetached(String keyId, String keyFingerprint, byte[] payloadHash,
+                                      byte[] signature, byte[] payload, PublicKey publicKey) {
+        new CoreIntegrityEnvelope(keyId, keyFingerprint, payloadHash, signature).verify(payload, publicKey);
+    }
+
     public static void requireFingerprint(PublicKey publicKey, String expectedFingerprint) {
         if (publicKey == null || expectedFingerprint == null
                 || !fingerprint(publicKey).equals(expectedFingerprint.toLowerCase(java.util.Locale.ROOT))) {

@@ -3954,6 +3954,17 @@ CREATE TABLE IF NOT EXISTS core_event_projection (
     command_status VARCHAR(16) NOT NULL,
     result_code VARCHAR(64) NOT NULL,
     user_id BIGINT NOT NULL,
+    before_business_state_hash BIGINT NOT NULL,
+    before_funds_state_hash BIGINT NOT NULL,
+    funds_state_hash BIGINT NOT NULL,
+    matcher_sequence BIGINT NOT NULL,
+    matcher_prefix_before BIGINT NOT NULL,
+    matcher_prefix_after BIGINT NOT NULL,
+    cluster_position BIGINT NOT NULL,
+    integrity_key_id VARCHAR(128) NOT NULL,
+    integrity_key_fingerprint VARCHAR(64) NOT NULL,
+    integrity_payload_hash BYTEA NOT NULL,
+    integrity_signature BYTEA NOT NULL,
     raw_event BYTEA NOT NULL,
     projected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (product_line, export_sequence)
@@ -3961,6 +3972,21 @@ CREATE TABLE IF NOT EXISTS core_event_projection (
 
 CREATE INDEX IF NOT EXISTS idx_core_event_projection_command
     ON core_event_projection (product_line, command_id);
+
+CREATE TABLE IF NOT EXISTS core_funds_posting_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    posting_index INTEGER NOT NULL,
+    asset VARCHAR(20) NOT NULL,
+    owner_kind VARCHAR(16) NOT NULL,
+    owner_id BIGINT NOT NULL,
+    subledger VARCHAR(32) NOT NULL,
+    units BIGINT NOT NULL,
+    PRIMARY KEY (product_line, export_sequence, posting_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_funds_posting_owner
+    ON core_funds_posting_projection (product_line, owner_kind, owner_id, asset, export_sequence);
 
 CREATE TABLE IF NOT EXISTS core_user_fact_projection (
     product_line VARCHAR(32) NOT NULL,
@@ -4101,6 +4127,10 @@ CREATE TABLE IF NOT EXISTS core_treasury_projection (
     fee_balance_units BIGINT NOT NULL,
     insurance_balance_units BIGINT NOT NULL,
     insurance_deficit_units BIGINT NOT NULL,
+    liquidation_fee_units BIGINT NOT NULL,
+    funding_residual_units BIGINT NOT NULL,
+    rounding_residual_units BIGINT NOT NULL,
+    clearing_pnl_units BIGINT NOT NULL,
     export_sequence BIGINT NOT NULL,
     updated_at_epoch_ms BIGINT NOT NULL,
     PRIMARY KEY (product_line, asset)

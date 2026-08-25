@@ -21,6 +21,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 public final class KafkaCoreExportSink implements CoreExportSink, AutoCloseable {
 
     private final KafkaProducer<String, byte[]> producer;
+    private final com.surprising.aeron.protocol.CoreFactVerifier factVerifier;
 
     public KafkaCoreExportSink(Map<String, Object> properties) {
         Objects.requireNonNull(properties, "properties");
@@ -30,6 +31,7 @@ public final class KafkaCoreExportSink implements CoreExportSink, AutoCloseable 
         configuration.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         configuration.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
         producer = new KafkaProducer<>(configuration);
+        factVerifier = com.surprising.aeron.protocol.CoreFactVerifier.configured();
     }
 
     @Override
@@ -37,6 +39,7 @@ public final class KafkaCoreExportSink implements CoreExportSink, AutoCloseable 
         String topic = topic(productLine);
         List<Future<RecordMetadata>> writes = new ArrayList<>(events.size());
         for (CoreMessage message : events) {
+            factVerifier.verify(CoreExportCodec.decodeEvent(message.payload()));
             writes.add(producer.send(record(topic, productLine, message)));
         }
         for (Future<RecordMetadata> write : writes) {

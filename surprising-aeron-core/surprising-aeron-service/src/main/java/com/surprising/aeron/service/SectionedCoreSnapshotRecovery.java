@@ -20,10 +20,7 @@ final class SectionedCoreSnapshotRecovery {
     private int payloadPosition;
     private int totalLength;
     private boolean modeKnown;
-    private boolean legacyMode;
     private boolean complete;
-    private byte[] legacy;
-    private int legacyPosition;
 
     void accept(DirectBuffer source, int offset, int length) {
         if (source == null || offset < 0 || length < 0 || offset > source.capacity() - length) {
@@ -41,14 +38,6 @@ final class SectionedCoreSnapshotRecovery {
                 totalLength = Math.addExact(totalLength, copied);
                 if (envelopePosition == envelope.length) selectMode();
                 continue;
-            }
-            if (legacyMode) {
-                ensureTotalCapacity(remaining);
-                ensureLegacyCapacity(Math.addExact(legacyPosition, remaining));
-                source.getBytes(cursor, legacy, legacyPosition, remaining);
-                legacyPosition += remaining;
-                totalLength += remaining;
-                return;
             }
             if (sectionHeaderPosition < sectionHeader.length) {
                 int copied = copy(source, cursor, remaining, sectionHeader, sectionHeaderPosition);
@@ -74,17 +63,15 @@ final class SectionedCoreSnapshotRecovery {
     }
 
     CoreProbeState decode(ProductLine expectedProductLine) {
-        if (legacyMode) return CoreStateSnapshotCodec.decode(legacySnapshot(), expectedProductLine);
         return components(expectedProductLine).restore(expectedProductLine);
     }
 
     CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
-        if (legacyMode) return CoreStateSnapshotCodec.manifest(legacySnapshot(), expectedProductLine);
         return components(expectedProductLine).manifest(expectedProductLine);
     }
 
     int ownedSectionCount() {
-        return legacyMode ? (legacyPosition == 0 ? 0 : 1) : sectionIndex;
+        return sectionIndex;
     }
 
     int totalLength() {
@@ -92,7 +79,6 @@ final class SectionedCoreSnapshotRecovery {
     }
 
     int allocatedBytes() {
-        if (legacyMode) return legacy.length;
         int allocated = envelope.length + sectionHeader.length;
         for (byte[] payload : payloads) {
             if (payload != null) allocated = Math.addExact(allocated, payload.length);
@@ -106,13 +92,6 @@ final class SectionedCoreSnapshotRecovery {
             throw new ProtocolException("invalid snapshot magic");
         }
         int version = Short.toUnsignedInt(buffer.getShort());
-        if (version == SectionedCoreSnapshotCodec.LEGACY_VERSION) {
-            legacyMode = true;
-            modeKnown = true;
-            legacy = envelope.clone();
-            legacyPosition = envelope.length;
-            return;
-        }
         if (version != SectionedCoreSnapshotCodec.VERSION) {
             throw new ProtocolException("unsupported snapshot version: " + version);
         }
@@ -174,25 +153,11 @@ final class SectionedCoreSnapshotRecovery {
         return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine);
     }
 
-    private byte[] legacySnapshot() {
-        ensureComplete();
-        return Arrays.copyOf(legacy, legacyPosition);
-    }
-
     private void ensureComplete() {
         if (totalLength == 0) throw new IllegalStateException("incomplete Aeron core snapshot");
-        if (legacyMode) return;
         if (!complete || sectionIndex != SectionedCoreSnapshotCodec.SECTION_COUNT) {
             throw new ProtocolException("snapshot is truncated or incomplete");
         }
-    }
-
-    private void ensureLegacyCapacity(int requiredLength) {
-        if (requiredLength <= legacy.length) return;
-        int doubled = legacy.length > CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES / 2
-                ? CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES : legacy.length * 2;
-        int newLength = Math.max(requiredLength, doubled);
-        legacy = Arrays.copyOf(legacy, newLength);
     }
 
     private void ensureTotalCapacity(int additionalLength) {

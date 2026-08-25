@@ -52,7 +52,12 @@ public final class RuntimeStateParityChecker {
         if (!expected.triggerOrders().equals(actual.triggerOrders())) return "trigger-orders";
         if (!expected.treasury().equals(actual.treasury())) return "treasury";
         if (!expected.fundingSettlements().equals(actual.fundingSettlements())) return "funding-settlements";
-        return mapMismatch("funding-progress", expected.fundingProgress(), actual.fundingProgress());
+        if (!expected.fundingProgress().equals(actual.fundingProgress())) return mapMismatch(
+                "funding-progress", expected.fundingProgress(), actual.fundingProgress());
+        if (!expected.lifecycleSettlements().equals(actual.lifecycleSettlements())) {
+            return "lifecycle-settlements";
+        }
+        return mapMismatch("lifecycle-progress", expected.lifecycleProgress(), actual.lifecycleProgress());
     }
 
     private static String mapMismatch(String name, java.util.Map<?, ?> expected, java.util.Map<?, ?> actual) {

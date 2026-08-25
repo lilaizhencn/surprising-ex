@@ -8,6 +8,7 @@ import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreResponse;
@@ -85,6 +86,37 @@ class CoreMatchingStateTest {
     }
 
     @Test
+    void finalMatcherFactCarriesTheRestingOrderAfterThePendingFact() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applyInstrument(state);
+            apply(state, 1, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
+            CoreMessage order = message(state, 2, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
+
+            CoreResponse completed = drainMatching(state, state.apply(order), order);
+
+            assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
+            CoreMessage exportQuery = new CoreMessage(CoreMessageHeader.query(
+                    CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
+                    CommandSource.OPERATIONS, 88, 0, 0, 3, 3), CoreExportCodec.encodeBatchQuery(20));
+            var events = CoreExportCodec.decodeBatchResponse(state.apply(exportQuery).data()).events().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
+                    .filter(event -> event.commandId().equals(order.header().commandId()))
+                    .toList();
+
+            assertThat(events).hasSize(2);
+            assertThat(events.getFirst().resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(events.getLast().resultCode()).isEqualTo(CoreResultCode.NONE);
+            assertThat(events.getLast().changedOrders()).singleElement()
+                    .satisfies(view -> {
+                        assertThat(view.orderId()).isEqualTo(202);
+                        assertThat(view.status()).isEqualTo("OPEN");
+                    });
+        }
+    }
+
+    @Test
     void marketOrderUsesProtectionPriceAndNeverRestsOnBook() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);
@@ -142,6 +174,51 @@ class CoreMatchingStateTest {
                 assertThat(restored.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
                 assertThat(restored.tradingState().orders().values())
                         .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("allProductLines")
+    void sameUserCrossCancelsTheRestingOrderBeforeSubmittingTheTaker(ProductLine productLine) {
+        try (CoreProbeState state = new CoreProbeState(productLine)) {
+            applyInstrument(state);
+            ReservationKind reservationKind = productLine == ProductLine.SPOT
+                    ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
+            String sellerAsset = productLine == ProductLine.SPOT ? "BTC" : settleAsset(productLine);
+            String buyerAsset = productLine == ProductLine.SPOT ? "USDT" : settleAsset(productLine);
+            long initialSellerUnits = productLine == ProductLine.SPOT ? 10 : 20_000;
+            long initialBuyerUnits = productLine == ProductLine.SPOT ? 1_000 : 20_000;
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(
+                            new BalanceAdjustmentCommand(sellerAsset, initialSellerUnits)));
+            if (productLine == ProductLine.SPOT) {
+                apply(state, 2, 11, CoreMessageType.ADJUST_BALANCE,
+                        TradingCommandCodec.encodeBalanceAdjustment(
+                                new BalanceAdjustmentCommand(buyerAsset, initialBuyerUnits)));
+            }
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 5, reservationKind, sellerAsset,
+                            productLine == ProductLine.SPOT ? 5 : 1_000));
+
+            apply(state, 4, 11, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 3, reservationKind, buyerAsset,
+                            productLine == ProductLine.SPOT ? 300 : 1_000));
+
+            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(101).executedQuantitySteps()).isZero();
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().order(202).executedQuantitySteps()).isZero();
+            if (productLine == ProductLine.SPOT) {
+                assertThat(state.tradingState().user(11).balances().get("BTC").availableUnits()).isEqualTo(10);
+                assertThat(state.tradingState().user(11).balances().get("BTC").lockedUnits()).isZero();
+                assertThat(state.tradingState().user(11).balances().get("USDT").availableUnits()).isEqualTo(700);
+                assertThat(state.tradingState().user(11).balances().get("USDT").lockedUnits()).isEqualTo(300);
+            } else {
+                var balance = state.tradingState().user(11).balances().get(buyerAsset);
+                assertThat(balance.lockedUnits()).isPositive();
+                assertThat(Math.addExact(balance.availableUnits(), balance.lockedUnits())).isEqualTo(20_000);
+                assertThat(state.tradingState().user(11).positions()).isEmpty();
             }
         }
     }
@@ -229,6 +306,68 @@ class CoreMatchingStateTest {
                     + state.tradingState().user(22).totalUnits("USDT")
                     + state.tradingState().treasuryState().insuranceBalances().getOrDefault("USDT", 0L);
             assertThat(total).isEqualTo(4_000);
+        }
+    }
+
+    @Test
+    void normalDerivativeCloseReservesItsFullQuantity() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+
+            CoreMessage underReservedClose = message(state, 5, 22, CoreMessageType.PLACE_ORDER,
+                    place(203, CoreOrderSide.SELL, 110, 1, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
+
+            assertThat(state.apply(underReservedClose).resultCode())
+                    .isEqualTo(com.surprising.aeron.protocol.CoreResultCode.INSUFFICIENT_ORDER_RESERVATION);
+            assertThat(state.tradingState().order(203)).isNull();
+            assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps())
+                    .isEqualTo(2);
+        }
+    }
+
+    @Test
+    void normalCloseCancelsNewestConflictingReduceOnlyOrderBeforeMatcherSubmission() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 5, 22, CoreMessageType.PLACE_ORDER,
+                    place(203, CoreOrderSide.SELL, 110, 1, true,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
+            apply(state, 6, 22, CoreMessageType.PLACE_ORDER,
+                    place(204, CoreOrderSide.SELL, 120, 1, true,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
+
+            apply(state, 7, 22, CoreMessageType.PLACE_ORDER,
+                    place(205, CoreOrderSide.SELL, 130, 1, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+
+            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().order(204).status()).isEqualTo(CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(205).status()).isEqualTo(CoreOrderStatus.OPEN);
+            apply(state, 8, 11, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(301, CoreOrderSide.BUY, 0, 2, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
+                            CoreOrderType.MARKET, CoreTimeInForce.IOC, 130, false, 0, 0));
+            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().order(204).status()).isEqualTo(CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(205).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
         }
     }
 
@@ -335,6 +474,42 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().treasuryState().feeBalances().getOrDefault(settlementAsset, 0L))
                     .isGreaterThan(feeBefore);
             assertThat(total(state, settlementAsset)).isEqualTo(fundsBefore);
+        }
+    }
+
+    @Test
+    void spotMatchExportsTheChangedTreasuryBalance() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applyInstrument(state, 100_000, 200_000);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 240)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(101, CoreOrderSide.SELL, 100, 2, false,
+                            ReservationKind.SPOT_ASSET, "BTC", 2,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, false, 100_000, 200_000));
+            CoreMessage buyer = message(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(202, CoreOrderSide.BUY, 100, 2, false,
+                            ReservationKind.SPOT_ASSET, "USDT", 240,
+                            CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false, 100_000, 200_000));
+
+            CoreResponse completed = drainMatching(state, state.apply(buyer), buyer);
+            assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
+            CoreMessage exportQuery = new CoreMessage(CoreMessageHeader.query(
+                    CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
+                    CommandSource.OPERATIONS, 88, 0, 0, 5, 5), CoreExportCodec.encodeBatchQuery(20));
+            var event = CoreExportCodec.decodeBatchResponse(state.apply(exportQuery).data()).events().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
+                    .filter(value -> value.commandId().equals(buyer.header().commandId()))
+                    .max(java.util.Comparator.comparingLong(
+                            com.surprising.aeron.protocol.CoreExportEvent::exportSequence))
+                    .orElseThrow();
+
+            assertThat(event.changedTreasuryAssets()).singleElement().satisfies(treasury -> {
+                assertThat(treasury.asset()).isEqualTo("USDT");
+                assertThat(treasury.feeBalanceUnits()).isEqualTo(60);
+            });
         }
     }
 
@@ -720,9 +895,14 @@ class CoreMatchingStateTest {
     private static long total(CoreProbeState state, String asset) {
         long users = state.tradingState().users().values().stream()
                 .mapToLong(user -> user.totalUnits(asset)).sum();
-        long fee = state.tradingState().treasuryState().feeBalances().getOrDefault(asset, 0L);
-        long insurance = state.tradingState().treasuryState().insuranceBalances().getOrDefault(asset, 0L);
-        long deficit = state.tradingState().treasuryState().insuranceDeficits().getOrDefault(asset, 0L);
-        return Math.subtractExact(Math.addExact(Math.addExact(users, fee), insurance), deficit);
+        var treasury = state.tradingState().treasuryState();
+        long total = users;
+        total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.insuranceBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.liquidationFeeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.fundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.roundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, treasury.clearingPnlBalances().getOrDefault(asset, 0L));
+        return Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(asset, 0L));
     }
 }

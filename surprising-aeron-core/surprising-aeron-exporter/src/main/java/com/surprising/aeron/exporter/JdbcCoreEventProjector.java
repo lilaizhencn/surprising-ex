@@ -19,8 +19,17 @@ public final class JdbcCoreEventProjector {
     private static final String INSERT = """
             INSERT INTO core_event_projection (
                 product_line, export_sequence, applied_command_count, business_state_hash,
-                command_id, command_type, command_status, result_code, user_id, raw_event
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                command_id, command_type, command_status, result_code, user_id,
+                before_business_state_hash, before_funds_state_hash, funds_state_hash,
+                matcher_sequence, matcher_prefix_before, matcher_prefix_after, cluster_position,
+                integrity_key_id, integrity_key_fingerprint, integrity_payload_hash, integrity_signature,
+                raw_event
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+    private static final String INSERT_FUNDS_POSTING = """
+            INSERT INTO core_funds_posting_projection
+                (product_line, export_sequence, posting_index, asset, owner_kind, owner_id, subledger, units)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """;
     private static final String INSERT_USER_FACT = """
             INSERT INTO core_user_fact_projection
@@ -96,13 +105,15 @@ public final class JdbcCoreEventProjector {
     private static final String INSERT_TREASURY = """
             INSERT INTO core_treasury_projection
                 (product_line, asset, fee_balance_units, insurance_balance_units,
-                 insurance_deficit_units, export_sequence, updated_at_epoch_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 insurance_deficit_units, liquidation_fee_units, funding_residual_units,
+                 rounding_residual_units, clearing_pnl_units, export_sequence, updated_at_epoch_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
     private static final String UPDATE_TREASURY = """
             UPDATE core_treasury_projection SET
                 fee_balance_units = ?, insurance_balance_units = ?, insurance_deficit_units = ?,
-                export_sequence = ?, updated_at_epoch_ms = ?
+                liquidation_fee_units = ?, funding_residual_units = ?, rounding_residual_units = ?,
+                clearing_pnl_units = ?, export_sequence = ?, updated_at_epoch_ms = ?
             WHERE product_line = ? AND asset = ? AND export_sequence < ?
             """;
     private static final String LOCK_WATERMARK = """
@@ -113,6 +124,11 @@ public final class JdbcCoreEventProjector {
             SELECT raw_event FROM core_event_projection
             WHERE product_line = ? AND export_sequence = ?
             """;
+    private static final String SELECT_PREVIOUS_INTEGRITY = """
+            SELECT business_state_hash, funds_state_hash, matcher_sequence, matcher_prefix_after, cluster_position
+            FROM core_event_projection
+            WHERE product_line = ? AND export_sequence = ?
+            """;
     private static final String UPDATE_WATERMARK = """
             UPDATE core_projection_watermark
             SET last_export_sequence = ?, updated_at = CURRENT_TIMESTAMP
@@ -120,13 +136,22 @@ public final class JdbcCoreEventProjector {
             """;
 
     private final DataSource dataSource;
+    private final com.surprising.aeron.protocol.CoreFactVerifier factVerifier;
 
     public JdbcCoreEventProjector(DataSource dataSource) {
+        this(dataSource, com.surprising.aeron.protocol.CoreFactVerifier.configured());
+    }
+
+    JdbcCoreEventProjector(
+            DataSource dataSource,
+            com.surprising.aeron.protocol.CoreFactVerifier factVerifier) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+        this.factVerifier = Objects.requireNonNull(factVerifier, "factVerifier");
     }
 
     public boolean project(ProductLine productLine, CoreMessage message) throws SQLException {
         CoreExportEvent event = CoreExportCodec.decodeEvent(message.payload());
+        factVerifier.verify(event);
         if (message.header().productLine() != productLine
                 || message.header().sourceSequence() != event.exportSequence()) {
             throw new IllegalArgumentException("export event identity mismatch");
@@ -148,6 +173,7 @@ public final class JdbcCoreEventProjector {
                 if (event.exportSequence() != Math.incrementExact(lastExportSequence)) {
                     throw sequenceFailure(productLine, lastExportSequence, event.exportSequence(), "sequence gap");
                 }
+                verifyContinuity(connection, productLine, lastExportSequence, event);
                 insertEvent(connection, productLine, message, event);
                 insertFacts(connection, productLine, message, event);
                 updateWatermark(connection, productLine, lastExportSequence, event.exportSequence());
@@ -193,6 +219,37 @@ public final class JdbcCoreEventProjector {
                 + ": watermark=" + current + ", received=" + received, "23000");
     }
 
+    private static void verifyContinuity(
+            Connection connection,
+            ProductLine productLine,
+            long previousSequence,
+            CoreExportEvent event) throws SQLException {
+        if (previousSequence == 0) return;
+        try (PreparedStatement statement = connection.prepareStatement(SELECT_PREVIOUS_INTEGRITY)) {
+            statement.setString(1, productLine.name());
+            statement.setLong(2, previousSequence);
+            try (var result = statement.executeQuery()) {
+                if (!result.next()) throw new SQLException("previous Core fact is missing", "23000");
+                long previousBusinessHash = result.getLong(1);
+                long previousFundsHash = result.getLong(2);
+                long previousMatcherSequence = result.getLong(3);
+                long previousMatcherPrefix = result.getLong(4);
+                long previousClusterPosition = result.getLong(5);
+                boolean matcherContinuous = event.matcherSequence() >= previousMatcherSequence
+                        && event.matcherPrefixBefore() == previousMatcherPrefix
+                        && (event.matcherSequence() != previousMatcherSequence
+                        || event.matcherPrefixAfter() == previousMatcherPrefix);
+                if (event.beforeBusinessStateHash() != previousBusinessHash
+                        || event.beforeFundsStateHash() != previousFundsHash
+                        || event.clusterPosition() < previousClusterPosition
+                        || !matcherContinuous) {
+                    throw new SQLException("Core fact continuity mismatch for " + productLine
+                            + "/" + event.exportSequence(), "23000");
+                }
+            }
+        }
+    }
+
     private static void updateWatermark(Connection connection, ProductLine productLine,
                                         long current, long next) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(UPDATE_WATERMARK)) {
@@ -215,7 +272,18 @@ public final class JdbcCoreEventProjector {
             statement.setString(7, event.commandStatus().name());
             statement.setString(8, event.resultCode().name());
             statement.setLong(9, event.userId());
-            statement.setBytes(10, CoreMessageCodec.encode(message));
+            statement.setLong(10, event.beforeBusinessStateHash());
+            statement.setLong(11, event.beforeFundsStateHash());
+            statement.setLong(12, event.fundsStateHash());
+            statement.setLong(13, event.matcherSequence());
+            statement.setLong(14, event.matcherPrefixBefore());
+            statement.setLong(15, event.matcherPrefixAfter());
+            statement.setLong(16, event.clusterPosition());
+            statement.setString(17, event.integrity().keyId());
+            statement.setString(18, event.integrity().keyFingerprint());
+            statement.setBytes(19, event.integrity().payloadHash());
+            statement.setBytes(20, event.integrity().signature());
+            statement.setBytes(21, CoreMessageCodec.encode(message));
             if (statement.executeUpdate() != 1) throw new SQLException("core event projection was not inserted");
         }
     }
@@ -287,8 +355,30 @@ public final class JdbcCoreEventProjector {
             executions.executeBatch();
         }
         insertFundingFacts(connection, productLine, message, event);
+        insertFundsPostings(connection, productLine, event);
         upsertLiquidations(connection, productLine, message, event);
         upsertTreasury(connection, productLine, message, event);
+    }
+
+    private static void insertFundsPostings(
+            Connection connection,
+            ProductLine productLine,
+            CoreExportEvent event) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(INSERT_FUNDS_POSTING)) {
+            for (int index = 0; index < event.fundsPostings().size(); index++) {
+                var posting = event.fundsPostings().get(index);
+                statement.setString(1, productLine.name());
+                statement.setLong(2, event.exportSequence());
+                statement.setInt(3, index);
+                statement.setString(4, posting.asset());
+                statement.setString(5, posting.ownerKind().name());
+                statement.setLong(6, posting.ownerId());
+                statement.setString(7, posting.subledger().name());
+                statement.setLong(8, posting.units());
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
     }
 
     private static boolean orderAlreadyProjected(
@@ -397,19 +487,27 @@ public final class JdbcCoreEventProjector {
                 update.setLong(1, treasury.feeBalanceUnits());
                 update.setLong(2, treasury.insuranceBalanceUnits());
                 update.setLong(3, treasury.insuranceDeficitUnits());
-                update.setLong(4, event.exportSequence());
-                update.setLong(5, message.header().submittedAtEpochMillis());
-                update.setString(6, productLine.name());
-                update.setString(7, treasury.asset());
+                update.setLong(4, treasury.liquidationFeeBalanceUnits());
+                update.setLong(5, treasury.fundingResidualBalanceUnits());
+                update.setLong(6, treasury.roundingResidualBalanceUnits());
+                update.setLong(7, treasury.clearingPnlBalanceUnits());
                 update.setLong(8, event.exportSequence());
+                update.setLong(9, message.header().submittedAtEpochMillis());
+                update.setString(10, productLine.name());
+                update.setString(11, treasury.asset());
+                update.setLong(12, event.exportSequence());
                 if (update.executeUpdate() == 0) {
                     insert.setString(1, productLine.name());
                     insert.setString(2, treasury.asset());
                     insert.setLong(3, treasury.feeBalanceUnits());
                     insert.setLong(4, treasury.insuranceBalanceUnits());
                     insert.setLong(5, treasury.insuranceDeficitUnits());
-                    insert.setLong(6, event.exportSequence());
-                    insert.setLong(7, message.header().submittedAtEpochMillis());
+                    insert.setLong(6, treasury.liquidationFeeBalanceUnits());
+                    insert.setLong(7, treasury.fundingResidualBalanceUnits());
+                    insert.setLong(8, treasury.roundingResidualBalanceUnits());
+                    insert.setLong(9, treasury.clearingPnlBalanceUnits());
+                    insert.setLong(10, event.exportSequence());
+                    insert.setLong(11, message.header().submittedAtEpochMillis());
                     insert.executeUpdate();
                 }
             }
