@@ -237,12 +237,13 @@ public final class RuntimeStateMaterializer {
         Map<String, CoreRiskSnapshot> snapshots = StateMapSupport.delta(previous.riskState().snapshots());
         for (long positionKey : runtime.changedRiskSnapshots().toArray()) {
             RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(positionKey);
+            String snapshotKey = identity.userId() + ":" + identity.positionKey();
             RiskSnapshotRuntime risk = runtime.riskSnapshot(positionKey);
             if (risk == null) {
-                snapshots.remove(identity.positionKey());
+                snapshots.remove(snapshotKey);
             } else {
                 CoreRiskSnapshot snapshot = riskSnapshot(risk, identities);
-                if (!snapshot.key().equals(identity.positionKey())) {
+                if (!snapshot.key().equals(snapshotKey)) {
                     throw new IllegalStateException("runtime risk snapshot identity mismatch: " + positionKey);
                 }
                 snapshots.put(snapshot.key(), snapshot);

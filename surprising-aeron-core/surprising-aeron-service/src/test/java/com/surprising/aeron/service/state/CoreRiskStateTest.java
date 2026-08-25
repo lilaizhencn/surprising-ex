@@ -284,6 +284,8 @@ class CoreRiskStateTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
         RuntimePerpetualRiskProcessor.applyMarkPrice(
                 state, command, state.users().keySet(), runtime, identities);
+        assertThat(RuntimeStateMaterializer.materializeTransition(runtime, identities, state))
+                .isEqualTo(first);
         RuntimeStateParityChecker.assertMatches(first, identities, runtime);
 
         while (!first.riskState().scan().riskComplete()) {
