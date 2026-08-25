@@ -1,6 +1,7 @@
 package com.surprising.candlestick.provider.repository;
 
 import com.surprising.candlestick.api.model.CandleStatus;
+import com.surprising.candlestick.api.model.CandlePeriod;
 import com.surprising.candlestick.provider.aggregation.CandleSink;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import java.sql.PreparedStatement;
@@ -13,7 +14,7 @@ import org.springframework.stereotype.Repository;
 /**
  * 只负责 {@code candlestick_candles} 表的批量写入。
  *
- * <p>处理器写入完整快照而不是增量，因此按 symbol、周期和开盘时间重试 upsert 是安全的。</p>
+ * <p>处理器只写入首次关闭的完整 1 分钟快照；相同 symbol 和开盘时间的重试不会改写历史。</p>
  */
 @Repository
 public class PostgresCandleSink implements CandleSink {
@@ -26,23 +27,7 @@ public class PostgresCandleSink implements CandleSink {
                 first_trade_id, last_trade_id, first_sequence, last_sequence,
                 status, updated_at, source_partition, source_offset
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (symbol, period, open_time) DO UPDATE SET
-                close_time = EXCLUDED.close_time,
-                open_price = EXCLUDED.open_price,
-                high_price = EXCLUDED.high_price,
-                low_price = EXCLUDED.low_price,
-                close_price = EXCLUDED.close_price,
-                base_volume = EXCLUDED.base_volume,
-                quote_volume = EXCLUDED.quote_volume,
-                trade_count = EXCLUDED.trade_count,
-                first_trade_id = EXCLUDED.first_trade_id,
-                last_trade_id = EXCLUDED.last_trade_id,
-                first_sequence = EXCLUDED.first_sequence,
-                last_sequence = EXCLUDED.last_sequence,
-                status = EXCLUDED.status,
-                updated_at = EXCLUDED.updated_at,
-                source_partition = EXCLUDED.source_partition,
-                source_offset = EXCLUDED.source_offset
+            ON CONFLICT (symbol, period, open_time) DO NOTHING
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -52,7 +37,7 @@ public class PostgresCandleSink implements CandleSink {
     }
 
     /**
-     * 使用一个 JDBC batch 持久化最新的脏 K 线快照。
+     * 使用一个 JDBC batch 首次持久化关闭的 1 分钟 K 线；冲突行保持不可变。
      */
     @Override
     public void upsertBatch(List<CandleSnapshot> candles) {
@@ -60,7 +45,8 @@ public class PostgresCandleSink implements CandleSink {
             return;
         }
         List<CandleSnapshot> closedCandles = candles.stream()
-                .filter(candle -> candle != null && candle.getStatus() == CandleStatus.CLOSED)
+                .filter(candle -> candle != null && candle.getStatus() == CandleStatus.CLOSED
+                        && CandlePeriod.M1.code().equals(candle.getPeriod()))
                 .toList();
         if (closedCandles.isEmpty()) {
             return;

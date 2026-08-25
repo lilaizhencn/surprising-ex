@@ -1,8 +1,12 @@
 package com.surprising.candlestick.provider.config;
 
+import com.surprising.candlestick.api.model.CandlePeriod;
+import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
 import com.surprising.candlestick.provider.aggregation.CandleAggregationProcessor;
+import com.surprising.candlestick.provider.aggregation.CandleRollupAccumulator;
+import com.surprising.candlestick.provider.aggregation.CandleRollupProcessor;
 import com.surprising.candlestick.provider.aggregation.CandleSink;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import com.surprising.candlestick.provider.aggregation.CandleStores;
@@ -34,7 +38,7 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerde;
 @EnableKafkaStreams
 @ImportRuntimeHints(KafkaStreamsRuntimeHints.class)
 /**
- * Builds the Kafka Streams topology for perpetual K-line aggregation.
+ * Builds the product-line-isolated Kafka Streams topology for K-line aggregation.
  *
  * <p>The topology consumes the shared trade topic, updates RocksDB-backed state stores, emits
  * candle update events, and periodically lets the processor flush dirty snapshots to PostgreSQL.</p>
@@ -94,6 +98,7 @@ public class CandlestickStreamConfiguration {
         Serde<CandleUpdatedEvent> updateSerde = jsonSerde(CandleUpdatedEvent.class);
         Serde<CandleAccumulator> accumulatorSerde = jsonSerde(CandleAccumulator.class);
         Serde<CandleSnapshot> snapshotSerde = jsonSerde(CandleSnapshot.class);
+        Serde<CandleRollupAccumulator> rollupSerde = jsonSerde(CandleRollupAccumulator.class);
 
         // Persistent stores are backed by RocksDB and restored from Kafka Streams changelog topics.
         streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
@@ -105,11 +110,27 @@ public class CandlestickStreamConfiguration {
                 Serdes.String(),
                 snapshotSerde));
         streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
+                Stores.persistentKeyValueStore(CandleStores.CLOSED_M1_WATERMARK_STORE),
+                Serdes.String(),
+                Serdes.Long()));
+        streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
                 Stores.persistentKeyValueStore(CandleStores.DEDUPE_STORE),
                 Serdes.String(),
                 Serdes.Long()));
         streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
                 Stores.persistentKeyValueStore(CandleStores.SEQUENCE_STORE),
+                Serdes.String(),
+                Serdes.Long()));
+        streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
+                Stores.persistentKeyValueStore(CandleStores.ROLLUP_STORE),
+                Serdes.String(),
+                rollupSerde));
+        streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
+                Stores.persistentKeyValueStore(CandleStores.ROLLUP_SEEN_STORE),
+                Serdes.String(),
+                Serdes.Long()));
+        streamsBuilder.addStateStore(Stores.keyValueStoreBuilder(
+                Stores.persistentKeyValueStore(CandleStores.ROLLUP_WATERMARK_STORE),
                 Serdes.String(),
                 Serdes.Long()));
 
@@ -120,10 +141,24 @@ public class CandlestickStreamConfiguration {
                         Named.as("candlestick-aggregator"),
                         CandleStores.CANDLE_STORE,
                         CandleStores.DIRTY_STORE,
+                        CandleStores.CLOSED_M1_WATERMARK_STORE,
                         CandleStores.DEDUPE_STORE,
                         CandleStores.SEQUENCE_STORE);
 
         updates.to(properties.getKafka().getCandleTopic(), Produced.with(Serdes.String(), updateSerde));
+
+        KStream<String, CandleUpdatedEvent> rollups = streamsBuilder
+                .stream(properties.getKafka().getCandleTopic(), Consumed.with(Serdes.String(), updateSerde))
+                .filter((key, event) -> event != null
+                        && event.status() == CandleStatus.CLOSED
+                        && CandlePeriod.M1.code().equals(event.period()),
+                        Named.as("closed-one-minute-candles"))
+                .process(() -> new CandleRollupProcessor(properties, hotCache),
+                        Named.as("candlestick-rollup"),
+                        CandleStores.ROLLUP_STORE,
+                        CandleStores.ROLLUP_SEEN_STORE,
+                        CandleStores.ROLLUP_WATERMARK_STORE);
+        rollups.to(properties.getKafka().getCandleTopic(), Produced.with(Serdes.String(), updateSerde));
         return updates;
     }
 

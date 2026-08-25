@@ -2,6 +2,7 @@ package com.surprising.candlestick.provider.config;
 
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
+import com.surprising.candlestick.provider.aggregation.CandleRollupAccumulator;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import org.apache.kafka.streams.processor.internals.NoOpProcessorWrapper;
@@ -23,6 +24,7 @@ public final class KafkaStreamsRuntimeHints implements RuntimeHintsRegistrar {
         registerJsonBinding(hints, PublicTradeEvent.class);
         registerJsonBinding(hints, CandleUpdatedEvent.class);
         registerJsonBinding(hints, CandleAccumulator.class);
+        registerJsonBinding(hints, CandleRollupAccumulator.class);
         registerJsonBinding(hints, CandleSnapshot.class);
     }
 

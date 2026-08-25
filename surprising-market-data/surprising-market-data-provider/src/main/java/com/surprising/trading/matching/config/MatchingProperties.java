@@ -48,11 +48,8 @@ public class MatchingProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine;
-        private String groupId = "surprising-matching-market-data-v1";
         private String clientId = "surprising-matching-market-data";
         private String coreEventsTopic;
-        private String matchTradesTopic = "surprising.perp.match.trades.v1";
-        private String orderBookDepthTopic = "surprising.perp.orderbook.depth.v1";
         private int maxPollRecords = 1_024;
 
         public String getBootstrapServers() {
@@ -76,10 +73,6 @@ public class MatchingProperties {
 
         public String getGroupId() {
             return productTopics().consumerGroup("matching-market-data");
-        }
-
-        public void setGroupId(String groupId) {
-            this.groupId = required(groupId, "Kafka group id");
         }
 
         public String getClientId() {
@@ -108,16 +101,8 @@ public class MatchingProperties {
             return productTopics().matchTradesTopic();
         }
 
-        public void setMatchTradesTopic(String matchTradesTopic) {
-            this.matchTradesTopic = required(matchTradesTopic, "match trades topic");
-        }
-
         public String getOrderBookDepthTopic() {
             return productTopics().orderBookDepthTopic();
-        }
-
-        public void setOrderBookDepthTopic(String orderBookDepthTopic) {
-            this.orderBookDepthTopic = required(orderBookDepthTopic, "order-book depth topic");
         }
 
         public int getMaxPollRecords() {

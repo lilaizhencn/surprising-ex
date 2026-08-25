@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
+import com.surprising.candlestick.provider.aggregation.CandleRollupAccumulator;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ class KafkaStreamsRuntimeHintsTest {
                 PublicTradeEvent.class,
                 CandleUpdatedEvent.class,
                 CandleAccumulator.class,
+                CandleRollupAccumulator.class,
                 CandleSnapshot.class}) {
             assertThat(RuntimeHintsPredicates.reflection().onType(type)
                     .withMemberCategory(MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS)

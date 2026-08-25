@@ -24,7 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Kafka Streams processor that turns keyed perpetual trades into candle snapshots.
+ * Kafka Streams processor that turns keyed product-line trades into one-minute candle snapshots.
  *
  * <p>Concurrency is controlled by Kafka partitioning: every record key must equal the normalized
  * symbol, so one symbol is processed by exactly one stream task at a time. RocksDB state stores
@@ -40,11 +40,12 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
     private final SymbolRegistryService symbolRegistryService;
     private final PublicTradeEventMapper tradeEventMapper;
     private final CandleHotCache hotCache;
-    private final List<CandlePeriod> periods;
+    private final String productKey;
 
     private ProcessorContext<String, CandleUpdatedEvent> context;
     private KeyValueStore<String, CandleAccumulator> candleStore;
     private KeyValueStore<String, CandleSnapshot> dirtyStore;
+    private KeyValueStore<String, Long> closedWatermarkStore;
     private KeyValueStore<String, Long> dedupeStore;
     private KeyValueStore<String, Long> sequenceStore;
 
@@ -57,9 +58,7 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         this.symbolRegistryService = symbolRegistryService;
         this.tradeEventMapper = tradeEventMapper;
         this.hotCache = hotCache;
-        this.periods = properties.getPeriods().stream()
-                .map(CandlePeriod::fromCode)
-                .toList();
+        this.productKey = properties.getKafka().getProductLine().topicSegment();
     }
 
     @Override
@@ -67,6 +66,7 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         this.context = context;
         this.candleStore = context.getStateStore(CandleStores.CANDLE_STORE);
         this.dirtyStore = context.getStateStore(CandleStores.DIRTY_STORE);
+        this.closedWatermarkStore = context.getStateStore(CandleStores.CLOSED_M1_WATERMARK_STORE);
         this.dedupeStore = context.getStateStore(CandleStores.DEDUPE_STORE);
         this.sequenceStore = context.getStateStore(CandleStores.SEQUENCE_STORE);
         context.schedule(properties.getFlush().getInterval(), PunctuationType.WALL_CLOCK_TIME, this::flushDirtyCandles);
@@ -106,27 +106,35 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         Integer partition = context.recordMetadata().map(metadata -> metadata.partition()).orElse(null);
         Long offset = context.recordMetadata().map(metadata -> metadata.offset()).orElse(null);
 
-        // One accepted trade updates every configured interval, e.g. 1m, 5m, 1h, 1d.
-        for (CandlePeriod period : periods) {
-            Instant openTime = period.floor(trade.tradeTime());
-            String candleKey = CandleKey.of(symbol, period, openTime).value();
-            CandleAccumulator accumulator = Optional.ofNullable(candleStore.get(candleKey))
-                    .orElseGet(() -> CandleAccumulator.create(symbol, period, openTime));
-
-            CandleMath.apply(accumulator, trade, now);
-            candleStore.put(candleKey, accumulator);
-
-            CandleSnapshot snapshot = accumulator.snapshot(now, partition, offset);
-            dirtyStore.put(candleKey, snapshot);
-            if (hotCache != null) {
-                hotCache.put(snapshot.toUpdatedEvent(now));
-            }
-            context.forward(new Record<>(symbol, snapshot.toUpdatedEvent(now), record.timestamp()));
+        CandlePeriod period = CandlePeriod.M1;
+        Instant openTime = period.floor(trade.tradeTime());
+        String candleKey = productKey + "|" + CandleKey.of(symbol, period, openTime).value();
+        Long closedThrough = closedWatermarkStore.get(sequenceKey(symbol));
+        if (closedThrough != null && period.closeTime(openTime).toEpochMilli() <= closedThrough) {
+            rememberTrade(symbol, trade);
+            return;
         }
+        CandleAccumulator accumulator = Optional.ofNullable(candleStore.get(candleKey))
+                .orElseGet(() -> CandleAccumulator.create(symbol, period, openTime));
 
+        CandleMath.apply(accumulator, trade, now);
+        candleStore.put(candleKey, accumulator);
+
+        CandleSnapshot snapshot = accumulator.snapshot(now, partition, offset);
+        snapshot.setStatus(CandleStatus.PARTIAL);
+        dirtyStore.put(candleKey, snapshot);
+        if (hotCache != null) {
+            hotCache.put(snapshot.toUpdatedEvent(now));
+        }
+        context.forward(new Record<>(symbol, snapshot.toUpdatedEvent(now), record.timestamp()));
+        rememberTrade(symbol, trade);
+    }
+
+    private void rememberTrade(String symbol, TradeEvent trade) {
         dedupeStore.put(dedupeKey(symbol, trade), trade.tradeTime().toEpochMilli());
         if (trade.sequence() >= 0) {
-            sequenceStore.put(symbol, Math.max(trade.sequence(), Optional.ofNullable(sequenceStore.get(symbol)).orElse(-1L)));
+            String key = sequenceKey(symbol);
+            sequenceStore.put(key, Math.max(trade.sequence(), Optional.ofNullable(sequenceStore.get(key)).orElse(-1L)));
         }
     }
 
@@ -144,12 +152,16 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         if (dedupeStore.get(dedupeKey(symbol, trade)) != null) {
             return true;
         }
-        Long lastSequence = sequenceStore.get(symbol);
+        Long lastSequence = sequenceStore.get(sequenceKey(symbol));
         return lastSequence != null && trade.sequence() <= lastSequence;
     }
 
     private String dedupeKey(String symbol, TradeEvent trade) {
-        return symbol + "|" + trade.idempotencyKey();
+        return productKey + "|" + symbol + "|" + trade.idempotencyKey();
+    }
+
+    private String sequenceKey(String symbol) {
+        return productKey + "|" + symbol;
     }
 
     private void flushDirtyCandles(long timestamp) {
@@ -188,7 +200,19 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
             return;
         }
         candleSink.upsertBatch(List.copyOf(batch));
-        for (String key : keys) {
+        Instant emittedAt = Instant.ofEpochMilli(context.currentSystemTimeMs());
+        for (int index = 0; index < keys.size(); index++) {
+            String key = keys.get(index);
+            CandleSnapshot snapshot = batch.get(index);
+            CandleUpdatedEvent event = snapshot.toUpdatedEvent(emittedAt);
+            String watermarkKey = sequenceKey(snapshot.getSymbol());
+            long closeTime = snapshot.getCloseTime().toEpochMilli();
+            closedWatermarkStore.put(watermarkKey,
+                    Math.max(closeTime, Optional.ofNullable(closedWatermarkStore.get(watermarkKey)).orElse(-1L)));
+            if (hotCache != null) {
+                hotCache.put(event);
+            }
+            context.forward(new Record<>(snapshot.getSymbol(), event, emittedAt.toEpochMilli()));
             dirtyStore.delete(key);
         }
         batch.clear();
@@ -204,6 +228,18 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
                 KeyValue<String, Long> item = iterator.next();
                 if (item.value != null && item.value < cutoff) {
                     dedupeStore.delete(item.key);
+                }
+                scanned++;
+            }
+        }
+        scanned = 0;
+        try (KeyValueIterator<String, CandleAccumulator> iterator = candleStore.all()) {
+            while (iterator.hasNext() && scanned < maxEntries) {
+                KeyValue<String, CandleAccumulator> item = iterator.next();
+                if (item.value != null && item.value.getCloseTime() != null
+                        && item.value.getCloseTime().toEpochMilli() < cutoff
+                        && dirtyStore.get(item.key) == null) {
+                    candleStore.delete(item.key);
                 }
                 scanned++;
             }

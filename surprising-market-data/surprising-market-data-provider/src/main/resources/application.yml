@@ -39,9 +39,6 @@ surprising:
     kafka:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      trade-topic: surprising.perp.match.trades.v1
-      candle-topic: surprising.perp.candle.events.v1
-      application-id: surprising-candlestick-v1
       application-id-override: ${SURPRISING_CANDLESTICK_KAFKA_APPLICATION_ID_OVERRIDE:}
     stream:
       threads: 2
@@ -76,11 +73,8 @@ surprising:
       kafka:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
-        group-id: surprising-matching-market-data-v1
         client-id: surprising-matching-market-data-${HOSTNAME:${random.uuid}}
         core-events-topic: ${CORE_EVENTS_TOPIC:}
-        match-trades-topic: surprising.perp.match.trades.v1
-        order-book-depth-topic: surprising.perp.orderbook.depth.v1
         max-poll-records: ${MATCHING_MAX_POLL_RECORDS:1024}
       market-data:
         enabled: true

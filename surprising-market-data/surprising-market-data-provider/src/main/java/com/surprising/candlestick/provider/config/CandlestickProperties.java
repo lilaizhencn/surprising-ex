@@ -69,9 +69,6 @@ public class CandlestickProperties {
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        private String tradeTopic = "surprising.perp.match.trades.v1";
-        private String candleTopic = "surprising.perp.candle.events.v1";
-        private String applicationId = "surprising-candlestick-v1";
         private String applicationIdOverride;
 
         public String getBootstrapServers() {
@@ -94,16 +91,8 @@ public class CandlestickProperties {
             return productTopics().matchTradesTopic();
         }
 
-        public void setTradeTopic(String tradeTopic) {
-            this.tradeTopic = tradeTopic;
-        }
-
         public String getCandleTopic() {
             return productTopics().candleEventsTopic();
-        }
-
-        public void setCandleTopic(String candleTopic) {
-            this.candleTopic = candleTopic;
         }
 
         public String getInstrumentSnapshotGroupId() {
@@ -115,10 +104,6 @@ public class CandlestickProperties {
                 return applicationIdOverride.trim();
             }
             return productTopics().consumerGroup("candlestick");
-        }
-
-        public void setApplicationId(String applicationId) {
-            this.applicationId = applicationId;
         }
 
         public String getApplicationIdOverride() {
