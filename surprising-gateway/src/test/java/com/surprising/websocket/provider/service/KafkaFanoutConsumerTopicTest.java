@@ -27,7 +27,6 @@ class KafkaFanoutConsumerTopicTest {
         assertThat(consumer.orderEventsTopic()).isEqualTo("surprising.inverse-delivery.order.events.v1");
         assertThat(consumer.triggerOrderEventsTopic())
                 .isEqualTo("surprising.inverse-delivery.trigger-order.events.v1");
-        assertThat(consumer.matchResultsTopic()).isEqualTo("surprising.inverse-delivery.match.results.v1");
         assertThat(consumer.matchTradesTopic()).isEqualTo("surprising.inverse-delivery.match.trades.v1");
         assertThat(consumer.positionEventsTopic())
                 .isEqualTo("surprising.inverse-delivery.account.position.events.v1");

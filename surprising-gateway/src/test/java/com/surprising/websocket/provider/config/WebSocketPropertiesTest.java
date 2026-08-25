@@ -43,8 +43,6 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising.linear-delivery.order.events.v1");
         assertThat(properties.getKafka().getTriggerOrderEventsTopic())
                 .isEqualTo("surprising.linear-delivery.trigger-order.events.v1");
-        assertThat(properties.getKafka().getMatchResultsTopic())
-                .isEqualTo("surprising.linear-delivery.match.results.v1");
         assertThat(properties.getKafka().getMatchTradesTopic())
                 .isEqualTo("surprising.linear-delivery.match.trades.v1");
         assertThat(properties.getKafka().getPositionEventsTopic())

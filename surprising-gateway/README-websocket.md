@@ -85,10 +85,10 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 | `index` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=INDEX_PRICE`) |
 | `mark` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=MARK_PRICE`) |
 | `funding` | 是 | `symbol` | `surprising.linear-perp.funding.rate.v1` |
-| `orders` | 否 | 可选 `symbol` | `surprising.linear-perp.order.events.v1` |
-| `triggerOrders` | 否 | 可选 `symbol` | `surprising.linear-perp.trigger-order.events.v1` |
-| `matches` | 否 | 可选 `symbol` | `surprising.linear-perp.match.results.v1` |
-| `positions` | 否 | 可选 `symbol` | `surprising.linear-perp.account.position.events.v1` |
+| `orders` | 否 | 可选 `symbol` | `surprising.linear-perp.core.events.v1` |
+| `triggerOrders` | 否 | 可选 `symbol` | `surprising.linear-perp.core.events.v1` |
+| `executionReports` | 否 | 可选 `symbol` | `surprising.linear-perp.core.events.v1` |
+| `positions` | 否 | 可选 `symbol` | `surprising.linear-perp.core.events.v1` |
 | `positionRisk` | 否 | 可选 `symbol` | `surprising.linear-perp.risk.position.events.v1` |
 | `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | `surprising.linear-perp.risk.account.events.v1` |
 
@@ -96,7 +96,7 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 
 `triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime` 和 `traceId`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
 
-撮合逐笔以轻量、允许丢失的 `PublicTradeEvent` 进入公共 `trades` 频道。Core 私有 `matches`、订单和成交回报直接从可靠的 Core export event 重建；公共 Kafka 背压或行情消息丢失不会影响用户通知与资金结算。Core event 的历史 PG 投影失败不会阻塞这条实时推送路径。
+撮合逐笔以轻量、允许丢失的 `PublicTradeEvent` 进入公共 `trades` 频道。私有订单、成交回报和持仓直接从可靠的 Core export event 重建；公共 Kafka 背压或行情消息丢失不会影响用户通知与资金结算。Core event 的历史 PG 投影失败不会阻塞这条实时推送路径。
 
 ## 盘口深度推送链路
 

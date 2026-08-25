@@ -69,18 +69,13 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 client / internal gateway
   -> POST /api/v1/trading/orders
   -> surprising-trading-provider
-  -> surprising.<product-segment>.order.user.commands.v1（key = PRODUCT_LINE:userId）
-  -> 用户分区单写入消费者
-  -> 用户分区 WAL/RocksDB 顺序追加订单事实
-  -> surprising.<product-segment>.order.state.events.v1（按用户键压缩的完整状态广播）
-  -> surprising.<product-segment>.order.user.command.results.v1
-  -> Aeron Core 订单命令（预占由 Core 原子裁决）
-  -> surprising.<product-segment>.order.commands.v1
-  -> Aeron Core / exchange-core
-  -> MatchResultEvent / MatchTradeEvent
-  -> 可靠资金链路：match.results.v1 + account.user.commands.v1
-  -> 内存公共行情链路：match.trades.v1 + orderbook.depth.v1
-  -> OrderStateProjectionWorker 异步投影 trading_orders 和审计表
+  -> Aeron Product Core
+  -> Runtime 原子裁决订单、预占、成交、手续费和持仓
+  -> exchange-core 唯一订单簿
+  -> replicated Core Fact outbox
+  -> Audit Exporter 发布 surprising.<product-segment>.core.events.v1
+  -> History Projector 异步投影 trading_orders 和审计表
+  -> 公共行情链路：match.trades.v1 + orderbook.depth.v1
 ```
 
 止盈止损走独立链路：
@@ -261,7 +256,7 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 - `surprising-trading-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command/export 元数据。
 - Core command、Core Export 和 WebSocket 事件会携带同一个 traceId，查询投影不参与在线裁决。
 - matching projection 必须沿用 Core Export 的 traceId，不能重新生成或把投影 trace 当裁决身份。
-- `surprising-account-provider` 会把 `MatchTradeEvent.traceId` 写入 `PositionUpdatedEvent`，这样私有 WebSocket 持仓推送也能和订单入口、撮合审计行关联。
+- Core Fact 中的订单、成交和用户状态变更沿用命令 traceId，私有 WebSocket 和历史投影都从同一事实恢复关联。
 - PostgreSQL 的 `trading_order_events`、`trading_match_results`、`trading_match_trades` 都保存 `trace_id`。生产日志建议同时输出 `traceId`、`orderId`、`commandId`、`tradeId`、symbol 和 Kafka topic/partition/offset。
 
 ## 保证金冻结
@@ -330,7 +325,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 - 每个已接受订单都会保存校验时使用的 `instrument_version`。
 - `reduceOnly` 平仓单绑定当前持仓版本，因此用户可以安全平掉旧版本持仓。
 - Core place command 携带 `instrumentVersion`；撮合结果和订单元数据保留 taker command 版本。
-- `MatchTradeEvent` 同时携带 `takerInstrumentVersion` 和 `makerInstrumentVersion`，账户结算时可以按双方各自合约公式处理。
+- Core execution fact 同时关联 taker 和 maker 的订单元数据及 instrument version，历史投影可按双方各自合约版本解释成交。
 - ProductExecutionCore 遇到同一 symbol 已有不同 `instrument_version` 的开放订单时拒绝新的 `PLACE` command，避免 exchange-core 在同一个 book 里撮合不兼容的 tick/multiplier 版本。
 - 运维上，tick size、quantity step、multiplier、contract type、settlement asset 这类核心字段变更前，应先暂停交易并清理开放订单。
 
@@ -357,8 +352,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 - `surprising.<product-segment>.order.commands.v1`：订单撮合命令，key = `symbol`。
 - `surprising.<product-segment>.order.events.v1`：订单入口事件，key = `symbol`。
-- `surprising.<product-segment>.match.results.v1`：可靠撮合结果，key = `symbol`；私有成交和开放订单投影只消费这条链路。
-- `surprising.<product-segment>.account.user.commands.v1`：matching outbox 产生的可靠用户资金命令；账户结算绝不消费公共逐笔流。
+- `surprising.<product-segment>.core.events.v1`：Product Core 导出的可靠审计事实；私有订单、成交、持仓推送和 PostgreSQL 历史投影消费这条链路。
 - `surprising.<product-segment>.order.user.commands.v1`：订单用户分区单写入命令，key = `<PRODUCT_LINE>:<userId>`；
   HTTP 下单/撤单、账户结果、撮合结果和算法状态更新都必须经过此 Topic。
 - `surprising.<product-segment>.order.user.command.results.v1`：订单用户命令终态，key = `<PRODUCT_LINE>:<userId>`；

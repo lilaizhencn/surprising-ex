@@ -43,7 +43,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - 开仓均价使用 `entryPriceTicks`。
 - 持仓保证金由 CoreUserState 维护；`account_position_margins.margin_units` 只是异步投影字段。
 - 已实现盈亏按 `realizedPnlUnits` 累计，单位是 instrument 的结算资产最小单位。U 本位线性合约使用 tick-step notional；币本位反向合约使用合约面值和入场/出场价格倒数公式。
-- 交易手续费使用 `MatchTradeEvent` 必须携带的 `takerFeeRatePpm` / `makerFeeRatePpm`。正费率扣用户余额，负费率给用户返佣；账户结算热路径不再回查 `trading_orders` 费率。
+- 交易手续费使用 Core 订单中固化的 `takerFeeRatePpm` / `makerFeeRatePpm`。正费率扣用户余额，负费率给用户返佣；账户结算热路径不回查 `trading_orders` 费率。
 - 强平费使用 `liquidation_orders.liquidation_fee_rate_ppm` 冻结费率。账户结算只扣实际可从用户保证金中收上的金额，并把已收金额发布给保险基金。
 - 当亏损超过 `availableUnits + lockedUnits` 时，Core 维护超额亏损状态，不让在线余额变成负数；
   `account_deficits` 只保留异步投影/对账记录。
@@ -296,7 +296,7 @@ mvn -pl :surprising-account-provider -am spring-boot:run
 - reduce-only 剪枝遇到 `Long.MIN_VALUE` 这类不可能的 signed quantity 必须 fail-fast，不能让容量数学回绕后基于负绝对值错误撤单或保留挂单。
 - 如果出现订单预占快照缺失或订单保证金核算不平，要检查 trading provider 是否漏写 `trading_orders.reserved_units` 快照、matching 是否丢失快照字段，以及 `account_trade_settlement_sides` 的消费/释放审计值。
 - 已实现亏损可以扣 `availableUnits` 和由持仓保证金支撑的 `lockedUnits`，但不能扣未成交订单冻结；该状态转移必须由 Core reducer 原子完成，数据库只接收投影。
-- 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。matching 会把订单接受时的不可变费率快照写入 `MatchTradeEvent`；account 结算直接使用命令快照，不查询 `trading_orders`，也不能按当前用户等级重算。
+- 手续费扣款复用已实现亏损的余额/deficit 安全路径。手续费返佣先清理 deficit，再增加 available balance。Product Core 使用订单接受时固化的费率完成结算并导出 Core Fact，不查询 `trading_orders`，也不能按当前用户等级重算。
 - 亏空和权益结算由 Core reducer 维护；异步数据库投影不能增加 `SELECT ... FOR UPDATE`、余额表 UPDATE 或更新后回查，否则会把数据库重新带回资金热路径。
 - Aeron Cluster 重启以 Core Snapshot 加 Snapshot 之后的 Cluster Log Replay 为准；数据库账本、审计和投影不能作为 Core 资金恢复源。
 - 强平费扣款故意不创建新的 `account_deficits`。保险基金只接收 account-provider 已经从用户 collateral 实际收上的金额，避免把未收上的惩罚费记成保险基金收入。

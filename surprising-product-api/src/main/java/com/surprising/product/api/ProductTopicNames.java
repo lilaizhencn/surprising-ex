@@ -30,10 +30,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("trigger-order.events");
     }
 
-    public String matchResultsTopic() {
-        return topic("match.results");
-    }
-
     public String matchTradesTopic() {
         return topic("match.trades");
     }

@@ -21,7 +21,6 @@ import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PerpBookTickerEvent;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PerpTradeEvent;
-import com.surprising.account.api.model.TradeSideSettlementCommand;
 import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent;
@@ -67,7 +66,6 @@ public final class AccountRuntimeHints implements RuntimeHintsRegistrar {
         registerRecord(hints, PositionMarginAdjustmentRequest.class);
         registerRecord(hints, PositionModeUpdateRequest.class);
         registerRecord(hints, PositionUpdatedEvent.class);
-        registerRecord(hints, TradeSideSettlementCommand.class);
         registerRecord(hints, DeliverySettlementEvent.class);
         registerRecord(hints, InstrumentEvent.class);
         registerRecord(hints, InstrumentLifecycleDrainEvent.class);

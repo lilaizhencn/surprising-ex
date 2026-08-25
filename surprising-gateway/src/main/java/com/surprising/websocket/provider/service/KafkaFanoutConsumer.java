@@ -12,11 +12,8 @@ import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
-import com.surprising.trading.api.model.MatchResultEvent;
-import com.surprising.trading.api.model.MatchTradeEvent;
 import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderEvent;
-import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
@@ -276,31 +273,6 @@ public class KafkaFanoutConsumer {
         }
     }
 
-    @KafkaListener(
-            topics = "#{__listener.matchResultsTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
-    public void onMatchResult(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), matchResultsTopic(), "match result");
-            MatchResultEvent event = objectMapper.readValue(record.value(), MatchResultEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match result");
-            registry.publish(topic(WsChannel.MATCHES, event.symbol(), event.userId()), event, event.eventTime());
-            publishExecutionReport(fromMatchResult(event));
-            for (MatchTradeEvent trade : event.trades()) {
-                registry.publish(topic(WsChannel.MATCHES, trade.symbol(), trade.takerUserId()),
-                        trade, trade.eventTime());
-                registry.publish(topic(WsChannel.MATCHES, trade.symbol(), trade.makerUserId()),
-                        trade, trade.eventTime());
-                publishExecutionReport(fromTakerTrade(trade));
-                publishExecutionReport(fromMakerTrade(trade));
-            }
-        } catch (Exception ex) {
-            log.error("Failed to fanout match result: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout match result", ex);
-        }
-    }
-
     public void onPublicTrade(ConsumerRecord<String, String> record) {
         try {
             requireCurrentProductTopic(record.topic(), matchTradesTopic(), "public trade");
@@ -414,10 +386,6 @@ public class KafkaFanoutConsumer {
         return properties.getKafka().getTriggerOrderEventsTopic();
     }
 
-    public String matchResultsTopic() {
-        return properties.getKafka().getMatchResultsTopic();
-    }
-
     public String matchTradesTopic() {
         return properties.getKafka().getMatchTradesTopic();
     }
@@ -504,100 +472,6 @@ public class KafkaFanoutConsumer {
                 event.reason(),
                 event.traceId(),
                 event.eventTime());
-    }
-
-    private ExecutionReportEvent fromMatchResult(MatchResultEvent event) {
-        return new ExecutionReportEvent(
-                "MATCH_RESULT",
-                event.userId(),
-                event.symbol(),
-                event.orderId(),
-                event.commandId(),
-                null,
-                null,
-                null,
-                event.instrumentVersion(),
-                null,
-                name(event.commandType()),
-                name(event.orderStatus()),
-                event.resultCode(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                event.filledQuantitySteps(),
-                null,
-                null,
-                event.traceId(),
-                event.eventTime());
-    }
-
-    private ExecutionReportEvent fromTakerTrade(MatchTradeEvent event) {
-        return new ExecutionReportEvent(
-                "TRADE",
-                event.takerUserId(),
-                event.symbol(),
-                event.takerOrderId(),
-                event.commandId(),
-                event.tradeId(),
-                event.makerOrderId(),
-                event.makerUserId(),
-                event.takerInstrumentVersion(),
-                null,
-                null,
-                null,
-                null,
-                "TAKER",
-                name(event.takerSide()),
-                name(event.takerMarginMode()),
-                name(event.takerPositionSide()),
-                event.priceTicks(),
-                event.quantitySteps(),
-                event.quantitySteps(),
-                event.takerOrderCompleted(),
-                null,
-                event.traceId(),
-                event.eventTime());
-    }
-
-    private ExecutionReportEvent fromMakerTrade(MatchTradeEvent event) {
-        return new ExecutionReportEvent(
-                "TRADE",
-                event.makerUserId(),
-                event.symbol(),
-                event.makerOrderId(),
-                event.commandId(),
-                event.tradeId(),
-                event.takerOrderId(),
-                event.takerUserId(),
-                event.makerInstrumentVersion(),
-                null,
-                null,
-                null,
-                null,
-                "MAKER",
-                name(opposite(event.takerSide())),
-                name(event.makerMarginMode()),
-                name(event.makerPositionSide()),
-                event.priceTicks(),
-                event.quantitySteps(),
-                event.quantitySteps(),
-                event.makerOrderCompleted(),
-                null,
-                event.traceId(),
-                event.eventTime());
-    }
-
-    private OrderSide opposite(OrderSide side) {
-        if (side == OrderSide.BUY) {
-            return OrderSide.SELL;
-        }
-        if (side == OrderSide.SELL) {
-            return OrderSide.BUY;
-        }
-        throw new IllegalArgumentException("unsupported order side: " + side);
     }
 
     private String name(Enum<?> value) {

@@ -130,10 +130,6 @@ public class WebSocketProperties {
             return productTopics().triggerOrderEventsTopic();
         }
 
-        public String getMatchResultsTopic() {
-            return productTopics().matchResultsTopic();
-        }
-
         public String getMatchTradesTopic() {
             return productTopics().matchTradesTopic();
         }

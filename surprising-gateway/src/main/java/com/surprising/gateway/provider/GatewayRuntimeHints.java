@@ -14,7 +14,6 @@ public final class GatewayRuntimeHints implements RuntimeHintsRegistrar {
                 "com.surprising.candlestick.api.model.TradeEvent",
                 "com.surprising.trading.api.model.OrderBookDepthEvent",
                 "com.surprising.trading.api.model.OrderEvent",
-                "com.surprising.trading.api.model.MatchResultEvent",
                 "com.surprising.trading.api.model.PublicTradeEvent",
                 "com.surprising.account.api.model.PositionUpdatedEvent",
                 "com.surprising.risk.api.model.RiskAccountUpdatedEvent",
