@@ -14,6 +14,8 @@ import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingStateSnapshotCodec;
 import com.surprising.aeron.service.state.CoreFeePolicySnapshotCodec;
 import com.surprising.aeron.service.state.CoreFeePolicyState;
+import com.surprising.aeron.service.state.CoreTransferSnapshotCodec;
+import com.surprising.aeron.service.state.TransferRuntime;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -35,13 +37,15 @@ final class SectionedCoreSnapshotParser {
         MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[4]);
         TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[5], manifest.productLine());
         Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[6]);
-        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
+        Map<Long, TransferRuntime> pendingTransfers = CoreTransferSnapshotCodec.decode(payloads[7]);
+        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[8]);
         SectionedCoreSnapshotValidation.validatePairing(
                 manifest, sourceSequences, exportState, matcherSnapshot, tradingState);
         matcherSnapshot.verifyCoreState(tradingState, manifest.appliedCommandCount());
-        long checksum = ByteBuffer.wrap(payloads[8]).order(ByteOrder.LITTLE_ENDIAN).getLong();
+        long checksum = ByteBuffer.wrap(payloads[9]).order(ByteOrder.LITTLE_ENDIAN).getLong();
         return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
-                commandResults, sourceSequences, exportState, matcherSnapshot, tradingState, feePolicies, retention,
+                commandResults, sourceSequences, exportState, matcherSnapshot, tradingState, feePolicies,
+                pendingTransfers, retention,
                 manifest, checksum);
     }
 
@@ -169,6 +173,7 @@ final class SectionedCoreSnapshotParser {
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, CoreFeePolicyState> feePolicies,
+            Map<Long, TransferRuntime> pendingTransfers,
             TerminalStateRetention retention,
             HeaderManifest manifest,
             long checksum) {
@@ -178,6 +183,7 @@ final class SectionedCoreSnapshotParser {
             CoreProbeState state = CoreProbeState.restore(productLine, appliedCommandCount, probeValue, commandResults,
                     sourceSequences, tradingState, exportState, retention, matcherSnapshot);
             state.restoreFeePolicies(feePolicies);
+            state.restorePendingTransfers(pendingTransfers);
             return state;
         }
 

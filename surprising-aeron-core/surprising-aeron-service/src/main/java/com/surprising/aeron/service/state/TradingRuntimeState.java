@@ -12,8 +12,11 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.List;
 
 public final class TradingRuntimeState {
+
+    public static final int MAX_PENDING_TRANSFERS = 131_072;
 
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     private long revision;
@@ -42,6 +45,7 @@ public final class TradingRuntimeState {
     private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new TreeMap<>();
     private final Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
     private final Map<Long, CoreFeePolicyState> feePolicies = new TreeMap<>();
+    private final Map<Long, TransferRuntime> pendingTransfers = new TreeMap<>();
     private long nextLiquidationId = 1;
     private CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
     private final LongHashSet changedUsers = new LongHashSet();
@@ -383,6 +387,62 @@ public final class TradingRuntimeState {
     Map<Long, CoreFeePolicyState> feePoliciesForRuntime() {
         assertOwner();
         return feePolicies;
+    }
+
+    public TransferRuntime pendingTransfer(long transferId) {
+        assertOwner();
+        return pendingTransfers.get(transferId);
+    }
+
+    public Map<Long, TransferRuntime> pendingTransfersSnapshot() {
+        assertOwner();
+        return Collections.unmodifiableMap(new TreeMap<>(pendingTransfers));
+    }
+
+    public List<TransferRuntime> pendingTransfers(int limit) {
+        assertOwner();
+        if (limit <= 0 || limit > com.surprising.aeron.protocol.CorePendingTransferCodec.MAX_RESULTS) {
+            throw new IllegalArgumentException("invalid pending transfer limit");
+        }
+        return pendingTransfers.values().stream().limit(limit).toList();
+    }
+
+    public void restorePendingTransfers(Map<Long, TransferRuntime> restored) {
+        assertOwner();
+        if (restored == null || restored.size() > MAX_PENDING_TRANSFERS
+                || restored.entrySet().stream().anyMatch(entry -> entry.getKey() == null
+                || entry.getValue() == null || entry.getKey() != entry.getValue().transferId())) {
+            throw new IllegalArgumentException("invalid pending transfer snapshot");
+        }
+        pendingTransfers.clear();
+        pendingTransfers.putAll(restored);
+    }
+
+    boolean hasPendingTransferCapacity() {
+        assertOwner();
+        return pendingTransfers.size() < MAX_PENDING_TRANSFERS;
+    }
+
+    void putPendingTransfer(TransferRuntime transfer) {
+        assertOwner();
+        if (!hasPendingTransferCapacity()) {
+            throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL",
+                    "pending transfer runtime capacity is full");
+        }
+        if (transfer == null || pendingTransfers.putIfAbsent(transfer.transferId(), transfer) != null) {
+            throw new IllegalArgumentException("pending transfer already exists");
+        }
+    }
+
+    boolean removePendingTransfer(long transferId, long userId) {
+        assertOwner();
+        TransferRuntime current = pendingTransfers.get(transferId);
+        if (current == null) return false;
+        if (current.userId() != userId) {
+            throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
+        }
+        pendingTransfers.remove(transferId);
+        return true;
     }
 
     public Map<Long, CoreFeePolicyState> feePoliciesSnapshot() {

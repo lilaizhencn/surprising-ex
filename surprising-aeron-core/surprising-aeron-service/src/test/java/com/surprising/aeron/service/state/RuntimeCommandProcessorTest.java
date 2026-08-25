@@ -10,11 +10,47 @@ import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
+import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 
 class RuntimeCommandProcessorTest {
+
+    @Test
+    void productTransferUsesOnlyBoundedRuntimeState() {
+        TradingCoreState before = new TradingCoreReducer().adjustBalance(
+                TradingCoreState.empty(ProductLine.SPOT), 7,
+                new BalanceAdjustmentCommand("USDT", 1_000));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
+                ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
+                "transfer-91", "product allocation");
+
+        assertThat(RuntimeCommandProcessor.transferOut(runtime, identities, 7L, transfer)).isTrue();
+        assertThat(runtime.pendingTransfer(91L)).isNotNull();
+        assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
+        assertThat(RuntimeCommandProcessor.transferOut(runtime, identities, 7L, transfer)).isFalse();
+
+        assertThat(RuntimeCommandProcessor.completeTransfer(runtime, 7L, 91L)).isTrue();
+        assertThat(runtime.pendingTransfer(91L)).isNull();
+        assertThat(RuntimeCommandProcessor.completeTransfer(runtime, 7L, 91L)).isFalse();
+    }
+
+    @Test
+    void transferInCreditsTargetRuntime() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(
+                TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities);
+        TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
+                ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
+                "transfer-91", "product allocation");
+
+        RuntimeCommandProcessor.transferIn(runtime, identities, 7L, transfer);
+
+        assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(250L);
+    }
 
     @Test
     void adjustsBalanceDirectlyInRuntimeAcrossEveryProductLine() {

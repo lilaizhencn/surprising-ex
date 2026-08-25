@@ -7,6 +7,7 @@ import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
 import com.surprising.aeron.service.state.TradingStateSnapshotCodec;
 import com.surprising.aeron.service.state.CoreFeePolicySnapshotCodec;
+import com.surprising.aeron.service.state.CoreTransferSnapshotCodec;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -45,6 +46,7 @@ final class SectionedCoreSnapshotWriter {
                 MatcherSnapshotCodec.encode(matcherSnapshot),
                 TradingStateSnapshotCodec.encode(snapshotState),
                 CoreFeePolicySnapshotCodec.encode(state.feePolicies()),
+                CoreTransferSnapshotCodec.encode(state.pendingTransfers()),
                 state.terminalRetention().encode()
         };
         long totalLength = SectionedCoreSnapshotCodec.ENVELOPE_LENGTH

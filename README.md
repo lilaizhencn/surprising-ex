@@ -24,7 +24,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P7 | fatal / readiness campaign：致命故障和就绪性验证，不是 P0-P5 行为改动。 |
 | P8 | three-node recovery certification：三节点恢复认证，不是 P0-P5 行为改动。 |
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
-| P10 | sharding / capacity：分片与容量工作；任何分片提案只能属于 P10，不能标为 P0-P5。 |
+| P10 | single-Core deterministic lanes / capacity：单物理 Product Core 内按 symbol/user/asset 建立无锁确定性 Lane 并完成容量认证；不包含物理 Core shard。实施规范见 [`surprising-aeron-core/P10-DETERMINISTIC-LANES.md`](surprising-aeron-core/P10-DETERMINISTIC-LANES.md)。 |
 
 当前实现状态：P0-P5 已完成；P6-P10 仍是后续验证和容量工作。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
@@ -68,6 +68,10 @@ exchange-core 产出的不可变 `MatcherResult`、event list 和 market data，
 - exchange-core 固定为 `MATCHING_ONLY` 且禁用其 margin trading；引擎内部 user/symbol/risk module 只是
   matcher 技术状态，不能成为业务余额、持仓、保证金、强平或对账来源。
 - PostgreSQL 只保存 Core Export 查询投影、审计、报表和对账数据；投影延迟或不可用不能改变交易裁决。
+- 产品线资金划转由 Gateway 使用稳定 `transferId` 同步提交 `TRANSFER_OUT -> TRANSFER_IN -> COMPLETE_TRANSFER`；
+  源 Core Runtime 在扣款后只保留有界 pending 记录，目标 Core 幂等入账，失败只做前向重试。Gateway 和
+  PostgreSQL 不保存在线 Saga 状态；`TRANSFER_IN` Core Fact 经 History Projector 异步写入
+  `account_product_transfers`，该表只用于历史查询。
 - Kafka 保留外部输入缓冲与 WebSocket、K 线、通知、数据仓库等外围事件分发，不恢复核心资金状态。
 - 公共逐笔统一使用产品线 `match.trades` / `PublicTradeEvent`：Gateway、标记价与 K 线不再消费
   `trade.events`。K 线逐笔链路只生成并落库关闭的 1 分钟数据，高周期由 `candle.events` 上的

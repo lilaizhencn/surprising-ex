@@ -174,6 +174,7 @@ public final class CoreProbeState implements AutoCloseable {
     private long probeValue;
     private long cachedBusinessStateHash;
     private long cachedFeePolicyHash;
+    private long cachedTransferHash;
     private long lastSourceSequenceDigest;
     private long nextAsyncQueryId = Long.MIN_VALUE;
     private RuntimeIdentityRegistry runtimePlaceOrderIdentities;
@@ -276,6 +277,7 @@ public final class CoreProbeState implements AutoCloseable {
         this.runtimePlaceOrderIdentities = runtime.identitiesForConstruction();
         this.runtimePlaceOrderState = runtime.runtimeStateForConstruction();
         this.cachedFeePolicyHash = 0;
+        this.cachedTransferHash = 0;
     }
 
     static CoreProbeState restore(
@@ -662,6 +664,21 @@ public final class CoreProbeState implements AutoCloseable {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
         }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.PENDING_TRANSFER_QUERY) {
+            try {
+                int limit = com.surprising.aeron.protocol.CorePendingTransferCodec.decodeQuery(
+                        message.payloadUnsafe());
+                var transfers = runtimePlaceOrderState.pendingTransfers(limit).stream()
+                        .map(value -> new com.surprising.aeron.protocol.CorePendingTransferView(
+                                value.userId(), value.command()))
+                        .toList();
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
+                        com.surprising.aeron.protocol.CorePendingTransferCodec.encode(transfers));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
         if (message.header().kind() != WireMessageKind.COMMAND) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
@@ -678,7 +695,7 @@ public final class CoreProbeState implements AutoCloseable {
                     duplicate.appliedCommandCount(), duplicate.requiredExportSequence(), duplicate.stateHash(),
                     duplicate.responseData());
         }
-        if (message.header().messageType() == CoreMessageType.ADJUST_BALANCE) {
+        if (isFundsIdempotencyCommand(message.header().messageType())) {
             CommandFingerprint retained = terminalRetention.fundsCommand(message.header().commandId());
             if (retained != null) {
                 if (!retained.equals(fingerprint)) {
@@ -812,7 +829,7 @@ public final class CoreProbeState implements AutoCloseable {
             lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, previousSourceSequence);
         }
         lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, message.header().sourceSequence());
-        if (message.header().messageType() == CoreMessageType.ADJUST_BALANCE
+        if (isFundsIdempotencyCommand(message.header().messageType())
                 && status == ResponseStatus.APPLIED) {
             terminalRetention.retainFundsCommand(message.header().commandId(), fingerprint);
         }
@@ -3078,6 +3095,16 @@ public final class CoreProbeState implements AutoCloseable {
         cachedBusinessStateHash = currentBusinessStateHash();
     }
 
+    Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers() {
+        return runtimePlaceOrderState.pendingTransfersSnapshot();
+    }
+
+    void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.TransferRuntime> transfers) {
+        runtimePlaceOrderState.restorePendingTransfers(transfers);
+        cachedTransferHash = computeTransferHash(transfers);
+        cachedBusinessStateHash = currentBusinessStateHash();
+    }
+
     CoreExportState exportState() {
         return exportState;
     }
@@ -3104,6 +3131,25 @@ public final class CoreProbeState implements AutoCloseable {
                 commandChangedUserIds = List.of(message.header().userId());
                 RuntimeCommandProcessor.adjustBalance(runtimePlaceOrderState, runtimePlaceOrderIdentities,
                         message.header().userId(), TradingCommandCodec.decodeBalanceAdjustment(message.payloadUnsafe()));
+                refreshSnapshotProjection();
+            }
+            case TRANSFER_OUT -> {
+                commandChangedUserIds = List.of(message.header().userId());
+                RuntimeCommandProcessor.transferOut(runtimePlaceOrderState, runtimePlaceOrderIdentities,
+                        message.header().userId(), TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe()));
+                cachedTransferHash = computeTransferHash(runtimePlaceOrderState.pendingTransfersSnapshot());
+                refreshSnapshotProjection();
+            }
+            case TRANSFER_IN -> {
+                commandChangedUserIds = List.of(message.header().userId());
+                RuntimeCommandProcessor.transferIn(runtimePlaceOrderState, runtimePlaceOrderIdentities,
+                        message.header().userId(), TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe()));
+                refreshSnapshotProjection();
+            }
+            case COMPLETE_TRANSFER -> {
+                RuntimeCommandProcessor.completeTransfer(runtimePlaceOrderState, message.header().userId(),
+                        TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId());
+                cachedTransferHash = computeTransferHash(runtimePlaceOrderState.pendingTransfersSnapshot());
                 refreshSnapshotProjection();
             }
             case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER,
@@ -3871,6 +3917,8 @@ public final class CoreProbeState implements AutoCloseable {
                 ? StateMapSupport.changedKeys(before.users(), after.users())
                 : new java.util.LinkedHashSet<>(delta.userIds());
         boolean externalAdjustment = command.header().messageType() == CoreMessageType.ADJUST_BALANCE
+                || command.header().messageType() == CoreMessageType.TRANSFER_OUT
+                || command.header().messageType() == CoreMessageType.TRANSFER_IN
                 || command.header().messageType() == CoreMessageType.ADJUST_INSURANCE_FUND;
         com.surprising.aeron.service.state.FundsDelta fundsDelta =
                 com.surprising.aeron.service.state.FundsDelta.between(
@@ -4240,7 +4288,33 @@ public final class CoreProbeState implements AutoCloseable {
 
     private long currentBusinessStateHash() {
         long base = rollingBusinessStateHash.value();
-        return cachedFeePolicyHash == 0 ? base : mix(base, cachedFeePolicyHash);
+        if (cachedFeePolicyHash != 0) base = mix(base, cachedFeePolicyHash);
+        return cachedTransferHash == 0 ? base : mix(base, cachedTransferHash);
+    }
+
+    private static long computeTransferHash(
+            Map<Long, com.surprising.aeron.service.state.TransferRuntime> transfers) {
+        if (transfers.isEmpty()) return 0;
+        long digest = HASH_OFFSET_BASIS;
+        for (var transfer : transfers.values()) {
+            var command = transfer.command();
+            digest = mix(digest, transfer.userId());
+            digest = mix(digest, command.transferId());
+            digest = mix(digest, command.sourceProductLine().ordinal());
+            digest = mix(digest, command.targetProductLine().ordinal());
+            digest = mixText(digest, command.sourceAccountType());
+            digest = mixText(digest, command.targetAccountType());
+            digest = mixText(digest, command.asset());
+            digest = mix(digest, command.amountUnits());
+            digest = mixText(digest, command.referenceId());
+            digest = mixText(digest, command.reason());
+        }
+        return digest;
+    }
+
+    private static boolean isFundsIdempotencyCommand(CoreMessageType type) {
+        return type == CoreMessageType.ADJUST_BALANCE || type == CoreMessageType.TRANSFER_OUT
+                || type == CoreMessageType.TRANSFER_IN || type == CoreMessageType.COMPLETE_TRANSFER;
     }
 
     private static long computeFeePolicyHash(

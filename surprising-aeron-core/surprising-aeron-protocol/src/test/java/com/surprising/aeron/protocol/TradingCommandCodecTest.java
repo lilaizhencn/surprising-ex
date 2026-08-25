@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 
 class TradingCommandCodecTest {
@@ -17,6 +18,27 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodePlaceOrder(command));
 
         assertThat(restored).isEqualTo(command);
+    }
+
+    @Test
+    void roundTripsProductTransferCommands() {
+        TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
+                ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
+                "transfer-91", "product allocation");
+
+        assertThat(TradingCommandCodec.decodeTransferFunds(
+                TradingCommandCodec.encodeTransferFunds(transfer))).isEqualTo(transfer);
+        assertThat(TradingCommandCodec.decodeCompleteTransfer(
+                TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(91L))))
+                .isEqualTo(new CompleteTransferCommand(91L));
+        CorePendingTransferView pending = new CorePendingTransferView(7L, transfer);
+        assertThat(CorePendingTransferCodec.decode(CorePendingTransferCodec.encode(java.util.List.of(pending))))
+                .containsExactly(pending);
+        assertThatThrownBy(() -> new TransferFundsCommand(92L, ProductLine.SPOT,
+                ProductLine.LINEAR_PERPETUAL, "USDT_PERPETUAL", "FUNDING", "USDT", 250L,
+                "transfer-92", "invalid route"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not match product line");
     }
 
     @Test

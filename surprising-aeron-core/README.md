@@ -38,7 +38,13 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 ## 实现状态与版本切换说明
 
 P0-P5 已完成。当前写格式为 command/envelope schema v3、export event marker v8、trading snapshot v23 和
-sectioned snapshot v12；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
+sectioned snapshot v13；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
+
+P10 的目标不是物理 Core shard，而是在同一个三节点 Product Core 内建立按 symbol 的 Matcher Lane、按 userId 的
+Account Lane 和按 asset 的 Treasury Lane；全局 Core sequence、Core Fact、snapshot 和恢复仍由一个确定性
+Sequencer 协调。该方案当前仅完成设计、尚未实施；完整所有权、无锁队列、资金提交、快照一致性、恢复门禁、
+代码修改清单和验收矩阵见 [P10 单物理 Product Core 确定性 Lane 实施规范](P10-DETERMINISTIC-LANES.md)。在该文档
+完成定义全部通过前，运行时仍保持 `routeVersion=1`、单 Runtime owner 和全局 one-in-flight matcher。
 
 ## 协议约束
 
@@ -132,6 +138,8 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 - `TradingCoreRuntime` 持有 owner-thread Runtime 与 identity registry；生产命令通过 Runtime processors 原地裁决，再按 changed-key
   增量生成 immutable Snapshot State。全量 materialization 只用于快照和恢复，不在普通命令或查询上遍历全局用户、余额、预留和持仓。
 - `USER_STATE`、`ORDER_STATE`、client-order、活动订单、Treasury、风险、ADL、清算工作和生命周期进度查询都读取 Runtime 或其 ID 索引；
+- 产品线划转的扣款、入账和完成都在 owner thread 内执行纯内存命令；源 Runtime 使用有界 pending 索引支持前向恢复，
+  不执行数据库、Kafka、HTTP、锁等待或 Future 等待。
   无分页协议设定固定实体/扫描上限，超限返回 `QUERY_RESPONSE_TOO_LARGE`。除异步 book capture 外，查询只占用一次
   有界 owner-thread CPU 片段，不做全局 materialization，也不会等待数据库、Kafka、Valkey 或 matcher callback；因此慢查询或超大结果
   不能把交易下单拖入外部 I/O 等待。
@@ -157,7 +165,7 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 - 每个 command 产生不可变、按 `(asset, ownerKind, ownerId, subledger)` 排序的 `FundsDelta` 和 Core Fact；before/after state hash、
   funds hash、Core/book prefix 和 Aeron position 必须共同标识同一裁决。Audit Exporter 从 replicated outbox 发布 Kafka history，
   History Projector 再幂等写入 PostgreSQL；投影结果不是 current state。
-- 当前写格式为 command/envelope v3、export event marker v8、trading snapshot v23、sectioned snapshot v12。
+- 当前写格式为 command/envelope v3、export event marker v8、trading snapshot v23、sectioned snapshot v13。
   decoder、snapshot loader 和 startup 对旧主版本 fresh fail-old：旧版本一律拒绝并 fail closed，只能从 fresh compatible
   Product Core state 启动，不保留旧 codec reader、迁移读取路径或隐式降级。
 
@@ -194,7 +202,7 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
 - `Trading snapshot v23` 是唯一外层交易快照写格式，配对保存 Product Core 状态和 exchange-core 的
   `MATCHING_ENGINE_ROUTER/0`、`RISK_ENGINE/0`；它不把可执行订单簿复制成业务状态，并包含版本化 Risk Scan Control。
-  `sectioned snapshot v12` 只按相同 Core/book prefix 拆分物理载荷；三个 Member 必须运行完全相同的 fork、配置和 schema。
+  `sectioned snapshot v13` 只按相同 Core/book prefix 拆分物理载荷；三个 Member 必须运行完全相同的 fork、配置和 schema。
 - capture 在 `SymbolMatchingLanes.barrier` 内等待全部 lane 和 callback；pending matching 存在时拒绝发布。
 - Aeron fragment 在复制前执行 64 MiB 外层上限；matcher envelope 为 48 MiB、单个原生 module 为 32 MiB，
   超限时 fail closed。修改这些上限必须同步默认 heap 并完成目标活动订单规模的快照容量测试。
@@ -203,7 +211,7 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   registry、完整 engine/book hash，再以 O(活动订单数) 一次报告逐字段核对 OPEN 订单；全部通过后才替换内存状态。
 - snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；不允许 clean-start 降级、订单回放、
   隐藏 FIFO、matcher journal 或跨 Member 部分恢复。
-- 只接受 v23/v12 的 fresh compatible state；command schema v3、export marker v8、trading snapshot v23、sectioned snapshot v12 之前的输入在 decode/startup 立即
+- 只接受 v23/v13 的 fresh compatible state；command schema v3、export marker v8、trading snapshot v23、sectioned snapshot v13 之前的输入在 decode/startup 立即
   拒绝并 fail closed。没有旧 reader、迁移读取路径或使用 PostgreSQL 投影、clean-start、逐单回放修复不一致状态的例外。
 - `UPDATE_RISK_SCAN_CONTROL` 使用乐观版本检查，`RISK_SCAN_CONTROL_QUERY` 返回当前版本、启停、续跑间隔、
   批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v23` 恢复。

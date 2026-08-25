@@ -39,6 +39,9 @@ public enum CoreMessageType {
     AMEND_ORDER_BATCH(46, WireMessageKind.COMMAND),
     UPDATE_RISK_SCAN_CONTROL(47, WireMessageKind.COMMAND),
     UPSERT_FEE_POLICY(48, WireMessageKind.COMMAND),
+    TRANSFER_OUT(49, WireMessageKind.COMMAND),
+    TRANSFER_IN(50, WireMessageKind.COMMAND),
+    COMPLETE_TRANSFER(51, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),
@@ -65,6 +68,7 @@ public enum CoreMessageType {
     COMMAND_RESULT_QUERY(123, WireMessageKind.QUERY),
     RISK_SCAN_CONTROL_QUERY(124, WireMessageKind.QUERY),
     ORDER_BOOK_BOOTSTRAP_QUERY(125, WireMessageKind.QUERY),
+    PENDING_TRANSFER_QUERY(126, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -86,6 +90,7 @@ public enum CoreMessageType {
     COMMAND_RESULT_RESULT(218, WireMessageKind.RESPONSE),
     RISK_SCAN_CONTROL_RESULT(219, WireMessageKind.RESPONSE),
     ORDER_BOOK_BOOTSTRAP_RESULT(220, WireMessageKind.RESPONSE),
+    PENDING_TRANSFER_RESULT(221, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

@@ -22,6 +22,8 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 - Repository 只负责账本、审计和投影表的查询或幂等追加，不负责余额、冻结资金和持仓裁决。
 - `AccountService` 的余额、产品余额和持仓接口通过 `AccountAeronGateway` 读取 Aeron Core 用户状态；`AccountQueryService` 只查询账本、划转和管理员调整记录。
 - `AccountCommandGateway` 将余额调整、仓位模式和逐仓保证金调整编码为 Aeron Core Command；成功后再读取 Core 状态返回结果。
+- 跨产品线划转使用专用 `TRANSFER_OUT`、`TRANSFER_IN`、`COMPLETE_TRANSFER` 命令。源产品线 Runtime 扣款并保存
+  pending，目标产品线 Runtime 幂等入账，完成命令仅清理源 pending；重试不查询或锁定 PostgreSQL。
 - 交易命令由 trading provider 直接提交 Aeron Core，Core 负责订单预占、释放、成交和用户资金状态变更；账户 Provider 不维护第二套可变余额状态。
 - 账户启动时通过 Instrument 内部聚合 RPC 加载本产品线完整 JVM 快照，并消费
   `surprising.instrument.events.v1` 增量更新；账户运行时只从本地快照取得合约正文、结算资产与精度。
@@ -136,6 +138,7 @@ admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Use
 - `account_deficits`（历史/投影表，非在线风险裁决来源）
 - `account_ledger_entries`
 - `account_product_ledger_entries`
+- `account_product_transfers`（仅保存 `TRANSFER_IN` Core Fact 投影出的已完成历史，不保存在线划转状态）
 - `account_admin_balance_adjustments`
 - `account_position_margins`（Core 持仓保证金的异步投影）
 - `account_positions`（Core 持仓状态的异步投影）

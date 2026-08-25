@@ -3,11 +3,8 @@ package com.surprising.account.provider.repository;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdminCursorPage;
 import com.surprising.account.api.model.ProductTransferRecordResponse;
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -76,44 +73,6 @@ public class ProductTransferRepository {
                 ProductTransferRecordResponse::transferId);
     }
 
-    public int insert(long transferId,
-                      long userId,
-                      AccountType sourceAccountType,
-                      AccountType targetAccountType,
-                      String asset,
-                      long amountUnits,
-                      String referenceId,
-                      String reason,
-                      Instant now) {
-        return jdbcTemplate.update("""
-                INSERT INTO account_product_transfers (
-                    transfer_id, user_id, source_account_type, target_account_type, asset,
-                    amount_units, reference_id, status, reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?)
-                ON CONFLICT (user_id, reference_id) DO NOTHING
-                """, transferId, userId, sourceAccountType.name(), targetAccountType.name(), asset,
-                amountUnits, referenceId, reason, Timestamp.from(now), Timestamp.from(now));
-    }
-
-    public Optional<TransferRecord> findByReference(long userId, String referenceId) {
-        return jdbcTemplate.query("""
-                SELECT transfer_id, source_account_type, target_account_type, asset,
-                       amount_units, status, reason, created_at
-                  FROM account_product_transfers
-                 WHERE user_id = ?
-                   AND reference_id = ?
-                """, (rs, rowNum) -> new TransferRecord(
-                        rs.getLong("transfer_id"),
-                        AccountType.valueOf(rs.getString("source_account_type")),
-                        AccountType.valueOf(rs.getString("target_account_type")),
-                        rs.getString("asset"),
-                        rs.getLong("amount_units"),
-                        rs.getString("status"),
-                        rs.getString("reason"),
-                        rs.getTimestamp("created_at").toInstant()), userId, referenceId)
-                .stream().findFirst();
-    }
-
     private static AdminCursorPage.SortSpec createdAtSort(String sort, String idColumn) {
         AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", idColumn, true);
@@ -124,16 +83,5 @@ public class ProductTransferRepository {
 
     private static String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
-    }
-
-    public record TransferRecord(
-            long transferId,
-            AccountType sourceAccountType,
-            AccountType targetAccountType,
-            String asset,
-            long amountUnits,
-            String status,
-            String reason,
-            Instant createdAt) {
     }
 }

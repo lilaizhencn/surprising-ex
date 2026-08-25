@@ -15,6 +15,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.CoreBalanceView;
@@ -44,7 +45,8 @@ class JdbcCoreEventProjectorTest {
                     "/db/migration/V006__enrich_core_liquidation_projection.sql",
                     "/db/migration/V007__add_projection_watermark_and_websocket_audit.sql",
                     "/db/migration/V008__drop_websocket_audit_projection.sql",
-                    "/db/migration/V009__add_core_fact_funds.sql")) {
+                    "/db/migration/V009__add_core_fact_funds.sql",
+                    "/db/migration/V010__add_product_transfer_history.sql")) {
                 try (var stream = getClass().getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) {
@@ -68,6 +70,41 @@ class JdbcCoreEventProjectorTest {
                 .executeQuery("SELECT COUNT(*) FROM core_event_projection")) {
             result.next();
             assertThat(result.getInt(1)).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void transferInFactCreatesOnlyCompletedPostgresqlHistory() throws Exception {
+        JdbcDataSource dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:mem:transfer_history;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+        migrate(dataSource);
+        UUID commandId = UUID.randomUUID();
+        var transfer = new TransferFundsCommand(7001L, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                "FUNDING", "USDT_PERPETUAL", "USDT", 1_250L, "transfer-007", "history test");
+        var event = withContinuity(new CoreExportEvent(1, 1, 9, commandId, CoreMessageType.TRANSFER_IN,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 42,
+                TradingCommandCodec.encodeTransferFunds(transfer), java.util.List.of(),
+                java.util.List.of(), java.util.List.of()), 0);
+        var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.TRANSFER_IN, commandId,
+                ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 1, 1, 42,
+                1_700_000_000_000L, 1).exportEvent(1), CoreExportCodec.encodeEvent(event));
+
+        assertThat(projector(dataSource).project(ProductLine.LINEAR_PERPETUAL, message)).isTrue();
+        assertThat(projector(dataSource).project(ProductLine.LINEAR_PERPETUAL, message)).isFalse();
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement();
+             var result = statement.executeQuery("SELECT transfer_id, user_id, source_account_type, "
+                     + "target_account_type, asset, amount_units, reference_id, status "
+                     + "FROM account_product_transfers")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getLong(1)).isEqualTo(7001L);
+            assertThat(result.getLong(2)).isEqualTo(42L);
+            assertThat(result.getString(3)).isEqualTo("FUNDING");
+            assertThat(result.getString(4)).isEqualTo("USDT_PERPETUAL");
+            assertThat(result.getString(5)).isEqualTo("USDT");
+            assertThat(result.getLong(6)).isEqualTo(1_250L);
+            assertThat(result.getString(7)).isEqualTo("transfer-007");
+            assertThat(result.getString(8)).isEqualTo("COMPLETED");
+            assertThat(result.next()).isFalse();
         }
     }
 
@@ -220,7 +257,8 @@ class JdbcCoreEventProjectorTest {
                     "/db/migration/V006__enrich_core_liquidation_projection.sql",
                     "/db/migration/V007__add_projection_watermark_and_websocket_audit.sql",
                     "/db/migration/V008__drop_websocket_audit_projection.sql",
-                    "/db/migration/V009__add_core_fact_funds.sql")) {
+                    "/db/migration/V009__add_core_fact_funds.sql",
+                    "/db/migration/V010__add_product_transfer_history.sql")) {
                 try (var stream = JdbcCoreEventProjectorTest.class.getResourceAsStream(resource)) {
                     String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
                     for (String sql : migration.split(";")) if (!sql.isBlank()) statement.execute(sql);

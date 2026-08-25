@@ -56,6 +56,64 @@ public final class RuntimeCommandProcessor {
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
     }
 
+    public static boolean transferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                      long userId, com.surprising.aeron.protocol.TransferFundsCommand command) {
+        if (runtime == null || identities == null || command == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid runtime transfer out");
+        }
+        runtime.assertOwner();
+        if (runtime.productLine() != command.sourceProductLine()) {
+            throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer source product line mismatch");
+        }
+        TransferRuntime transfer = new TransferRuntime(userId, command);
+        TransferRuntime existing = runtime.pendingTransfer(command.transferId());
+        if (existing != null) {
+            if (!existing.equals(transfer)) {
+                throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer identity contains different data");
+            }
+            return false;
+        }
+        if (!runtime.hasPendingTransferCapacity()) {
+            throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL",
+                    "pending transfer runtime capacity is full");
+        }
+        int assetId = identities.assetId(command.asset());
+        BalanceRuntime balance = runtime.balance(userId, assetId);
+        if (balance == null || balance.availableUnits() < command.amountUnits()) {
+            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
+                    "transfer available balance is insufficient");
+        }
+        balance.replace(Math.subtractExact(balance.availableUnits(), command.amountUnits()), balance.lockedUnits());
+        runtime.markBalanceChanged(userId, assetId);
+        runtime.putPendingTransfer(transfer);
+        runtime.advanceUserRevision(userId);
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        return true;
+    }
+
+    public static void transferIn(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                  long userId, com.surprising.aeron.protocol.TransferFundsCommand command) {
+        if (runtime == null || identities == null || command == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid runtime transfer in");
+        }
+        runtime.assertOwner();
+        if (runtime.productLine() != command.targetProductLine()) {
+            throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer target product line mismatch");
+        }
+        adjustBalance(runtime, identities, userId,
+                new com.surprising.aeron.protocol.BalanceAdjustmentCommand(command.asset(), command.amountUnits()));
+    }
+
+    public static boolean completeTransfer(TradingRuntimeState runtime, long userId, long transferId) {
+        if (runtime == null || userId <= 0 || transferId <= 0) {
+            throw new IllegalArgumentException("invalid runtime transfer completion");
+        }
+        runtime.assertOwner();
+        if (!runtime.removePendingTransfer(transferId, userId)) return false;
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        return true;
+    }
+
     public static void updateRiskScanControl(TradingRuntimeState runtime, UpdateRiskScanControlCommand command,
                                              long updatedAtEpochMillis) {
         if (runtime == null || command == null) {

@@ -226,8 +226,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         java.util.Map<Long, com.surprising.aeron.service.state.CoreFeePolicyState> feePolicies =
                 runtimeState.feePoliciesSnapshot();
+        java.util.Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers =
+                runtimeState.pendingTransfersSnapshot();
         restoreIndexes(restored);
         runtimeState.restoreFeePolicies(feePolicies);
+        runtimeState.restorePendingTransfers(pendingTransfers);
     }
 
     private void restoreIndexes(TradingCoreState restored) {

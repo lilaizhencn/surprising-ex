@@ -11,6 +11,7 @@ public final class TradingCommandCodec {
     private static final int PLACE_ORDER_VERSION = 4;
     private static final int INSTRUMENT_RISK_V2_MARKER = 0x49525632;
     private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
+    private static final int TRANSFER_FUNDS_VERSION = 1;
 
     private static final int MAX_TEXT_BYTES = 64;
 
@@ -34,6 +35,63 @@ public final class TradingCommandCodec {
         long delta = buffer.getLong();
         requireConsumed(buffer);
         return new BalanceAdjustmentCommand(asset, delta);
+    }
+
+    public static byte[] encodeTransferFunds(TransferFundsCommand command) {
+        byte[] sourceAccount = transferText(command.sourceAccountType(), 32, false);
+        byte[] targetAccount = transferText(command.targetAccountType(), 32, false);
+        byte[] asset = transferText(command.asset(), 20, false);
+        byte[] reference = transferText(command.referenceId(), 128, false);
+        byte[] reason = transferText(command.reason(), 256, true);
+        return ByteBuffer.allocate(Integer.BYTES * 3 + Long.BYTES * 2 + Short.BYTES * 5
+                        + sourceAccount.length + targetAccount.length + asset.length + reference.length + reason.length)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(TRANSFER_FUNDS_VERSION)
+                .putLong(command.transferId())
+                .putInt(ProductLineWireCode.encode(command.sourceProductLine()))
+                .putInt(ProductLineWireCode.encode(command.targetProductLine()))
+                .putShort((short) sourceAccount.length).put(sourceAccount)
+                .putShort((short) targetAccount.length).put(targetAccount)
+                .putShort((short) asset.length).put(asset)
+                .putLong(command.amountUnits())
+                .putShort((short) reference.length).put(reference)
+                .putShort((short) reason.length).put(reason)
+                .array();
+    }
+
+    public static TransferFundsCommand decodeTransferFunds(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES + Integer.BYTES * 2);
+        int version = buffer.getInt();
+        if (version != TRANSFER_FUNDS_VERSION) {
+            throw new ProtocolException("unsupported transfer funds version: " + version);
+        }
+        long transferId = buffer.getLong();
+        var source = ProductLineWireCode.decode(buffer.getInt());
+        var target = ProductLineWireCode.decode(buffer.getInt());
+        String sourceAccount = readTransferText(buffer, 32, false);
+        String targetAccount = readTransferText(buffer, 32, false);
+        String asset = readTransferText(buffer, 20, false);
+        requireRemaining(buffer, Long.BYTES);
+        long amount = buffer.getLong();
+        String reference = readTransferText(buffer, 128, false);
+        String reason = readTransferText(buffer, 256, true);
+        requireConsumed(buffer);
+        return new TransferFundsCommand(transferId, source, target, sourceAccount, targetAccount,
+                asset, amount, reference, reason);
+    }
+
+    public static byte[] encodeCompleteTransfer(CompleteTransferCommand command) {
+        return ByteBuffer.allocate(Long.BYTES).order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(command.transferId()).array();
+    }
+
+    public static CompleteTransferCommand decodeCompleteTransfer(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Long.BYTES);
+        CompleteTransferCommand command = new CompleteTransferCommand(buffer.getLong());
+        requireConsumed(buffer);
+        return command;
     }
 
     public static byte[] encodeAdjustInsuranceFund(AdjustInsuranceFundCommand command) {
@@ -662,6 +720,27 @@ public final class TradingCommandCodec {
         int length = Short.toUnsignedInt(buffer.getShort());
         if (length > MAX_TEXT_BYTES) {
             throw new ProtocolException("invalid optional text length: " + length);
+        }
+        requireRemaining(buffer, length);
+        byte[] encoded = new byte[length];
+        buffer.get(encoded);
+        return new String(encoded, StandardCharsets.UTF_8);
+    }
+
+    private static byte[] transferText(String value, int maximumLength, boolean optional) {
+        if (value == null) throw new IllegalArgumentException("transfer text is required");
+        byte[] encoded = value.getBytes(StandardCharsets.UTF_8);
+        if ((!optional && encoded.length == 0) || encoded.length > maximumLength) {
+            throw new IllegalArgumentException("transfer text length is invalid");
+        }
+        return encoded;
+    }
+
+    private static String readTransferText(ByteBuffer buffer, int maximumLength, boolean optional) {
+        requireRemaining(buffer, Short.BYTES);
+        int length = Short.toUnsignedInt(buffer.getShort());
+        if ((!optional && length == 0) || length > maximumLength) {
+            throw new ProtocolException("invalid transfer text length: " + length);
         }
         requireRemaining(buffer, length);
         byte[] encoded = new byte[length];

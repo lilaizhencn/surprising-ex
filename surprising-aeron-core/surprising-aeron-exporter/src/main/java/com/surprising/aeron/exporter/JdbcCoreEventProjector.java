@@ -5,11 +5,14 @@ import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.product.api.ProductLine;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Objects;
 import javax.sql.DataSource;
@@ -29,6 +32,12 @@ public final class JdbcCoreEventProjector {
             INSERT INTO core_funds_posting_projection
                 (product_line, export_sequence, posting_index, asset, owner_kind, owner_id, subledger, units)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+    private static final String INSERT_TRANSFER_HISTORY = """
+            INSERT INTO account_product_transfers
+                (transfer_id, user_id, source_account_type, target_account_type, asset,
+                 amount_units, reference_id, status, reason, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?)
             """;
     private static final String INSERT_USER_FACT = """
             INSERT INTO core_user_fact_projection
@@ -348,6 +357,7 @@ public final class JdbcCoreEventProjector {
         }
         insertFundingFacts(connection, productLine, message, event);
         insertFundsPostings(connection, productLine, event);
+        insertTransferHistory(connection, message, event);
         upsertLiquidations(connection, productLine, message, event);
         upsertTreasury(connection, productLine, message, event);
     }
@@ -370,6 +380,31 @@ public final class JdbcCoreEventProjector {
                 statement.addBatch();
             }
             statement.executeBatch();
+        }
+    }
+
+    private static void insertTransferHistory(
+            Connection connection,
+            CoreMessage message,
+            CoreExportEvent event) throws SQLException {
+        if (event.commandType() != CoreMessageType.TRANSFER_IN
+                || event.commandStatus() != ResponseStatus.APPLIED) {
+            return;
+        }
+        var command = TradingCommandCodec.decodeTransferFunds(event.commandPayload());
+        Timestamp occurredAt = Timestamp.from(Instant.ofEpochMilli(message.header().submittedAtEpochMillis()));
+        try (PreparedStatement statement = connection.prepareStatement(INSERT_TRANSFER_HISTORY)) {
+            statement.setLong(1, command.transferId());
+            statement.setLong(2, event.userId());
+            statement.setString(3, command.sourceAccountType());
+            statement.setString(4, command.targetAccountType());
+            statement.setString(5, command.asset());
+            statement.setLong(6, command.amountUnits());
+            statement.setString(7, command.referenceId());
+            statement.setString(8, command.reason());
+            statement.setTimestamp(9, occurredAt);
+            statement.setTimestamp(10, occurredAt);
+            statement.executeUpdate();
         }
     }
 

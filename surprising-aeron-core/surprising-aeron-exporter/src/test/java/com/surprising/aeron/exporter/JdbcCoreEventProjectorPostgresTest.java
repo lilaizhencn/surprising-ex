@@ -58,7 +58,6 @@ class JdbcCoreEventProjectorPostgresTest {
         while (Instant.now().isBefore(deadline)) {
             try (Connection ignored = dataSource.getConnection()) {
                 migrate();
-                migrateResource("/db/migration/V007__add_projection_watermark_and_websocket_audit.sql");
                 assertSeededProductLines();
                 return;
             } catch (SQLException exception) {
@@ -80,6 +79,7 @@ class JdbcCoreEventProjectorPostgresTest {
         try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             statement.execute("TRUNCATE core_funding_payment_projection, core_funding_settlement_projection, "
                     + "core_execution_projection, core_order_projection, core_user_fact_projection, "
+                    + "core_funds_posting_projection, account_product_transfers, "
                     + "core_liquidation_projection, core_treasury_projection, core_event_projection");
             statement.executeUpdate("UPDATE core_projection_watermark SET last_export_sequence = 0");
         }
@@ -209,7 +209,7 @@ class JdbcCoreEventProjectorPostgresTest {
     }
 
     private static void migrate() throws Exception {
-        for (int version = 1; version <= 7; version++) {
+        for (int version = 1; version <= 10; version++) {
             String prefix = "/db/migration/V%03d__".formatted(version);
             String resource = switch (version) {
                 case 1 -> prefix + "create_core_event_projection.sql";
@@ -219,6 +219,9 @@ class JdbcCoreEventProjectorPostgresTest {
                 case 5 -> prefix + "enrich_core_execution_projection.sql";
                 case 6 -> prefix + "enrich_core_liquidation_projection.sql";
                 case 7 -> prefix + "add_projection_watermark_and_websocket_audit.sql";
+                case 8 -> prefix + "drop_websocket_audit_projection.sql";
+                case 9 -> prefix + "add_core_fact_funds.sql";
+                case 10 -> prefix + "add_product_transfer_history.sql";
                 default -> throw new IllegalStateException("unexpected migration version");
             };
             migrateResource(resource);

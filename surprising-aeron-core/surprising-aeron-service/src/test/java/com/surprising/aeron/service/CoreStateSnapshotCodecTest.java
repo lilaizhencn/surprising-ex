@@ -79,17 +79,17 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(12);
-            assertThat(buffer.getInt(8)).isEqualTo(9);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(13);
+            assertThat(buffer.getInt(8)).isEqualTo(10);
             buffer.position(ENVELOPE_LENGTH);
-            int[] sectionIds = new int[9];
+            int[] sectionIds = new int[10];
             for (int index = 0; index < sectionIds.length; index++) {
                 sectionIds[index] = buffer.getInt();
                 int sectionLength = buffer.getInt();
                 assertThat(sectionLength).isBetween(1, CoreStateSnapshotCodec.MAX_SECTION_BYTES);
                 buffer.position(Math.addExact(buffer.position(), sectionLength));
             }
-            assertThat(sectionIds).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9);
+            assertThat(sectionIds).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
             assertThat(buffer.hasRemaining()).isFalse();
         } finally {
             state.close();
@@ -259,7 +259,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(12);
+            assertThat(manifest.schemaVersion()).isEqualTo(13);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);

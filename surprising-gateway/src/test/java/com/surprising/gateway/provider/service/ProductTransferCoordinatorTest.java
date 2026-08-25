@@ -3,18 +3,19 @@ package com.surprising.gateway.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
+import com.surprising.account.api.model.ProductTransferOperationRequest;
+import com.surprising.product.api.ProductLine;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ProductTransferCoordinatorTest {
 
     @Test
-    void transferDebitsAndCreditsOnceAndDuplicateKeyReturnsSameTransfer() {
-        InMemoryProductTransferStore store = new InMemoryProductTransferStore();
+    void transferUsesStableRuntimeIdentityAndThreeForwardPhases() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(store, accountClient);
+        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
         ProductTransferCommand command = command("transfer-001", "FUNDING", "USDT_PERPETUAL", 1_250_000L);
 
         ProductTransferResult first = coordinator.transfer(command);
@@ -23,61 +24,48 @@ class ProductTransferCoordinatorTest {
         assertThat(first.transferId()).isEqualTo(duplicate.transferId());
         assertThat(first.status()).isEqualTo(ProductTransferStatus.COMPLETED);
         assertThat(duplicate.status()).isEqualTo(ProductTransferStatus.COMPLETED);
-        assertThat(accountClient.calls()).containsExactly(
-                new AdjustmentCall("SPOT", -1_250_000L, "gateway-transfer:100:debit"),
-                new AdjustmentCall("USDT_PERPETUAL", 1_250_000L, "gateway-transfer:100:credit"));
+        assertThat(accountClient.calls()).extracting(TransferCall::phase)
+                .containsExactly("OUT", "IN", "COMPLETE", "OUT", "IN", "COMPLETE");
+        assertThat(accountClient.calls()).extracting(call -> call.operation().transferId())
+                .containsOnly(first.transferId());
     }
 
     @Test
-    void rejectedTargetIsCompensatedAndDoesNotReportSuccess() {
-        InMemoryProductTransferStore store = new InMemoryProductTransferStore();
+    void rejectedTargetRemainsSourceDebitedForForwardRecovery() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        accountClient.reject("USDT_PERPETUAL");
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(store, accountClient);
+        accountClient.rejectNextTransferIn();
+        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
 
         ProductTransferResult result = coordinator.transfer(
                 command("transfer-002", "FUNDING", "USDT_PERPETUAL", 10L));
 
-        assertThat(result.status()).isEqualTo(ProductTransferStatus.FAILED);
-        assertThat(accountClient.calls()).containsExactly(
-                new AdjustmentCall("SPOT", -10L, "gateway-transfer:100:debit"),
-                new AdjustmentCall("USDT_PERPETUAL", 10L, "gateway-transfer:100:credit"),
-                new AdjustmentCall("SPOT", 10L, "gateway-transfer:100:compensate"));
+        assertThat(result.status()).isEqualTo(ProductTransferStatus.SOURCE_DEBITED);
+        assertThat(accountClient.calls()).extracting(TransferCall::phase)
+                .containsExactly("OUT", "IN");
     }
 
     @Test
-    void unknownCompensationIsRecoverableAndNeverReportedAsCompleted() {
-        InMemoryProductTransferStore store = new InMemoryProductTransferStore();
+    void reconciliationReadsPendingRuntimeAndOnlyRunsRemainingPhases() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        accountClient.unknown("SPOT", "gateway-transfer:100:compensate");
-        accountClient.reject("USDT_PERPETUAL");
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(store, accountClient);
-
-        ProductTransferResult result = coordinator.transfer(
+        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
+        accountClient.rejectNextTransferIn();
+        ProductTransferResult started = coordinator.transfer(
                 command("transfer-003", "FUNDING", "USDT_PERPETUAL", 10L));
+        ProductTransferOperationRequest pending = accountClient.calls().get(0).operation();
+        accountClient.addPending(pending);
+        accountClient.clearCalls();
 
-        assertThat(result.status()).isEqualTo(ProductTransferStatus.COMPENSATION_REQUIRED);
-        assertThat(result.status()).isNotEqualTo(ProductTransferStatus.COMPLETED);
-    }
-
-    @Test
-    void reusingKeyWithDifferentRequestIsRejected() {
-        InMemoryProductTransferStore store = new InMemoryProductTransferStore();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(
-                store, new RecordingProductAccountClient());
-        coordinator.transfer(command("transfer-004", "FUNDING", "USDT_PERPETUAL", 10L));
-
-        assertThatThrownBy(() -> coordinator.transfer(
-                command("transfer-004", "FUNDING", "USDT_PERPETUAL", 11L)))
-                .isInstanceOf(ProductTransferConflictException.class)
-                .hasMessageContaining("idempotency key");
+        assertThat(coordinator.reconcile(10)).isEqualTo(1);
+        assertThat(accountClient.calls()).extracting(TransferCall::phase)
+                .containsExactly("IN", "COMPLETE");
+        assertThat(accountClient.calls()).extracting(call -> call.operation().transferId())
+                .containsOnly(started.transferId());
     }
 
     @Test
     void sameUnderlyingFundingAndSpotAreRejectedBeforeProviderCall() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(
-                new InMemoryProductTransferStore(), accountClient);
+        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
 
         assertThatThrownBy(() -> coordinator.transfer(
                 command("transfer-005", "FUNDING", "SPOT", 10L)))
@@ -89,8 +77,7 @@ class ProductTransferCoordinatorTest {
     @Test
     void sameDerivativeAccountIsRejectedBeforeProviderCall() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(
-                new InMemoryProductTransferStore(), accountClient);
+        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
 
         assertThatThrownBy(() -> coordinator.transfer(
                 command("transfer-006", "USDT_PERPETUAL", "USDT_PERPETUAL", 10L)))
@@ -100,95 +87,77 @@ class ProductTransferCoordinatorTest {
     }
 
     @Test
-    void samePublicReferenceDoesNotReuseProviderCommandAcrossTransfers() {
-        InMemoryProductTransferStore store = new InMemoryProductTransferStore();
+    void distinctIdempotencyKeysProduceDistinctRuntimeTransferIds() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(store, accountClient);
+        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
 
-        coordinator.transfer(new ProductTransferCommand(42L, "transfer-007", "FUNDING", "USDT_PERPETUAL",
+        ProductTransferResult first = coordinator.transfer(new ProductTransferCommand(
+                42L, "transfer-007", "FUNDING", "USDT_PERPETUAL",
                 "USDT", 10L, "same-reference", "test"));
-        coordinator.transfer(new ProductTransferCommand(42L, "transfer-008", "FUNDING", "USDT_PERPETUAL",
+        ProductTransferResult second = coordinator.transfer(new ProductTransferCommand(
+                42L, "transfer-008", "FUNDING", "USDT_PERPETUAL",
                 "USDT", 10L, "same-reference", "test"));
 
-        assertThat(accountClient.calls()).extracting(AdjustmentCall::referenceId)
-                .containsExactly("gateway-transfer:100:debit", "gateway-transfer:100:credit",
-                        "gateway-transfer:101:debit", "gateway-transfer:101:credit");
+        assertThat(first.transferId()).isNotEqualTo(second.transferId());
     }
 
     private ProductTransferCommand command(String key, String source, String target, long amount) {
         return new ProductTransferCommand(42L, key, source, target, "USDT", amount, key, "test transfer");
     }
 
-    private static final class InMemoryProductTransferStore implements ProductTransferStore {
-        private final Map<Long, ProductTransferState> rows = new HashMap<>();
-        private long nextId = 100L;
-
-        @Override
-        public ProductTransferState createOrGet(ProductTransferCreateRequest request) {
-            return rows.values().stream()
-                    .filter(row -> row.userId() == request.userId()
-                            && row.idempotencyKey().equals(request.idempotencyKey()))
-                    .findFirst()
-                    .orElseGet(() -> {
-                        ProductTransferState row = ProductTransferState.pending(
-                                nextId++, request, Instant.parse("2026-08-05T00:00:00Z"));
-                        rows.put(row.transferId(), row);
-                        return row;
-                    });
-        }
-
-        @Override
-        public ProductTransferState lock(long transferId) {
-            return rows.get(transferId);
-        }
-
-        @Override
-        public ProductTransferState update(ProductTransferState previous, ProductTransferState next) {
-            ProductTransferState current = rows.get(previous.transferId());
-            if (current.status() != previous.status()) {
-                return current;
-            }
-            rows.put(next.transferId(), next);
-            return next;
-        }
-
-        @Override
-        public java.util.List<ProductTransferState> recoverable(int limit) {
-            return rows.values().stream().filter(row -> !row.status().terminal()).limit(limit).toList();
-        }
-    }
-
     private static final class RecordingProductAccountClient implements ProductAccountClient {
-        private final java.util.List<AdjustmentCall> calls = new java.util.ArrayList<>();
-        private final java.util.Set<String> rejectedAccounts = new java.util.HashSet<>();
-        private final java.util.Set<String> unknownCalls = new java.util.HashSet<>();
+        private final List<TransferCall> calls = new ArrayList<>();
+        private final EnumMap<ProductLine, List<ProductTransferOperationRequest>> pending =
+                new EnumMap<>(ProductLine.class);
+        private boolean rejectNextTransferIn;
 
         @Override
-        public ProductAccountAdjustment adjust(String accountType, long amountUnits, String referenceId,
-                                                String reason, long userId, String asset) {
-            calls.add(new AdjustmentCall(accountType, amountUnits, referenceId));
-            if (unknownCalls.contains(accountType + ":" + referenceId)) {
-                return ProductAccountAdjustment.unknown("unknown");
-            }
-            if (rejectedAccounts.contains(accountType)) {
+        public ProductAccountAdjustment transferOut(String accountType, ProductTransferOperationRequest request) {
+            calls.add(new TransferCall("OUT", accountType, request));
+            return ProductAccountAdjustment.applied("applied");
+        }
+
+        @Override
+        public ProductAccountAdjustment transferIn(String accountType, ProductTransferOperationRequest request) {
+            calls.add(new TransferCall("IN", accountType, request));
+            if (rejectNextTransferIn) {
+                rejectNextTransferIn = false;
                 return ProductAccountAdjustment.rejected("rejected");
             }
             return ProductAccountAdjustment.applied("applied");
         }
 
-        void reject(String accountType) {
-            rejectedAccounts.add(accountType);
+        @Override
+        public ProductAccountAdjustment completeTransfer(String accountType,
+                                                         ProductTransferOperationRequest request) {
+            calls.add(new TransferCall("COMPLETE", accountType, request));
+            List<ProductTransferOperationRequest> sourcePending = pending.get(request.sourceProductLine());
+            if (sourcePending != null) sourcePending.remove(request);
+            return ProductAccountAdjustment.applied("applied");
         }
 
-        void unknown(String accountType, String referenceId) {
-            unknownCalls.add(accountType + ":" + referenceId);
+        @Override
+        public List<ProductTransferOperationRequest> pendingTransfers(ProductLine productLine, int limit) {
+            return pending.getOrDefault(productLine, List.of()).stream().limit(limit).toList();
         }
 
-        java.util.List<AdjustmentCall> calls() {
+        void rejectNextTransferIn() {
+            rejectNextTransferIn = true;
+        }
+
+        void addPending(ProductTransferOperationRequest operation) {
+            pending.computeIfAbsent(operation.sourceProductLine(), ignored -> new ArrayList<>()).add(operation);
+        }
+
+        void clearCalls() {
+            calls.clear();
+        }
+
+        List<TransferCall> calls() {
             return calls;
         }
     }
 
-    private record AdjustmentCall(String accountType, long amountUnits, String referenceId) {
+    private record TransferCall(String phase, String accountType, ProductTransferOperationRequest operation) {
     }
 }

@@ -209,8 +209,6 @@ public class GatewayProxyService {
                     : result.status().terminal() ? HttpStatus.CONFLICT : HttpStatus.SERVICE_UNAVAILABLE;
             return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
                     .body(objectMapper.writeValueAsBytes(result));
-        } catch (ProductTransferConflictException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
