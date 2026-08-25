@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.AckExportCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreExportCodec;
@@ -17,6 +18,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
@@ -79,8 +81,18 @@ public final class CorePerpetualEndToEndBenchmark {
     private static void setup(CoreProbeState state, Sequences sequences) {
         apply(state, sequences, CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
                 TradingCommandCodec.encodeUpsertInstrument(instrument()));
+        apply(state, sequences, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
+                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(SYMBOL, 1, 1_000, 1, 1_000)));
+        importFeePolicy(state, sequences, 1, MAKER_USER_ID);
+        importFeePolicy(state, sequences, 2, TAKER_USER_ID);
         adjust(state, sequences, MAKER_USER_ID);
         adjust(state, sequences, TAKER_USER_ID);
+    }
+
+    private static void importFeePolicy(CoreProbeState state, Sequences sequences, long policyId, long userId) {
+        apply(state, sequences, CoreMessageType.UPSERT_FEE_POLICY, CommandSource.OPERATIONS, userId,
+                TradingCommandCodec.encodeUpsertFeePolicy(new UpsertFeePolicyCommand(
+                        policyId, 1, userId, SYMBOL, -10, 20, 4, true, 1, 0)));
     }
 
     private static void adjust(CoreProbeState state, Sequences sequences, long userId) {
@@ -146,10 +158,18 @@ public final class CorePerpetualEndToEndBenchmark {
 
     private static CoreResponse apply(CoreProbeState state, Sequences sequences, CoreMessageType type,
                                       CommandSource source, long userId, byte[] payload) {
-        long sourceSequence = source == CommandSource.OPERATIONS
-                ? sequences.operationsSequence++ : sequences.gatewaySequence++;
+        long sourceSequence = switch (source) {
+            case OPERATIONS -> sequences.operationsSequence++;
+            case KAFKA_INPUT_BRIDGE -> sequences.kafkaSequence++;
+            default -> sequences.gatewaySequence++;
+        };
+        int sourceId = switch (source) {
+            case OPERATIONS -> 9;
+            case KAFKA_INPUT_BRIDGE -> 89;
+            default -> 7;
+        };
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(),
-                ProductLine.LINEAR_PERPETUAL, source, source == CommandSource.OPERATIONS ? 9 : 7,
+                ProductLine.LINEAR_PERPETUAL, source, sourceId,
                 sourceSequence, userId, 1_000L, sequences.clusterPosition++), payload);
         CoreResponse response = state.apply(message);
         if (response.status() != ResponseStatus.APPLIED && response.status() != ResponseStatus.OK) {
@@ -160,10 +180,7 @@ public final class CorePerpetualEndToEndBenchmark {
 
     private static PlaceOrderCommand order(long orderId, CoreOrderSide side, CoreTimeInForce timeInForce,
                                            long quantity) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, "BTC", "USDT", "USDT", side,
-                1_000, 1_001, 1_100, 999, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", Math.multiplyExact(1_000, quantity),
-                CoreOrderType.LIMIT, timeInForce, false, "perpetual-e2e-" + orderId, 0, 0);
+        return new PlaceOrderCommand(orderId, SYMBOL, 1, side, 1_000, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "perpetual-e2e-" + orderId);
     }
 
     private static UpsertInstrumentCommand instrument() {
@@ -187,6 +204,7 @@ public final class CorePerpetualEndToEndBenchmark {
     private static final class Sequences {
         private long gatewaySequence = 1;
         private long operationsSequence = 1;
+        private long kafkaSequence = 1;
         private long clusterPosition = 1;
         private long orderId = 1_000_000L;
     }

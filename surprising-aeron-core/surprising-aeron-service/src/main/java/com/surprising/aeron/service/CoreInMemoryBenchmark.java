@@ -77,10 +77,7 @@ public final class CoreInMemoryBenchmark {
     }
 
     private static PlaceOrderCommand place(long orderId) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, "BTC", "USDT", "USDT", CoreOrderSide.BUY,
-                1_000, 1_001, 1_100, 999, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                ReservationKind.SPOT_ASSET, "USDT", 1_000, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
-                "bench-" + orderId, 0, 0);
+        return new PlaceOrderCommand(orderId, SYMBOL, 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "bench-" + orderId);
     }
 
     private static UpsertInstrumentCommand instrument() {

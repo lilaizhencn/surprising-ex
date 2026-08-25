@@ -18,6 +18,7 @@ import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
+import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
 import com.surprising.aeron.service.state.ActiveOrderIndex;
@@ -78,17 +79,17 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(11);
-            assertThat(buffer.getInt(8)).isEqualTo(8);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(12);
+            assertThat(buffer.getInt(8)).isEqualTo(9);
             buffer.position(ENVELOPE_LENGTH);
-            int[] sectionIds = new int[8];
+            int[] sectionIds = new int[9];
             for (int index = 0; index < sectionIds.length; index++) {
                 sectionIds[index] = buffer.getInt();
                 int sectionLength = buffer.getInt();
                 assertThat(sectionLength).isBetween(1, CoreStateSnapshotCodec.MAX_SECTION_BYTES);
                 buffer.position(Math.addExact(buffer.position(), sectionLength));
             }
-            assertThat(sectionIds).containsExactly(1, 2, 3, 4, 5, 6, 7, 8);
+            assertThat(sectionIds).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9);
             assertThat(buffer.hasRemaining()).isFalse();
         } finally {
             state.close();
@@ -101,7 +102,7 @@ class CoreStateSnapshotCodecTest {
         try {
             byte[] snapshot = state.snapshot(42);
             byte[] invalidCount = snapshot.clone();
-            ByteBuffer.wrap(invalidCount).order(ByteOrder.LITTLE_ENDIAN).putInt(8, 9);
+            ByteBuffer.wrap(invalidCount).order(ByteOrder.LITTLE_ENDIAN).putInt(8, 8);
             byte[] invalidLength = snapshot.clone();
             ByteBuffer.wrap(invalidLength).order(ByteOrder.LITTLE_ENDIAN)
                     .putInt(ENVELOPE_LENGTH + Integer.BYTES, CoreStateSnapshotCodec.MAX_SECTION_BYTES + 1);
@@ -258,7 +259,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(11);
+            assertThat(manifest.schemaVersion()).isEqualTo(12);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
@@ -380,33 +381,10 @@ class CoreStateSnapshotCodecTest {
                 CoreRiskState.empty(), CoreTreasuryState.empty());
     }
 
-    private static PlaceOrderCommand bid() {
-        return new PlaceOrderCommand(
-                1,
-                "BTC-USDT",
-                1,
-                "BTC",
-                "USDT",
-                "USDT",
-                CoreOrderSide.BUY,
-                100,
-                100,
-                100,
-                100,
-                2,
-                false,
-                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                com.surprising.aeron.protocol.CorePositionSide.NET,
-                ReservationKind.SPOT_ASSET,
-                "USDT",
-                200,
+    private static CoreMatchingOrder bid() {
+        return new CoreMatchingOrder(1, "BTC-USDT", CoreOrderSide.BUY,
                 com.surprising.aeron.protocol.CoreOrderType.LIMIT,
-                com.surprising.aeron.protocol.CoreTimeInForce.GTC,
-                false,
-                "",
-                0,
-                0
-        );
+                com.surprising.aeron.protocol.CoreTimeInForce.GTC, 100, 2);
     }
 
     private static byte[] mutateHeaderByte(byte[] snapshot, int fieldOffset) {

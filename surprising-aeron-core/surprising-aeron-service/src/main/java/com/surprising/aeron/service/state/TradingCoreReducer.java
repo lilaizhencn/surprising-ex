@@ -571,6 +571,10 @@ public final class TradingCoreReducer {
         return placeOrder(state, userId, command, new UUID(0, command.orderId()), -1, null);
     }
 
+    public TradingCoreState placeOrder(TradingCoreState state, long userId, ResolvedPlaceOrder command) {
+        return placeOrder(state, userId, command, new UUID(0, command.orderId()), -1, null);
+    }
+
     public TradingCoreState placeOrder(
             TradingCoreState state,
             long userId,
@@ -595,6 +599,17 @@ public final class TradingCoreReducer {
             UUID commandId,
             long indexedOpenInterestSteps,
             ActiveOrderIndex activeOrderIndex) {
+        return placeOrder(state, userId, CoreOrderDecisionResolver.resolve(state, command), commandId,
+                indexedOpenInterestSteps, activeOrderIndex);
+    }
+
+    public TradingCoreState placeOrder(
+            TradingCoreState state,
+            long userId,
+            ResolvedPlaceOrder command,
+            UUID commandId,
+            long indexedOpenInterestSteps,
+            ActiveOrderIndex activeOrderIndex) {
         long requiredReservation = requiredReservationForAcceptedPlaceOrder(
                 state, userId, command, indexedOpenInterestSteps, activeOrderIndex);
         CoreUserState currentUser = state.users().getOrDefault(userId,
@@ -607,7 +622,7 @@ public final class TradingCoreReducer {
                 command.reservationKind(), asset, requiredReservation, command.quantitySteps());
         CoreOrderState order = new CoreOrderState(command.orderId(), state.productLine(), userId,
                 command.symbol(), command.instrumentVersion(), command.side(), command.limitPriceTicks(),
-                command.executionPriceTicks(),
+                command.matchingPriceTicks(),
                 command.quantitySteps(), 0,
                 command.quantitySteps(), command.reduceOnly(), command.marginMode(), command.positionSide(),
                 command.orderType(), command.timeInForce(), command.postOnly(),
@@ -636,6 +651,16 @@ public final class TradingCoreReducer {
             PlaceOrderCommand command,
             long indexedOpenInterestSteps,
             ActiveOrderIndex activeOrderIndex) {
+        return requiredReservationForAcceptedPlaceOrder(state, userId,
+                CoreOrderDecisionResolver.resolve(state, command), indexedOpenInterestSteps, activeOrderIndex);
+    }
+
+    public long requiredReservationForAcceptedPlaceOrder(
+            TradingCoreState state,
+            long userId,
+            ResolvedPlaceOrder command,
+            long indexedOpenInterestSteps,
+            ActiveOrderIndex activeOrderIndex) {
         requireUserId(userId);
         if (state.orders().containsKey(command.orderId())) {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "orderId already exists");
@@ -658,10 +683,6 @@ public final class TradingCoreReducer {
                 indexedOpenInterestSteps < 0 ? symbolOpenInterestSteps(state, instrument.symbol())
                         : indexedOpenInterestSteps);
         long requiredReservation = requiredReservationUnits(state, instrument, currentUser, command);
-        if (command.reservedUnits() > 0 && command.reservedUnits() < requiredReservation) {
-            throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
-                    "order reservation is below deterministic margin and fee requirement");
-        }
         return requiredReservation;
     }
 
@@ -957,7 +978,7 @@ public final class TradingCoreReducer {
         }
         Map<String, CoreMarkPriceState> marks = StateMapSupport.delta(state.riskState().markPrices());
         marks.put(instrument.symbol(), new CoreMarkPriceState(instrument.symbol(), instrument.version(),
-                command.markPriceTicks(), command.priceSequence()));
+                command.markPriceTicks(), command.priceSequence(), command.generatedAtEpochMillis()));
         Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(state.riskState().scans());
         CoreRiskState.RiskScan currentScan = scans.get(instrument.symbol());
         long scanStart = currentScan != null && !currentScan.riskComplete()
@@ -2377,14 +2398,14 @@ public final class TradingCoreReducer {
                 state.triggerOrders());
     }
 
-    private static void validateReservationRule(TradingCoreState state, PlaceOrderCommand command) {
+    private static void validateReservationRule(TradingCoreState state, ResolvedPlaceOrder command) {
         String reservationAsset = AssetBalance.normalizeAsset(command.reservationAsset());
         if (state.productLine().isDerivative()) {
             if (command.reservationKind() != ReservationKind.DERIVATIVE_MARGIN) {
                 throw new CoreStateRejectedException("INVALID_RESERVATION_KIND",
                         "derivative orders require DERIVATIVE_MARGIN");
             }
-            String settleAsset = AssetBalance.normalizeAsset(command.settleAsset());
+            String settleAsset = command.instrument().settleAsset();
             if (!reservationAsset.equals(settleAsset)) {
                 throw new CoreStateRejectedException("INVALID_DERIVATIVE_RESERVATION_ASSET",
                         "derivative orders reserve the instrument settle asset");
@@ -2396,21 +2417,19 @@ public final class TradingCoreReducer {
                     "spot orders require SPOT_ASSET");
         }
         String expectedAsset = AssetBalance.normalizeAsset(command.side() == CoreOrderSide.BUY
-                ? command.quoteAsset() : command.baseAsset());
+                ? command.instrument().quoteAsset() : command.instrument().baseAsset());
         if (!reservationAsset.equals(expectedAsset)) {
             throw new CoreStateRejectedException("INVALID_SPOT_RESERVATION_ASSET",
                     "spot buy reserves quote asset and spot sell reserves base asset");
         }
     }
 
-    private static void validateInstrumentOrder(CoreInstrumentState instrument, PlaceOrderCommand command) {
-        if (!instrument.baseAsset().equals(AssetBalance.normalizeAsset(command.baseAsset()))
-                || !instrument.quoteAsset().equals(AssetBalance.normalizeAsset(command.quoteAsset()))
-                || !instrument.settleAsset().equals(AssetBalance.normalizeAsset(command.settleAsset()))) {
+    private static void validateInstrumentOrder(CoreInstrumentState instrument, ResolvedPlaceOrder command) {
+        if (!instrument.equals(command.instrument())) {
             throw new CoreStateRejectedException("INSTRUMENT_ORDER_MISMATCH",
                     "order assets do not match instrument state");
         }
-        if (command.executionPriceTicks() <= 0) {
+        if (command.matchingPriceTicks() <= 0) {
             throw new CoreStateRejectedException("INVALID_ORDER_PRICE", "matching price must be positive");
         }
     }
@@ -2419,7 +2438,7 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
-            PlaceOrderCommand command) {
+            ResolvedPlaceOrder command) {
         if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
             if (command.side() == CoreOrderSide.SELL) return command.quantitySteps();
             long notional = Math.multiplyExact(command.reservationPriceTicks(), command.quantitySteps());
@@ -2469,7 +2488,7 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
-            PlaceOrderCommand command,
+            ResolvedPlaceOrder command,
             ActiveOrderIndex activeOrderIndex,
             long indexedOpenInterestSteps) {
         if (!state.productLine().isDerivative() || command.reduceOnly()) return;
@@ -2512,7 +2531,7 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
-            PlaceOrderCommand command,
+            ResolvedPlaceOrder command,
             ActiveOrderIndex activeOrderIndex) {
         return CoreContractMath.notionalUnits(instrument,
                 projectedPositionSteps(state, instrument, user, command, command.quantitySteps(), activeOrderIndex),
@@ -2523,7 +2542,7 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
-            PlaceOrderCommand command,
+            ResolvedPlaceOrder command,
             long additionalQuantitySteps,
             ActiveOrderIndex activeOrderIndex) {
         return Math.absExact(projectedPositionSignedSteps(state, instrument, user, command,
@@ -2534,7 +2553,7 @@ public final class TradingCoreReducer {
             TradingCoreState state,
             CoreInstrumentState instrument,
             CoreUserState user,
-            PlaceOrderCommand command,
+            ResolvedPlaceOrder command,
             long additionalQuantitySteps,
             ActiveOrderIndex activeOrderIndex) {
         CorePositionState position = user.positions().get(positionKey(instrument.symbol(), command.positionSide()));
@@ -2585,7 +2604,7 @@ public final class TradingCoreReducer {
     private static void validateReduceOnlyCapacity(
             TradingCoreState state,
             CoreUserState user,
-            PlaceOrderCommand command,
+            ResolvedPlaceOrder command,
             ActiveOrderIndex activeOrderIndex) {
         if (!command.reduceOnly()) {
             return;
@@ -2604,7 +2623,7 @@ public final class TradingCoreReducer {
     }
 
     private static void validatePositionIdentity(TradingCoreState state, CoreUserState user,
-                                                 PlaceOrderCommand command,
+                                                 ResolvedPlaceOrder command,
                                                  ActiveOrderIndex activeOrderIndex) {
         if (user.positionMode() == CorePositionMode.ONE_WAY && command.positionSide().hedgeSide()
                 || user.positionMode() == CorePositionMode.HEDGE && !command.positionSide().hedgeSide()) {

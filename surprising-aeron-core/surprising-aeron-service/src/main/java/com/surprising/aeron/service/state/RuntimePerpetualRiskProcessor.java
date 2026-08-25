@@ -37,7 +37,7 @@ public final class RuntimePerpetualRiskProcessor {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
         }
         runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument.version(), command.markPriceTicks(),
-                command.priceSequence()));
+                command.priceSequence(), command.generatedAtEpochMillis()));
         RiskScanRuntime currentScan = runtime.riskScan(symbolId);
         long scanStart = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.scanStartPriceSequence() : command.priceSequence();

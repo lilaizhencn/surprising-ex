@@ -22,7 +22,9 @@ public final class TradingRuntimeState {
     private final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances = new LongObjectHashMap<>();
     private final LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>();
     private final LongObjectHashMap<ReservationRuntime> reservations = new LongObjectHashMap<>();
+    private final LongObjectHashMap<LongHashSet> reservationIdsByUser = new LongObjectHashMap<>();
     private final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>();
+    private final LongObjectHashMap<LongHashSet> positionKeysByUser = new LongObjectHashMap<>();
     private final IntObjectHashMap<LongObjectHashMap<TreeSet<Long>>> positionKeysBySymbolAndUser
             = new IntObjectHashMap<>();
     private final LongObjectHashMap<LiquidationRuntime> liquidations = new LongObjectHashMap<>();
@@ -35,9 +37,11 @@ public final class TradingRuntimeState {
     private final TreasuryRuntime treasury = new TreasuryRuntime();
     private final Map<String, CoreInstrumentState> instruments = new TreeMap<>();
     private final Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
+    private final LongObjectHashMap<TreeSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
     private final Map<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();
     private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new TreeMap<>();
     private final Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
+    private final Map<Long, CoreFeePolicyState> feePolicies = new TreeMap<>();
     private long nextLiquidationId = 1;
     private CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
     private final LongHashSet changedUsers = new LongHashSet();
@@ -56,6 +60,7 @@ public final class TradingRuntimeState {
     private final LongHashSet changedAlgoOrders = new LongHashSet();
     private final TreeSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers = new TreeSet<>();
     private final LongHashSet changedTriggerOrders = new LongHashSet();
+    private final LongHashSet changedFeePolicies = new LongHashSet();
     private Thread owner;
 
     public void bindOwner() {
@@ -124,6 +129,42 @@ public final class TradingRuntimeState {
         return userBalances == null ? null : userBalances.get(assetId);
     }
 
+    IntObjectHashMap<BalanceRuntime> balancesForUser(long userId) {
+        assertOwner();
+        return balances.get(userId);
+    }
+
+    LongHashSet reservationIdsForUser(long userId) {
+        assertOwner();
+        LongHashSet orderIds = reservationIdsByUser.get(userId);
+        return orderIds == null ? new LongHashSet() : new LongHashSet(orderIds);
+    }
+
+    int reservationCountForUser(long userId) {
+        assertOwner();
+        LongHashSet orderIds = reservationIdsByUser.get(userId);
+        return orderIds == null ? 0 : orderIds.size();
+    }
+
+    LongHashSet positionKeysForUser(long userId) {
+        assertOwner();
+        LongHashSet positionKeys = positionKeysByUser.get(userId);
+        return positionKeys == null ? new LongHashSet() : new LongHashSet(positionKeys);
+    }
+
+    int positionCountForUser(long userId) {
+        assertOwner();
+        LongHashSet positionKeys = positionKeysByUser.get(userId);
+        return positionKeys == null ? 0 : positionKeys.size();
+    }
+
+    NavigableSet<CoreLeverageKey> leverageKeysForUser(long userId) {
+        assertOwner();
+        TreeSet<CoreLeverageKey> keys = leverageKeysByUser.get(userId);
+        return keys == null ? Collections.emptyNavigableSet()
+                : Collections.unmodifiableNavigableSet(keys);
+    }
+
     public OrderRuntime order(long orderId) {
         assertOwner();
         return orders.get(orderId);
@@ -179,7 +220,7 @@ public final class TradingRuntimeState {
         return nextLiquidationId;
     }
 
-    TreasuryRuntime treasury() {
+    public TreasuryRuntime treasury() {
         assertOwner();
         return treasury;
     }
@@ -198,7 +239,7 @@ public final class TradingRuntimeState {
         changedInstruments.add(instrument.symbol());
     }
 
-    Long leverage(CoreLeverageKey key) {
+    public Long leverage(CoreLeverageKey key) {
         assertOwner();
         return leverages.get(key);
     }
@@ -209,10 +250,16 @@ public final class TradingRuntimeState {
             throw new IllegalArgumentException("invalid runtime leverage");
         }
         leverages.put(key, leveragePpm);
+        TreeSet<CoreLeverageKey> userKeys = leverageKeysByUser.get(key.userId());
+        if (userKeys == null) {
+            userKeys = new TreeSet<>();
+            leverageKeysByUser.put(key.userId(), userKeys);
+        }
+        userKeys.add(key);
         changedLeverages.add(key);
     }
 
-    CoreAlgoOrderState algoOrder(long algoOrderId) {
+    public CoreAlgoOrderState algoOrder(long algoOrderId) {
         assertOwner();
         return algoOrders.get(algoOrderId);
     }
@@ -230,7 +277,7 @@ public final class TradingRuntimeState {
         changedAlgoOrders.add(algoOrderId);
     }
 
-    CoreCancelAllAfterState cancelAllAfterTimer(CoreCancelAllAfterKey key) {
+    public CoreCancelAllAfterState cancelAllAfterTimer(CoreCancelAllAfterKey key) {
         assertOwner();
         return cancelAllAfterTimers.get(key);
     }
@@ -242,7 +289,7 @@ public final class TradingRuntimeState {
         changedCancelAllAfterTimers.add(key);
     }
 
-    CoreTriggerOrderState triggerOrder(long triggerOrderId) {
+    public CoreTriggerOrderState triggerOrder(long triggerOrderId) {
         assertOwner();
         return triggerOrders.get(triggerOrderId);
     }
@@ -283,6 +330,57 @@ public final class TradingRuntimeState {
     Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
         assertOwner();
         return triggerOrders;
+    }
+
+    Map<Long, CoreFeePolicyState> feePoliciesForRuntime() {
+        assertOwner();
+        return feePolicies;
+    }
+
+    public Map<Long, CoreFeePolicyState> feePoliciesSnapshot() {
+        assertOwner();
+        return Collections.unmodifiableMap(new TreeMap<>(feePolicies));
+    }
+
+    public void restoreFeePolicies(Map<Long, CoreFeePolicyState> restored) {
+        assertOwner();
+        if (restored == null) throw new IllegalArgumentException("fee policy snapshot is required");
+        feePolicies.clear();
+        feePolicies.putAll(restored);
+        changedFeePolicies.clear();
+    }
+
+    public void upsertFeePolicy(com.surprising.aeron.protocol.UpsertFeePolicyCommand command) {
+        assertOwner();
+        CoreFeePolicyState next = CoreFeePolicyState.from(command);
+        CoreFeePolicyState current = feePolicies.get(next.policyId());
+        if (current != null && next.policyRevision() < current.policyRevision()) {
+            throw new CoreStateRejectedException("STALE_FEE_POLICY_VERSION", "fee policy version must increase");
+        }
+        if (current != null && next.policyRevision() == current.policyRevision()) {
+            if (!current.equals(next)) {
+                throw new CoreStateRejectedException("FEE_POLICY_VERSION_CONFLICT",
+                        "fee policy version contains different data");
+            }
+            return;
+        }
+        feePolicies.put(next.policyId(), next);
+        changedFeePolicies.add(next.policyId());
+        setMetadata(productLine, Math.incrementExact(revision));
+    }
+
+    public CoreFeeRate resolveFee(long userId, String symbol, long clusterTimestamp,
+                                  CoreInstrumentState instrument) {
+        assertOwner();
+        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        CoreFeePolicyState selected = feePolicies.values().stream()
+                .filter(policy -> policy.effective(userId, normalizedSymbol, clusterTimestamp))
+                .min(CoreFeePolicyState::compareTo)
+                .orElse(null);
+        return selected == null
+                ? new CoreFeeRate(instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm(), 0)
+                : new CoreFeeRate(selected.makerFeeRatePpm(), selected.takerFeeRatePpm(),
+                selected.policyRevision());
     }
 
     public void replaceAuxiliaryState(TradingCoreState source) {
@@ -333,6 +431,9 @@ public final class TradingRuntimeState {
         users.remove(userId);
         balances.remove(userId);
         clientOrderIndex.remove(userId);
+        reservationIdsByUser.remove(userId);
+        positionKeysByUser.remove(userId);
+        leverageKeysByUser.remove(userId);
         changedUsers.add(userId);
     }
 
@@ -359,6 +460,8 @@ public final class TradingRuntimeState {
     public void putReservation(ReservationRuntime reservation) {
         assertOwner();
         ReservationRuntime previous = reservations.put(reservation.orderId(), reservation);
+        if (previous != null) removeUserEntity(reservationIdsByUser, previous.userId(), previous.orderId());
+        addUserEntity(reservationIdsByUser, reservation.userId(), reservation.orderId());
         changedReservations.add(reservation.orderId());
         changedUsers.add(reservation.userId());
         if (previous != null) changedUsers.add(previous.userId());
@@ -383,6 +486,8 @@ public final class TradingRuntimeState {
     public void replaceReservation(ReservationRuntime reservation) {
         assertOwner();
         ReservationRuntime previous = reservations.put(reservation.orderId(), reservation);
+        if (previous != null) removeUserEntity(reservationIdsByUser, previous.userId(), previous.orderId());
+        addUserEntity(reservationIdsByUser, reservation.userId(), reservation.orderId());
         changedReservations.add(reservation.orderId());
         changedUsers.add(reservation.userId());
         if (previous != null) changedUsers.add(previous.userId());
@@ -395,6 +500,7 @@ public final class TradingRuntimeState {
             throw new IllegalArgumentException("runtime reservation is not registered: " + orderId);
         }
         reservations.remove(orderId);
+        removeUserEntity(reservationIdsByUser, userId, orderId);
         changedReservations.add(orderId);
         changedUsers.add(userId);
     }
@@ -681,6 +787,11 @@ public final class TradingRuntimeState {
         return new LongHashSet(changedTriggerOrders);
     }
 
+    LongHashSet changedFeePolicies() {
+        assertOwner();
+        return new LongHashSet(changedFeePolicies);
+    }
+
     public void clearChangedKeys() {
         assertOwner();
         changedUsers.clear();
@@ -699,6 +810,7 @@ public final class TradingRuntimeState {
         changedAlgoOrders.clear();
         changedCancelAllAfterTimers.clear();
         changedTriggerOrders.clear();
+        changedFeePolicies.clear();
         treasury.clearChangedKeys();
     }
 
@@ -770,6 +882,7 @@ public final class TradingRuntimeState {
         balance.reserve(reservedUnits);
         orders.put(orderId, order);
         reservations.put(orderId, reservation);
+        addUserEntity(reservationIdsByUser, userId, orderId);
         if (clientKey != 0 && userClientOrders == null) {
             userClientOrders = new LongObjectHashMap<>();
             clientOrderIndex.put(userId, userClientOrders);
@@ -799,6 +912,7 @@ public final class TradingRuntimeState {
     }
 
     private void indexPosition(long positionKey, PositionRuntime position) {
+        addUserEntity(positionKeysByUser, position.userId(), positionKey);
         if (position.signedQuantitySteps() == 0) return;
         LongObjectHashMap<TreeSet<Long>> byUser = positionKeysBySymbolAndUser.get(position.symbolId());
         if (byUser == null) {
@@ -814,6 +928,7 @@ public final class TradingRuntimeState {
     }
 
     private void unindexPosition(long positionKey, PositionRuntime position) {
+        removeUserEntity(positionKeysByUser, position.userId(), positionKey);
         LongObjectHashMap<TreeSet<Long>> byUser = positionKeysBySymbolAndUser.get(position.symbolId());
         TreeSet<Long> keys = byUser == null ? null : byUser.get(position.userId());
         if (keys == null || !keys.remove(positionKey)) return;
@@ -828,6 +943,22 @@ public final class TradingRuntimeState {
             changedBalances.put(userId, assets);
         }
         assets.add(assetId);
+    }
+
+    private static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
+        LongHashSet entities = index.get(userId);
+        if (entities == null) {
+            entities = new LongHashSet();
+            index.put(userId, entities);
+        }
+        entities.add(entityId);
+    }
+
+    private static void removeUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
+        LongHashSet entities = index.get(userId);
+        if (entities == null) return;
+        entities.remove(entityId);
+        if (entities.isEmpty()) index.remove(userId);
     }
 
     private void changedClientOrder(long userId, long clientKey) {

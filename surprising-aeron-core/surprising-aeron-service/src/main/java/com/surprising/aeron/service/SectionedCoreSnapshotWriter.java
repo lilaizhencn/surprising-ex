@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
 import com.surprising.aeron.service.state.TradingStateSnapshotCodec;
+import com.surprising.aeron.service.state.CoreFeePolicySnapshotCodec;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -29,18 +30,21 @@ final class SectionedCoreSnapshotWriter {
         if (!state.pendingMatching().isEmpty()) {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
-        matcherSnapshot.verifyCoreState(state.tradingState(), state.appliedCommandCount());
+        var snapshotState = state.snapshotTradingState();
+        matcherSnapshot.verifyCoreState(snapshotState, state.appliedCommandCount());
         if (snapshotId != matcherSnapshot.snapshotId() || coreSequence != matcherSnapshot.coreSequence()
                 || coreSequence != state.appliedCommandCount() || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new IllegalStateException("snapshot fence and matcher manifest do not match");
         }
         byte[][] payloads = {
-                header(state, matcherSnapshot, snapshotId, coreSequence, clusterTimestamp, clusterPosition),
+                header(state, snapshotState, matcherSnapshot, snapshotId, coreSequence,
+                        clusterTimestamp, clusterPosition),
                 sources(state),
                 results(state),
                 outbox(state.exportState()),
                 MatcherSnapshotCodec.encode(matcherSnapshot),
-                TradingStateSnapshotCodec.encode(state.tradingState()),
+                TradingStateSnapshotCodec.encode(snapshotState),
+                CoreFeePolicySnapshotCodec.encode(state.feePolicies()),
                 state.terminalRetention().encode()
         };
         long totalLength = SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
@@ -81,6 +85,7 @@ final class SectionedCoreSnapshotWriter {
 
     private static byte[] header(
             CoreProbeState state,
+            com.surprising.aeron.service.state.TradingCoreState snapshotState,
             MatcherSnapshot matcherSnapshot,
             long snapshotId,
             long coreSequence,
@@ -98,7 +103,7 @@ final class SectionedCoreSnapshotWriter {
                 .putLong(clusterTimestamp)
                 .putLong(clusterPosition)
                 .putLong(matcherSnapshot.matcherSequence())
-                .putLong(state.tradingState().businessStateHash())
+                .putLong(snapshotState.businessStateHash())
                 .putInt(matcherSnapshot.engineStateHash())
                 .putInt(matcherSnapshot.bookStateHash())
                 .putLong(matcherSnapshot.symbolRegistryHash())

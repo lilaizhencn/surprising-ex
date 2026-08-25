@@ -470,10 +470,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             String symbol, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce, long price) {
         String reservationAsset = productLine == ProductLine.SPOT
                 ? (side == CoreOrderSide.BUY ? "USDT" : "BTC") : settleAsset();
-        return new PlaceOrderCommand(orderId, symbol, 1, "BTC", "USDT", settleAsset(), side, price,
-                price, price, price, QUANTITY_STEPS, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                productLine == ProductLine.SPOT ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
-                reservationAsset, 0, CoreOrderType.LIMIT, timeInForce, false, "", 0, 0);
+        return new PlaceOrderCommand(orderId, symbol, 1, side, price, QUANTITY_STEPS, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "");
     }
 
     private UpsertInstrumentCommand instrument(String symbol) {

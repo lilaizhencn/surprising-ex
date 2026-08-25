@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 22;
+    private static final int VERSION = 23;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -139,6 +139,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(mark.instrumentVersion());
             writer.longValue(mark.markPriceTicks());
             writer.longValue(mark.priceSequence());
+            writer.longValue(mark.generatedAtEpochMillis());
         });
         writer.intValue(state.riskState().snapshots().size());
         state.riskState().snapshots().values().forEach(risk -> {
@@ -425,7 +426,7 @@ public final class TradingStateSnapshotCodec {
             String symbol = reader.text();
             CoreMarkPriceState mark = new CoreMarkPriceState(symbol,
                     reader.positiveLong("mark instrument version"), reader.positiveLong("mark price"),
-                    reader.positiveLong("price sequence"));
+                    reader.positiveLong("price sequence"), reader.positiveLong("mark generated time"));
             putUnique(marks, symbol, mark);
         }
         Map<String, CoreRiskSnapshot> risks = new TreeMap<>();

@@ -10,27 +10,18 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
-    void roundTripsFourIndependentPrices() {
-        PlaceOrderCommand command = new PlaceOrderCommand(71, "BTC-USDT", 9, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 101, 102, 110, 99, 6, false, CoreMarginMode.CROSS,
-                CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, "USDT", 660,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-71", -10, 20);
+    void roundTripsLeanPlaceOrderIntent() {
+        PlaceOrderCommand command = new PlaceOrderCommand(71, "BTC-USDT", 9, CoreOrderSide.BUY, 101, 6, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-71");
 
         PlaceOrderCommand restored = TradingCommandCodec.decodePlaceOrder(
                 TradingCommandCodec.encodePlaceOrder(command));
 
-        assertThat(restored.limitPriceTicks()).isEqualTo(101);
-        assertThat(restored.executionPriceTicks()).isEqualTo(102);
-        assertThat(restored.reservationPriceTicks()).isEqualTo(110);
-        assertThat(restored.markPriceTicks()).isEqualTo(99);
+        assertThat(restored).isEqualTo(command);
     }
 
     @Test
     void rejectsV2PlaceOrder() {
-        PlaceOrderCommand command = new PlaceOrderCommand(72, "BTC-USDT", 9, "BTC", "USDT", "USDT",
-                CoreOrderSide.SELL, 101, 102, 110, 99, 2, false, CoreMarginMode.CROSS,
-                CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, "USDT", 220,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-72", 0, 20);
+        PlaceOrderCommand command = new PlaceOrderCommand(72, "BTC-USDT", 9, CoreOrderSide.SELL, 101, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-72");
         byte[] encoded = TradingCommandCodec.encodePlaceOrder(command);
         ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).putInt(0, 2);
 
@@ -42,12 +33,7 @@ class TradingCommandCodecTest {
     @Test
     void roundTripsAllP2Commands() {
         BalanceAdjustmentCommand adjustment = new BalanceAdjustmentCommand("USDT", 10_000);
-        PlaceOrderCommand placeOrder = new PlaceOrderCommand(7, "BTC-USDT", 3, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 60_000, 60_001, 61_000, 59_000, 3,
-                false, CoreMarginMode.ISOLATED, CorePositionSide.LONG,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 2_000,
-                CoreOrderType.MARKET, CoreTimeInForce.FOK, false,
-                "client-7", -10, 20);
+        PlaceOrderCommand placeOrder = new PlaceOrderCommand(7, "BTC-USDT", 3, CoreOrderSide.BUY, 0, 3, false, CoreMarginMode.ISOLATED, CorePositionSide.LONG, CoreOrderType.MARKET, CoreTimeInForce.FOK, false, "client-7");
         CancelOrderCommand cancelOrder = new CancelOrderCommand(7);
         ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(6, placeOrder);
         AmendOrderCommand amendOrder = new AmendOrderCommand(6, 8, "client-8", 61_000L,
@@ -75,6 +61,8 @@ class TradingCommandCodecTest {
                 CoreMarginMode.ISOLATED, CorePositionSide.LONG, 500);
         AdjustInsuranceFundCommand insuranceFund = new AdjustInsuranceFundCommand("USDT", 500);
         UpdateLeverageCommand leverage = new UpdateLeverageCommand("BTC-USDT", CoreMarginMode.CROSS, 5_000_000L);
+        UpsertFeePolicyCommand feePolicy = new UpsertFeePolicyCommand(31, 7, 1001, "BTC-USDT",
+                -25, 100, 4, true, 1_700_000_000_000L, 0);
 
         assertThat(TradingCommandCodec.decodeBalanceAdjustment(
                 TradingCommandCodec.encodeBalanceAdjustment(adjustment))).isEqualTo(adjustment);
@@ -84,6 +72,8 @@ class TradingCommandCodecTest {
                 TradingCommandCodec.encodeCancelOrder(cancelOrder))).isEqualTo(cancelOrder);
         assertThat(TradingCommandCodec.decodeReplaceOrder(
                 TradingCommandCodec.encodeReplaceOrder(replaceOrder))).isEqualTo(replaceOrder);
+        assertThat(TradingCommandCodec.decodeUpsertFeePolicy(
+                TradingCommandCodec.encodeUpsertFeePolicy(feePolicy))).isEqualTo(feePolicy);
         assertThat(TradingCommandCodec.decodeAmendOrder(
                 TradingCommandCodec.encodeAmendOrder(amendOrder))).isEqualTo(amendOrder);
         assertThat(TradingCommandCodec.decodeUpsertInstrument(

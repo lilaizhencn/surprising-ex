@@ -93,10 +93,7 @@ public final class ClusterDerivativeSmokeMain {
     }
 
     private static byte[] derivativeOrder(long orderId, CoreOrderSide side) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                "BTC", "USDT", "USDT", side, 100, 100, 100, 100, 10, false,
-                CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, "USDT", 100,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", 0, 0));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
     }
 
     private static void requirePosition(

@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,7 +25,6 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
@@ -42,12 +41,7 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
-import com.surprising.trading.order.model.MarkPriceLookup;
-import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.ValidationResult;
-import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -63,11 +57,6 @@ class AeronOrderCommandServiceTest {
 
     @Mock
     private OrderAeronGateway aeron;
-    @Mock
-    private InstrumentRuleLookup instrumentRules;
-    @Mock
-    private MarkPriceLookup markPrices;
-
     private AeronOrderCommandService service;
 
     @BeforeEach
@@ -75,21 +64,17 @@ class AeronOrderCommandServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAeron().setNodeId(3);
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        service = new AeronOrderCommandService(aeron, instrumentRules, markPrices, properties);
+        service = new AeronOrderCommandService(aeron, properties);
         lenient().when(aeron.preflight(anyLong(), any(PlaceOrderCommand.class)))
                 .thenReturn(new OrderAeronGateway.PreflightResult(CoreResultCode.NONE,
                         new CoreOrderPreflightView("USDT", 1L)));
-        lenient().when(markPrices.latestMarkPriceTicks(any(), anyLong(), anyLong()))
-                .thenReturn(OptionalLong.of(60_000L));
     }
 
     @Test
-    void placeMapsMarketProtectionFeesAndDerivativeReservation() {
+    void placeSubmitsOnlyTradingIntentAndLeavesFundsDecisionToCore() {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-1", "BTC-USDT", OrderSide.BUY,
                 OrderType.MARKET, TimeInForce.IOC, 0, 7, MarginMode.ISOLATED, PositionSide.LONG,
                 false, false);
-        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
-        when(markPrices.latestMarkPriceTicks("BTC-USDT", 7, 5_000)).thenReturn(OptionalLong.of(60_000L));
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
@@ -97,8 +82,7 @@ class AeronOrderCommandServiceTest {
         });
 
         assertThat(service.place(request,
-                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL),
-                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test")).status())
+                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL)).status())
                 .isEqualTo(OrderStatus.ACCEPTED);
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
@@ -110,35 +94,21 @@ class AeronOrderCommandServiceTest {
         assertThat(preflight.getValue()).isEqualTo(command);
         assertThat(command.orderType()).isEqualTo(CoreOrderType.MARKET);
         assertThat(command.timeInForce()).isEqualTo(CoreTimeInForce.IOC);
-        assertThat(command.limitPriceTicks()).isEqualTo(60_600L);
-        assertThat(command.executionPriceTicks()).isEqualTo(60_600L);
-        assertThat(command.reservationPriceTicks()).isEqualTo(60_600L);
-        assertThat(command.markPriceTicks()).isEqualTo(60_000L);
-        assertThat(command.reservationKind()).isEqualTo(ReservationKind.DERIVATIVE_MARGIN);
-        assertThat(command.reservationAsset()).isEqualTo("USDT");
-        assertThat(command.reservedUnits()).isZero();
+        assertThat(command.limitPriceTicks()).isZero();
         assertThat(command.clientOrderId()).isEqualTo("client-1");
-        assertThat(command.makerFeeRatePpm()).isEqualTo(-10);
-        assertThat(command.takerFeeRatePpm()).isEqualTo(25);
     }
 
     @Test
-    void spotLimitPreflightUsesLimitPriceWhenMarkPriceIsUnavailable() {
+    void spotLimitPreflightSubmitsOnlyTheValidatedIntent() {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "spot-limit", "BTC-USDT", OrderSide.SELL,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(spotRule()));
-
         service.preflight(request,
-                ValidationResult.ok(7, InstrumentType.SPOT, ContractType.SPOT),
-                new OrderFeeSnapshot(ProductLine.SPOT, -10, 25, "test"));
+                ValidationResult.ok(7, InstrumentType.SPOT, ContractType.SPOT));
 
         ArgumentCaptor<PlaceOrderCommand> command = ArgumentCaptor.forClass(PlaceOrderCommand.class);
         verify(aeron).preflight(eq(1001L), command.capture());
-        assertThat(command.getValue().markPriceTicks()).isEqualTo(60_000L);
-        assertThat(command.getValue().reservationPriceTicks()).isEqualTo(60_000L);
-        assertThat(command.getValue().reservationKind()).isEqualTo(ReservationKind.SPOT_ASSET);
-        verify(markPrices, never()).latestMarkPriceTicks(any(), anyLong(), anyLong());
+        assertThat(command.getValue().limitPriceTicks()).isEqualTo(60_000L);
     }
 
     @Test
@@ -146,7 +116,6 @@ class AeronOrderCommandServiceTest {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-response", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
@@ -154,8 +123,7 @@ class AeronOrderCommandServiceTest {
         });
 
         assertThat(service.place(request,
-                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL),
-                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test")).orderId())
+                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL)).orderId())
                 .isPositive();
 
         verify(aeron, times(1)).commandOutcome(eq(CoreMessageType.PLACE_ORDER),
@@ -168,13 +136,11 @@ class AeronOrderCommandServiceTest {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "client-no-funds", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
         when(aeron.preflight(eq(1001L), org.mockito.ArgumentMatchers.any(PlaceOrderCommand.class)))
                 .thenReturn(new OrderAeronGateway.PreflightResult(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, null));
 
         AeronOrderCommandService.CommandExecution execution = service.placeCommand(request,
-                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL),
-                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test"));
+                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL));
 
         assertThat(execution.outcome()).isInstanceOf(CoreCommandOutcome.Terminal.class);
         assertThat(((CoreCommandOutcome.Terminal) execution.outcome()).response().resultCode())
@@ -191,7 +157,6 @@ class AeronOrderCommandServiceTest {
         PlaceOrderRequest changed = new PlaceOrderRequest(1001, "client-identity", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 3, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
@@ -200,10 +165,9 @@ class AeronOrderCommandServiceTest {
         });
 
         ValidationResult validation = ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL);
-        OrderFeeSnapshot fee = new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test");
-        service.place(request, validation, fee);
-        service.place(request, validation, fee);
-        service.place(changed, validation, fee);
+        service.place(request, validation);
+        service.place(request, validation);
+        service.place(changed, validation);
 
         ArgumentCaptor<UUID> commandIds = ArgumentCaptor.forClass(UUID.class);
         verify(aeron, times(3)).commandOutcome(eq(CoreMessageType.PLACE_ORDER), commandIds.capture(), eq(1001L),
@@ -262,7 +226,6 @@ class AeronOrderCommandServiceTest {
                 60_000, 5, 0, 5, MarginMode.CROSS, PositionSide.NET, -10, 25,
                 false, false, OrderStatus.ACCEPTED, null,
                 java.time.Instant.ofEpochMilli(1_000), java.time.Instant.ofEpochMilli(1_000));
-        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
         when(aeron.commandOutcome(eq(CoreMessageType.REPLACE_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class))).thenAnswer(invocation -> {
             ReplaceOrderCommand command = TradingCommandCodec.decodeReplaceOrder(invocation.getArgument(3));
@@ -275,8 +238,7 @@ class AeronOrderCommandServiceTest {
         });
 
         assertThat(service.replace(original, replacementRequest,
-                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL),
-                new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test"))
+                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL))
                 .replacementOrder().clientOrderId()).isEqualTo("new");
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
@@ -288,7 +250,7 @@ class AeronOrderCommandServiceTest {
         assertThat(command.replacement().quantitySteps()).isEqualTo(4);
         assertThat(command.replacement().timeInForce()).isEqualTo(CoreTimeInForce.GTX);
         assertThat(command.replacement().postOnly()).isTrue();
-        assertThat(command.replacement().reservedUnits()).isZero();
+        assertThat(command.replacement().limitPriceTicks()).isEqualTo(59_000);
     }
 
     @Test

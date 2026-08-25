@@ -212,10 +212,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     }
 
     private byte[] order(long orderId, CoreOrderSide side, long reservedUnits) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, symbol, 1,
-                "BTC", "USDT", settleAsset(), side, 100, 100, 100, 100, 10, false,
-                CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.DERIVATIVE_MARGIN, settleAsset(),
-                reservedUnits, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", 0, 0));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, symbol, 1, side, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
     }
 
     private void adjust(long userId, long units) {

@@ -250,11 +250,7 @@ public final class ClusterProductLineGateMain {
     private byte[] order(long orderId, CoreOrderSide side, long quantity, String reservationAsset, long reserved) {
         ReservationKind kind = productLine == ProductLine.SPOT
                 ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, 1,
-                "BTC", "USDT", settleAsset(), side, 100, 100, 100, 100, quantity, false, CoreMarginMode.CROSS,
-                CorePositionSide.NET, kind, reservationAsset, reserved, CoreOrderType.LIMIT,
-                CoreTimeInForce.GTC, false, "cluster-gate-" + orderId,
-                MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, 1, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cluster-gate-" + orderId));
     }
 
     private void adjust(long userId, String asset, long units) {

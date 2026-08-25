@@ -46,6 +46,14 @@ public final class TreasuryRuntime {
     public long lifecycleSettlement(int symbolId) { assertOwner(); return lifecycleSettlements.get(symbolId); }
     public LifecycleProgressRuntime lifecycleProgress(int symbolId) { assertOwner(); return lifecycleProgress.get(symbolId); }
 
+    public int assetLedgerEntryCount() {
+        assertOwner();
+        return Math.addExact(Math.addExact(Math.addExact(feeBalances.size(), insuranceBalances.size()),
+                        Math.addExact(insuranceDeficits.size(), liquidationFeeBalances.size())),
+                Math.addExact(Math.addExact(fundingResidualBalances.size(), roundingResidualBalances.size()),
+                        clearingPnlBalances.size()));
+    }
+
     public void setFee(int assetId, long units) {
         assertOwner();
         setSigned(feeBalances, assetId, units);

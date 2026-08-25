@@ -1,18 +1,12 @@
 package com.surprising.aeron.service.state;
 
-/** Migration-only guard that compares the mutable Runtime with the authoritative core state. */
-public final class RuntimeStateParityChecker {
+final class RuntimeStateParityChecker {
 
     private RuntimeStateParityChecker() {
     }
 
-    /**
-     * Fully validates the runtime and returns the immutable state built during that validation.
-     * Callers that need the authoritative compatibility state must retain this result rather than
-     * materializing the same runtime a second time.
-     */
-    public static TradingCoreState assertMatches(TradingCoreState expected, RuntimeIdentityRegistry identities,
-                                                  TradingRuntimeState actual) {
+    static TradingCoreState assertMatches(
+            TradingCoreState expected, RuntimeIdentityRegistry identities, TradingRuntimeState actual) {
         if (expected == null || identities == null || actual == null) {
             throw new IllegalArgumentException("parity arguments are required");
         }
@@ -30,20 +24,22 @@ public final class RuntimeStateParityChecker {
     }
 
     private static String mismatch(TradingRuntimeSnapshot expected, TradingRuntimeSnapshot actual) {
-        if (!expected.users().equals(actual.users())) return mapMismatch(
-                "users", expected.users(), actual.users());
+        if (!expected.users().equals(actual.users())) return mapMismatch("users", expected.users(), actual.users());
         if (!expected.balances().equals(actual.balances())) return "balances";
         if (!expected.orders().equals(actual.orders())) return "orders";
         if (!expected.reservations().equals(actual.reservations())) return "reservations";
         if (!expected.clientOrderIndex().equals(actual.clientOrderIndex())) return "client-order-index";
         if (!expected.positions().equals(actual.positions())) return "positions";
-        if (!expected.liquidations().equals(actual.liquidations())) return mapMismatch(
-                "liquidations", expected.liquidations(), actual.liquidations());
+        if (!expected.liquidations().equals(actual.liquidations())) {
+            return mapMismatch("liquidations", expected.liquidations(), actual.liquidations());
+        }
         if (!expected.markPrices().equals(actual.markPrices())) return "mark-prices";
-        if (!expected.riskSnapshots().equals(actual.riskSnapshots())) return mapMismatch(
-                "risk-snapshots", expected.riskSnapshots(), actual.riskSnapshots());
-        if (!expected.riskScans().equals(actual.riskScans())) return mapMismatch(
-                "risk-scans", expected.riskScans(), actual.riskScans());
+        if (!expected.riskSnapshots().equals(actual.riskSnapshots())) {
+            return mapMismatch("risk-snapshots", expected.riskSnapshots(), actual.riskSnapshots());
+        }
+        if (!expected.riskScans().equals(actual.riskScans())) {
+            return mapMismatch("risk-scans", expected.riskScans(), actual.riskScans());
+        }
         if (expected.nextLiquidationId() != actual.nextLiquidationId()) return "next-liquidation-id";
         if (!expected.instruments().equals(actual.instruments())) return "instruments";
         if (!expected.leverages().equals(actual.leverages())) return "leverages";
@@ -52,11 +48,10 @@ public final class RuntimeStateParityChecker {
         if (!expected.triggerOrders().equals(actual.triggerOrders())) return "trigger-orders";
         if (!expected.treasury().equals(actual.treasury())) return "treasury";
         if (!expected.fundingSettlements().equals(actual.fundingSettlements())) return "funding-settlements";
-        if (!expected.fundingProgress().equals(actual.fundingProgress())) return mapMismatch(
-                "funding-progress", expected.fundingProgress(), actual.fundingProgress());
-        if (!expected.lifecycleSettlements().equals(actual.lifecycleSettlements())) {
-            return "lifecycle-settlements";
+        if (!expected.fundingProgress().equals(actual.fundingProgress())) {
+            return mapMismatch("funding-progress", expected.fundingProgress(), actual.fundingProgress());
         }
+        if (!expected.lifecycleSettlements().equals(actual.lifecycleSettlements())) return "lifecycle-settlements";
         return mapMismatch("lifecycle-progress", expected.lifecycleProgress(), actual.lifecycleProgress());
     }
 

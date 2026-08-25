@@ -11,12 +11,6 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
-/**
- * 统一解析订单费率。
- *
- * <p>在线只读取 Instrument 和费率 JVM 快照。费率快照不可用、事件延迟或缓存恢复失败时，
- * 统一回退到当前 Instrument 默认费率，不在下单热路径访问数据库。</p>
- */
 @Service
 public class OrderFeeSnapshotLookup {
 
@@ -44,13 +38,8 @@ public class OrderFeeSnapshotLookup {
             return Optional.empty();
         }
         var value = instrument.get();
-        Optional<FeeScheduleResponse> schedule;
-        try {
-            schedule = feeScheduleSnapshotCache.effective(productLine, userId, symbol, now);
-        } catch (RuntimeException ex) {
-            // 费率覆盖快照损坏或尚未恢复时，使用 Instrument 默认费率继续完成安全校验。
-            schedule = Optional.empty();
-        }
+        Optional<FeeScheduleResponse> schedule = feeScheduleSnapshotCache.effective(
+                productLine, userId, symbol, now);
         if (schedule.isEmpty()) {
             return Optional.of(new OrderFeeSnapshot(productLine, value.makerFeeRatePpm(), value.takerFeeRatePpm(),
                     "INSTRUMENT"));

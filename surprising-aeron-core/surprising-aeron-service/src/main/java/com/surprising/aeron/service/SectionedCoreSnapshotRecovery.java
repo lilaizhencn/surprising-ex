@@ -115,8 +115,8 @@ final class SectionedCoreSnapshotRecovery {
             case 0 -> SectionedCoreSnapshotCodec.HEADER_LENGTH;
             case 1, 2 -> Integer.BYTES;
             case 3 -> SectionedCoreSnapshotCodec.OUTBOX_FIXED_LENGTH;
-            case 4, 5, 6 -> 1;
-            case 7 -> SectionedCoreSnapshotCodec.FOOTER_LENGTH;
+            case 4, 5, 6, 7 -> 1;
+            case 8 -> SectionedCoreSnapshotCodec.FOOTER_LENGTH;
             default -> throw new ProtocolException("invalid snapshot section count");
         };
         if (sectionLength < minimumLength || sectionLength > SectionedCoreSnapshotCodec.MAX_SECTION_BYTES

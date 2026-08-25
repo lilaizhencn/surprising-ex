@@ -221,9 +221,11 @@ public record TradingRuntimeSnapshot(
         }
     }
 
-    public record MarkPriceSnapshot(long instrumentVersion, long markPriceTicks, long priceSequence) {
+    public record MarkPriceSnapshot(long instrumentVersion, long markPriceTicks, long priceSequence,
+                                    long generatedAtEpochMillis) {
         public MarkPriceSnapshot {
-            if (instrumentVersion <= 0 || markPriceTicks <= 0 || priceSequence <= 0) {
+            if (instrumentVersion <= 0 || markPriceTicks <= 0 || priceSequence <= 0
+                    || generatedAtEpochMillis <= 0) {
                 throw new IllegalArgumentException("invalid snapshot mark price");
             }
         }

@@ -29,6 +29,7 @@ public class TradingFeeService {
     private final FeeScheduleEventPublisher eventPublisher;
     private final FeeScheduleSnapshotCache feeScheduleSnapshotCache;
     private final TradingOrderProperties properties;
+    private final FeePolicyCoreImporter coreImporter;
 
     @org.springframework.beans.factory.annotation.Autowired
     public TradingFeeService(OrderFeeRepository orderFeeRepository,
@@ -36,13 +37,15 @@ public class TradingFeeService {
                              OrderFeeSnapshotLookup feeSnapshotLookup,
                              FeeScheduleEventPublisher eventPublisher,
                              FeeScheduleSnapshotCache feeScheduleSnapshotCache,
-                             TradingOrderProperties properties) {
+                             TradingOrderProperties properties,
+                             FeePolicyCoreImporter coreImporter) {
         this.orderFeeRepository = orderFeeRepository;
         this.instrumentRuleLookup = instrumentRuleLookup;
         this.feeSnapshotLookup = feeSnapshotLookup;
         this.eventPublisher = eventPublisher;
         this.feeScheduleSnapshotCache = feeScheduleSnapshotCache;
         this.properties = properties;
+        this.coreImporter = coreImporter;
     }
 
     public EffectiveTradingFeeResponse effectiveFee(long userId, String symbol, long instrumentVersion) {
@@ -92,6 +95,7 @@ public class TradingFeeService {
             throw new IllegalStateException("费率事件发布器未配置");
         }
         eventPublisher.publish(response);
+        coreImporter.importPolicy(response);
         return response;
     }
 
@@ -120,6 +124,7 @@ public class TradingFeeService {
             throw new IllegalStateException("费率事件发布器未配置");
         }
         eventPublisher.publish(response);
+        coreImporter.importPolicy(response);
         return response;
     }
 
@@ -217,4 +222,5 @@ public class TradingFeeService {
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }
+
 }

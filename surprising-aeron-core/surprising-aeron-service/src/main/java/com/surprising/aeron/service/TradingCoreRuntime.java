@@ -13,7 +13,6 @@ import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
-import com.surprising.aeron.service.state.TradingCoreReducer;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
@@ -22,7 +21,6 @@ import java.util.concurrent.CompletableFuture;
 
 public final class TradingCoreRuntime implements AutoCloseable {
     private final ProductLine productLine;
-    private final TradingCoreReducer reducer;
     private final DeterministicExchangeCoreAdapter matcher;
     private final PositionUserIndex positionUsers;
     private final OpenInterestIndex openInterest;
@@ -57,7 +55,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.runtimeState = RuntimeStateProjector.project(initialState, identities);
         this.committedRevision = initialState.revision();
         this.committedBusinessStateHash = initialState.businessStateHash();
-        this.reducer = new TradingCoreReducer();
         this.activeOrders = new ActiveOrderIndex(initialState);
         this.matcher = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter()
@@ -89,7 +86,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         bindOwner();
     }
 
-    public TradingCoreState state() {
+    public TradingCoreState snapshotState() {
         assertOwner();
         return RuntimeStateMaterializer.materialize(runtimeState, identities);
     }
@@ -102,15 +99,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     RuntimeIdentityRegistry identitiesForConstruction() {
         if (owner != null) assertOwner();
         return identities;
-    }
-
-    public TradingCoreReducer reducer() {
-        assertOwner();
-        return reducer;
-    }
-
-    TradingCoreReducer reducerForConstruction() {
-        return reducer;
     }
 
     public DeterministicExchangeCoreAdapter matcher() {
@@ -236,7 +224,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (restored == null || restored.productLine() != productLine) {
             throw new IllegalArgumentException("invalid matcher state");
         }
+        java.util.Map<Long, com.surprising.aeron.service.state.CoreFeePolicyState> feePolicies =
+                runtimeState.feePoliciesSnapshot();
         restoreIndexes(restored);
+        runtimeState.restoreFeePolicies(feePolicies);
     }
 
     private void restoreIndexes(TradingCoreState restored) {

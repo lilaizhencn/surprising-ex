@@ -16,7 +16,7 @@ class TradingCoreRuntimeAuthorityTest {
                 ProductLine.SPOT, TradingCoreState.empty(ProductLine.SPOT))) {
             runtime.runtimeStateForConstruction().setMetadata(ProductLine.SPOT, 7);
 
-            assertThat(runtime.state().revision()).isEqualTo(7);
+            assertThat(runtime.snapshotState().revision()).isEqualTo(7);
         }
     }
 

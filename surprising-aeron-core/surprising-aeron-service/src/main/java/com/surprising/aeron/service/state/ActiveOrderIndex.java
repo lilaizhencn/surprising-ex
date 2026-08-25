@@ -82,6 +82,13 @@ public final class ActiveOrderIndex {
         return false;
     }
 
+    public int marginModeCount(long userId, String symbol,
+                               com.surprising.aeron.protocol.CorePositionSide positionSide,
+                               com.surprising.aeron.protocol.CoreMarginMode marginMode) {
+        return marginModeCounts.getOrDefault(new MarginKey(userId, OrderReservation.normalizeSymbol(symbol),
+                positionSide, marginMode), 0);
+    }
+
     public Page page(long userId, String symbol, long beforeOrderId, int limit) {
         if (beforeOrderId < 0 || limit < 1 || limit > MAX_PAGE_SIZE) {
             throw new IllegalArgumentException("invalid active-order page");

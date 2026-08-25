@@ -18,9 +18,9 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 - `MARKET` 订单要求 `priceTicks = 0`。
 - `MARKET` 订单只允许 `IOC` 或 `FOK`。
 - notional 校验按 `contract_type` 分支。U 本位线性合约校验 `priceTicks * quantitySteps * notional_multiplier_units`；币本位反向合约校验 `quantitySteps * notional_multiplier_units`，因为 multiplier 表示每个合约 step 的报价币面值。两条路径都用 `Math.multiplyExact` 防止 long 溢出。
-- 市价单用 `markPriceTicks +/- marketMaxSlippagePpm` 做提交 exchange-core 前的价格保护。订单入口使用同一个 mark 派生的可成交区间做风控：U 本位线性合约无论 BUY/SELL 都按上边界冻结初始保证金，币本位反向合约按下边界冻结，因为价格越低所需抵押越高。
+- 市价单只向 Aeron 提交业务意图，`priceTicks = 0`。Product Core 使用自身 Runtime 中带 instrument version 和生成时间的 mark，按 Core 固定滑点边界生成 exchange-core 保护价；U 本位线性合约按上边界冻结，币本位反向合约按下边界冻结。
 - 当 `surprising.trading.order.risk.limit-price-protection-enabled=true` 时，限价单也要求新鲜 mark price。BUY 限价不能高于 `markPriceTicks * (1 + limitPriceBandPpm / 1_000_000)`，SELL 限价不能低于 `markPriceTicks * (1 - limitPriceBandPpm / 1_000_000)`。被动低价买单和高价卖单仍然允许。
-- instrument version 保存产品默认 maker/taker ppm 费率；订单入口会叠加用户/VIP/做市覆盖后，把本订单实际费率快照写入 `trading_orders`，成交后由 account provider 按快照结算。
+- instrument version 保存产品默认 maker/taker ppm 费率；费率配置先通过 `UPSERT_FEE_POLICY` 导入对应 Product Core。Core 在接受订单时按用户、symbol、优先级和有效期选择费率，并把结果固化到 Core 订单事实；Provider 不参与费率裁决。
 
 例子：`BTC-USDT` 的 `price_tick_units = 10000000`、`quantity_step_units = 100000`，USDT scale 为 `100000000`，BTC scale 为 `100000000`。
 
@@ -114,6 +114,7 @@ account 的 `position-mode` API 切换到 `HEDGE`。`ONE_WAY` 使用 `positionSi
 - `init.sql` 初始化的六产品线 120 个 symbol 默认使用 maker `200 ppm`、taker `500 ppm`，即 `0.02% / 0.05%`。
 - `trading_fee_schedules` 可配置用户全局或单 symbol 覆盖，`source_type` 支持 `USER_OVERRIDE`、`VIP`、`MARKET_MAKER`、`PROMOTION`、`RISK_OVERRIDE`。
   单 symbol 优先于用户全局，未匹配时使用当前 Instrument 默认费率。
+- Provider 启动时先把 PostgreSQL 配置快照按 revision 导入 Product Core，再开放交易；管理端新增、更新或禁用配置时先同步提交 Core 命令，成功后才发布异步投影事件。数据库和 JVM fee cache 都不是订单费率裁决源。
 - 多个用户全局费率同时 active 时，source 优先级是 `RISK_OVERRIDE`、`USER_OVERRIDE`、`PROMOTION`、`MARKET_MAKER`、`VIP`，防止 VIP 费率覆盖风控、人工、活动或做市商费率。
 - 管理接口：`POST /api/v1/admin/trading/fees/schedules` 新增/更新费率，请求必须显式携带正数 `feeScheduleId`；`POST /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable` 禁用费率，
   `GET /api/v1/admin/trading/fees/schedules` 查询配置。查询支持 `limit/cursor/sort` 游标分页，排序白名单为 `updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`、`effectiveTime.desc`、`effectiveTime.asc`，响应保留 `schedules/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。
@@ -261,11 +262,11 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 
 ## 保证金冻结
 
-普通开仓/挂单由 `surprising-trading-provider` 完成规则校验和保证金计算，再把带不可变预占快照的下单命令提交给 Aeron Core：
+普通开仓/挂单由 `surprising-trading-provider` 完成 API 形状、数量和 instrument version 校验，只把精简下单意图提交给 Aeron Core：
 
 - 从 instrument 当前版本读取 `contract_type`、`initial_margin_rate_ppm`、`notional_multiplier_units`、`price_tick_units`、`settle_asset` 和资产 scale。
-- 在 Java `OrderMarginMath` 中换算 `initialMarginUnits`：输入和输出都是 long ticks/steps/asset units，中间乘除使用精确整数计算，溢出会拒绝而不是回绕。
-- Aeron Core 校验用户可用余额和订单预占，并在同一有序命令中把 `availableUnits` 转入 `lockedUnits`；`trading_orders` 只保存订单及预占快照投影，不更新账户余额表。
+- Core 从 Runtime Instrument、mark、leverage、position、active-order、open-interest 和 fee policy 计算保护价、预占价格、结算资产、保证金及手续费上界；所有整数运算溢出都会拒绝。
+- Aeron Core 校验用户可用余额并在同一有序命令中把 `availableUnits` 转入 `lockedUnits`；`trading_orders` 只保存订单及预占事实投影，不更新账户余额表。
 - 账户类型、结算资产和初始冻结量作为 Core 订单/预占元数据的一部分原子保存；`trading_orders` 只接收异步投影，永续不再维护独立的可裁决保证金预占记录。
 - 如果 Core 判断保证金不足，命令直接返回 `REJECTED`，不会进入撮合；数据库只接收最终订单状态投影。
 
@@ -278,8 +279,7 @@ matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。�
 - 空仓只能提交 reduce-only `BUY`。
 - 已存在的未完成 reduce-only 平仓单会占用可平数量，新订单数量加上已有待平数量不能超过当前持仓。
 - 待平数量聚合使用 checked long addition；如果溢出，会拒绝订单或回滚强平事务，不能静默扩大可平容量。
-- 校验使用 Aeron Core 用户状态快照中的 `positionRevision`、订单 revision 和本地未成交索引，多节点
-  通过用户 key 串行更新；快照未就绪时失败关闭，不使用数据库行锁猜测可平数量。
+- 校验直接读取 Aeron Core Runtime 的 position、order 和活动订单索引；Provider 节点不保存可裁决的本地持仓/挂单快照，也不使用数据库行锁猜测可平数量。
 - 持仓被成交、强平或 ADL 改变后，trading provider 消费 Core Export 发布的完整持仓状态事件，并在同一订单用户
   分区 WAL 中撤销事件发生前创建且反向、版本不一致或超过新持仓容量的订单。它忽略事件之后创建的
   订单，避免延迟快照误撤重开仓位的新平仓单。
@@ -317,6 +317,8 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
   `trading_fee_schedules` 可提供用户全局或单 symbol 覆盖，订单接受时会把最终费率固化到
   Core 订单元数据，成交时直接用 maker/taker 已固化费率计算并导出结算事实，
   投影和账户查询不再回查 fee schedule 决定既有成交。
+- 费率管理写入先发布持久费率事实，再用版本化 `UPSERT_FEE_POLICY` 同步导入本产品线 Core；导入失败会使管理请求失败并允许
+  复用同一版本重试。Provider 的费率 JVM 快照只服务管理/展示，不能给下单命令补 maker/taker 费率。
 
 所以交易模块 Java 代码仍然保持 long-only。
 
@@ -371,8 +373,8 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 ## exchange-core 撮合
 
 每个 `ProductLine` 的 Aeron Core 内嵌一个 fork exchange-core；它是该产品线唯一价格树、FIFO 和可执行盘口。
-`TradingCoreState` 只保存 `CoreOrderState` 业务元数据、资金预留和 `ActiveOrderIndex` 等必要索引，
-不保存 `CoreBookState`、价格桶或 priority sequence。`surprising-market-data-provider` 只负责行情/成交查询投影，
+`TradingRuntimeState` 保存 owner-thread 热路径业务状态和 primitive/有界索引；`TradingCoreState` 只作为快照、事实、恢复、hash 与对账投影，
+两者都不保存 `CoreBookState`、价格桶或 priority sequence。`surprising-market-data-provider` 只负责行情/成交查询投影，
 不持有、恢复或裁决第二个 exchange-core。
 
 命令在 Core 单写 transition 内按以下顺序执行：

@@ -72,6 +72,41 @@ public record PositionCloseCapacity(
                 Math.subtractExact(positionQuantity, committed), commitments);
     }
 
+    public static PositionCloseCapacity inspectRuntime(
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId, String symbol,
+            CorePositionSide positionSide, CoreOrderSide closeSide, ActiveOrderIndex activeOrderIndex,
+            long excludedOrderId) {
+        if (runtime == null || identities == null || userId <= 0 || positionSide == null
+                || closeSide == null || activeOrderIndex == null) {
+            throw new IllegalArgumentException("runtime close-capacity input is required");
+        }
+        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        String positionName = positionSide == CorePositionSide.NET
+                ? normalizedSymbol : normalizedSymbol + ':' + positionSide.name();
+        Long positionKey = identities.findPositionKey(userId, positionName);
+        PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
+        long positionQuantity = position == null ? 0 : Math.absExact(position.signedQuantitySteps());
+        long requestedQuantity = 0;
+        ArrayList<Commitment> commitments = new ArrayList<>();
+        for (Long orderId : activeOrderIndex.ids(userId, normalizedSymbol)) {
+            if (orderId == null || orderId == excludedOrderId) continue;
+            OrderRuntime order = runtime.order(orderId);
+            if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId
+                    || !identities.symbol(order.symbolId()).equals(normalizedSymbol)
+                    || order.positionSide() != positionSide || order.side() != closeSide) continue;
+            if (order.reduceOnly()) {
+                commitments.add(new Commitment(order.orderId(), order.remainingQuantitySteps(),
+                        order.clusterPosition()));
+            }
+            requestedQuantity = Math.addExact(requestedQuantity, order.remainingQuantitySteps());
+        }
+        commitments.sort(Comparator.comparingLong(Commitment::corePosition)
+                .thenComparingLong(Commitment::orderId).reversed());
+        long committed = Math.min(positionQuantity, requestedQuantity);
+        return new PositionCloseCapacity(positionQuantity, requestedQuantity, committed,
+                Math.subtractExact(positionQuantity, committed), commitments);
+    }
+
     public void require(long quantitySteps) {
         if (quantitySteps <= 0) throw new IllegalArgumentException("close quantity must be positive");
         if (quantitySteps > availableQuantitySteps) {

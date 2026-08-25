@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderType;
@@ -54,38 +55,15 @@ class RuntimeStateProjectorTest {
                 ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
                 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 1_000_000));
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 1_000, 1, 1));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
 
         for (int index = 0; index < 50; index++) {
             long orderId = 10_000 + index;
-            PlaceOrderCommand command = new PlaceOrderCommand(
-                    orderId,
-                    "BTC-USDT",
-                    1,
-                    "BTC",
-                    "USDT",
-                    "USDT",
-                    CoreOrderSide.BUY,
-                    1_000,
-                    1_000,
-                    1_000,
-                    1_000,
-                    1,
-                    false,
-                    CoreMarginMode.CROSS,
-                    CorePositionSide.NET,
-                    ReservationKind.DERIVATIVE_MARGIN,
-                    "USDT",
-                    1_000,
-                    CoreOrderType.LIMIT,
-                    CoreTimeInForce.IOC,
-                    false,
-                    "incremental-" + orderId,
-                    0,
-                    0
-            );
-            RuntimeCommandProcessor.placeOrder(runtime, identities, 7, command, new UUID(0, orderId), 100);
+            PlaceOrderCommand command = new PlaceOrderCommand(orderId, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "incremental-" + orderId);
+            ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtime, identities, 7, command, 1);
+            RuntimeCommandProcessor.placeOrder(runtime, identities, 7, resolved, new UUID(0, orderId), 100);
             TradingCoreState placed = RuntimeStateMaterializer.materializeTransition(runtime, identities, state);
             runtime.clearChangedKeys();
             RuntimeCommandProcessor.stampOrderChanges(runtime, identities, state,

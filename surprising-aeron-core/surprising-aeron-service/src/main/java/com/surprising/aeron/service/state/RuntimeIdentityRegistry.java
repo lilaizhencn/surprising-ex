@@ -42,6 +42,11 @@ public final class RuntimeIdentityRegistry {
         return id;
     }
 
+    public Integer findAssetId(String asset) {
+        assertOwner();
+        return assetIds.get(AssetBalance.normalizeAsset(asset));
+    }
+
     public String asset(int assetId) {
         assertOwner();
         String asset = assets.get(assetId);
@@ -58,6 +63,11 @@ public final class RuntimeIdentityRegistry {
         symbolIds.put(normalized, id);
         symbols.put(id, normalized);
         return id;
+    }
+
+    public Integer findSymbolId(String symbol) {
+        assertOwner();
+        return symbolIds.get(OrderReservation.normalizeSymbol(symbol));
     }
 
     public String symbol(int symbolId) {
@@ -78,6 +88,13 @@ public final class RuntimeIdentityRegistry {
         clientKeys.put(identity, key);
         clients.put(key, identity);
         return key;
+    }
+
+    public Long findClientKey(long userId, String clientOrderId) {
+        assertOwner();
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        if (clientOrderId == null || clientOrderId.isBlank()) return null;
+        return clientKeys.get(new ClientIdentity(userId, clientOrderId));
     }
 
     public String clientOrderId(long userId, long clientKey) {
@@ -102,6 +119,12 @@ public final class RuntimeIdentityRegistry {
         positionKeys.put(identity, key);
         positions.put(key, identity);
         return key;
+    }
+
+    public Long findPositionKey(long userId, String positionKey) {
+        assertOwner();
+        if (userId <= 0 || positionKey == null || positionKey.isBlank()) return null;
+        return positionKeys.get(new PositionIdentity(userId, positionKey));
     }
 
     public String positionKey(long userId, long positionKey) {

@@ -1,5 +1,6 @@
 package com.surprising.aeron.service;
 
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -126,17 +127,16 @@ public final class CoreAcceptFreezeConcurrentBenchmark {
     private static void bootstrap(CoreProbeState state) {
         applied(state, CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 9, 1,
                 TradingCommandCodec.encodeUpsertInstrument(instrument()));
+        applied(state, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 89, 1,
+                TradingCommandCodec.encodeApplyMarkPrice(
+                        new ApplyMarkPriceCommand(SYMBOL, 1, 1_000, 1, 1_000)));
         applied(state, CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, 7, 1,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", BALANCE_UNITS)));
     }
 
     private static CoreMessage place(int index, int producer, long sourceSequence) {
         long orderId = 10_000_000L + index;
-        PlaceOrderCommand order = new PlaceOrderCommand(orderId, SYMBOL, 1, "BTC", "USDT", "USDT",
-                CoreOrderSide.BUY, 1_000, 1_001, 1_100, 999, 1,
-                false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000, CoreOrderType.LIMIT,
-                CoreTimeInForce.IOC, false, "accept-freeze-concurrent-" + orderId, 0, 0);
+        PlaceOrderCommand order = new PlaceOrderCommand(orderId, SYMBOL, 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "accept-freeze-concurrent-" + orderId);
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(),
                 ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 100 + producer, sourceSequence, USER_ID,
                 1_000, 1_000_000L + index), TradingCommandCodec.encodePlaceOrder(order));

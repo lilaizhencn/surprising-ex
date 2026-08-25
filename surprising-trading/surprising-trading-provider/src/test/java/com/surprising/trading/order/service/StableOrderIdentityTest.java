@@ -29,15 +29,8 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
-import com.surprising.trading.order.model.MarkPriceLookup;
-import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.ValidationResult;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalLong;
-import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -70,29 +63,26 @@ class StableOrderIdentityTest {
     @Test
     void placeIdentitySurvivesProviderReconstruction() {
         OrderAeronGateway aeron = Mockito.mock(OrderAeronGateway.class);
-        InstrumentRuleLookup rules = Mockito.mock(InstrumentRuleLookup.class);
-        MarkPriceLookup marks = Mockito.mock(MarkPriceLookup.class);
         TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
         properties.getAeron().setNodeId(3);
         when(aeron.preflight(eq(1001L), any(PlaceOrderCommand.class)))
                 .thenReturn(new OrderAeronGateway.PreflightResult(CoreResultCode.NONE,
                         new CoreOrderPreflightView("USDT", 1L)));
-        when(rules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
-        when(marks.latestMarkPriceTicks("BTC-USDT", 7, 5_000)).thenReturn(OptionalLong.of(60_000));
         when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), any(UUID.class), eq(1001L), any(byte[].class)))
                 .thenAnswer(invocation -> {
                     PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
                     return new CoreCommandOutcome.Terminal(commandResponse(command, "stable-client"));
                 });
 
-        AeronOrderCommandService first = service(aeron, rules, marks, properties);
-        first.place(request(), validation(), fee());
+        AeronOrderCommandService first = service(aeron, properties);
+        first.place(request(), validation());
         long firstTimestamp = System.currentTimeMillis();
         while (System.currentTimeMillis() == firstTimestamp) {
             Thread.onSpinWait();
         }
-        AeronOrderCommandService reconstructed = service(aeron, rules, marks, properties);
-        reconstructed.place(request(), validation(), fee());
+        AeronOrderCommandService reconstructed = service(aeron, properties);
+        reconstructed.place(request(), validation());
 
         ArgumentCaptor<UUID> commandIds = ArgumentCaptor.forClass(UUID.class);
         ArgumentCaptor<byte[]> payloads = ArgumentCaptor.forClass(byte[].class);
@@ -103,9 +93,8 @@ class StableOrderIdentityTest {
                 .isEqualTo(TradingCommandCodec.decodePlaceOrder(payloads.getAllValues().get(1)).orderId());
     }
 
-    private static AeronOrderCommandService service(OrderAeronGateway aeron, InstrumentRuleLookup rules,
-                                                    MarkPriceLookup marks, TradingOrderProperties properties) {
-        return new AeronOrderCommandService(aeron, rules, marks, properties);
+    private static AeronOrderCommandService service(OrderAeronGateway aeron, TradingOrderProperties properties) {
+        return new AeronOrderCommandService(aeron, properties);
     }
 
     private static PlaceOrderRequest request() {
@@ -117,16 +106,12 @@ class StableOrderIdentityTest {
         return ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL);
     }
 
-    private static OrderFeeSnapshot fee() {
-        return new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10, 25, "test");
-    }
-
     private static CoreResponse commandResponse(PlaceOrderCommand command, String clientOrderId) {
         CoreOrderStateView order = new CoreOrderStateView(command.orderId(), ProductLine.LINEAR_PERPETUAL,
                 1001, command.symbol(), command.instrumentVersion(), command.side(), command.limitPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(), clientOrderId,
-                UUID.randomUUID(), command.makerFeeRatePpm(), command.takerFeeRatePpm(), 1_000, 1_000, 1,
+                UUID.randomUUID(), -10, 25, 0, 1_000, 1_000, 1,
                 "OPEN", 1);
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
@@ -134,10 +119,4 @@ class StableOrderIdentityTest {
                         command.instrumentVersion(), 1, 41, 43, List.of(order), List.of())));
     }
 
-    private static InstrumentRule perpetualRule() {
-        return new InstrumentRule("BTC-USDT", 7, "TRADING", InstrumentType.PERPETUAL,
-                ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", Set.of("LIMIT", "MARKET"),
-                Set.of("GTC", "IOC", "FOK", "GTX"), true, true, true, 1, 1, 1_000_000, 1,
-                Long.MAX_VALUE, 1, 100_000_000, 10_000);
-    }
 }

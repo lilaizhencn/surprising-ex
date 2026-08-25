@@ -320,6 +320,8 @@ class CoreLifecycleStateTest {
     void lifecycleSettlementProcessesOpenOrdersInBoundedOrderChunks() {
         TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
                 ContractType.LINEAR_DELIVERY, 100, 10, 100);
+        state = reducer.applyMarkPrice(state,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, 1_700_000_000_000L));
         state = reducer.placeOrder(state, 1, lifecycleOrder(101));
         state = reducer.placeOrder(state, 2, lifecycleOrder(102));
 
@@ -598,32 +600,7 @@ class CoreLifecycleStateTest {
     }
 
     private static PlaceOrderCommand lifecycleOrder(long orderId) {
-        return new PlaceOrderCommand(
-                orderId,
-                "BTC-USDT",
-                1,
-                "BTC",
-                "USDT",
-                "USDT",
-                CoreOrderSide.BUY,
-                10,
-                10,
-                10,
-                10,
-                1,
-                false,
-                CoreMarginMode.CROSS,
-                CorePositionSide.NET,
-                ReservationKind.DERIVATIVE_MARGIN,
-                "USDT",
-                0,
-                com.surprising.aeron.protocol.CoreOrderType.LIMIT,
-                com.surprising.aeron.protocol.CoreTimeInForce.GTC,
-                false,
-                "",
-                0,
-                0
-        );
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, CoreOrderSide.BUY, 10, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
     }
 
     private static long total(TradingCoreState state, String asset) {

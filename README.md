@@ -17,7 +17,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P0 | canonical 中文 P0-P5 规范注册与分支安全：先发布根 README 契约，保留既有脏改动。 |
 | P1 | reservation、`PositionCloseCapacity`、价格分离与累计手续费：衍生品普通单为全量开仓风险预留，reduce-only 才可省略开仓保证金。 |
 | P2 | deterministic `MATCHING_ONLY` 推进与成对快照：adapter 每次仅执行一个按 Core sequence 排序的 matcher 命令，先取得不可变结果并推进可恢复的 matcher prefix digest，才执行下一条。 |
-| P3 | TradingRuntimeState 生产写入权威：六条产品线的 Runtime owner 线程是唯一生产 mutation 权威，immutable `TradingCoreState` 仅用于快照、查询、回放/参考与 parity。 |
+| P3 | TradingRuntimeState 生产写入权威：六条产品线的 Runtime owner 线程是唯一交易裁决状态，immutable `TradingCoreState` 仅是快照、事实增量、恢复、hash 与对账投影。 |
 | P4 | six isolated settlement kernels：Spot、LinearPerpetual、InversePerpetual、LinearDelivery、InverseDelivery、Option 各有穷尽且隔离的结算内核。 |
 | P5 | FundsDelta、Treasury、操作级舍入与连续性：每命令/资产资金变动不可变且确定性排序，Treasury 子账本、残差和 Core Fact 前后状态证据显式核算。 |
 | P6 | randomized properties / model campaign：随机化属性与模型验证，不是 P0-P5 行为改动。 |
@@ -29,8 +29,10 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 当前实现状态：P2、P3 已完成。P2 在 `DeterministicExchangeCoreAdapter` 边界串行化实际 matcher 提交，直接消费
 exchange-core 产出的不可变 `MatcherResult`，并用 `matcherSequence + MatcherPrefix(before, after)` 绑定命令结果；prefix
 digest 随配对快照恢复，断裂或 malformed 结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes`，完整
-`bookStateHash` 只保留在 snapshot、恢复和显式审计边界。`TradingRuntimeState` 是唯一可变交易权威；
-`TradingCoreState` 继续保留，但只承担不可变快照、查询、恢复/回放、参考计算和 parity，不构成第二套可变权威。
+`bookStateHash` 只保留在 snapshot、恢复和显式审计边界。`TradingRuntimeState` 是唯一交易裁决权威；
+`TradingCoreState` 只承担不可变快照、Core Fact 增量、恢复/回放、状态 hash 和对账，不参与在线查询或外围裁决。
+在线当前态查询在 Product Core owner 上通过 Runtime 索引读取，并对用户实体、风险快照和工作页设置硬上限；
+查询不触发全量 materialization、数据库、Valkey、Kafka 或异步等待。
 P2、P3 完成不代表 P1、P4、P5 或 P6-P10 已经完成。
 
 ### 分支安全与验证契约
@@ -149,11 +151,12 @@ sequenceDiagram
 校验把同一撮合命令内“成交更新 → 释放预留”的合法多层 delta 误判为状态损坏，已在
 `StateMapSupport` 与 `CoreUserState` 修复并以状态测试和三节点永续 capacity 测试验证。
 
-永续 Runtime 迁移当前已完成下单、撤单、成交、资金费、强平、ADL 和风险扫描的独立原生计算
-与逐字段 parity。风险快照包含 mark price、cross/isolated 结果、分页 scan cursor、liquidation plan
-和 `nextLiquidationId`。连续 mark/continuation 已切换为 owner-thread 持久 Runtime 原地增量提交，
-active liquidation 使用 primitive 分层索引精确定位；`TradingCoreReducer` 生成候选 transition，
-Runtime 是在线状态权威，materialize 后的 Core 视图通过完整 equals 与 business hash 作为切换门禁。
+永续 Runtime 迁移当前已完成下单、撤单、成交、资金费、强平、ADL 和风险扫描的原生计算。
+风险快照包含 mark price、cross/isolated 结果、分页 scan cursor、liquidation plan 和
+`nextLiquidationId`。连续 mark/continuation 由 owner thread 在持久 Runtime 原地增量提交，
+active liquidation 使用 primitive 分层索引精确定位；生产路径不再通过 immutable reducer 候选结果
+反向覆盖 Runtime。不可变 Core 视图只由 Runtime changed-key 生成，用于事实、hash、快照、恢复和对账，
+Runtime/materialization 等价检查仅留在测试源码。
 
 ## 产品线
 

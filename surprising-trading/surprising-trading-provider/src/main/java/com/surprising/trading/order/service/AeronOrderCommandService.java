@@ -16,7 +16,6 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
@@ -38,13 +37,8 @@ import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
-import com.surprising.trading.api.model.MarketPriceProtection;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
-import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.ValidationResult;
-import com.surprising.trading.order.model.MarkPriceLookup;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -54,32 +48,17 @@ import org.springframework.stereotype.Service;
 public class AeronOrderCommandService {
 
     private final OrderAeronGateway aeron;
-    private final InstrumentRuleLookup instrumentRules;
-    private final MarkPriceLookup markPrices;
     private final TradingOrderProperties properties;
 
-    public AeronOrderCommandService(OrderAeronGateway aeron, InstrumentRuleLookup instrumentRules,
-                                    MarkPriceLookup markPrices,
-                                    TradingOrderProperties properties) {
+    public AeronOrderCommandService(OrderAeronGateway aeron, TradingOrderProperties properties) {
         this.aeron = aeron;
-        this.instrumentRules = instrumentRules;
-        this.markPrices = markPrices;
         this.properties = properties;
     }
 
     public OrderResponse place(
             com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation,
-            OrderFeeSnapshot fee) {
-        return place(request, validation, fee, null);
-    }
-
-    public OrderResponse place(
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation,
-            OrderFeeSnapshot fee,
-            InstrumentRule instrument) {
-        CommandExecution execution = placeCommand(request, validation, fee, instrument);
+            ValidationResult validation) {
+        CommandExecution execution = placeCommand(request, validation);
         return requireOrder(commandOrder(terminalResponse(execution), execution.prospectiveOrderIds().getFirst()),
                 "placed order missing");
     }
@@ -87,13 +66,12 @@ public class AeronOrderCommandService {
     public com.surprising.trading.api.model.AmendOrderResponse replace(
             OrderResponse original,
             com.surprising.trading.api.model.PlaceOrderRequest replacement,
-            ValidationResult validation,
-            OrderFeeSnapshot fee) {
+            ValidationResult validation) {
         String clientOrderId = requireClientKey(replacement.clientOrderId(), "clientOrderId");
-        ProductLine productLine = requireProductLine(fee.productLine());
+        ProductLine productLine = configuredProductLine();
         long replacementOrderId = StableOrderIdentity.replacementOrderId(
                 productLine, replacement.userId(), clientOrderId);
-        PlaceOrderCommand replacementCommand = buildPlaceCommand(replacementOrderId, replacement, validation, fee);
+        PlaceOrderCommand replacementCommand = buildPlaceCommand(replacementOrderId, replacement, validation);
         UUID commandId = StableOrderIdentity.replacementCommandId(productLine, replacement.userId(), clientOrderId);
         var response = aeron.commandOutcome(CoreMessageType.REPLACE_ORDER, commandId, replacement.userId(),
                 TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(original.orderId(), replacementCommand)));
@@ -142,46 +120,22 @@ public class AeronOrderCommandService {
     private PlaceOrderCommand buildPlaceCommand(
             long orderId,
             com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation,
-            OrderFeeSnapshot fee) {
-        InstrumentRule instrument = instrumentRules.currentRule(request.symbol())
-                .filter(value -> value.version() == validation.instrumentVersion())
-                .orElseThrow(() -> new IllegalStateException("instrument snapshot changed before Aeron submit"));
-        return buildPlaceCommand(orderId, request, validation, fee, instrument);
-    }
-
-    private PlaceOrderCommand buildPlaceCommand(
-            long orderId,
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation,
-            OrderFeeSnapshot fee,
-            InstrumentRule instrument) {
-        if (instrument.version() != validation.instrumentVersion()) {
-            throw new IllegalStateException("instrument snapshot changed before Aeron submit");
-        }
-        OrderPricePreflight prices = preflightPrices(request, validation, instrument);
-        String reservationAsset = instrument.spot()
-                ? (request.side() == OrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset())
-                : instrument.settleAsset();
+            ValidationResult validation) {
+        long limitPriceTicks = request.orderType() == OrderType.LIMIT ? request.priceTicks() : 0;
         return new PlaceOrderCommand(orderId, request.symbol(), validation.instrumentVersion(),
-                instrument.baseAsset(), instrument.quoteAsset(), instrument.settleAsset(), side(request.side()),
-                prices.limitPriceTicks(), prices.executionPriceTicks(), prices.reservationPriceTicks(),
-                prices.markPriceTicks(), request.quantitySteps(), request.reduceOnly(), marginMode(request.marginMode()),
-                positionSide(request.positionSide()), instrument.spot() ? ReservationKind.SPOT_ASSET
-                : ReservationKind.DERIVATIVE_MARGIN, reservationAsset, 0,
+                side(request.side()), limitPriceTicks, request.quantitySteps(), request.reduceOnly(),
+                marginMode(request.marginMode()), positionSide(request.positionSide()),
                 orderType(request.orderType()), timeInForce(request.timeInForce()), request.postOnly(),
-                requireClientKey(request.clientOrderId(), "clientOrderId"),
-                fee.makerFeeRatePpm(), fee.takerFeeRatePpm());
+                requireClientKey(request.clientOrderId(), "clientOrderId"));
     }
 
     public OrderAeronGateway.PreflightResult preflight(
             com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation,
-            OrderFeeSnapshot fee) {
-        ProductLine productLine = requireProductLine(fee.productLine());
+            ValidationResult validation) {
+        ProductLine productLine = configuredProductLine();
         long orderId = StableOrderIdentity.orderId(productLine, request.userId(),
                 requireClientKey(request.clientOrderId(), "clientOrderId"));
-        return aeron.preflight(request.userId(), buildPlaceCommand(orderId, request, validation, fee));
+        return aeron.preflight(request.userId(), buildPlaceCommand(orderId, request, validation));
     }
 
     public OrderResponse cancel(long userId, long orderId) {
@@ -199,22 +153,11 @@ public class AeronOrderCommandService {
 
     public CommandExecution placeCommand(
             com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation,
-            OrderFeeSnapshot fee) {
-        return placeCommand(request, validation, fee, null);
-    }
-
-    public CommandExecution placeCommand(
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation,
-            OrderFeeSnapshot fee,
-            InstrumentRule validatedInstrument) {
+            ValidationResult validation) {
         String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
-        ProductLine productLine = requireProductLine(fee.productLine());
+        ProductLine productLine = configuredProductLine();
         long orderId = StableOrderIdentity.orderId(productLine, request.userId(), clientOrderId);
-        PlaceOrderCommand command = validatedInstrument == null
-                ? buildPlaceCommand(orderId, request, validation, fee)
-                : buildPlaceCommand(orderId, request, validation, fee, validatedInstrument);
+        PlaceOrderCommand command = buildPlaceCommand(orderId, request, validation);
         UUID commandId = StableOrderIdentity.commandId(productLine, request.userId(), clientOrderId);
         OrderAeronGateway.PreflightResult preflight = aeron.preflight(request.userId(), command);
         if (preflight == null || preflight.resultCode() == null) {
@@ -233,13 +176,11 @@ public class AeronOrderCommandService {
 
     public CommandExecution placeBatchCommand(String batchKey,
                                                List<com.surprising.trading.api.model.PlaceOrderRequest> requests,
-                                               List<ValidationResult> validations,
-                                               List<OrderFeeSnapshot> fees) {
+                                               List<ValidationResult> validations) {
         requireBatchKey(batchKey);
         requireBatchSize(requests, com.surprising.aeron.protocol.PlaceOrderBatchCommand.MAX_ORDERS, "orders");
-        if (validations == null || fees == null || validations.size() != requests.size()
-                || fees.size() != requests.size()) {
-            throw new IllegalArgumentException("batch validation and fee counts must match orders");
+        if (validations == null || validations.size() != requests.size()) {
+            throw new IllegalArgumentException("batch validation count must match orders");
         }
         ProductLine productLine = configuredProductLine();
         long userId = requireSingleUser(requests);
@@ -247,14 +188,10 @@ public class AeronOrderCommandService {
         List<Long> prospectiveIds = new java.util.ArrayList<>(requests.size());
         for (int index = 0; index < requests.size(); index++) {
             com.surprising.trading.api.model.PlaceOrderRequest request = requests.get(index);
-            OrderFeeSnapshot fee = fees.get(index);
-            if (requireProductLine(fee.productLine()) != productLine) {
-                throw new IllegalArgumentException("batch fee product line does not match trading provider");
-            }
             String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
             long orderId = StableOrderIdentity.orderId(productLine, userId, clientOrderId);
             prospectiveIds.add(orderId);
-            commands.add(buildPlaceCommand(orderId, request, validations.get(index), fee));
+            commands.add(buildPlaceCommand(orderId, request, validations.get(index)));
         }
         UUID commandId = batchCommandId(productLine, userId, "place", batchKey);
         CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER_BATCH, commandId, userId,
@@ -382,32 +319,6 @@ public class AeronOrderCommandService {
 
     private static OrderResponse toOrder(CoreOrderStateView view) {
         return view == null ? null : requireOrder(view, "order query returned no order");
-    }
-
-    private OrderPricePreflight preflightPrices(
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation,
-            InstrumentRule instrument) {
-        long mark = instrument.spot() && request.orderType() == OrderType.LIMIT
-                ? request.priceTicks()
-                : markPrices.latestMarkPriceTicks(request.symbol(), validation.instrumentVersion(),
-                                properties.getRisk().getMarketMaxMarkAgeMs())
-                        .orElseThrow(() -> new IllegalStateException("mark price unavailable"));
-        long executionPrice = request.orderType() == OrderType.LIMIT
-                ? request.priceTicks()
-                : MarketPriceProtection.protectedPriceTicks(request.side(), mark,
-                        properties.getRisk().getMarketMaxSlippagePpm());
-        long reservationPrice = instrument.spot()
-                ? executionPrice
-                : OrderMarginMath.collateralPriceTicks(request.side(), request.orderType(), request.priceTicks(), mark,
-                        properties.getRisk().getMarketMaxSlippagePpm(), validation.contractType());
-        return new OrderPricePreflight(executionPrice, executionPrice, reservationPrice, mark);
-    }
-
-    private record OrderPricePreflight(long limitPriceTicks,
-                                       long executionPriceTicks,
-                                       long reservationPriceTicks,
-                                       long markPriceTicks) {
     }
 
     private static OrderResponse requireOrder(CoreOrderStateView view, String message) {

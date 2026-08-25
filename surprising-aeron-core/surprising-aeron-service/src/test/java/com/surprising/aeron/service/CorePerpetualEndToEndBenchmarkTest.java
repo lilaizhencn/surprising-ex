@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 class CorePerpetualEndToEndBenchmarkTest {
 
     @Test
-    void makerDepthBenchmarkFullyMatchesOneTenAndOneHundredMakers() {
+    void coreReservationCoversFragmentedTakerFeesAcrossMakerDepths() {
         for (int makerDepth : List.of(1, 10, 100)) {
             CorePerpetualEndToEndBenchmark.BaselineResult result =
                     CorePerpetualEndToEndBenchmark.measure(1, 1, makerDepth);

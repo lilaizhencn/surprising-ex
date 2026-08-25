@@ -120,22 +120,23 @@ current state 的唯一权威；PostgreSQL 只负责 Instrument 管理和 histor
   恢复时任一字段不匹配即拒绝并 fail closed；pending callback 不得进入快照。完整订单簿 hash 只在 snapshot、恢复和
   显式审计边界计算，不进入普通交易命令热路径。
 
-### P3：Runtime 唯一生产写入权与 parity
+### P3：Runtime 唯一交易裁决状态
 
 当前实现状态：P3 已完成。
 
 - `TradingRuntimeState` 是六条产品线生产热路径的唯一 mutation authority。只有 Product Core owner thread 可以原地写入 Runtime State；
   外围服务、异步 matcher callback、PostgreSQL、Kafka 和 query projection 均不得直接写入。
-- immutable `TradingCoreState` 只能用于 snapshot、online query、replay/reference 和 parity materialization；生产命令不得先计算一份
-  第二个 immutable outcome 再覆盖 Runtime。deterministic parity sampling 必须逐项比较 Runtime 与 materialization 的状态、订单、
-  持仓、余额、预留、book hash 和资金 hash；发布前另行执行 full snapshot/replay parity。
+- immutable `TradingCoreState` 是由 Runtime changed-key 增量生成的 Snapshot State，只用于 Cluster snapshot、Core Fact 增量、恢复、
+  business/funds hash 和对账；它不再承担在线查询，也不允许反向覆盖 Runtime。
 - `TradingCoreRuntime` 持有 owner-thread Runtime 与 identity registry；生产命令通过 Runtime processors 原地裁决，再按 changed-key
-  增量生成 immutable compatibility state。全量 materialization 只用于快照、恢复、显式查询或 parity，不在每条命令上遍历全局用户、
-  余额、预留和持仓。
+  增量生成 immutable Snapshot State。全量 materialization 只用于快照和恢复，不在普通命令或查询上遍历全局用户、余额、预留和持仓。
+- `USER_STATE`、`ORDER_STATE`、client-order、活动订单、Treasury、风险、ADL、清算工作和生命周期进度查询都读取 Runtime 或其 ID 索引；
+  无分页协议设定固定实体/扫描上限，超限返回 `QUERY_RESPONSE_TOO_LARGE`。除异步 book capture 外，查询只占用一次
+  有界 owner-thread CPU 片段，不做全局 materialization，也不会等待数据库、Kafka、Valkey 或 matcher callback；因此慢查询或超大结果
+  不能把交易下单拖入外部 I/O 等待。
 - 主源码不再提供 immutable outcome 反向覆盖 Runtime 的 delta applier。状态索引和 business-state hash 都从 Runtime changed-key
   增量推进；exchange-core 仍是唯一可执行订单簿，未被 Runtime 或 `TradingCoreState` 复制。
-- 验证命令：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`。2026-08-24 本地结果为
-  295 tests、0 failures、0 errors，覆盖真实 exchange-core、Aeron timer replay、快照、六产品线资金/生命周期矩阵和 Runtime parity。
+- Runtime/materialization 等价检查只保留在测试源码，用于快照恢复回归，不进入生产命令或在线查询路径。
 
 ### P4：六条产品线的结算内核
 

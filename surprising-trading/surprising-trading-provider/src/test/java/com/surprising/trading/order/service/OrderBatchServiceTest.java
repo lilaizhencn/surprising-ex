@@ -30,14 +30,8 @@ import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
-import com.surprising.trading.order.model.MarkPriceLookup;
-import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.ValidationResult;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,16 +40,13 @@ import org.mockito.ArgumentCaptor;
 class OrderBatchServiceTest {
 
     private final OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-    private final InstrumentRuleLookup instrumentRules = mock(InstrumentRuleLookup.class);
-    private final MarkPriceLookup markPrices = mock(MarkPriceLookup.class);
     private AeronOrderCommandService service;
 
     @BeforeEach
     void setUp() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        service = new AeronOrderCommandService(aeron, instrumentRules, markPrices, properties);
-        when(instrumentRules.currentRule("BTC-USDT")).thenReturn(Optional.of(perpetualRule()));
+        service = new AeronOrderCommandService(aeron, properties);
         when(aeron.commandOutcome(any(), any(), anyLong(), any(byte[].class)))
                 .thenReturn(new CoreCommandOutcome.Terminal(new CoreResponse(
                         ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
@@ -68,7 +59,6 @@ class OrderBatchServiceTest {
                 .mapToObj(index -> place("place-" + index)).toList();
         ValidationResult validation = ValidationResult.ok(7L, InstrumentType.PERPETUAL,
                 ContractType.LINEAR_PERPETUAL);
-        OrderFeeSnapshot fee = fee();
         CoreOrderBatchResult aggregate = new CoreOrderBatchResult(java.util.stream.IntStream.range(0, 20)
                 .mapToObj(index -> new CoreOrderBatchResult.Item(index, 30_000L + index, 0L, 0L,
                         ResponseStatus.APPLIED, CoreResultCode.NONE, null, List.of()))
@@ -79,9 +69,9 @@ class OrderBatchServiceTest {
                 1L, 9L, 17L, com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResult(aggregate))));
 
         AeronOrderCommandService.CommandExecution first = service.placeBatchCommand("place-batch", requests,
-                java.util.Collections.nCopies(20, validation), java.util.Collections.nCopies(20, fee));
+                java.util.Collections.nCopies(20, validation));
         AeronOrderCommandService.CommandExecution second = service.placeBatchCommand("place-batch", requests,
-                java.util.Collections.nCopies(20, validation), java.util.Collections.nCopies(20, fee));
+                java.util.Collections.nCopies(20, validation));
 
         assertThat(first.commandId()).isEqualTo(second.commandId());
         OrderCommandReceipt firstReceipt = service.receipt(first);
@@ -184,14 +174,4 @@ class OrderBatchServiceTest {
                 TimeInForce.GTC, 60_000L, 2L, MarginMode.CROSS, PositionSide.NET, false, false);
     }
 
-    private static OrderFeeSnapshot fee() {
-        return new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, -10L, 25L, "test");
-    }
-
-    private static InstrumentRule perpetualRule() {
-        return new InstrumentRule("BTC-USDT", 7, "TRADING", InstrumentType.PERPETUAL,
-                ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
-                Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC", "FOK", "GTX"),
-                true, true, true, 1, 1, 1_000_000, 1, Long.MAX_VALUE, 1, 100_000_000, 10_000);
-    }
 }

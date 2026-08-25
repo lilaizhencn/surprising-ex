@@ -1,12 +1,9 @@
 package com.surprising.aeron.service;
 
-import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
-import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import java.util.Arrays;
@@ -90,11 +87,9 @@ public final class ExchangeCoreConcurrentBenchmark {
         }
     }
 
-    private static PlaceOrderCommand place(long orderId) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, "BTC", "USDT", "USDT", CoreOrderSide.BUY,
-                1_000, 1_001, 1_100, 999, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                ReservationKind.SPOT_ASSET, "USDT", 1_000, CoreOrderType.LIMIT, CoreTimeInForce.IOC, false,
-                "bench-concurrent-" + orderId, 0, 0);
+    private static CoreMatchingOrder place(long orderId) {
+        return new CoreMatchingOrder(orderId, SYMBOL, CoreOrderSide.BUY, CoreOrderType.LIMIT,
+                CoreTimeInForce.IOC, 1_000, 1);
     }
 
     private static int positive(String[] args, int index, int fallback) {

@@ -238,7 +238,7 @@ class CoreRiskStateTest {
                 1_700_000_000_000L));
 
         Map<String, CoreMarkPriceState> marks = new TreeMap<>(state.riskState().markPrices());
-        marks.put("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 80, 3));
+        marks.put("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 80, 3, 1_000));
         CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan("BTC-USDT", 3, 3, 0, false)
                 .withTriggerProgress(false, 1, 80, 91, 100, 80, 1_700_000_000_001L);
         CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),

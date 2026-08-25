@@ -300,32 +300,7 @@ class CoreProbeStateTest {
         CoreMessage adjustment = tradingCommand(CoreMessageType.ADJUST_BALANCE, adjustmentId, 1,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
         CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, placeId, 2,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        91,
-                        "BTC-USDT",
-                        1,
-                        "BTC",
-                        "USDT",
-                        "USDT",
-                        CoreOrderSide.BUY,
-                        1_000,
-                        1_000,
-                        1_000,
-                        1_000,
-                        2,
-                        false,
-                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                        com.surprising.aeron.protocol.CorePositionSide.NET,
-                        ReservationKind.SPOT_ASSET,
-                        "USDT",
-                        2_500,
-                        CoreOrderType.LIMIT,
-                        CoreTimeInForce.GTC,
-                        false,
-                        "client-91",
-                        -10,
-                        20
-                )));
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(91, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-91")));
 
         assertThat(original.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
         var placeResponse = applyAndDrain(original, place);
@@ -345,7 +320,7 @@ class CoreProbeStateTest {
         assertThat(duplicatePlace.status()).isEqualTo(ResponseStatus.DUPLICATE);
         assertThat(com.surprising.aeron.protocol.CoreCommandResultCodec.decode(duplicatePlace.data())
                 .orders()).extracting(value -> value.orderId()).containsExactly(91L);
-        assertThat(original.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(7_999);
+        assertThat(original.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(7_998);
 
         var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(501,
                 ProductLine.SPOT, 1001, "tp-501", "", "BTC-USDT", CoreOrderSide.SELL,
@@ -380,7 +355,7 @@ class CoreProbeStateTest {
         var orderResult = original.apply(orderQuery);
         assertThat(userResult.status()).isEqualTo(ResponseStatus.OK);
         assertThat(CoreStateQueryCodec.decodeUserState(userResult.data()).balances().getFirst().lockedUnits())
-                .isEqualTo(2_001);
+                .isEqualTo(2_002);
         assertThat(orderResult.status()).isEqualTo(ResponseStatus.OK);
         assertThat(CoreStateQueryCodec.decodeOrderState(orderResult.data()).orderId()).isEqualTo(91);
         var byClientId = CoreStateQueryCodec.decodeOrderState(original.apply(clientOrderQuery).data());
@@ -419,32 +394,7 @@ class CoreProbeStateTest {
 
         UUID duplicateId = UUID.randomUUID();
         CoreMessage duplicateClientOrder = tradingCommand(CoreMessageType.PLACE_ORDER, duplicateId, 4,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        92,
-                        "BTC-USDT",
-                        1,
-                        "BTC",
-                        "USDT",
-                        "USDT",
-                        CoreOrderSide.BUY,
-                        900,
-                        900,
-                        900,
-                        900,
-                        1,
-                        false,
-                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                        com.surprising.aeron.protocol.CorePositionSide.NET,
-                        ReservationKind.SPOT_ASSET,
-                        "USDT",
-                        900,
-                        CoreOrderType.LIMIT,
-                        CoreTimeInForce.GTC,
-                        false,
-                        "client-91",
-                        -10,
-                        20
-                )));
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(92, "BTC-USDT", 1, CoreOrderSide.BUY, 900, 1, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-91")));
         long availableBeforeDuplicate = original.tradingState().user(1001).balances().get("USDT").availableUnits();
         assertThat(original.apply(duplicateClientOrder).resultCode()).isEqualTo(CoreResultCode.DUPLICATE_CLIENT_ORDER_ID);
         assertThat(original.tradingState().order(92)).isNull();
@@ -480,32 +430,7 @@ class CoreProbeStateTest {
         assertThat(state.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
         UUID commandId = UUID.randomUUID();
         CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, commandId, 2,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        711,
-                        "BTC-USDT",
-                        1,
-                        "BTC",
-                        "USDT",
-                        "USDT",
-                        CoreOrderSide.BUY,
-                        1_000,
-                        1_000,
-                        1_000,
-                        1_000,
-                        2,
-                        false,
-                        CoreMarginMode.CROSS,
-                        CorePositionSide.NET,
-                        ReservationKind.SPOT_ASSET,
-                        "USDT",
-                        2_000,
-                        CoreOrderType.LIMIT,
-                        CoreTimeInForce.GTC,
-                        false,
-                        "async-711",
-                        0,
-                        0
-                )));
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(711, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "async-711")));
 
         CoreResponse pending = state.apply(place);
 
@@ -514,32 +439,7 @@ class CoreProbeStateTest {
         long sequence = state.matchingSequence(commandId);
         UUID secondCommandId = UUID.randomUUID();
         CoreMessage secondPlace = tradingCommand(CoreMessageType.PLACE_ORDER, secondCommandId, 3,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        712,
-                        "BTC-USDT",
-                        1,
-                        "BTC",
-                        "USDT",
-                        "USDT",
-                        CoreOrderSide.BUY,
-                        900,
-                        900,
-                        900,
-                        900,
-                        2,
-                        false,
-                        CoreMarginMode.CROSS,
-                        CorePositionSide.NET,
-                        ReservationKind.SPOT_ASSET,
-                        "USDT",
-                        1_800,
-                        CoreOrderType.LIMIT,
-                        CoreTimeInForce.GTC,
-                        false,
-                        "async-712",
-                        0,
-                        0
-                )));
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(712, "BTC-USDT", 1, CoreOrderSide.BUY, 900, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "async-712")));
         assertThat(state.apply(secondPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         long secondSequence = state.matchingSequence(secondCommandId);
         assertThat(secondSequence).isGreaterThan(sequence);
@@ -583,32 +483,7 @@ class CoreProbeStateTest {
             state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
             CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                            713,
-                            "BTC-USDT",
-                            1,
-                            "BTC",
-                            "USDT",
-                            "USDT",
-                            CoreOrderSide.BUY,
-                            1_000,
-                            1_000,
-                            1_000,
-                            1_000,
-                            2,
-                            false,
-                            CoreMarginMode.CROSS,
-                            CorePositionSide.NET,
-                            ReservationKind.SPOT_ASSET,
-                            "USDT",
-                            2_000,
-                            CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC,
-                            false,
-                            "snapshot-attempt-713",
-                            0,
-                            0
-                    )));
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(713, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "snapshot-attempt-713")));
 
             state.apply(place);
             assertThat(state.snapshot()).isNotEmpty();
@@ -627,60 +502,10 @@ class CoreProbeStateTest {
             assertThat(fixtureStartingCount).isEqualTo(2);
             UUID firstCommandId = UUID.randomUUID();
             CoreMessage firstPlace = tradingCommand(CoreMessageType.PLACE_ORDER, firstCommandId, 2,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                            715,
-                            "BTC-USDT",
-                            1,
-                            "BTC",
-                            "USDT",
-                            "USDT",
-                            CoreOrderSide.BUY,
-                            1_000,
-                            1_000,
-                            1_000,
-                            1_000,
-                            2,
-                            false,
-                            CoreMarginMode.CROSS,
-                            CorePositionSide.NET,
-                            ReservationKind.SPOT_ASSET,
-                            "USDT",
-                            2_000,
-                            CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC,
-                            false,
-                            "snapshot-fence-715",
-                            0,
-                            0
-                    )));
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(715, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "snapshot-fence-715")));
             UUID secondCommandId = UUID.randomUUID();
             CoreMessage secondPlace = tradingCommand(CoreMessageType.PLACE_ORDER, secondCommandId, 3,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                            716,
-                            "BTC-USDT",
-                            1,
-                            "BTC",
-                            "USDT",
-                            "USDT",
-                            CoreOrderSide.BUY,
-                            900,
-                            900,
-                            900,
-                            900,
-                            2,
-                            false,
-                            CoreMarginMode.CROSS,
-                            CorePositionSide.NET,
-                            ReservationKind.SPOT_ASSET,
-                            "USDT",
-                            1_800,
-                            CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC,
-                            false,
-                            "snapshot-fence-716",
-                            0,
-                            0
-                    )));
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(716, "BTC-USDT", 1, CoreOrderSide.BUY, 900, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "snapshot-fence-716")));
             assertThat(state.apply(firstPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             assertThat(state.apply(secondPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
 
@@ -794,32 +619,7 @@ class CoreProbeStateTest {
                     .status()).isEqualTo(ResponseStatus.APPLIED);
             UUID commandId = UUID.randomUUID();
             CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, commandId, 2,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                            714,
-                            "BTC-USDT",
-                            1,
-                            "BTC",
-                            "USDT",
-                            "USDT",
-                            CoreOrderSide.BUY,
-                            1_000,
-                            1_000,
-                            1_000,
-                            1_000,
-                            2,
-                            false,
-                            CoreMarginMode.CROSS,
-                            CorePositionSide.NET,
-                            ReservationKind.SPOT_ASSET,
-                            "USDT",
-                            2_000,
-                            CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC,
-                            false,
-                            "fatal-714",
-                            0,
-                            0
-                    )));
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(714, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "fatal-714")));
             assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(commandId);
             var matcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
@@ -847,32 +647,7 @@ class CoreProbeStateTest {
                     .status()).isEqualTo(ResponseStatus.APPLIED);
             UUID commandId = UUID.randomUUID();
             CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, commandId, 2,
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                            715,
-                            "BTC-USDT",
-                            1,
-                            "BTC",
-                            "USDT",
-                            "USDT",
-                            CoreOrderSide.BUY,
-                            1_000,
-                            1_000,
-                            1_000,
-                            1_000,
-                            2,
-                            false,
-                            CoreMarginMode.CROSS,
-                            CorePositionSide.NET,
-                            ReservationKind.SPOT_ASSET,
-                            "USDT",
-                            2_000,
-                            CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC,
-                            false,
-                            "prefix-715",
-                            0,
-                            0
-                    )));
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(715, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prefix-715")));
             assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(commandId);
             var result = state.takeMatchingResult(sequence);
@@ -908,6 +683,7 @@ class CoreProbeStateTest {
     void asyncTriggerMatchingUsesContinuationAfterTriggerClaim() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         applySpotInstrument(state);
+        applySpotMark(state, 70_000);
         state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2))));
         var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(712,
@@ -950,32 +726,7 @@ class CoreProbeStateTest {
         state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
         long hash = state.tradingState().businessStateHash();
-        PlaceOrderCommand command = new PlaceOrderCommand(
-                99,
-                "BTC-USDT",
-                1,
-                "BTC",
-                "USDT",
-                "USDT",
-                CoreOrderSide.BUY,
-                1_000,
-                1_000,
-                1_000,
-                1_000,
-                2,
-                false,
-                com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                com.surprising.aeron.protocol.CorePositionSide.NET,
-                ReservationKind.SPOT_ASSET,
-                "USDT",
-                0,
-                CoreOrderType.LIMIT,
-                CoreTimeInForce.GTC,
-                false,
-                "",
-                0,
-                0
-        );
+        PlaceOrderCommand command = new PlaceOrderCommand(99, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "");
         CoreMessage query = query(CoreMessageType.ORDER_PREFLIGHT_QUERY, 1001,
                 TradingCommandCodec.encodePlaceOrder(command));
 
@@ -983,7 +734,7 @@ class CoreProbeStateTest {
 
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
         assertThat(com.surprising.aeron.protocol.CoreOrderPreflightCodec.decode(response.data()))
-                .isEqualTo(new com.surprising.aeron.protocol.CoreOrderPreflightView("USDT", 2_000));
+                .isEqualTo(new com.surprising.aeron.protocol.CoreOrderPreflightView("USDT", 2_002));
         assertThat(state.tradingState().businessStateHash()).isEqualTo(hash);
         assertThat(state.tradingState().orders()).isEmpty();
     }
@@ -992,6 +743,7 @@ class CoreProbeStateTest {
     void executesTriggerInsideCoreAndDoesNotCreateASecondLifecycleRoundTrip() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         applySpotInstrument(state);
+        applySpotMark(state, 70_000);
         state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2))));
         var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(503,
@@ -1035,7 +787,7 @@ class CoreProbeStateTest {
         state.apply(tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), 2,
                 com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger)));
 
-        var mark = new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 2_000);
+        var mark = new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 1_000);
         var response = applyAndDrain(state, tradingCommand(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 3,
                 TradingCommandCodec.encodeApplyMarkPrice(mark)));
 
@@ -1067,7 +819,7 @@ class CoreProbeStateTest {
 
         CoreMessage mark = tradingCommand(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 10,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 2_000)));
+                        new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 1_000)));
         assertThat(applyAndDrain(state, mark).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(state.tradingState().triggerOrders().get(1L).status())
                 .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING);
@@ -1119,7 +871,7 @@ class CoreProbeStateTest {
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 2, 0, 2_000, 399),
                 CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)))).status())
                 .isEqualTo(ResponseStatus.APPLIED);
-        var mark = new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 2_000);
+        var mark = new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 1_000);
         CoreResponse markResponse = applyAndDrain(state, tradingCommand(CoreMessageType.APPLY_MARK_PRICE,
                 UUID.randomUUID(), 400, TradingCommandCodec.encodeApplyMarkPrice(mark)));
         assertThat(markResponse.status()).withFailMessage("mark status=%s result=%s", markResponse.status(), markResponse.resultCode())
@@ -1191,9 +943,9 @@ class CoreProbeStateTest {
                 com.surprising.aeron.service.state.CoreLiquidationState.Status.PLANNED);
         var risk = new com.surprising.aeron.service.state.CoreRiskState(
                 Map.of("BTC-USDT", new com.surprising.aeron.service.state.CoreMarkPriceState(
-                                "BTC-USDT", 1, 81, 7),
+                                "BTC-USDT", 1, 81, 7, 1),
                         "ETH-USDT", new com.surprising.aeron.service.state.CoreMarkPriceState(
-                                "ETH-USDT", 1, 120, 9)),
+                                "ETH-USDT", 1, 120, 9, 1)),
                 Map.of(), Map.of(1L, current, 2L, stale),
                 Map.of("BTC-USDT", new com.surprising.aeron.service.state.CoreRiskState.RiskScan(
                         "BTC-USDT", 7, 7, 1001, false)), 3);
@@ -1224,32 +976,7 @@ class CoreProbeStateTest {
         applySpotInstrument(state);
         long businessHash = state.tradingState().businessStateHash();
         CoreMessage command = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 1,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        1,
-                        "BTC-USDT",
-                        1,
-                        "BTC",
-                        "USDT",
-                        "USDT",
-                        CoreOrderSide.BUY,
-                        600,
-                        600,
-                        600,
-                        600,
-                        1,
-                        false,
-                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                        com.surprising.aeron.protocol.CorePositionSide.NET,
-                        ReservationKind.SPOT_ASSET,
-                        "USDT",
-                        1_000,
-                        com.surprising.aeron.protocol.CoreOrderType.LIMIT,
-                        com.surprising.aeron.protocol.CoreTimeInForce.GTC,
-                        false,
-                        "",
-                        0,
-                        0
-                )));
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(1, "BTC-USDT", 1, CoreOrderSide.BUY, 600, 1, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "")));
 
         var rejected = state.apply(command);
         var duplicate = state.apply(command);
@@ -1329,32 +1056,7 @@ class CoreProbeStateTest {
         var beforeExportStatus = state.exportState().status();
         UUID rejectedCommandId = UUID.randomUUID();
         CoreMessage command = tradingCommand(CoreMessageType.PLACE_ORDER, rejectedCommandId, 2,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        9_001,
-                        "BTC-USDT",
-                        1,
-                        "BTC",
-                        "USDT",
-                        "USDT",
-                        CoreOrderSide.BUY,
-                        600,
-                        600,
-                        600,
-                        600,
-                        1,
-                        false,
-                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
-                        com.surprising.aeron.protocol.CorePositionSide.NET,
-                        ReservationKind.SPOT_ASSET,
-                        "USDT",
-                        1_000,
-                        com.surprising.aeron.protocol.CoreOrderType.LIMIT,
-                        com.surprising.aeron.protocol.CoreTimeInForce.GTC,
-                        false,
-                        "",
-                        0,
-                        0
-                )));
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9_001, "BTC-USDT", 1, CoreOrderSide.BUY, 600, 1, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "")));
 
         // When
         CoreResponse rejected = state.apply(command);
@@ -1409,7 +1111,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(11);
+        assertThat(manifest.schemaVersion()).isEqualTo(12);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();
@@ -1465,32 +1167,7 @@ class CoreProbeStateTest {
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                 .status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(applyAndDrain(state, tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 3,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        901,
-                        "BTC-USDT",
-                        1,
-                        "BTC",
-                        "USDT",
-                        "USDT",
-                        CoreOrderSide.BUY,
-                        1_000,
-                        1_000,
-                        1_000,
-                        1_000,
-                        2,
-                        false,
-                        CoreMarginMode.CROSS,
-                        CorePositionSide.NET,
-                        ReservationKind.SPOT_ASSET,
-                        "USDT",
-                        2_000,
-                        CoreOrderType.LIMIT,
-                        CoreTimeInForce.GTC,
-                        false,
-                        "client-901",
-                        0,
-                        0
-                )))).status()).isEqualTo(ResponseStatus.APPLIED);
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(901, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-901")))).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(applyAndDrain(state, tradingCommand(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 4,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(901)))).status())
                 .isEqualTo(ResponseStatus.APPLIED);
@@ -1513,32 +1190,7 @@ class CoreProbeStateTest {
         assertThat(state.terminalRetentionTombstoneCount()).isEqualTo(1);
 
         CoreMessage reusedOrderId = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 5,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
-                        901,
-                        "BTC-USDT",
-                        1,
-                        "BTC",
-                        "USDT",
-                        "USDT",
-                        CoreOrderSide.BUY,
-                        900,
-                        900,
-                        900,
-                        900,
-                        1,
-                        false,
-                        CoreMarginMode.CROSS,
-                        CorePositionSide.NET,
-                        ReservationKind.SPOT_ASSET,
-                        "USDT",
-                        900,
-                        CoreOrderType.LIMIT,
-                        CoreTimeInForce.GTC,
-                        false,
-                        "client-902",
-                        0,
-                        0
-                )));
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(901, "BTC-USDT", 1, CoreOrderSide.BUY, 900, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-902")));
         assertThat(state.apply(reusedOrderId).resultCode()).isEqualTo(CoreResultCode.DUPLICATE_ORDER_ID);
         CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot());
         assertThat(restored.tradingState().user(1001).reservations()).doesNotContainKey(901L);
@@ -1626,10 +1278,18 @@ class CoreProbeStateTest {
     private static void applySpotInstrument(CoreProbeState state) {
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
-                100_000, 50_000, 0, 0, 0, -1, 0);
+                100_000, 50_000, -10, 20, 0, -1, 0);
         CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.UPSERT_INSTRUMENT,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 1, 1,
                 1_000, 1), TradingCommandCodec.encodeUpsertInstrument(instrument));
+        assertThat(state.apply(command).status()).isEqualTo(ResponseStatus.APPLIED);
+    }
+
+    private static void applySpotMark(CoreProbeState state, long markPriceTicks) {
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
+                UUID.randomUUID(), ProductLine.SPOT, CommandSource.KAFKA_INPUT_BRIDGE, 10, 1, 1,
+                1_000, 2), TradingCommandCodec.encodeApplyMarkPrice(
+                        new ApplyMarkPriceCommand("BTC-USDT", 1, markPriceTicks, 7, 1_000)));
         assertThat(state.apply(command).status()).isEqualTo(ResponseStatus.APPLIED);
     }
 

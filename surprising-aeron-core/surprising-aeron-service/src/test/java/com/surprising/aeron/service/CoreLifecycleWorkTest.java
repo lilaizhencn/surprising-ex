@@ -70,8 +70,13 @@ class CoreLifecycleWorkTest {
         CoreLiquidationWorkView first = CoreLiquidationWorkCodec.decodeWork(firstResponse.data());
         assertThat(firstResponse.data().length).isLessThanOrEqualTo(1_024);
         assertThat(first.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-        assertThat(first.nextCursorLiquidationId()).isEqualTo(expectedLiquidationId);
+        assertThat(first.nextCursorLiquidationId()).isEqualTo(3);
         assertThat(first.actions().size() + first.resolutions().size()).isEqualTo(1);
+        if (purpose == CoreLiquidationWorkView.Purpose.EXECUTION) {
+            assertThat(first.actions().getFirst().liquidationId()).isEqualTo(expectedLiquidationId);
+        } else {
+            assertThat(first.resolutions().getFirst().liquidationId()).isEqualTo(expectedLiquidationId);
+        }
 
         var resumedResponse = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                 CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL, purpose,
@@ -92,7 +97,7 @@ class CoreLifecycleWorkTest {
         var insurance = liquidation(2, 1002, 100, CoreLiquidationState.Status.INSURANCE_REQUIRED);
         var adl = liquidation(3, 1003, 50, CoreLiquidationState.Status.ADL_REQUIRED);
         CoreRiskState risk = new CoreRiskState(
-                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 60_000, 9)),
+                Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 60_000, 9, 1_000)),
                 Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4);
         CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
                 Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(11, 1, 100, 41,

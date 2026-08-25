@@ -135,7 +135,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
-    public CompletableFuture<CoreMatchingResult> placeAsync(long userId, PlaceOrderCommand command) {
+    public CompletableFuture<CoreMatchingResult> placeAsync(long userId, CoreMatchingOrder command) {
         return placeUnlanedAsync(userId, command);
     }
 
@@ -235,7 +235,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return bound;
     }
 
-    private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, PlaceOrderCommand command) {
+    private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, CoreMatchingOrder command) {
         return ensureSymbolAsync(command.symbol())
                 .thenCombine(ensureUserAsync(userId), (symbolId, ignored) -> symbolId)
                 .thenCompose(symbolId -> {
@@ -245,8 +245,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .symbol(symbolId)
                         .action(command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
                         .orderType(orderType(command))
-                        .price(command.executionPriceTicks())
-                        .reservePrice(command.executionPriceTicks())
+                        .price(command.matchingPriceTicks())
+                        .reservePrice(command.matchingPriceTicks())
                         .size(command.quantitySteps()).build());
                 })
                 .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
@@ -277,7 +277,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 new CoreMatchingResult.MarketData(asks, bids));
     }
 
-    private static OrderType orderType(PlaceOrderCommand command) {
+    private static OrderType orderType(CoreMatchingOrder command) {
         if (command.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return command.timeInForce() == com.surprising.aeron.protocol.CoreTimeInForce.FOK
                     ? OrderType.FOK : OrderType.IOC;
@@ -378,7 +378,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String symbol,
-                                                                    PlaceOrderCommand replacement) {
+                                                                    CoreMatchingOrder replacement) {
         return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
                 .thenCompose(ignored -> {
                     CompletableFuture<exchange.core2.core.common.MatcherResult> cancel =
@@ -394,8 +394,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                     api.submitCommandAsyncMatcherResult(ApiPlaceOrder.builder()
                                             .orderId(replacement.orderId()).uid(userId).symbol(replacementSymbolId)
                                             .action(replacement.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
-                                            .orderType(orderType(replacement)).price(replacement.executionPriceTicks())
-                                            .reservePrice(replacement.executionPriceTicks())
+                                            .orderType(orderType(replacement)).price(replacement.matchingPriceTicks())
+                                            .reservePrice(replacement.matchingPriceTicks())
                                             .size(replacement.quantitySteps()).build());
                             return place.thenApply(response -> {
                                 CoreMatchingResult result = matchingResult(response);

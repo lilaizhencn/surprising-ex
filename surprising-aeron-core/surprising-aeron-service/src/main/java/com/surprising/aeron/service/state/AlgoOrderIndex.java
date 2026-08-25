@@ -9,6 +9,7 @@ import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.LongFunction;
 
 public final class AlgoOrderIndex {
 
@@ -32,6 +33,12 @@ public final class AlgoOrderIndex {
 
     public List<Long> query(long userId, String symbol, long dueAtEpochMillis, int limit,
                             Map<Long, CoreAlgoOrderState> values) {
+        return query(userId, symbol, dueAtEpochMillis, limit, values::get);
+    }
+
+    public List<Long> query(long userId, String symbol, long dueAtEpochMillis, int limit,
+                            LongFunction<CoreAlgoOrderState> lookup) {
+        if (lookup == null) throw new IllegalArgumentException("algo order lookup is required");
         int boundedLimit = Math.max(1, Math.min(limit, 10_000));
         String normalizedSymbol = symbol == null || symbol.isEmpty()
                 ? "" : OrderReservation.normalizeSymbol(symbol);
@@ -42,7 +49,7 @@ public final class AlgoOrderIndex {
                 : candidates.headSet(new AlgoDueKey(dueAtEpochMillis, Long.MAX_VALUE), true);
         List<Long> result = new ArrayList<>(Math.min(boundedLimit, dueCandidates.size()));
         for (AlgoDueKey key : dueCandidates) {
-            CoreAlgoOrderState value = values.get(key.algoOrderId());
+            CoreAlgoOrderState value = lookup.apply(key.algoOrderId());
             if (value == null || (userId != 0 && value.userId() != userId)
                     || (!normalizedSymbol.isEmpty() && !value.symbol().equals(normalizedSymbol))
                     || (dueAtEpochMillis != 0 && (value.nextSliceAtEpochMillis() == 0

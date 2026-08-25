@@ -244,7 +244,7 @@ public final class RuntimeCommandProcessor {
     }
 
     public static void placeOrder(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                  long userId, PlaceOrderCommand command, UUID commandId,
+                                  long userId, ResolvedPlaceOrder command, UUID commandId,
                                   long requiredReservation) {
         if (runtime == null || identities == null || command == null || commandId == null || userId <= 0
                 || requiredReservation <= 0) {
@@ -267,7 +267,7 @@ public final class RuntimeCommandProcessor {
                     "available balance is insufficient");
         }
         OrderRuntime order = new OrderRuntime(command.orderId(), runtime.productLine(), userId, symbolId,
-                command.instrumentVersion(), command.side(), command.limitPriceTicks(), command.executionPriceTicks(),
+                command.instrumentVersion(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
                 command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),

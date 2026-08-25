@@ -12,6 +12,8 @@ import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingStateSnapshotCodec;
+import com.surprising.aeron.service.state.CoreFeePolicySnapshotCodec;
+import com.surprising.aeron.service.state.CoreFeePolicyState;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -32,13 +34,14 @@ final class SectionedCoreSnapshotParser {
         CoreExportState exportState = parseOutbox(payloads[3]);
         MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[4]);
         TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[5], manifest.productLine());
-        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[6]);
+        Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[6]);
+        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
         SectionedCoreSnapshotValidation.validatePairing(
                 manifest, sourceSequences, exportState, matcherSnapshot, tradingState);
         matcherSnapshot.verifyCoreState(tradingState, manifest.appliedCommandCount());
-        long checksum = ByteBuffer.wrap(payloads[7]).order(ByteOrder.LITTLE_ENDIAN).getLong();
+        long checksum = ByteBuffer.wrap(payloads[8]).order(ByteOrder.LITTLE_ENDIAN).getLong();
         return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
-                commandResults, sourceSequences, exportState, matcherSnapshot, tradingState, retention,
+                commandResults, sourceSequences, exportState, matcherSnapshot, tradingState, feePolicies, retention,
                 manifest, checksum);
     }
 
@@ -165,14 +168,17 @@ final class SectionedCoreSnapshotParser {
             CoreExportState exportState,
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
+            Map<Long, CoreFeePolicyState> feePolicies,
             TerminalStateRetention retention,
             HeaderManifest manifest,
             long checksum) {
 
         CoreProbeState restore(ProductLine expectedProductLine) {
             requireProductLine(expectedProductLine);
-            return CoreProbeState.restore(productLine, appliedCommandCount, probeValue, commandResults,
+            CoreProbeState state = CoreProbeState.restore(productLine, appliedCommandCount, probeValue, commandResults,
                     sourceSequences, tradingState, exportState, retention, matcherSnapshot);
+            state.restoreFeePolicies(feePolicies);
+            return state;
         }
 
         CoreSnapshotManifest manifest(ProductLine expectedProductLine) {

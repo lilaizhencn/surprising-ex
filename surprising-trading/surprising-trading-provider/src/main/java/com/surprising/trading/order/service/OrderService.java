@@ -31,15 +31,14 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
-import java.time.Instant;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -58,7 +57,6 @@ public class OrderService {
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
     private final OrderPlacementStateService placementStateService;
-    private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final AeronOrderCommandService aeronOrders;
     private final AeronOrderProjectionRepository aeronOrderProjection;
 
@@ -66,22 +64,19 @@ public class OrderService {
     public OrderService(TradingOrderProperties properties,
                         OrderValidator orderValidator,
                         OrderPlacementStateService placementStateService,
-                        OrderFeeSnapshotLookup feeSnapshotLookup,
                         AeronOrderCommandService aeronOrders,
                         AeronOrderProjectionRepository aeronOrderProjection) {
         this.properties = properties;
         this.orderValidator = orderValidator;
         this.placementStateService = placementStateService;
-        this.feeSnapshotLookup = feeSnapshotLookup;
         this.aeronOrders = aeronOrders;
         this.aeronOrderProjection = aeronOrderProjection;
     }
 
     public OrderService(TradingOrderProperties properties,
                         OrderValidator orderValidator,
-                        OrderPlacementStateService placementStateService,
-                        OrderFeeSnapshotLookup feeSnapshotLookup) {
-        this(properties, orderValidator, placementStateService, feeSnapshotLookup, null, null);
+                        OrderPlacementStateService placementStateService) {
+        this(properties, orderValidator, placementStateService, null, null);
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
@@ -91,10 +86,7 @@ public class OrderService {
     public OrderCommandReceipt placeCommand(PlaceOrderRequest request) {
         requireAeron();
         PreparedAeronOrder prepared = prepareAeronOrder(normalize(request));
-        var execution = prepared.instrument() == null
-                ? aeronOrders.placeCommand(prepared.request(), prepared.validation(), prepared.fee())
-                : aeronOrders.placeCommand(prepared.request(), prepared.validation(), prepared.fee(),
-                prepared.instrument());
+        var execution = aeronOrders.placeCommand(prepared.request(), prepared.validation());
         return aeronOrders.receipt(execution);
     }
 
@@ -102,10 +94,7 @@ public class OrderService {
         requireAeron();
         PlaceOrderRequest normalized = normalize(request);
         PreparedAeronOrder prepared = prepareAeronOrder(normalized);
-        if (prepared.instrument() == null) {
-            return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee());
-        }
-        return aeronOrders.place(prepared.request(), prepared.validation(), prepared.fee(), prepared.instrument());
+        return aeronOrders.place(prepared.request(), prepared.validation());
     }
 
     private PreparedAeronOrder prepareAeronOrder(PlaceOrderRequest normalized) {
@@ -116,10 +105,7 @@ public class OrderService {
                 ? orderValidator.validate(normalized)
                 : orderValidator.validate(normalized, instrument);
         if (!validation.accepted()) throw new IllegalArgumentException(validation.rejectReason());
-        OrderFeeSnapshot fee = feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
-                        validation.instrumentVersion(), Instant.now())
-                .orElseThrow(() -> new IllegalStateException("fee schedule unavailable"));
-        return new PreparedAeronOrder(normalized, validation, fee, instrument);
+        return new PreparedAeronOrder(normalized, validation);
     }
 
     public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
@@ -132,23 +118,20 @@ public class OrderService {
         }
         List<PlaceOrderRequest> normalized = new ArrayList<>();
         List<ValidationResult> validations = new ArrayList<>();
-        List<OrderFeeSnapshot> fees = new ArrayList<>();
         requireBatchSize(request.orders().size(), 20, "orders");
         for (PlaceOrderRequest order : request.orders()) {
             PreparedAeronOrder prepared = prepareAeronOrder(normalize(order));
             normalized.add(prepared.request());
             validations.add(prepared.validation());
-            fees.add(prepared.fee());
         }
         requireAeron();
-        return aeronOrders.receipt(aeronOrders.placeBatchCommand(request.batchKey(), normalized, validations, fees));
+        return aeronOrders.receipt(aeronOrders.placeBatchCommand(request.batchKey(), normalized, validations));
     }
 
     public TestOrderResponse test(PlaceOrderRequest request) {
         return testLocal(request);
     }
 
-    /** 生产测试下单只读取 JVM 快照，不为校验请求打开数据库事务。 */
     private TestOrderResponse testLocal(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
@@ -157,15 +140,7 @@ public class OrderService {
         if (!validation.accepted()) {
             return testRejected(validation, "ORDER_RULES");
         }
-        var resolvedFeeSnapshot = feeSnapshotLookup == null
-                ? java.util.Optional.<OrderFeeSnapshot>empty()
-                : feeSnapshotLookup.lookup(productLine, normalized.userId(), normalized.symbol(),
-                validation.instrumentVersion(), Instant.now());
-        if (resolvedFeeSnapshot.isEmpty()) {
-            return new TestOrderResponse(false, "fee schedule unavailable", validation.instrumentVersion(),
-                    "FEE", null, null, 0L);
-        }
-        return dryRunOpeningFunds(normalized, validation, resolvedFeeSnapshot.get());
+        return dryRunOpeningFunds(normalized, validation);
     }
 
     public AmendOrderResponse amend(AmendOrderRequest request) {
@@ -237,9 +212,8 @@ public class OrderService {
     }
 
     private TestOrderResponse dryRunOpeningFunds(PlaceOrderRequest request,
-                                                 ValidationResult validation,
-                                                 OrderFeeSnapshot feeSnapshot) {
-        OrderAeronGateway.PreflightResult result = requireAeron().preflight(request, validation, feeSnapshot);
+                                                 ValidationResult validation) {
+        OrderAeronGateway.PreflightResult result = requireAeron().preflight(request, validation);
         if (!result.accepted()) {
             return new TestOrderResponse(false, result.resultCode().name(), validation.instrumentVersion(),
                     "CORE_PREFLIGHT", currentProductLine().accountTypeCode(), null, 0L);
@@ -708,8 +682,7 @@ public class OrderService {
     private record IndexedCancelRequest(int index, CancelOrderRequest request) {
     }
 
-    private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation,
-                                      OrderFeeSnapshot fee, InstrumentRule instrument) {
+    private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation) {
     }
 
     private PlaceOrderRequest normalize(PlaceOrderRequest request) {

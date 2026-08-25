@@ -35,7 +35,6 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
@@ -65,8 +64,6 @@ class OrderServiceTest {
     private OrderValidator orderValidator;
     @Mock
     private OrderPlacementStateService placementStateService;
-    @Mock
-    private OrderFeeSnapshotLookup feeSnapshotLookup;
     @Mock
     private AeronOrderCommandService aeronOrders;
     @Mock
@@ -110,22 +107,24 @@ class OrderServiceTest {
         when(placementStateService.position(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
                 MarginMode.CROSS, PositionSide.NET))
                 .thenReturn(Optional.of(new ReduceOnlyPosition(5L, 7L)));
-        when(aeronOrders.place(any(), any(), any())).thenReturn(response(91, "close-1", OrderStatus.ACCEPTED));
+        when(aeronOrders.place(any(), any())).thenReturn(response(91, "close-1", OrderStatus.ACCEPTED));
 
         service.closePosition(new ClosePositionRequest(1001L, "close-1", "BTC-USDT",
                 MarginMode.CROSS, PositionSide.NET));
 
         ArgumentCaptor<PlaceOrderRequest> request = ArgumentCaptor.forClass(PlaceOrderRequest.class);
-        verify(aeronOrders).place(request.capture(), any(), any());
+        verify(aeronOrders).place(request.capture(), any());
         assertThat(request.getValue().clientOrderId()).isEqualTo("close-1");
     }
 
     @Test
-    void missingFeeSnapshotFailsClosedBeforeAppendingOrderFact() {
+    void placeDelegatesFundsAndFeeDecisionToCore() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
-        when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
-                .thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.place(request("no-fee"))).isInstanceOf(IllegalStateException.class);
+        when(aeronOrders.place(any(), any())).thenReturn(response(91, "core-fee", OrderStatus.ACCEPTED));
+
+        assertThat(service.place(request("core-fee")).orderId()).isEqualTo(91);
+
+        verify(aeronOrders).place(any(), any());
     }
 
     @Test
@@ -308,9 +307,7 @@ class OrderServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        when(feeSnapshotLookup.lookup(any(), anyLong(), anyString(), anyLong(), any()))
-                .thenReturn(Optional.of(new OrderFeeSnapshot(ProductLine.LINEAR_PERPETUAL, 100L, 200L, "JVM")));
-        return new OrderService(properties, orderValidator, placementStateService, feeSnapshotLookup, aeron, projection);
+        return new OrderService(properties, orderValidator, placementStateService, aeron, projection);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

@@ -38,6 +38,7 @@ public enum CoreMessageType {
     CANCEL_ORDER_BATCH(45, WireMessageKind.COMMAND),
     AMEND_ORDER_BATCH(46, WireMessageKind.COMMAND),
     UPDATE_RISK_SCAN_CONTROL(47, WireMessageKind.COMMAND),
+    UPSERT_FEE_POLICY(48, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),

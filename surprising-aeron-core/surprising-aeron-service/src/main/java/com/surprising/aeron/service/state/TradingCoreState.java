@@ -328,6 +328,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, mark.instrumentVersion());
             hash = CoreStateHash.mix(hash, mark.markPriceTicks());
             hash = CoreStateHash.mix(hash, mark.priceSequence());
+            hash = CoreStateHash.mix(hash, mark.generatedAtEpochMillis());
         }
         for (CoreRiskSnapshot risk : riskState.snapshots().values()) {
             hash = CoreStateHash.mix(hash, risk.userId());

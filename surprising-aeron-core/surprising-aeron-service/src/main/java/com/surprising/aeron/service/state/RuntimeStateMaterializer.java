@@ -4,7 +4,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** Builds the immutable compatibility/read model from the authoritative mutable runtime. */
 public final class RuntimeStateMaterializer {
 
     private RuntimeStateMaterializer() {
@@ -79,7 +78,7 @@ public final class RuntimeStateMaterializer {
         runtime.markPricesForSnapshot().forEachKeyValue((symbolId, mark) -> {
             String symbol = identities.symbol(symbolId);
             marks.put(symbol, new CoreMarkPriceState(symbol, mark.instrumentVersion(), mark.markPriceTicks(),
-                    mark.priceSequence()));
+                    mark.priceSequence(), mark.generatedAtEpochMillis()));
         });
         Map<String, CoreRiskSnapshot> riskSnapshots = new TreeMap<>();
         runtime.riskSnapshotsForSnapshot().forEachKeyValue((positionKey, risk) -> {
@@ -223,7 +222,7 @@ public final class RuntimeStateMaterializer {
         for (long orderId : runtime.changedOrders().toArray()) {
             OrderRuntime order = runtime.order(orderId);
             if (order == null) orders.remove(orderId);
-            else orders.put(orderId, order(order, identities));
+            else orders.put(orderId, orderSnapshot(order, identities));
         }
 
         Map<String, CoreMarkPriceState> marks = StateMapSupport.delta(previous.riskState().markPrices());
@@ -232,7 +231,7 @@ public final class RuntimeStateMaterializer {
             MarkPriceRuntime mark = runtime.markPrice(symbolId);
             if (mark == null) marks.remove(symbol);
             else marks.put(symbol, new CoreMarkPriceState(symbol, mark.instrumentVersion(),
-                    mark.markPriceTicks(), mark.priceSequence()));
+                    mark.markPriceTicks(), mark.priceSequence(), mark.generatedAtEpochMillis()));
         }
         Map<String, CoreRiskSnapshot> snapshots = StateMapSupport.delta(previous.riskState().snapshots());
         for (long positionKey : runtime.changedRiskSnapshots().toArray()) {
@@ -326,7 +325,8 @@ public final class RuntimeStateMaterializer {
         return result;
     }
 
-    private static CoreOrderState order(OrderRuntime value, RuntimeIdentityRegistry identities) {
+    public static CoreOrderState orderSnapshot(OrderRuntime value, RuntimeIdentityRegistry identities) {
+        if (value == null || identities == null) throw new IllegalArgumentException("runtime order is required");
         return new CoreOrderState(value.orderId(), value.productLine(), value.userId(),
                 identities.symbol(value.symbolId()), value.instrumentVersion(), value.side(), value.priceTicks(),
                 value.matchingPriceTicks(), value.quantitySteps(), value.executedQuantitySteps(),

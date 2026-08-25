@@ -73,10 +73,7 @@ public final class ClusterSpotMatchSmokeMain {
     }
 
     private static byte[] order(long orderId, CoreOrderSide side, long quantity, String asset, long reserved) {
-        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
-                "BTC", "USDT", "USDT", side, 100, 100, 100, 100, quantity, false,
-                CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET, asset, reserved,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", 0, 0));
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
     }
 
     private static CoreMessage command(long sourceId, long sequence, long userId,

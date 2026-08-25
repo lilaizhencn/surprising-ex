@@ -7,6 +7,7 @@ import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.Function;
 
 public final class CancelAllAfterIndex {
 
@@ -19,6 +20,12 @@ public final class CancelAllAfterIndex {
 
     public List<CoreCancelAllAfterKey> query(long userId, String symbolScope, long dueAtEpochMillis, int limit,
                                              Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> values) {
+        return query(userId, symbolScope, dueAtEpochMillis, limit, values::get);
+    }
+
+    public List<CoreCancelAllAfterKey> query(long userId, String symbolScope, long dueAtEpochMillis, int limit,
+                                             Function<CoreCancelAllAfterKey, CoreCancelAllAfterState> lookup) {
+        if (lookup == null) throw new IllegalArgumentException("cancel-all-after lookup is required");
         int boundedLimit = Math.max(1, Math.min(limit, 10_000));
         NavigableSet<TimerKey> candidates = userId == 0 ? allDue : idsByUser.get(userId);
         if (candidates == null) return List.of();
@@ -27,7 +34,7 @@ public final class CancelAllAfterIndex {
         List<CoreCancelAllAfterKey> result = new ArrayList<>(Math.min(boundedLimit, dueCandidates.size()));
         for (TimerKey timer : dueCandidates) {
             CoreCancelAllAfterKey key = new CoreCancelAllAfterKey(timer.userId(), timer.symbolScope());
-            CoreCancelAllAfterState value = values.get(key);
+            CoreCancelAllAfterState value = lookup.apply(key);
             if (value == null || (userId != 0 && value.userId() != userId)
                     || (!symbolScope.isEmpty() && !value.symbolScope().equals(symbolScope))
                     || (dueAtEpochMillis != 0 && (value.status() != com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE

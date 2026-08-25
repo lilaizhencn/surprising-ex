@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.AckExportCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -36,8 +37,12 @@ public final class CoreAcceptFreezeBenchmark {
         try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
             long gatewaySequence = 1;
             long operationsSequence = 1;
+            long kafkaSequence = 1;
             apply(state, CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
                     TradingCommandCodec.encodeUpsertInstrument(instrument()));
+            apply(state, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, kafkaSequence++, 2,
+                    TradingCommandCodec.encodeApplyMarkPrice(
+                            new ApplyMarkPriceCommand(SYMBOL, 1, 1_000, 1, 1_000)));
             apply(state, CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, gatewaySequence++, 2,
                     TradingCommandCodec.encodeBalanceAdjustment(
                             new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", BALANCE_UNITS)));
@@ -72,7 +77,8 @@ public final class CoreAcceptFreezeBenchmark {
     private static CoreResponse apply(CoreProbeState state, CoreMessageType type, CommandSource source,
                                       long sourceSequence, long correlationId, byte[] payload) {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(),
-                ProductLine.LINEAR_PERPETUAL, source, source == CommandSource.OPERATIONS ? 9 : 7,
+                ProductLine.LINEAR_PERPETUAL, source, source == CommandSource.OPERATIONS ? 9
+                        : source == CommandSource.KAFKA_INPUT_BRIDGE ? 89 : 7,
                 sourceSequence, source == CommandSource.OPERATIONS ? 0 : USER_ID, 1_000, correlationId), payload);
         CoreResponse response = state.apply(message);
         if (response.status() != ResponseStatus.APPLIED && response.status() != ResponseStatus.OK) {
@@ -82,10 +88,7 @@ public final class CoreAcceptFreezeBenchmark {
     }
 
     private static PlaceOrderCommand place(long orderId) {
-        return new PlaceOrderCommand(orderId, SYMBOL, 1, "BTC", "USDT", "USDT", CoreOrderSide.BUY,
-                1_000, 1_001, 1_100, 999, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000, CoreOrderType.LIMIT,
-                CoreTimeInForce.IOC, false, "accept-freeze-" + orderId, 0, 0);
+        return new PlaceOrderCommand(orderId, SYMBOL, 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "accept-freeze-" + orderId);
     }
 
     private static UpsertInstrumentCommand instrument() {

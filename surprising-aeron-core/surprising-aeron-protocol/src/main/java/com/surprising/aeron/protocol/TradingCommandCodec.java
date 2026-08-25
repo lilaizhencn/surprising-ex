@@ -8,7 +8,7 @@ import java.util.List;
 
 public final class TradingCommandCodec {
 
-    private static final int PLACE_ORDER_VERSION = 3;
+    private static final int PLACE_ORDER_VERSION = 4;
     private static final int INSTRUMENT_RISK_V2_MARKER = 0x49525632;
     private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
 
@@ -108,48 +108,26 @@ public final class TradingCommandCodec {
 
     public static byte[] encodePlaceOrder(PlaceOrderCommand command) {
         byte[] symbol = text(command.symbol());
-        byte[] baseAsset = text(command.baseAsset());
-        byte[] quoteAsset = text(command.quoteAsset());
-        byte[] settleAsset = text(command.settleAsset());
-        byte[] asset = text(command.reservationAsset());
         byte[] clientOrderId = optionalText(command.clientOrderId());
-        return ByteBuffer.allocate(Integer.BYTES + Long.BYTES * 2 + Short.BYTES + symbol.length
-                        + Short.BYTES + baseAsset.length + Short.BYTES + quoteAsset.length
-                        + Short.BYTES + settleAsset.length + Integer.BYTES
-                        + Long.BYTES * 8 + Byte.BYTES * 2 + Integer.BYTES * 5
-                        + Short.BYTES * 2 + asset.length + clientOrderId.length)
+        return ByteBuffer.allocate(Integer.BYTES + Long.BYTES * 4 + Short.BYTES * 2
+                        + symbol.length + clientOrderId.length + Integer.BYTES * 5 + Byte.BYTES * 2)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(PLACE_ORDER_VERSION)
                 .putLong(command.orderId())
                 .putLong(command.instrumentVersion())
                 .putShort((short) symbol.length)
                 .put(symbol)
-                .putShort((short) baseAsset.length)
-                .put(baseAsset)
-                .putShort((short) quoteAsset.length)
-                .put(quoteAsset)
-                .putShort((short) settleAsset.length)
-                .put(settleAsset)
                 .putInt(command.side().wireCode())
                 .putLong(command.limitPriceTicks())
-                .putLong(command.executionPriceTicks())
-                .putLong(command.reservationPriceTicks())
-                .putLong(command.markPriceTicks())
                 .putLong(command.quantitySteps())
                 .put((byte) (command.reduceOnly() ? 1 : 0))
                 .putInt(command.marginMode().wireCode())
                 .putInt(command.positionSide().wireCode())
-                .putInt(command.reservationKind().wireCode())
-                .putShort((short) asset.length)
-                .put(asset)
-                .putLong(command.reservedUnits())
                 .putInt(command.orderType().wireCode())
                 .putInt(command.timeInForce().wireCode())
                 .put((byte) (command.postOnly() ? 1 : 0))
                 .putShort((short) clientOrderId.length)
                 .put(clientOrderId)
-                .putLong(command.makerFeeRatePpm())
-                .putLong(command.takerFeeRatePpm())
                 .array();
     }
 
@@ -163,15 +141,9 @@ public final class TradingCommandCodec {
         long orderId = buffer.getLong();
         long instrumentVersion = buffer.getLong();
         String symbol = readText(buffer);
-        String baseAsset = readText(buffer);
-        String quoteAsset = readText(buffer);
-        String settleAsset = readText(buffer);
-        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 5 + Byte.BYTES + Integer.BYTES);
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 2 + Byte.BYTES + Integer.BYTES * 3);
         CoreOrderSide side = CoreOrderSide.fromWireCode(buffer.getInt());
         long limitPriceTicks = buffer.getLong();
-        long executionPriceTicks = buffer.getLong();
-        long reservationPriceTicks = buffer.getLong();
-        long markPriceTicks = buffer.getLong();
         long quantitySteps = buffer.getLong();
         byte reduceOnlyCode = buffer.get();
         if (reduceOnlyCode != 0 && reduceOnlyCode != 1) {
@@ -179,10 +151,6 @@ public final class TradingCommandCodec {
         }
         CoreMarginMode marginMode = CoreMarginMode.fromWireCode(buffer.getInt());
         CorePositionSide positionSide = CorePositionSide.fromWireCode(buffer.getInt());
-        ReservationKind reservationKind = ReservationKind.fromWireCode(buffer.getInt());
-        String asset = readText(buffer);
-        requireRemaining(buffer, Long.BYTES);
-        long reservedUnits = buffer.getLong();
         requireRemaining(buffer, Integer.BYTES * 2 + Byte.BYTES);
         CoreOrderType orderType = CoreOrderType.fromWireCode(buffer.getInt());
         CoreTimeInForce timeInForce = CoreTimeInForce.fromWireCode(buffer.getInt());
@@ -192,15 +160,55 @@ public final class TradingCommandCodec {
         }
         boolean postOnly = postOnlyCode == 1;
         String clientOrderId = readOptionalText(buffer);
-        requireRemaining(buffer, Long.BYTES * 2);
+        requireConsumed(buffer);
+        return new PlaceOrderCommand(orderId, symbol, instrumentVersion, side, limitPriceTicks,
+                quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
+                orderType, timeInForce, postOnly, clientOrderId);
+    }
+
+    public static byte[] encodeUpsertFeePolicy(UpsertFeePolicyCommand command) {
+        byte[] symbol = optionalText(command.symbol());
+        return ByteBuffer.allocate(Long.BYTES * 7 + Integer.BYTES + Byte.BYTES + Short.BYTES + symbol.length)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(command.policyId())
+                .putLong(command.policyRevision())
+                .putLong(command.userId())
+                .putShort((short) symbol.length)
+                .put(symbol)
+                .putLong(command.makerFeeRatePpm())
+                .putLong(command.takerFeeRatePpm())
+                .putInt(command.sourcePriority())
+                .put((byte) (command.active() ? 1 : 0))
+                .putLong(command.effectiveFromEpochMillis())
+                .putLong(command.expireAtEpochMillis())
+                .array();
+    }
+
+    public static UpsertFeePolicyCommand decodeUpsertFeePolicy(byte[] payload) {
+        ByteBuffer buffer = readable(payload);
+        requireRemaining(buffer, Long.BYTES * 3 + Short.BYTES);
+        long policyId = buffer.getLong();
+        long policyRevision = buffer.getLong();
+        long userId = buffer.getLong();
+        String symbol = readOptionalText(buffer);
+        requireRemaining(buffer, Long.BYTES * 4 + Integer.BYTES + Byte.BYTES);
         long makerFeeRatePpm = buffer.getLong();
         long takerFeeRatePpm = buffer.getLong();
+        int sourcePriority = buffer.getInt();
+        byte activeCode = buffer.get();
+        if (activeCode != 0 && activeCode != 1) {
+            throw new ProtocolException("invalid fee policy active flag: " + activeCode);
+        }
+        long effectiveFromEpochMillis = buffer.getLong();
+        long expireAtEpochMillis = buffer.getLong();
         requireConsumed(buffer);
-        return new PlaceOrderCommand(orderId, symbol, instrumentVersion, baseAsset, quoteAsset, settleAsset,
-                side, limitPriceTicks, executionPriceTicks, reservationPriceTicks, markPriceTicks,
-                quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
-                reservationKind, asset, reservedUnits, orderType, timeInForce, postOnly,
-                clientOrderId, makerFeeRatePpm, takerFeeRatePpm);
+        try {
+            return new UpsertFeePolicyCommand(policyId, policyRevision, userId, symbol,
+                    makerFeeRatePpm, takerFeeRatePpm, sourcePriority, activeCode == 1,
+                    effectiveFromEpochMillis, expireAtEpochMillis);
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException(exception.getMessage());
+        }
     }
 
     public static byte[] encodeCancelOrder(CancelOrderCommand command) {

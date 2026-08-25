@@ -74,7 +74,9 @@ class TradingFeeServiceTest {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
         FeeScheduleEventPublisher publisher = mock(FeeScheduleEventPublisher.class);
-        TradingFeeService service = service(feeRepository, instrumentRuleLookup, null, publisher);
+        FeePolicyCoreImporter coreImporter = mock(FeePolicyCoreImporter.class);
+        TradingFeeService service = service(feeRepository, instrumentRuleLookup, null, publisher,
+                ProductLine.LINEAR_PERPETUAL, coreImporter);
         Instant effectiveTime = Instant.parse("2026-07-01T00:00:00Z");
         FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(777L, ProductLine.LINEAR_PERPETUAL,
                 1001L, "BTC-USDT", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip tier",
@@ -84,6 +86,7 @@ class TradingFeeServiceTest {
 
         assertThat(response.feeScheduleId()).isEqualTo(777L);
         assertThat(response.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+        verify(coreImporter).importPolicy(response);
         verify(publisher).publish(eq(response));
         org.mockito.Mockito.verifyNoInteractions(feeRepository);
     }
@@ -134,7 +137,7 @@ class TradingFeeServiceTest {
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
                                       FeeScheduleEventPublisher publisher) {
         return service(feeRepository, instrumentRuleLookup, feeSnapshotLookup, publisher,
-                ProductLine.LINEAR_PERPETUAL);
+                ProductLine.LINEAR_PERPETUAL, mock(FeePolicyCoreImporter.class));
     }
 
     private TradingFeeService service(OrderFeeRepository feeRepository,
@@ -142,9 +145,19 @@ class TradingFeeServiceTest {
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
                                       FeeScheduleEventPublisher publisher,
                                       ProductLine productLine) {
+        return service(feeRepository, instrumentRuleLookup, feeSnapshotLookup, publisher, productLine,
+                mock(FeePolicyCoreImporter.class));
+    }
+
+    private TradingFeeService service(OrderFeeRepository feeRepository,
+                                      InstrumentRuleLookup instrumentRuleLookup,
+                                      OrderFeeSnapshotLookup feeSnapshotLookup,
+                                      FeeScheduleEventPublisher publisher,
+                                      ProductLine productLine,
+                                      FeePolicyCoreImporter coreImporter) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
         return new TradingFeeService(feeRepository, instrumentRuleLookup,
-                feeSnapshotLookup, publisher, new FeeScheduleSnapshotCache(), properties);
+                feeSnapshotLookup, publisher, new FeeScheduleSnapshotCache(), properties, coreImporter);
     }
 }

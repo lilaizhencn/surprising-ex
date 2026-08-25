@@ -538,42 +538,13 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static PlaceOrderCommand place(long orderId, String clientOrderId, long reservedUnits) {
-        return new PlaceOrderCommand(
-                orderId,
-                "BTC-USDT",
-                1,
-                "BTC",
-                "USDT",
-                "USDT",
-                CoreOrderSide.BUY,
-                1_000,
-                1_000,
-                1_000,
-                1_000,
-                1,
-                false,
-                CoreMarginMode.CROSS,
-                CorePositionSide.NET,
-                ReservationKind.SPOT_ASSET,
-                "USDT",
-                reservedUnits,
-                CoreOrderType.LIMIT,
-                CoreTimeInForce.GTC,
-                false,
-                clientOrderId,
-                0,
-                0
-        );
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
     }
 
     private static PlaceOrderCommand spotOrder(long orderId, String clientOrderId, CoreOrderSide side,
                                                 long priceTicks, long quantitySteps, String reservationAsset,
                                                 long reservedUnits, long makerFeeRatePpm, long takerFeeRatePpm) {
-        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, "BTC", "USDT", "USDT", side,
-                priceTicks, priceTicks, priceTicks, priceTicks, quantitySteps, false,
-                CoreMarginMode.CROSS, CorePositionSide.NET, ReservationKind.SPOT_ASSET,
-                reservationAsset, reservedUnits, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
-                clientOrderId, makerFeeRatePpm, takerFeeRatePpm);
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, priceTicks, quantitySteps, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
     }
 
     private static void applySpotInstrument(CoreProbeState state) {

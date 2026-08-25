@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
@@ -145,6 +146,8 @@ class RuntimePerpetualMatchProcessorTest {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 liveInstrument());
+        state = reducer.applyMarkPrice(state,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 773_022, 1, 1_700_000_000_000L));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 10_000_000_000L));
         state = reducer.adjustBalance(state, 8, new BalanceAdjustmentCommand("USDT", 2_000_000_000_000L));
         PlaceOrderCommand open = marketOrder(11, CoreOrderSide.BUY, false, 788_640);
@@ -158,11 +161,9 @@ class RuntimePerpetualMatchProcessorTest {
                 limitOrder(21, CoreOrderSide.SELL, 773_332, false));
         invalidOpen = reducer.placeOrder(invalidOpen, 7,
                 marketOrder(22, CoreOrderSide.BUY, false, 773_022));
-        TradingCoreState invalidOpenFill = invalidOpen;
-        assertThatThrownBy(() -> reducer.applyMatches(invalidOpenFill, 22, "BTC", "USDT",
-                List.of(new CoreMatch(21, 8, 773_332, 1, true, true))))
-                .isInstanceOfSatisfying(CoreStateRejectedException.class,
-                        exception -> assertThat(exception.code()).isEqualTo("INSUFFICIENT_ORDER_RESERVATION"));
+        TradingCoreState protectedFill = reducer.applyMatches(invalidOpen, 22, "BTC", "USDT",
+                List.of(new CoreMatch(21, 8, 773_332, 1, true, true)));
+        assertThat(protectedFill.order(22).status()).isEqualTo(CoreOrderStatus.FILLED);
 
         state = reducer.placeOrder(state, 8, limitOrder(12, CoreOrderSide.SELL, 773_333, false));
         state = reducer.placeOrder(state, 7, open);
@@ -173,7 +174,7 @@ class RuntimePerpetualMatchProcessorTest {
 
         state = reducer.placeOrder(state, 8, limitOrder(13, CoreOrderSide.BUY, 773_332, true));
         state = reducer.placeOrder(state, 7, marketOrder(14, CoreOrderSide.SELL, true, 773_022));
-        assertThat(state.user(7).reservations().get(14L).remainingUnits()).isEqualTo(3_865_110_000L);
+        assertThat(state.user(7).reservations().get(14L).remainingUnits()).isEqualTo(3_903_765_000L);
 
         TradingCoreState readyToClose = state;
         TradingCoreState boundaryFill = reducer.applyMatches(readyToClose, 14, "BTC", "USDT",
@@ -186,11 +187,11 @@ class RuntimePerpetualMatchProcessorTest {
                 new BalanceAdjustmentCommand("USDT", Math.negateExact(availableBeforeClose)));
         marginFundedClose = reducer.applyMatches(marginFundedClose, 14, "BTC", "USDT", betterFill);
         assertThat(marginFundedClose.user(7).balances().get("USDT"))
-                .isEqualTo(new AssetBalance("USDT", 77_321_750_000L, 0));
+                .isEqualTo(new AssetBalance("USDT", 77_360_405_000L, 0));
 
         TradingCoreState closed = reducer.applyMatches(readyToClose, 14, "BTC", "USDT", betterFill);
         assertThat(closed.user(7).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
-        assertThat(closed.user(7).reservations().get(14L).reservedUnits()).isEqualTo(3_865_110_000L);
+        assertThat(closed.user(7).reservations().get(14L).reservedUnits()).isEqualTo(3_903_765_000L);
         assertThat(closed.user(7).reservations().get(14L).remainingUnits()).isZero();
         assertThat(closed.user(7).balances().get("USDT"))
                 .isEqualTo(new AssetBalance("USDT", 992_256_675_000L, 0));
@@ -277,61 +278,11 @@ class RuntimePerpetualMatchProcessorTest {
 
     private static PlaceOrderCommand marketOrder(long orderId, CoreOrderSide side,
                                                   boolean reduceOnly, long matchingPriceTicks) {
-        return new PlaceOrderCommand(
-                orderId,
-                "BTC-USDT",
-                1,
-                "BTC",
-                "USDT",
-                "USDT",
-                side,
-                matchingPriceTicks,
-                matchingPriceTicks,
-                matchingPriceTicks,
-                matchingPriceTicks,
-                1,
-                reduceOnly,
-                CoreMarginMode.CROSS,
-                CorePositionSide.NET,
-                ReservationKind.DERIVATIVE_MARGIN,
-                "USDT",
-                0,
-                CoreOrderType.MARKET,
-                CoreTimeInForce.IOC,
-                false,
-                "order-" + orderId,
-                0,
-                500
-        );
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, 0, 1, reduceOnly, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET, CoreTimeInForce.IOC, false, "order-" + orderId);
     }
 
     private static PlaceOrderCommand limitOrder(long orderId, CoreOrderSide side,
                                                  long priceTicks, boolean reduceOnly) {
-        return new PlaceOrderCommand(
-                orderId,
-                "BTC-USDT",
-                1,
-                "BTC",
-                "USDT",
-                "USDT",
-                side,
-                priceTicks,
-                priceTicks,
-                priceTicks,
-                priceTicks,
-                1,
-                reduceOnly,
-                CoreMarginMode.CROSS,
-                CorePositionSide.NET,
-                ReservationKind.DERIVATIVE_MARGIN,
-                "USDT",
-                0,
-                CoreOrderType.LIMIT,
-                CoreTimeInForce.GTC,
-                false,
-                "order-" + orderId,
-                0,
-                0
-        );
+        return new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, priceTicks, 1, reduceOnly, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "order-" + orderId);
     }
 }
