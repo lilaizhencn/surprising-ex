@@ -20,8 +20,8 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
-import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import exchange.core2.core.common.MatcherEventType;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
@@ -152,7 +152,9 @@ public final class CorePerpetualEndToEndBenchmark {
         if (completed == null || completed.status() != ResponseStatus.APPLIED) {
             throw new IllegalStateException("matching was not applied");
         }
-        long matchedQuantity = matching.matches().stream().mapToLong(CoreMatch::quantitySteps).sum();
+        long matchedQuantity = matching.matcherEvents().stream()
+                .filter(event -> event.eventType() == MatcherEventType.TRADE)
+                .mapToLong(exchange.core2.core.common.MatcherResult.MatcherEvent::size).sum();
         return new Completion(completed.requiredExportSequence(), matchedQuantity);
     }
 

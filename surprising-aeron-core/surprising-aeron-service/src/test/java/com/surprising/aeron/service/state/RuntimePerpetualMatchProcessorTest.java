@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -14,7 +15,7 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
-import com.surprising.aeron.service.matching.CoreMatch;
+import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -33,7 +34,7 @@ class RuntimePerpetualMatchProcessorTest {
                 Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100)),
                 Map.of(11L, taker, 12L, maker), Map.of(instrument.symbol(), instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
-        List<CoreMatch> matches = List.of(new CoreMatch(12, 8, 100, 1, true, true));
+        List<MatcherEvent> matches = List.of(trade(12, 8, 100, 1, true, true));
         TradingCoreState expected = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
@@ -58,8 +59,8 @@ class RuntimePerpetualMatchProcessorTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
         assertThatThrownBy(() -> RuntimePerpetualMatchProcessor.apply(before, 11,
-                List.of(new CoreMatch(12, 8, 100, 1, true, true),
-                        new CoreMatch(99, 9, 100, 1, true, true)), runtime, identities))
+                List.of(trade(12, 8, 100, 1, true, true),
+                        trade(99, 9, 100, 1, true, true)), runtime, identities))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("runtime matched order is not open: 99");
         RuntimeStateParityChecker.assertMatches(before, identities, runtime);
@@ -75,7 +76,7 @@ class RuntimePerpetualMatchProcessorTest {
                 Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100), 99L, unrelated),
                 Map.of(11L, taker, 12L, maker), Map.of(instrument.symbol(), instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
-        List<CoreMatch> matches = List.of(new CoreMatch(12, 8, 100, 1, true, true));
+        List<MatcherEvent> matches = List.of(trade(12, 8, 100, 1, true, true));
         TradingCoreState expected = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
@@ -96,9 +97,9 @@ class RuntimePerpetualMatchProcessorTest {
                 Map.of(7L, user(7, taker, 200), 8L, user(8, makerOne, 100), 9L, user(9, makerTwo, 100)),
                 Map.of(11L, taker, 12L, makerOne, 13L, makerTwo),
                 Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
-        List<CoreMatch> matches = List.of(
-                new CoreMatch(12, 8, 100, 1, true, false),
-                new CoreMatch(13, 9, 100, 1, true, true));
+        List<MatcherEvent> matches = List.of(
+                trade(12, 8, 100, 1, true, false),
+                trade(13, 9, 100, 1, true, true));
         TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -162,13 +163,13 @@ class RuntimePerpetualMatchProcessorTest {
         invalidOpen = reducer.placeOrder(invalidOpen, 7,
                 marketOrder(22, CoreOrderSide.BUY, false, 773_022));
         TradingCoreState protectedFill = reducer.applyMatches(invalidOpen, 22, "BTC", "USDT",
-                List.of(new CoreMatch(21, 8, 773_332, 1, true, true)));
+                List.of(trade(21, 8, 773_332, 1, true, true)));
         assertThat(protectedFill.order(22).status()).isEqualTo(CoreOrderStatus.FILLED);
 
         state = reducer.placeOrder(state, 8, limitOrder(12, CoreOrderSide.SELL, 773_333, false));
         state = reducer.placeOrder(state, 7, open);
         state = reducer.applyMatches(state, 11, "BTC", "USDT",
-                List.of(new CoreMatch(12, 8, 773_333, 1, true, true)));
+                List.of(trade(12, 8, 773_333, 1, true, true)));
         assertThat(state.user(7).balances().get("USDT"))
                 .isEqualTo(new AssetBalance("USDT", 918_800_035_000L, 77_333_300_000L));
 
@@ -178,10 +179,10 @@ class RuntimePerpetualMatchProcessorTest {
 
         TradingCoreState readyToClose = state;
         TradingCoreState boundaryFill = reducer.applyMatches(readyToClose, 14, "BTC", "USDT",
-                List.of(new CoreMatch(13, 8, 773_022, 1, true, true)));
+                List.of(trade(13, 8, 773_022, 1, true, true)));
         assertThat(boundaryFill.user(7).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
 
-        List<CoreMatch> betterFill = List.of(new CoreMatch(13, 8, 773_332, 1, true, true));
+        List<MatcherEvent> betterFill = List.of(trade(13, 8, 773_332, 1, true, true));
         long availableBeforeClose = readyToClose.user(7).balances().get("USDT").availableUnits();
         TradingCoreState marginFundedClose = reducer.adjustBalance(readyToClose, 7,
                 new BalanceAdjustmentCommand("USDT", Math.negateExact(availableBeforeClose)));
@@ -219,7 +220,7 @@ class RuntimePerpetualMatchProcessorTest {
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, takerUser, 8L, user(8, maker, 300)), Map.of(11L, taker, 12L, maker),
                 Map.of(instrument.symbol(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
-        List<CoreMatch> matches = List.of(new CoreMatch(12, 8, 120, quantity, true, true));
+        List<MatcherEvent> matches = List.of(trade(12, 8, 120, quantity, true, true));
         TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 

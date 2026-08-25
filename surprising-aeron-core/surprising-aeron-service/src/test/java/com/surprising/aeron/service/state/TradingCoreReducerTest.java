@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
@@ -17,7 +18,6 @@ import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
-import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
@@ -163,7 +163,7 @@ class TradingCoreReducerTest {
         state = reducer.placeOrder(state, 101, takerBuy);
 
         TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
-                List.of(new CoreMatch(2, 202, 10, 10, true, true)));
+                List.of(trade(2, 202, 10, 10, true, true)));
 
         assertThat(matched.user(101).totalUnits("USDT")).isEqualTo(890);
         assertThat(matched.user(101).totalUnits("BTC")).isEqualTo(10);
@@ -182,7 +182,7 @@ class TradingCoreReducerTest {
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 200_000));
 
         TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
-                List.of(new CoreMatch(2, 202, 10, 10, true, true)));
+                List.of(trade(2, 202, 10, 10, true, true)));
 
         assertThat(matched.user(101).totalUnits("USDT")).isEqualTo(980);
         assertThat(matched.user(202).totalUnits("USDT")).isEqualTo(1_010);
@@ -201,7 +201,7 @@ class TradingCoreReducerTest {
         state = reducer.placeOrder(state, 101, takerSell);
 
         TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
-                List.of(new CoreMatch(2, 202, 20, 10, true, true)));
+                List.of(trade(2, 202, 20, 10, true, true)));
 
         assertThat(matched.order(1).status()).isEqualTo(CoreOrderStatus.FILLED);
         assertThat(matched.user(101).positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(11);
@@ -222,7 +222,7 @@ class TradingCoreReducerTest {
         state = reducer.placeOrder(state, 101, takerBuy);
 
         TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
-                List.of(new CoreMatch(3, 202, 10, 10, true, true)));
+                List.of(trade(3, 202, 10, 10, true, true)));
 
         assertThat(matched.order(1).status()).isEqualTo(CoreOrderStatus.FILLED);
         assertThat(matched.user(202).positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(10);
@@ -243,11 +243,11 @@ class TradingCoreReducerTest {
         state = reducer.placeOrder(state, 202, higherMakerAsk);
         state = reducer.placeOrder(state, 101, firstTaker);
         state = reducer.applyMatches(state, 1, "BTC", "USDT",
-                List.of(new CoreMatch(2, 202, 10, 10, true, true)));
+                List.of(trade(2, 202, 10, 10, true, true)));
         state = reducer.placeOrder(state, 303, secondTaker);
 
         TradingCoreState matched = reducer.applyMatches(state, 4, "BTC", "USDT",
-                List.of(new CoreMatch(3, 202, 20, 10, true, true)));
+                List.of(trade(3, 202, 20, 10, true, true)));
 
         assertThat(matched.user(202).positions().get("BTC-USDT").signedQuantitySteps()).isEqualTo(-20);
         assertThat(matched.user(202).positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(30);
@@ -269,7 +269,7 @@ class TradingCoreReducerTest {
         state = reducer.placeOrder(state, 101,
                 order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
         state = reducer.applyMatches(state, 1, "BTC", "USDT",
-                List.of(new CoreMatch(2, 202, 10, 10, true, true)));
+                List.of(trade(2, 202, 10, 10, true, true)));
 
         TradingCoreState withMaker = reducer.placeOrder(state, 202,
                 new PlaceOrderCommand(3, "BTC-USDT", 1, CoreOrderSide.SELL, 10, 20, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
@@ -278,7 +278,7 @@ class TradingCoreReducerTest {
 
         assertThat(withAdd.user(101).balances().get("USDT").lockedUnits()).isEqualTo(60);
         TradingCoreState matched = reducer.applyMatches(withAdd, 4, "BTC", "USDT",
-                List.of(new CoreMatch(3, 202, 10, 20, true, true)));
+                List.of(trade(3, 202, 10, 20, true, true)));
         assertThat(matched.user(101).positions().get("BTC-USDT").positionMarginUnits()).isEqualTo(60);
         assertThat(matched.user(101).balances().get("USDT").lockedUnits()).isEqualTo(60);
     }

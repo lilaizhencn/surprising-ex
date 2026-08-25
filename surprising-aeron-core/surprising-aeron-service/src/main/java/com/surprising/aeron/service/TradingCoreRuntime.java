@@ -15,12 +15,15 @@ import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.LaneTopology;
+import com.surprising.aeron.service.state.AccountLaneState;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.CompletableFuture;
 
 public final class TradingCoreRuntime implements AutoCloseable {
     private final ProductLine productLine;
+    private final LaneTopology topology;
     private final DeterministicExchangeCoreAdapter matcher;
     private final PositionUserIndex positionUsers;
     private final OpenInterestIndex openInterest;
@@ -35,6 +38,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private TradingRuntimeState runtimeState;
     private long committedRevision;
     private long committedBusinessStateHash;
+    private long committedCoreSequence;
     private final CompletableFuture<Void> matcherReady;
     private Thread owner;
 
@@ -51,10 +55,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
             throw new IllegalArgumentException("invalid trading runtime state");
         }
         this.productLine = productLine;
+        this.topology = matcherSnapshot == null
+                ? LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization"))
+                : matcherSnapshot.topology();
         this.identities = new RuntimeIdentityRegistry();
-        this.runtimeState = RuntimeStateProjector.project(initialState, identities);
+        this.runtimeState = RuntimeStateProjector.project(initialState, identities, topology);
         this.committedRevision = initialState.revision();
         this.committedBusinessStateHash = initialState.businessStateHash();
+        this.committedCoreSequence = coreSequence;
         this.activeOrders = new ActiveOrderIndex(initialState);
         this.matcher = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter()
@@ -89,6 +97,42 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public TradingCoreState snapshotState() {
         assertOwner();
         return RuntimeStateMaterializer.materialize(runtimeState, identities);
+    }
+
+    public LaneTopology topology() {
+        assertOwner();
+        return topology;
+    }
+
+    public int accountLaneId(long userId) {
+        assertOwner();
+        return topology.accountLaneId(userId);
+    }
+
+    public AccountLaneState accountLane(long userId) {
+        assertOwner();
+        return runtimeState.accountLane(userId);
+    }
+
+    public long committedCoreSequence() {
+        assertOwner();
+        return committedCoreSequence;
+    }
+
+    void commitCoreSequence(long coreSequence) {
+        assertOwner();
+        if (coreSequence != Math.incrementExact(committedCoreSequence)) {
+            throw new IllegalStateException("global core commit sequence gap");
+        }
+        committedCoreSequence = coreSequence;
+    }
+
+    public long readFence(long requestedSequence) {
+        assertOwner();
+        if (requestedSequence < 0 || requestedSequence > committedCoreSequence) {
+            throw new IllegalArgumentException("query is outside committed visibility");
+        }
+        return committedCoreSequence;
     }
 
     TradingRuntimeState runtimeStateForConstruction() {
@@ -235,7 +279,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     private void restoreIndexes(TradingCoreState restored) {
         identities = new RuntimeIdentityRegistry();
-        runtimeState = RuntimeStateProjector.project(restored, identities);
+        runtimeState = RuntimeStateProjector.project(restored, identities, topology);
         runtimeState.clearChangedKeys();
         committedRevision = restored.revision();
         committedBusinessStateHash = restored.businessStateHash();

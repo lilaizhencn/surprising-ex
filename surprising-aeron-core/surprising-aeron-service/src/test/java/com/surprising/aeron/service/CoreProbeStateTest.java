@@ -42,6 +42,21 @@ import org.junit.jupiter.api.Test;
 class CoreProbeStateTest {
 
     @Test
+    void exposesBoundedMatcherCompletionAndLaneContextMetrics() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            CoreLaneMetrics metrics = state.laneMetrics();
+
+            assertThat(metrics.matchingEngineCount()).isEqualTo(4);
+            assertThat(metrics.accountLaneCount()).isEqualTo(4);
+            assertThat(metrics.matcherDispatchCapacity()).isEqualTo(4_096);
+            assertThat(metrics.matchingCompletionCapacity()).isEqualTo(4_096);
+            assertThat(metrics.commandContextCapacity()).isEqualTo(4_096);
+            assertThat(metrics.matcherDispatchDepth()).isZero();
+            assertThat(metrics.commandContextDepth()).isZero();
+        }
+    }
+
+    @Test
     void replicatedTimerBoundaryDoesNotBlockOnIncompleteLocalMatching() throws Exception {
         CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> matching =
                 new CompletableFuture<>();
@@ -53,7 +68,7 @@ class CoreProbeStateTest {
         assertThat(timer.isAlive()).isFalse();
         assertThat(result.get()).isNull();
         matching.complete(new com.surprising.aeron.service.matching.CoreMatchingResult(
-                true, "SUCCESS", List.of()));
+                true, "SUCCESS"));
     }
 
     @Test
@@ -63,7 +78,7 @@ class CoreProbeStateTest {
                     List.of(), 1, 0,
                     new com.surprising.aeron.protocol.CoreRiskScanContinuation("BTC-USDT-SWAP", 7, 1001), 1);
             var accepted = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    true, "SUCCESS", List.of());
+                    true, "SUCCESS");
             var apply = CoreProbeState.class.getDeclaredMethod("applyLiquidationBatch",
                     com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand.class,
                     com.surprising.aeron.service.matching.CoreMatchingResult.class);
@@ -377,7 +392,7 @@ class CoreProbeStateTest {
                 query(CoreMessageType.BOOK_STATE_QUERY, 0,
                         CoreStateQueryCodec.encodeOrderBookQuery(
                                 new com.surprising.aeron.protocol.CoreOrderBookQuery("BTC-USDT", 30)))).data());
-        assertThat(book.exportSequence()).isEqualTo(5);
+        assertThat(book.exportSequence()).isEqualTo(4);
         assertThat(book.levels()).singleElement().satisfies(value -> {
             assertThat(value.priceTicks()).isEqualTo(1_000);
             assertThat(value.quantitySteps()).isEqualTo(2);
@@ -389,7 +404,7 @@ class CoreProbeStateTest {
         var bootstrap = CoreStateQueryCodec.decodeOrderBookBootstrapPage(
                 applyBookQuery(original, bootstrapQuery).data());
         assertThat(bootstrap.complete()).isTrue();
-        assertThat(bootstrap.exportSequence()).isEqualTo(5);
+        assertThat(bootstrap.exportSequence()).isEqualTo(4);
         assertThat(bootstrap.levels()).isEqualTo(book.levels());
 
         UUID duplicateId = UUID.randomUUID();
@@ -443,6 +458,12 @@ class CoreProbeStateTest {
         assertThat(state.apply(secondPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         long secondSequence = state.matchingSequence(secondCommandId);
         assertThat(secondSequence).isGreaterThan(sequence);
+        assertThat(state.tradingState().order(711)).isNull();
+        assertThat(state.tradingState().order(712)).isNull();
+        assertThat(state.exportState().pending().stream()
+                .map(event -> CoreExportCodec.decodeEvent(event.payloadUnsafe()))
+                .filter(event -> event.commandId().equals(commandId) || event.commandId().equals(secondCommandId))
+                .toList()).isEmpty();
         com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
@@ -470,9 +491,9 @@ class CoreProbeStateTest {
                 .map(event -> CoreExportCodec.decodeEvent(event.payloadUnsafe()))
                 .filter(event -> event.commandId().equals(commandId))
                 .toList();
-        assertThat(firstOrderFacts).hasSize(2);
-        assertThat(firstOrderFacts.get(0).changedOrders())
-                .isEqualTo(firstOrderFacts.get(1).changedOrders());
+        assertThat(firstOrderFacts).hasSize(1);
+        assertThat(firstOrderFacts.getFirst().committedCoreSequence())
+                .isEqualTo(firstOrderFacts.getFirst().appliedCommandCount());
         state.close();
     }
 
@@ -524,10 +545,10 @@ class CoreProbeStateTest {
             }
             assertThat(state.pendingMatching()).isEmpty();
             assertThat(state.commandResults().get(firstCommandId).appliedCommandCount())
-                    .isEqualTo(fixtureStartingCount + 3);
+                    .isEqualTo(fixtureStartingCount + 1);
             assertThat(state.commandResults().get(secondCommandId).appliedCommandCount())
-                    .isEqualTo(fixtureStartingCount + 4);
-            assertThat(state.appliedCommandCount()).isEqualTo(fixtureStartingCount + 4);
+                    .isEqualTo(fixtureStartingCount + 2);
+            assertThat(state.appliedCommandCount()).isEqualTo(fixtureStartingCount + 2);
             assertThat(state.tradingState().order(715).status())
                     .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
             assertThat(state.tradingState().order(716).status())
@@ -595,7 +616,7 @@ class CoreProbeStateTest {
     void snapshotFenceFailsClosedWhenCompletionQueueOverflows() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             var result = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    true, "SUCCESS", List.of());
+                    true, "SUCCESS");
             for (int index = 0; index <= CoreProbeState.MAX_PENDING_MATCHING; index++) {
                 state.publishMatchingCompletion(1, result);
             }
@@ -623,7 +644,7 @@ class CoreProbeStateTest {
             assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(commandId);
             var matcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    false, "EXCHANGE_CORE_FAILURE", List.of());
+                    false, "EXCHANGE_CORE_FAILURE");
 
             Throwable fatal = catchThrowable(() -> state.completeMatching(sequence, matcherFailure, 2_000, 3));
 
@@ -633,8 +654,7 @@ class CoreProbeStateTest {
                     .isSameAs(fatal);
             assertThatThrownBy(state::snapshot).isSameAs(fatal);
             assertThat(state.pendingMatching()).containsOnlyKeys(sequence);
-            assertThat(state.tradingState().order(714).status())
-                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().order(714)).isNull();
         }
     }
 
@@ -662,7 +682,7 @@ class CoreProbeStateTest {
                 tamperedBefore ^= 2L;
             }
             var tampered = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    result.accepted(), result.resultCode(), result.matches(), result.cancellations(),
+                    result.accepted(), result.resultCode(), result.cancellations(),
                     result.successfulPrefixCount(), result.matcherStateChanged(), result.nativeCommand(),
                     new com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix(
                             tamperedBefore, result.matcherPrefix().after()),
@@ -1100,7 +1120,7 @@ class CoreProbeStateTest {
 
         assertThatThrownBy(() -> CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot))
                 .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version");
+                .hasMessageContaining("legacy core snapshot is disabled");
     }
 
     @Test
@@ -1111,12 +1131,12 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(13);
+        assertThat(manifest.schemaVersion()).isEqualTo(14);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();
         assertThat(manifest.coreShardId()).isEqualTo("default");
-        assertThat(manifest.routeVersion()).isEqualTo(1);
+        assertThat(manifest.routeVersion()).isEqualTo(2);
         assertThat(manifest.forkGitSha()).isEqualTo(
                 com.surprising.aeron.service.matching.MatcherSnapshot.FORK_GIT_SHA);
         assertThat(manifest.artifactSha256()).isEqualTo(
@@ -1207,7 +1227,7 @@ class CoreProbeStateTest {
             exportState.append(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 91, sequence,
                     0, 1_000, sequence), payload), ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    sequence, 0, 0, 0, 0,
+                    sequence, 0, 0, 0, 0, 1, 1,
                     com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), sequence,
                     new com.surprising.aeron.service.state.FundsDelta(List.of()),
                     List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());

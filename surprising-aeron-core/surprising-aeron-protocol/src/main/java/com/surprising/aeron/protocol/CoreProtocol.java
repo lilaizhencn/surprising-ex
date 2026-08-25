@@ -6,9 +6,9 @@ import java.nio.ByteOrder;
 public final class CoreProtocol {
 
     public static final int MAGIC = 0x53584558;
-    public static final int SCHEMA_VERSION = 3;
+    public static final int SCHEMA_VERSION = 4;
     public static final int HEADER_LENGTH = 76;
-    public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 40;
+    public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 52;
     public static final int CLUSTER_MAX_MESSAGE_LENGTH = 2 * 1024 * 1024;
     public static final int PROBE_PAYLOAD_LENGTH = Long.BYTES;
 
@@ -33,6 +33,8 @@ public final class CoreProtocol {
                 .putInt(response.status().wireCode())
                 .putInt(response.commandStatus().wireCode())
                 .putInt(response.resultCode().wireCode())
+                .putInt(response.routeVersion())
+                .putLong(response.committedCoreSequence())
                 .putLong(response.appliedCommandCount())
                 .putLong(response.requiredExportSequence())
                 .putLong(response.stateHash())
@@ -49,6 +51,8 @@ public final class CoreProtocol {
         ResponseStatus status = ResponseStatus.fromWireCode(buffer.getInt());
         ResponseStatus commandStatus = ResponseStatus.fromWireCode(buffer.getInt());
         CoreResultCode resultCode = CoreResultCode.fromWireCode(buffer.getInt());
+        int routeVersion = buffer.getInt();
+        long committedCoreSequence = buffer.getLong();
         long appliedCommandCount = buffer.getLong();
         long requiredExportSequence = buffer.getLong();
         long stateHash = buffer.getLong();
@@ -58,7 +62,7 @@ public final class CoreProtocol {
         }
         byte[] data = new byte[dataLength];
         buffer.get(data);
-        return new CoreResponse(status, commandStatus, resultCode, appliedCommandCount,
-                requiredExportSequence, stateHash, data);
+        return new CoreResponse(status, commandStatus, resultCode, routeVersion, committedCoreSequence,
+                appliedCommandCount, requiredExportSequence, stateHash, data);
     }
 }

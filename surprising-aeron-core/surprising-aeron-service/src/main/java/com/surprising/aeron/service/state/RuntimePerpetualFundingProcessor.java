@@ -81,16 +81,9 @@ public final class RuntimePerpetualFundingProcessor {
             }
         }
 
-        ArrayList<Long> selectedUserIds = new ArrayList<>();
-        boolean moreUsers = false;
-        for (Long userId : indexedUserIds) {
-            if (userId == null || chunked && userId <= command.cursorUserId()) continue;
-            if (!chunked || selectedUserIds.size() < command.maxUsers()) selectedUserIds.add(userId);
-            else {
-                moreUsers = true;
-                break;
-            }
-        }
+        UserPage userPage = selectUsers(indexedUserIds, command.cursorUserId(),
+                chunked ? command.maxUsers() : Integer.MAX_VALUE);
+        ArrayList<Long> selectedUserIds = userPage.userIds();
 
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
         for (Long userId : selectedUserIds) {
@@ -143,16 +136,17 @@ public final class RuntimePerpetualFundingProcessor {
             }
         }
 
-        boolean complete = !chunked || !moreUsers;
-        long nextCursorUserId = complete ? 0 : selectedUserIds.getLast();
+        boolean complete = !chunked || userPage.complete();
+        long nextCursorUserId = complete ? 0 : userPage.nextCursorUserId();
         if (complete) {
             runtime.treasury().setFundingSettlement(symbolId, command.settlementId());
         } else {
             runtime.treasury().setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
                     command.settlementId(), command.instrumentVersion(), command.fundingRatePpm(),
-                    nextCursorUserId, chunkCommandId));
+                    userPage.accountLaneId(), nextCursorUserId, chunkCommandId));
         }
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));
         return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
                 nextCursorUserId, selectedUserIds.size()));
     }
@@ -165,5 +159,21 @@ public final class RuntimePerpetualFundingProcessor {
             }
             payments = List.copyOf(payments);
         }
+    }
+
+    private static UserPage selectUsers(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {
+        ArrayList<Long> selected = new ArrayList<>();
+        for (Long userId : indexedUserIds) {
+            if (userId == null || userId <= startCursorUserId) continue;
+            if (selected.size() == limit) {
+                return new UserPage(selected, 0, selected.getLast(), false);
+            }
+            selected.add(userId);
+        }
+        return new UserPage(selected, 0, 0, true);
+    }
+
+    private record UserPage(ArrayList<Long> userIds, int accountLaneId,
+                            long nextCursorUserId, boolean complete) {
     }
 }

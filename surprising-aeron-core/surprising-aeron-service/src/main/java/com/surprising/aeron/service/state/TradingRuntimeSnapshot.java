@@ -242,7 +242,8 @@ public record TradingRuntimeSnapshot(
         }
     }
 
-    public record RiskScanSnapshot(long priceSequence, long scanStartPriceSequence, long lastUserId,
+    public record RiskScanSnapshot(int accountLaneId, long priceSequence,
+                                   long scanStartPriceSequence, long lastUserId,
                                    boolean riskComplete, long riskUserId, int riskPhase,
                                    String riskPositionCursor, long riskReservationCursor,
                                    long riskUnrealizedPnlUnits, long riskMaintenanceMarginUnits,
@@ -259,9 +260,10 @@ public record TradingRuntimeSnapshot(
     }
 
     public record FundingProgressSnapshot(long settlementId, long instrumentVersion, long fundingRatePpm,
-                                          long nextCursorUserId, UUID commandId) {
+                                          int accountLaneId, long nextCursorUserId, UUID commandId) {
         public FundingProgressSnapshot {
             if (settlementId <= 0 || instrumentVersion <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
+                    || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorUserId < 0 || commandId == null) {
                 throw new IllegalArgumentException("invalid snapshot funding progress");
             }
@@ -270,11 +272,12 @@ public record TradingRuntimeSnapshot(
 
     public record LifecycleProgressSnapshot(long settlementId, long instrumentVersion,
                                             long settlementPriceTicks, long optionCashUnitsPerContract,
-                                            boolean ordersComplete, long nextCursorOrderId,
+                                            boolean ordersComplete, int accountLaneId, long nextCursorOrderId,
                                             long nextCursorUserId, UUID commandId) {
         public LifecycleProgressSnapshot {
             if (settlementId <= 0 || instrumentVersion <= 0 || settlementPriceTicks < 0
-                    || optionCashUnitsPerContract < 0 || nextCursorOrderId < 0 || nextCursorUserId < 0
+                    || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
+                    || nextCursorOrderId < 0 || nextCursorUserId < 0
                     || (!ordersComplete && nextCursorUserId != 0)
                     || (ordersComplete && nextCursorOrderId != 0) || commandId == null) {
                 throw new IllegalArgumentException("invalid snapshot lifecycle progress");

@@ -2,6 +2,7 @@ package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.CoreExportStatus;
 import com.surprising.product.api.ProductLine;
+import com.surprising.aeron.service.state.LaneTopology;
 
 public record CoreSnapshotManifest(
         ProductLine productLine,
@@ -25,6 +26,10 @@ public record CoreSnapshotManifest(
         String forkGitSha,
         String artifactSha256,
         long matcherConfigHash,
+        LaneTopology topology,
+        long topologyHash,
+        long symbolRouteHash,
+        long globalFundsHash,
         CoreExportStatus exportStatus,
         long outboxPendingDigest,
         long checksum) {
@@ -36,12 +41,13 @@ public record CoreSnapshotManifest(
                 || coreSequence != appliedCommandCount || matcherSequence < 0
                 || forkGitSha == null || forkGitSha.isBlank()
                 || artifactSha256 == null || artifactSha256.isBlank()
+                || topology == null || topology.routeVersion() != routeVersion
+                || topologyHash != topology.topologyHash() || symbolRouteHash == 0 || globalFundsHash == 0
                 || exportStatus == null || checksum < 0) {
             throw new IllegalArgumentException("invalid core snapshot manifest");
         }
     }
 
-    /** Compatibility constructor for callers compiled against the V8 manifest surface. */
     public CoreSnapshotManifest(
             ProductLine productLine,
             int schemaVersion,
@@ -59,13 +65,18 @@ public record CoreSnapshotManifest(
             String forkGitSha,
             String artifactSha256,
             long matcherConfigHash,
+            LaneTopology topology,
+            long topologyHash,
+            long symbolRouteHash,
+            long globalFundsHash,
             CoreExportStatus exportStatus,
             long checksum) {
         this(productLine, schemaVersion, coreShardId, routeVersion,
                 0, appliedCommandCount, 0, 0, appliedCommandCount, matcherSequence,
                 businessStateHash, engineStateHash, bookStateHash, symbolRegistryHash,
                 userRegistryHash, instrumentRegistryHash, activeOrderHash, 0,
-                forkGitSha, artifactSha256, matcherConfigHash, exportStatus, 0, checksum);
+                forkGitSha, artifactSha256, matcherConfigHash, topology, topologyHash,
+                symbolRouteHash, globalFundsHash, exportStatus, 0, checksum);
     }
 
     public long outboxAcknowledgedSequence() {

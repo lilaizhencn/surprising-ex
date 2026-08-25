@@ -1,7 +1,8 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.matching.CoreMatch;
+import exchange.core2.core.common.MatcherEventType;
+import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,7 +13,7 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     public static void apply(TradingCoreState before, long takerOrderId, String baseAsset, String quoteAsset,
-                             List<CoreMatch> matches, TradingRuntimeState runtime,
+                             List<MatcherEvent> matches, TradingRuntimeState runtime,
                              RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -21,7 +22,7 @@ public final class RuntimeSpotMatchProcessor {
         applyRuntime(takerOrderId, matches, runtime, identities);
     }
 
-    public static void applyRuntime(long takerOrderId, List<CoreMatch> matches,
+    public static void applyRuntime(long takerOrderId, List<MatcherEvent> matches,
                                     TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (matches == null || runtime == null || identities == null || runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid spot match apply");
@@ -43,14 +44,15 @@ public final class RuntimeSpotMatchProcessor {
         int baseAssetId = identities.assetId(instrument.baseAsset());
         int quoteAssetId = identities.assetId(instrument.quoteAsset());
         validateMatches(runtime, taker, matches);
-        for (CoreMatch match : matches) {
+        for (MatcherEvent match : matches) {
+            if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
-            OrderRuntime maker = requireOpen(runtime, match.makerOrderId());
+            OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
             OrderRuntime buyer = taker.side() == CoreOrderSide.BUY ? taker : maker;
             OrderRuntime seller = taker.side() == CoreOrderSide.SELL ? taker : maker;
-            applyFill(runtime, instrument, buyer, match.priceTicks(), match.quantitySteps(),
+            applyFill(runtime, instrument, buyer, match.price(), match.size(),
                     buyer.orderId() == taker.orderId(), baseAssetId, quoteAssetId);
-            applyFill(runtime, instrument, seller, match.priceTicks(), match.quantitySteps(),
+            applyFill(runtime, instrument, seller, match.price(), match.size(),
                     seller.orderId() == taker.orderId(), baseAssetId, quoteAssetId);
             releaseTerminalReservation(runtime, maker.orderId());
         }
@@ -132,22 +134,26 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     private static void validateMatches(TradingRuntimeState runtime, OrderRuntime taker,
-                                        List<CoreMatch> matches) {
+                                        List<MatcherEvent> matches) {
         long takerRemaining = taker.remainingQuantitySteps();
         Map<Long, Long> makerRemaining = new HashMap<>();
-        for (CoreMatch match : matches) {
-            if (match == null || match.priceTicks() <= 0 || match.quantitySteps() <= 0) {
+        for (MatcherEvent match : matches) {
+            if (match == null) {
                 throw new IllegalArgumentException("invalid runtime match");
             }
-            OrderRuntime maker = requireOpen(runtime, match.makerOrderId());
-            if (maker.userId() != match.makerUserId() || maker.symbolId() != taker.symbolId()
+            if (match.eventType() != MatcherEventType.TRADE) continue;
+            if (match.price() <= 0 || match.size() <= 0) {
+                throw new IllegalArgumentException("invalid runtime match");
+            }
+            OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+            if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                     || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                 throw new IllegalStateException("runtime match does not match authoritative orders");
             }
-            takerRemaining = Math.subtractExact(takerRemaining, match.quantitySteps());
+            takerRemaining = Math.subtractExact(takerRemaining, match.size());
             long remaining = Math.subtractExact(
                     makerRemaining.getOrDefault(maker.orderId(), maker.remainingQuantitySteps()),
-                    match.quantitySteps());
+                    match.size());
             if (takerRemaining < 0 || remaining < 0) {
                 throw new IllegalStateException("fill exceeds runtime order remaining quantity");
             }

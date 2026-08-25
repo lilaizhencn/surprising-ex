@@ -83,7 +83,7 @@ class SurprisingClusteredServiceTest {
         TimerScenario replay = runTimerScenario(true);
 
         assertThat(replay).isEqualTo(live);
-        assertThat(replay.appliedCommandCount()).isEqualTo(4);
+        assertThat(replay.appliedCommandCount()).isEqualTo(3);
         assertThat(replay.pendingMatchingCount()).isZero();
         assertThat(replay.responseCount()).isOne();
         assertThat(replay.orderStatus())
@@ -224,7 +224,9 @@ class SurprisingClusteredServiceTest {
             long beforeSequence = before.appliedCommandCount();
             byte[] snapshot = before.snapshot(75);
             ByteBuffer manifest = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
-            manifest.putLong(20 + 22, manifest.getLong(20 + 22) + 1);
+            int snapshotIdOffset = SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
+                    + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 70;
+            manifest.putLong(snapshotIdOffset, manifest.getLong(snapshotIdOffset) + 1);
             CRC32C checksum = new CRC32C();
             checksum.update(snapshot, 0, snapshot.length - 16);
             manifest.putLong(snapshot.length - Long.BYTES, checksum.getValue());
@@ -248,7 +250,7 @@ class SurprisingClusteredServiceTest {
             CoreProbeState state = service.state();
             long sequence = preparePendingPlace(state, 901);
             var matcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    false, "EXCHANGE_CORE_FAILURE", List.of());
+                    false, "EXCHANGE_CORE_FAILURE");
             Throwable fatal = catchThrowable(() -> state.completeMatching(sequence, matcherFailure, 2_000, 3));
 
             assertThat(fatal).isInstanceOf(

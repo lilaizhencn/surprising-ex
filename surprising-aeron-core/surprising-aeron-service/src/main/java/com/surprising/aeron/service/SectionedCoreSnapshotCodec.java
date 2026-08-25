@@ -12,19 +12,27 @@ import org.agrona.concurrent.UnsafeBuffer;
 final class SectionedCoreSnapshotCodec {
 
     static final int MAGIC = 0x5358534E;
-    static final int VERSION = 13;
+    static final int VERSION = 14;
     static final int ENVELOPE_LENGTH = 12;
     static final int SECTION_HEADER_LENGTH = 8;
     static final int FORK_GIT_SHA_LENGTH = 40;
     static final int ARTIFACT_SHA256_LENGTH = 64;
-    static final int HEADER_LENGTH = 258;
+    static final int HEADER_LENGTH = 314;
     static final int SOURCE_SEQUENCE_LENGTH = 24;
     static final int OUTBOX_FIXED_LENGTH = 20;
     static final int FOOTER_LENGTH = Long.BYTES;
-    static final int SECTION_COUNT = 10;
-    static final int MAX_SECTION_COUNT = SECTION_COUNT;
+    static final int BASE_SECTION_COUNT = 10;
+    static final int SECTION_COUNT = BASE_SECTION_COUNT + 4;
+    static final int MAX_SECTION_COUNT = BASE_SECTION_COUNT + Long.SIZE;
     static final int MAX_SECTION_BYTES = CoreStateSnapshotCodec.MAX_SNAPSHOT_BYTES
-            - ENVELOPE_LENGTH - SECTION_COUNT * SECTION_HEADER_LENGTH;
+            - ENVELOPE_LENGTH - MAX_SECTION_COUNT * SECTION_HEADER_LENGTH;
+
+    static int sectionCount(int accountLaneCount) {
+        if (accountLaneCount < 1 || accountLaneCount > Long.SIZE) {
+            throw new IllegalArgumentException("invalid account lane section count");
+        }
+        return BASE_SECTION_COUNT + accountLaneCount;
+    }
 
     private SectionedCoreSnapshotCodec() {
     }

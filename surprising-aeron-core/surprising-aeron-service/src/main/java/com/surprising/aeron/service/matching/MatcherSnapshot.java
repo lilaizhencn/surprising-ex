@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.matching;
 
 import com.surprising.aeron.service.state.CoreOrderStatus;
+import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.processors.journaling.ISerializationProcessor.SerializedModuleType;
@@ -16,6 +17,7 @@ public record MatcherSnapshot(
         ProductLine productLine,
         String coreShardId,
         int routeVersion,
+        LaneTopology topology,
         long snapshotId,
         long coreSequence,
         long matcherSequence,
@@ -24,6 +26,7 @@ public record MatcherSnapshot(
         int engineStateHash,
         int bookStateHash,
         long symbolRegistryHash,
+        long symbolRouteHash,
         long userRegistryHash,
         long instrumentRegistryHash,
         long activeOrderHash,
@@ -35,19 +38,23 @@ public record MatcherSnapshot(
         List<SerializedModule> modules) {
 
     public static final String CORE_SHARD_ID = "default";
-    public static final int ROUTE_VERSION = 1;
+    public static final int ROUTE_VERSION = LaneTopology.ROUTE_VERSION;
     public static final String FORK_GIT_SHA = "4c4d163b6ba736a43360b325cdd7b9fb8c20648d";
     public static final String ARTIFACT_SHA256 =
             "d4ab72853924edc32069ab7158e7bcc5d374ecc1bcd594df04128ab459732b86";
-    public static final long MATCHER_CONFIG_HASH = hashText(
-            "matching=1;risk=1;wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED;eventsPooling=true");
+    public static final long MATCHER_CONFIG_HASH = matcherConfigHash(new LaneTopology(
+            ROUTE_VERSION, LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT,
+            LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT - 1, LaneTopology.DEFAULT_ACCOUNT_LANE_COUNT,
+            LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE,
+            LaneTopology.DEFAULT_QUEUE_CAPACITY, LaneTopology.DEFAULT_QUEUE_CAPACITY));
 
     public MatcherSnapshot {
         if (productLine == null || !CORE_SHARD_ID.equals(coreShardId)
-                || routeVersion != ROUTE_VERSION || snapshotId <= 0 || coreSequence < 0
+                || routeVersion != ROUTE_VERSION || topology == null || topology.routeVersion() != routeVersion
+                || snapshotId <= 0 || coreSequence < 0
                 || matcherSequence < 0 || matcherPrefixDigest == 0 || !FORK_GIT_SHA.equals(forkGitSha)
                 || !ARTIFACT_SHA256.equals(artifactSha256)
-                || matcherConfigHash != MATCHER_CONFIG_HASH || symbols == null || users == null
+                || matcherConfigHash != matcherConfigHash(topology) || symbols == null || users == null
                 || modules == null || modules.isEmpty()) {
             throw new IllegalArgumentException("invalid matcher snapshot manifest");
         }
@@ -60,29 +67,53 @@ public record MatcherSnapshot(
             throw new IllegalArgumentException("invalid matcher registries");
         }
         if (symbolRegistryHash != symbolRegistryHash(symbols)
+                || symbolRouteHash != topology.symbolRouteHash(symbols)
                 || userRegistryHash != userRegistryHash(users)) {
             throw new IllegalArgumentException("matcher registry hash mismatch");
         }
-        boolean matching = false;
+        boolean[] matching = new boolean[topology.matchingEngineCount()];
         boolean risk = false;
         long maximumModuleSequence = Long.MIN_VALUE;
         for (SerializedModule module : modules) {
             if (module.snapshotId() != snapshotId || module.sequence() < 0 || module.sequence() > matcherSequence
-                    || module.instanceId() != 0) {
+                    || module.instanceId() < 0) {
                 throw new IllegalArgumentException("matcher snapshot module watermark mismatch");
             }
             maximumModuleSequence = Math.max(maximumModuleSequence, module.sequence());
             if (module.type() == SerializedModuleType.MATCHING_ENGINE_ROUTER) {
-                if (matching) throw new IllegalArgumentException("duplicate matching module");
-                matching = true;
+                if (module.instanceId() >= matching.length || matching[module.instanceId()]) {
+                    throw new IllegalArgumentException("duplicate or out-of-range matching module");
+                }
+                matching[module.instanceId()] = true;
             } else if (module.type() == SerializedModuleType.RISK_ENGINE) {
-                if (risk) throw new IllegalArgumentException("duplicate risk module");
+                if (risk || module.instanceId() != 0) throw new IllegalArgumentException("duplicate risk module");
                 risk = true;
+            } else {
+                throw new IllegalArgumentException("unsupported matcher module");
             }
         }
-        if (!matching || !risk || modules.size() != 2 || maximumModuleSequence != matcherSequence) {
+        boolean completeMatching = true;
+        for (boolean present : matching) completeMatching &= present;
+        if (!completeMatching || !risk || modules.size() != topology.matchingEngineCount() + 1
+                || maximumModuleSequence != matcherSequence) {
             throw new IllegalArgumentException("incomplete matcher snapshot modules");
         }
+    }
+
+    public int matchingEngineCount() { return topology.matchingEngineCount(); }
+    public int matcherShardMask() { return topology.matcherShardMask(); }
+    public int accountLaneCount() { return topology.accountLaneCount(); }
+    public long accountLaneSeed() { return topology.accountLaneSeed(); }
+    public long topologyHash() { return topology.topologyHash(); }
+
+    public static long matcherConfigHash(LaneTopology topology) {
+        return hashText("matching=" + topology.matchingEngineCount()
+                + ";risk=1;wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED;eventsPooling=true"
+                + ";matcherWindow=" + topology.matcherWindowSize()
+                + ";completionCapacity=" + topology.matchingCompletionCapacity()
+                + ";accountLanes=" + topology.accountLaneCount()
+                + ";accountLaneSeed=" + topology.accountLaneSeed()
+                + ";accountLaneQueue=" + topology.accountLaneQueueCapacity());
     }
 
     public void verifyCoreState(TradingCoreState state, long expectedCoreSequence) {

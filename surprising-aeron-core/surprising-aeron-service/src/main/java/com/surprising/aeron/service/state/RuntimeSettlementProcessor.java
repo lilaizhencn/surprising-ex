@@ -56,19 +56,19 @@ public final class RuntimeSettlementProcessor {
             cancelOrders(runtime, selectedOrders);
             ordersComplete = true;
         } else if (!ordersComplete) {
-            ActiveOrderIndex.Page page = activeOrderIndex.page(
-                    0, instrument.symbol(), command.cursorOrderId(), command.maxOrders());
-            selectedOrders = page.orderIds().stream().map(runtime::order)
-                    .filter(order -> order != null && !order.canceled())
-                    .map(order -> RuntimeStateMaterializer.orderSnapshot(order, identities)).toList();
-            moreOrders = page.nextCursorOrderId() != 0;
+            int accountLaneId = previousProgress == null ? 0 : previousProgress.accountLaneId();
+            OrderPage page = selectOrders(runtime, identities, activeOrderIndex, instrument.symbol(),
+                    accountLaneId, command.cursorOrderId(), command.maxOrders());
+            selectedOrders = page.orders();
+            moreOrders = !page.complete();
             cancelOrders(runtime, selectedOrders);
             if (moreOrders) {
-                long nextCursor = selectedOrders.getLast().orderId();
+                long nextCursor = page.nextCursorOrderId();
                 runtime.treasury().setLifecycleProgress(symbolId,
                         new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
                                 command.instrumentVersion(), command.settlementPriceTicks(),
-                                command.optionCashUnitsPerContract(), false, nextCursor, 0, chunkCommandId));
+                                command.optionCashUnitsPerContract(), false, page.accountLaneId(),
+                                nextCursor, 0, chunkCommandId));
                 runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
                         selectedOrders.isEmpty() ? 1 : 2));
                 return new CoreSettlementProgressView(command.settlementId(), false, false, nextCursor, 0,
@@ -76,8 +76,12 @@ public final class RuntimeSettlementProcessor {
             }
             ordersComplete = true;
         }
-        ArrayList<Long> selectedUserIds = selectUsers(indexedUserIds, command, chunked);
-        boolean moreUsers = chunked && hasMoreUsers(indexedUserIds, selectedUserIds, command.cursorUserId());
+        int accountLaneId = previousProgress == null || !previousProgress.ordersComplete()
+                ? 0 : previousProgress.accountLaneId();
+        UserPage userPage = selectUsers(indexedUserIds, runtime, accountLaneId,
+                command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
+        ArrayList<Long> selectedUserIds = userPage.userIds();
+        boolean moreUsers = chunked && !userPage.complete();
         for (long userId : selectedUserIds) {
             settleUser(runtime, identities, instrument, kernel, command, userId);
         }
@@ -89,7 +93,8 @@ public final class RuntimeSettlementProcessor {
             runtime.treasury().setLifecycleProgress(symbolId,
                     new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
                             command.instrumentVersion(), command.settlementPriceTicks(),
-                            command.optionCashUnitsPerContract(), true, 0, nextCursorUserId, chunkCommandId));
+                            command.optionCashUnitsPerContract(), true, userPage.accountLaneId(),
+                            0, nextCursorUserId, chunkCommandId));
         }
         runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
                 selectedOrders.isEmpty() ? 1 : 2));
@@ -127,7 +132,7 @@ public final class RuntimeSettlementProcessor {
         runtime.treasury().setLifecycleProgress(symbolId,
                 new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.instrumentVersion(),
                         command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
-                        nextCursorOrderId, 0, chunkCommandId));
+                        progress == null ? 0 : progress.accountLaneId(), nextCursorOrderId, 0, chunkCommandId));
         runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
                 orders == null || orders.isEmpty() ? 1 : 2));
     }
@@ -202,22 +207,54 @@ public final class RuntimeSettlementProcessor {
         return new Cash(available, locked, applied);
     }
 
-    private static ArrayList<Long> selectUsers(Iterable<Long> indexedUserIds,
-                                               SettleInstrumentCommand command, boolean chunked) {
+    private static UserPage selectUsers(Iterable<Long> indexedUserIds, TradingRuntimeState runtime,
+                                        int startLaneId, long startCursorUserId, int limit) {
         ArrayList<Long> selected = new ArrayList<>();
-        for (Long userId : indexedUserIds) {
-            if (userId == null || chunked && userId <= command.cursorUserId()) continue;
-            if (!chunked || selected.size() < command.maxUsers()) selected.add(userId);
-            else break;
+        int laneCount = runtime.topology().accountLaneCount();
+        int laneId = startLaneId;
+        long cursorUserId = startCursorUserId;
+        int lastSelectedLaneId = startLaneId;
+        while (laneId < laneCount) {
+            for (Long userId : indexedUserIds) {
+                if (userId == null || runtime.topology().accountLaneId(userId) != laneId
+                        || userId <= cursorUserId) continue;
+                if (selected.size() == limit) {
+                    return new UserPage(selected, lastSelectedLaneId, selected.getLast(), false);
+                }
+                selected.add(userId);
+                lastSelectedLaneId = laneId;
+            }
+            laneId++;
+            cursorUserId = 0;
         }
-        return selected;
+        return new UserPage(selected, laneCount - 1, 0, true);
     }
 
-    private static boolean hasMoreUsers(Iterable<Long> indexedUserIds, List<Long> selected, long cursor) {
-        if (indexedUserIds == null) return false;
-        long last = selected.isEmpty() ? cursor : selected.getLast();
-        for (Long userId : indexedUserIds) if (userId != null && userId > last) return true;
-        return false;
+    private static OrderPage selectOrders(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                          ActiveOrderIndex index, String symbol, int startLaneId,
+                                          long startCursorOrderId, int limit) {
+        ArrayList<CoreOrderState> selected = new ArrayList<>();
+        int laneCount = runtime.topology().accountLaneCount();
+        int laneId = startLaneId;
+        long cursorOrderId = startCursorOrderId;
+        int lastSelectedLaneId = startLaneId;
+        while (laneId < laneCount) {
+            for (long orderId : index.ids(symbol)) {
+                CoreOrderState order = runtime.order(orderId) == null ? null
+                        : RuntimeStateMaterializer.orderSnapshot(runtime.order(orderId), identities);
+                if (order == null || order.status() != CoreOrderStatus.OPEN
+                        || runtime.topology().accountLaneId(order.userId()) != laneId
+                        || orderId <= cursorOrderId) continue;
+                if (selected.size() == limit) {
+                    return new OrderPage(selected, lastSelectedLaneId, selected.getLast().orderId(), false);
+                }
+                selected.add(order);
+                lastSelectedLaneId = laneId;
+            }
+            laneId++;
+            cursorOrderId = 0;
+        }
+        return new OrderPage(selected, laneCount - 1, 0, true);
     }
 
     private static List<CoreOrderState> openOrders(TradingRuntimeState runtime,
@@ -279,5 +316,13 @@ public final class RuntimeSettlementProcessor {
     }
 
     private record Cash(long available, long locked, long appliedDelta) {
+    }
+
+    private record UserPage(ArrayList<Long> userIds, int accountLaneId,
+                            long nextCursorUserId, boolean complete) {
+    }
+
+    private record OrderPage(List<CoreOrderState> orders, int accountLaneId,
+                             long nextCursorOrderId, boolean complete) {
     }
 }

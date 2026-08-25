@@ -22,7 +22,7 @@ class CoreNativeSnapshotProductLineTest {
         try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
             assertThat(manifest.productLine()).isEqualTo(productLine);
             assertThat(manifest.coreShardId()).isEqualTo("default");
-            assertThat(manifest.routeVersion()).isEqualTo(1);
+            assertThat(manifest.routeVersion()).isEqualTo(2);
             assertThat(restored.productLine()).isEqualTo(productLine);
             assertThat(restored.matchingStateHashAsync().join()).isEqualTo(bookHash);
         }

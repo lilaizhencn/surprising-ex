@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.matching.CoreMatch;
+import exchange.core2.core.common.MatcherEventType;
+import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,7 +12,7 @@ public final class RuntimePerpetualMatchProcessor {
     }
 
     public static TradingRuntimeState simulate(TradingCoreState before, long takerOrderId,
-                                               List<CoreMatch> matches,
+                                               List<MatcherEvent> matches,
                                                RuntimeIdentityRegistry identities) {
         if (before == null || matches == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual match simulation");
@@ -21,7 +22,7 @@ public final class RuntimePerpetualMatchProcessor {
     }
 
     public static TradingRuntimeState apply(TradingCoreState before, long takerOrderId,
-                                            List<CoreMatch> matches, TradingRuntimeState runtime,
+                                            List<MatcherEvent> matches, TradingRuntimeState runtime,
                                             RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -30,7 +31,7 @@ public final class RuntimePerpetualMatchProcessor {
         return applyRuntime(takerOrderId, matches, runtime, identities);
     }
 
-    public static TradingRuntimeState applyRuntime(long takerOrderId, List<CoreMatch> matches,
+    public static TradingRuntimeState applyRuntime(long takerOrderId, List<MatcherEvent> matches,
                                                    TradingRuntimeState runtime,
                                                    RuntimeIdentityRegistry identities) {
         if (matches == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
@@ -48,17 +49,18 @@ public final class RuntimePerpetualMatchProcessor {
         }
         validateMatches(runtime, taker, matches);
         int settleAssetId = identities.assetId(instrument.settleAsset());
-        for (CoreMatch match : matches) {
+        for (MatcherEvent match : matches) {
+            if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
-            OrderRuntime maker = requireOpen(runtime, match.makerOrderId());
-            if (maker.userId() != match.makerUserId() || maker.symbolId() != taker.symbolId()
+            OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+            if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                     || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                 throw new IllegalStateException("runtime match does not match authoritative orders");
             }
-            applyFill(runtime, identities, instrument, taker, match.priceTicks(),
-                    match.quantitySteps(), true, settleAssetId);
-            applyFill(runtime, identities, instrument, maker, match.priceTicks(),
-                    match.quantitySteps(), false, settleAssetId);
+            applyFill(runtime, identities, instrument, taker, match.price(),
+                    match.size(), true, settleAssetId);
+            applyFill(runtime, identities, instrument, maker, match.price(),
+                    match.size(), false, settleAssetId);
             if (runtime.order(maker.orderId()).canceled()) {
                 long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
                 runtime.releaseTerminalReservation(maker.orderId());
@@ -80,24 +82,25 @@ public final class RuntimePerpetualMatchProcessor {
     }
 
     private static void validateMatches(TradingRuntimeState runtime, OrderRuntime taker,
-                                        List<CoreMatch> matches) {
+                                        List<MatcherEvent> matches) {
         long takerRemaining = taker.remainingQuantitySteps();
         Map<Long, Long> makerRemaining = new HashMap<>();
-        for (CoreMatch match : matches) {
+        for (MatcherEvent match : matches) {
             if (match == null) {
                 throw new IllegalArgumentException("runtime match is required");
             }
-            OrderRuntime maker = requireOpen(runtime, match.makerOrderId());
-            if (maker.userId() != match.makerUserId() || maker.symbolId() != taker.symbolId()
+            if (match.eventType() != MatcherEventType.TRADE) continue;
+            OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+            if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                     || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                 throw new IllegalStateException("runtime match does not match authoritative orders");
             }
-            if (match.priceTicks() <= 0 || match.quantitySteps() <= 0) {
+            if (match.price() <= 0 || match.size() <= 0) {
                 throw new IllegalArgumentException("invalid runtime match price or quantity");
             }
-            takerRemaining = Math.subtractExact(takerRemaining, match.quantitySteps());
+            takerRemaining = Math.subtractExact(takerRemaining, match.size());
             long remaining = makerRemaining.getOrDefault(maker.orderId(), maker.remainingQuantitySteps());
-            remaining = Math.subtractExact(remaining, match.quantitySteps());
+            remaining = Math.subtractExact(remaining, match.size());
             if (takerRemaining < 0 || remaining < 0) {
                 throw new IllegalStateException("fill exceeds runtime order remaining quantity");
             }
@@ -111,7 +114,7 @@ public final class RuntimePerpetualMatchProcessor {
      * from the fill alone once the reservation was created by an earlier command.
      */
     public static TradingRuntimeState simulateTransition(TradingCoreState before, TradingCoreState expected,
-                                                         long takerOrderId, List<CoreMatch> matches,
+                                                         long takerOrderId, List<MatcherEvent> matches,
                                                          RuntimeIdentityRegistry identities) {
         if (before == null || expected == null || identities == null
                 || expected.productLine() != before.productLine()) {
@@ -122,7 +125,7 @@ public final class RuntimePerpetualMatchProcessor {
     }
 
     public static TradingRuntimeState applyTransition(TradingCoreState before, TradingCoreState expected,
-                                                       long takerOrderId, List<CoreMatch> matches,
+                                                       long takerOrderId, List<MatcherEvent> matches,
                                                        TradingRuntimeState runtime,
                                                        RuntimeIdentityRegistry identities) {
         if (before == null || expected == null || runtime == null || identities == null

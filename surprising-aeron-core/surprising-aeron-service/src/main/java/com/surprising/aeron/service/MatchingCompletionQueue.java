@@ -2,20 +2,30 @@ package com.surprising.aeron.service;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 
 final class MatchingCompletionQueue {
 
-    private final ManyToOneConcurrentArrayQueue<Completion> queue;
+    private final ManyToOneConcurrentArrayQueue<CoreMatchingResult> queue;
     private final AtomicBoolean overflowed = new AtomicBoolean();
+    private final AtomicInteger highWaterMark = new AtomicInteger();
+    private final int capacity;
 
     MatchingCompletionQueue(int capacity) {
         if (capacity <= 0) throw new IllegalArgumentException("matching completion capacity must be positive");
+        this.capacity = capacity;
         queue = new ManyToOneConcurrentArrayQueue<>(capacity);
     }
 
-    boolean offer(long sequence, CoreMatchingResult result) {
-        if (queue.offer(new Completion(sequence, result))) return true;
+    boolean offer(CoreMatchingResult result) {
+        if (result == null || result.nativeCommand().coreSequence() <= 0) {
+            throw new IllegalArgumentException("matching completion must carry coreSequence");
+        }
+        if (queue.offer(result)) {
+            highWaterMark.accumulateAndGet(queue.size(), Math::max);
+            return true;
+        }
         overflowed.set(true);
         return false;
     }
@@ -24,7 +34,7 @@ final class MatchingCompletionQueue {
         return overflowed.getAndSet(false);
     }
 
-    Completion poll() {
+    CoreMatchingResult poll() {
         return queue.poll();
     }
 
@@ -33,9 +43,7 @@ final class MatchingCompletionQueue {
         overflowed.set(false);
     }
 
-    record Completion(long sequence, CoreMatchingResult result) {
-        Completion {
-            if (sequence <= 0 || result == null) throw new IllegalArgumentException("invalid matching completion");
-        }
-    }
+    int depth() { return queue.size(); }
+    int capacity() { return capacity; }
+    int highWaterMark() { return highWaterMark.get(); }
 }

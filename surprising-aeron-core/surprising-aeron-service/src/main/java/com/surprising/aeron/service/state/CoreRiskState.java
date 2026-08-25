@@ -65,6 +65,7 @@ public record CoreRiskState(
 
     public record RiskScan(
             String symbol,
+            int accountLaneId,
             long priceSequence,
             long scanStartPriceSequence,
             long lastUserId,
@@ -88,7 +89,7 @@ public record CoreRiskState(
             long triggerOcoCursor) {
 
         public RiskScan {
-            if (priceSequence < 0 || scanStartPriceSequence < 0
+            if (accountLaneId < 0 || accountLaneId >= Long.SIZE || priceSequence < 0 || scanStartPriceSequence < 0
                     || scanStartPriceSequence > priceSequence || lastUserId < 0 || riskUserId < 0
                     || riskPhase < 0 || riskPhase > 2 || riskReservationCursor < 0
                     || riskMaintenanceMarginUnits < 0 || riskIsolatedMarginUnits < 0
@@ -106,9 +107,24 @@ public record CoreRiskState(
             }
         }
 
+        public RiskScan(String symbol, long priceSequence, long scanStartPriceSequence, long lastUserId,
+                        boolean riskComplete, long riskUserId, int riskPhase, String riskPositionCursor,
+                        long riskReservationCursor, long riskUnrealizedPnlUnits,
+                        long riskMaintenanceMarginUnits, long riskIsolatedMarginUnits,
+                        long riskIsolatedReservationUnits, boolean triggerComplete, int triggerPhase,
+                        long triggerPriceCursor, long triggerOrderCursor, long triggerUpperId,
+                        long triggerMarkPriceTicks, long triggerGeneratedAtEpochMillis,
+                        long triggerOcoOrderId, long triggerOcoCursor) {
+            this(symbol, 0, priceSequence, scanStartPriceSequence, lastUserId, riskComplete, riskUserId,
+                    riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
+                    riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
+                    triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
+                    triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor);
+        }
+
         public RiskScan(String symbol, long priceSequence, long scanStartPriceSequence,
                         long lastUserId, boolean complete) {
-            this(symbol, priceSequence, scanStartPriceSequence, lastUserId, complete,
+            this(symbol, 0, priceSequence, scanStartPriceSequence, lastUserId, complete,
                     0, 0, "-", 0, 0, 0, 0, 0,
                     true, 0, 0, 0, 0, 0, 0, 0, 0);
         }
@@ -125,7 +141,7 @@ public record CoreRiskState(
                                          long reservationCursor, long unrealizedPnlUnits,
                                          long maintenanceMarginUnits, long isolatedMarginUnits,
                                          long isolatedReservationUnits, long completedUserId) {
-            return new RiskScan(symbol, priceSequence, scanStartPriceSequence, completedUserId, complete,
+            return new RiskScan(symbol, accountLaneId, priceSequence, scanStartPriceSequence, completedUserId, complete,
                     userId, phase, positionCursor, reservationCursor, unrealizedPnlUnits,
                     maintenanceMarginUnits, isolatedMarginUnits, isolatedReservationUnits,
                     triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
@@ -134,7 +150,7 @@ public record CoreRiskState(
 
         public RiskScan withTriggerProgress(boolean complete, int phase, long priceCursor, long orderCursor,
                                             long upperId, long markPriceTicks, long generatedAtEpochMillis) {
-            return new RiskScan(symbol, priceSequence, scanStartPriceSequence, lastUserId, riskComplete,
+            return new RiskScan(symbol, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete,
                     riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
                     riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
                     riskIsolatedReservationUnits, complete, phase, priceCursor, orderCursor, upperId,
@@ -142,7 +158,7 @@ public record CoreRiskState(
         }
 
         public RiskScan withTriggerOcoProgress(long orderId, long cursor) {
-            return new RiskScan(symbol, priceSequence, scanStartPriceSequence, lastUserId, riskComplete,
+            return new RiskScan(symbol, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete,
                     riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
                     riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
                     riskIsolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor,

@@ -30,15 +30,6 @@ final class MatcherPrefixDigest {
         hash = mix(hash, result.resultCode());
         hash = mix(hash, result.successfulPrefixCount());
         hash = mix(hash, result.matcherStateChanged());
-        hash = mix(hash, result.matches().size());
-        for (CoreMatch match : result.matches()) {
-            hash = mix(hash, match.makerOrderId());
-            hash = mix(hash, match.makerUserId());
-            hash = mix(hash, match.priceTicks());
-            hash = mix(hash, match.quantitySteps());
-            hash = mix(hash, match.makerCompleted());
-            hash = mix(hash, match.takerCompleted());
-        }
         hash = mix(hash, result.cancellations().size());
         for (CoreCancellationResult cancellation : result.cancellations()) {
             hash = mix(hash, cancellation.orderId());

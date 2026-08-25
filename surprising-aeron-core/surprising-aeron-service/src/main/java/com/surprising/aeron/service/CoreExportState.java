@@ -69,6 +69,7 @@ final class CoreExportState {
     long append(CoreMessage command, ResponseStatus status, com.surprising.aeron.protocol.CoreResultCode resultCode,
                 long appliedCommandCount, long businessStateHash,
                 long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
+                long topologyHash, long laneRevisionHash,
                 CoreMatcherTransition matcherTransition, long clusterPosition,
                 FundsDelta fundsDelta,
                 List<com.surprising.aeron.protocol.CoreUserStateView> changedUsers,
@@ -89,8 +90,9 @@ final class CoreExportState {
                 command.header().commandId(), command.header().messageType(), status, resultCode,
                 command.header().userId(), command.payloadUnsafe(), changedUsers, changedOrders, executions,
                 fundingPayments, changedLiquidations, changedTreasuryAssets, changedTriggerOrders,
-                beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash, matcherTransition,
-                clusterPosition, fundsDelta.views());
+                beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
+                matcherTransition.routeVersion(), topologyHash, laneRevisionHash, appliedCommandCount,
+                matcherTransition, clusterPosition, fundsDelta.views());
         CoreMessage message;
         try {
             message = CoreMessage.owned(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));

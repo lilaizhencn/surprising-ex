@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import com.surprising.aeron.service.state.AccountLaneSnapshot;
 import java.util.zip.CRC32C;
 
 final class SectionedCoreSnapshotWriter {
@@ -37,20 +38,26 @@ final class SectionedCoreSnapshotWriter {
                 || coreSequence != state.appliedCommandCount() || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new IllegalStateException("snapshot fence and matcher manifest do not match");
         }
-        byte[][] payloads = {
-                header(state, snapshotState, matcherSnapshot, snapshotId, coreSequence,
-                        clusterTimestamp, clusterPosition),
-                sources(state),
-                results(state),
-                outbox(state.exportState()),
-                MatcherSnapshotCodec.encode(matcherSnapshot),
-                TradingStateSnapshotCodec.encode(snapshotState),
-                CoreFeePolicySnapshotCodec.encode(state.feePolicies()),
-                CoreTransferSnapshotCodec.encode(state.pendingTransfers()),
-                state.terminalRetention().encode()
-        };
+        ArrayList<byte[]> payloads = new ArrayList<>();
+        payloads.add(header(state, snapshotState, matcherSnapshot, snapshotId, coreSequence,
+                clusterTimestamp, clusterPosition));
+        payloads.add(sources(state));
+        payloads.add(results(state));
+        payloads.add(outbox(state.exportState()));
+        payloads.add(MatcherSnapshotCodec.encode(matcherSnapshot));
+        payloads.add(TradingStateSnapshotCodec.encode(snapshotState));
+        payloads.add(CoreFeePolicySnapshotCodec.encode(state.feePolicies()));
+        payloads.add(CoreTransferSnapshotCodec.encode(state.pendingTransfers()));
+        payloads.add(state.terminalRetention().encode());
+        for (AccountLaneSnapshot lane : state.accountLaneSnapshots(coreSequence, snapshotState)) {
+            payloads.add(accountLane(lane));
+        }
+        int sectionCount = Math.addExact(payloads.size(), 1);
+        if (sectionCount != SectionedCoreSnapshotCodec.sectionCount(matcherSnapshot.accountLaneCount())) {
+            throw new IllegalStateException("account lane snapshot section count mismatch");
+        }
         long totalLength = SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
-                + (long) SectionedCoreSnapshotCodec.SECTION_COUNT * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
+                + (long) sectionCount * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
                 + SectionedCoreSnapshotCodec.FOOTER_LENGTH;
         for (byte[] payload : payloads) {
             requireSectionLength(payload.length);
@@ -65,22 +72,23 @@ final class SectionedCoreSnapshotWriter {
                 .putInt(SectionedCoreSnapshotCodec.MAGIC)
                 .putShort((short) SectionedCoreSnapshotCodec.VERSION)
                 .putShort((short) 0)
-                .putInt(SectionedCoreSnapshotCodec.SECTION_COUNT)
+                .putInt(sectionCount)
                 .array();
         CRC32C checksum = new CRC32C();
         checksum.update(envelope, 0, envelope.length);
-        ArrayList<byte[]> chunks = new ArrayList<>(1 + SectionedCoreSnapshotCodec.SECTION_COUNT * 2);
+        ArrayList<byte[]> chunks = new ArrayList<>(1 + sectionCount * 2);
         chunks.add(envelope);
-        for (int index = 0; index < payloads.length; index++) {
-            byte[] sectionHeader = sectionHeader(index + 1, payloads[index].length);
+        for (int index = 0; index < payloads.size(); index++) {
+            byte[] payload = payloads.get(index);
+            byte[] sectionHeader = sectionHeader(index + 1, payload.length);
             chunks.add(sectionHeader);
-            chunks.add(payloads[index]);
+            chunks.add(payload);
             checksum.update(sectionHeader, 0, sectionHeader.length);
-            checksum.update(payloads[index], 0, payloads[index].length);
+            checksum.update(payload, 0, payload.length);
         }
         byte[] footer = ByteBuffer.allocate(SectionedCoreSnapshotCodec.FOOTER_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN).putLong(checksum.getValue()).array();
-        chunks.add(sectionHeader(SectionedCoreSnapshotCodec.SECTION_COUNT, footer.length));
+        chunks.add(sectionHeader(sectionCount, footer.length));
         chunks.add(footer);
         return new SectionedCoreSnapshotCodec.SectionedSnapshot(chunks, Math.toIntExact(totalLength));
     }
@@ -98,6 +106,15 @@ final class SectionedCoreSnapshotWriter {
                 .put((byte) ProductLineWireCode.encode(state.productLine()))
                 .put((byte) 0)
                 .putInt(MatcherSnapshot.ROUTE_VERSION)
+                .putInt(matcherSnapshot.matchingEngineCount())
+                .putInt(matcherSnapshot.matcherShardMask())
+                .putInt(matcherSnapshot.accountLaneCount())
+                .putLong(matcherSnapshot.accountLaneSeed())
+                .putInt(matcherSnapshot.topology().matcherWindowSize())
+                .putInt(matcherSnapshot.topology().matchingCompletionCapacity())
+                .putInt(matcherSnapshot.topology().accountLaneQueueCapacity())
+                .putLong(matcherSnapshot.topologyHash())
+                .putLong(matcherSnapshot.symbolRouteHash())
                 .putLong(state.appliedCommandCount())
                 .putLong(state.probeValue())
                 .putLong(snapshotId)
@@ -106,6 +123,7 @@ final class SectionedCoreSnapshotWriter {
                 .putLong(clusterPosition)
                 .putLong(matcherSnapshot.matcherSequence())
                 .putLong(snapshotState.businessStateHash())
+                .putLong(com.surprising.aeron.service.state.RollingFundsStateHash.compute(snapshotState))
                 .putInt(matcherSnapshot.engineStateHash())
                 .putInt(matcherSnapshot.bookStateHash())
                 .putLong(matcherSnapshot.symbolRegistryHash())
@@ -120,6 +138,19 @@ final class SectionedCoreSnapshotWriter {
                 .putLong(matcherSnapshot.matcherConfigHash());
         putFixedAscii(buffer, matcherSnapshot.forkGitSha(), SectionedCoreSnapshotCodec.FORK_GIT_SHA_LENGTH);
         putFixedAscii(buffer, matcherSnapshot.artifactSha256(), SectionedCoreSnapshotCodec.ARTIFACT_SHA256_LENGTH);
+        return buffer.array();
+    }
+
+    private static byte[] accountLane(AccountLaneSnapshot lane) {
+        byte[] state = TradingStateSnapshotCodec.encode(lane.state());
+        int length = Math.addExact(Integer.BYTES * 3 + Long.BYTES * 5,
+                Math.addExact(Math.multiplyExact(lane.userIds().size(), Long.BYTES), state.length));
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(lane.laneId()).putLong(lane.revision()).putLong(lane.appliedSequence())
+                .putLong(lane.committedSequence()).putLong(lane.localStateHash())
+                .putLong(lane.localFundsHash()).putInt(lane.userIds().size());
+        lane.userIds().forEach(buffer::putLong);
+        buffer.putInt(state.length).put(state);
         return buffer.array();
     }
 

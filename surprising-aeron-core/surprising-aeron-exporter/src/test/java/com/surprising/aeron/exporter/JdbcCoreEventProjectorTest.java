@@ -289,6 +289,8 @@ class JdbcCoreEventProjectorTest {
                 event.resultCode(), event.userId(), event.commandPayload(), event.changedUsers(),
                 event.changedOrders(), event.executions(), event.fundingPayments(), event.changedLiquidations(),
                 event.changedTreasuryAssets(), event.changedTriggerOrders(), beforeBusinessStateHash, 0, 0,
+                com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 1,
+                event.businessStateHash() == 0 ? 1 : event.businessStateHash(), event.appliedCommandCount(),
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
                 event.exportSequence(), java.util.List.of());
     }

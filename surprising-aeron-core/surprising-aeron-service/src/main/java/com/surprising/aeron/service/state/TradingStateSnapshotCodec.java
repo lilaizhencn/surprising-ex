@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 23;
+    private static final int VERSION = 24;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -174,6 +174,7 @@ public final class TradingStateSnapshotCodec {
         writer.intValue(state.riskState().scans().size());
         state.riskState().scans().values().forEach(scan -> {
             writer.text(scan.symbol());
+            writer.intValue(scan.accountLaneId());
             writer.longValue(scan.priceSequence());
             writer.longValue(scan.scanStartPriceSequence());
             writer.longValue(scan.lastUserId());
@@ -221,6 +222,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(progress.settlementId());
             writer.longValue(progress.instrumentVersion());
             writer.longValue(progress.fundingRatePpm());
+            writer.intValue(progress.accountLaneId());
             writer.longValue(progress.nextCursorUserId());
             writer.longValue(progress.commandId().getMostSignificantBits());
             writer.longValue(progress.commandId().getLeastSignificantBits());
@@ -233,6 +235,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(progress.settlementPriceTicks());
             writer.longValue(progress.optionCashUnitsPerContract());
             writer.byteValue(progress.ordersComplete() ? 1 : 0);
+            writer.intValue(progress.accountLaneId());
             writer.longValue(progress.nextCursorOrderId());
             writer.longValue(progress.nextCursorUserId());
             writer.longValue(progress.commandId().getMostSignificantBits());
@@ -479,6 +482,7 @@ public final class TradingStateSnapshotCodec {
         for (int index = 0; index < scanCount; index++) {
             String scanSymbol = reader.text();
             CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(scanSymbol,
+                    reader.intValue(),
                     reader.nonNegativeLong("scan price sequence"),
                     reader.nonNegativeLong("scan start price sequence"),
                     reader.nonNegativeLong("scan userId"), reader.booleanValue(),
@@ -519,7 +523,8 @@ public final class TradingStateSnapshotCodec {
             CoreTreasuryState.FundingProgress progress = new CoreTreasuryState.FundingProgress(
                     reader.positiveLong("funding progress settlement id"),
                     reader.positiveLong("funding progress instrument version"),
-                    reader.longValue(), reader.nonNegativeLong("funding progress cursor"),
+                    reader.longValue(), reader.intValue(),
+                    reader.nonNegativeLong("funding progress cursor"),
                     new UUID(reader.longValue(), reader.longValue()));
             putUnique(fundingProgress, symbol, progress);
         }
@@ -532,7 +537,8 @@ public final class TradingStateSnapshotCodec {
                     reader.positiveLong("lifecycle progress instrument version"),
                     reader.nonNegativeLong("lifecycle progress settlement price"),
                     reader.nonNegativeLong("lifecycle progress option cash"),
-                    reader.booleanValue(), reader.nonNegativeLong("lifecycle progress order cursor"),
+                    reader.booleanValue(), reader.intValue(),
+                    reader.nonNegativeLong("lifecycle progress order cursor"),
                     reader.nonNegativeLong("lifecycle progress user cursor"),
                     new UUID(reader.longValue(), reader.longValue()));
             putUnique(lifecycleProgress, symbol, progress);

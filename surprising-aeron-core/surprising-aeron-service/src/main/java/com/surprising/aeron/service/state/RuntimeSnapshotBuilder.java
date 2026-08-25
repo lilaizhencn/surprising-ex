@@ -77,7 +77,8 @@ final class RuntimeSnapshotBuilder {
                         risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status())));
         Map<Integer, TradingRuntimeSnapshot.RiskScanSnapshot> riskScans = new TreeMap<>();
         state.riskScansForSnapshot().forEachKeyValue((symbolId, scan) -> riskScans.put(symbolId,
-                new TradingRuntimeSnapshot.RiskScanSnapshot(scan.priceSequence(), scan.scanStartPriceSequence(),
+                new TradingRuntimeSnapshot.RiskScanSnapshot(scan.accountLaneId(), scan.priceSequence(),
+                        scan.scanStartPriceSequence(),
                         scan.lastUserId(), scan.riskComplete(), scan.riskUserId(), scan.riskPhase(),
                         scan.riskPositionCursor(), scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(),
                         scan.riskMaintenanceMarginUnits(), scan.riskIsolatedMarginUnits(),
@@ -105,7 +106,8 @@ final class RuntimeSnapshotBuilder {
         Map<Integer, TradingRuntimeSnapshot.FundingProgressSnapshot> fundingProgress = new TreeMap<>();
         state.treasury().fundingProgresses().forEachKeyValue((symbolId, progress) -> fundingProgress.put(symbolId,
                 new TradingRuntimeSnapshot.FundingProgressSnapshot(progress.settlementId(),
-                        progress.instrumentVersion(), progress.fundingRatePpm(), progress.nextCursorUserId(),
+                        progress.instrumentVersion(), progress.fundingRatePpm(), progress.accountLaneId(),
+                        progress.nextCursorUserId(),
                         progress.commandId())));
         Map<Integer, Long> lifecycleSettlements = new TreeMap<>();
         state.treasury().lifecycleSettlements().forEachKeyValue(lifecycleSettlements::put);
@@ -114,7 +116,8 @@ final class RuntimeSnapshotBuilder {
                 new TradingRuntimeSnapshot.LifecycleProgressSnapshot(progress.settlementId(),
                         progress.instrumentVersion(), progress.settlementPriceTicks(),
                         progress.optionCashUnitsPerContract(), progress.ordersComplete(),
-                        progress.nextCursorOrderId(), progress.nextCursorUserId(), progress.commandId())));
+                        progress.accountLaneId(), progress.nextCursorOrderId(),
+                        progress.nextCursorUserId(), progress.commandId())));
         return new TradingRuntimeSnapshot(revision, users, balances, orders, reservations, clientOrderIndex,
                 positions, liquidations, markPrices, riskSnapshots, riskScans, state.nextLiquidationId(),
                 new TreeMap<>(state.instrumentsForRuntime()), new TreeMap<>(state.leveragesForRuntime()),

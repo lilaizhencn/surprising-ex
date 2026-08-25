@@ -21,7 +21,8 @@ import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
-import com.surprising.aeron.service.matching.CoreMatch;
+import exchange.core2.core.common.MatcherEventType;
+import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey;
 import java.util.Collection;
@@ -849,7 +850,7 @@ public final class TradingCoreReducer {
             long takerOrderId,
             String baseAsset,
             String quoteAsset,
-            List<CoreMatch> matches) {
+            List<MatcherEvent> matches) {
         if (matches == null) {
             throw new IllegalArgumentException("matches are required");
         }
@@ -865,10 +866,11 @@ public final class TradingCoreReducer {
         CoreTreasuryState treasury = state.treasuryState();
         CoreOrderState taker = requireOpenOrder(orders, takerOrderId);
         CoreInstrumentState instrument = requireInstrument(state, taker.symbol(), taker.instrumentVersion());
-        for (CoreMatch match : matches) {
-            CoreOrderState maker = requireOpenOrder(orders, match.makerOrderId());
+        for (MatcherEvent match : matches) {
+            if (match.eventType() != MatcherEventType.TRADE) continue;
+            CoreOrderState maker = requireOpenOrder(orders, match.matchedOrderId());
             if (!taker.symbol().equals(maker.symbol()) || taker.side() == maker.side()
-                    || maker.userId() != match.makerUserId()) {
+                    || maker.userId() != match.matchedOrderUid()) {
                 throw new IllegalStateException("exchange-core match does not match authoritative orders");
             }
             if (taker.userId() == maker.userId()) {
@@ -879,14 +881,14 @@ public final class TradingCoreReducer {
                         new CoreLeverageKey(taker.userId(), instrument.symbol(), taker.marginMode()),
                         instrument.maxLeveragePpm());
                 DerivativeFillResult takerFill = applyDerivativeFill(users.get(taker.userId()), taker,
-                        instrument, match.priceTicks(), match.quantitySteps(), true, takerLeverage, treasury);
+                        instrument, match.price(), match.size(), true, takerLeverage, treasury);
                 users.put(taker.userId(), takerFill.user());
                 treasury = takerFill.treasury();
                 long makerLeverage = state.leverages().getOrDefault(
                         new CoreLeverageKey(maker.userId(), instrument.symbol(), maker.marginMode()),
                         instrument.maxLeveragePpm());
                 DerivativeFillResult makerFill = applyDerivativeFill(users.get(maker.userId()), maker,
-                        instrument, match.priceTicks(), match.quantitySteps(), false, makerLeverage, treasury);
+                        instrument, match.price(), match.size(), false, makerLeverage, treasury);
                 users.put(maker.userId(), makerFill.user());
                 treasury = makerFill.treasury();
             } else {
@@ -898,21 +900,21 @@ public final class TradingCoreReducer {
                         ? sellerOrder.takerFeeRatePpm() : sellerOrder.makerFeeRatePpm();
                 SpotFillResult buyerFill = applySpotFill(users.get(buyerOrder.userId()), buyerOrder,
                         instrument, AssetBalance.normalizeAsset(baseAsset), AssetBalance.normalizeAsset(quoteAsset),
-                        match.priceTicks(), match.quantitySteps(), buyerFeeRate, treasury);
+                        match.price(), match.size(), buyerFeeRate, treasury);
                 users.put(buyerOrder.userId(), buyerFill.user());
                 treasury = buyerFill.treasury();
                 SpotFillResult sellerFill = applySpotFill(users.get(sellerOrder.userId()), sellerOrder,
                         instrument, AssetBalance.normalizeAsset(baseAsset), AssetBalance.normalizeAsset(quoteAsset),
-                        match.priceTicks(), match.quantitySteps(), sellerFeeRate, treasury);
+                        match.price(), match.size(), sellerFeeRate, treasury);
                 users.put(sellerOrder.userId(), sellerFill.user());
                 treasury = sellerFill.treasury();
             }
             long takerFeeUnits = Math.negateExact(CoreContractMath.feeDeltaUnits(
-                    instrument, match.priceTicks(), match.quantitySteps(), taker.takerFeeRatePpm()));
+                    instrument, match.price(), match.size(), taker.takerFeeRatePpm()));
             long makerFeeUnits = Math.negateExact(CoreContractMath.feeDeltaUnits(
-                    instrument, match.priceTicks(), match.quantitySteps(), maker.makerFeeRatePpm()));
-            taker = taker.fill(match.quantitySteps(), takerFeeUnits);
-            maker = maker.fill(match.quantitySteps(), makerFeeUnits);
+                    instrument, match.price(), match.size(), maker.makerFeeRatePpm()));
+            taker = taker.fill(match.size(), takerFeeUnits);
+            maker = maker.fill(match.size(), makerFeeUnits);
             orders.put(taker.orderId(), taker);
             orders.put(maker.orderId(), maker);
             if (maker.status() != CoreOrderStatus.OPEN) {

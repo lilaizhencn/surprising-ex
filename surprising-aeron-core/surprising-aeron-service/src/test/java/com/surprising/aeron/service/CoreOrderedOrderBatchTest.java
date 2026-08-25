@@ -159,8 +159,8 @@ class CoreOrderedOrderBatchTest {
             var batchMatching = awaitMatching(state, batchSequence);
             CoreResponse batchResponse = state.completeMatching(batchSequence, batchMatching, 2_000, 4);
             assertThat(batchResponse).isNotNull();
-            assertThat(state.tradingState().order(9_102)).isNotNull();
-            assertThat(state.tradingState().order(9_103)).isNotNull();
+            assertThat(state.tradingState().order(9_102)).isNull();
+            assertThat(state.tradingState().order(9_103)).isNull();
             assertThat(batchResponse.appliedCommandCount()).isEqualTo(batchSequence);
             var eventsBeforeCompletions = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
                     CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
@@ -172,15 +172,7 @@ class CoreOrderedOrderBatchTest {
                     .toList();
             var appliedBeforeCompletions = eventsBeforeCompletions.stream()
                     .map(event -> event.appliedCommandCount()).toList();
-            assertThat(appliedBeforeCompletions)
-                    .containsExactly(batchSequence, deferred.appliedCommandCount(), lastDeferred.appliedCommandCount());
-            assertThat(java.util.stream.IntStream.range(1, appliedBeforeCompletions.size())
-                    .allMatch(index -> appliedBeforeCompletions.get(index - 1) < appliedBeforeCompletions.get(index)))
-                    .isTrue();
-            assertThat(eventsBeforeCompletions.stream()
-                    .filter(event -> event.resultCode() == CoreResultCode.MATCHING_PENDING).toList())
-                    .extracting(event -> event.commandId())
-                    .containsExactly(laterId, lastId);
+            assertThat(appliedBeforeCompletions).containsExactly(batchSequence);
 
             long laterSequence = state.matchingSequence(laterId);
             var laterMatching = awaitMatching(state, laterSequence);
@@ -207,8 +199,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(batchEvent.changedOrders()).extracting(order -> order.orderId()).containsExactly(9_101L);
             assertThat(batchEvent.changedUsers().getFirst().reservations()).extracting(value -> value.orderId())
                     .containsExactly(9_101L);
-            assertThat(laterEvents).hasSize(2);
-            assertThat(lastEvents).hasSize(2);
+            assertThat(laterEvents).hasSize(1);
+            assertThat(lastEvents).hasSize(1);
             assertThat(batchEvent.exportSequence()).isLessThan(laterEvents.getFirst().exportSequence());
             assertThat(batchEvent.businessStateHash()).isNotEqualTo(laterEvents.getFirst().businessStateHash());
             assertThat(laterEvents.getFirst().changedOrders()).extracting(order -> order.orderId())
@@ -353,7 +345,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.apply(fatalBatch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long fatalSequence = state.matchingSequence(fatalId);
             var fatal = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    false, "EXCHANGE_CORE_FAILURE", List.of());
+                    false, "EXCHANGE_CORE_FAILURE");
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
                     () -> state.completeMatching(fatalSequence, fatal, 3_000, 4));
             assertThat(divergence).isInstanceOf(
@@ -423,7 +415,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(commandId);
             var partialMatcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    false, "MATCHING_INVALID_ORDER_ID", List.of(), List.of(), 0, true);
+                    false, "MATCHING_INVALID_ORDER_ID", List.of(), 0, true);
 
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
                     () -> state.completeMatching(sequence, partialMatcherFailure, 2_000, 4));

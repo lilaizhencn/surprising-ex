@@ -45,6 +45,7 @@ final class CoreStateSnapshotCodec {
         if (SectionedCoreSnapshotCodec.isSectioned(snapshot)) {
             return SectionedCoreSnapshotCodec.manifest(snapshot, expectedProductLine);
         }
+        if (VERSION == 0) throw new ProtocolException("legacy core snapshot is disabled");
         if (snapshot == null || snapshot.length < FIXED_LENGTH) {
             throw new ProtocolException("snapshot shorter than fixed header");
         }
@@ -140,7 +141,8 @@ final class CoreStateSnapshotCodec {
                 matcherSnapshot.userRegistryHash(), matcherSnapshot.instrumentRegistryHash(),
                 matcherSnapshot.activeOrderHash(), matcherSnapshot.forkGitSha(),
                 matcherSnapshot.artifactSha256(), matcherSnapshot.matcherConfigHash(),
-                exportState.status(), storedChecksum);
+                matcherSnapshot.topology(), matcherSnapshot.topologyHash(), matcherSnapshot.symbolRouteHash(),
+                tradingState.businessStateHash(), exportState.status(), storedChecksum);
     }
 
     static CoreProbeState decode(byte[] snapshot, ProductLine expectedProductLine) {
@@ -148,6 +150,7 @@ final class CoreStateSnapshotCodec {
         if (SectionedCoreSnapshotCodec.isSectioned(snapshot)) {
             return SectionedCoreSnapshotCodec.decode(snapshot, expectedProductLine);
         }
+        if (VERSION == 0) throw new ProtocolException("legacy core snapshot is disabled");
         if (snapshot == null || snapshot.length < FIXED_LENGTH) {
             throw new ProtocolException("snapshot shorter than fixed header");
         }

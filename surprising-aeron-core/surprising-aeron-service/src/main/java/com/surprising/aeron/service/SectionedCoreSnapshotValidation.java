@@ -4,6 +4,7 @@ import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -23,6 +24,15 @@ final class SectionedCoreSnapshotValidation {
         }
         int shardCode = Byte.toUnsignedInt(header.get());
         int routeVersion = header.getInt();
+        LaneTopology topology;
+        try {
+            topology = new LaneTopology(routeVersion, header.getInt(), header.getInt(), header.getInt(),
+                    header.getLong(), header.getInt(), header.getInt(), header.getInt());
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException("snapshot route mismatch: " + exception.getMessage());
+        }
+        long topologyHash = header.getLong();
+        long symbolRouteHash = header.getLong();
         long appliedCommandCount = header.getLong();
         long probeValue = header.getLong();
         long snapshotId = header.getLong();
@@ -31,6 +41,7 @@ final class SectionedCoreSnapshotValidation {
         long clusterPosition = header.getLong();
         long matcherSequence = header.getLong();
         long businessStateHash = header.getLong();
+        long globalFundsHash = header.getLong();
         int engineStateHash = header.getInt();
         int bookStateHash = header.getInt();
         long symbolRegistryHash = header.getLong();
@@ -47,7 +58,12 @@ final class SectionedCoreSnapshotValidation {
         String artifactSha256 = readFixedAscii(header, SectionedCoreSnapshotCodec.ARTIFACT_SHA256_LENGTH);
         if (header.hasRemaining()) throw new ProtocolException("snapshot header section has trailing garbage");
         if (shardCode != 0) throw new ProtocolException("snapshot core shard mismatch");
-        if (routeVersion != MatcherSnapshot.ROUTE_VERSION) throw new ProtocolException("snapshot route mismatch");
+        if (routeVersion != MatcherSnapshot.ROUTE_VERSION) {
+            throw new ProtocolException("snapshot route mismatch");
+        }
+        if (topologyHash != topology.topologyHash()) {
+            throw new ProtocolException("snapshot topology mismatch");
+        }
         if (snapshotId <= 0) throw new ProtocolException("snapshot id mismatch");
         if (appliedCommandCount < 0 || coreSequence < 0 || matcherSequence < 0
                 || clusterTimestamp < 0 || clusterPosition < 0) {
@@ -57,9 +73,11 @@ final class SectionedCoreSnapshotValidation {
                 || outboxPendingCount < 0 || outboxPendingCount > CoreExportState.MAX_PENDING_EVENTS) {
             throw new ProtocolException("invalid snapshot outbox metadata");
         }
-        return new HeaderManifest(productLine, routeVersion, snapshotId, coreSequence,
+        return new HeaderManifest(productLine, routeVersion, topology, topologyHash, symbolRouteHash,
+                snapshotId, coreSequence,
                 clusterTimestamp, clusterPosition, appliedCommandCount, probeValue, matcherSequence,
-                businessStateHash, engineStateHash, bookStateHash, symbolRegistryHash, userRegistryHash,
+                businessStateHash, globalFundsHash, engineStateHash, bookStateHash,
+                symbolRegistryHash, userRegistryHash,
                 instrumentRegistryHash, activeOrderHash, sourceSequenceDigest, outboxAcknowledgedSequence,
                 outboxNextSequence, outboxPendingCount, outboxPendingDigest, forkGitSha, artifactSha256,
                 matcherConfigHash);
@@ -74,12 +92,17 @@ final class SectionedCoreSnapshotValidation {
         requireMatch(manifest.productLine() == matcherSnapshot.productLine()
                 && manifest.productLine() == tradingState.productLine(), "product line");
         requireMatch(manifest.routeVersion() == matcherSnapshot.routeVersion(), "route");
+        requireMatch(manifest.topology().equals(matcherSnapshot.topology())
+                && manifest.topologyHash() == matcherSnapshot.topologyHash(), "topology");
+        requireMatch(manifest.symbolRouteHash() == matcherSnapshot.symbolRouteHash(), "symbol route");
         requireMatch(manifest.snapshotId() == matcherSnapshot.snapshotId(), "snapshot id");
         requireMatch(manifest.coreSequence() == matcherSnapshot.coreSequence(), "core sequence");
         requireMatch(manifest.appliedCommandCount() == manifest.coreSequence(), "applied sequence");
         requireMatch(manifest.matcherSequence() == matcherSnapshot.matcherSequence(), "matcher sequence");
         requireMatch(manifest.businessStateHash() == tradingState.businessStateHash()
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
+        requireMatch(manifest.globalFundsHash()
+                == com.surprising.aeron.service.state.RollingFundsStateHash.compute(tradingState), "funds hash");
         requireMatch(manifest.engineStateHash() == matcherSnapshot.engineStateHash(), "engine state hash");
         requireMatch(manifest.bookStateHash() == matcherSnapshot.bookStateHash(), "book state hash");
         requireMatch(manifest.symbolRegistryHash() == matcherSnapshot.symbolRegistryHash(), "symbol registry hash");
@@ -112,9 +135,11 @@ final class SectionedCoreSnapshotValidation {
     }
 
     record HeaderManifest(
-            ProductLine productLine, int routeVersion, long snapshotId, long coreSequence,
+            ProductLine productLine, int routeVersion, LaneTopology topology, long topologyHash,
+            long symbolRouteHash, long snapshotId, long coreSequence,
             long clusterTimestamp, long clusterPosition, long appliedCommandCount, long probeValue,
-            long matcherSequence, long businessStateHash, int engineStateHash, int bookStateHash,
+            long matcherSequence, long businessStateHash, long globalFundsHash,
+            int engineStateHash, int bookStateHash,
             long symbolRegistryHash, long userRegistryHash, long instrumentRegistryHash, long activeOrderHash,
             long sourceSequenceDigest, long outboxAcknowledgedSequence, long outboxNextSequence,
             int outboxPendingCount, long outboxPendingDigest, String forkGitSha, String artifactSha256,

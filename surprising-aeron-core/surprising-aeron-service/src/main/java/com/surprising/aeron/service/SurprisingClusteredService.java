@@ -97,7 +97,15 @@ public final class SurprisingClusteredService implements ClusteredService {
         } catch (IllegalArgumentException exception) {
             return;
         }
-        completeEarlierMatching(timestamp, header.position());
+        boolean matcherPipelineCommand = request.header().kind()
+                == com.surprising.aeron.protocol.WireMessageKind.COMMAND
+                && CoreProbeState.isMatchingCommand(request.header().messageType())
+                && !state.hasPendingMatchingForUser(request.header().userId());
+        if (!matcherPipelineCommand) {
+            completeEarlierMatching(timestamp, header.position());
+        } else {
+            state.drainMatchingCompletions();
+        }
         var result = state.apply(request, timestamp, header.position());
         long matchingSequence = state.matchingSequence(request.header().commandId());
         if (matchingSequence > 0) {
@@ -119,7 +127,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
         if (session != null) {
             CoreMessage response = new CoreMessage(request.header().response(responseType(request.header())),
-                    CoreProtocol.responsePayload(result));
+                    CoreProtocol.responsePayload(visible(result)));
             offer(session, response);
         }
     }
@@ -275,7 +283,8 @@ public final class SurprisingClusteredService implements ClusteredService {
                 for (PendingClient pendingClient : clients) {
                     if (pendingClient.session().isClosing()) continue;
                     CoreMessage response = new CoreMessage(pendingClient.requestHeader().response(
-                            responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(queryResult));
+                            responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(
+                            visible(queryResult)));
                     offer(pendingClient.session(), response);
                 }
             }
@@ -464,9 +473,13 @@ public final class SurprisingClusteredService implements ClusteredService {
         for (PendingClient pendingClient : clients) {
             if (pendingClient.session().isClosing()) continue;
             CoreMessage response = new CoreMessage(pendingClient.requestHeader().response(
-                    responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(result));
+                    responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(visible(result)));
             offer(pendingClient.session(), response);
         }
+    }
+
+    private CoreResponse visible(CoreResponse result) {
+        return result.withCommittedCoreSequence(state.committedCoreSequence());
     }
 
     private void completeEarlierMatching(long timestamp, long clusterPosition) {
@@ -475,6 +488,11 @@ public final class SurprisingClusteredService implements ClusteredService {
             long sequence = state.firstPendingMatchingSequence();
             if (sequence == 0) {
                 return;
+            }
+            if (state.hasPendingMatchingRejection(sequence)) {
+                CoreResponse rejected = state.completeRejectedMatching(sequence);
+                if (rejected != null) deliverMatchingResponse(sequence, rejected);
+                continue;
             }
             var matchingResult = state.awaitMatchingResult(sequence);
             if (matchingResult == null) {

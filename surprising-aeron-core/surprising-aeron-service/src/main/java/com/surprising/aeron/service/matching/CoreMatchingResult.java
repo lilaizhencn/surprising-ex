@@ -15,7 +15,6 @@ public final class CoreMatchingResult {
 
     private final boolean accepted;
     private final String resultCode;
-    private final List<CoreMatch> matches;
     private final List<CoreCancellationResult> cancellations;
     private final int successfulPrefixCount;
     private final boolean matcherStateChanged;
@@ -25,37 +24,36 @@ public final class CoreMatchingResult {
     private final List<MatcherResult.MatcherEvent> matcherEvents;
     private final MatcherResult.MarketData marketData;
 
-    public CoreMatchingResult(boolean accepted, String resultCode, List<CoreMatch> matches) {
-        this(accepted, resultCode, matches, List.of(), 0, false);
+    public CoreMatchingResult(boolean accepted, String resultCode) {
+        this(accepted, resultCode, List.of(), 0, false);
     }
 
-    public CoreMatchingResult(boolean accepted, String resultCode, List<CoreMatch> matches,
+    public CoreMatchingResult(boolean accepted, String resultCode,
                               List<CoreCancellationResult> cancellations, int successfulPrefixCount) {
-        this(accepted, resultCode, matches, cancellations, successfulPrefixCount, false);
+        this(accepted, resultCode, cancellations, successfulPrefixCount, false);
     }
 
-    public CoreMatchingResult(boolean accepted, String resultCode, List<CoreMatch> matches,
+    public CoreMatchingResult(boolean accepted, String resultCode,
                               List<CoreCancellationResult> cancellations, int successfulPrefixCount,
                               boolean matcherStateChanged) {
-        this(accepted, resultCode, matches, cancellations, successfulPrefixCount, matcherStateChanged,
-                new NativeCommand(0, "", 0, 0, 0, 0, 0), new MatcherPrefix(0, 0), null,
+        this(accepted, resultCode, cancellations, successfulPrefixCount, matcherStateChanged,
+                new NativeCommand(0, "", 0, 0, 0, 0, 0, -1), new MatcherPrefix(0, 0), null,
                 List.of(), EMPTY_MARKET_DATA);
     }
 
-    public CoreMatchingResult(boolean accepted, String resultCode, List<CoreMatch> matches,
+    public CoreMatchingResult(boolean accepted, String resultCode,
                               List<CoreCancellationResult> cancellations, int successfulPrefixCount,
                               boolean matcherStateChanged, NativeCommand nativeCommand,
                               MatcherPrefix matcherPrefix, MatcherResult nativeMatcherResult,
                               List<MatcherResult.MatcherEvent> matcherEvents,
                               MatcherResult.MarketData marketData) {
-        if (resultCode == null || resultCode.isBlank() || matches == null || cancellations == null
+        if (resultCode == null || resultCode.isBlank() || cancellations == null
                 || successfulPrefixCount < 0 || successfulPrefixCount > cancellations.size()
                 || nativeCommand == null || matcherPrefix == null || matcherEvents == null || marketData == null) {
             throw new IllegalArgumentException("invalid matching result");
         }
         this.accepted = accepted;
         this.resultCode = resultCode;
-        this.matches = List.copyOf(matches);
         this.cancellations = List.copyOf(cancellations);
         this.successfulPrefixCount = successfulPrefixCount;
         this.matcherStateChanged = matcherStateChanged;
@@ -66,19 +64,29 @@ public final class CoreMatchingResult {
         this.marketData = marketData;
     }
 
-    static CoreMatchingResult fromNative(MatcherResult result, List<CoreMatch> matches) {
+    static CoreMatchingResult fromNative(MatcherResult result) {
         Objects.requireNonNull(result, "matcher result");
         boolean accepted = result.resultCode() == CommandResultCode.SUCCESS
                 || result.resultCode() == CommandResultCode.ACCEPTED;
-        return new CoreMatchingResult(accepted, result.resultCode().name(), matches,
-                List.of(), 0, false,
+        return new CoreMatchingResult(accepted, result.resultCode().name(), List.of(), 0, false,
                 new NativeCommand(0, "", 0, 0, result.sequence(), 0, 0),
                 new MatcherPrefix(0, 0), result, result.events(), result.marketData());
     }
 
     CoreMatchingResult withEvidence(NativeCommand command, MatcherPrefix prefix) {
-        return new CoreMatchingResult(accepted, resultCode, matches, cancellations, successfulPrefixCount,
+        return new CoreMatchingResult(accepted, resultCode, cancellations, successfulPrefixCount,
                 matcherStateChanged, command, prefix, nativeMatcherResult, matcherEvents, marketData);
+    }
+
+    public CoreMatchingResult withCoreSequence(long coreSequence) {
+        if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
+        if (nativeCommand.coreSequence() == coreSequence) return this;
+        if (nativeCommand.coreSequence() != 0) throw new IllegalStateException("matching result sequence mismatch");
+        NativeCommand command = new NativeCommand(coreSequence, nativeCommand.commandId(), nativeCommand.orderId(),
+                nativeCommand.instrumentVersion(), nativeCommand.nativeSequence(), nativeCommand.matcherSequence(),
+                nativeCommand.aeronTimestamp(), nativeCommand.matcherShardId());
+        return new CoreMatchingResult(accepted, resultCode, cancellations, successfulPrefixCount,
+                matcherStateChanged, command, matcherPrefix, nativeMatcherResult, matcherEvents, marketData);
     }
 
     static List<MatcherResult.MatcherEvent> concatenateEvents(
@@ -116,7 +124,6 @@ public final class CoreMatchingResult {
 
     public boolean accepted() { return accepted; }
     public String resultCode() { return resultCode; }
-    public List<CoreMatch> matches() { return matches; }
     public List<CoreCancellationResult> cancellations() { return cancellations; }
     public int successfulPrefixCount() { return successfulPrefixCount; }
     public boolean matcherStateChanged() { return matcherStateChanged; }
@@ -127,12 +134,19 @@ public final class CoreMatchingResult {
     public MatcherResult.MarketData marketData() { return marketData; }
 
     public record NativeCommand(long coreSequence, String commandId, long orderId, long instrumentVersion,
-                                long nativeSequence, long matcherSequence, long aeronTimestamp) {
+                                long nativeSequence, long matcherSequence, long aeronTimestamp,
+                                int matcherShardId) {
         public NativeCommand {
             if (coreSequence < 0 || commandId == null || orderId < 0 || instrumentVersion < 0
-                    || nativeSequence < 0 || matcherSequence < 0 || aeronTimestamp < 0) {
+                    || nativeSequence < 0 || matcherSequence < 0 || aeronTimestamp < 0 || matcherShardId < -1) {
                 throw new IllegalArgumentException("invalid native command identity");
             }
+        }
+
+        public NativeCommand(long coreSequence, String commandId, long orderId, long instrumentVersion,
+                             long nativeSequence, long matcherSequence, long aeronTimestamp) {
+            this(coreSequence, commandId, orderId, instrumentVersion, nativeSequence, matcherSequence,
+                    aeronTimestamp, -1);
         }
     }
 

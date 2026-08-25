@@ -87,7 +87,7 @@ class CoreMatchingStateTest {
     }
 
     @Test
-    void finalMatcherFactCarriesTheRestingOrderAfterThePendingFact() {
+    void finalMatcherFactCarriesTheRestingOrderWithoutExportingPendingState() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 22, CoreMessageType.ADJUST_BALANCE,
@@ -106,10 +106,9 @@ class CoreMatchingStateTest {
                     .filter(event -> event.commandId().equals(order.header().commandId()))
                     .toList();
 
-            assertThat(events).hasSize(2);
-            assertThat(events.getFirst().resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThat(events.getLast().resultCode()).isEqualTo(CoreResultCode.NONE);
-            assertThat(events.getLast().changedOrders()).singleElement()
+            assertThat(events).singleElement()
+                    .satisfies(event -> assertThat(event.resultCode()).isEqualTo(CoreResultCode.NONE));
+            assertThat(events.getFirst().changedOrders()).singleElement()
                     .satisfies(view -> {
                         assertThat(view.orderId()).isEqualTo(202);
                         assertThat(view.status()).isEqualTo("OPEN");

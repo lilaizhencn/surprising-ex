@@ -5,18 +5,17 @@
 
 W1/W2 已完成单一可执行盘口改造：`TradingCoreRuntime` 是 Core 单写边界，撮合命令只进入 fork 的
 exchange-core 0.5.16-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
-matcher 恢复导入 Aeron 配对 snapshot 中的原生 `ME0/RE0`，通过 `fromSnapshotOnly` 启动，不逐单回放。
+matcher 恢复导入 Aeron 配对 snapshot 中全部原生 `ME[0..N)/RE0`，通过 `fromSnapshotOnly` 启动，不逐单回放。
 
 部署基线不按 margin mode 或热点 symbol 分 Core：CROSS 和 ISOLATED 都由同一个 ProductLine Core 裁决；
-CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。当前仅保留 `coreShardId=default` 和
-`routeVersion=1` 的协议语义；字段按主规格 W1/W3 版本化落地，完成前不接受非默认路由，也不启用热点分片
-或跨 Core 全仓余额共享。
+CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保留 `coreShardId=default`，当前协议固定
+`routeVersion=2`；symbol 只进入同一共享 ExchangeCore 的原生 matcher shard，不启用物理热点 Core 或跨 Core 全仓余额共享。
 
 ## 模块
 
 | 模块 | 职责 |
 | --- | --- |
-| `surprising-aeron-protocol` | P1-P5 schema v3 的固定小端二进制 command/envelope、六线 wire code 和端口布局。 |
+| `surprising-aeron-protocol` | schema v4 固定小端二进制 command/envelope、六线 wire code、route v2 和端口布局。 |
 | `surprising-aeron-service` | `ClusteredService`、有界幂等状态、Snapshot 和节点启动器。 |
 | `surprising-aeron-client` | Leader 自动发现、切换处理和“超时即结果未知”同步客户端。 |
 | `surprising-aeron-exporter` | P5 可靠 Exporter 的最小 sink 边界。 |
@@ -37,34 +36,33 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 
 ## 实现状态与版本切换说明
 
-P0-P5 已完成。当前写格式为 command/envelope schema v3、export event marker v8、trading snapshot v23 和
-sectioned snapshot v13；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
+当前写格式为 command/envelope schema v4、export event marker v9、trading snapshot v24、matcher snapshot v3 和
+sectioned snapshot v14；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
 
 P10 的目标不是物理 Core shard；每个三节点 Product Core 仍只运行一个共享的 Adapter/ExchangeCore，按 symbol 的
 Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Account Lane 是默认必须实施的运行时边界，
 生产默认 `accountLaneCount=4`；Sequencer 扫描一次 userId 后把同一不可变 matcher result 引用扇出到受影响 Lane，
 以 expected/ack Lane mask 提交，不生成 `SettlementPlan` 或 event 副本；Treasury 保持 Sequencer owner。全局 Core
-sequence、Core Fact、snapshot 和恢复仍由一个
-确定性 Sequencer 协调。该方案当前仅完成设计、尚未实施；完整所有权、无锁队列、资金提交、快照一致性、恢复门禁、
-代码修改清单和验收矩阵见 [P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)。在该文档
-完成定义全部通过前，运行时仍保持 `routeVersion=1`、单 Runtime owner 和全局 one-in-flight matcher。
+sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
+4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、ACK 位图、全局 commit
+cursor、lane-aware 生命周期和实际 Lane snapshot section 已落地。P10-G 的真实 HTTP/JFR 门禁见
+[P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)，没有对应 artifact 时不得宣称生产认证完成。
 
 ## 协议约束
 
 - Cluster Log 权威消息禁止 Java serialization 和无版本 JSON。
-- schema v3 header 包含 `commandId`、`productLine`、`source`、`sourceId`、`sourceSequence`、`userId`、
-  外部提交时间和 `correlationId`；旧 v2 envelope 不再接受。
+- schema v4 header 包含 `commandId`、`productLine`、`source`、`sourceId`、`sourceSequence`、`userId`、
+  外部提交时间、`correlationId` 和 route v2；旧 envelope/route 不再接受。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
 - exchange-core 0.5.16-emporia 是唯一可执行订单簿（sole executable order book），独占价格树/FIFO；`GTX` 使用原生
   post-only 语义，外层不得查 book 后模拟，也不得建立并行可执行 book。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
-- P2 的 one-in-flight 边界由 `DeterministicExchangeCoreAdapter` 执行：Core owner 按 Core sequence 排队，adapter 只向
-  exchange-core 提交当前一条命令；exchange-core 返回不可变 `MatcherResult` 并绑定 `matcherSequence` 与滚动
-  `MatcherPrefix(before, after)` 后，才放行下一条实际 matcher 提交。异步完成只把同一个结果引用放入有界 completion
-  queue，仍由 owner 按 Core sequence 校验并写入 Runtime，不能由回调直接写状态。P10 将删除 `Completion` wrapper，
-  由 Sequencer 扫描一次 userId 并把同一不可变结果引用扇出给受影响 Account Lane；不复制 event，也不物化
+- Adapter 按 Core sequence 向一个 ExchangeCore ring 提交最多 `matcherWindowSize` 个命令；原生 shard 可并行，
+  ResultsHandler 的 native sequence/prefix 必须形成严格连续前缀。异步完成直接把同一个 `CoreMatchingResult` 引用放入
+  有界 MPSC completion queue，不存在 `Completion` wrapper。Sequencer 扫描一次 userId 后把该引用扇出给受影响
+  Account Lane；不复制 event，也不物化
   `SettlementPlan`。wall-clock readiness/watchdog 只能由 external health
   supervisor 观察，不能进入复制状态或改变裁决顺序。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
@@ -73,8 +71,8 @@ sequence、Core Fact、snapshot 和恢复仍由一个
   生命周期进度保存在 Core 状态中，但 pending matcher continuation 不写入 snapshot。matcher 异常、超时、
   malformed result 或 Core/matcher 分歧直接抛出 `FatalMatchingDivergenceException`，Cluster Member 失败关闭，
   不 rebuild、不 retry、不 resubmit；生命周期期间同 symbol 的普通订单被拒绝，其他 symbol 仍可提交。
-- exchange-core 的提交边界统一由上述单一 in-flight 门控；即使不同 symbol 也不得重叠，snapshot/hash/settlement 等全局操作必须在
-  同一 Core/book prefix 栅栏之后执行。当前物理 matcher 保持 `matchingEnginesNum(1)`，不得以线程池并发替代 Core sequence。
+- snapshot/query/lifecycle fence 停止新派发并排空 bounded window；不同 symbol 可在原生 shard 并行，但全局可见性、
+  Core Fact 和 outbox 永远只按 Core sequence 提交。生产默认 `matchingEnginesNum(4)`，不得创建第二个 Adapter/ExchangeCore。
 
 生命周期批量协议使用 `EXECUTE_LIQUIDATION_BATCH` wire code 43。`CoreLiquidationWorkCodec` 返回 action 的
 `ORDERED` cursor 和精确 Risk Scan token；`CoreLiquidationBatchResultCodec` 返回 offered/applied/pending/obsolete/
@@ -116,9 +114,9 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 
 当前实现状态：P2 已完成。
 
-- 同一时刻最多有一个实际 MATCHING_ONLY matcher command in flight。adapter 按 Core sequence 串行提交，直接取得
+- Adapter 允许 bounded MATCHING_ONLY matcher commands in flight，按 Core sequence 提交并直接取得
   exchange-core 的不可变 `MatcherResult`；结果至少携带 Core sequence、command ID、order ID、instrument version、
-  process-local native sequence、可恢复 matcher sequence 和滚动 `MatcherPrefix(before, after)`，随后才允许执行下一条
+  process-local native sequence、可恢复 matcher sequence、matcher shard id 和滚动 `MatcherPrefix(before, after)`；
   matcher 命令。事件链对象可以在 exchange-core 内池化，但越过 adapter 边界的结果、事件和 market data 都是不可变值。
 - 滚动 prefix digest 覆盖前一 digest、命令身份、结果码、成交、撤单和完整 matcher event；Product Core 应用时必须
   验证 `before` 等于当前已应用 digest 且 matcher sequence 单调递增。process-local native sequence 与按本地刷新节奏
@@ -170,15 +168,16 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 - 每个 command 产生不可变、按 `(asset, ownerKind, ownerId, subledger)` 排序的 `FundsDelta` 和 Core Fact；before/after state hash、
   funds hash、Core/book prefix 和 Aeron position 必须共同标识同一裁决。Audit Exporter 从 replicated outbox 发布 Kafka history，
   History Projector 再幂等写入 PostgreSQL；投影结果不是 current state。
-- 当前写格式为 command/envelope v3、export event marker v8、trading snapshot v23、sectioned snapshot v13。
+- 当前写格式为 command/envelope v4、export event marker v9、trading snapshot v24、sectioned snapshot v14。
   decoder、snapshot loader 和 startup 对旧主版本 fresh fail-old：旧版本一律拒绝并 fail closed，只能从 fresh compatible
   Product Core state 启动，不保留旧 codec reader、迁移读取路径或隐式降级。
 
-### P6-P10：本 Task 2 的明确排除项
+### P10：确定性 Lane 与容量门禁
 
-本 Task 2 只冻结上述 P1-P5 合同，不宣称或实现 P6-P10：P6 randomized properties，P7 fatal/readiness certification，P8 three-node
-recovery，P9 1,000-user/40-minute capacity，P10 sharding/capacity。它们属于后续独立任务；任何 P6-P10 结果都不能改变本 README 已冻结的
-Product Core/Aeron authority、MATCHING_ONLY 唯一 book、单 in-flight progression 或 fresh fail-old cutover。
+P10-A 至 P10-F 的写路径、协议和快照已切换到 route v2。P10-G 由 `HttpOpenLoopWorkloadMain` 的
+`qualification=P10` 门禁强制检查 1,000 用户、至少 200 symbol、100k/s、40 分钟和活动 JFR；输出目录保存
+coordinated-omission-corrected HDR、逐请求事件和 accounting JSON。真实三节点/Provider 环境未生成完整 artifact 前，
+只能描述为“迁移完成、待生产容量认证”，不能描述为“P10 生产认证完成”。
 
 ## 六产品线资金守恒契约
 
@@ -205,9 +204,9 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   service 的 Maven `validate` 同时校验 provenance 与整包 hash。
   matcher 内部启用事件链池化，池对象只在 exchange-core 内复用；对外 `MatcherResult` 为不可变值，普通交易热路径不执行全局状态报告。
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
-- `Trading snapshot v23` 是唯一外层交易快照写格式，配对保存 Product Core 状态和 exchange-core 的
-  `MATCHING_ENGINE_ROUTER/0`、`RISK_ENGINE/0`；它不把可执行订单簿复制成业务状态，并包含版本化 Risk Scan Control。
-  `sectioned snapshot v13` 只按相同 Core/book prefix 拆分物理载荷；三个 Member 必须运行完全相同的 fork、配置和 schema。
+- `Trading snapshot v24` 是唯一外层交易快照写格式；matcher snapshot v3 保存全部
+  `MATCHING_ENGINE_ROUTER/[0..N)` 和唯一 `RISK_ENGINE/0`。`sectioned snapshot v14` 按相同 Core/book prefix 拆分载荷，
+  并保存按 laneId 升序的实际 Account Lane state section；三个 Member 必须运行完全相同的 topology、fork、配置和 schema。
 - capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内等待全部 native shard module 和 callback；
   pending matching 存在时拒绝发布。当前不存在第二个 ExchangeCore 或 `SymbolMatchingLanes` 运行时。
 - Aeron fragment 在复制前执行 64 MiB 外层上限；matcher envelope 为 48 MiB、单个原生 module 为 32 MiB，
@@ -217,7 +216,7 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   registry、完整 engine/book hash，再以 O(活动订单数) 一次报告逐字段核对 OPEN 订单；全部通过后才替换内存状态。
 - snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；不允许 clean-start 降级、订单回放、
   隐藏 FIFO、matcher journal 或跨 Member 部分恢复。
-- 只接受 v23/v13 的 fresh compatible state；command schema v3、export marker v8、trading snapshot v23、sectioned snapshot v13 之前的输入在 decode/startup 立即
+- 只接受 v24/v14 的 fresh compatible state；command schema v4、export marker v9、trading snapshot v24、sectioned snapshot v14 之前的输入在 decode/startup 立即
   拒绝并 fail closed。没有旧 reader、迁移读取路径或使用 PostgreSQL 投影、clean-start、逐单回放修复不一致状态的例外。
 - `UPDATE_RISK_SCAN_CONTROL` 使用乐观版本检查，`RISK_SCAN_CONTROL_QUERY` 返回当前版本、启停、续跑间隔、
-  批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v23` 恢复。
+  批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v24` 恢复。

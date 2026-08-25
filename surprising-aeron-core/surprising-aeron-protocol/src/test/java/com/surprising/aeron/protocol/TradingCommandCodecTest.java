@@ -195,6 +195,8 @@ class TradingCommandCodecTest {
         assertThat(restored.status()).isEqualTo(response.status());
         assertThat(restored.commandStatus()).isEqualTo(response.commandStatus());
         assertThat(restored.resultCode()).isEqualTo(response.resultCode());
+        assertThat(restored.routeVersion()).isEqualTo(CoreRoute.DEFAULT.version());
+        assertThat(restored.committedCoreSequence()).isEqualTo(response.appliedCommandCount());
         assertThat(restored.appliedCommandCount()).isEqualTo(response.appliedCommandCount());
         assertThat(restored.stateHash()).isEqualTo(response.stateHash());
         assertThat(restored.data()).containsExactly(response.data());

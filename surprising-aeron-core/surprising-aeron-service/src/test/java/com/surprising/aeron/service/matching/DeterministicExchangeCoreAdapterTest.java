@@ -85,7 +85,8 @@ class DeterministicExchangeCoreAdapterTest {
                     1_000,
                     () -> adapter.placeAsync(22, command)).join();
 
-            assertThat(result.matches()).extracting(CoreMatch::makerOrderId).containsExactly(101L, 102L);
+            assertThat(result.matcherEvents()).extracting(MatcherResult.MatcherEvent::matchedOrderId)
+                    .containsExactly(101L, 102L);
             assertThat(result.nativeCommand().orderId()).isEqualTo(201L);
             assertThat(result.nativeCommand().nativeSequence()).isPositive();
             assertThat(result.matcherPrefix().before()).isNotZero();
@@ -97,7 +98,7 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     @Test
-    void serializesMatcherCommandsAndChainsImmutableResultDigests() {
+    void pipelinesMatcherCommandsAndChainsImmutableResultDigests() {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
             CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
             CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
@@ -116,13 +117,16 @@ class DeterministicExchangeCoreAdapterTest {
                         return secondNative;
                     });
 
-            assertThat(submissions).hasValue(1);
+            assertThat(submissions).hasValue(2);
+            assertThat(adapter.dispatchDepth()).isEqualTo(2);
+            assertThat(adapter.dispatchHighWaterMark()).isEqualTo(2);
+            assertThat(adapter.dispatchCapacity()).isEqualTo(adapter.topology().matcherWindowSize());
             firstNative.complete(result(true, "SUCCESS"));
             CoreMatchingResult firstResult = first.join();
-            assertThat(submissions).hasValue(2);
 
             secondNative.complete(result(false, "MATCHING_INVALID_ORDER_ID"));
             CoreMatchingResult secondResult = second.join();
+            assertThat(adapter.dispatchDepth()).isZero();
 
             assertThat(firstResult.matcherPrefix().before()).isNotZero();
             assertThat(firstResult.matcherPrefix().after()).isNotEqualTo(firstResult.matcherPrefix().before());
@@ -137,7 +141,7 @@ class DeterministicExchangeCoreAdapterTest {
     void matcherPrefixIgnoresProcessLocalSequenceAndOptionalMarketData() {
         CoreMatchingResult result = result(true, "SUCCESS");
         CoreMatchingResult resultWithMarketData = new CoreMatchingResult(
-                result.accepted(), result.resultCode(), result.matches(), result.cancellations(),
+                result.accepted(), result.resultCode(), result.cancellations(),
                 result.successfulPrefixCount(), result.matcherStateChanged(), result.nativeCommand(),
                 result.matcherPrefix(), result.nativeMatcherResult(), result.matcherEvents(),
                 new MatcherResult.MarketData(
@@ -155,7 +159,7 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     @Test
-    void poisonedMatcherDoesNotSubmitQueuedCommands() {
+    void poisonedMatcherRejectsCommandsSubmittedAfterTheFatalCompletion() {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
             CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
             AtomicInteger submissions = new AtomicInteger();
@@ -173,11 +177,18 @@ class DeterministicExchangeCoreAdapterTest {
                     });
 
             firstNative.complete(result(false, "EXCHANGE_CORE_FAILURE"));
+            CompletableFuture<CoreMatchingResult> third = adapter.executeWithEvidence(
+                    3, java.util.UUID.fromString("00000000-0000-0000-0000-000000000013"),
+                    103, 7, 1_002, () -> {
+                        submissions.incrementAndGet();
+                        return CompletableFuture.completedFuture(result(true, "SUCCESS"));
+                    });
 
             assertThat(first.join().resultCode()).isEqualTo("EXCHANGE_CORE_FAILURE");
-            assertThatThrownBy(second::join).hasCauseInstanceOf(IllegalStateException.class)
+            assertThat(second.join().resultCode()).isEqualTo("SUCCESS");
+            assertThatThrownBy(third::join).hasCauseInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("matcher is poisoned");
-            assertThat(submissions).hasValue(1);
+            assertThat(submissions).hasValue(2);
         }
     }
 
@@ -217,7 +228,11 @@ class DeterministicExchangeCoreAdapterTest {
         assertThat(decoded.matcherPrefixDigest()).isEqualTo(beforeSnapshot.matcherPrefix().after());
         assertThat(decoded.symbols()).containsExactlyEntriesOf(snapshot.symbols());
         assertThat(decoded.users()).containsExactlyElementsOf(snapshot.users());
-        assertThat(decoded.modules()).hasSize(2);
+        assertThat(decoded.modules()).hasSize(decoded.matchingEngineCount() + 1);
+        assertThat(decoded.modules().stream()
+                .filter(module -> module.type().name().equals("MATCHING_ENGINE_ROUTER"))
+                .map(module -> module.instanceId()).sorted().toList())
+                .containsExactly(0, 1, 2, 3);
         assertThat(decoded.modules()).zipSatisfy(snapshot.modules(), (actual, expected) -> {
             assertThat(actual.type()).isEqualTo(expected.type());
             assertThat(actual.sequence()).isEqualTo(expected.sequence());
@@ -283,10 +298,12 @@ class DeterministicExchangeCoreAdapterTest {
         }
         TradingCoreState divergent = stateWithOpenBid(101);
         MatcherSnapshot divergentManifest = new MatcherSnapshot(
-                snapshot.productLine(), snapshot.coreShardId(), snapshot.routeVersion(), snapshot.snapshotId(),
+                snapshot.productLine(), snapshot.coreShardId(), snapshot.routeVersion(), snapshot.topology(),
+                snapshot.snapshotId(),
                 snapshot.coreSequence(), snapshot.matcherSequence(), snapshot.matcherPrefixDigest(),
                 divergent.businessStateHash(),
-                snapshot.engineStateHash(), snapshot.bookStateHash(), snapshot.symbolRegistryHash(), snapshot.userRegistryHash(),
+                snapshot.engineStateHash(), snapshot.bookStateHash(), snapshot.symbolRegistryHash(),
+                snapshot.symbolRouteHash(), snapshot.userRegistryHash(),
                 MatcherSnapshot.instrumentRegistryHash(divergent), MatcherSnapshot.activeOrderHash(divergent),
                 snapshot.forkGitSha(), snapshot.artifactSha256(), snapshot.matcherConfigHash(),
                 snapshot.symbols(), snapshot.users(), snapshot.modules());
@@ -354,6 +371,6 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static CoreMatchingResult result(boolean accepted, String resultCode) {
-        return new CoreMatchingResult(accepted, resultCode, List.of());
+        return new CoreMatchingResult(accepted, resultCode);
     }
 }

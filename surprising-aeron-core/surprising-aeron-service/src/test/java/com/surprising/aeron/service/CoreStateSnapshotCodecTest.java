@@ -79,17 +79,17 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(13);
-            assertThat(buffer.getInt(8)).isEqualTo(10);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(14);
+            assertThat(buffer.getInt(8)).isEqualTo(14);
             buffer.position(ENVELOPE_LENGTH);
-            int[] sectionIds = new int[10];
+            int[] sectionIds = new int[14];
             for (int index = 0; index < sectionIds.length; index++) {
                 sectionIds[index] = buffer.getInt();
                 int sectionLength = buffer.getInt();
                 assertThat(sectionLength).isBetween(1, CoreStateSnapshotCodec.MAX_SECTION_BYTES);
                 buffer.position(Math.addExact(buffer.position(), sectionLength));
             }
-            assertThat(sectionIds).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+            assertThat(sectionIds).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
             assertThat(buffer.hasRemaining()).isFalse();
         } finally {
             state.close();
@@ -174,7 +174,28 @@ class CoreStateSnapshotCodecTest {
 
         assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(legacy, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 8");
+                .hasMessageContaining("legacy core snapshot is disabled");
+    }
+
+    @Test
+    void rejectsMissingDuplicateAndMisroutedAccountLaneSectionsAfterChecksumRecomputation() {
+        byte[] snapshot;
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            snapshot = state.snapshot(49);
+        }
+        byte[] duplicate = mutateSectionId(snapshot, 11, 10);
+        byte[] misrouted = mutateSectionPayloadInt(snapshot, 10, 0, 1);
+        byte[] missing = snapshot.clone();
+        ByteBuffer.wrap(missing).order(ByteOrder.LITTLE_ENDIAN).putInt(8, 13);
+        missing = rewriteOuterChecksum(missing);
+
+        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(duplicate, ProductLine.SPOT))
+                .isInstanceOf(ProtocolException.class).hasMessageContaining("section");
+        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(misrouted, ProductLine.SPOT))
+                .isInstanceOf(ProtocolException.class).hasMessageContaining("lane");
+        byte[] missingSection = missing;
+        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(missingSection, ProductLine.SPOT))
+                .isInstanceOf(ProtocolException.class).hasMessageContaining("section");
     }
 
     @Test
@@ -259,7 +280,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(13);
+            assertThat(manifest.schemaVersion()).isEqualTo(14);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
@@ -291,25 +312,28 @@ class CoreStateSnapshotCodecTest {
         Map<String, byte[]> mismatches = new LinkedHashMap<>();
         mismatches.put("product line", mutateHeaderProductLine(snapshot));
         mismatches.put("route", mutateHeaderInt(snapshot, 2));
-        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 6));
-        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 22));
-        mismatches.put("core sequence", mutateHeaderLong(snapshot, 30));
-        mismatches.put("matcher sequence", mutateHeaderLong(snapshot, 54));
-        mismatches.put("business state hash", mutateHeaderLong(snapshot, 62));
-        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 70));
-        mismatches.put("book state hash", mutateHeaderInt(snapshot, 74));
-        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 78));
-        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 86));
-        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 94));
-        mismatches.put("active order hash", mutateHeaderLong(snapshot, 102));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 110));
-        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 118));
-        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 126));
-        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 134));
-        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 138));
-        mismatches.put("matcher config", mutateHeaderLong(snapshot, 146));
-        mismatches.put("fork identity", mutateHeaderByte(snapshot, 154));
-        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 194));
+        mismatches.put("topology", mutateHeaderLong(snapshot, 38));
+        mismatches.put("symbol route", mutateHeaderLong(snapshot, 46));
+        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 54));
+        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 70));
+        mismatches.put("core sequence", mutateHeaderLong(snapshot, 78));
+        mismatches.put("matcher sequence", mutateHeaderLong(snapshot, 102));
+        mismatches.put("business state hash", mutateHeaderLong(snapshot, 110));
+        mismatches.put("funds hash", mutateHeaderLong(snapshot, 118));
+        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 126));
+        mismatches.put("book state hash", mutateHeaderInt(snapshot, 130));
+        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 134));
+        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 142));
+        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 150));
+        mismatches.put("active order hash", mutateHeaderLong(snapshot, 158));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 166));
+        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 174));
+        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 182));
+        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 190));
+        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 194));
+        mismatches.put("matcher config", mutateHeaderLong(snapshot, 202));
+        mismatches.put("fork identity", mutateHeaderByte(snapshot, 210));
+        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 250));
 
         mismatches.forEach((field, mutated) -> {
             Throwable failure = catchThrowable(() -> CoreStateSnapshotCodec.decode(mutated, ProductLine.SPOT));
@@ -352,10 +376,10 @@ class CoreStateSnapshotCodecTest {
         }
 
         assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 38), ProductLine.SPOT))
+                mutateHeaderLongWithoutChecksum(snapshot, 86), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
         assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 46), ProductLine.SPOT))
+                mutateHeaderLongWithoutChecksum(snapshot, 94), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
     }
 
@@ -370,7 +394,7 @@ class CoreStateSnapshotCodecTest {
         byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
         assertThatThrownBy(() -> CoreStateSnapshotCodec.manifest(legacy, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 8");
+                .hasMessageContaining("legacy core snapshot is disabled");
     }
 
     private static TradingCoreState stateWithOpenBid() {
@@ -421,6 +445,44 @@ class CoreStateSnapshotCodecTest {
         int offset = HEADER_PAYLOAD_OFFSET + fieldOffset;
         buffer.putLong(offset, buffer.getLong(offset) + 1);
         return mutated;
+    }
+
+    private static byte[] mutateSectionId(byte[] snapshot, int targetSectionId, int replacementSectionId) {
+        byte[] mutated = snapshot.clone();
+        ByteBuffer buffer = ByteBuffer.wrap(mutated).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.position(ENVELOPE_LENGTH);
+        while (buffer.hasRemaining()) {
+            int idOffset = buffer.position();
+            int sectionId = buffer.getInt();
+            int length = buffer.getInt();
+            if (sectionId == targetSectionId) {
+                buffer.putInt(idOffset, replacementSectionId);
+                return rewriteOuterChecksum(mutated);
+            }
+            buffer.position(Math.addExact(buffer.position(), length));
+        }
+        throw new AssertionError("section not found: " + targetSectionId);
+    }
+
+    private static byte[] mutateSectionPayloadInt(byte[] snapshot, int targetSectionId,
+                                                  int payloadOffset, int value) {
+        byte[] mutated = snapshot.clone();
+        ByteBuffer buffer = ByteBuffer.wrap(mutated).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.position(ENVELOPE_LENGTH);
+        while (buffer.hasRemaining()) {
+            int sectionId = buffer.getInt();
+            int length = buffer.getInt();
+            int start = buffer.position();
+            if (sectionId == targetSectionId) {
+                if (payloadOffset < 0 || payloadOffset + Integer.BYTES > length) {
+                    throw new AssertionError("invalid section payload offset");
+                }
+                buffer.putInt(start + payloadOffset, value);
+                return rewriteOuterChecksum(mutated);
+            }
+            buffer.position(Math.addExact(start, length));
+        }
+        throw new AssertionError("section not found: " + targetSectionId);
     }
 
     private static byte[] rewriteOuterChecksum(byte[] snapshot) {

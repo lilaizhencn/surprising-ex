@@ -119,7 +119,7 @@ final class HttpOpenLoopWorkload {
             WorkloadOperation operation = operation(sequence);
             long userId = user(sequence);
             String symbol = symbol(sequence);
-            Optional<Resource> reserved = pools.reserve(operation, sequence);
+            Optional<Resource> reserved = reservePrerequisite(operation, sequence);
             long intentUserId = reserved.map(Resource::userId).orElse(userId);
             String intentSymbol = reserved.map(Resource::symbol).orElse(symbol);
             String targetIdentity = reserved.map(Resource::identity).orElse("");
@@ -132,6 +132,18 @@ final class HttpOpenLoopWorkload {
                 dispatch(intent, true);
             }
         }
+    }
+
+    private Optional<Resource> reservePrerequisite(WorkloadOperation operation, long sequence) {
+        Optional<Resource> reserved = pools.reserve(operation, sequence);
+        if (!requiresPrerequisite(operation, sequence) || reserved.isPresent()) return reserved;
+        long deadline = System.nanoTime() + config.requestTimeout().toNanos();
+        while (reserved.isEmpty() && !cancelled.get() && !active.isEmpty()
+                && System.nanoTime() < deadline) {
+            LockSupport.parkNanos(Duration.ofMillis(1).toNanos());
+            reserved = pools.reserve(operation, sequence);
+        }
+        return reserved;
     }
 
     private void dispatch(StableIdentityLedger.Intent intent, boolean abortWhenSaturated) {
@@ -288,7 +300,7 @@ final class HttpOpenLoopWorkload {
                             + config.limitPriceTicks() + ","
                             + "\"quantitySteps\":1,\"timeInForce\":\"GTC\",\"postOnly\":false,"
                             + "\"clientRequestId\":\"" + clientId + "\"}");
-            case MARKET_IOC_CLOSE -> intent.sequence() % 2 != 0
+            case MARKET_IOC_CLOSE -> !isPositionCloseIntent(intent.sequence())
                     ? post("/api/v1/trading/orders", orderJson(intent, "MARKET", "IOC", false))
                     : post("/api/v1/trading/orders/close-position",
                             "{\"userId\":" + intent.userId() + ",\"clientOrderId\":\"" + clientId
@@ -387,6 +399,9 @@ final class HttpOpenLoopWorkload {
             writeHistogram(config.outputDirectory().resolve("http-corrected.hdr"), httpLatency);
             writeHistogram(config.outputDirectory().resolve("finalization-corrected.hdr"), finalizationLatency);
             String json = "{\"runId\":\"" + config.runId() + "\",\"seed\":" + config.seed()
+                    + ",\"ratePerSecond\":" + config.ratePerSecond()
+                    + ",\"durationSeconds\":" + config.duration().toSeconds()
+                    + ",\"users\":" + config.users().length + ",\"symbols\":" + config.symbols().length
                     + ",\"scheduled\":" + summary.scheduled() + ",\"completed\":" + summary.completed()
                     + ",\"outstanding\":" + summary.outstanding() + ",\"deliberately_aborted\":"
                     + summary.deliberatelyAborted() + ",\"maxObservedInFlight\":" + summary.maxObservedInFlight()
@@ -473,10 +488,24 @@ final class HttpOpenLoopWorkload {
         };
     }
 
-    private static boolean requiresPrerequisite(WorkloadOperation operation, long sequence) {
+    private boolean requiresPrerequisite(WorkloadOperation operation, long sequence) {
         return operation == WorkloadOperation.CANCEL || operation == WorkloadOperation.AMEND
                 || operation == WorkloadOperation.TRIGGER || operation == WorkloadOperation.TRIGGER_CANCEL
-                || operation == WorkloadOperation.MARKET_IOC_CLOSE && sequence % 2 == 0;
+                || operation == WorkloadOperation.MARKET_IOC_CLOSE && isPositionCloseIntent(sequence);
+    }
+
+    private boolean isPositionCloseIntent(long sequence) {
+        int bucket = (int) Math.floorMod(sequence - 1 + config.seed(), 100L);
+        int marketStart = config.traffic().get(WorkloadOperation.PLACE)
+                + config.traffic().get(WorkloadOperation.CANCEL)
+                + config.traffic().get(WorkloadOperation.AMEND);
+        int marketCount = config.traffic().get(WorkloadOperation.MARKET_IOC_CLOSE);
+        int triggerCount = config.traffic().get(WorkloadOperation.TRIGGER);
+        int closeCount = Math.min(marketCount / 2, Math.max(0, (marketCount - triggerCount) / 2));
+        int marketOffset = bucket - marketStart;
+        return closeCount > 0 && marketOffset >= 0 && marketOffset < marketCount
+                && (marketOffset + 1) * closeCount / marketCount
+                > marketOffset * closeCount / marketCount;
     }
 
     private static RequestSpec post(String path, String body) {
@@ -552,7 +581,7 @@ final class HttpOpenLoopWorkload {
     private record Resource(long userId, String symbol, String identity) {
     }
 
-    private static final class PrerequisitePools {
+    private final class PrerequisitePools {
         private final Deque<Resource> orders = new ArrayDeque<>();
         private final Deque<Resource> triggers = new ArrayDeque<>();
         private final Deque<Resource> positions = new ArrayDeque<>();
@@ -578,7 +607,9 @@ final class HttpOpenLoopWorkload {
             switch (intent.operation()) {
                 case CANCEL -> removeByIdentity(orders, intent.targetIdentity());
                 case MARKET_IOC_CLOSE -> {
-                    if (intent.sequence() % 2 == 0) removeByIdentity(positions, intent.targetIdentity());
+                    if (isPositionCloseIntent(intent.sequence())) {
+                        removeByIdentity(positions, intent.targetIdentity());
+                    }
                 }
                 case TRIGGER -> removeByIdentity(positions, intent.targetIdentity());
                 case TRIGGER_CANCEL -> {
@@ -598,7 +629,7 @@ final class HttpOpenLoopWorkload {
                 triggers.addLast(new Resource(intent.userId(), intent.symbol(), resourceIdentity));
                 triggerPositions.put(resourceIdentity, intent.targetIdentity());
             } else if (intent.operation() == WorkloadOperation.MARKET_IOC_CLOSE
-                    && intent.sequence() % 2 != 0 && !resourceIdentity.isBlank()) {
+                    && !isPositionCloseIntent(intent.sequence()) && !resourceIdentity.isBlank()) {
                 positions.addLast(new Resource(intent.userId(), intent.symbol(), resourceIdentity));
             } else if (intent.operation() == WorkloadOperation.TRIGGER_CANCEL) {
                 Resource trigger = reservedTriggers.remove(intent.targetIdentity());

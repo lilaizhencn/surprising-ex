@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -16,7 +17,6 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
-import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -233,11 +233,11 @@ class CorePerpetualFinancialMatrixTest {
             placed = reducer.placeOrder(placed, MAKER_ID,
                     pricedOrder(803, variant, CoreOrderSide.BUY, 1, 100));
             TradingCoreState afterFirstFill = reducer.applyMatches(placed, 803, variant.baseAsset(),
-                    variant.quoteAsset(), List.of(new CoreMatch(801, USER_ID, 100, 1, true, true)));
+                    variant.quoteAsset(), List.of(trade(801, USER_ID, 100, 1, true, true)));
             afterFirstFill = reducer.placeOrder(afterFirstFill, MAKER_ID,
                     pricedOrder(804, variant, CoreOrderSide.BUY, 1, 101));
             TradingCoreState ending = reducer.applyMatches(afterFirstFill, 804, variant.baseAsset(),
-                    variant.quoteAsset(), List.of(new CoreMatch(802, USER_ID, 101, 1, true, true)));
+                    variant.quoteAsset(), List.of(trade(802, USER_ID, 101, 1, true, true)));
 
             assertThat(ending.user(USER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-2);
             assertThat(ending.user(USER_ID).positions().get(SYMBOL).positionMarginUnits())
@@ -314,7 +314,7 @@ class CorePerpetualFinancialMatrixTest {
         state = reducer.placeOrder(state, USER_ID,
                 order(22, variant, CoreOrderSide.BUY, QUANTITY, false, 0, 100_000));
         TradingCoreState ending = reducer.applyMatches(state, 22, variant.baseAsset(), variant.quoteAsset(),
-                List.of(new CoreMatch(21, MAKER_ID, ENTRY_PRICE, QUANTITY, true, true)));
+                List.of(trade(21, MAKER_ID, ENTRY_PRICE, QUANTITY, true, true)));
 
         assertThat(ending.treasuryState().feeBalances()).containsEntry(variant.settleAsset(), 50L);
         return row(variant, "MAKER_TAKER_FEES", opening, ending, List.of(MAKER_ID), false, false,
@@ -818,7 +818,7 @@ class CorePerpetualFinancialMatrixTest {
         placed = reducer.placeOrder(placed, USER_ID,
                 order(takerOrderId, variant, takerSide, quantity, false, 0, 0));
         return reducer.applyMatches(placed, takerOrderId, variant.baseAsset(), variant.quoteAsset(),
-                List.of(new CoreMatch(makerOrderId, MAKER_ID, ENTRY_PRICE, quantity, true, true)));
+                List.of(trade(makerOrderId, MAKER_ID, ENTRY_PRICE, quantity, true, true)));
     }
 
     private PlaceOrderCommand order(long orderId, Variant variant, CoreOrderSide side, long quantity,

@@ -9,8 +9,14 @@ public final class RuntimeStateProjector {
     }
 
     public static TradingRuntimeState project(TradingCoreState source, RuntimeIdentityRegistry identities) {
+        return project(source, identities,
+                LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
+    }
+
+    public static TradingRuntimeState project(
+            TradingCoreState source, RuntimeIdentityRegistry identities, LaneTopology topology) {
         if (source == null || identities == null) throw new IllegalArgumentException("source and identities are required");
-        TradingRuntimeState runtime = new TradingRuntimeState();
+        TradingRuntimeState runtime = new TradingRuntimeState(topology);
         runtime.replaceAuxiliaryState(source);
         source.users().forEach((userId, user) -> {
             runtime.putUser(new UserRuntime(user.productLine(), userId, user.revision(), user.positionMode()));
@@ -49,7 +55,7 @@ public final class RuntimeStateProjector {
                 runtime.treasury().setFundingProgress(identities.symbolId(symbol),
                         new TreasuryRuntime.FundingProgressRuntime(progress.settlementId(),
                                 progress.instrumentVersion(), progress.fundingRatePpm(),
-                                progress.nextCursorUserId(), progress.commandId())));
+                                progress.accountLaneId(), progress.nextCursorUserId(), progress.commandId())));
         source.treasuryState().lifecycleSettlements().forEach((symbol, settlementId) ->
                 runtime.treasury().setLifecycleSettlement(identities.symbolId(symbol), settlementId));
         source.treasuryState().lifecycleProgress().forEach((symbol, progress) ->
@@ -57,7 +63,8 @@ public final class RuntimeStateProjector {
                         new TreasuryRuntime.LifecycleProgressRuntime(progress.settlementId(),
                                 progress.instrumentVersion(), progress.settlementPriceTicks(),
                                 progress.optionCashUnitsPerContract(), progress.ordersComplete(),
-                                progress.nextCursorOrderId(), progress.nextCursorUserId(), progress.commandId())));
+                                progress.accountLaneId(), progress.nextCursorOrderId(),
+                                progress.nextCursorUserId(), progress.commandId())));
         source.riskState().liquidations().forEach((liquidationId, liquidation) ->
                 runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
                         identities.symbolId(liquidation.symbol()), liquidation.marginMode(),
@@ -76,7 +83,8 @@ public final class RuntimeStateProjector {
                         risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
                         risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status())));
         source.riskState().scans().forEach((symbol, scan) -> runtime.putRiskScan(new RiskScanRuntime(
-                identities.symbolId(symbol), scan.priceSequence(), scan.scanStartPriceSequence(), scan.lastUserId(),
+                identities.symbolId(symbol), scan.accountLaneId(), scan.priceSequence(),
+                scan.scanStartPriceSequence(), scan.lastUserId(),
                 scan.riskComplete(), scan.riskUserId(), scan.riskPhase(), scan.riskPositionCursor(),
                 scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(),
                 scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),

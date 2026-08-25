@@ -22,8 +22,8 @@ class CoreExportCodecTest {
         byte[] encoded = CoreExportCodec.encodeEvent(event);
 
         assertThat(ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt())
-                .isEqualTo(0xC0E7_0008);
-        assertThat(encoded).hasSize(164);
+                .isEqualTo(0xC0E7_0009);
+        assertThat(encoded).hasSize(196);
     }
 
     @Test
@@ -57,6 +57,7 @@ class CoreExportCodecTest {
                 CoreMessageType.ADJUST_BALANCE, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 17, new byte[]{1, 2, 3}, List.of(user), List.of(order), List.of(execution), List.of(funding),
                 List.of(liquidation), List.of(treasury), List.of(), 10, 20, 21,
+                CoreRoute.DEFAULT.version(), 31, 32, 11,
                 new CoreMatcherTransition(40, 42, 0x1020_3040_5060_7080L, 0x1121_3141_5161_7181L),
                 23, List.of());
         CoreMessage message = new CoreMessage(new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION,
@@ -77,6 +78,10 @@ class CoreExportCodecTest {
         assertThat(restored.fundingPayments()).containsExactly(funding);
         assertThat(restored.changedLiquidations()).containsExactly(liquidation);
         assertThat(restored.changedTreasuryAssets()).containsExactly(treasury);
+        assertThat(restored.routeVersion()).isEqualTo(CoreRoute.DEFAULT.version());
+        assertThat(restored.topologyHash()).isEqualTo(31);
+        assertThat(restored.laneRevisionHash()).isEqualTo(32);
+        assertThat(restored.committedCoreSequence()).isEqualTo(11);
         assertThat(restored.matcherTransition()).isEqualTo(event.matcherTransition());
         assertThat(batch).containsExactly(message);
         assertThat(batch.getFirst().header().route()).isEqualTo(CoreRoute.DEFAULT);

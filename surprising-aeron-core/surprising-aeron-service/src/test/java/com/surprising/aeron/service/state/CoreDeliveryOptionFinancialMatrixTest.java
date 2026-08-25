@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -15,7 +16,6 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
-import com.surprising.aeron.service.matching.CoreMatch;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
@@ -365,7 +365,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         state = reducer.placeOrder(state, MAKER_ID, optionOrder(301, variant, CoreOrderSide.SELL));
         state = reducer.placeOrder(state, USER_ID, optionOrder(302, variant, CoreOrderSide.BUY));
         return reducer.applyMatches(state, 302, variant.baseAsset(), variant.quoteAsset(),
-                List.of(new CoreMatch(301, MAKER_ID, PREMIUM_PRICE, QUANTITY, true, true)));
+                List.of(trade(301, MAKER_ID, PREMIUM_PRICE, QUANTITY, true, true)));
     }
 
     private PlaceOrderCommand optionOrder(long orderId, Variant variant, CoreOrderSide side) {

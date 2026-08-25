@@ -1,11 +1,18 @@
 # P10 单物理 Product Core 确定性 Lane 实施规范
 
-> 状态：设计冻结，尚未实施。
+> 状态：P10-A 至 P10-F 代码/协议/快照迁移已落地；P10-G 生产容量认证必须在目标三节点环境生成 artifact 后单独签字。
 >
 > 本文定义 P10 的唯一实施方向。P10 不拆分物理 Product Core，不改变“一条产品线对应一个三节点
 > Aeron Cluster”的部署边界。每个 Product Core 只运行一个共享的 `ExchangeCore`；Matcher Lane 仅指该实例内部
 > exchange-core 原生 `MatchingEngineRouter` shard。Account Lane 是 P10 默认且必须实施的运行时边界，Treasury 继续由
-> Sequencer 串行裁决。本文不是当前运行能力声明；只有完成文末全部门禁后，才能把 P10 标记为完成。
+> Sequencer 串行裁决。本文同时记录当前写格式和剩余生产认证边界；只有完成文末全部门禁后，才能把 P10 标记为生产认证完成。
+
+当前唯一写版本为 command/envelope schema v4、route v2、Core Export marker v9、matcher snapshot v3、
+Trading State v24 和 sectioned snapshot v14。生产默认 `matchingEngineCount=4`、`accountLaneCount=4`；旧协议、旧 route
+和旧快照均 fail closed。关键落点是 `LaneTopology`、`AccountLaneState[]`、`LaneCommandContextRing`、
+`DeterministicExchangeCoreAdapter`、`CoreProbeState`、`SectionedCoreSnapshotWriter/Parser/Recovery` 和
+`HttpOpenLoopWorkloadMain`。P10-G 使用 `qualification=P10`，会拒绝少于 1,000 用户、200 symbol、100k/s、40 分钟或
+没有活动 JFR 的运行；输出的 HDR、events JSONL、accounting JSON、资金对账和三节点故障记录必须一起归档。
 
 ## 1. 目标与非目标
 
@@ -347,8 +354,8 @@ snapshot 失败。旧快照继续有效；不得发布“其余 Lane 成功”�
 
 ### 9.2 Snapshot 结构
 
-当前 `Trading snapshot v23` / `sectioned snapshot v13` 在 P10 实现时必须提升主版本，并删除旧版本读取路径。新格式至少
-包含：
+当前唯一写格式已提升为 `Trading snapshot v24` / `sectioned snapshot v14` / matcher snapshot v3，并删除旧版本读取路径。
+新格式包含：
 
 1. Header：magic、schema、productLine、`coreShardId=default`、snapshotId、fence/committed sequence。
 2. Topology：routeVersion、matchingEngineCount/shardMask、symbolId-to-shard hash、Account Lane count/seed、
@@ -569,7 +576,7 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 
 ## 14. 完成定义
 
-只有以下条件全部满足，P10 才能从“设计冻结，尚未实施”改为“完成”：
+只有以下条件全部满足，P10 才能从“迁移已落地、待生产认证”改为“生产认证完成”：
 
 - P10-A 至 P10-G 的生产代码和协议/快照版本全部落地；Account Lane 默认启用且生产默认数为 4，不存在兼容 fallback。
 - 一个 ProductLine 仍只有一个物理三节点 Product Core、一个 global Core sequence 和一条 Core Fact 链。

@@ -352,31 +352,44 @@ public record CoreTreasuryState(
     }
 
     public record FundingProgress(long settlementId, long instrumentVersion, long fundingRatePpm,
-                                 long nextCursorUserId, UUID commandId) {
+                                 int accountLaneId, long nextCursorUserId, UUID commandId) {
         public FundingProgress {
             if (settlementId <= 0 || instrumentVersion <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
+                    || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorUserId < 0 || commandId == null) {
                 throw new IllegalArgumentException("invalid funding progress");
             }
+        }
+        public FundingProgress(long settlementId, long instrumentVersion, long fundingRatePpm,
+                               long nextCursorUserId, UUID commandId) {
+            this(settlementId, instrumentVersion, fundingRatePpm, 0, nextCursorUserId, commandId);
         }
     }
 
     public record LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
                                    long optionCashUnitsPerContract, boolean ordersComplete,
-                                   long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
+                                   int accountLaneId, long nextCursorOrderId,
+                                   long nextCursorUserId, UUID commandId) {
         public LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
                                  long optionCashUnitsPerContract, long nextCursorUserId, UUID commandId) {
             this(settlementId, instrumentVersion, settlementPriceTicks, optionCashUnitsPerContract,
-                    true, 0, nextCursorUserId, commandId);
+                    true, 0, 0, nextCursorUserId, commandId);
         }
 
         public LifecycleProgress {
             if (settlementId <= 0 || instrumentVersion <= 0 || settlementPriceTicks < 0
-                    || optionCashUnitsPerContract < 0 || nextCursorOrderId < 0 || nextCursorUserId < 0
+                    || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
+                    || nextCursorOrderId < 0 || nextCursorUserId < 0
                     || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)
                     || commandId == null) {
                 throw new IllegalArgumentException("invalid lifecycle progress");
             }
+        }
+        public LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
+                                 long optionCashUnitsPerContract, boolean ordersComplete,
+                                 long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
+            this(settlementId, instrumentVersion, settlementPriceTicks, optionCashUnitsPerContract,
+                    ordersComplete, 0, nextCursorOrderId, nextCursorUserId, commandId);
         }
     }
 }

@@ -9,8 +9,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 
 ## P0-P10 规范阶段注册（当前权威）
 
-下列阶段名称是本分支唯一的 P0-P10 注册表。P0-P5 是 Product Core 正确性闭环的默认交付顺序；P6-P10
-是后续、相互不替代的验证或容量工作。历史草案只能按这里的名称解释，不能重新定义 P0-P5。
+下列阶段名称是本分支唯一的 P0-P10 注册表。历史草案只能按这里的名称解释，不能重新定义阶段边界。
 
 | 阶段 | 当前唯一名称与默认边界 |
 |---|---|
@@ -26,15 +25,19 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
 | P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个共享 ExchangeCore，以原生 symbol matcher shard 和默认启用的 user Account Lane 扩展；同一不可变 matcher result 引用按 userId 扇出，以 expected/ack Lane mask 提交，Treasury 保持 Sequencer owner，不包含物理 Core shard。实施规范见 [`docs/P10-DETERMINISTIC-LANES.md`](docs/P10-DETERMINISTIC-LANES.md)。 |
 
-当前实现状态：P0-P5 已完成；P6-P10 仍是后续验证和容量工作。普通下单只提交一次正式 `PLACE_ORDER`，
+当前实现状态：P0-P5 与 P10-A 至 P10-F 的写路径已迁移；P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、
+至少 200 symbol、100k/s offered rate、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
-但不在正式下单前额外往返 Core。P2 在 `DeterministicExchangeCoreAdapter` 边界串行化实际 matcher 提交，直接持有
+但不在正式下单前额外往返 Core。`DeterministicExchangeCoreAdapter` 向一个共享 ExchangeCore 的原生 matcher shard
+提交有界 pipeline，直接持有
 exchange-core 产出的不可变 `MatcherResult`、event list 和 market data，不再复制 matcher 证据，并用
 `matcherSequence + MatcherPrefix(before, after)` 绑定命令结果；prefix digest 随配对快照恢复，断裂或 malformed
 结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes`，完整 `bookStateHash` 只保留在 snapshot、恢复和
 显式审计边界。`TradingRuntimeState` 是 P3 唯一交易裁决权威；`TradingCoreState` 仅在每个事实边界按 changed-key
 生成一次不可变投影，承担 Cluster snapshot、Core Fact、恢复、状态 hash 和对账。P4 使用六个穷尽且隔离的
 `SettlementKernel`。P5 以确定性 `FundsDelta`、Treasury 子账本、状态/资金 hash 和 replicated outbox 形成连续事实链。
+P10 使用 `routeVersion=2`、默认 4 个 native matcher shard 和 4 个 Account Lane；pending reservation 在 commit 前不进入
+query、Snapshot State 或 Core Fact，immutable matcher result 以 expected/ACK mask 提交，Core Fact 仍严格按全局 sequence 发布。
 
 ### 分支安全与验证契约
 
@@ -53,9 +56,9 @@ exchange-core 产出的不可变 `MatcherResult`、event list 和 market data，
   不是单进程。该 Core 管理本产品线全部 symbol、账户、订单元数据、持仓、风险和生命周期。
 - CROSS 与 ISOLATED 都在同一个 Core 内。CROSS 只共享本产品线 Core 内的权益；ISOLATED 绑定 position identity，
   保证金划拨仍由同一 Core 原子完成。产品线之间不共享 live available balance。
-- 当前不为热点币对单独部署 Core。协议、路由、事件、指标和 snapshot 只预留
-  `coreShardId=default`、`routeVersion=1` 的语义；字段按主规格 W1/W3 版本化落地，完成前拒绝任何非默认路由。
-  只有容量门禁证明单 Core 不足后才评审独立风险子账户式分片。
+- 当前不为热点币对单独部署 Core。协议固定 `coreShardId=default`、`routeVersion=2`；symbol 只路由到同一共享
+  ExchangeCore 的原生 `MatchingEngineRouter` shard，user 只路由到静态 Account Lane。matcher/Lane 数和 seed 只能在
+  fresh compatible state 启动前配置，运行中不 rebalance，也不产生第二条 Core Fact 链。
 - exchange-core 已是唯一可执行盘口和 FIFO/价格树权威；Core 只保留订单元数据、资金、持仓、风险状态和
   必要派生索引。`CoreBookState`、优先级副本、逐单 rebuild、恢复 retry/resubmit 已从生产代码删除。
 
@@ -348,19 +351,21 @@ Kafka 集群或长时间容量验证的场景必须在交付记录中明确标�
 
 Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Runbook 补充；不得改变上述所有权和恢复边界。
 
-### W1/W2 快照与发布契约
+### P10 快照与发布契约
 
 - fork 固定为 `exchange-core 0.5.16-emporia`，源码提交
   `4c4d163b6ba736a43360b325cdd7b9fb8c20648d`，可复现 JAR SHA-256
   `d4ab72853924edc32069ab7158e7bcc5d374ecc1bcd594df04128ab459732b86`；fork 构建拒绝 dirty
   worktree，从已认证提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 provenance；
   Aeron service 的 Maven `validate` 阶段同时校验 provenance 与整包 hash。
-- `CoreState v9` 同时封装 Core 业务状态和 exchange-core 原生 `ME0/RE0`；reader 显式兼容现有 V8 快照，writer 只生成 V9；`TradingState v20` 不包含盘口，并持久化版本化 Risk Scan Control。
+- 当前唯一写格式为 command/envelope schema v4、Core Export marker v9、`TradingState v24`、sectioned snapshot v14
+  和 matcher snapshot v3；所有旧主版本立即 fail closed，没有 legacy reader。sectioned snapshot 按 laneId 升序保存
+  4 个实际 Account Lane state section，matcher section 保存 `matchingEngineCount` 个原生 matcher module 加一个 risk module。
   恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，不允许 clean-start、活动订单回放或第二本 FIFO。
 - capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内完成；存在 pending matching 时精确拒绝快照。恢复在开放流量前执行
   CRC32C、产品线/路由、snapshot ID、Core/matcher sequence、Cluster position、source/outbox digest、
   fork/config/artifact、注册表、完整引擎哈希、盘口哈希和全部 OPEN 订单逐字段对账；全部通过后才替换内存状态。
-- V8 兼容只读取快照中的权威状态，不允许从 PostgreSQL 投影、clean-start 或逐单回放修复；V9 检测到任一配对不一致时直接中止。
+- 任一 Lane section 缺失、重复、CRC/route/hash 错误，或 native module 数、prefix、book/order pairing 不一致时直接中止 READY。
 - Risk Scan Control 的当前值仅存在于 Product Core 状态、Cluster Log/Archive 和 snapshot；Provider 通过
   `RISK_SCAN_CONTROL_QUERY` 查询，并以 `expectedVersion` 提交更新。PostgreSQL 只通过 Core Export→Kafka
   异步保留审计事实，不保存或覆盖当前配置。

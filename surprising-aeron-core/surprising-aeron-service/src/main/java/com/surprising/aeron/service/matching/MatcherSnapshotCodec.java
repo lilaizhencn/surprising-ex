@@ -2,6 +2,7 @@ package com.surprising.aeron.service.matching;
 
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ProductLineWireCode;
+import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.processors.journaling.ISerializationProcessor.SerializedModuleType;
 import exchange.core2.core.processors.journaling.InMemorySerializationProcessor.SerializedModule;
@@ -24,7 +25,7 @@ import java.util.zip.CRC32C;
 public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
     private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
@@ -41,6 +42,14 @@ public final class MatcherSnapshotCodec {
                 output.writeInt(ProductLineWireCode.encode(snapshot.productLine()));
                 writeText(output, snapshot.coreShardId());
                 output.writeInt(snapshot.routeVersion());
+                output.writeInt(snapshot.topology().matchingEngineCount());
+                output.writeInt(snapshot.topology().matcherShardMask());
+                output.writeInt(snapshot.topology().accountLaneCount());
+                output.writeLong(snapshot.topology().accountLaneSeed());
+                output.writeInt(snapshot.topology().matcherWindowSize());
+                output.writeInt(snapshot.topology().matchingCompletionCapacity());
+                output.writeInt(snapshot.topology().accountLaneQueueCapacity());
+                output.writeLong(snapshot.topologyHash());
                 output.writeLong(snapshot.snapshotId());
                 output.writeLong(snapshot.coreSequence());
                 output.writeLong(snapshot.matcherSequence());
@@ -49,6 +58,7 @@ public final class MatcherSnapshotCodec {
                 output.writeInt(snapshot.engineStateHash());
                 output.writeInt(snapshot.bookStateHash());
                 output.writeLong(snapshot.symbolRegistryHash());
+                output.writeLong(snapshot.symbolRouteHash());
                 output.writeLong(snapshot.userRegistryHash());
                 output.writeLong(snapshot.instrumentRegistryHash());
                 output.writeLong(snapshot.activeOrderHash());
@@ -110,6 +120,11 @@ public final class MatcherSnapshotCodec {
             ProductLine productLine = ProductLineWireCode.decode(input.readInt());
             String coreShardId = readText(input);
             int routeVersion = input.readInt();
+            LaneTopology topology = new LaneTopology(routeVersion, input.readInt(), input.readInt(), input.readInt(),
+                    input.readLong(), input.readInt(), input.readInt(), input.readInt());
+            if (input.readLong() != topology.topologyHash()) {
+                throw new ProtocolException("matcher topology hash mismatch");
+            }
             long snapshotId = input.readLong();
             long coreSequence = input.readLong();
             long matcherSequence = input.readLong();
@@ -118,6 +133,7 @@ public final class MatcherSnapshotCodec {
             int engineHash = input.readInt();
             int bookHash = input.readInt();
             long symbolHash = input.readLong();
+            long symbolRouteHash = input.readLong();
             long userHash = input.readLong();
             long instrumentHash = input.readLong();
             long activeOrderHash = input.readLong();
@@ -141,7 +157,9 @@ public final class MatcherSnapshotCodec {
                 if (userId <= 0 || !users.add(userId)) throw new ProtocolException("invalid matcher user registry");
             }
             int moduleCount = readCount(input, "module");
-            if (moduleCount != 2) throw new ProtocolException("invalid matcher module count");
+            if (moduleCount != topology.matchingEngineCount() + 1) {
+                throw new ProtocolException("invalid matcher module count");
+            }
             List<SerializedModule> modules = new ArrayList<>(moduleCount);
             for (int index = 0; index < moduleCount; index++) {
                 int typeOrdinal = input.readInt();
@@ -164,9 +182,9 @@ public final class MatcherSnapshotCodec {
                         SerializedModuleType.values()[typeOrdinal], instanceId, data));
             }
             if (input.available() != 0) throw new ProtocolException("trailing matcher snapshot bytes");
-            return new MatcherSnapshot(productLine, coreShardId, routeVersion, snapshotId, coreSequence,
+            return new MatcherSnapshot(productLine, coreShardId, routeVersion, topology, snapshotId, coreSequence,
                     matcherSequence, matcherPrefixDigest, businessHash, engineHash, bookHash,
-                    symbolHash, userHash, instrumentHash,
+                    symbolHash, symbolRouteHash, userHash, instrumentHash,
                     activeOrderHash, forkGitSha, artifactSha256, configHash, symbols, users, modules);
         } catch (EOFException exception) {
             throw new ProtocolException("matcher snapshot is truncated: " + exception.getMessage());

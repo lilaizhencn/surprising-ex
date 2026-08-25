@@ -16,11 +16,13 @@ import com.surprising.aeron.service.state.CoreFeePolicySnapshotCodec;
 import com.surprising.aeron.service.state.CoreFeePolicyState;
 import com.surprising.aeron.service.state.CoreTransferSnapshotCodec;
 import com.surprising.aeron.service.state.TransferRuntime;
+import com.surprising.aeron.service.state.AccountLaneSnapshot;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -39,14 +41,61 @@ final class SectionedCoreSnapshotParser {
         Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[6]);
         Map<Long, TransferRuntime> pendingTransfers = CoreTransferSnapshotCodec.decode(payloads[7]);
         TerminalStateRetention retention = TerminalStateRetention.decode(payloads[8]);
+        int laneSectionCount = payloads.length - SectionedCoreSnapshotCodec.BASE_SECTION_COUNT;
+        if (laneSectionCount != manifest.topology().accountLaneCount()) {
+            throw new ProtocolException("snapshot account lane section count mismatch");
+        }
+        List<AccountLaneSnapshot> accountLanes = new ArrayList<>(laneSectionCount);
+        for (int index = 0; index < laneSectionCount; index++) {
+            accountLanes.add(parseAccountLane(payloads[9 + index], manifest));
+        }
         SectionedCoreSnapshotValidation.validatePairing(
                 manifest, sourceSequences, exportState, matcherSnapshot, tradingState);
         matcherSnapshot.verifyCoreState(tradingState, manifest.appliedCommandCount());
-        long checksum = ByteBuffer.wrap(payloads[9]).order(ByteOrder.LITTLE_ENDIAN).getLong();
+        long checksum = ByteBuffer.wrap(payloads[payloads.length - 1]).order(ByteOrder.LITTLE_ENDIAN).getLong();
         return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
                 commandResults, sourceSequences, exportState, matcherSnapshot, tradingState, feePolicies,
-                pendingTransfers, retention,
+                pendingTransfers, retention, accountLanes,
                 manifest, checksum);
+    }
+
+    private static AccountLaneSnapshot parseAccountLane(byte[] payload, HeaderManifest manifest) {
+        ByteBuffer lane = wrap(payload);
+        if (lane.remaining() < Integer.BYTES * 3 + Long.BYTES * 5) {
+            throw new ProtocolException("truncated account lane section");
+        }
+        int laneId = lane.getInt();
+        long revision = lane.getLong();
+        long appliedSequence = lane.getLong();
+        long committedSequence = lane.getLong();
+        long localStateHash = lane.getLong();
+        long localFundsHash = lane.getLong();
+        int userCount = readCount(lane, 1_000_000, "account lane user");
+        int userBytes = Math.multiplyExact(userCount, Long.BYTES);
+        if (lane.remaining() < Math.addExact(userBytes, Integer.BYTES)) {
+            throw new ProtocolException("invalid account lane user section length");
+        }
+        List<Long> userIds = new ArrayList<>(userCount);
+        for (int index = 0; index < userCount; index++) {
+            long userId = lane.getLong();
+            if (manifest.topology().accountLaneId(userId) != laneId) {
+                throw new ProtocolException("account lane user route mismatch");
+            }
+            userIds.add(userId);
+        }
+        int stateLength = lane.getInt();
+        if (stateLength <= 0 || stateLength != lane.remaining()) {
+            throw new ProtocolException("invalid account lane state payload length");
+        }
+        byte[] statePayload = new byte[stateLength];
+        lane.get(statePayload);
+        TradingCoreState laneState = TradingStateSnapshotCodec.decode(statePayload, manifest.productLine());
+        try {
+            return new AccountLaneSnapshot(laneId, revision, appliedSequence, committedSequence,
+                    localStateHash, localFundsHash, userIds, laneState);
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException("invalid account lane snapshot: " + exception.getMessage());
+        }
     }
 
     private static Map<CoreProbeState.SourceKey, Long> parseSources(byte[] payload) {
@@ -175,16 +224,23 @@ final class SectionedCoreSnapshotParser {
             Map<Long, CoreFeePolicyState> feePolicies,
             Map<Long, TransferRuntime> pendingTransfers,
             TerminalStateRetention retention,
+            List<AccountLaneSnapshot> accountLanes,
             HeaderManifest manifest,
             long checksum) {
 
         CoreProbeState restore(ProductLine expectedProductLine) {
             requireProductLine(expectedProductLine);
-            CoreProbeState state = CoreProbeState.restore(productLine, appliedCommandCount, probeValue, commandResults,
-                    sourceSequences, tradingState, exportState, retention, matcherSnapshot);
-            state.restoreFeePolicies(feePolicies);
-            state.restorePendingTransfers(pendingTransfers);
-            return state;
+            try {
+                CoreProbeState state = CoreProbeState.restore(productLine, appliedCommandCount, probeValue,
+                        commandResults, sourceSequences, tradingState, exportState, retention, matcherSnapshot);
+                state.restoreFeePolicies(feePolicies);
+                state.restorePendingTransfers(pendingTransfers);
+                state.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
+                return state;
+            } catch (IllegalArgumentException exception) {
+                throw new com.surprising.aeron.protocol.ProtocolException(
+                        "invalid account lane snapshot: " + exception.getMessage());
+            }
         }
 
         CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
@@ -196,7 +252,9 @@ final class SectionedCoreSnapshotParser {
                     manifest.engineStateHash(), manifest.bookStateHash(), manifest.symbolRegistryHash(),
                     manifest.userRegistryHash(), manifest.instrumentRegistryHash(), manifest.activeOrderHash(),
                     manifest.sourceSequenceDigest(), manifest.forkGitSha(), manifest.artifactSha256(),
-                    manifest.matcherConfigHash(), exportState.status(), manifest.outboxPendingDigest(), checksum);
+                    manifest.matcherConfigHash(), manifest.topology(), manifest.topologyHash(),
+                    manifest.symbolRouteHash(), manifest.globalFundsHash(), exportState.status(),
+                    manifest.outboxPendingDigest(), checksum);
         }
 
         private void requireProductLine(ProductLine expectedProductLine) {

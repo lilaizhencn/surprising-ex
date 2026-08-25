@@ -22,6 +22,7 @@ public final class RuntimeStateMaterializer {
         if (traversalProbe != null) traversalProbe.reservationTraversalStarted();
         runtime.reservationsForSnapshot().forEachKeyValue((orderId, reservation) -> {
             if (traversalProbe != null) traversalProbe.reservationEntryVisited();
+            if (runtime.pendingReservation(orderId, reservation.userId())) return;
             if (!runtime.usersForSnapshot().containsKey(reservation.userId())) {
                 throw new IllegalStateException("reservation owner is not registered: " + reservation.userId());
             }
@@ -52,18 +53,23 @@ public final class RuntimeStateMaterializer {
             var runtimeBalances = runtime.balancesForSnapshot().get(userId);
             if (runtimeBalances != null) runtimeBalances.forEachKeyValue((assetId, balance) -> {
                 String asset = identities.asset(assetId);
-                balances.put(asset, new AssetBalance(asset, balance.availableUnits(), balance.lockedUnits()));
+                long pending = runtime.pendingReservedUnits(userId, assetId);
+                balances.put(asset, new AssetBalance(asset, Math.addExact(balance.availableUnits(), pending),
+                        Math.subtractExact(balance.lockedUnits(), pending)));
             });
             Map<Long, OrderReservation> reservations = new TreeMap<>(
                     reservationsByUser.getOrDefault(userId, Map.of()));
             Map<String, CorePositionState> positions = new TreeMap<>(
                     positionsByUser.getOrDefault(userId, Map.of()));
-            users.put(userId, new CoreUserState(user.productLine(), userId, user.revision(), balances,
+            users.put(userId, new CoreUserState(user.productLine(), userId,
+                    Math.subtractExact(user.revision(), runtime.pendingReservationCount(userId)), balances,
                     reservations, positions, user.positionMode()));
         });
 
         Map<Long, CoreOrderState> orders = new TreeMap<>();
-        runtime.ordersForSnapshot().forEachKeyValue((orderId, order) -> orders.put(orderId,
+        runtime.ordersForSnapshot().forEachKeyValue((orderId, order) -> {
+            if (runtime.pendingReservation(orderId, order.userId())) return;
+            orders.put(orderId,
                 new CoreOrderState(orderId, order.productLine(), order.userId(), identities.symbol(order.symbolId()),
                         order.instrumentVersion(), order.side(), order.priceTicks(), order.matchingPriceTicks(),
                         order.quantitySteps(),
@@ -72,7 +78,8 @@ public final class RuntimeStateMaterializer {
                         order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
                         order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.createdAtEpochMillis(),
                         order.updatedAtEpochMillis(),
-                        order.clusterPosition(), order.status(), order.revision())));
+                        order.clusterPosition(), order.status(), order.revision()));
+        });
 
         Map<String, CoreMarkPriceState> marks = new TreeMap<>();
         runtime.markPricesForSnapshot().forEachKeyValue((symbolId, mark) -> {
@@ -97,7 +104,7 @@ public final class RuntimeStateMaterializer {
         Map<String, CoreRiskState.RiskScan> scans = new TreeMap<>();
         runtime.riskScansForSnapshot().forEachKeyValue((symbolId, scan) -> {
             String symbol = identities.symbol(symbolId);
-            scans.put(symbol, new CoreRiskState.RiskScan(symbol, scan.priceSequence(),
+            scans.put(symbol, new CoreRiskState.RiskScan(symbol, scan.accountLaneId(), scan.priceSequence(),
                     scan.scanStartPriceSequence(), scan.lastUserId(), scan.riskComplete(), scan.riskUserId(),
                     scan.riskPhase(), scan.riskPositionCursor(), scan.riskReservationCursor(),
                     scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(),
@@ -134,21 +141,28 @@ public final class RuntimeStateMaterializer {
         Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
         runtime.treasury().fundingProgresses().forEachKeyValue((id, value) -> fundingProgress.put(
                 identities.symbol(id), new CoreTreasuryState.FundingProgress(value.settlementId(),
-                        value.instrumentVersion(), value.fundingRatePpm(), value.nextCursorUserId(), value.commandId())));
+                        value.instrumentVersion(), value.fundingRatePpm(), value.accountLaneId(),
+                        value.nextCursorUserId(), value.commandId())));
         Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
         runtime.treasury().lifecycleProgresses().forEachKeyValue((id, value) -> lifecycleProgress.put(
                 identities.symbol(id), new CoreTreasuryState.LifecycleProgress(value.settlementId(),
                         value.instrumentVersion(), value.settlementPriceTicks(), value.optionCashUnitsPerContract(),
-                        value.ordersComplete(), value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId())));
+                        value.ordersComplete(), value.accountLaneId(), value.nextCursorOrderId(),
+                        value.nextCursorUserId(), value.commandId())));
         CoreTreasuryState treasury = new CoreTreasuryState(fees, insurance, deficits, liquidationFees,
                 fundingResiduals, roundingResiduals, clearingPnl, funding, lifecycle,
                 fundingProgress, lifecycleProgress);
 
         Map<TradingCoreState.ClientOrderKey, Long> clientIndex = new TreeMap<>();
         runtime.clientOrderIndexForSnapshot().forEachKeyValue((userId, entries) ->
-                entries.forEachKeyValue((clientKey, orderId) -> clientIndex.put(
-                        new TradingCoreState.ClientOrderKey(userId, identities.clientOrderId(userId, clientKey)), orderId)));
-        return new TradingCoreState(runtime.productLine(), runtime.revision(), users, orders,
+                entries.forEachKeyValue((clientKey, orderId) -> {
+                    if (!runtime.pendingReservation(orderId, userId)) {
+                        clientIndex.put(new TradingCoreState.ClientOrderKey(
+                                userId, identities.clientOrderId(userId, clientKey)), orderId);
+                    }
+                }));
+        return new TradingCoreState(runtime.productLine(),
+                Math.subtractExact(runtime.revision(), runtime.pendingReservationCount()), users, orders,
                 new TreeMap<>(runtime.instrumentsForRuntime()), risk, treasury,
                 new TreeMap<>(runtime.leveragesForRuntime()), new TreeMap<>(runtime.algoOrdersForRuntime()),
                 new TreeMap<>(runtime.cancelAllAfterTimersForRuntime()), clientIndex,
@@ -188,14 +202,19 @@ public final class RuntimeStateMaterializer {
                 String asset = identities.asset(assetId);
                 BalanceRuntime balance = runtime.balance(userId, assetId);
                 if (balance == null) balances.remove(asset);
-                else balances.put(asset, new AssetBalance(asset, balance.availableUnits(), balance.lockedUnits()));
+                else {
+                    long pending = runtime.pendingReservedUnits(userId, assetId);
+                    balances.put(asset, new AssetBalance(asset, Math.addExact(balance.availableUnits(), pending),
+                            Math.subtractExact(balance.lockedUnits(), pending)));
+                }
             }
             Map<Long, OrderReservation> reservations = StateMapSupport.delta(
                     beforeUser == null ? Map.of() : beforeUser.reservations());
             for (long orderId : changedReservations) {
                 ReservationRuntime reservation = runtime.reservation(orderId);
                 OrderReservation prior = beforeUser == null ? null : beforeUser.reservations().get(orderId);
-                if (reservation != null && reservation.userId() == userId) {
+                if (reservation != null && reservation.userId() == userId
+                        && !runtime.pendingReservation(orderId, userId)) {
                     reservations.put(orderId, reservation(reservation, identities));
                 } else if (prior != null) {
                     reservations.remove(orderId);
@@ -210,10 +229,12 @@ public final class RuntimeStateMaterializer {
                 if (position == null) positions.remove(identity.positionKey());
                 else positions.put(identity.positionKey(), position(positionKey, position, identities));
             }
+            long committedRevision = Math.subtractExact(
+                    runtimeUser.revision(), runtime.pendingReservationCount(userId));
             CoreUserState user = beforeUser == null
-                    ? new CoreUserState(runtimeUser.productLine(), userId, runtimeUser.revision(), balances,
+                    ? new CoreUserState(runtimeUser.productLine(), userId, committedRevision, balances,
                     reservations, positions, runtimeUser.positionMode())
-                    : beforeUser.transition(runtimeUser.revision(), balances, reservations, positions,
+                    : beforeUser.transition(committedRevision, balances, reservations, positions,
                     runtimeUser.positionMode());
             users.put(userId, user);
         }
@@ -221,7 +242,7 @@ public final class RuntimeStateMaterializer {
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(previous.orders());
         for (long orderId : runtime.changedOrders().toArray()) {
             OrderRuntime order = runtime.order(orderId);
-            if (order == null) orders.remove(orderId);
+            if (order == null || runtime.pendingReservation(orderId, order.userId())) orders.remove(orderId);
             else orders.put(orderId, orderSnapshot(order, identities));
         }
 
@@ -299,10 +320,12 @@ public final class RuntimeStateMaterializer {
                 TradingCoreState.ClientOrderKey key = new TradingCoreState.ClientOrderKey(
                         userId, identities.clientOrderId(userId, clientKey));
                 Long orderId = runtime.orderIdByClient(userId, clientKey);
-                if (orderId == null) clients.remove(key); else clients.put(key, orderId);
+                if (orderId == null || runtime.pendingReservation(orderId, userId)) clients.remove(key);
+                else clients.put(key, orderId);
             }
         });
-        return new TradingCoreState(runtime.productLine(), runtime.revision(), users, orders, instruments,
+        return new TradingCoreState(runtime.productLine(),
+                Math.subtractExact(runtime.revision(), runtime.pendingReservationCount()), users, orders, instruments,
                 riskState, treasuryState, leverages, algoOrders, timers, clients, triggers);
     }
 
@@ -355,7 +378,8 @@ public final class RuntimeStateMaterializer {
 
     private static CoreRiskState.RiskScan riskScan(RiskScanRuntime value,
                                                    RuntimeIdentityRegistry identities) {
-        return new CoreRiskState.RiskScan(identities.symbol(value.symbolId()), value.priceSequence(),
+        return new CoreRiskState.RiskScan(identities.symbol(value.symbolId()), value.accountLaneId(),
+                value.priceSequence(),
                 value.scanStartPriceSequence(), value.lastUserId(), value.riskComplete(), value.riskUserId(),
                 value.riskPhase(), value.riskPositionCursor(), value.riskReservationCursor(),
                 value.riskUnrealizedPnlUnits(), value.riskMaintenanceMarginUnits(),
@@ -394,7 +418,8 @@ public final class RuntimeStateMaterializer {
             TreasuryRuntime.FundingProgressRuntime value = runtime.fundingProgress(symbolId);
             if (value == null) fundingProgress.remove(symbol);
             else fundingProgress.put(symbol, new CoreTreasuryState.FundingProgress(value.settlementId(),
-                    value.instrumentVersion(), value.fundingRatePpm(), value.nextCursorUserId(), value.commandId()));
+                    value.instrumentVersion(), value.fundingRatePpm(), value.accountLaneId(),
+                    value.nextCursorUserId(), value.commandId()));
         }
         Map<String, Long> lifecycleSettlements = StateMapSupport.delta(previous.lifecycleSettlements());
         Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = StateMapSupport.delta(
@@ -406,7 +431,8 @@ public final class RuntimeStateMaterializer {
             if (value == null) lifecycleProgress.remove(symbol);
             else lifecycleProgress.put(symbol, new CoreTreasuryState.LifecycleProgress(value.settlementId(),
                     value.instrumentVersion(), value.settlementPriceTicks(), value.optionCashUnitsPerContract(),
-                    value.ordersComplete(), value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId()));
+                    value.ordersComplete(), value.accountLaneId(), value.nextCursorOrderId(),
+                    value.nextCursorUserId(), value.commandId()));
         }
         return new CoreTreasuryState(fees, insurance, deficits, liquidationFees, fundingResiduals,
                 roundingResiduals, clearingPnl, fundingSettlements, lifecycleSettlements,

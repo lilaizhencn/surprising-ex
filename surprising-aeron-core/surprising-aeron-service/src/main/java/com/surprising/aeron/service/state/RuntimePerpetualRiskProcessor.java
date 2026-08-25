@@ -156,7 +156,7 @@ public final class RuntimePerpetualRiskProcessor {
                     0, 0, 0, 0, progress.lastUserId());
         }
         if (progress.riskComplete() && initial.scanStartPriceSequence() != initial.priceSequence()) {
-            progress = new RiskScanRuntime(symbolId, initial.priceSequence(), initial.priceSequence(), 0, false,
+            progress = new RiskScanRuntime(symbolId, 0, initial.priceSequence(), initial.priceSequence(), 0, false,
                     0, 0, "-", 0, 0, 0, 0, 0,
                     progress.triggerComplete(), progress.triggerPhase(), progress.triggerPriceCursor(),
                     progress.triggerOrderCursor(), progress.triggerUpperId(), progress.triggerMarkPriceTicks(),
@@ -340,7 +340,8 @@ public final class RuntimePerpetualRiskProcessor {
     }
 
     private static RiskScanRuntime toRuntimeScan(int symbolId, CoreRiskState.RiskScan scan) {
-        return new RiskScanRuntime(symbolId, scan.priceSequence(), scan.scanStartPriceSequence(), scan.lastUserId(),
+        return new RiskScanRuntime(symbolId, scan.accountLaneId(), scan.priceSequence(),
+                scan.scanStartPriceSequence(), scan.lastUserId(),
                 scan.riskComplete(), scan.riskUserId(), scan.riskPhase(), scan.riskPositionCursor(),
                 scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(),
                 scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),
@@ -349,7 +350,8 @@ public final class RuntimePerpetualRiskProcessor {
                 scan.triggerOcoCursor());
     }
 
-    private static UserRuntime nextUser(TradingRuntimeState runtime, Iterable<Long> indexedUserIds, long cursor) {
+    private static UserRuntime nextUser(TradingRuntimeState runtime, Iterable<Long> indexedUserIds,
+                                        long cursor) {
         if (indexedUserIds instanceof NavigableSet<?>) {
             @SuppressWarnings("unchecked")
             NavigableSet<Long> orderedUsers = (NavigableSet<Long>) indexedUserIds;
@@ -361,28 +363,28 @@ public final class RuntimePerpetualRiskProcessor {
 
     private static PositionEntry nextPosition(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                               long userId, String cursor) {
-        PositionEntry selected = null;
-        for (long positionId : runtime.positionKeysForUser(userId).toArray()) {
+        PositionEntry[] selected = new PositionEntry[1];
+        runtime.positionKeysForUser(userId).forEach(positionId -> {
             PositionRuntime position = runtime.position(positionId);
-            if (position == null) continue;
+            if (position == null) return;
             String symbol = identities.symbol(position.symbolId());
             String key = position.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
                     ? symbol : symbol + ':' + position.positionSide().name();
-            if (!"-".equals(cursor) && key.compareTo(cursor) <= 0) continue;
-            if (selected == null || key.compareTo(selected.key()) < 0) {
-                selected = new PositionEntry(key, position);
+            if (!"-".equals(cursor) && key.compareTo(cursor) <= 0) return;
+            if (selected[0] == null || key.compareTo(selected[0].key()) < 0) {
+                selected[0] = new PositionEntry(key, position);
             }
-        }
-        return selected;
+        });
+        return selected[0];
     }
 
     private static ReservationRuntime nextReservation(TradingRuntimeState runtime, long userId, long cursor) {
-        ReservationRuntime selected = null;
-        for (long orderId : runtime.reservationIdsForUser(userId).toArray()) {
-            if (orderId <= cursor || selected != null && orderId >= selected.orderId()) continue;
-            selected = runtime.reservation(orderId);
-        }
-        return selected;
+        ReservationRuntime[] selected = new ReservationRuntime[1];
+        runtime.reservationIdsForUser(userId).forEach(orderId -> {
+            if (orderId <= cursor || selected[0] != null && orderId >= selected[0].orderId()) return;
+            selected[0] = runtime.reservation(orderId);
+        });
+        return selected[0];
     }
 
     private record PositionRisk(CoreInstrumentState instrument, long priceSequence,

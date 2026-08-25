@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public final class CoreExportCodec {
 
-    private static final int EVENT_V8_MARKER = 0xC0E7_0008;
+    private static final int EVENT_V9_MARKER = 0xC0E7_0009;
     private static final int BATCH_V3_MARKER = 0xC0B2_0003;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
@@ -68,7 +68,7 @@ public final class CoreExportCodec {
             byte[] encoded = CoreTriggerOrderCodec.encodeState(trigger);
             length = Math.addExact(length, Integer.BYTES + encoded.length);
         }
-        length = Math.addExact(length, Long.BYTES * 8L + Integer.BYTES);
+        length = Math.addExact(length, Long.BYTES * 11L + Integer.BYTES * 3L);
         for (CoreFundsPostingView posting : event.fundsPostings()) {
             length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 2L + utf8(posting.asset()).length);
         }
@@ -76,7 +76,7 @@ public final class CoreExportCodec {
             throw new IllegalArgumentException("export event payload is too large");
         }
         ByteBuffer output = littleEndian(Math.toIntExact(length));
-        output.putInt(EVENT_V8_MARKER);
+        output.putInt(EVENT_V9_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
         output.putLong(event.businessStateHash());
@@ -108,7 +108,10 @@ public final class CoreExportCodec {
         });
         CoreMatcherTransition matcher = event.matcherTransition();
         output.putLong(event.beforeBusinessStateHash()).putLong(event.beforeFundsStateHash())
-                .putLong(event.fundsStateHash()).putLong(matcher.sequenceBefore())
+                .putLong(event.fundsStateHash()).putInt(event.routeVersion())
+                .putLong(event.topologyHash()).putLong(event.laneRevisionHash())
+                .putLong(event.committedCoreSequence()).putInt(matcher.matcherShardId())
+                .putLong(matcher.sequenceBefore())
                 .putLong(matcher.sequenceAfter()).putLong(matcher.prefixBefore()).putLong(matcher.prefixAfter())
                 .putLong(event.clusterPosition());
         output.putInt(event.fundsPostings().size());
@@ -125,7 +128,7 @@ public final class CoreExportCodec {
             throw new ProtocolException("export event is truncated");
         }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
-        if (input.getInt() != EVENT_V8_MARKER) {
+        if (input.getInt() != EVENT_V9_MARKER) {
             throw new ProtocolException("unsupported export event version");
         }
         long sequence = input.getLong();
@@ -174,12 +177,17 @@ public final class CoreExportCodec {
             byte[] triggerPayload = new byte[length]; input.get(triggerPayload);
             triggerOrders.add(CoreTriggerOrderCodec.decodeState(triggerPayload));
         }
-        if (input.remaining() < Long.BYTES * 8 + Integer.BYTES) {
+        if (input.remaining() < Long.BYTES * 11 + Integer.BYTES * 3) {
             throw new ProtocolException("core fact continuity metadata is truncated");
         }
         long beforeBusinessHash = input.getLong();
         long beforeFundsHash = input.getLong();
         long fundsHash = input.getLong();
+        int routeVersion = input.getInt();
+        long topologyHash = input.getLong();
+        long laneRevisionHash = input.getLong();
+        long committedCoreSequence = input.getLong();
+        int matcherShardId = input.getInt();
         long matcherSequenceBefore = input.getLong();
         long matcherSequenceAfter = input.getLong();
         long matcherPrefixBefore = input.getLong();
@@ -200,7 +208,8 @@ public final class CoreExportCodec {
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                 commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
                 liquidations, treasuryAssets, triggerOrders, beforeBusinessHash, beforeFundsHash, fundsHash,
-                new CoreMatcherTransition(matcherSequenceBefore, matcherSequenceAfter,
+                routeVersion, topologyHash, laneRevisionHash, committedCoreSequence,
+                new CoreMatcherTransition(routeVersion, matcherShardId, matcherSequenceBefore, matcherSequenceAfter,
                         matcherPrefixBefore, matcherPrefixAfter),
                 clusterPosition, fundsPostings);
     }

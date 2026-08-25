@@ -83,6 +83,7 @@ class KafkaProjectionWorkerTest {
                 CoreMessageType.PROBE_INCREMENT, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 users.getFirst().userId(), new byte[] {(byte) sequence}, users, List.of(), List.of(), List.of(),
                 List.of(), List.of(), List.of(), (sequence - 1) * 17, 0, 0,
+                com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 1, sequence * 17, sequence,
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
                 sequence, List.of());
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,

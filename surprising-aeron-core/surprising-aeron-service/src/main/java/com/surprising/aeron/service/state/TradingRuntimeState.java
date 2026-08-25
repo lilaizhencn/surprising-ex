@@ -20,30 +20,14 @@ public final class TradingRuntimeState {
 
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     private long revision;
+    private final LaneTopology topology;
+    private final AccountLaneState[] accountLanes;
 
-    private final LongObjectHashMap<UserRuntime> users = new LongObjectHashMap<>();
-    private final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances = new LongObjectHashMap<>();
-    private final LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>();
-    private final LongObjectHashMap<ReservationRuntime> reservations = new LongObjectHashMap<>();
-    private final LongObjectHashMap<LongHashSet> reservationIdsByUser = new LongObjectHashMap<>();
-    private final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>();
-    private final LongObjectHashMap<LongHashSet> positionKeysByUser = new LongObjectHashMap<>();
-    private final IntObjectHashMap<LongObjectHashMap<TreeSet<Long>>> positionKeysBySymbolAndUser
-            = new IntObjectHashMap<>();
-    private final LongObjectHashMap<LiquidationRuntime> liquidations = new LongObjectHashMap<>();
-    private final LongObjectHashMap<IntObjectHashMap<LongObjectHashMap<Long>>> activeLiquidationIndex
-            = new LongObjectHashMap<>();
     private final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
-    private final LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
     private final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
-    private final LongObjectHashMap<LongObjectHashMap<Long>> clientOrderIndex = new LongObjectHashMap<>();
     private final TreasuryRuntime treasury = new TreasuryRuntime();
     private final Map<String, CoreInstrumentState> instruments = new TreeMap<>();
-    private final Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
-    private final LongObjectHashMap<TreeSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
-    private final Map<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();
     private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new TreeMap<>();
-    private final Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
     private final Map<Long, CoreFeePolicyState> feePolicies = new TreeMap<>();
     private final Map<Long, TransferRuntime> pendingTransfers = new TreeMap<>();
     private long nextLiquidationId = 1;
@@ -67,6 +51,240 @@ public final class TradingRuntimeState {
     private final LongHashSet changedFeePolicies = new LongHashSet();
     private Thread owner;
 
+    public TradingRuntimeState() {
+        this(LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
+    }
+
+    public TradingRuntimeState(LaneTopology topology) {
+        if (topology == null) throw new IllegalArgumentException("lane topology is required");
+        this.topology = topology;
+        this.accountLanes = new AccountLaneState[topology.accountLaneCount()];
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
+        }
+    }
+
+    public LaneTopology topology() {
+        return topology;
+    }
+
+    public AccountLaneState accountLane(long userId) {
+        assertOwner();
+        return lane(userId);
+    }
+
+    private AccountLaneState lane(long userId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        return accountLanes[topology.accountLaneId(userId)];
+    }
+
+    public AccountLaneState[] accountLanes() {
+        assertOwner();
+        return accountLanes.clone();
+    }
+
+    public AccountLaneState accountLaneById(int laneId) {
+        assertOwner();
+        if (laneId < 0 || laneId >= accountLanes.length) throw new IllegalArgumentException("invalid laneId");
+        return accountLanes[laneId];
+    }
+
+    public void markPendingReservation(long userId, long orderId, long coreSequence) {
+        assertOwner();
+        ReservationRuntime reservation = lane(userId).reservations.get(orderId);
+        if (reservation == null || reservation.userId() != userId) {
+            throw new IllegalStateException("pending reservation is missing");
+        }
+        lane(userId).markPendingReservation(orderId, coreSequence);
+    }
+
+    public void completePendingReservation(long userId, long orderId, long coreSequence) {
+        assertOwner();
+        AccountLaneState accountLane = lane(userId);
+        ReservationRuntime reservation = accountLane.reservations.get(orderId);
+        accountLane.completePendingReservation(orderId, coreSequence);
+        changedOrders.add(orderId);
+        changedReservations.add(orderId);
+        changedUsers.add(userId);
+        if (reservation != null) changedBalance(userId, reservation.assetId());
+        LongObjectHashMap<Long> clients = accountLane.clientOrderIndex.get(userId);
+        if (clients != null) clients.forEachKeyValue((clientKey, indexedOrderId) -> {
+            if (indexedOrderId == orderId) {
+                changedClientOrders.add(clientKey);
+                changedClientOrder(userId, clientKey);
+            }
+        });
+    }
+
+    public void completePendingReservations(long coreSequence) {
+        assertOwner();
+        if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
+        for (AccountLaneState lane : accountLanes) {
+            long[] orderIds = lane.pendingReservationSequences.keySet().toArray();
+            for (long orderId : orderIds) {
+                if (lane.pendingReservationSequences.get(orderId) == coreSequence) {
+                    ReservationRuntime reservation = lane.reservations.get(orderId);
+                    OrderRuntime order = lane.orders.get(orderId);
+                    long userId = reservation != null ? reservation.userId()
+                            : order == null ? 0 : order.userId();
+                    if (userId == 0) throw new IllegalStateException("pending reservation owner is missing");
+                    completePendingReservation(userId, orderId, coreSequence);
+                }
+            }
+        }
+    }
+
+    boolean pendingReservation(long orderId, long userId) {
+        assertOwner();
+        return lane(userId).pendingReservation(orderId);
+    }
+
+    long pendingReservedUnits(long userId, int assetId) {
+        assertOwner();
+        return lane(userId).pendingReservedUnits(userId, assetId);
+    }
+
+    int pendingReservationCount(long userId) {
+        assertOwner();
+        return lane(userId).pendingReservationCount(userId);
+    }
+
+    int pendingReservationCount() {
+        assertOwner();
+        int count = 0;
+        for (AccountLaneState lane : accountLanes) {
+            count = Math.addExact(count, lane.pendingReservationSequences.size());
+        }
+        return count;
+    }
+
+    public boolean hasPendingReservations() {
+        assertOwner();
+        for (AccountLaneState lane : accountLanes) {
+            if (lane.hasPendingReservations()) return true;
+        }
+        return false;
+    }
+
+    public long applyLaneSequence(long coreSequence, Iterable<Long> userIds,
+                                  long stateContribution, long fundsContribution) {
+        assertOwner();
+        if (coreSequence <= 0 || userIds == null) throw new IllegalArgumentException("invalid lane apply");
+        long mask = 0;
+        for (Long userId : userIds) {
+            if (userId == null || userId <= 0) continue;
+            AccountLaneState lane = accountLanes[topology.accountLaneId(userId)];
+            if (!lane.owns(userId)) lane.registerUser(userId);
+            lane.applied(coreSequence, userId, stateContribution, fundsContribution);
+            mask |= 1L << lane.laneId();
+        }
+        return mask;
+    }
+
+    public void commitLaneSequence(long coreSequence, long laneMask) {
+        assertOwner();
+        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
+        if (coreSequence <= 0 || (laneMask & ~validMask) != 0) {
+            throw new IllegalArgumentException("invalid account lane commit");
+        }
+        for (AccountLaneState lane : accountLanes) {
+            if ((laneMask & (1L << lane.laneId())) != 0) lane.committed(coreSequence);
+        }
+    }
+
+    public java.util.List<AccountLaneSnapshot> accountLaneSnapshots(
+            long fenceSequence, TradingCoreState globalState) {
+        assertOwner();
+        if (globalState == null || globalState.productLine() != productLine) {
+            throw new IllegalArgumentException("global snapshot state is required");
+        }
+        java.util.List<AccountLaneSnapshot> snapshots = new java.util.ArrayList<>(accountLanes.length);
+        for (AccountLaneState lane : accountLanes) {
+            snapshots.add(lane.snapshot(fenceSequence,
+                    laneSnapshotState(globalState, lane.laneId(), lane.revision())));
+        }
+        return java.util.List.copyOf(snapshots);
+    }
+
+    public void restoreAccountLaneSnapshots(java.util.List<AccountLaneSnapshot> snapshots, long fenceSequence,
+                                            TradingCoreState globalState) {
+        assertOwner();
+        if (snapshots == null || snapshots.size() != accountLanes.length || globalState == null) {
+            throw new IllegalArgumentException("incomplete account lane snapshot set");
+        }
+        boolean[] restored = new boolean[accountLanes.length];
+        for (AccountLaneSnapshot snapshot : snapshots) {
+            int laneId = snapshot.laneId();
+            if (laneId < 0 || laneId >= accountLanes.length || restored[laneId]
+                    || snapshot.appliedSequence() != fenceSequence
+                    || snapshot.committedSequence() != fenceSequence) {
+                throw new IllegalArgumentException("invalid account lane snapshot manifest");
+            }
+            for (Long userId : snapshot.userIds()) {
+                if (topology.accountLaneId(userId) != laneId
+                        || accountLanes[laneId].users.get(userId) == null) {
+                    throw new IllegalArgumentException("account lane contains an incorrectly routed user");
+                }
+            }
+            if (!snapshot.state().equals(
+                    laneSnapshotState(globalState, laneId, snapshot.state().revision()))) {
+                throw new IllegalArgumentException("account lane payload differs from global state");
+            }
+            accountLanes[laneId].restore(snapshot);
+            restored[laneId] = true;
+        }
+        for (AccountLaneState lane : accountLanes) {
+            lane.users.forEachKey(userId -> {
+                if (!lane.owns(userId)) {
+                    throw new IllegalArgumentException("runtime user is absent from its account lane");
+                }
+            });
+        }
+    }
+
+    private TradingCoreState laneSnapshotState(TradingCoreState state, int laneId, long laneRevision) {
+        java.util.Map<Long, CoreUserState> users = new java.util.TreeMap<>();
+        state.users().forEach((userId, user) -> {
+            if (topology.accountLaneId(userId) == laneId) users.put(userId, user);
+        });
+        java.util.Map<Long, CoreOrderState> orders = new java.util.TreeMap<>();
+        state.orders().forEach((orderId, order) -> {
+            if (topology.accountLaneId(order.userId()) == laneId) orders.put(orderId, order);
+        });
+        java.util.Map<String, CoreRiskSnapshot> risks = new java.util.TreeMap<>();
+        state.riskState().snapshots().forEach((key, value) -> {
+            if (topology.accountLaneId(value.userId()) == laneId) risks.put(key, value);
+        });
+        java.util.Map<Long, CoreLiquidationState> liquidations = new java.util.TreeMap<>();
+        state.riskState().liquidations().forEach((id, value) -> {
+            if (topology.accountLaneId(value.userId()) == laneId) liquidations.put(id, value);
+        });
+        CoreRiskState riskState = new CoreRiskState(java.util.Map.of(), risks, liquidations,
+                java.util.Map.of(), state.riskState().nextLiquidationId(), state.riskState().scanControl());
+        java.util.Map<CoreLeverageKey, Long> leverages = new java.util.TreeMap<>();
+        state.leverages().forEach((key, value) -> {
+            if (topology.accountLaneId(key.userId()) == laneId) leverages.put(key, value);
+        });
+        java.util.Map<Long, CoreAlgoOrderState> algos = new java.util.TreeMap<>();
+        state.algoOrders().forEach((id, value) -> {
+            if (topology.accountLaneId(value.userId()) == laneId) algos.put(id, value);
+        });
+        java.util.Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = new java.util.TreeMap<>();
+        state.cancelAllAfterTimers().forEach((key, value) -> {
+            if (topology.accountLaneId(key.userId()) == laneId) timers.put(key, value);
+        });
+        java.util.Map<TradingCoreState.ClientOrderKey, Long> clients = new java.util.TreeMap<>();
+        state.clientOrderIndex().forEach((key, value) -> {
+            if (topology.accountLaneId(key.userId()) == laneId) clients.put(key, value);
+        });
+        java.util.Map<Long, CoreTriggerOrderState> triggers = new java.util.TreeMap<>();
+        state.triggerOrders().forEach((id, value) -> {
+            if (topology.accountLaneId(value.userId()) == laneId) triggers.put(id, value);
+        });
+        return new TradingCoreState(productLine, laneRevision, users, orders,
+                java.util.Map.of(), riskState, CoreTreasuryState.empty(), leverages, algos, timers, clients, triggers);
+    }
+
     public void bindOwner() {
         Thread current = Thread.currentThread();
         if (owner == null) {
@@ -81,7 +299,9 @@ public final class TradingRuntimeState {
     }
 
     void releaseOwnerForHandoff() {
-        balances.forEachValue(values -> values.forEachValue(BalanceRuntime::releaseOwnerForHandoff));
+        for (AccountLaneState lane : accountLanes) {
+            lane.balances.forEachValue(values -> values.forEachValue(BalanceRuntime::releaseOwnerForHandoff));
+        }
         treasury.releaseOwnerForHandoff();
         owner = null;
     }
@@ -116,7 +336,7 @@ public final class TradingRuntimeState {
 
     public UserRuntime user(long userId) {
         assertOwner();
-        return users.get(userId);
+        return lane(userId).users.get(userId);
     }
 
     public UserRuntime requireUser(long userId) {
@@ -129,93 +349,113 @@ public final class TradingRuntimeState {
 
     public BalanceRuntime balance(long userId, int assetId) {
         assertOwner();
-        IntObjectHashMap<BalanceRuntime> userBalances = balances.get(userId);
+        IntObjectHashMap<BalanceRuntime> userBalances = lane(userId).balances.get(userId);
         return userBalances == null ? null : userBalances.get(assetId);
     }
 
     IntObjectHashMap<BalanceRuntime> balancesForUser(long userId) {
         assertOwner();
-        return balances.get(userId);
+        return lane(userId).balances.get(userId);
     }
 
     LongHashSet reservationIdsForUser(long userId) {
         assertOwner();
-        LongHashSet orderIds = reservationIdsByUser.get(userId);
+        LongHashSet orderIds = lane(userId).reservationIdsByUser.get(userId);
         return orderIds == null ? new LongHashSet() : new LongHashSet(orderIds);
     }
 
     int reservationCountForUser(long userId) {
         assertOwner();
-        LongHashSet orderIds = reservationIdsByUser.get(userId);
+        LongHashSet orderIds = lane(userId).reservationIdsByUser.get(userId);
         return orderIds == null ? 0 : orderIds.size();
     }
 
     LongHashSet positionKeysForUser(long userId) {
         assertOwner();
-        LongHashSet positionKeys = positionKeysByUser.get(userId);
+        LongHashSet positionKeys = lane(userId).positionKeysByUser.get(userId);
         return positionKeys == null ? new LongHashSet() : new LongHashSet(positionKeys);
     }
 
     int positionCountForUser(long userId) {
         assertOwner();
-        LongHashSet positionKeys = positionKeysByUser.get(userId);
+        LongHashSet positionKeys = lane(userId).positionKeysByUser.get(userId);
         return positionKeys == null ? 0 : positionKeys.size();
     }
 
     NavigableSet<CoreLeverageKey> leverageKeysForUser(long userId) {
         assertOwner();
-        TreeSet<CoreLeverageKey> keys = leverageKeysByUser.get(userId);
+        TreeSet<CoreLeverageKey> keys = lane(userId).leverageKeysByUser.get(userId);
         return keys == null ? Collections.emptyNavigableSet()
                 : Collections.unmodifiableNavigableSet(keys);
     }
 
     public OrderRuntime order(long orderId) {
         assertOwner();
-        return orders.get(orderId);
+        for (AccountLaneState lane : accountLanes) {
+            OrderRuntime order = lane.orders.get(orderId);
+            if (order != null) return order;
+        }
+        return null;
     }
 
     public ReservationRuntime reservation(long orderId) {
         assertOwner();
-        return reservations.get(orderId);
+        for (AccountLaneState lane : accountLanes) {
+            ReservationRuntime reservation = lane.reservations.get(orderId);
+            if (reservation != null) return reservation;
+        }
+        return null;
     }
 
     public PositionRuntime position(long positionKey) {
         assertOwner();
-        return positions.get(positionKey);
+        for (AccountLaneState lane : accountLanes) {
+            PositionRuntime position = lane.positions.get(positionKey);
+            if (position != null) return position;
+        }
+        return null;
     }
 
     public NavigableSet<Long> positionKeysForUserAndSymbol(long userId, int symbolId) {
         assertOwner();
-        LongObjectHashMap<TreeSet<Long>> byUser = positionKeysBySymbolAndUser.get(symbolId);
+        LongObjectHashMap<TreeSet<Long>> byUser = lane(userId).positionKeysBySymbolAndUser.get(symbolId);
         TreeSet<Long> keys = byUser == null ? null : byUser.get(userId);
         return keys == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(keys);
     }
 
     public LiquidationRuntime liquidation(long liquidationId) {
         assertOwner();
-        return liquidations.get(liquidationId);
+        for (AccountLaneState lane : accountLanes) {
+            LiquidationRuntime liquidation = lane.liquidations.get(liquidationId);
+            if (liquidation != null) return liquidation;
+        }
+        return null;
     }
 
     public LiquidationRuntime activeLiquidation(long userId, int symbolId, CorePositionSide positionSide) {
         assertOwner();
-        IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = activeLiquidationIndex.get(userId);
+        AccountLaneState lane = lane(userId);
+        IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.activeLiquidationIndex.get(userId);
         LongObjectHashMap<Long> bySide = bySymbol == null ? null : bySymbol.get(symbolId);
         Long liquidationId = bySide == null ? null : bySide.get(positionSide.ordinal());
-        return liquidationId == null ? null : liquidations.get(liquidationId);
+        return liquidationId == null ? null : lane.liquidations.get(liquidationId);
     }
 
     public boolean hasActiveLiquidationConflict(long userId, int symbolId, long excludedLiquidationId) {
         assertOwner();
         boolean[] conflict = new boolean[1];
-        liquidations.forEachValue(liquidation -> {
-            if (!conflict[0] && liquidation.liquidationId() != excludedLiquidationId
-                    && (liquidation.status() == CoreLiquidationState.Status.PLANNED
-                    || liquidation.status() == CoreLiquidationState.Status.ORDERED)
-                    && (userId == 0 || liquidation.userId() == userId)
-                    && (symbolId < 0 || liquidation.symbolId() == symbolId)) {
-                conflict[0] = true;
-            }
-        });
+        for (AccountLaneState lane : accountLanes) {
+            if (userId != 0 && lane.laneId() != topology.accountLaneId(userId)) continue;
+            lane.liquidations.forEachValue(liquidation -> {
+                if (!conflict[0] && liquidation.liquidationId() != excludedLiquidationId
+                        && (liquidation.status() == CoreLiquidationState.Status.PLANNED
+                        || liquidation.status() == CoreLiquidationState.Status.ORDERED)
+                        && (userId == 0 || liquidation.userId() == userId)
+                        && (symbolId < 0 || liquidation.symbolId() == symbolId)) {
+                    conflict[0] = true;
+                }
+            });
+        }
         return conflict[0];
     }
 
@@ -226,7 +466,11 @@ public final class TradingRuntimeState {
 
     public RiskSnapshotRuntime riskSnapshot(long positionKey) {
         assertOwner();
-        return riskSnapshots.get(positionKey);
+        for (AccountLaneState lane : accountLanes) {
+            RiskSnapshotRuntime snapshot = lane.riskSnapshots.get(positionKey);
+            if (snapshot != null) return snapshot;
+        }
+        return null;
     }
 
     public RiskScanRuntime riskScan(int symbolId) {
@@ -293,7 +537,7 @@ public final class TradingRuntimeState {
 
     public Long leverage(CoreLeverageKey key) {
         assertOwner();
-        return leverages.get(key);
+        return lane(key.userId()).leverages.get(key);
     }
 
     void putLeverage(CoreLeverageKey key, long leveragePpm) {
@@ -301,11 +545,12 @@ public final class TradingRuntimeState {
         if (key == null || leveragePpm < 1_000_000L) {
             throw new IllegalArgumentException("invalid runtime leverage");
         }
-        leverages.put(key, leveragePpm);
-        TreeSet<CoreLeverageKey> userKeys = leverageKeysByUser.get(key.userId());
+        AccountLaneState lane = lane(key.userId());
+        lane.leverages.put(key, leveragePpm);
+        TreeSet<CoreLeverageKey> userKeys = lane.leverageKeysByUser.get(key.userId());
         if (userKeys == null) {
             userKeys = new TreeSet<>();
-            leverageKeysByUser.put(key.userId(), userKeys);
+            lane.leverageKeysByUser.put(key.userId(), userKeys);
         }
         userKeys.add(key);
         changedLeverages.add(key);
@@ -313,19 +558,23 @@ public final class TradingRuntimeState {
 
     public CoreAlgoOrderState algoOrder(long algoOrderId) {
         assertOwner();
-        return algoOrders.get(algoOrderId);
+        for (AccountLaneState lane : accountLanes) {
+            CoreAlgoOrderState order = lane.algoOrders.get(algoOrderId);
+            if (order != null) return order;
+        }
+        return null;
     }
 
     void putAlgoOrder(CoreAlgoOrderState algoOrder) {
         assertOwner();
         if (algoOrder == null) throw new IllegalArgumentException("invalid runtime algo order");
-        algoOrders.put(algoOrder.algoOrderId(), algoOrder);
+        lane(algoOrder.userId()).algoOrders.put(algoOrder.algoOrderId(), algoOrder);
         changedAlgoOrders.add(algoOrder.algoOrderId());
     }
 
     void removeAlgoOrder(long algoOrderId) {
         assertOwner();
-        algoOrders.remove(algoOrderId);
+        for (AccountLaneState lane : accountLanes) lane.algoOrders.remove(algoOrderId);
         changedAlgoOrders.add(algoOrderId);
     }
 
@@ -343,19 +592,23 @@ public final class TradingRuntimeState {
 
     public CoreTriggerOrderState triggerOrder(long triggerOrderId) {
         assertOwner();
-        return triggerOrders.get(triggerOrderId);
+        for (AccountLaneState lane : accountLanes) {
+            CoreTriggerOrderState order = lane.triggerOrders.get(triggerOrderId);
+            if (order != null) return order;
+        }
+        return null;
     }
 
     void putTriggerOrder(CoreTriggerOrderState triggerOrder) {
         assertOwner();
         if (triggerOrder == null) throw new IllegalArgumentException("invalid runtime trigger order");
-        triggerOrders.put(triggerOrder.triggerOrderId(), triggerOrder);
+        lane(triggerOrder.userId()).triggerOrders.put(triggerOrder.triggerOrderId(), triggerOrder);
         changedTriggerOrders.add(triggerOrder.triggerOrderId());
     }
 
     void removeTriggerOrder(long triggerOrderId) {
         assertOwner();
-        triggerOrders.remove(triggerOrderId);
+        for (AccountLaneState lane : accountLanes) lane.triggerOrders.remove(triggerOrderId);
         changedTriggerOrders.add(triggerOrderId);
     }
 
@@ -366,12 +619,16 @@ public final class TradingRuntimeState {
 
     Map<CoreLeverageKey, Long> leveragesForRuntime() {
         assertOwner();
-        return leverages;
+        TreeMap<CoreLeverageKey, Long> values = new TreeMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.leverages);
+        return values;
     }
 
     Map<Long, CoreAlgoOrderState> algoOrdersForRuntime() {
         assertOwner();
-        return algoOrders;
+        TreeMap<Long, CoreAlgoOrderState> values = new TreeMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.algoOrders);
+        return values;
     }
 
     Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimersForRuntime() {
@@ -381,7 +638,9 @@ public final class TradingRuntimeState {
 
     Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
         assertOwner();
-        return triggerOrders;
+        TreeMap<Long, CoreTriggerOrderState> values = new TreeMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.triggerOrders);
+        return values;
     }
 
     Map<Long, CoreFeePolicyState> feePoliciesForRuntime() {
@@ -497,61 +756,69 @@ public final class TradingRuntimeState {
         setRiskScanControl(source.riskState().scanControl());
         instruments.clear();
         instruments.putAll(source.instruments());
-        leverages.clear();
-        leverages.putAll(source.leverages());
-        algoOrders.clear();
-        algoOrders.putAll(source.algoOrders());
+        for (AccountLaneState lane : accountLanes) {
+            lane.leverages.clear();
+            lane.leverageKeysByUser.clear();
+            lane.algoOrders.clear();
+            lane.triggerOrders.clear();
+        }
+        source.leverages().forEach(this::putLeverage);
+        source.algoOrders().values().forEach(this::putAlgoOrder);
         cancelAllAfterTimers.clear();
         cancelAllAfterTimers.putAll(source.cancelAllAfterTimers());
-        triggerOrders.clear();
-        triggerOrders.putAll(source.triggerOrders());
+        source.triggerOrders().values().forEach(this::putTriggerOrder);
     }
 
     public Long orderIdByClient(long userId, long clientKey) {
         assertOwner();
-        LongObjectHashMap<Long> userClientOrders = clientOrderIndex.get(userId);
+        LongObjectHashMap<Long> userClientOrders = lane(userId).clientOrderIndex.get(userId);
         return userClientOrders == null ? null : userClientOrders.get(clientKey);
     }
 
     public void putUser(UserRuntime user) {
         assertOwner();
-        users.put(user.userId(), user);
+        AccountLaneState lane = lane(user.userId());
+        lane.users.put(user.userId(), user);
+        lane.registerUser(user.userId());
         changedUsers.add(user.userId());
     }
 
     public void advanceUserRevision(long userId) {
         assertOwner();
         UserRuntime current = requireUser(userId);
-        users.put(userId, new UserRuntime(current.productLine(), userId,
+        lane(userId).users.put(userId, new UserRuntime(current.productLine(), userId,
                 Math.incrementExact(current.revision()), current.positionMode()));
         changedUsers.add(userId);
     }
 
     public void removeUser(long userId) {
         assertOwner();
-        LongObjectHashMap<Long> userClientOrders = clientOrderIndex.get(userId);
+        AccountLaneState lane = lane(userId);
+        LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders != null) {
             userClientOrders.forEachKey(clientKey -> {
                 changedClientOrders.add(clientKey);
                 changedClientOrder(userId, clientKey);
             });
         }
-        users.remove(userId);
-        balances.remove(userId);
-        clientOrderIndex.remove(userId);
-        reservationIdsByUser.remove(userId);
-        positionKeysByUser.remove(userId);
-        leverageKeysByUser.remove(userId);
+        lane.users.remove(userId);
+        lane.removeUser(userId);
+        lane.balances.remove(userId);
+        lane.clientOrderIndex.remove(userId);
+        lane.reservationIdsByUser.remove(userId);
+        lane.positionKeysByUser.remove(userId);
+        lane.leverageKeysByUser.remove(userId);
         changedUsers.add(userId);
     }
 
     public void putBalance(BalanceRuntime balance) {
         assertOwner();
         balance.bindOwner();
-        IntObjectHashMap<BalanceRuntime> userBalances = balances.get(balance.userId());
+        AccountLaneState lane = lane(balance.userId());
+        IntObjectHashMap<BalanceRuntime> userBalances = lane.balances.get(balance.userId());
         if (userBalances == null) {
             userBalances = new IntObjectHashMap<>();
-            balances.put(balance.userId(), userBalances);
+            lane.balances.put(balance.userId(), userBalances);
         }
         userBalances.put(balance.assetId(), balance);
         changedBalance(balance.userId(), balance.assetId());
@@ -560,16 +827,22 @@ public final class TradingRuntimeState {
 
     public void putOrder(OrderRuntime order) {
         assertOwner();
-        orders.put(order.orderId(), order);
+        lane(order.userId()).orders.put(order.orderId(), order);
         changedOrders.add(order.orderId());
         changedUsers.add(order.userId());
     }
 
     public void putReservation(ReservationRuntime reservation) {
         assertOwner();
-        ReservationRuntime previous = reservations.put(reservation.orderId(), reservation);
-        if (previous != null) removeUserEntity(reservationIdsByUser, previous.userId(), previous.orderId());
-        addUserEntity(reservationIdsByUser, reservation.userId(), reservation.orderId());
+        ReservationRuntime previous = reservation(reservation.orderId());
+        if (previous != null) {
+            AccountLaneState previousLane = lane(previous.userId());
+            previousLane.reservations.remove(previous.orderId());
+            removeUserEntity(previousLane.reservationIdsByUser, previous.userId(), previous.orderId());
+        }
+        AccountLaneState lane = lane(reservation.userId());
+        lane.reservations.put(reservation.orderId(), reservation);
+        addUserEntity(lane.reservationIdsByUser, reservation.userId(), reservation.orderId());
         changedReservations.add(reservation.orderId());
         changedUsers.add(reservation.userId());
         if (previous != null) changedUsers.add(previous.userId());
@@ -577,15 +850,20 @@ public final class TradingRuntimeState {
 
     public void replaceOrder(OrderRuntime order) {
         assertOwner();
-        orders.put(order.orderId(), order);
+        OrderRuntime previous = order(order.orderId());
+        if (previous != null && previous.userId() != order.userId()) {
+            throw new IllegalArgumentException("runtime order owner cannot change");
+        }
+        lane(order.userId()).orders.put(order.orderId(), order);
         changedOrders.add(order.orderId());
         changedUsers.add(order.userId());
     }
 
     public void removeOrder(long orderId) {
         assertOwner();
-        OrderRuntime previous = orders.remove(orderId);
+        OrderRuntime previous = order(orderId);
         if (previous != null) {
+            lane(previous.userId()).orders.remove(orderId);
             changedOrders.add(orderId);
             changedUsers.add(previous.userId());
         }
@@ -593,9 +871,15 @@ public final class TradingRuntimeState {
 
     public void replaceReservation(ReservationRuntime reservation) {
         assertOwner();
-        ReservationRuntime previous = reservations.put(reservation.orderId(), reservation);
-        if (previous != null) removeUserEntity(reservationIdsByUser, previous.userId(), previous.orderId());
-        addUserEntity(reservationIdsByUser, reservation.userId(), reservation.orderId());
+        ReservationRuntime previous = reservation(reservation.orderId());
+        if (previous != null) {
+            AccountLaneState previousLane = lane(previous.userId());
+            previousLane.reservations.remove(previous.orderId());
+            removeUserEntity(previousLane.reservationIdsByUser, previous.userId(), previous.orderId());
+        }
+        AccountLaneState lane = lane(reservation.userId());
+        lane.reservations.put(reservation.orderId(), reservation);
+        addUserEntity(lane.reservationIdsByUser, reservation.userId(), reservation.orderId());
         changedReservations.add(reservation.orderId());
         changedUsers.add(reservation.userId());
         if (previous != null) changedUsers.add(previous.userId());
@@ -603,12 +887,13 @@ public final class TradingRuntimeState {
 
     public void removeReservation(long orderId, long userId) {
         assertOwner();
-        ReservationRuntime current = reservations.get(orderId);
+        AccountLaneState lane = lane(userId);
+        ReservationRuntime current = lane.reservations.get(orderId);
         if (current == null || current.userId() != userId) {
             throw new IllegalArgumentException("runtime reservation is not registered: " + orderId);
         }
-        reservations.remove(orderId);
-        removeUserEntity(reservationIdsByUser, userId, orderId);
+        lane.reservations.remove(orderId);
+        removeUserEntity(lane.reservationIdsByUser, userId, orderId);
         changedReservations.add(orderId);
         changedUsers.add(userId);
     }
@@ -624,7 +909,7 @@ public final class TradingRuntimeState {
 
     public void removeBalance(long userId, int assetId) {
         assertOwner();
-        IntObjectHashMap<BalanceRuntime> userBalances = balances.get(userId);
+        IntObjectHashMap<BalanceRuntime> userBalances = lane(userId).balances.get(userId);
         if (userBalances == null || userBalances.remove(assetId) == null) {
             throw new IllegalArgumentException("runtime balance is not registered: " + userId + '/' + assetId);
         }
@@ -634,9 +919,9 @@ public final class TradingRuntimeState {
 
     public void replacePosition(long positionKey, PositionRuntime position) {
         assertOwner();
-        PositionRuntime previous = positions.get(positionKey);
+        PositionRuntime previous = position(positionKey);
         if (previous != null) unindexPosition(positionKey, previous);
-        positions.put(positionKey, position);
+        lane(position.userId()).positions.put(positionKey, position);
         indexPosition(positionKey, position);
         changedPositions.add(positionKey);
         changedUsers.add(position.userId());
@@ -645,10 +930,10 @@ public final class TradingRuntimeState {
 
     public void putLiquidation(LiquidationRuntime liquidation) {
         assertOwner();
-        if (liquidations.containsKey(liquidation.liquidationId())) {
+        if (liquidation(liquidation.liquidationId()) != null) {
             throw new IllegalArgumentException("runtime liquidation already exists: " + liquidation.liquidationId());
         }
-        liquidations.put(liquidation.liquidationId(), liquidation);
+        lane(liquidation.userId()).liquidations.put(liquidation.liquidationId(), liquidation);
         indexActiveLiquidation(liquidation);
         changedLiquidations.add(liquidation.liquidationId());
         changedUsers.add(liquidation.userId());
@@ -662,7 +947,7 @@ public final class TradingRuntimeState {
 
     public void putRiskSnapshot(long positionKey, RiskSnapshotRuntime snapshot) {
         assertOwner();
-        riskSnapshots.put(positionKey, snapshot);
+        lane(snapshot.userId()).riskSnapshots.put(positionKey, snapshot);
         changedRiskSnapshots.add(positionKey);
     }
 
@@ -680,13 +965,16 @@ public final class TradingRuntimeState {
 
     public void replaceLiquidation(LiquidationRuntime liquidation) {
         assertOwner();
-        LiquidationRuntime previous = liquidations.get(liquidation.liquidationId());
+        LiquidationRuntime previous = liquidation(liquidation.liquidationId());
         if (previous == null) {
             throw new IllegalArgumentException("runtime liquidation is not registered: "
                     + liquidation.liquidationId());
         }
         removeActiveLiquidation(previous);
-        liquidations.put(liquidation.liquidationId(), liquidation);
+        if (previous.userId() != liquidation.userId()) {
+            lane(previous.userId()).liquidations.remove(previous.liquidationId());
+        }
+        lane(liquidation.userId()).liquidations.put(liquidation.liquidationId(), liquidation);
         indexActiveLiquidation(liquidation);
         changedLiquidations.add(liquidation.liquidationId());
         changedUsers.add(liquidation.userId());
@@ -695,11 +983,12 @@ public final class TradingRuntimeState {
 
     public void removePosition(long positionKey, long userId) {
         assertOwner();
-        PositionRuntime current = positions.get(positionKey);
+        AccountLaneState lane = lane(userId);
+        PositionRuntime current = lane.positions.get(positionKey);
         if (current == null || current.userId() != userId) {
             throw new IllegalArgumentException("runtime position is not registered: " + positionKey);
         }
-        positions.remove(positionKey);
+        lane.positions.remove(positionKey);
         unindexPosition(positionKey, current);
         changedPositions.add(positionKey);
         changedUsers.add(userId);
@@ -707,8 +996,9 @@ public final class TradingRuntimeState {
 
     public void removeLiquidation(long liquidationId) {
         assertOwner();
-        LiquidationRuntime previous = liquidations.remove(liquidationId);
+        LiquidationRuntime previous = liquidation(liquidationId);
         if (previous != null) {
+            lane(previous.userId()).liquidations.remove(liquidationId);
             removeActiveLiquidation(previous);
             changedLiquidations.add(liquidationId);
             changedUsers.add(previous.userId());
@@ -723,7 +1013,7 @@ public final class TradingRuntimeState {
 
     public void removeRiskSnapshot(long positionKey) {
         assertOwner();
-        riskSnapshots.remove(positionKey);
+        for (AccountLaneState lane : accountLanes) lane.riskSnapshots.remove(positionKey);
         changedRiskSnapshots.add(positionKey);
     }
 
@@ -735,8 +1025,9 @@ public final class TradingRuntimeState {
 
     public void cancelOrder(long orderId, long userId, long releaseUnits) {
         assertOwner();
-        OrderRuntime order = orders.get(orderId);
-        ReservationRuntime reservation = reservations.get(orderId);
+        AccountLaneState lane = lane(userId);
+        OrderRuntime order = lane.orders.get(orderId);
+        ReservationRuntime reservation = lane.reservations.get(orderId);
         if (order == null || reservation == null || order.userId() != userId || order.canceled()) {
             throw new IllegalArgumentException("runtime order is not cancelable: " + orderId);
         }
@@ -748,8 +1039,8 @@ public final class TradingRuntimeState {
             throw new IllegalArgumentException("runtime cancellation balance is missing: " + orderId);
         }
         balance.release(releaseUnits);
-        orders.put(orderId, order.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(order.revision())));
-        reservations.put(orderId, reservation.release(releaseUnits));
+        lane.orders.put(orderId, order.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(order.revision())));
+        lane.reservations.put(orderId, reservation.release(releaseUnits));
         changedOrders.add(orderId);
         changedReservations.add(orderId);
         changedUsers.add(userId);
@@ -759,8 +1050,9 @@ public final class TradingRuntimeState {
 
     public void releaseTerminalReservation(long orderId) {
         assertOwner();
-        OrderRuntime order = orders.get(orderId);
-        ReservationRuntime reservation = reservations.get(orderId);
+        OrderRuntime order = order(orderId);
+        AccountLaneState lane = order == null ? null : lane(order.userId());
+        ReservationRuntime reservation = lane == null ? null : lane.reservations.get(orderId);
         if (order == null || reservation == null || !order.canceled()) {
             throw new IllegalArgumentException("runtime order is not terminal: " + orderId);
         }
@@ -769,7 +1061,7 @@ public final class TradingRuntimeState {
         BalanceRuntime balance = balance(order.userId(), reservation.assetId());
         if (balance == null) throw new IllegalStateException("runtime terminal balance is missing: " + orderId);
         balance.release(releaseUnits);
-        reservations.put(orderId, reservation.release(releaseUnits));
+        lane.reservations.put(orderId, reservation.release(releaseUnits));
         changedReservations.add(orderId);
         changedUsers.add(order.userId());
         changedBalance(order.userId(), reservation.assetId());
@@ -777,10 +1069,11 @@ public final class TradingRuntimeState {
 
     public void putClientOrder(long userId, long clientKey, long orderId) {
         assertOwner();
-        LongObjectHashMap<Long> userClientOrders = clientOrderIndex.get(userId);
+        AccountLaneState lane = lane(userId);
+        LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders == null) {
             userClientOrders = new LongObjectHashMap<>();
-            clientOrderIndex.put(userId, userClientOrders);
+            lane.clientOrderIndex.put(userId, userClientOrders);
         }
         userClientOrders.put(clientKey, orderId);
         changedClientOrders.add(clientKey);
@@ -790,10 +1083,11 @@ public final class TradingRuntimeState {
 
     public void removeClientOrder(long userId, long clientKey) {
         assertOwner();
-        LongObjectHashMap<Long> userClientOrders = clientOrderIndex.get(userId);
+        AccountLaneState lane = lane(userId);
+        LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders != null) {
             userClientOrders.remove(clientKey);
-            if (userClientOrders.isEmpty()) clientOrderIndex.remove(userId);
+            if (userClientOrders.isEmpty()) lane.clientOrderIndex.remove(userId);
         }
         changedClientOrders.add(clientKey);
         changedClientOrder(userId, clientKey);
@@ -928,31 +1222,45 @@ public final class TradingRuntimeState {
     }
 
     LongObjectHashMap<UserRuntime> usersForSnapshot() {
-        return users;
+        LongObjectHashMap<UserRuntime> values = new LongObjectHashMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.users);
+        return values;
     }
 
     LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balancesForSnapshot() {
-        return balances;
+        LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> values = new LongObjectHashMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.balances);
+        return values;
     }
 
     LongObjectHashMap<OrderRuntime> ordersForSnapshot() {
-        return orders;
+        LongObjectHashMap<OrderRuntime> values = new LongObjectHashMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.orders);
+        return values;
     }
 
     LongObjectHashMap<ReservationRuntime> reservationsForSnapshot() {
-        return reservations;
+        LongObjectHashMap<ReservationRuntime> values = new LongObjectHashMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.reservations);
+        return values;
     }
 
     LongObjectHashMap<LongObjectHashMap<Long>> clientOrderIndexForSnapshot() {
-        return clientOrderIndex;
+        LongObjectHashMap<LongObjectHashMap<Long>> values = new LongObjectHashMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.clientOrderIndex);
+        return values;
     }
 
     LongObjectHashMap<PositionRuntime> positionsForSnapshot() {
-        return positions;
+        LongObjectHashMap<PositionRuntime> values = new LongObjectHashMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.positions);
+        return values;
     }
 
     LongObjectHashMap<LiquidationRuntime> liquidationsForSnapshot() {
-        return liquidations;
+        LongObjectHashMap<LiquidationRuntime> values = new LongObjectHashMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.liquidations);
+        return values;
     }
 
     IntObjectHashMap<MarkPriceRuntime> markPricesForSnapshot() {
@@ -960,7 +1268,9 @@ public final class TradingRuntimeState {
     }
 
     LongObjectHashMap<RiskSnapshotRuntime> riskSnapshotsForSnapshot() {
-        return riskSnapshots;
+        LongObjectHashMap<RiskSnapshotRuntime> values = new LongObjectHashMap<>();
+        for (AccountLaneState lane : accountLanes) values.putAll(lane.riskSnapshots);
+        return values;
     }
 
     IntObjectHashMap<RiskScanRuntime> riskScansForSnapshot() {
@@ -970,14 +1280,15 @@ public final class TradingRuntimeState {
     public void reserveOrder(long orderId, long userId, long clientKey, int symbolId,
                              long quantitySteps, int assetId, long reservedUnits) {
         assertOwner();
-        if (orders.containsKey(orderId)) {
+        AccountLaneState lane = lane(userId);
+        if (order(orderId) != null) {
             throw new IllegalArgumentException("runtime order already exists: " + orderId);
         }
-        LongObjectHashMap<Long> userClientOrders = clientOrderIndex.get(userId);
+        LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
         if (clientKey != 0 && userClientOrders != null && userClientOrders.containsKey(clientKey)) {
             throw new IllegalArgumentException("runtime client order already exists: " + clientKey);
         }
-        UserRuntime user = users.get(userId);
+        UserRuntime user = lane.users.get(userId);
         if (user == null) {
             throw new IllegalArgumentException("runtime user is not registered: " + userId);
         }
@@ -988,12 +1299,12 @@ public final class TradingRuntimeState {
         OrderRuntime order = new OrderRuntime(orderId, userId, symbolId, quantitySteps);
         ReservationRuntime reservation = new ReservationRuntime(orderId, userId, assetId, reservedUnits);
         balance.reserve(reservedUnits);
-        orders.put(orderId, order);
-        reservations.put(orderId, reservation);
-        addUserEntity(reservationIdsByUser, userId, orderId);
+        lane.orders.put(orderId, order);
+        lane.reservations.put(orderId, reservation);
+        addUserEntity(lane.reservationIdsByUser, userId, orderId);
         if (clientKey != 0 && userClientOrders == null) {
             userClientOrders = new LongObjectHashMap<>();
-            clientOrderIndex.put(userId, userClientOrders);
+            lane.clientOrderIndex.put(userId, userClientOrders);
         }
         if (clientKey != 0) {
             userClientOrders.put(clientKey, orderId);
@@ -1010,9 +1321,9 @@ public final class TradingRuntimeState {
 
     public void putPosition(long positionKey, PositionRuntime position) {
         assertOwner();
-        PositionRuntime previous = positions.get(positionKey);
+        PositionRuntime previous = position(positionKey);
         if (previous != null) unindexPosition(positionKey, previous);
-        positions.put(positionKey, position);
+        lane(position.userId()).positions.put(positionKey, position);
         indexPosition(positionKey, position);
         changedPositions.add(positionKey);
         changedUsers.add(position.userId());
@@ -1020,12 +1331,13 @@ public final class TradingRuntimeState {
     }
 
     private void indexPosition(long positionKey, PositionRuntime position) {
-        addUserEntity(positionKeysByUser, position.userId(), positionKey);
+        AccountLaneState lane = lane(position.userId());
+        addUserEntity(lane.positionKeysByUser, position.userId(), positionKey);
         if (position.signedQuantitySteps() == 0) return;
-        LongObjectHashMap<TreeSet<Long>> byUser = positionKeysBySymbolAndUser.get(position.symbolId());
+        LongObjectHashMap<TreeSet<Long>> byUser = lane.positionKeysBySymbolAndUser.get(position.symbolId());
         if (byUser == null) {
             byUser = new LongObjectHashMap<>();
-            positionKeysBySymbolAndUser.put(position.symbolId(), byUser);
+            lane.positionKeysBySymbolAndUser.put(position.symbolId(), byUser);
         }
         TreeSet<Long> keys = byUser.get(position.userId());
         if (keys == null) {
@@ -1036,12 +1348,13 @@ public final class TradingRuntimeState {
     }
 
     private void unindexPosition(long positionKey, PositionRuntime position) {
-        removeUserEntity(positionKeysByUser, position.userId(), positionKey);
-        LongObjectHashMap<TreeSet<Long>> byUser = positionKeysBySymbolAndUser.get(position.symbolId());
+        AccountLaneState lane = lane(position.userId());
+        removeUserEntity(lane.positionKeysByUser, position.userId(), positionKey);
+        LongObjectHashMap<TreeSet<Long>> byUser = lane.positionKeysBySymbolAndUser.get(position.symbolId());
         TreeSet<Long> keys = byUser == null ? null : byUser.get(position.userId());
         if (keys == null || !keys.remove(positionKey)) return;
         if (keys.isEmpty()) byUser.remove(position.userId());
-        if (byUser.isEmpty()) positionKeysBySymbolAndUser.remove(position.symbolId());
+        if (byUser.isEmpty()) lane.positionKeysBySymbolAndUser.remove(position.symbolId());
     }
 
     private void changedBalance(long userId, int assetId) {
@@ -1080,10 +1393,11 @@ public final class TradingRuntimeState {
 
     private void indexActiveLiquidation(LiquidationRuntime liquidation) {
         if (!active(liquidation)) return;
-        IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = activeLiquidationIndex.get(liquidation.userId());
+        AccountLaneState lane = lane(liquidation.userId());
+        IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.activeLiquidationIndex.get(liquidation.userId());
         if (bySymbol == null) {
             bySymbol = new IntObjectHashMap<>();
-            activeLiquidationIndex.put(liquidation.userId(), bySymbol);
+            lane.activeLiquidationIndex.put(liquidation.userId(), bySymbol);
         }
         LongObjectHashMap<Long> bySide = bySymbol.get(liquidation.symbolId());
         if (bySide == null) {
@@ -1099,12 +1413,13 @@ public final class TradingRuntimeState {
 
     private void removeActiveLiquidation(LiquidationRuntime liquidation) {
         if (!active(liquidation)) return;
-        IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = activeLiquidationIndex.get(liquidation.userId());
+        AccountLaneState lane = lane(liquidation.userId());
+        IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.activeLiquidationIndex.get(liquidation.userId());
         LongObjectHashMap<Long> bySide = bySymbol == null ? null : bySymbol.get(liquidation.symbolId());
         if (bySide == null) return;
         bySide.remove(liquidation.positionSide().ordinal());
         if (bySide.isEmpty()) bySymbol.remove(liquidation.symbolId());
-        if (bySymbol.isEmpty()) activeLiquidationIndex.remove(liquidation.userId());
+        if (bySymbol.isEmpty()) lane.activeLiquidationIndex.remove(liquidation.userId());
     }
 
     private static boolean active(LiquidationRuntime liquidation) {

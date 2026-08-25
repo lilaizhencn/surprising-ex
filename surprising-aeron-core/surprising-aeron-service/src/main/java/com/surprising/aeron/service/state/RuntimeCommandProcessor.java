@@ -470,8 +470,9 @@ public final class RuntimeCommandProcessor {
         if (runtime == null || identities == null || scan == null) {
             throw new IllegalArgumentException("invalid runtime risk scan");
         }
-        runtime.putRiskScan(new RiskScanRuntime(identities.symbolId(scan.symbol()), scan.priceSequence(),
-                scan.scanStartPriceSequence(), scan.lastUserId(), scan.riskComplete(), scan.riskUserId(),
+        runtime.putRiskScan(new RiskScanRuntime(identities.symbolId(scan.symbol()), scan.accountLaneId(),
+                scan.priceSequence(), scan.scanStartPriceSequence(), scan.lastUserId(),
+                scan.riskComplete(), scan.riskUserId(),
                 scan.riskPhase(), scan.riskPositionCursor(), scan.riskReservationCursor(),
                 scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(), scan.riskIsolatedMarginUnits(),
                 scan.riskIsolatedReservationUnits(), scan.triggerComplete(), scan.triggerPhase(),

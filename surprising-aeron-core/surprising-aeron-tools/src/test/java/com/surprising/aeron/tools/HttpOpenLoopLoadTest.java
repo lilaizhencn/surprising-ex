@@ -19,6 +19,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -37,6 +38,36 @@ class HttpOpenLoopLoadTest {
                 .hasMessageContaining("99%");
         HttpWorkloadLoopbackMain.requireQa(
                 new HttpOpenLoopWorkload.Summary(1_000, 990, 0, 10, 4, classifications));
+    }
+
+    @Test
+    void defaultTrafficMaintainsValidPrerequisitesForACompleteCycle() throws Exception {
+        AtomicLong resources = new AtomicLong(10_000);
+        try (Loopback server = new Loopback(exchange -> {
+            if (health(exchange)) return;
+            exchange.getRequestBody().readAllBytes();
+            String path = exchange.getRequestURI().getPath();
+            if (path.contains("trigger-orders/cancel")) {
+                respond(exchange, 200, "{\"status\":\"CANCELED\"}");
+            } else if (path.endsWith("trigger-orders")) {
+                respond(exchange, 200, "{\"status\":\"PENDING\",\"triggerOrderId\":"
+                        + resources.incrementAndGet() + "}");
+            } else {
+                respond(exchange, 200, "{\"code\":\"APPLIED\",\"orderId\":"
+                        + resources.incrementAndGet() + "}");
+            }
+        })) {
+            HttpWorkloadConfig config = config(server.uri(), temporaryDirectory.resolve("prerequisites"),
+                    "prerequisite-run", 100, Duration.ofSeconds(1), 128, Duration.ofSeconds(1), 4);
+
+            HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload(config).run();
+
+            assertThat(summary.scheduled()).isEqualTo(100);
+            var abortedEvents = Files.readAllLines(config.outputDirectory().resolve("events.jsonl")).stream()
+                    .filter(line -> line.contains("\"event\":\"ABORTED\"")).toList();
+            assertThat(summary.deliberatelyAborted()).as("aborted events: %s", abortedEvents).isZero();
+            assertThat(summary.completed()).isEqualTo(summary.scheduled());
+        }
     }
 
     @Test

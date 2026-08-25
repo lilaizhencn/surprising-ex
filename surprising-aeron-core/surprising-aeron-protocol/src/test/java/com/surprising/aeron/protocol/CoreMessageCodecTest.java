@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String CURRENT_GOLDEN = "5845585303000102010001004c000100"
+    private static final String CURRENT_GOLDEN = "5845585304000102010001004c000200"
             + "7766554433221100ffeeddccbbaa9988"
             + "0800000000000000"
             + "2a00000000000000e903000000000000"
@@ -105,7 +105,7 @@ class CoreMessageCodecTest {
                 .hasMessageContaining("shard");
 
         byte[] unknownRoute = valid.clone();
-        unknownRoute[14] = 2;
+        unknownRoute[14] = 3;
         assertThatThrownBy(() -> CoreMessageCodec.decode(unknownRoute))
                 .isInstanceOf(ProtocolException.class)
                 .hasMessageContaining("route version");
