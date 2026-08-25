@@ -43,7 +43,7 @@ sectioned snapshot v13；decoder 和 startup 对旧主版本 fail closed，不�
 P10 的目标不是物理 Core shard，而是在同一个三节点 Product Core 内建立按 symbol 的 Matcher Lane、按 userId 的
 Account Lane 和按 asset 的 Treasury Lane；全局 Core sequence、Core Fact、snapshot 和恢复仍由一个确定性
 Sequencer 协调。该方案当前仅完成设计、尚未实施；完整所有权、无锁队列、资金提交、快照一致性、恢复门禁、
-代码修改清单和验收矩阵见 [P10 单物理 Product Core 确定性 Lane 实施规范](P10-DETERMINISTIC-LANES.md)。在该文档
+代码修改清单和验收矩阵见 [P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)。在该文档
 完成定义全部通过前，运行时仍保持 `routeVersion=1`、单 Runtime owner 和全局 one-in-flight matcher。
 
 ## 协议约束
