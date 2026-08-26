@@ -1,6 +1,8 @@
 # P10 单物理 Product Core 确定性 Lane 实施规范
 
-> 状态：P10-A 至 P10-F 代码、协议和快照迁移已落地；P10-G 三节点容量认证必须在目标环境生成 artifact 后单独签字。
+> 状态：P10-A 至 P10-C、P10-F 主体代码、协议和快照已落地；P10-D/E 尚有两个上线阻断项：撮合结算仍由
+> Sequencer 同步编排多个 Lane 访问，ACK/Treasury 仍需改为 Lane 原生 per-asset delta 后再过 barrier 提交。
+> P10-G 三节点容量认证必须在上述阻断项关闭且目标环境生成 artifact 后单独签字。
 >
 > 本文定义 P10 的唯一实施方向。P10 不拆分物理 Product Core，不改变“一条产品线对应一个三节点
 > Aeron Cluster”的部署边界。每个 Product Core 只运行一个共享的 `ExchangeCore`；Matcher Lane 仅指该实例内部
@@ -578,7 +580,7 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 
 ## 14. 完成定义
 
-只有以下条件全部满足，P10 才能从“代码迁移完成、待生产认证”改为“完成”：
+只有以下条件全部满足，P10 才能从“迁移进行中”改为“完成”：
 
 - P10-A 至 P10-G 的生产代码和协议/快照版本全部落地；Account Lane 默认启用且生产默认数为 4，不存在兼容 fallback。
 - 一个 ProductLine 仍只有一个物理三节点 Product Core、一个 global Core sequence 和一条 Core Fact 链。

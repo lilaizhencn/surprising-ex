@@ -45,9 +45,10 @@ Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Acco
 以 expected/ack Lane mask 提交，不生成 `SettlementPlan` 或 event 副本；Treasury 保持 Sequencer owner。全局 Core
 sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
 4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、ACK 位图、全局 commit
-cursor、lane-aware 生命周期和实际 Lane snapshot section 已落地。`AccountLaneWorker[]` 为每个 Lane 创建固定 platform
-owner thread；账户 Map mutation、同一 immutable result 引用 fanout、ACK、owner-routed query/read fence 和 Lane snapshot
-capture/restore 都经过预分配槽位的有界双向 SPSC ring。P10-G 的真实 HTTP/JFR 门禁见
+cursor 和实际 Lane snapshot section 已落地。`AccountLaneWorker[]` 为每个 Lane 创建固定 platform owner thread；账户 Map
+mutation、owner-routed query/read fence 和 Lane snapshot capture/restore 经过预分配槽位的有界双向 SPSC ring。当前
+P10-D/E 缺陷闭环尚未完成：撮合结算仍由 Sequencer 同步编排多个 Lane 访问，ACK/Treasury 尚未全部改为 Lane 原生
+per-asset delta 后再过 barrier 提交。P10-G 的真实 HTTP/JFR 门禁见
 [P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)，没有对应 artifact 时不得宣称生产认证完成。
 
 ## 协议约束
@@ -176,10 +177,15 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 
 ### P10：确定性 Lane 与容量门禁
 
-P10-A 至 P10-F 的写路径、协议和快照已切换到 route v2。P10-G 由 `HttpOpenLoopWorkloadMain` 的
+P10-A 至 P10-C 和 P10-F 的主体写路径、协议和快照已切换到 route v2；P10-D/E 的 Lane-local settlement 与
+Lane 原生 Treasury ACK 仍是上线前门禁。P10-G 由 `HttpOpenLoopWorkloadMain` 的
 `qualification=P10` 门禁强制检查 1,000 用户、至少 200 symbol、100k/s、40 分钟和活动 JFR；输出目录保存
 coordinated-omission-corrected HDR、逐请求事件和 accounting JSON。真实三节点/Provider 环境未生成完整 artifact 前，
-只能描述为“迁移完成、待生产容量认证”，不能描述为“P10 生产认证完成”。
+只能描述为“迁移进行中”，不能描述为“P10 迁移完成”或“P10 生产认证完成”。
+
+运维可通过 `ClusterProbeMain -Dsurprising.aeron.probe-mode=metrics` 查询 Core 内部 Lane 指标并输出 Prometheus
+text format。该查询走 committed Core query surface，不读取 PostgreSQL；采样与计数由独立
+`AccountLaneMetricsTracker` 维护，业务 `AccountLaneView` 不包含监控字段；标签固定为产品线、Lane 类型/编号和有界操作类型。
 
 ## 六产品线资金守恒契约
 

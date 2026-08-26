@@ -25,8 +25,10 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
 | P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个共享 ExchangeCore，以原生 symbol matcher shard 和默认启用的 user Account Lane 扩展；同一不可变 matcher result 引用按 userId 扇出，以 expected/ack Lane mask 提交，Treasury 保持 Sequencer owner，不包含物理 Core shard。实施规范见 [`docs/P10-DETERMINISTIC-LANES.md`](docs/P10-DETERMINISTIC-LANES.md)。 |
 
-当前实现状态：P0-P5 与 P10-A 至 P10-F 的代码迁移已完成；每个 Account Lane 使用固定 platform owner thread，
-账户状态 mutation、immutable result fanout、ACK、query/read fence 和 snapshot capture/restore 都经过有界双向 SPSC ring。
+当前实现状态：P0-P5 与 P10-A 至 P10-C、P10-F 的主体迁移已完成；每个 Account Lane 使用固定 platform owner thread，
+账户状态 mutation、query/read fence 和 snapshot capture/restore 都经过有界双向 SPSC ring。P10-D/E 正在做缺陷闭环：
+当前 immutable result 已按 expected Lane mask 扇出并有 ACK/commit fence，但撮合结算仍存在 Sequencer 编排的同步逐访问
+Lane 往返，Treasury ACK 仍需替换为 Lane 原生 per-asset delta；在该门禁完成前不得宣称 P10-A 至 P10-F 全部完成。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、
 至少 200 symbol、100k/s offered rate、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
@@ -350,6 +352,10 @@ Kafka 集群或长时间容量验证的场景必须在交付记录中明确标�
   和容量门禁；生产峰值不超过满足 SLO 的实测容量 70%。
 - 监控 Aeron election/commit position、Archive/snapshot、matcher queue/latency、Core p99/p99.9、GC、
   export event age、Kafka/PG/WebSocket lag、资金差额和 book hash；不以平均 TPS 代替容量结论。
+- `ClusterProbeMain` 使用 `-Dsurprising.aeron.probe-mode=metrics` 从 Product Core 的 committed query surface
+  获取 Lane 指标并输出 Prometheus text format；指标覆盖 matcher/completion/context queue、每 Lane applied/committed gap、
+  queue depth/capacity/high-water、拒绝数、oldest pending 以及 command/settlement/query/risk 延迟，标签只含
+  `product_line`、`lane_type`、`lane_id` 和有界 `operation`。
 
 Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Runbook 补充；不得改变上述所有权和恢复边界。
 
