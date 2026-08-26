@@ -1821,6 +1821,175 @@ public final class TradingRuntimeState implements AutoCloseable {
         return new LongHashSet(changedFeePolicies);
     }
 
+    public RuntimeMutationDelta captureMutationDelta() {
+        assertOwner();
+        long[] userIds = changedUsers.toArray();
+        TreeMap<Long, int[]> balanceAssetIds = new TreeMap<>();
+        changedBalances.forEachKeyValue((userId, assetIds) ->
+                balanceAssetIds.put(userId, assetIds.toArray()));
+        TreeMap<Long, long[]> clientKeysByUser = new TreeMap<>();
+        changedClientOrdersByUser.forEachKeyValue((userId, clientKeys) ->
+                clientKeysByUser.put(userId, clientKeys.toArray()));
+        long[] orderIds = changedOrders.toArray();
+        long[] reservationIds = changedReservations.toArray();
+        long[] positionKeys = changedPositions.toArray();
+        long[] liquidationIds = changedLiquidations.toArray();
+        long[] riskSnapshotKeys = changedRiskSnapshots.toArray();
+        long[] algoOrderIds = changedAlgoOrders.toArray();
+        long[] triggerOrderIds = changedTriggerOrders.toArray();
+        RuntimeMutationDelta.CaptureRequest request = new RuntimeMutationDelta.CaptureRequest(
+                userIds, Collections.unmodifiableMap(balanceAssetIds), orderIds, reservationIds, positionKeys,
+                liquidationIds, riskSnapshotKeys, Collections.unmodifiableSet(new TreeSet<>(changedLeverages)),
+                algoOrderIds, triggerOrderIds, Collections.unmodifiableMap(clientKeysByUser));
+        RuntimeMutationDelta.LaneValues[] laneValues = captureLaneMutationValues(request);
+
+        int pendingReservations = 0;
+        TreeMap<Long, RuntimeMutationDelta.UserValue> users = new TreeMap<>();
+        TreeMap<Long, OrderRuntime> orders = new TreeMap<>();
+        TreeMap<Long, ReservationRuntime> reservations = new TreeMap<>();
+        TreeSet<Long> pendingReservationIds = new TreeSet<>();
+        TreeMap<Long, PositionRuntime> positions = new TreeMap<>();
+        TreeMap<Long, LiquidationRuntime> liquidations = new TreeMap<>();
+        TreeMap<Long, RiskSnapshotRuntime> riskSnapshots = new TreeMap<>();
+        TreeMap<CoreLeverageKey, Long> leverages = new TreeMap<>();
+        TreeMap<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();
+        TreeMap<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
+        TreeMap<RuntimeMutationDelta.RuntimeClientKey, Long> clientOrders = new TreeMap<>();
+        for (RuntimeMutationDelta.LaneValues lane : laneValues) {
+            pendingReservations = Math.addExact(pendingReservations, lane.pendingReservationCount());
+            users.putAll(lane.users());
+            orders.putAll(lane.orders());
+            reservations.putAll(lane.reservations());
+            pendingReservationIds.addAll(lane.pendingReservations());
+            positions.putAll(lane.positions());
+            liquidations.putAll(lane.liquidations());
+            riskSnapshots.putAll(lane.riskSnapshots());
+            leverages.putAll(lane.leverages());
+            algoOrders.putAll(lane.algoOrders());
+            triggerOrders.putAll(lane.triggerOrders());
+            clientOrders.putAll(lane.clientOrders());
+        }
+
+        TreeSet<Integer> changedMarkIds = intSet(changedMarkPrices.toArray());
+        TreeMap<Integer, MarkPriceRuntime> currentMarks = new TreeMap<>();
+        for (int symbolId : changedMarkIds) {
+            MarkPriceRuntime mark = markPrices.get(symbolId);
+            if (mark != null) currentMarks.put(symbolId, mark);
+        }
+        TreeSet<Integer> changedScanIds = intSet(changedRiskScans.toArray());
+        TreeMap<Integer, RiskScanRuntime> currentScans = new TreeMap<>();
+        for (int symbolId : changedScanIds) {
+            RiskScanRuntime scan = riskScans.get(symbolId);
+            if (scan != null) currentScans.put(symbolId, scan);
+        }
+        TreeMap<String, CoreInstrumentState> currentInstruments = new TreeMap<>();
+        for (String symbol : changedInstruments) {
+            CoreInstrumentState instrument = instruments.get(symbol);
+            if (instrument != null) currentInstruments.put(symbol, instrument);
+        }
+        TreeMap<CoreCancelAllAfterKey, CoreCancelAllAfterState> currentTimers = new TreeMap<>();
+        for (CoreCancelAllAfterKey key : changedCancelAllAfterTimers) {
+            CoreCancelAllAfterState timer = cancelAllAfterTimers.get(key);
+            if (timer != null) currentTimers.put(key, timer);
+        }
+
+        return new RuntimeMutationDelta(productLine, revision, pendingReservations,
+                RuntimeMutationDelta.ValueChanges.of(longSet(userIds), users),
+                RuntimeMutationDelta.ValueChanges.of(longSet(orderIds), orders),
+                RuntimeMutationDelta.ValueChanges.of(longSet(reservationIds), reservations),
+                pendingReservationIds,
+                RuntimeMutationDelta.ValueChanges.of(longSet(positionKeys), positions),
+                RuntimeMutationDelta.ValueChanges.of(longSet(liquidationIds), liquidations),
+                RuntimeMutationDelta.ValueChanges.of(longSet(riskSnapshotKeys), riskSnapshots),
+                RuntimeMutationDelta.ValueChanges.of(new TreeSet<>(changedLeverages), leverages),
+                RuntimeMutationDelta.ValueChanges.of(longSet(algoOrderIds), algoOrders),
+                RuntimeMutationDelta.ValueChanges.of(longSet(triggerOrderIds), triggerOrders),
+                RuntimeMutationDelta.ValueChanges.of(runtimeClientKeys(clientKeysByUser), clientOrders),
+                RuntimeMutationDelta.ValueChanges.of(changedMarkIds, currentMarks),
+                RuntimeMutationDelta.ValueChanges.of(changedScanIds, currentScans),
+                RuntimeMutationDelta.ValueChanges.of(new TreeSet<>(changedInstruments), currentInstruments),
+                RuntimeMutationDelta.ValueChanges.of(new TreeSet<>(changedCancelAllAfterTimers), currentTimers),
+                captureTreasuryMutation(), nextLiquidationId, riskScanControl);
+    }
+
+    private RuntimeMutationDelta.LaneValues[] captureLaneMutationValues(
+            RuntimeMutationDelta.CaptureRequest request) {
+        @SuppressWarnings("unchecked")
+        AccountLaneWorker.Ticket<RuntimeMutationDelta.LaneValues>[] tickets =
+                new AccountLaneWorker.Ticket[accountLanes.length];
+        RuntimeMutationDelta.LaneValues[] values = new RuntimeMutationDelta.LaneValues[accountLanes.length];
+        Throwable firstFailure = null;
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            AccountLaneWorker worker = worker(laneId);
+            try {
+                if (worker == null) values[laneId] = RuntimeMutationDelta.captureLane(accountLanes[laneId], request);
+                else tickets[laneId] = worker.submit(AccountLaneOperationType.QUERY,
+                        lane -> RuntimeMutationDelta.captureLane(lane, request));
+            } catch (Throwable failure) {
+                firstFailure = failure;
+                break;
+            }
+        }
+        for (int laneId = 0; laneId < tickets.length; laneId++) {
+            if (tickets[laneId] == null) continue;
+            try {
+                values[laneId] = worker(laneId).await(tickets[laneId]);
+            } catch (Throwable failure) {
+                if (firstFailure == null) firstFailure = failure;
+            }
+        }
+        throwAccountLaneFailure(firstFailure, "runtime mutation capture failed");
+        return values;
+    }
+
+    private RuntimeMutationDelta.TreasuryValues captureTreasuryMutation() {
+        TreeSet<Integer> assets = intSet(treasury.changedAssets().toArray());
+        TreeMap<Integer, RuntimeMutationDelta.AssetLedger> assetValues = new TreeMap<>();
+        for (int assetId : assets) {
+            assetValues.put(assetId, new RuntimeMutationDelta.AssetLedger(treasury.fee(assetId),
+                    treasury.insurance(assetId), treasury.insuranceDeficit(assetId),
+                    treasury.liquidationFee(assetId), treasury.fundingResidual(assetId),
+                    treasury.roundingResidual(assetId), treasury.clearingPnl(assetId)));
+        }
+        TreeSet<Integer> fundingSymbols = intSet(treasury.changedFundingSymbols().toArray());
+        TreeMap<Integer, RuntimeMutationDelta.FundingLedger> funding = new TreeMap<>();
+        for (int symbolId : fundingSymbols) {
+            funding.put(symbolId, new RuntimeMutationDelta.FundingLedger(
+                    treasury.fundingSettlement(symbolId), treasury.fundingProgress(symbolId)));
+        }
+        TreeSet<Integer> lifecycleSymbols = intSet(treasury.changedLifecycleSymbols().toArray());
+        TreeMap<Integer, RuntimeMutationDelta.LifecycleLedger> lifecycle = new TreeMap<>();
+        for (int symbolId : lifecycleSymbols) {
+            lifecycle.put(symbolId, new RuntimeMutationDelta.LifecycleLedger(
+                    treasury.lifecycleSettlement(symbolId), treasury.lifecycleProgress(symbolId)));
+        }
+        return new RuntimeMutationDelta.TreasuryValues(
+                RuntimeMutationDelta.ValueChanges.of(assets, assetValues),
+                RuntimeMutationDelta.ValueChanges.of(fundingSymbols, funding),
+                RuntimeMutationDelta.ValueChanges.of(lifecycleSymbols, lifecycle));
+    }
+
+    private static TreeSet<Long> longSet(long[] values) {
+        TreeSet<Long> result = new TreeSet<>();
+        for (long value : values) result.add(value);
+        return result;
+    }
+
+    private static TreeSet<Integer> intSet(int[] values) {
+        TreeSet<Integer> result = new TreeSet<>();
+        for (int value : values) result.add(value);
+        return result;
+    }
+
+    private static TreeSet<RuntimeMutationDelta.RuntimeClientKey> runtimeClientKeys(
+            Map<Long, long[]> keysByUser) {
+        TreeSet<RuntimeMutationDelta.RuntimeClientKey> result = new TreeSet<>();
+        keysByUser.forEach((userId, keys) -> {
+            for (long key : keys) result.add(new RuntimeMutationDelta.RuntimeClientKey(userId, key));
+        });
+        return result;
+    }
+
     public void clearChangedKeys() {
         assertOwner();
         changedUsers.clear();

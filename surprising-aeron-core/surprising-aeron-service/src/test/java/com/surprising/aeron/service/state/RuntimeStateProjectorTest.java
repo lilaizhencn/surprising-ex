@@ -48,6 +48,26 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
+    void capturedMutationDeltaIsImmutableAndProjectsWithoutReadingLaterRuntimeChanges() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        before = reducer.adjustBalance(before, 7, new BalanceAdjustmentCommand("USDT", 1_000));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
+                new BalanceAdjustmentCommand("USDT", 250));
+        RuntimeMutationDelta captured = runtime.captureMutationDelta();
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
+                new BalanceAdjustmentCommand("USDT", 100));
+
+        TradingCoreState projected = RuntimeStateMaterializer.materializeTransition(captured, identities, before);
+
+        assertThat(projected.user(7).balances().get("USDT").availableUnits()).isEqualTo(1_250);
+        assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(1_350);
+    }
+
+    @Test
     void keepsRuntimeInParityAcrossIncrementalPlaceAndStampTransitions() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);

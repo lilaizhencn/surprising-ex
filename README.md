@@ -223,6 +223,13 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 中直接修改在线余额。接口返回已处理数量和失败/未完成数量，便于记录 `ProductLine`、Core sequence
 和资金对账证据。
 
+Product Core 的热状态与不可变状态投影通过 `RuntimeMutationDelta` 分界。命令在 Account Lane 内完成原地
+裁决后，每个 lane 只并行捕获一次本命令涉及的用户、余额、订单、冻结、仓位和风险值；随后唯一的
+`RuntimeStateMaterializer` 路径把该不可变 delta 投影为 `Snapshot State`，供资金守恒、滚动 hash、Core Fact、
+索引和快照 fence 使用。等待 matcher 的临时冻结不会投影或更新已提交 hash，失败仍按命令前状态回滚；
+批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
+双写或 feature flag 路径。
+
 ## 构建与本地验证
 
 要求 JDK 25。Topic 创建和三节点部署入口仍在整理；PostgreSQL 首发初始化统一使用根目录 `init.sql`：
