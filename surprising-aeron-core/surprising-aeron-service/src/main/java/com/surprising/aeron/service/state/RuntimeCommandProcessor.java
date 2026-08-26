@@ -762,7 +762,7 @@ public final class RuntimeCommandProcessor {
                     "trigger order side must reduce the current position");
         }
         long openReduceOnly = 0;
-        for (OrderRuntime order : runtime.ordersForSnapshot()) {
+        for (OrderRuntime order : runtime.ordersForUser(userId)) {
             if (order.userId() == userId && order.symbolId() == symbolId && order.status() == CoreOrderStatus.OPEN
                     && order.reduceOnly() && order.marginMode() == view.marginMode()
                     && order.positionSide() == view.positionSide() && order.side() == closeSide) {

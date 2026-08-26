@@ -226,6 +226,7 @@ public final class RuntimePerpetualLiquidationProcessor {
         CoreLiquidationState.Status nextStatus;
         long nextDeficit = liquidation.deficitUnits();
         BalanceRuntime nextBalance = null;
+        int changedAssetId;
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         switch (command.resolution()) {
             case INSURANCE -> {
@@ -248,6 +249,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                 }
                 nextBalance = new BalanceRuntime(balance.userId(), balance.assetId(),
                         Math.addExact(balance.availableUnits(), command.coveredUnits()), balance.lockedUnits());
+                changedAssetId = assetId;
                 treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
                 nextDeficit = Math.subtractExact(nextDeficit, command.coveredUnits());
                 nextStatus = nextDeficit == 0 ? CoreLiquidationState.Status.COMPLETED
@@ -263,6 +265,7 @@ public final class RuntimePerpetualLiquidationProcessor {
                     throw new CoreStateRejectedException("LIQUIDATION_DEFICIT_REMAINS",
                             "liquidation deficit must be fully covered before completion");
                 }
+                changedAssetId = -1;
                 nextStatus = CoreLiquidationState.Status.COMPLETED;
             }
             default -> throw new IllegalStateException("unknown liquidation resolution");
@@ -281,6 +284,9 @@ public final class RuntimePerpetualLiquidationProcessor {
             runtime.replaceLiquidation(nextLiquidation);
             return null;
         });
+        if (preparedBalance != null) {
+            runtime.markBalanceChanged(current.userId(), changedAssetId);
+        }
         treasuryDelta.apply(runtime.treasury());
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return runtime;
@@ -357,6 +363,8 @@ public final class RuntimePerpetualLiquidationProcessor {
             throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
         }
         long targetCashDelta = Math.subtractExact(coverCapacity, command.coveredUnits());
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        treasuryDelta.addClearing(settleAssetId, Math.negateExact(targetCashDelta));
         BalanceRuntime nextBalance = new BalanceRuntime(balance.userId(), balance.assetId(),
                 Math.addExact(balance.availableUnits(), Math.addExact(releasedMargin, targetCashDelta)),
                 Math.subtractExact(balance.lockedUnits(), releasedMargin));
@@ -386,6 +394,8 @@ public final class RuntimePerpetualLiquidationProcessor {
             if (runtime.currentLaneOwns(current.userId())) runtime.replaceLiquidation(nextLiquidation);
             return null;
         });
+        runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
+        treasuryDelta.apply(runtime.treasury());
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return runtime;
     }

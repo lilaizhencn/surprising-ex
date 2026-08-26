@@ -822,6 +822,7 @@ public final class CoreProbeState implements AutoCloseable {
             }
         }
         completeSnapshotProjectionBatch();
+        materializeChangeAccumulators();
         boolean tradingStateChanged = status == ResponseStatus.APPLIED && snapshotState != beforeTradingState;
         try {
             commandDelta = commandDelta(beforeTradingState, snapshotState, exportCommand);

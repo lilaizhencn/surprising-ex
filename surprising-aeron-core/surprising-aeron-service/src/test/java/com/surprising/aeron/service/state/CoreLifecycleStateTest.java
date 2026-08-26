@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
@@ -19,6 +20,7 @@ import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -493,6 +495,7 @@ class CoreLifecycleStateTest {
         state = reducer.resolveLiquidation(state,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
         long before = totalEconomicEquity(state, "USDT");
+        TradingCoreState beforeAdl = state;
 
         var command = new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
@@ -509,6 +512,8 @@ class CoreLifecycleStateTest {
         assertThat(resolved.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
         assertThat(totalEconomicEquity(resolved, "USDT")).isEqualTo(before);
+        assertThatCode(() -> FundsDelta.between(beforeAdl, resolved, Set.of(2L), Set.of("USDT"), false))
+                .doesNotThrowAnyException();
     }
 
     @Test

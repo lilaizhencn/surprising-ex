@@ -25,6 +25,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.protocol.AckExportCommand;
+import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
@@ -40,6 +41,31 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class CoreProbeStateTest {
+
+    @Test
+    void nonMatchingTreasuryCommandExportsItsChangedAssetAndConservedPostings() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            UUID commandId = UUID.randomUUID();
+            CoreMessage adjustment = new CoreMessage(CoreMessageHeader.command(
+                    CoreMessageType.ADJUST_INSURANCE_FUND, commandId, ProductLine.LINEAR_PERPETUAL,
+                    CommandSource.OPERATIONS, 9, 1, 0, 1_000, 1),
+                    TradingCommandCodec.encodeAdjustInsuranceFund(
+                            new AdjustInsuranceFundCommand("USDT", 25)));
+
+            assertThat(state.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
+
+            var event = state.exportState().pending().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payloadUnsafe()))
+                    .filter(value -> value.commandId().equals(commandId))
+                    .findFirst().orElseThrow();
+            assertThat(event.changedTreasuryAssets())
+                    .extracting(com.surprising.aeron.protocol.CoreTreasuryAssetView::asset)
+                    .containsExactly("USDT");
+            assertThat(event.fundsPostings()).hasSize(2);
+            assertThat(event.fundsPostings().stream()
+                    .mapToLong(com.surprising.aeron.protocol.CoreFundsPostingView::units).sum()).isZero();
+        }
+    }
 
     @Test
     void exposesBoundedMatcherCompletionAndLaneContextMetrics() {

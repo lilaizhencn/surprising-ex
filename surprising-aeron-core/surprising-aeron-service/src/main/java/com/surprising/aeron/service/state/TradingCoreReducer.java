@@ -1929,6 +1929,8 @@ public final class TradingCoreReducer {
         if (releasedMargin > 0) balance = balance.release(releasedMargin);
         long targetCashDelta = Math.subtractExact(coverCapacity, command.coveredUnits());
         if (targetCashDelta > 0) balance = balance.credit(targetCashDelta);
+        CoreTreasuryState treasury = state.treasuryState().adjustClearingPnl(
+                instrument.settleAsset(), Math.negateExact(targetCashDelta));
         Map<String, AssetBalance> balances = StateMapSupport.delta(target.balances());
         balances.put(instrument.settleAsset(), balance);
         long nextEntryValue = remainingAbs == 0 ? 0
@@ -1952,7 +1954,7 @@ public final class TradingCoreReducer {
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(),
                 state.riskState().scanControl());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.instruments(), risk, state.treasuryState(),
+                state.orders(), state.instruments(), risk, treasury,
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }

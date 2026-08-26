@@ -94,6 +94,9 @@ public final class RuntimePerpetualFundingProcessor {
             if (!(value instanceof LaneFundingResult laneResult)) continue;
             payments.addAll(laneResult.payments());
             treasuryDelta.merge(laneResult.treasuryDelta());
+            for (long userId : laneResult.changedUserIds()) {
+                runtime.markBalanceChanged(userId, settleAssetId);
+            }
         }
         treasuryDelta.apply(runtime.treasury());
 
@@ -117,6 +120,7 @@ public final class RuntimePerpetualFundingProcessor {
                                                int symbolId, int settleAssetId, long markPriceTicks) {
         SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
+        ArrayList<Long> changedUserIds = new ArrayList<>();
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (Long userId : selectedUserIds) {
             if (userId == null || !runtime.currentLaneOwns(userId)) continue;
@@ -141,6 +145,7 @@ public final class RuntimePerpetualFundingProcessor {
                         Math.addExact(balance.availableUnits(), appliedDelta), balance.lockedUnits()));
                 treasuryDelta.addFundingResidual(settleAssetId, Math.negateExact(appliedDelta));
                 runtime.advanceUserRevision(userId);
+                changedUserIds.add(userId);
             }
 
             long debitRelief = Math.subtractExact(appliedDelta, requestedDelta);
@@ -167,7 +172,7 @@ public final class RuntimePerpetualFundingProcessor {
                 throw new IllegalStateException("runtime funding debit relief was not fully allocated");
             }
         }
-        return new LaneFundingResult(payments, treasuryDelta);
+        return new LaneFundingResult(payments, changedUserIds, treasuryDelta);
     }
 
     public record FundingResult(TradingRuntimeState state, List<CoreFundingPaymentView> payments,
@@ -180,7 +185,7 @@ public final class RuntimePerpetualFundingProcessor {
         }
     }
 
-    private record LaneFundingResult(List<CoreFundingPaymentView> payments,
+    private record LaneFundingResult(List<CoreFundingPaymentView> payments, List<Long> changedUserIds,
                                      RuntimeTreasuryDelta treasuryDelta) {
     }
 

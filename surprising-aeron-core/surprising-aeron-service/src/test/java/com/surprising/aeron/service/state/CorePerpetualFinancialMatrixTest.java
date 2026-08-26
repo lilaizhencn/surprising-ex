@@ -165,6 +165,8 @@ class CorePerpetualFinancialMatrixTest {
                             null, runtime, identities);
 
             RuntimeStateParityChecker.assertMatches(expected.state(), identities, runtime);
+            assertThat(RuntimeStateMaterializer.materializeTransition(runtime, identities, marked))
+                    .isEqualTo(expected.state());
             assertThat(actual.payments()).isEqualTo(expected.payments());
             assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(USER_ID))
                     .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()]).isEqualTo(1);

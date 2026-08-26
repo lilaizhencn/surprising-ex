@@ -10,6 +10,7 @@ import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.AccountLaneAck;
 import com.surprising.product.api.ProductLine;
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.TreeMap;
@@ -1869,6 +1870,18 @@ public final class TradingRuntimeState implements AutoCloseable {
             values.putAll(onLane(laneId, lane -> new LongObjectHashMap<>(lane.orders)));
         }
         return values;
+    }
+
+    List<OrderRuntime> ordersForUser(long userId) {
+        assertOwner();
+        ArrayList<OrderRuntime> values = new ArrayList<>();
+        onLane(userId, lane -> {
+            lane.orders.forEachValue(order -> {
+                if (order.userId() == userId) values.add(order);
+            });
+            return null;
+        });
+        return List.copyOf(values);
     }
 
     LongObjectHashMap<ReservationRuntime> reservationsForSnapshot() {
