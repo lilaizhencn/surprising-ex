@@ -22,5 +22,6 @@
         <module>surprising-aeron-client</module>
         <module>surprising-aeron-exporter</module>
         <module>surprising-aeron-tools</module>
+        <module>surprising-aeron-benchmarks</module>
     </modules>
 </project>

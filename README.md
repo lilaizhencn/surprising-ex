@@ -227,6 +227,29 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 
 要求 JDK 25。Topic 创建和三节点部署入口仍在整理；PostgreSQL 首发初始化统一使用根目录 `init.sql`：
 
+线性永续 Product Core 的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
+不启动 wallet、PostgreSQL、Kafka、Valkey 或 Aeron Cluster；JMH worker 固定为一个 owner thread，Account Lane
+在 Core 内部并行。默认覆盖限价挂单、吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复：
+
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
+  'LinearPerpetualCoreBenchmark.*' -p accountLanes=4,8 -prof gc
+```
+
+快速确认 JMH 打包与场景可执行时可缩短迭代；该命令只用于 smoke，不作为容量结论：
+
+```bash
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
+  'LinearPerpetualCoreBenchmark.*' -p accountLanes=4 -wi 0 -i 1 -r 100ms -f 1
+```
+
+`multiLaneMatching` 的一次 taker 会吃掉分布在全部 Account Lane 上的 maker 深度；可用
+`-p makerDepth=16,64` 调整深度，`riskScan` 可用 `-p riskUsers=32,64` 调整风险用户数。
+正式采样应使用 HotSpot 兼容的 JDK 25；OpenJ9 可用于 smoke，但 JMH 会禁用 compiler hints，
+其输出不能作为容量或延迟基线。
+JMH 结果只代表本地微基准，Aeron、HTTP/WebSocket、Kafka、故障切换和端到端资金对账仍需独立门禁。
+
 ```bash
 createdb surprising_exchange
 psql -v ON_ERROR_STOP=1 \
