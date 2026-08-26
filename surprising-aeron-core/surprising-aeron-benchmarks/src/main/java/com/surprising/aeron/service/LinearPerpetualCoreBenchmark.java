@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import java.util.concurrent.TimeUnit;
+import org.openjdk.jmh.annotations.AuxCounters;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -67,6 +68,15 @@ public class LinearPerpetualCoreBenchmark {
         return state.scenario.run();
     }
 
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long productionMixedWorkload(ProductionMixedState state, MixedWorkloadCounters counters) {
+        long result = state.scenario.run();
+        counters.coreCommands += state.scenario.operations();
+        return result;
+    }
+
     @State(Scope.Thread)
     public abstract static class InvocationState {
         @Param("4")
@@ -81,6 +91,7 @@ public class LinearPerpetualCoreBenchmark {
 
         @TearDown(Level.Invocation)
         public void tearDownInvocation() {
+            scenario.verify();
             scenario.close();
         }
 
@@ -184,6 +195,39 @@ public class LinearPerpetualCoreBenchmark {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
             return LinearPerpetualBenchmarkSupport.snapshotRecovery(template);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class ProductionMixedState extends InvocationState {
+        @Param({"1000", "10000"})
+        public int activeUsers;
+
+        @Param("4")
+        public int symbols;
+
+        private LinearPerpetualMixedWorkload.Template template;
+
+        @Setup(Level.Trial)
+        public void setUpTrial() {
+            LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
+            template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, symbols);
+        }
+
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualMixedWorkload.scenario(template);
+        }
+    }
+
+    @AuxCounters(AuxCounters.Type.OPERATIONS)
+    @State(Scope.Thread)
+    public static class MixedWorkloadCounters {
+        public long coreCommands;
+
+        @Setup(Level.Iteration)
+        public void reset() {
+            coreCommands = 0;
         }
     }
 }

@@ -59,6 +59,19 @@ class LinearPerpetualBenchmarkSupportTest {
         }
     }
 
+    @Test
+    void mixedProductionWorkloadPreservesFundsAndCompletesLifecycleWork() {
+        var template = LinearPerpetualMixedWorkload.template(4, 32, 4);
+
+        assertThatCode(() -> {
+            try (var scenario = LinearPerpetualMixedWorkload.scenario(template)) {
+                assertThat(scenario.run()).isNotZero();
+                assertThat(scenario.operations()).isGreaterThan(100);
+                scenario.verify();
+            }
+        }).doesNotThrowAnyException();
+    }
+
     private record NamedScenario(
             String name,
             Supplier<LinearPerpetualBenchmarkSupport.Scenario> factory) {

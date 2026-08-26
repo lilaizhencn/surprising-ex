@@ -229,13 +229,31 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 
 线性永续 Product Core 的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
 不启动 wallet、PostgreSQL、Kafka、Valkey 或 Aeron Cluster；JMH worker 固定为一个 owner thread，Account Lane
-在 Core 内部并行。默认覆盖限价挂单、吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复：
+在 Core 内部并行。默认覆盖限价挂单、吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复。
+`productionMixedWorkload` 额外把多币对做市、触发单、资金费、风险扫描、强平、保险基金和 ADL 放入同一条
+确定性 owner command stream，模拟生产中同时到达、由 Product Core 串行裁决的混合负载：
 
 ```bash
 mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean package
 java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
   'LinearPerpetualCoreBenchmark.*' -p accountLanes=4,8 -prof gc
 ```
+
+混合场景默认同时运行 4 个 symbol，测试 1,000/10,000 个真实持仓用户和 2/4/8 个 Account Lane。所有活跃用户
+都有 1..4 档不等的仓位；为避免把不现实的全量密集挂单预装成本当作生产吞吐，最多 128 个用户持有 0..3 笔
+未成交单，共 192 笔静态挂单，其余用户为零挂单。每个 symbol 每轮执行 8 组做市高频挂单、部分成交和撤单，
+并执行触发单、正负资金费、标记价和完整风险扫描；最后一个 symbol 还完成强平、保险基金覆盖和 ADL。
+可只选择该场景并把 `coreCommands` 作为实际 Product Core 消息吞吐读取：
+
+```bash
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
+  '.*productionMixedWorkload.*' -p activeUsers=1000,10000 -p symbols=4 \
+  -p accountLanes=2,4,8 -wi 2 -w 1s -i 3 -r 1s -f 1 -prof gc
+```
+
+主指标 `ops/s` 是完整混合业务批次/秒；辅助指标 `coreCommands` 才是该批次内实际执行的 Core command/query/
+ack 消息/秒。Trial setup 会通过正常命令建仓、挂单并生成快照，invocation setup 从快照恢复；两者以及 teardown
+中的资金总量、触发单、资金费、风险扫描、强平、保险基金和 ADL 终态校验均不进入计时区间。
 
 快速确认 JMH 打包与场景可执行时可缩短迭代；该命令只用于 smoke，不作为容量结论：
 
@@ -252,7 +270,9 @@ Trial setup 中预装并生成快照，每次 invocation 从同一快照恢复�
 独立持仓用户，并由一张足额安全对手单完成建仓，因此 `riskUsers` 是真实扫描用户数而不是名义数量。
 正式采样应使用 HotSpot 兼容的 JDK 25；OpenJ9 可用于 smoke，但 JMH 会禁用 compiler hints，
 其输出不能作为容量或延迟基线。
-JMH 结果只代表本地微基准，Aeron、HTTP/WebSocket、Kafka、故障切换和端到端资金对账仍需独立门禁。
+JMH 结果只代表单个 LINEAR_PERPETUAL Product Core 的本地内存基准。它不包含 Aeron ingress/replication、
+HTTP/WebSocket、Kafka、数据库、Cluster 故障切换和端到端资金对账，这些外围链路仍需独立门禁；多个 lane
+只并行 Core 内部账户工作，不会把唯一 owner 状态机变成多写者。
 
 ```bash
 createdb surprising_exchange

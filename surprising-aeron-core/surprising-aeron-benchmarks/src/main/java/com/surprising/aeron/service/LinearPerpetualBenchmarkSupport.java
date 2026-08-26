@@ -57,6 +57,10 @@ final class LinearPerpetualBenchmarkSupport {
     interface Scenario extends AutoCloseable {
         long run();
 
+        default long operations() {
+            return 1;
+        }
+
         default void verify() {
         }
 
@@ -376,7 +380,7 @@ final class LinearPerpetualBenchmarkSupport {
                 SETTLE_ASSET, 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 
-    private static List<Long> usersAcrossLanes(int accountLanes, int count, long startUserId) {
+    static List<Long> usersAcrossLanes(int accountLanes, int count, long startUserId) {
         configureAccountLanes(accountLanes);
         LaneTopology topology = LaneTopology.configured(false);
         List<Long> users = new ArrayList<>(count);
@@ -389,15 +393,26 @@ final class LinearPerpetualBenchmarkSupport {
         return List.copyOf(users);
     }
 
-    private static final class Harness implements AutoCloseable {
+    static final class Harness implements AutoCloseable {
         private final CoreProbeState state;
         private final Sequences sequences;
         private int commandsSinceExportAck;
         private long lastRequiredExportSequence;
+        private long executedMessages;
 
         private Harness(CoreProbeState state, Sequences sequences) {
             this.state = state;
             this.sequences = sequences;
+        }
+
+        static Harness create(int accountLanes) {
+            configureAccountLanes(accountLanes);
+            Harness harness = new Harness(new CoreProbeState(ProductLine.LINEAR_PERPETUAL), new Sequences());
+            if (harness.state.laneTopology().accountLaneCount() != accountLanes) {
+                harness.close();
+                throw new IllegalStateException("Core did not start with requested account lane count");
+            }
+            return harness;
         }
 
         static Harness restore(SnapshotTemplate template) {
@@ -425,9 +440,13 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         CoreResponse execute(CoreMessage command) {
+            executedMessages++;
             CoreResponse response = state.apply(command);
-            if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                long sequence = state.matchingSequence(command.header().commandId());
+            long sequence = state.matchingSequence(command.header().commandId());
+            if (sequence == 0 && state.pendingMatchingCount() != 0) {
+                sequence = state.firstPendingMatchingSequence();
+            }
+            if (response.resultCode() == CoreResultCode.MATCHING_PENDING || sequence != 0) {
                 CoreMatchingResult matching = null;
                 long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
                 while (matching == null && System.nanoTime() < deadline) {
@@ -472,6 +491,7 @@ final class LinearPerpetualBenchmarkSupport {
                     benchmarkTimestamp(sequences.clusterPosition), sequences.clusterPosition),
                     CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL,
                             CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1_000, 1_048_576));
+            executedMessages++;
             CoreResponse response = state.apply(query);
             if (response.status() != ResponseStatus.OK) {
                 throw new IllegalStateException("liquidation work query failed: " + response.resultCode());
@@ -483,6 +503,14 @@ final class LinearPerpetualBenchmarkSupport {
             acknowledgeExports();
             byte[] snapshot = state.snapshot();
             return new SnapshotTemplate(snapshot, state.tradingState().businessStateHash(), accountLanes);
+        }
+
+        CoreProbeState state() {
+            return state;
+        }
+
+        long executedMessages() {
+            return executedMessages;
         }
 
         @Override
