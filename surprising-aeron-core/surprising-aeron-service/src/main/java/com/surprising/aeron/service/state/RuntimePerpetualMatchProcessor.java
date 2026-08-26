@@ -47,8 +47,9 @@ public final class RuntimePerpetualMatchProcessor {
         if (instrument == null || instrument.version() != taker.instrumentVersion()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
-        validateMatches(runtime, taker, matches);
+        validateAndPrepare(takerOrderId, matches, runtime, identities);
         int settleAssetId = identities.assetId(instrument.settleAsset());
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (MatcherEvent match : matches) {
             if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
@@ -58,9 +59,9 @@ public final class RuntimePerpetualMatchProcessor {
                 throw new IllegalStateException("runtime match does not match authoritative orders");
             }
             applyFill(runtime, identities, instrument, taker, match.price(),
-                    match.size(), true, settleAssetId);
+                    match.size(), true, settleAssetId, treasuryDelta);
             applyFill(runtime, identities, instrument, maker, match.price(),
-                    match.size(), false, settleAssetId);
+                    match.size(), false, settleAssetId, treasuryDelta);
             if (runtime.order(maker.orderId()).canceled()) {
                 long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
                 runtime.releaseTerminalReservation(maker.orderId());
@@ -77,8 +78,61 @@ public final class RuntimePerpetualMatchProcessor {
             runtime.releaseTerminalReservation(takerOrderId);
             if (releaseUnits > 0) runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
         }
+        treasuryDelta.apply(runtime.treasury());
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return runtime;
+    }
+
+    static void validateAndPrepare(long takerOrderId, List<MatcherEvent> matches,
+                                   TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        OrderRuntime taker = requireOpen(runtime, takerOrderId);
+        validateMatches(runtime, taker, matches);
+        CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
+        identities.positionKey(taker.userId(), positionKey(instrument.symbol(), taker.positionSide()));
+        for (MatcherEvent match : matches) {
+            if (match.eventType() != MatcherEventType.TRADE) continue;
+            OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+            identities.positionKey(maker.userId(), positionKey(instrument.symbol(), maker.positionSide()));
+        }
+    }
+
+    static RuntimeTreasuryDelta applyLane(long takerOrderId, List<MatcherEvent> matches,
+                                          TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                          CoreInstrumentState instrument, int settleAssetId) {
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        OrderRuntime localTaker = runtime.order(takerOrderId);
+        for (MatcherEvent match : matches) {
+            if (match.eventType() != MatcherEventType.TRADE) continue;
+            if (localTaker != null) {
+                localTaker = requireOpen(runtime, takerOrderId);
+                applyFill(runtime, identities, instrument, localTaker, match.price(), match.size(), true,
+                        settleAssetId, treasuryDelta);
+            }
+            OrderRuntime maker = runtime.order(match.matchedOrderId());
+            if (maker != null) {
+                maker = requireOpen(runtime, maker.orderId());
+                applyFill(runtime, identities, instrument, maker, match.price(), match.size(), false,
+                        settleAssetId, treasuryDelta);
+                if (runtime.order(maker.orderId()).canceled()) {
+                    long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
+                    runtime.releaseTerminalReservation(maker.orderId());
+                    if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
+                }
+            }
+        }
+        localTaker = runtime.order(takerOrderId);
+        if (localTaker != null) {
+            if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
+                    || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
+                runtime.replaceOrder(terminal(localTaker));
+            }
+            if (runtime.order(takerOrderId).canceled()) {
+                long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
+                runtime.releaseTerminalReservation(takerOrderId);
+                if (releaseUnits > 0) runtime.advanceUserRevision(localTaker.userId());
+            }
+        }
+        return treasuryDelta;
     }
 
     private static void validateMatches(TradingRuntimeState runtime, OrderRuntime taker,
@@ -155,13 +209,13 @@ public final class RuntimePerpetualMatchProcessor {
     private static void applyFill(TradingRuntimeState runtime,
                                   RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
-                                  boolean taker, int settleAssetId) {
+                                  boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta) {
         Long configuredLeverage = runtime.leverage(
                 new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
         long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
         RuntimePerpetualFillCalculator.apply(runtime, identities, instrument, order,
-                identities.positionKey(order.userId(), positionKey(instrument.symbol(), order.positionSide())),
-                priceTicks, quantitySteps, taker, leverage, settleAssetId);
+                identities.preparedPositionKey(order.userId(), positionKey(instrument.symbol(), order.positionSide())),
+                priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta);
     }
 
     private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {

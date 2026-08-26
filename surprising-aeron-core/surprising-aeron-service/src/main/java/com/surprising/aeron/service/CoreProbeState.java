@@ -2500,7 +2500,7 @@ public final class CoreProbeState implements AutoCloseable {
                             matchingResult.matcherEvents());
                     applyPreMatchingCancellations(pending, matchingResult);
                     if (matchingResult.accepted()) {
-                        applyMatchesRuntime(command.orderId(), matchingResult.matcherEvents());
+                        applyMatchesOnAccountLanes(command.orderId(), sequence, matchingResult, laneContext);
                     } else {
                         rejectPlaceOrderRuntime(pending.command().header().userId(), command.orderId());
                     }
@@ -2533,7 +2533,7 @@ public final class CoreProbeState implements AutoCloseable {
                         requireOrderIdentityAvailable(pending.command().header().userId(), command);
                         reservePlaceOrderRuntime(pending.command().header().userId(), command,
                                 pending.command().header().commandId(), pending.sequence());
-                        applyMatchesRuntime(command.orderId(), matchingResult.matcherEvents());
+                        applyMatchesOnAccountLanes(command.orderId(), sequence, matchingResult, laneContext);
                         commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
                                 matchingResult.matcherEvents());
                     }
@@ -2550,7 +2550,7 @@ public final class CoreProbeState implements AutoCloseable {
                             matchingResult.matcherEvents());
                     applyPreMatchingCancellations(pending, matchingResult);
                     if (matchingResult.accepted()) {
-                        applyMatchesRuntime(command.orderId(), matchingResult.matcherEvents());
+                        applyMatchesOnAccountLanes(command.orderId(), sequence, matchingResult, laneContext);
                     } else {
                         rejectPlaceOrderRuntime(trigger.userId(), command.orderId());
                     }
@@ -2620,7 +2620,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (laneMask != laneContext.expectedLaneMask()) {
             throw failMatching(pending, "account lane mask differs from immutable matcher result", null);
         }
-        acknowledgeAccountLanes(laneContext, before, snapshotState);
+        if (!laneContext.complete()) acknowledgeAccountLanes(laneContext, before, snapshotState);
         if (commandOrderViews.isEmpty() && !commandChangedOrderIds.isEmpty()) {
             commandOrderViews = commandChangedOrderIds.stream()
                     .map(this::runtimeOrder)
@@ -2745,20 +2745,27 @@ public final class CoreProbeState implements AutoCloseable {
         long roundingResidual = treasuryDelta(
                 beforeTreasury.roundingResidualBalances(), afterTreasury.roundingResidualBalances());
         long clearing = treasuryDelta(beforeTreasury.clearingPnlBalances(), afterTreasury.clearingPnlBalances());
+        com.surprising.aeron.service.state.RuntimeTreasuryDelta delta = new com.surprising.aeron.service.state.RuntimeTreasuryDelta();
+        int syntheticAssetId = 0;
+        delta.addFee(syntheticAssetId, fee);
+        delta.addInsurance(syntheticAssetId, insurance);
+        delta.addDeficit(syntheticAssetId, deficit);
+        delta.addFundingResidual(syntheticAssetId, fundingResidual);
+        delta.addRoundingResidual(syntheticAssetId, roundingResidual);
+        delta.addClearing(syntheticAssetId, clearing);
         boolean treasuryAckAssigned = false;
         for (var lane : runtimePlaceOrderState.accountLaneViews(context.expectedLaneMask())) {
             boolean aggregate = !treasuryAckAssigned;
             context.acknowledge(new AccountLaneAck(context.coreSequence(), lane.laneId(), lane.revision(),
-                    lane.localStateHash(), lane.localFundsHash(), aggregate ? fee : 0,
-                    aggregate ? insurance : 0, aggregate ? deficit : 0,
-                    aggregate ? fundingResidual : 0, aggregate ? roundingResidual : 0,
-                    aggregate ? clearing : 0));
+                    lane.localStateHash(), lane.localFundsHash(), context.matchingResult(),
+                    aggregate ? delta : new com.surprising.aeron.service.state.RuntimeTreasuryDelta()));
             treasuryAckAssigned = true;
         }
         if (!context.complete()) throw new IllegalStateException("account lane ACK barrier is incomplete");
-        if (context.feeUnits() != fee || context.insuranceUnits() != insurance
-                || context.deficitUnits() != deficit || context.fundingResidualUnits() != fundingResidual
-                || context.roundingResidualUnits() != roundingResidual || context.clearingUnits() != clearing) {
+        var aggregate = context.treasuryDelta();
+        if (aggregate.size() != 1 || aggregate.feeUnits(0) != fee || aggregate.insuranceUnits(0) != insurance
+                || aggregate.deficitUnits(0) != deficit || aggregate.fundingResidualUnits(0) != fundingResidual
+                || aggregate.roundingResidualUnits(0) != roundingResidual || aggregate.clearingUnits(0) != clearing) {
             throw new IllegalStateException("account lane Treasury ACK aggregation mismatch");
         }
     }
@@ -4220,6 +4227,24 @@ public final class CoreProbeState implements AutoCloseable {
             RuntimeSpotMatchProcessor.applyRuntime(takerOrderId, matches,
                     runtimePlaceOrderState, runtimePlaceOrderIdentities);
         }
+        refreshSnapshotProjection();
+    }
+
+    private void applyMatchesOnAccountLanes(
+            long takerOrderId,
+            long coreSequence,
+            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
+            LaneCommandContextRing.Context laneContext) {
+        AccountLaneAck[] acknowledgements = runtimePlaceOrderState.applyMatcherSettlement(
+                coreSequence, laneContext.expectedLaneMask(), takerOrderId,
+                matchingResult, runtimePlaceOrderIdentities);
+        for (AccountLaneAck acknowledgement : acknowledgements) {
+            if (acknowledgement != null) laneContext.acknowledge(acknowledgement);
+        }
+        if (!laneContext.complete()) throw new IllegalStateException("account lane ACK barrier is incomplete");
+        laneContext.treasuryDelta().apply(runtimePlaceOrderState.treasury());
+        runtimePlaceOrderState.setMetadata(productLine,
+                Math.incrementExact(runtimePlaceOrderState.revision()));
         refreshSnapshotProjection();
     }
 

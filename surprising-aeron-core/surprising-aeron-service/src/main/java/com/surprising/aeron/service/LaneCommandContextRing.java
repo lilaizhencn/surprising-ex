@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
 
 final class LaneCommandContextRing {
     private final Context[] contexts;
@@ -59,23 +60,13 @@ final class LaneCommandContextRing {
         private long expectedLaneMask;
         private long ackLaneMask;
         private CoreMatchingResult matchingResult;
-        private long feeUnits;
-        private long insuranceUnits;
-        private long deficitUnits;
-        private long fundingResidualUnits;
-        private long roundingResidualUnits;
-        private long clearingUnits;
+        private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
 
         long coreSequence() { return coreSequence; }
         long expectedLaneMask() { return expectedLaneMask; }
         long ackLaneMask() { return ackLaneMask; }
         CoreMatchingResult matchingResult() { return matchingResult; }
-        long feeUnits() { return feeUnits; }
-        long insuranceUnits() { return insuranceUnits; }
-        long deficitUnits() { return deficitUnits; }
-        long fundingResidualUnits() { return fundingResidualUnits; }
-        long roundingResidualUnits() { return roundingResidualUnits; }
-        long clearingUnits() { return clearingUnits; }
+        RuntimeTreasuryDelta treasuryDelta() { return treasuryDelta; }
 
         void result(CoreMatchingResult result, long expectedMask, long validLaneMask) {
             if (result == null || result.nativeCommand().coreSequence() != coreSequence
@@ -88,7 +79,8 @@ final class LaneCommandContextRing {
         }
 
         void acknowledge(AccountLaneAck ack) {
-            if (ack == null || ack.coreSequence() != coreSequence || matchingResult == null) {
+            if (ack == null || ack.coreSequence() != coreSequence || matchingResult == null
+                    || ack.matchingResult() != matchingResult) {
                 throw new IllegalStateException("invalid account lane ACK");
             }
             long laneBit = 1L << ack.laneId();
@@ -96,12 +88,7 @@ final class LaneCommandContextRing {
                 throw new IllegalStateException("duplicate or unexpected account lane ACK");
             }
             ackLaneMask |= laneBit;
-            feeUnits = Math.addExact(feeUnits, ack.feeUnits());
-            insuranceUnits = Math.addExact(insuranceUnits, ack.insuranceUnits());
-            deficitUnits = Math.addExact(deficitUnits, ack.deficitUnits());
-            fundingResidualUnits = Math.addExact(fundingResidualUnits, ack.fundingResidualUnits());
-            roundingResidualUnits = Math.addExact(roundingResidualUnits, ack.roundingResidualUnits());
-            clearingUnits = Math.addExact(clearingUnits, ack.clearingUnits());
+            treasuryDelta.merge(ack.treasuryDelta());
         }
 
         boolean complete() {
@@ -113,12 +100,7 @@ final class LaneCommandContextRing {
             expectedLaneMask = 0;
             ackLaneMask = 0;
             matchingResult = null;
-            feeUnits = 0;
-            insuranceUnits = 0;
-            deficitUnits = 0;
-            fundingResidualUnits = 0;
-            roundingResidualUnits = 0;
-            clearingUnits = 0;
+            treasuryDelta.clear();
         }
     }
 }

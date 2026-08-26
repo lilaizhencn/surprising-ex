@@ -148,6 +148,24 @@ class AccountLaneWorkerTest {
         reference.get().close();
     }
 
+    @Test
+    void operationFailureStillAllowsEveryLaterTicketToBeReclaimed() {
+        AccountLaneWorker worker = new AccountLaneWorker(new AccountLaneState(0, 4), "test");
+        try {
+            AccountLaneWorker.Ticket<Integer> failed = worker.submit(state -> {
+                throw new IllegalStateException("injected lane failure");
+            });
+            AccountLaneWorker.Ticket<Integer> later = worker.submit(AccountLaneState::userCount);
+
+            assertThatThrownBy(() -> worker.await(failed))
+                    .isInstanceOf(IllegalStateException.class).hasMessage("injected lane failure");
+            assertThat(worker.await(later)).isZero();
+            assertThat(worker.queueDepth()).isZero();
+        } finally {
+            worker.close();
+        }
+    }
+
     private static String await(CountDownLatch entered, CountDownLatch release) {
         entered.countDown();
         try {

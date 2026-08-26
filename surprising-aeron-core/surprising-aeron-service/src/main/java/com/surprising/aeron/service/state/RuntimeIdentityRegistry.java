@@ -127,6 +127,12 @@ public final class RuntimeIdentityRegistry {
         return positionKeys.get(new PositionIdentity(userId, positionKey));
     }
 
+    long preparedPositionKey(long userId, String positionKey) {
+        Long key = positionKeys.get(new PositionIdentity(userId, positionKey));
+        if (key == null) throw new IllegalStateException("position identity was not prepared by the Sequencer");
+        return key;
+    }
+
     public String positionKey(long userId, long positionKey) {
         assertOwner();
         PositionIdentity identity = positions.get(positionKey);

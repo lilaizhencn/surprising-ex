@@ -12,14 +12,24 @@ public final class RuntimePerpetualFillCalculator {
                              CoreInstrumentState instrument, OrderRuntime order,
                              long positionKey, long fillPriceTicks, long fillQuantitySteps,
                              boolean taker, long leveragePpm, int settleAssetId) {
-        if (runtime == null || identities == null || instrument == null || order == null
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        apply(runtime, identities, instrument, order, positionKey, fillPriceTicks, fillQuantitySteps,
+                taker, leveragePpm, settleAssetId, treasuryDelta);
+        treasuryDelta.apply(runtime.treasury());
+    }
+
+    static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                      CoreInstrumentState instrument, OrderRuntime order,
+                      long positionKey, long fillPriceTicks, long fillQuantitySteps,
+                      boolean taker, long leveragePpm, int settleAssetId,
+                      RuntimeTreasuryDelta treasuryDelta) {
+        if (runtime == null || identities == null || instrument == null || order == null || treasuryDelta == null
                 || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("invalid perpetual fill arguments");
         }
         SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
         if (kernel.productLine() == com.surprising.product.api.ProductLine.SPOT
-                || order.symbolId() != identities.symbolId(instrument.symbol())
-                || settleAssetId != identities.assetId(instrument.settleAsset())) {
+                || order.symbolId() < 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("runtime fill instrument identity mismatch");
         }
         if (order.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET
@@ -118,7 +128,6 @@ public final class RuntimePerpetualFillCalculator {
         if (nextAvailable < 0 || nextLocked < 0) {
             throw new IllegalStateException("runtime fill balance would become negative");
         }
-        long feeUnits = Math.addExact(runtime.treasury().fee(settleAssetId), Math.negateExact(feeDelta));
         long nextEntryPrice;
         long nextEntryValue;
         if (nextQuantity == 0) {
@@ -135,7 +144,7 @@ public final class RuntimePerpetualFillCalculator {
             nextEntryPrice = current.entryPriceTicks();
             nextEntryValue = Math.multiplyExact(Math.absExact(nextQuantity), nextEntryPrice);
         }
-        PositionRuntime next = new PositionRuntime(order.userId(), identities.symbolId(instrument.symbol()), settleAssetId,
+        PositionRuntime next = new PositionRuntime(order.userId(), order.symbolId(), settleAssetId,
                 order.marginMode(), order.positionSide(), nextQuantity == 0 ? 0 : order.instrumentVersion(),
                 nextQuantity, nextEntryPrice, nextEntryValue,
                 Math.addExact(current == null ? 0 : current.realizedPnlUnits(), realizedPnl),
@@ -149,9 +158,8 @@ public final class RuntimePerpetualFillCalculator {
 
         runtime.replaceReservation(reservation.consume(orderReservationDebit));
         runtime.replaceBalance(new BalanceRuntime(order.userId(), settleAssetId, nextAvailable, nextLocked));
-        runtime.treasury().setFee(settleAssetId, feeUnits);
-        runtime.treasury().setClearingPnl(settleAssetId, Math.addExact(
-                runtime.treasury().clearingPnl(settleAssetId), Math.negateExact(appliedPnl)));
+        treasuryDelta.addFee(settleAssetId, Math.negateExact(feeDelta));
+        treasuryDelta.addClearing(settleAssetId, Math.negateExact(appliedPnl));
         runtime.replacePosition(positionKey, next);
         runtime.replaceOrder(nextOrder);
         runtime.advanceUserRevision(order.userId());

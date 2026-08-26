@@ -44,6 +44,7 @@ public final class RuntimeSpotMatchProcessor {
         int baseAssetId = identities.assetId(instrument.baseAsset());
         int quoteAssetId = identities.assetId(instrument.quoteAsset());
         validateMatches(runtime, taker, matches);
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (MatcherEvent match : matches) {
             if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
@@ -51,9 +52,9 @@ public final class RuntimeSpotMatchProcessor {
             OrderRuntime buyer = taker.side() == CoreOrderSide.BUY ? taker : maker;
             OrderRuntime seller = taker.side() == CoreOrderSide.SELL ? taker : maker;
             applyFill(runtime, instrument, buyer, match.price(), match.size(),
-                    buyer.orderId() == taker.orderId(), baseAssetId, quoteAssetId);
+                    buyer.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
             applyFill(runtime, instrument, seller, match.price(), match.size(),
-                    seller.orderId() == taker.orderId(), baseAssetId, quoteAssetId);
+                    seller.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
             releaseTerminalReservation(runtime, maker.orderId());
         }
         taker = runtime.order(takerOrderId);
@@ -62,12 +63,48 @@ public final class RuntimeSpotMatchProcessor {
             runtime.replaceOrder(taker.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(taker.revision())));
         }
         releaseTerminalReservation(runtime, takerOrderId);
+        treasuryDelta.apply(runtime.treasury());
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+    }
+
+    static RuntimeTreasuryDelta applyLane(long takerOrderId, List<MatcherEvent> matches,
+                                          TradingRuntimeState runtime, CoreInstrumentState instrument,
+                                          int baseAssetId, int quoteAssetId) {
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        OrderRuntime localTaker = runtime.order(takerOrderId);
+        for (MatcherEvent match : matches) {
+            if (match.eventType() != MatcherEventType.TRADE) continue;
+            if (localTaker != null) {
+                localTaker = requireOpen(runtime, takerOrderId);
+                applyFill(runtime, instrument, localTaker, match.price(), match.size(), true,
+                        baseAssetId, quoteAssetId, treasuryDelta);
+            }
+            OrderRuntime maker = runtime.order(match.matchedOrderId());
+            if (maker != null) {
+                applyFill(runtime, instrument, requireOpen(runtime, maker.orderId()), match.price(), match.size(),
+                        false, baseAssetId, quoteAssetId, treasuryDelta);
+                releaseTerminalReservation(runtime, maker.orderId());
+            }
+        }
+        localTaker = runtime.order(takerOrderId);
+        if (localTaker != null) {
+            if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
+                    || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
+                runtime.replaceOrder(localTaker.withStatus(CoreOrderStatus.CANCELED,
+                        Math.incrementExact(localTaker.revision())));
+            }
+            releaseTerminalReservation(runtime, takerOrderId);
+        }
+        return treasuryDelta;
+    }
+
+    static void validate(long takerOrderId, List<MatcherEvent> matches, TradingRuntimeState runtime) {
+        validateMatches(runtime, requireOpen(runtime, takerOrderId), matches);
     }
 
     private static void applyFill(TradingRuntimeState runtime, CoreInstrumentState instrument, OrderRuntime order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
-                                  int baseAssetId, int quoteAssetId) {
+                                  int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
         ReservationRuntime reservation = runtime.reservation(order.orderId());
         if (reservation == null || reservation.userId() != order.userId()) {
             throw new IllegalStateException("runtime spot reservation is missing");
@@ -110,12 +147,11 @@ public final class RuntimeSpotMatchProcessor {
                 Math.negateExact(feeDelta),
                 order.remainingQuantitySteps() == fillQuantitySteps ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN,
                 Math.incrementExact(order.revision()));
-        long nextFee = Math.addExact(runtime.treasury().fee(quoteAssetId), Math.negateExact(feeDelta));
         replaceBalance(runtime, order.userId(), baseAssetId, base, nextBaseAvailable, nextBaseLocked);
         replaceBalance(runtime, order.userId(), quoteAssetId, quote, nextQuoteAvailable, nextQuoteLocked);
         runtime.replaceReservation(nextReservation);
         runtime.replaceOrder(nextOrder);
-        runtime.treasury().setFee(quoteAssetId, nextFee);
+        treasuryDelta.addFee(quoteAssetId, Math.negateExact(feeDelta));
         runtime.advanceUserRevision(order.userId());
     }
 

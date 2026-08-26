@@ -35,24 +35,38 @@ import org.junit.jupiter.params.provider.MethodSource;
 class CoreMatchingStateTest {
 
     @Test
-    void iocPartialFillCancelsRemainderAndReleasesUnusedFunds() {
+    void crossLaneIocPartialFillCommitsBothOwnersAndReleasesUnusedFunds() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);
-            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+            apply(state, 1, 7, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
-            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+            apply(state, 2, 8, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
-            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+            apply(state, 3, 7, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.SPOT_ASSET, "BTC", 2));
-            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+            CoreMessage crossing = message(state, 4, 8, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 5, ReservationKind.SPOT_ASSET, "USDT", 500,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false));
+            long committedBefore = state.committedCoreSequence();
+            CoreResponse pending = state.apply(crossing);
+
+            assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(state.tradingState().order(101).executedQuantitySteps()).isZero();
+            assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
+
+            CoreResponse completed = drainMatching(state, pending, crossing);
+            assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
 
             assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.CANCELED);
             assertThat(state.tradingState().order(202).executedQuantitySteps()).isEqualTo(2);
-            assertThat(state.tradingState().user(22).balances().get("USDT").availableUnits()).isEqualTo(300);
-            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(state.tradingState().user(22).totalUnits("BTC")).isEqualTo(2);
+            assertThat(state.tradingState().user(8).balances().get("USDT").availableUnits()).isEqualTo(300);
+            assertThat(state.tradingState().user(8).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().user(8).totalUnits("BTC")).isEqualTo(2);
+            CoreLaneMetrics metrics = state.laneMetrics();
+            assertThat(metrics.accountLaneAppliedSequences()[0]).isEqualTo(state.committedCoreSequence());
+            assertThat(metrics.accountLaneCommittedSequences()[0]).isEqualTo(state.committedCoreSequence());
+            assertThat(metrics.accountLaneAppliedSequences()[2]).isEqualTo(state.committedCoreSequence());
+            assertThat(metrics.accountLaneCommittedSequences()[2]).isEqualTo(state.committedCoreSequence());
             assertThat(state.tradingState().orders().values())
                     .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
         }

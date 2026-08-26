@@ -84,6 +84,26 @@ class RuntimeTreasuryDeltaTest {
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(after);
     }
 
+    @Test
+    void aggregatesContributionsWithoutNettingDifferentAssets() {
+        RuntimeTreasuryDelta first = new RuntimeTreasuryDelta();
+        first.addFee(1, 7);
+        first.addClearing(2, -11);
+        RuntimeTreasuryDelta second = new RuntimeTreasuryDelta();
+        second.addFee(2, 13);
+        second.addClearing(1, -17);
+
+        first.merge(second);
+
+        assertThat(first.size()).isEqualTo(2);
+        assertThat(first.assetId(0)).isEqualTo(1);
+        assertThat(first.feeUnits(0)).isEqualTo(7);
+        assertThat(first.clearingUnits(0)).isEqualTo(-17);
+        assertThat(first.assetId(1)).isEqualTo(2);
+        assertThat(first.feeUnits(1)).isEqualTo(13);
+        assertThat(first.clearingUnits(1)).isEqualTo(-11);
+    }
+
     private static TradingCoreState state(CoreTreasuryState treasury, long revision) {
         return new TradingCoreState(ProductLine.LINEAR_PERPETUAL, revision,
                 Map.of(), Map.of(), Map.of(), CoreRiskState.empty(), treasury);
