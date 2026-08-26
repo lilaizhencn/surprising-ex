@@ -232,7 +232,7 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 在 Core 内部并行。默认覆盖限价挂单、吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复：
 
 ```bash
-mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package
+mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean package
 java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
   'LinearPerpetualCoreBenchmark.*' -p accountLanes=4,8 -prof gc
 ```
@@ -244,8 +244,12 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpet
   'LinearPerpetualCoreBenchmark.*' -p accountLanes=4 -wi 0 -i 1 -r 100ms -f 1
 ```
 
-`multiLaneMatching` 的一次 taker 会吃掉分布在全部 Account Lane 上的 maker 深度；可用
-`-p makerDepth=16,64` 调整深度，`riskScan` 可用 `-p riskUsers=32,64` 调整风险用户数。
+`multiLaneMatching` 的一次 taker 会吃掉分布在全部 Account Lane 上的 maker 深度；默认测试
+`makerDepth=1000,10000`，`riskScan` 默认测试 `riskUsers=1000,10000`。大规模 maker 和持仓用户在
+Trial setup 中预装并生成快照，每次 invocation 从同一快照恢复，计时区间只包含目标撮合或风险扫描；
+预装期间会模拟 Audit Exporter 确认 Core Fact，避免把 64 MiB replicated outbox 上限误当成交易容量上限。
+撮合夹具为每个 Account Lane 创建一个 maker 并轮询分配 1k/10k 笔独立订单；风险夹具创建 1k/10k 个
+独立持仓用户，并由一张足额安全对手单完成建仓，因此 `riskUsers` 是真实扫描用户数而不是名义数量。
 正式采样应使用 HotSpot 兼容的 JDK 25；OpenJ9 可用于 smoke，但 JMH 会禁用 compiler hints，
 其输出不能作为容量或延迟基线。
 JMH 结果只代表本地微基准，Aeron、HTTP/WebSocket、Kafka、故障切换和端到端资金对账仍需独立门禁。

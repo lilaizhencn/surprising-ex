@@ -1,10 +1,12 @@
 package com.surprising.aeron.service;
 
+import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.ContinueRiskScanCommand;
+import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreLiquidationActionView;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
@@ -37,6 +39,7 @@ final class LinearPerpetualBenchmarkSupport {
     static final int DEFAULT_ACCOUNT_LANES = 4;
     static final int DEFAULT_MAKER_DEPTH = 16;
     static final int DEFAULT_RISK_USERS = 32;
+    static final int MAX_BENCHMARK_SCALE = 10_000;
     private static final String SYMBOL = "JMH-BTC-USDT";
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
@@ -45,6 +48,8 @@ final class LinearPerpetualBenchmarkSupport {
     private static final long SAFE_BALANCE = 1_000_000_000L;
     private static final long LIQUIDATION_BALANCE = 230;
     private static final long MATCH_TIMEOUT_NANOS = 30_000_000_000L;
+    private static final int EXPORT_ACK_INTERVAL = 128;
+    private static final int COMMANDS_PER_LOGICAL_MILLISECOND = 32;
 
     private LinearPerpetualBenchmarkSupport() {
     }
@@ -81,6 +86,10 @@ final class LinearPerpetualBenchmarkSupport {
         System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
     }
 
+    static long benchmarkTimestamp(long correlationId) {
+        return BASE_EPOCH_MILLIS + correlationId / COMMANDS_PER_LOGICAL_MILLISECOND;
+    }
+
     static Scenario limitOrderPlacement(int accountLanes) {
         Harness harness = base(accountLanes);
         long userId = usersAcrossLanes(accountLanes, 1, 1_000).getFirst();
@@ -111,19 +120,33 @@ final class LinearPerpetualBenchmarkSupport {
     }
 
     static Scenario multiLaneMatching(int accountLanes, int makerDepth) {
-        if (makerDepth < accountLanes || makerDepth > 1_000) {
-            throw new IllegalArgumentException("makerDepth must cover every lane and be at most 1000");
-        }
+        return multiLaneMatching(multiLaneMatchingTemplate(accountLanes, makerDepth), makerDepth);
+    }
+
+    static SnapshotTemplate multiLaneMatchingTemplate(int accountLanes, int makerDepth) {
+        validateScale("makerDepth", accountLanes, makerDepth);
         Harness harness = base(accountLanes);
-        List<Long> users = usersAcrossLanes(accountLanes, makerDepth + 1, 5_000);
-        for (int index = 0; index < makerDepth; index++) {
-            long maker = users.get(index);
-            harness.adjust(maker, SAFE_BALANCE);
-            harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, maker,
-                    order(harness.nextOrderId(), CoreOrderSide.SELL, ENTRY_PRICE, 1, CoreTimeInForce.GTC)));
+        try {
+            List<Long> users = usersAcrossLanes(accountLanes, accountLanes + 1, 5_000);
+            for (int lane = 0; lane < accountLanes; lane++) {
+                harness.adjust(users.get(lane), SAFE_BALANCE);
+            }
+            for (int index = 0; index < makerDepth; index++) {
+                long maker = users.get(index & (accountLanes - 1));
+                harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, maker,
+                        order(harness.nextOrderId(), CoreOrderSide.SELL, ENTRY_PRICE, 1, CoreTimeInForce.GTC)));
+            }
+            harness.adjust(users.getLast(), SAFE_BALANCE);
+            return harness.snapshotTemplate(accountLanes);
+        } finally {
+            harness.close();
         }
-        long taker = users.getLast();
-        harness.adjust(taker, SAFE_BALANCE);
+    }
+
+    static Scenario multiLaneMatching(SnapshotTemplate template, int makerDepth) {
+        validateScale("makerDepth", template.accountLanes(), makerDepth);
+        Harness harness = Harness.restore(template);
+        long taker = usersAcrossLanes(template.accountLanes(), template.accountLanes() + 1, 5_000).getLast();
         CoreMessage command = harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, taker,
                 order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE, makerDepth, CoreTimeInForce.IOC));
         return commandScenario(harness, command);
@@ -302,23 +325,28 @@ final class LinearPerpetualBenchmarkSupport {
     }
 
     private static Harness positionedUsers(int accountLanes, int riskUsers) {
-        if (riskUsers < accountLanes || riskUsers > 96) {
-            throw new IllegalArgumentException("riskUsers must cover every lane and be at most 96");
-        }
+        validateScale("riskUsers", accountLanes, riskUsers);
         Harness harness = base(accountLanes);
         List<Long> users = usersAcrossLanes(accountLanes, riskUsers + 1, 20_000);
         long safeShort = users.getFirst();
         harness.adjust(safeShort, SAFE_BALANCE);
+        harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, safeShort,
+                order(harness.nextOrderId(), CoreOrderSide.SELL, ENTRY_PRICE,
+                        Math.multiplyExact(riskUsers, 10L), CoreTimeInForce.GTC)));
         for (int index = 1; index <= riskUsers; index++) {
             long vulnerableLong = users.get(index);
-            harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, safeShort,
-                    order(harness.nextOrderId(), CoreOrderSide.SELL, ENTRY_PRICE, 10,
-                            CoreTimeInForce.GTC)));
             harness.adjust(vulnerableLong, LIQUIDATION_BALANCE);
             harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, vulnerableLong,
                     order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE, 10, CoreTimeInForce.IOC)));
         }
         return harness;
+    }
+
+    private static void validateScale(String parameter, int accountLanes, int value) {
+        if (value < accountLanes || value > MAX_BENCHMARK_SCALE) {
+            throw new IllegalArgumentException(parameter + " must cover every lane and be at most "
+                    + MAX_BENCHMARK_SCALE);
+        }
     }
 
     private static Harness base(int accountLanes) {
@@ -364,6 +392,8 @@ final class LinearPerpetualBenchmarkSupport {
     private static final class Harness implements AutoCloseable {
         private final CoreProbeState state;
         private final Sequences sequences;
+        private int commandsSinceExportAck;
+        private long lastRequiredExportSequence;
 
         private Harness(CoreProbeState state, Sequences sequences) {
             this.state = state;
@@ -390,7 +420,7 @@ final class LinearPerpetualBenchmarkSupport {
             long correlationId = sequences.clusterPosition++;
             return new CoreMessage(CoreMessageHeader.command(type,
                     new UUID(source.ordinal() + 1L, sourceSequence), ProductLine.LINEAR_PERPETUAL,
-                    source, sourceId(source), sourceSequence, userId, BASE_EPOCH_MILLIS + correlationId,
+                    source, sourceId(source), sourceSequence, userId, benchmarkTimestamp(correlationId),
                     correlationId), payload);
         }
 
@@ -411,16 +441,35 @@ final class LinearPerpetualBenchmarkSupport {
             }
             if (response.status() != ResponseStatus.APPLIED && response.status() != ResponseStatus.OK) {
                 throw new IllegalStateException("benchmark command rejected type=" + command.header().messageType()
-                        + " status=" + response.status() + " result=" + response.resultCode());
+                        + " userId=" + command.header().userId()
+                        + " status=" + response.status() + " result=" + response.resultCode()
+                        + " applied=" + state.appliedCommandCount()
+                        + " users=" + state.tradingState().users().size()
+                        + " orders=" + state.tradingState().orders().size()
+                        + " export=" + state.exportState().status());
+            }
+            if (response.requiredExportSequence() > 0) {
+                lastRequiredExportSequence = response.requiredExportSequence();
+                commandsSinceExportAck++;
+                if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExports();
             }
             return response;
+        }
+
+        void acknowledgeExports() {
+            if (lastRequiredExportSequence == 0) return;
+            long acknowledged = lastRequiredExportSequence;
+            lastRequiredExportSequence = 0;
+            commandsSinceExportAck = 0;
+            execute(command(CoreMessageType.ACK_EXPORT, CommandSource.RECOVERY_TOOL, 0,
+                    CoreExportCodec.encodeAck(new AckExportCommand(acknowledged))));
         }
 
         CoreLiquidationWorkView executionWork() {
             CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                     new UUID(99, sequences.clusterPosition++), ProductLine.LINEAR_PERPETUAL,
                     CommandSource.OPERATIONS, sourceId(CommandSource.OPERATIONS), 0, 0,
-                    BASE_EPOCH_MILLIS + sequences.clusterPosition, sequences.clusterPosition),
+                    benchmarkTimestamp(sequences.clusterPosition), sequences.clusterPosition),
                     CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL,
                             CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1_000, 1_048_576));
             CoreResponse response = state.apply(query);
@@ -431,6 +480,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         SnapshotTemplate snapshotTemplate(int accountLanes) {
+            acknowledgeExports();
             byte[] snapshot = state.snapshot();
             return new SnapshotTemplate(snapshot, state.tradingState().businessStateHash(), accountLanes);
         }

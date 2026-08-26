@@ -120,13 +120,18 @@ public class LinearPerpetualCoreBenchmark {
     }
 
     @State(Scope.Thread)
-    public static class MultiLaneState extends InvocationState {
-        @Param("16")
+    public static class MultiLaneState extends SnapshotBackedState {
+        @Param({"1000", "10000"})
         public int makerDepth;
 
         @Override
+        LinearPerpetualBenchmarkSupport.SnapshotTemplate createTemplate() {
+            return LinearPerpetualBenchmarkSupport.multiLaneMatchingTemplate(accountLanes, makerDepth);
+        }
+
+        @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
-            return LinearPerpetualBenchmarkSupport.multiLaneMatching(accountLanes, makerDepth);
+            return LinearPerpetualBenchmarkSupport.multiLaneMatching(template, makerDepth);
         }
     }
 
@@ -144,7 +149,7 @@ public class LinearPerpetualCoreBenchmark {
 
     @State(Scope.Thread)
     public static class RiskScanState extends SnapshotBackedState {
-        @Param("32")
+        @Param({"1000", "10000"})
         public int riskUsers;
 
         @Override

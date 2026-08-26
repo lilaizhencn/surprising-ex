@@ -19,8 +19,18 @@ class LinearPerpetualBenchmarkSupportTest {
     }
 
     @Test
+    void largeScaleSetupKeepsMarkPriceInsideFreshnessWindow() {
+        long firstTimestamp = LinearPerpetualBenchmarkSupport.benchmarkTimestamp(1);
+        long lastTimestamp = LinearPerpetualBenchmarkSupport.benchmarkTimestamp(
+                4L * LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE);
+
+        assertThat(lastTimestamp - firstTimestamp).isLessThanOrEqualTo(5_000);
+    }
+
+    @Test
     void allLinearPerpetualScenariosCompleteOnFourAccountLanes() {
         int lanes = 4;
+        var matchingTemplate = LinearPerpetualBenchmarkSupport.multiLaneMatchingTemplate(lanes, 8);
         var riskTemplate = LinearPerpetualBenchmarkSupport.riskScanTemplate(lanes, 8);
         var recoveryTemplate = LinearPerpetualBenchmarkSupport.recoveryTemplate(lanes, 8);
 
@@ -32,7 +42,7 @@ class LinearPerpetualBenchmarkSupportTest {
                         () -> LinearPerpetualBenchmarkSupport.cancelRestingOrder(lanes)),
                 new NamedScenario("partialFill", () -> LinearPerpetualBenchmarkSupport.partialFill(lanes)),
                 new NamedScenario("multiLaneMatching",
-                        () -> LinearPerpetualBenchmarkSupport.multiLaneMatching(lanes, 8)),
+                        () -> LinearPerpetualBenchmarkSupport.multiLaneMatching(matchingTemplate, 8)),
                 new NamedScenario("riskScan", () -> LinearPerpetualBenchmarkSupport.riskScan(riskTemplate)),
                 new NamedScenario("liquidationExecution",
                         () -> LinearPerpetualBenchmarkSupport.liquidationExecution(lanes)),
