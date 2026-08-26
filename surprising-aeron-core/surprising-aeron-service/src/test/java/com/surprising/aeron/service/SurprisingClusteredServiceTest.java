@@ -295,16 +295,14 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void incompleteMatcherSnapshotFailsClosedAndReleasesCommandAdmission() {
+    void snapshotWaitsForAsynchronousMatcherCaptureAndReleasesCommandAdmission() {
         SurprisingClusteredService service = service();
         service.onStart(cluster(), null);
         try {
-            assertThatThrownBy(() -> service.captureSnapshot(7))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("snapshot not ready");
+            assertThat(service.captureSnapshot(7)).isNotEmpty();
             assertThat(service.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                     CoreProtocol.probePayload(7))).status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(service.snapshotFenceNotReadyCount()).isEqualTo(1);
+            assertThat(service.snapshotFenceNotReadyCount()).isZero();
             assertThat(service.snapshotFenceTimeoutCount()).isZero();
         } finally {
             service.onTerminate(null);
@@ -322,17 +320,15 @@ class SurprisingClusteredServiceTest {
             assertThat(service.snapshotFenceTimeoutCount()).isEqualTo(1);
             assertThat(service.snapshotFenceNotReadyCount()).isZero();
 
-            assertThatThrownBy(() -> service.captureSnapshot(10))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("snapshot not ready");
-            assertThat(service.snapshotFenceNotReadyCount()).isEqualTo(1);
+            assertThat(service.captureSnapshot(10)).isNotEmpty();
+            assertThat(service.snapshotFenceNotReadyCount()).isZero();
         } finally {
             service.onTerminate(null);
         }
     }
 
     @Test
-    void snapshotCallbackSurfaceDrainsQueuedMatcherCompletionWithSinglePoll() {
+    void snapshotCallbackSurfaceDrainsQueuedMatcherCompletionBeforeCapture() {
         // Given
         SurprisingClusteredService service = service();
         service.onStart(cluster(), null);
@@ -343,9 +339,7 @@ class SurprisingClusteredServiceTest {
             service.state().publishMatchingCompletion(pendingSequence, matchingResult);
 
             // When
-            assertThatThrownBy(() -> service.captureSnapshot(8))
-                    .isInstanceOf(CoreProbeState.SnapshotNotReadyException.class)
-                    .hasMessage("snapshot not ready");
+            assertThat(service.captureSnapshot(8)).isNotEmpty();
 
             // Then
             assertThat(service.state().pendingMatchingCount()).isZero();

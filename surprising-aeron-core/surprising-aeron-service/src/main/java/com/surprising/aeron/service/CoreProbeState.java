@@ -3353,8 +3353,6 @@ public final class CoreProbeState implements AutoCloseable {
         assertHealthy();
         long deadlineNanos = Math.addExact(System.nanoTime(), java.util.concurrent.TimeUnit.SECONDS.toNanos(30));
         beginSnapshot(snapshotId, deadlineNanos);
-        // Compatibility-only synchronous surface for non-Aeron callers. The clustered-service callback must use
-        // captureSnapshot(), which performs exactly one poll and fails closed when this matcher work is not ready.
         while (true) {
             SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = pollSnapshotSections(0, 0, System.nanoTime());
             if (snapshot != null) return snapshot.toByteArray();

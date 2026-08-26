@@ -167,10 +167,15 @@ public final class SurprisingClusteredService implements ClusteredService {
             long snapshotId, long deadlineNanos) {
         try {
             state.beginSnapshot(snapshotId, deadlineNanos);
-            return state.captureSnapshotSections(
-                    cluster == null ? 0 : cluster.time(),
-                    cluster == null ? 0 : cluster.logPosition(),
-                    System.nanoTime());
+            idleStrategy.reset();
+            while (true) {
+                SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = state.pollSnapshotSections(
+                        cluster == null ? 0 : cluster.time(),
+                        cluster == null ? 0 : cluster.logPosition(),
+                        System.nanoTime());
+                if (snapshot != null) return snapshot;
+                idleStrategy.idle();
+            }
         } catch (CoreProbeState.SnapshotNotReadyException notReady) {
             snapshotFenceNotReadyCount++;
             throw notReady;
