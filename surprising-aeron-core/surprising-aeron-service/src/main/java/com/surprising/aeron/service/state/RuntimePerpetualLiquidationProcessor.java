@@ -62,9 +62,12 @@ public final class RuntimePerpetualLiquidationProcessor {
         }
         validatePrice(runtime, liquidation, command);
         if (!executable(runtime, liquidation, identities)) {
-            runtime.replaceLiquidation(copy(liquidation, 0, 0, 0,
-                    CoreLiquidationState.Status.CANCELED, 0));
-            runtime.advanceUserRevision(liquidation.userId());
+            runtime.executeUserSettlement(liquidation.userId(), () -> {
+                runtime.replaceLiquidation(copy(liquidation, 0, 0, 0,
+                        CoreLiquidationState.Status.CANCELED, 0));
+                runtime.advanceUserRevision(liquidation.userId());
+                return null;
+            });
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             return runtime;
         }
@@ -109,12 +112,17 @@ public final class RuntimePerpetualLiquidationProcessor {
         CoreLiquidationState.Status nextStatus = uncovered > 0
                 ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED;
 
-        runtime.replaceBalance(cash.balance());
-        runtime.replacePosition(positionKey, nextPosition);
-        runtime.treasury().adjustInsurance(settleAssetId, insuranceDelta);
-        runtime.replaceLiquidation(copy(liquidation, uncovered, command.executionPriceTicks(),
-                command.liquidationFeeRatePpm(), nextStatus, cash.collectedFee()));
-        runtime.advanceUserRevision(liquidation.userId());
+        runtime.executeUserSettlement(liquidation.userId(), () -> {
+            runtime.replaceBalance(cash.balance());
+            runtime.replacePosition(positionKey, nextPosition);
+            runtime.replaceLiquidation(copy(liquidation, uncovered, command.executionPriceTicks(),
+                    command.liquidationFeeRatePpm(), nextStatus, cash.collectedFee()));
+            runtime.advanceUserRevision(liquidation.userId());
+            return null;
+        });
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        treasuryDelta.addInsurance(settleAssetId, insuranceDelta);
+        treasuryDelta.apply(runtime.treasury());
         runtime.setMetadata(runtime.productLine(), revisionAfterCancellation(runtime.revision(), canceledOrders));
         return runtime;
     }
@@ -166,11 +174,15 @@ public final class RuntimePerpetualLiquidationProcessor {
         }
         cancelOrders(runtime, canceledOrders == null ? List.of() : canceledOrders);
         LiquidationRuntime current = runtime.liquidation(command.liquidationId());
-        runtime.replaceLiquidation(new LiquidationRuntime(current.liquidationId(), current.userId(),
+        LiquidationRuntime next = new LiquidationRuntime(current.liquidationId(), current.userId(),
                 current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentVersion(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 current.deficitUnits(), current.executionPriceTicks(), current.liquidationFeeRatePpm(),
-                current.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
+                current.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId);
+        runtime.executeUserSettlement(current.userId(), () -> {
+            runtime.replaceLiquidation(next);
+            return null;
+        });
         runtime.setMetadata(runtime.productLine(), revisionAfterCancellation(runtime.revision(), canceledOrders));
         return runtime;
     }
@@ -212,6 +224,8 @@ public final class RuntimePerpetualLiquidationProcessor {
         LiquidationRuntime current = liquidation;
         CoreLiquidationState.Status nextStatus;
         long nextDeficit = liquidation.deficitUnits();
+        BalanceRuntime nextBalance = null;
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         switch (command.resolution()) {
             case INSURANCE -> {
                 if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
@@ -227,14 +241,13 @@ public final class RuntimePerpetualLiquidationProcessor {
                     throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                             "insurance fund balance is insufficient");
                 }
-                runtime.treasury().adjustInsurance(assetId, Math.negateExact(command.coveredUnits()));
                 BalanceRuntime balance = runtime.balance(liquidation.userId(), assetId);
                 if (balance == null) {
                     throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
                 }
-                runtime.replaceBalance(new BalanceRuntime(balance.userId(), balance.assetId(),
-                        Math.addExact(balance.availableUnits(), command.coveredUnits()), balance.lockedUnits()));
-                runtime.advanceUserRevision(liquidation.userId());
+                nextBalance = new BalanceRuntime(balance.userId(), balance.assetId(),
+                        Math.addExact(balance.availableUnits(), command.coveredUnits()), balance.lockedUnits());
+                treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
                 nextDeficit = Math.subtractExact(nextDeficit, command.coveredUnits());
                 nextStatus = nextDeficit == 0 ? CoreLiquidationState.Status.COMPLETED
                         : CoreLiquidationState.Status.ADL_REQUIRED;
@@ -253,11 +266,21 @@ public final class RuntimePerpetualLiquidationProcessor {
             }
             default -> throw new IllegalStateException("unknown liquidation resolution");
         }
-        runtime.replaceLiquidation(new LiquidationRuntime(current.liquidationId(), current.userId(),
+        LiquidationRuntime nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(),
                 current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentVersion(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
-                current.liquidationFeeUnits(), nextStatus, 0));
+                current.liquidationFeeUnits(), nextStatus, 0);
+        BalanceRuntime preparedBalance = nextBalance;
+        runtime.executeUserSettlement(current.userId(), () -> {
+            if (preparedBalance != null) {
+                runtime.replaceBalance(preparedBalance);
+                runtime.advanceUserRevision(current.userId());
+            }
+            runtime.replaceLiquidation(nextLiquidation);
+            return null;
+        });
+        treasuryDelta.apply(runtime.treasury());
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return runtime;
     }
@@ -348,14 +371,20 @@ public final class RuntimePerpetualLiquidationProcessor {
         CoreLiquidationState.Status nextStatus = nextDeficit == 0
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
 
-        runtime.replaceBalance(nextBalance);
-        runtime.replacePosition(positionKey, nextPosition);
-        runtime.replaceLiquidation(new LiquidationRuntime(current.liquidationId(), current.userId(),
+        LiquidationRuntime nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(),
                 current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentVersion(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
-                current.liquidationFeeUnits(), nextStatus, 0));
-        runtime.advanceUserRevision(command.targetUserId());
+                current.liquidationFeeUnits(), nextStatus, 0);
+        runtime.executeOwnerSettlements(List.of(command.targetUserId(), current.userId()), ignored -> {
+            if (runtime.currentLaneOwns(command.targetUserId())) {
+                runtime.replaceBalance(nextBalance);
+                runtime.replacePosition(positionKey, nextPosition);
+                runtime.advanceUserRevision(command.targetUserId());
+            }
+            if (runtime.currentLaneOwns(current.userId())) runtime.replaceLiquidation(nextLiquidation);
+            return null;
+        });
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return runtime;
     }
@@ -400,18 +429,23 @@ public final class RuntimePerpetualLiquidationProcessor {
     }
 
     private static void cancelOrders(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
-        for (CoreOrderState order : orders) {
-            OrderRuntime current = order == null ? null : runtime.order(order.orderId());
-            if (current == null || current.canceled() || current.remainingQuantitySteps() == 0
-                    || current.userId() != order.userId()) {
-                throw new IllegalArgumentException("runtime liquidation cancellation requires open orders");
+        if (orders == null || orders.isEmpty()) return;
+        runtime.executeOwnerSettlements(orders, CoreOrderState::userId, ignored -> {
+            for (CoreOrderState order : orders) {
+                if (order == null || !runtime.currentLaneOwns(order.userId())) continue;
+                OrderRuntime current = runtime.order(order.orderId());
+                if (current == null || current.canceled() || current.remainingQuantitySteps() == 0
+                        || current.userId() != order.userId()) {
+                    throw new IllegalArgumentException("runtime liquidation cancellation requires open orders");
+                }
+                ReservationRuntime reservation = runtime.reservation(order.orderId());
+                if (reservation == null) {
+                    throw new IllegalStateException("runtime liquidation reservation is missing: " + order.orderId());
+                }
+                runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
             }
-            ReservationRuntime reservation = runtime.reservation(order.orderId());
-            if (reservation == null) {
-                throw new IllegalStateException("runtime liquidation reservation is missing: " + order.orderId());
-            }
-            runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
-        }
+            return null;
+        });
     }
 
     private static boolean executable(TradingRuntimeState runtime, LiquidationRuntime liquidation,

@@ -1236,6 +1236,41 @@ class CoreProbeStateTest {
         assertThat(restored.terminalRetentionTombstoneCount()).isEqualTo(1);
     }
 
+    @Test
+    void cancelSettlementUsesOneBoundedOwnerLaneCommand() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(applyAndDrain(state, tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 3,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(902, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
+                            CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                            false, "client-902")))).status()).isEqualTo(ResponseStatus.APPLIED);
+            long settlementsBefore = accountLaneSettlementOperations(state.laneMetrics());
+
+            assertThat(applyAndDrain(state, tradingCommand(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 4,
+                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(902)))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+
+            long matcherApplyOwnerMutationAndCommitOperations =
+                    accountLaneSettlementOperations(state.laneMetrics()) - settlementsBefore;
+            assertThat(matcherApplyOwnerMutationAndCommitOperations).isEqualTo(3);
+            assertThat(state.tradingState().order(902).status().name()).isEqualTo("CANCELED");
+            assertThat(state.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+        }
+    }
+
+    private static long accountLaneSettlementOperations(CoreLaneMetrics metrics) {
+        long total = 0;
+        long[] completed = metrics.accountLaneCompletedOperations();
+        for (int laneId = 0; laneId < metrics.accountLaneCount(); laneId++) {
+            total += completed[laneId * CoreLaneMetrics.OPERATION_TYPE_COUNT + 1];
+        }
+        return total;
+    }
+
     private static CoreMessage command(UUID commandId, long sourceSequence, long delta) {
         return command(ProductLine.SPOT, commandId, sourceSequence, delta);
     }

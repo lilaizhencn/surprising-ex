@@ -82,9 +82,14 @@ public final class RuntimeSettlementProcessor {
                 command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
         ArrayList<Long> selectedUserIds = userPage.userIds();
         boolean moreUsers = chunked && !userPage.complete();
-        for (long userId : selectedUserIds) {
-            settleUser(runtime, identities, instrument, kernel, command, userId);
+        int assetId = identities.assetId(instrument.settleAsset());
+        Object[] laneResults = runtime.executeOwnerSettlements(selectedUserIds,
+                ignored -> settleLane(runtime, instrument, kernel, command, selectedUserIds, symbolId, assetId));
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        for (Object value : laneResults) {
+            if (value instanceof RuntimeTreasuryDelta laneDelta) treasuryDelta.merge(laneDelta);
         }
+        treasuryDelta.apply(runtime.treasury());
         boolean complete = !chunked || !moreUsers;
         long nextCursorUserId = complete ? 0 : selectedUserIds.getLast();
         if (complete) {
@@ -137,43 +142,52 @@ public final class RuntimeSettlementProcessor {
                 orders == null || orders.isEmpty() ? 1 : 2));
     }
 
-    private static void settleUser(TradingRuntimeState runtime,
-                                   RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
-                                   SettlementKernel kernel, SettleInstrumentCommand command, long userId) {
-        if (runtime.user(userId) == null) return;
-        int symbolId = identities.symbolId(instrument.symbol());
-        ArrayList<PositionRuntime> positions = new ArrayList<>();
-        for (long positionKey : runtime.positionKeysForUserAndSymbol(userId, symbolId)) {
-            PositionRuntime position = runtime.position(positionKey);
-            if (position != null && position.signedQuantitySteps() != 0) positions.add(position);
+    private static RuntimeTreasuryDelta settleLane(TradingRuntimeState runtime,
+                                                   CoreInstrumentState instrument, SettlementKernel kernel,
+                                                   SettleInstrumentCommand command,
+                                                   Iterable<Long> selectedUserIds, int symbolId, int assetId) {
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        for (Long userId : selectedUserIds) {
+            if (userId != null && runtime.currentLaneOwns(userId)) {
+                settleUser(runtime, instrument, kernel, command, userId,
+                        symbolId, assetId, treasuryDelta);
+            }
         }
-        if (positions.isEmpty()) return;
-        int assetId = identities.assetId(instrument.settleAsset());
+        return treasuryDelta;
+    }
+
+    private static void settleUser(TradingRuntimeState runtime,
+                                   CoreInstrumentState instrument,
+                                   SettlementKernel kernel, SettleInstrumentCommand command, long userId,
+                                   int symbolId, int assetId, RuntimeTreasuryDelta treasuryDelta) {
+        if (runtime.user(userId) == null) return;
+        java.util.NavigableSet<Long> positionKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
+        if (positionKeys.isEmpty()) return;
         BalanceRuntime balance = runtime.balance(userId, assetId);
         if (balance == null) throw new IllegalStateException("settlement balance is missing");
         long available = balance.availableUnits();
         long locked = balance.lockedUnits();
-        long clearingPnl = runtime.treasury().clearingPnl(assetId);
-        long deficit = runtime.treasury().insuranceDeficit(assetId);
-        for (PositionRuntime position : positions) {
+        long clearingPnlDelta = 0;
+        boolean settled = false;
+        for (long positionKey : positionKeys) {
+            PositionRuntime position = runtime.position(positionKey);
+            if (position == null || position.signedQuantitySteps() == 0) continue;
+            settled = true;
             long cashDelta = kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
                     position.entryPriceTicks(), command.settlementPriceTicks());
             Cash cash = applyCash(available, locked, position.marginMode(),
                     position.positionMarginUnits(), cashDelta);
             available = cash.available();
             locked = cash.locked();
-            clearingPnl = Math.addExact(clearingPnl, Math.negateExact(cash.appliedDelta()));
-            String positionName = position.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                    ? instrument.symbol() : instrument.symbol() + ':' + position.positionSide().name();
-            long positionKey = identities.positionKey(userId, positionName);
+            clearingPnlDelta = Math.addExact(clearingPnlDelta, Math.negateExact(cash.appliedDelta()));
             runtime.replacePosition(positionKey, new PositionRuntime(userId, position.symbolId(),
                     assetId, position.marginMode(), position.positionSide(), 0, 0, 0, 0,
                     Math.addExact(position.realizedPnlUnits(), cashDelta),
                     0));
         }
+        if (!settled) return;
         runtime.replaceBalance(new BalanceRuntime(userId, assetId, available, locked));
-        runtime.treasury().setClearingPnl(assetId, clearingPnl);
-        runtime.treasury().setDeficit(assetId, deficit);
+        treasuryDelta.addClearing(assetId, clearingPnlDelta);
         runtime.advanceUserRevision(userId);
     }
 
@@ -266,12 +280,16 @@ public final class RuntimeSettlementProcessor {
     }
 
     private static void cancelOrders(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
-        if (orders == null) return;
-        for (CoreOrderState order : orders) {
-            ReservationRuntime reservation = runtime.reservation(order.orderId());
-            if (reservation == null) throw new IllegalStateException("settlement reservation is missing");
-            runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
-        }
+        if (orders == null || orders.isEmpty()) return;
+        runtime.executeOwnerSettlements(orders, CoreOrderState::userId, ignored -> {
+            for (CoreOrderState order : orders) {
+                if (!runtime.currentLaneOwns(order.userId())) continue;
+                ReservationRuntime reservation = runtime.reservation(order.orderId());
+                if (reservation == null) throw new IllegalStateException("settlement reservation is missing");
+                runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
+            }
+            return null;
+        });
     }
 
     private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime,

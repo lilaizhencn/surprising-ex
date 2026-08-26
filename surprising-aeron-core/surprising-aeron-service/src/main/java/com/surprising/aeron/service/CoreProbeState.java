@@ -3691,53 +3691,41 @@ public final class CoreProbeState implements AutoCloseable {
                             "terminal trigger order identity is retained");
                 }
                 commandChangedTriggerOrderIds = List.of(trigger.triggerOrderId());
-                RuntimeCommandProcessor.upsertTriggerOrder(runtimePlaceOrderState, runtimePlaceOrderIdentities,
-                        message.header().userId(), trigger);
+                int symbolId = runtimePlaceOrderIdentities.symbolId(trigger.symbol());
+                long positionKey = preparedTriggerPositionKey(message.header().userId(), trigger);
+                boolean instrumentSettled = runtimePlaceOrderState.treasury().lifecycleSettlement(symbolId) != 0;
+                runtimePlaceOrderState.executeUserSettlement(message.header().userId(), () -> {
+                    RuntimeCommandProcessor.upsertTriggerOrder(runtimePlaceOrderState,
+                            message.header().userId(), trigger, symbolId, positionKey, instrumentSettled);
+                    return null;
+                });
                 refreshSnapshotProjection();
                 commandTriggerOrderView = runtimePlaceOrderState.triggerOrder(trigger.triggerOrderId()).view();
             }
             case CANCEL_TRIGGER_ORDER -> {
                 long triggerOrderId = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payloadUnsafe());
                 commandChangedTriggerOrderIds = List.of(triggerOrderId);
-                if (RuntimeCommandProcessor.cancelTriggerOrder(
-                        runtimePlaceOrderState, message.header().userId(), triggerOrderId)) {
-                    refreshSnapshotProjection();
-                }
+                cancelTriggerOrderRuntime(message.header().userId(), triggerOrderId);
             }
             case CLAIM_TRIGGER_ORDER -> {
                 long[] claim = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeClaim(message.payloadUnsafe());
-                if (RuntimeCommandProcessor.claimTriggerOrder(
-                        runtimePlaceOrderState, claim[0], claim[1], claim[2], claim[3])) {
-                    refreshSnapshotProjection();
-                }
+                claimTriggerOrderRuntime(claim[0], claim[1], claim[2], claim[3]);
             }
             case COMPLETE_TRIGGER_ORDER -> {
                 long[] complete = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeComplete(message.payloadUnsafe());
-                if (RuntimeCommandProcessor.completeTriggerOrder(runtimePlaceOrderState, complete[0],
-                        complete[1] == 1, complete[2], "", complete[3])) {
-                    refreshSnapshotProjection();
-                }
+                completeTriggerOrderRuntime(complete[0], complete[1] == 1, complete[2], "", complete[3]);
             }
             case UPDATE_TRIGGER_TRAILING -> {
                 long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payloadUnsafe());
-                if (RuntimeCommandProcessor.updateTriggerTrailing(
-                        runtimePlaceOrderState, trailing[0], trailing[1], trailing[2], trailing[3])) {
-                    refreshSnapshotProjection();
-                }
+                updateTriggerTrailingRuntime(trailing[0], trailing[1], trailing[2], trailing[3]);
             }
             case EXPIRE_TRIGGER_ORDER -> {
                 long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
-                if (RuntimeCommandProcessor.expireTriggerOrder(
-                        runtimePlaceOrderState, lifecycle[0], lifecycle[1])) {
-                    refreshSnapshotProjection();
-                }
+                expireTriggerOrderRuntime(lifecycle[0], lifecycle[1]);
             }
             case RETRY_TRIGGER_ORDER -> {
                 long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
-                if (RuntimeCommandProcessor.retryTriggerOrder(runtimePlaceOrderState, lifecycle[0], lifecycle[1],
-                        message.header().submittedAtEpochMillis())) {
-                    refreshSnapshotProjection();
-                }
+                retryTriggerOrderRuntime(lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis());
             }
             case EXECUTE_TRIGGER_ORDER -> executeTriggerOrder(message);
             default -> {
@@ -4135,13 +4123,17 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void cancelOrderRuntime(long userId, long orderId) {
-        if (RuntimeCommandProcessor.cancelOrder(runtimePlaceOrderState, userId, orderId)) {
+        if (runtimePlaceOrderState.executeUserSettlement(userId,
+                () -> RuntimeCommandProcessor.cancelOrder(runtimePlaceOrderState, userId, orderId))) {
             refreshSnapshotProjection();
         }
     }
 
     private void rejectPlaceOrderRuntime(long userId, long orderId) {
-        RuntimeCommandProcessor.rejectPlaceOrder(runtimePlaceOrderState, userId, orderId);
+        runtimePlaceOrderState.executeUserSettlement(userId, () -> {
+            RuntimeCommandProcessor.rejectPlaceOrder(runtimePlaceOrderState, userId, orderId);
+            return null;
+        });
         refreshSnapshotProjection();
     }
 
@@ -4186,32 +4178,74 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void cancelTriggerOrderRuntime(long userId, long triggerOrderId) {
-        if (RuntimeCommandProcessor.cancelTriggerOrder(runtimePlaceOrderState, userId, triggerOrderId)) {
+        if (runtimePlaceOrderState.executeUserSettlement(userId,
+                () -> RuntimeCommandProcessor.cancelTriggerOrder(
+                        runtimePlaceOrderState, userId, triggerOrderId))) {
+            refreshSnapshotProjection();
+        }
+    }
+
+    private void claimTriggerOrderRuntime(long triggerOrderId, long triggerSequence,
+                                          long triggeredPriceTicks, long triggeredAtEpochMillis) {
+        long userId = requireTriggerOwner(triggerOrderId);
+        if (runtimePlaceOrderState.executeUserSettlement(userId,
+                () -> RuntimeCommandProcessor.claimTriggerOrder(runtimePlaceOrderState, triggerOrderId,
+                        triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis))) {
             refreshSnapshotProjection();
         }
     }
 
     private void completeTriggerOrderRuntime(long triggerOrderId, boolean success, long placedOrderId,
                                              String rejectReason, long completedAtEpochMillis) {
-        if (RuntimeCommandProcessor.completeTriggerOrder(runtimePlaceOrderState, triggerOrderId, success,
-                placedOrderId, rejectReason, completedAtEpochMillis)) {
+        long userId = requireTriggerOwner(triggerOrderId);
+        if (runtimePlaceOrderState.executeUserSettlement(userId,
+                () -> RuntimeCommandProcessor.completeTriggerOrder(runtimePlaceOrderState, triggerOrderId, success,
+                        placedOrderId, rejectReason, completedAtEpochMillis))) {
             refreshSnapshotProjection();
         }
     }
 
     private void expireTriggerOrderRuntime(long triggerOrderId, long expiredAtEpochMillis) {
-        if (RuntimeCommandProcessor.expireTriggerOrder(
-                runtimePlaceOrderState, triggerOrderId, expiredAtEpochMillis)) {
+        long userId = requireTriggerOwner(triggerOrderId);
+        if (runtimePlaceOrderState.executeUserSettlement(userId,
+                () -> RuntimeCommandProcessor.expireTriggerOrder(
+                        runtimePlaceOrderState, triggerOrderId, expiredAtEpochMillis))) {
             refreshSnapshotProjection();
         }
     }
 
     private void updateTriggerTrailingRuntime(long triggerOrderId, long highestPriceTicks,
                                               long lowestPriceTicks, long activatedAtEpochMillis) {
-        if (RuntimeCommandProcessor.updateTriggerTrailing(runtimePlaceOrderState, triggerOrderId,
-                highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis)) {
+        long userId = requireTriggerOwner(triggerOrderId);
+        if (runtimePlaceOrderState.executeUserSettlement(userId,
+                () -> RuntimeCommandProcessor.updateTriggerTrailing(runtimePlaceOrderState, triggerOrderId,
+                        highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis))) {
             refreshSnapshotProjection();
         }
+    }
+
+    private void retryTriggerOrderRuntime(long triggerOrderId, long staleBeforeEpochMillis,
+                                          long retryAtEpochMillis) {
+        long userId = requireTriggerOwner(triggerOrderId);
+        if (runtimePlaceOrderState.executeUserSettlement(userId,
+                () -> RuntimeCommandProcessor.retryTriggerOrder(runtimePlaceOrderState, triggerOrderId,
+                        staleBeforeEpochMillis, retryAtEpochMillis))) {
+            refreshSnapshotProjection();
+        }
+    }
+
+    private long requireTriggerOwner(long triggerOrderId) {
+        var trigger = runtimePlaceOrderState.triggerOrder(triggerOrderId);
+        if (trigger == null) {
+            throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order does not exist");
+        }
+        return trigger.userId();
+    }
+
+    private long preparedTriggerPositionKey(
+            long userId, com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
+        return RuntimeCommandProcessor.triggerPositionKey(
+                runtimePlaceOrderIdentities, productLine, userId, trigger);
     }
 
     private void applyMatchesRuntime(long takerOrderId,

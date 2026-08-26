@@ -10,6 +10,7 @@ import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -33,6 +34,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
     private static final long USER_ID = 101;
     private static final long MAKER_ID = 202;
+    private static final long SECOND_MAKER_ID = 203;
     private static final long QUANTITY = 2;
     private static final long ENTRY_PRICE = 100;
     private static final long STRIKE_PRICE = 100;
@@ -67,6 +69,34 @@ class CoreDeliveryOptionFinancialMatrixTest {
                     "BTC", "USDT", "USDT"),
             new Variant(ContractType.VANILLA_OPTION, CoreMarginMode.CROSS, OptionType.PUT, "OTM", 120, 1, 1,
                     "BTC", "USDT", "USDT"));
+
+    @Test
+    void crossLaneExpiryReturnsClearingContributionsBeforeSequencerTreasuryApply() {
+        Variant variant = VARIANTS.getFirst();
+        TradingCoreState opening = fundedState(variant, USER_ID, WALLET);
+        opening = fundedState(opening, SECOND_MAKER_ID, WALLET);
+        opening = addPosition(opening, USER_ID, QUANTITY, variant);
+        opening = addPosition(opening, SECOND_MAKER_ID, -QUANTITY, variant);
+        SettleInstrumentCommand command = new SettleInstrumentCommand(
+                701, variant.symbol(), 1, variant.settlementPriceTicks(), 9_999);
+        TradingCoreState expected = reducer.settleInstrument(opening, command);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(opening, identities);
+        runtime.startAccountLanes();
+        try {
+            CoreSettlementProgressView actual = RuntimeSettlementProcessor.applyRuntime(command,
+                    List.of(USER_ID, SECOND_MAKER_ID), null, new ActiveOrderIndex(opening), runtime, identities);
+
+            assertThat(actual.complete()).isTrue();
+            RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
+            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(USER_ID))
+                    .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()]).isEqualTo(1);
+            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(SECOND_MAKER_ID))
+                    .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()]).isEqualTo(1);
+        } finally {
+            runtime.close();
+        }
+    }
 
     private static final Map<String, DeliveryExpectation> DELIVERY_EXPECTATIONS = Map.of(
             "LINEAR_DELIVERY:CROSS", new DeliveryExpectation(40, -40, 2_040, 1_960),

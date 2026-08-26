@@ -145,6 +145,72 @@ class CorePerpetualFinancialMatrixTest {
     private final TradingCoreReducer reducer = new TradingCoreReducer();
 
     @Test
+    void crossLaneFundingReturnsOwnerContributionsBeforeSequencerTreasuryApply() {
+        Variant variant = VARIANTS.getFirst();
+        TradingCoreState opening = withPosition(variant, USER_ID, QUANTITY, ENTRY_PRICE,
+                DEFAULT_WALLET, POSITION_MARGIN);
+        opening = withPosition(opening, variant, SECOND_MAKER_ID, -QUANTITY, ENTRY_PRICE,
+                DEFAULT_WALLET, POSITION_MARGIN);
+        TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
+        ApplyFundingCommand command = new ApplyFundingCommand(701, SYMBOL, 1, 100_000);
+        TradingCoreReducer.FundingApplication expected = reducer.applyFundingWithFacts(marked, command);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(marked, identities);
+        assertThat(runtime.topology().accountLaneId(USER_ID))
+                .isNotEqualTo(runtime.topology().accountLaneId(SECOND_MAKER_ID));
+        runtime.startAccountLanes();
+        try {
+            RuntimePerpetualFundingProcessor.FundingResult actual =
+                    RuntimePerpetualFundingProcessor.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID),
+                            null, runtime, identities);
+
+            RuntimeStateParityChecker.assertMatches(expected.state(), identities, runtime);
+            assertThat(actual.payments()).isEqualTo(expected.payments());
+            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(USER_ID))
+                    .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()]).isEqualTo(1);
+            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(SECOND_MAKER_ID))
+                    .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()]).isEqualTo(1);
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    void crossLaneAdlMutatesOnlyTheTargetAndLiquidationOwners() {
+        Variant variant = VARIANTS.getFirst();
+        TradingCoreState opening = adlSetup(variant);
+        TradingCoreState marked = mark(opening, variant, 1, 1);
+        TradingCoreState liquidated = reducer.executeLiquidation(marked,
+                new ExecuteLiquidationCommand(1, liquidationSequence(marked), 1, 0));
+        long insuranceCoverage = variant.type() == ContractType.LINEAR_PERPETUAL ? 25 : 50_000;
+        TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(
+                        variant.settleAsset(), insuranceCoverage));
+        TradingCoreState beforeAdl = reducer.resolveLiquidation(funded,
+                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE,
+                        insuranceCoverage));
+        long residual = linearOrInverse(variant, 700, 40_000);
+        ExecuteAdlCommand command = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(),
+                CorePositionSide.NET, -QUANTITY, 150,
+                beforeAdl.riskState().markPrices().get(SYMBOL).priceSequence(), 5, residual);
+        TradingCoreState expected = reducer.executeAdl(beforeAdl, command);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(beforeAdl, identities);
+        runtime.startAccountLanes();
+        try {
+            RuntimePerpetualLiquidationProcessor.applyAdlRuntime(command, runtime, identities);
+
+            RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
+            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(USER_ID))
+                    .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()]).isEqualTo(1);
+            assertThat(runtime.accountLaneMetricsById(runtime.topology().accountLaneId(SECOND_MAKER_ID))
+                    .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()]).isEqualTo(1);
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
     void failingFirstCompletenessManifestReportsEveryMissingRow() {
         List<Row> rows = allRows();
         Map<String, Integer> counts = new TreeMap<>();

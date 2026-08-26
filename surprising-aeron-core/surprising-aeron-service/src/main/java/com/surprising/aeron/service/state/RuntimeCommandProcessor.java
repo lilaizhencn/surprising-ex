@@ -17,6 +17,7 @@ import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
+import com.surprising.product.api.ProductLine;
 import java.math.BigInteger;
 import java.util.UUID;
 import java.util.ArrayList;
@@ -615,6 +616,18 @@ public final class RuntimeCommandProcessor {
         if (runtime == null || identities == null || view == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime trigger order update");
         }
+        int symbolId = identities.symbolId(view.symbol());
+        long positionKey = triggerPositionKey(identities, runtime.productLine(), userId, view);
+        boolean instrumentSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
+        upsertTriggerOrder(runtime, userId, view, symbolId, positionKey, instrumentSettled);
+    }
+
+    public static void upsertTriggerOrder(TradingRuntimeState runtime, long userId,
+                                          CoreTriggerOrderStateView view, int symbolId,
+                                          long positionKey, boolean instrumentSettled) {
+        if (runtime == null || view == null || userId <= 0 || symbolId < 0 || positionKey < 0) {
+            throw new IllegalArgumentException("invalid prepared runtime trigger order update");
+        }
         runtime.assertOwner();
         if (view.userId() != userId || view.productLine() != runtime.productLine()) {
             throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
@@ -626,8 +639,7 @@ public final class RuntimeCommandProcessor {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
         }
-        int symbolId = identities.symbolId(instrument.symbol());
-        if (runtime.treasury().lifecycleSettlement(symbolId) != 0) {
+        if (instrumentSettled) {
             throw new CoreStateRejectedException("INSTRUMENT_SETTLED", "instrument is already settled");
         }
         if (runtime.triggerOrder(view.triggerOrderId()) != null) {
@@ -640,7 +652,7 @@ public final class RuntimeCommandProcessor {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
                     "client trigger order id already exists");
         }
-        validateTriggerPlacement(runtime, identities, userId, symbolId, view);
+        validateTriggerPlacement(runtime, userId, symbolId, positionKey, view);
         CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view);
         if (trigger.instrumentVersion() == 0) {
             trigger = trigger.withExecutionSnapshot(instrument.version(), instrument.makerFeeRatePpm(),
@@ -725,8 +737,8 @@ public final class RuntimeCommandProcessor {
         return true;
     }
 
-    private static void validateTriggerPlacement(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                                 long userId, int symbolId, CoreTriggerOrderStateView view) {
+    private static void validateTriggerPlacement(TradingRuntimeState runtime, long userId, int symbolId,
+                                                 long positionKey, CoreTriggerOrderStateView view) {
         UserRuntime user = runtime.user(userId);
         if (user == null) throw new CoreStateRejectedException("USER_NOT_FOUND", "user does not exist");
         if (!runtime.productLine().isDerivative()) return;
@@ -735,10 +747,7 @@ public final class RuntimeCommandProcessor {
             throw new CoreStateRejectedException("POSITION_MODE_MISMATCH",
                     "trigger position side does not match user position mode");
         }
-        String positionIdentity = view.positionSide().hedgeSide()
-                ? OrderReservation.normalizeSymbol(view.symbol()) + ':' + view.positionSide().name()
-                : OrderReservation.normalizeSymbol(view.symbol());
-        PositionRuntime position = runtime.position(identities.positionKey(userId, positionIdentity));
+        PositionRuntime position = runtime.position(positionKey);
         if (position == null || position.signedQuantitySteps() == 0) {
             throw new CoreStateRejectedException("TRIGGER_POSITION_REQUIRED",
                     "trigger order requires an open position");
@@ -778,6 +787,15 @@ public final class RuntimeCommandProcessor {
             throw new CoreStateRejectedException("TRIGGER_CLOSE_CAPACITY_EXCEEDED",
                     "trigger order quantity exceeds available position");
         }
+    }
+
+    public static long triggerPositionKey(RuntimeIdentityRegistry identities, ProductLine productLine,
+                                          long userId, CoreTriggerOrderStateView view) {
+        if (!productLine.isDerivative()) return 0;
+        String positionIdentity = view.positionSide().hedgeSide()
+                ? OrderReservation.normalizeSymbol(view.symbol()) + ':' + view.positionSide().name()
+                : OrderReservation.normalizeSymbol(view.symbol());
+        return identities.positionKey(userId, positionIdentity);
     }
 
     private static void updateTrigger(TradingRuntimeState runtime, CoreTriggerOrderState current,

@@ -85,56 +85,17 @@ public final class RuntimePerpetualFundingProcessor {
                 chunked ? command.maxUsers() : Integer.MAX_VALUE);
         ArrayList<Long> selectedUserIds = userPage.userIds();
 
+        Object[] laneResults = runtime.executeOwnerSettlements(selectedUserIds,
+                ignored -> applyLane(command, selectedUserIds, runtime, instrument, symbolId,
+                        settleAssetId, mark.markPriceTicks()));
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
-        for (Long userId : selectedUserIds) {
-            NavigableSet<Long> positionKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
-            if (positionKeys.isEmpty()) continue;
-            long requestedDelta = 0;
-            for (long positionKey : positionKeys) {
-                PositionRuntime position = runtime.position(positionKey);
-                long positionDelta = kernel.fundingDeltaUnits(instrument,
-                        position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
-                requestedDelta = Math.addExact(requestedDelta, positionDelta);
-            }
-
-            BalanceRuntime balance = runtime.balance(userId, settleAssetId);
-            if (balance == null) {
-                throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
-            }
-            long appliedDelta = requestedDelta >= 0 ? requestedDelta
-                    : Math.negateExact(Math.min(balance.availableUnits(), Math.negateExact(requestedDelta)));
-            if (appliedDelta != 0) {
-                runtime.replaceBalance(new BalanceRuntime(userId, settleAssetId,
-                        Math.addExact(balance.availableUnits(), appliedDelta), balance.lockedUnits()));
-                runtime.treasury().setFundingResidual(settleAssetId, Math.addExact(
-                        runtime.treasury().fundingResidual(settleAssetId), Math.negateExact(appliedDelta)));
-                runtime.advanceUserRevision(userId);
-            }
-
-            long debitRelief = Math.subtractExact(appliedDelta, requestedDelta);
-            for (long positionKey : positionKeys) {
-                PositionRuntime position = runtime.position(positionKey);
-                long amount = kernel.fundingDeltaUnits(instrument,
-                        position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
-                if (amount < 0 && debitRelief > 0) {
-                    long relief = Math.min(Math.negateExact(amount), debitRelief);
-                    amount = Math.addExact(amount, relief);
-                    debitRelief = Math.subtractExact(debitRelief, relief);
-                }
-                if (amount != 0) {
-                    long notional = PerpetualContractMath.notionalUnits(instrument.contractType(),
-                            position.signedQuantitySteps(), mark.markPriceTicks(),
-                            instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
-                            instrument.settleScaleUnits());
-                    payments.add(new CoreFundingPaymentView(command.settlementId(), userId, instrument.symbol(),
-                            position.marginMode(), position.positionSide(), instrument.settleAsset(),
-                            position.signedQuantitySteps(), notional, command.fundingRatePpm(), amount));
-                }
-            }
-            if (debitRelief != 0) {
-                throw new IllegalStateException("runtime funding debit relief was not fully allocated");
-            }
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        for (Object value : laneResults) {
+            if (!(value instanceof LaneFundingResult laneResult)) continue;
+            payments.addAll(laneResult.payments());
+            treasuryDelta.merge(laneResult.treasuryDelta());
         }
+        treasuryDelta.apply(runtime.treasury());
 
         boolean complete = !chunked || userPage.complete();
         long nextCursorUserId = complete ? 0 : userPage.nextCursorUserId();
@@ -151,6 +112,64 @@ public final class RuntimePerpetualFundingProcessor {
                 nextCursorUserId, selectedUserIds.size()));
     }
 
+    private static LaneFundingResult applyLane(ApplyFundingCommand command, Iterable<Long> selectedUserIds,
+                                               TradingRuntimeState runtime, CoreInstrumentState instrument,
+                                               int symbolId, int settleAssetId, long markPriceTicks) {
+        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        for (Long userId : selectedUserIds) {
+            if (userId == null || !runtime.currentLaneOwns(userId)) continue;
+            NavigableSet<Long> positionKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
+            if (positionKeys.isEmpty()) continue;
+            long requestedDelta = 0;
+            for (long positionKey : positionKeys) {
+                PositionRuntime position = runtime.position(positionKey);
+                long positionDelta = kernel.fundingDeltaUnits(instrument,
+                        position.signedQuantitySteps(), markPriceTicks, command.fundingRatePpm());
+                requestedDelta = Math.addExact(requestedDelta, positionDelta);
+            }
+
+            BalanceRuntime balance = runtime.balance(userId, settleAssetId);
+            if (balance == null) {
+                throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
+            }
+            long appliedDelta = requestedDelta >= 0 ? requestedDelta
+                    : Math.negateExact(Math.min(balance.availableUnits(), Math.negateExact(requestedDelta)));
+            if (appliedDelta != 0) {
+                runtime.replaceBalance(new BalanceRuntime(userId, settleAssetId,
+                        Math.addExact(balance.availableUnits(), appliedDelta), balance.lockedUnits()));
+                treasuryDelta.addFundingResidual(settleAssetId, Math.negateExact(appliedDelta));
+                runtime.advanceUserRevision(userId);
+            }
+
+            long debitRelief = Math.subtractExact(appliedDelta, requestedDelta);
+            for (long positionKey : positionKeys) {
+                PositionRuntime position = runtime.position(positionKey);
+                long amount = kernel.fundingDeltaUnits(instrument,
+                        position.signedQuantitySteps(), markPriceTicks, command.fundingRatePpm());
+                if (amount < 0 && debitRelief > 0) {
+                    long relief = Math.min(Math.negateExact(amount), debitRelief);
+                    amount = Math.addExact(amount, relief);
+                    debitRelief = Math.subtractExact(debitRelief, relief);
+                }
+                if (amount != 0) {
+                    long notional = PerpetualContractMath.notionalUnits(instrument.contractType(),
+                            position.signedQuantitySteps(), markPriceTicks,
+                            instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
+                            instrument.settleScaleUnits());
+                    payments.add(new CoreFundingPaymentView(command.settlementId(), userId, instrument.symbol(),
+                            position.marginMode(), position.positionSide(), instrument.settleAsset(),
+                            position.signedQuantitySteps(), notional, command.fundingRatePpm(), amount));
+                }
+            }
+            if (debitRelief != 0) {
+                throw new IllegalStateException("runtime funding debit relief was not fully allocated");
+            }
+        }
+        return new LaneFundingResult(payments, treasuryDelta);
+    }
+
     public record FundingResult(TradingRuntimeState state, List<CoreFundingPaymentView> payments,
                                 CoreFundingProgressView progress) {
         public FundingResult {
@@ -159,6 +178,10 @@ public final class RuntimePerpetualFundingProcessor {
             }
             payments = List.copyOf(payments);
         }
+    }
+
+    private record LaneFundingResult(List<CoreFundingPaymentView> payments,
+                                     RuntimeTreasuryDelta treasuryDelta) {
     }
 
     private static UserPage selectUsers(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {

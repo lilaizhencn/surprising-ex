@@ -180,6 +180,71 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
+    public <T> T executeUserSettlement(long userId, java.util.function.Supplier<T> operation) {
+        assertOwner();
+        if (userId <= 0 || operation == null) {
+            throw new IllegalArgumentException("invalid user settlement command");
+        }
+        return onLane(topology.accountLaneId(userId), AccountLaneOperationType.SETTLEMENT,
+                lane -> inLaneCommandScope(lane, ignored -> operation.get()));
+    }
+
+    public Object[] executeOwnerSettlements(Iterable<Long> userIds,
+                                            java.util.function.IntFunction<Object> operation) {
+        return executeOwnerSettlements(userIds, Long::longValue, operation);
+    }
+
+    public <E> Object[] executeOwnerSettlements(Iterable<E> values,
+                                                java.util.function.ToLongFunction<E> ownerUserId,
+                                                java.util.function.IntFunction<Object> operation) {
+        assertOwner();
+        if (values == null || ownerUserId == null || operation == null) {
+            throw new IllegalArgumentException("invalid owner settlement command");
+        }
+        boolean[] selected = new boolean[accountLanes.length];
+        for (E value : values) {
+            if (value == null) continue;
+            long userId = ownerUserId.applyAsLong(value);
+            if (userId > 0) selected[topology.accountLaneId(userId)] = true;
+        }
+        @SuppressWarnings("unchecked")
+        AccountLaneWorker.Ticket<Object>[] tickets = new AccountLaneWorker.Ticket[accountLanes.length];
+        Object[] results = new Object[accountLanes.length];
+        Throwable firstFailure = null;
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if (!selected[laneId]) continue;
+            int currentLaneId = laneId;
+            AccountLaneWorker.Operation<Object> laneOperation = lane ->
+                    inLaneCommandScope(lane, ignored -> operation.apply(currentLaneId));
+            AccountLaneWorker laneWorker = worker(laneId);
+            try {
+                if (laneWorker == null) results[laneId] = laneOperation.apply(accountLanes[laneId]);
+                else tickets[laneId] = laneWorker.submit(AccountLaneOperationType.SETTLEMENT, laneOperation);
+            } catch (Throwable failure) {
+                firstFailure = failure;
+                break;
+            }
+        }
+        for (int laneId = 0; laneId < tickets.length; laneId++) {
+            if (tickets[laneId] == null) continue;
+            try {
+                results[laneId] = worker(laneId).await(tickets[laneId]);
+            } catch (Throwable failure) {
+                if (firstFailure == null) firstFailure = failure;
+            }
+        }
+        if (firstFailure instanceof RuntimeException exception) throw exception;
+        if (firstFailure instanceof Error error) throw error;
+        if (firstFailure != null) throw new IllegalStateException("account lane lifecycle settlement failed", firstFailure);
+        return results;
+    }
+
+    public boolean currentLaneOwns(long userId) {
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped == null) throw new IllegalStateException("account lane command scope is required");
+        return topology.accountLaneId(userId) == scoped.laneId();
+    }
+
     private static void applyLaneUsers(AccountLaneState lane, java.util.List<Long> users, long coreSequence,
                                        long stateContribution, long fundsContribution) {
         for (long userId : users) {
@@ -789,6 +854,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public LiquidationRuntime liquidation(long liquidationId) {
         assertOwner();
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped != null) return scoped.liquidations.get(liquidationId);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             LiquidationRuntime liquidation = onLane(laneId, lane -> lane.liquidations.get(liquidationId));
             if (liquidation != null) return liquidation;
@@ -968,6 +1035,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public CoreTriggerOrderState triggerOrder(long triggerOrderId) {
         assertOwner();
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped != null) return scoped.triggerOrders.get(triggerOrderId);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             CoreTriggerOrderState order = onLane(laneId, lane -> lane.triggerOrders.get(triggerOrderId));
             if (order != null) return order;
@@ -984,6 +1053,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void removeTriggerOrder(long triggerOrderId) {
         assertOwner();
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped != null) {
+            scoped.triggerOrders.remove(triggerOrderId);
+            changedTriggerOrders.add(triggerOrderId);
+            return;
+        }
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> lane.triggerOrders.remove(triggerOrderId));
         }
@@ -1020,6 +1095,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
         assertOwner();
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped != null) return new TreeMap<>(scoped.triggerOrders);
         TreeMap<Long, CoreTriggerOrderState> values = new TreeMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             values.putAll(onLane(laneId, lane -> new TreeMap<>(lane.triggerOrders)));

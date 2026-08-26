@@ -255,4 +255,21 @@ class TradingRuntimeStateTest {
             state.close();
         }
     }
+
+    @Test
+    void lifecycleFailureReclaimsEverySubmittedOwnerTicket() {
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.startAccountLanes();
+        try {
+            assertThatThrownBy(() -> state.executeOwnerSettlements(java.util.List.of(203L, 8L), laneId -> {
+                if (laneId == 0) throw new IllegalStateException("injected lifecycle lane failure");
+                return laneId;
+            })).isInstanceOf(IllegalStateException.class)
+                    .hasMessage("injected lifecycle lane failure");
+
+            assertThat(state.executeUserSettlement(8, () -> "reclaimed")).isEqualTo("reclaimed");
+        } finally {
+            state.close();
+        }
+    }
 }
