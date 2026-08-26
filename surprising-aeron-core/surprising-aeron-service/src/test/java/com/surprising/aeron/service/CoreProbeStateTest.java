@@ -53,6 +53,8 @@ class CoreProbeStateTest {
             assertThat(metrics.commandContextCapacity()).isEqualTo(4_096);
             assertThat(metrics.matcherDispatchDepth()).isZero();
             assertThat(metrics.commandContextDepth()).isZero();
+            assertThat(metrics.accountLaneQueueCapacities()).containsOnly(4_096);
+            assertThat(metrics.accountLaneQueueHighWaterMarks()).containsOnly(1);
         }
     }
 

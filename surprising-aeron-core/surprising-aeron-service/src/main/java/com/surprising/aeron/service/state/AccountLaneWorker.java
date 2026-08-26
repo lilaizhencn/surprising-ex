@@ -1,0 +1,194 @@
+package com.surprising.aeron.service.state;
+
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+
+final class AccountLaneWorker implements AutoCloseable {
+
+    @FunctionalInterface
+    interface Operation<T> {
+        T apply(AccountLaneState state);
+    }
+
+    private static final long EMPTY_SEQUENCE = Long.MIN_VALUE;
+    private final AccountLaneState state;
+    private final Slot[] slots;
+    private final int mask;
+    private final Thread thread;
+    private final AtomicReference<Thread> sequencer = new AtomicReference<>();
+    private volatile long consumedSequence;
+    private volatile boolean running = true;
+    private volatile long offeredSequence;
+    private volatile long reclaimedSequence;
+    private int highWaterMark;
+
+    AccountLaneWorker(AccountLaneState state, String productLineName) {
+        if (state == null || productLineName == null || productLineName.isBlank()) {
+            throw new IllegalArgumentException("account lane worker state is required");
+        }
+        this.state = state;
+        this.slots = new Slot[state.queueCapacity()];
+        for (int index = 0; index < slots.length; index++) slots[index] = new Slot();
+        this.mask = slots.length - 1;
+        this.thread = Thread.ofPlatform()
+                .name("account-lane-" + productLineName + '-' + state.laneId())
+                .daemon(true)
+                .unstarted(this::run);
+        this.thread.start();
+    }
+
+    <T> T invoke(Operation<T> operation) {
+        if (operation == null) throw new IllegalArgumentException("account lane operation is required");
+        if (Thread.currentThread() == thread) return operation.apply(state);
+        return await(submit(operation));
+    }
+
+    <T> Ticket<T> submit(Operation<T> operation) {
+        if (operation == null) throw new IllegalArgumentException("account lane operation is required");
+        if (Thread.currentThread() == thread) {
+            throw new IllegalStateException("account lane owner cannot enqueue its own work");
+        }
+        bindSequencer();
+        if (!running) throw new IllegalStateException("account lane worker is closed");
+        offeredSequence = Math.incrementExact(offeredSequence);
+        long sequence = offeredSequence;
+        while (sequence - reclaimedSequence > slots.length) {
+            ensureRunning();
+            Thread.onSpinWait();
+        }
+        Slot slot = slots[(int) sequence & mask];
+        slot.operation = operation;
+        slot.result = null;
+        slot.failure = null;
+        int depth = (int) (sequence - consumedSequence);
+        highWaterMark = Math.max(highWaterMark, depth);
+        slot.requestSequence = sequence;
+        LockSupport.unpark(thread);
+        return new Ticket<>(this, slot, sequence);
+    }
+
+    <T> T await(Ticket<T> ticket) {
+        if (ticket == null || ticket.worker != this) {
+            throw new IllegalArgumentException("account lane ticket does not belong to this worker");
+        }
+        Slot slot = ticket.slot;
+        long sequence = ticket.sequence;
+        long expectedSequence = Math.incrementExact(reclaimedSequence);
+        if (sequence != expectedSequence) {
+            throw new IllegalStateException("account lane responses must be reclaimed in sequence: expected="
+                    + expectedSequence + ", actual=" + sequence);
+        }
+        while (slot.responseSequence != sequence) {
+            ensureRunning();
+            Thread.onSpinWait();
+        }
+        Object result = slot.result;
+        Throwable failure = slot.failure;
+        slot.operation = null;
+        slot.result = null;
+        slot.failure = null;
+        slot.requestSequence = EMPTY_SEQUENCE;
+        slot.responseSequence = EMPTY_SEQUENCE;
+        reclaimedSequence = sequence;
+        if (failure instanceof RuntimeException exception) throw exception;
+        if (failure instanceof Error error) throw error;
+        if (failure != null) throw new IllegalStateException("account lane operation failed", failure);
+        @SuppressWarnings("unchecked")
+        T typed = (T) result;
+        return typed;
+    }
+
+    int queueDepth() {
+        return Math.toIntExact(offeredSequence - consumedSequence);
+    }
+
+    int queueCapacity() {
+        return slots.length;
+    }
+
+    int highWaterMark() {
+        return highWaterMark;
+    }
+
+    String ownerThreadName() {
+        return thread.getName();
+    }
+
+    boolean ownerThread() {
+        return Thread.currentThread() == thread;
+    }
+
+    @Override
+    public void close() {
+        if (Thread.currentThread() == thread) throw new IllegalStateException("account lane cannot close itself");
+        if (offeredSequence != reclaimedSequence) {
+            throw new IllegalStateException("account lane cannot close with unreclaimed responses");
+        }
+        running = false;
+        LockSupport.unpark(thread);
+        boolean interrupted = false;
+        while (thread.isAlive()) {
+            try {
+                thread.join();
+            } catch (InterruptedException exception) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+    }
+
+    private void run() {
+        state.bindOwner();
+        long nextSequence = 1;
+        while (running || nextSequence <= offeredSequence) {
+            Slot slot = slots[(int) nextSequence & mask];
+            if (slot.requestSequence != nextSequence) {
+                LockSupport.park();
+                continue;
+            }
+            try {
+                slot.result = slot.operation.apply(state);
+            } catch (Throwable failure) {
+                slot.failure = failure;
+            }
+            slot.responseSequence = nextSequence;
+            consumedSequence = nextSequence;
+            nextSequence = Math.incrementExact(nextSequence);
+        }
+        state.releaseOwner();
+    }
+
+    private void bindSequencer() {
+        Thread current = Thread.currentThread();
+        Thread bound = sequencer.get();
+        if (bound == null) {
+            if (!sequencer.compareAndSet(null, current)) bound = sequencer.get();
+            else bound = current;
+        }
+        if (bound != current) throw new IllegalStateException("account lane queue has multiple sequencer writers");
+    }
+
+    private void ensureRunning() {
+        if (!running && !thread.isAlive()) throw new IllegalStateException("account lane worker terminated");
+    }
+
+    static final class Ticket<T> {
+        private final AccountLaneWorker worker;
+        private final Slot slot;
+        private final long sequence;
+
+        private Ticket(AccountLaneWorker worker, Slot slot, long sequence) {
+            this.worker = worker;
+            this.slot = slot;
+            this.sequence = sequence;
+        }
+    }
+
+    private static final class Slot {
+        private volatile long requestSequence = EMPTY_SEQUENCE;
+        private volatile long responseSequence = EMPTY_SEQUENCE;
+        private Operation<?> operation;
+        private Object result;
+        private Throwable failure;
+    }
+}

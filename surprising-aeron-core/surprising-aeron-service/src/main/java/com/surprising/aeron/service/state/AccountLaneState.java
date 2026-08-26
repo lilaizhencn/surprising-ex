@@ -36,6 +36,7 @@ public final class AccountLaneState {
     private long committedSequence;
     private long localStateHash = 0xcbf29ce484222325L;
     private long localFundsHash = 0xcbf29ce484222325L;
+    private Thread owner;
 
     AccountLaneState(int laneId, int queueCapacity) {
         if (laneId < 0 || laneId >= Long.SIZE || queueCapacity <= 0) {
@@ -45,26 +46,53 @@ public final class AccountLaneState {
         this.queueCapacity = queueCapacity;
     }
 
+    void bindOwner() {
+        Thread current = Thread.currentThread();
+        if (owner == null) owner = current;
+        else if (owner != current) throw new IllegalStateException("account lane is bound to another thread");
+    }
+
+    void releaseOwner() {
+        if (owner != Thread.currentThread()) throw new IllegalStateException("account lane owner mismatch");
+        balances.forEachValue(values -> values.forEachValue(BalanceRuntime::releaseOwnerForHandoff));
+        owner = null;
+    }
+
+    void releaseOwnerForHandoff() {
+        if (owner != null && owner != Thread.currentThread()) {
+            throw new IllegalStateException("account lane owner mismatch");
+        }
+        balances.forEachValue(values -> values.forEachValue(BalanceRuntime::releaseOwnerForHandoff));
+        owner = null;
+    }
+
+    void assertOwner() {
+        bindOwner();
+    }
+
     public int laneId() { return laneId; }
     public int queueCapacity() { return queueCapacity; }
-    public long revision() { return revision; }
-    public long appliedSequence() { return appliedSequence; }
-    public long committedSequence() { return committedSequence; }
-    public long localStateHash() { return localStateHash; }
-    public long localFundsHash() { return localFundsHash; }
-    public boolean owns(long userId) { return userIds.contains(userId); }
-    public int userCount() { return userIds.size(); }
+    public long revision() { assertOwner(); return revision; }
+    public long appliedSequence() { assertOwner(); return appliedSequence; }
+    public long committedSequence() { assertOwner(); return committedSequence; }
+    public long localStateHash() { assertOwner(); return localStateHash; }
+    public long localFundsHash() { assertOwner(); return localFundsHash; }
+    public boolean owns(long userId) { assertOwner(); return userIds.contains(userId); }
+    public int userCount() { assertOwner(); return userIds.size(); }
 
     void registerUser(long userId) {
+        assertOwner();
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         userIds.add(userId);
     }
 
     void removeUser(long userId) {
+        assertOwner();
         userIds.remove(userId);
     }
 
     void markPendingReservation(long orderId, long coreSequence) {
+        assertOwner();
         if (orderId <= 0 || coreSequence <= committedSequence) {
             throw new IllegalArgumentException("invalid pending reservation identity");
         }
@@ -75,6 +103,7 @@ public final class AccountLaneState {
     }
 
     void completePendingReservation(long orderId, long coreSequence) {
+        assertOwner();
         long pendingSequence = pendingReservationSequences.getIfAbsent(orderId, 0);
         if (pendingSequence != coreSequence) {
             throw new IllegalStateException("pending reservation sequence mismatch");
@@ -83,10 +112,12 @@ public final class AccountLaneState {
     }
 
     boolean pendingReservation(long orderId) {
+        assertOwner();
         return pendingReservationSequences.containsKey(orderId);
     }
 
     long pendingReservedUnits(long userId, int assetId) {
+        assertOwner();
         long[] total = {0};
         pendingReservationSequences.forEachKeyValue((orderId, ignored) -> {
             ReservationRuntime reservation = reservations.get(orderId);
@@ -98,6 +129,7 @@ public final class AccountLaneState {
     }
 
     int pendingReservationCount(long userId) {
+        assertOwner();
         int[] count = {0};
         pendingReservationSequences.forEachKeyValue((orderId, ignored) -> {
             ReservationRuntime reservation = reservations.get(orderId);
@@ -107,10 +139,12 @@ public final class AccountLaneState {
     }
 
     boolean hasPendingReservations() {
+        assertOwner();
         return !pendingReservationSequences.isEmpty();
     }
 
     void applied(long coreSequence, long userId, long stateContribution, long fundsContribution) {
+        assertOwner();
         if (coreSequence < appliedSequence || userId <= 0 || !userIds.contains(userId)) {
             throw new IllegalStateException("account lane apply is out of order");
         }
@@ -121,14 +155,25 @@ public final class AccountLaneState {
     }
 
     void committed(long coreSequence) {
+        assertOwner();
         if (coreSequence < committedSequence || coreSequence > appliedSequence) {
             throw new IllegalStateException("account lane commit is out of order");
         }
         committedSequence = coreSequence;
     }
 
+    void readFence(long coreSequence) {
+        assertOwner();
+        if (coreSequence < committedSequence || appliedSequence != committedSequence) {
+            throw new IllegalStateException("account lane read fence crossed uncommitted work");
+        }
+        appliedSequence = coreSequence;
+        committedSequence = coreSequence;
+    }
+
     void restore(long revision, long appliedSequence, long committedSequence,
                  long localStateHash, long localFundsHash, LongHashSet restoredUsers) {
+        assertOwner();
         if (revision < 0 || appliedSequence < committedSequence || committedSequence < 0
                 || localStateHash == 0 || localFundsHash == 0 || restoredUsers == null) {
             throw new IllegalArgumentException("invalid account lane snapshot");
@@ -144,10 +189,12 @@ public final class AccountLaneState {
     }
 
     LongHashSet userIdsSnapshot() {
+        assertOwner();
         return new LongHashSet(userIds);
     }
 
     AccountLaneSnapshot snapshot(long fenceSequence, TradingCoreState laneState) {
+        assertOwner();
         if (!pendingReservationSequences.isEmpty()) {
             throw new IllegalStateException("pending reservation cannot cross snapshot fence");
         }
@@ -164,6 +211,7 @@ public final class AccountLaneState {
     }
 
     void restore(AccountLaneSnapshot snapshot) {
+        assertOwner();
         if (snapshot == null || snapshot.laneId() != laneId) {
             throw new IllegalArgumentException("account lane snapshot route mismatch");
         }

@@ -15,7 +15,10 @@ public record CoreLaneMetrics(
         long committedCoreSequence,
         long[] accountLaneRevisions,
         long[] accountLaneAppliedSequences,
-        long[] accountLaneCommittedSequences) {
+        long[] accountLaneCommittedSequences,
+        int[] accountLaneQueueDepths,
+        int[] accountLaneQueueCapacities,
+        int[] accountLaneQueueHighWaterMarks) {
 
     public CoreLaneMetrics {
         if (matchingEngineCount <= 0 || accountLaneCount <= 0 || matcherDispatchDepth < 0
@@ -25,14 +28,30 @@ public record CoreLaneMetrics(
                 || commandContextCapacity <= 0 || commandContextHighWaterMark < commandContextDepth
                 || committedCoreSequence < 0 || accountLaneRevisions == null
                 || accountLaneAppliedSequences == null || accountLaneCommittedSequences == null
+                || accountLaneQueueDepths == null || accountLaneQueueCapacities == null
+                || accountLaneQueueHighWaterMarks == null
                 || accountLaneRevisions.length != accountLaneCount
                 || accountLaneAppliedSequences.length != accountLaneCount
-                || accountLaneCommittedSequences.length != accountLaneCount) {
+                || accountLaneCommittedSequences.length != accountLaneCount
+                || accountLaneQueueDepths.length != accountLaneCount
+                || accountLaneQueueCapacities.length != accountLaneCount
+                || accountLaneQueueHighWaterMarks.length != accountLaneCount) {
             throw new IllegalArgumentException("invalid Core lane metrics");
+        }
+        for (int laneId = 0; laneId < accountLaneCount; laneId++) {
+            if (accountLaneQueueDepths[laneId] < 0 || accountLaneQueueCapacities[laneId] <= 0
+                    || accountLaneQueueDepths[laneId] > accountLaneQueueCapacities[laneId]
+                    || accountLaneQueueHighWaterMarks[laneId] < accountLaneQueueDepths[laneId]
+                    || accountLaneQueueHighWaterMarks[laneId] > accountLaneQueueCapacities[laneId]) {
+                throw new IllegalArgumentException("invalid Account Lane queue metrics");
+            }
         }
         accountLaneRevisions = accountLaneRevisions.clone();
         accountLaneAppliedSequences = accountLaneAppliedSequences.clone();
         accountLaneCommittedSequences = accountLaneCommittedSequences.clone();
+        accountLaneQueueDepths = accountLaneQueueDepths.clone();
+        accountLaneQueueCapacities = accountLaneQueueCapacities.clone();
+        accountLaneQueueHighWaterMarks = accountLaneQueueHighWaterMarks.clone();
     }
 
     @Override
@@ -43,4 +62,13 @@ public record CoreLaneMetrics(
 
     @Override
     public long[] accountLaneCommittedSequences() { return accountLaneCommittedSequences.clone(); }
+
+    @Override
+    public int[] accountLaneQueueDepths() { return accountLaneQueueDepths.clone(); }
+
+    @Override
+    public int[] accountLaneQueueCapacities() { return accountLaneQueueCapacities.clone(); }
+
+    @Override
+    public int[] accountLaneQueueHighWaterMarks() { return accountLaneQueueHighWaterMarks.clone(); }
 }

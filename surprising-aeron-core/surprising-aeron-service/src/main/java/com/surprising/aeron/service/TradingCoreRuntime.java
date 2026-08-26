@@ -16,7 +16,7 @@ import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.LaneTopology;
-import com.surprising.aeron.service.state.AccountLaneState;
+import com.surprising.aeron.service.state.AccountLaneView;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.CompletableFuture;
@@ -85,6 +85,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             owner = current;
             runtimeState.bindOwner();
             identities.assertOwner();
+            runtimeState.startAccountLanes();
         } else if (owner != current) {
             throw new IllegalStateException("trading runtime is bound to another thread");
         }
@@ -109,7 +110,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return topology.accountLaneId(userId);
     }
 
-    public AccountLaneState accountLane(long userId) {
+    public AccountLaneView accountLane(long userId) {
         assertOwner();
         return runtimeState.accountLane(userId);
     }
@@ -278,8 +279,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     private void restoreIndexes(TradingCoreState restored) {
+        runtimeState.close();
         identities = new RuntimeIdentityRegistry();
         runtimeState = RuntimeStateProjector.project(restored, identities, topology);
+        runtimeState.bindOwner();
+        runtimeState.startAccountLanes();
         runtimeState.clearChangedKeys();
         committedRevision = restored.revision();
         committedBusinessStateHash = restored.businessStateHash();
@@ -296,6 +300,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     @Override
     public void close() {
+        runtimeState.close();
         matcher.close();
     }
 }

@@ -83,8 +83,8 @@ public final class RuntimeCommandProcessor {
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                     "transfer available balance is insufficient");
         }
-        balance.replace(Math.subtractExact(balance.availableUnits(), command.amountUnits()), balance.lockedUnits());
-        runtime.markBalanceChanged(userId, assetId);
+        runtime.replaceBalance(new BalanceRuntime(userId, assetId,
+                Math.subtractExact(balance.availableUnits(), command.amountUnits()), balance.lockedUnits()));
         runtime.putPendingTransfer(transfer);
         runtime.advanceUserRevision(userId);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
@@ -266,17 +266,22 @@ public final class RuntimeCommandProcessor {
         long units = Math.absExact(command.amountUnits());
         long nextMargin;
         if (command.amountUnits() > 0) {
-            balance.reserve(units);
+            if (balance.availableUnits() < units) {
+                throw new IllegalArgumentException("insufficient runtime balance");
+            }
+            runtime.replaceBalance(new BalanceRuntime(userId, position.assetId(),
+                    balance.availableUnits() - units, Math.addExact(balance.lockedUnits(), units)));
             nextMargin = Math.addExact(position.positionMarginUnits(), units);
         } else {
             if (position.positionMarginUnits() < units) {
                 throw new CoreStateRejectedException("POSITION_MARGIN_INSUFFICIENT",
                         "position margin is insufficient");
             }
-            balance.release(units);
+            if (balance.lockedUnits() < units) throw new IllegalArgumentException("invalid runtime release");
+            runtime.replaceBalance(new BalanceRuntime(userId, position.assetId(),
+                    Math.addExact(balance.availableUnits(), units), balance.lockedUnits() - units));
             nextMargin = Math.subtractExact(position.positionMarginUnits(), units);
         }
-        runtime.markBalanceChanged(userId, position.assetId());
         runtime.replacePosition(positionKey, new PositionRuntime(position.userId(), position.symbolId(),
                 position.assetId(), position.marginMode(), position.positionSide(), position.instrumentVersion(),
                 position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
@@ -375,8 +380,9 @@ public final class RuntimeCommandProcessor {
         if (balance == null) throw new IllegalStateException("rejected order balance is missing");
         long releaseUnits = reservation.reservedUnits();
         if (releaseUnits > 0) {
-            balance.release(releaseUnits);
-            runtime.markBalanceChanged(userId, reservation.assetId());
+            if (balance.lockedUnits() < releaseUnits) throw new IllegalArgumentException("invalid runtime release");
+            runtime.replaceBalance(new BalanceRuntime(userId, reservation.assetId(),
+                    Math.addExact(balance.availableUnits(), releaseUnits), balance.lockedUnits() - releaseUnits));
         }
         runtime.replaceOrder(order.withStatus(CoreOrderStatus.REJECTED, Math.incrementExact(order.revision())));
         runtime.removeReservation(orderId, userId);

@@ -373,6 +373,14 @@ public final class CoreProbeState implements AutoCloseable {
             return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
         }
         if (message.header().kind() == WireMessageKind.QUERY
+                && accountLaneReadQuery(message.header().messageType())) {
+            if (singleUserLaneQuery(message.header().messageType()) && message.header().userId() > 0) {
+                runtimePlaceOrderState.readFence(message.header().userId(), committedCoreSequence);
+            } else {
+                runtimePlaceOrderState.readFenceAll(committedCoreSequence);
+            }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.STATE_HASH_QUERY) {
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount, stateHash());
         }
@@ -833,7 +841,8 @@ public final class CoreProbeState implements AutoCloseable {
                             true, "NO_NATIVE_COMMAND").withCoreSequence(nextAppliedCommandCount),
                     expectedLaneMask, validAccountLaneMask());
             long appliedLaneMask = runtimePlaceOrderState.applyLaneSequence(nextAppliedCommandCount,
-                    commandDelta.userIds(), snapshotState.businessStateHash(), rollingFundsStateHash.value());
+                    commandDelta.userIds(), commandLaneContext.matchingResult(),
+                    snapshotState.businessStateHash(), rollingFundsStateHash.value());
             if (appliedLaneMask != expectedLaneMask) {
                 throw new IllegalStateException("single command account lane mask mismatch");
             }
@@ -1271,7 +1280,7 @@ public final class CoreProbeState implements AutoCloseable {
         CoreCommandDelta delta = commandDelta(batch.beforeState, snapshotState, true);
         validateFundsConservation(pending.command(), batch.beforeState, snapshotState, delta);
         long laneMask = runtimePlaceOrderState.applyLaneSequence(batch.sequence, commandChangedUserIds,
-                snapshotState.businessStateHash(), rollingFundsStateHash.value());
+                laneContext.matchingResult(), snapshotState.businessStateHash(), rollingFundsStateHash.value());
         if (laneMask != laneContext.expectedLaneMask()) {
             throw failMatching(pending, "order batch account lane mask mismatch", null);
         }
@@ -2601,7 +2610,7 @@ public final class CoreProbeState implements AutoCloseable {
         completeSnapshotProjectionBatch();
         materializeChangeAccumulators();
         long laneMask = runtimePlaceOrderState.applyLaneSequence(pending.sequence(), commandChangedUserIds,
-                snapshotState.businessStateHash(), rollingFundsStateHash.value());
+                laneContext.matchingResult(), snapshotState.businessStateHash(), rollingFundsStateHash.value());
         if (laneMask != laneContext.expectedLaneMask()) {
             throw failMatching(pending, "account lane mask differs from immutable matcher result", null);
         }
@@ -2649,6 +2658,26 @@ public final class CoreProbeState implements AutoCloseable {
             return isMatchingCommand(message.header().messageType());
         }
         return isCommittedExportQuery(message);
+    }
+
+    private static boolean accountLaneReadQuery(CoreMessageType type) {
+        return switch (type) {
+            case USER_STATE_HASH_QUERY, ORDER_STATE_HASH_QUERY, USER_STATE_QUERY, ORDER_STATE_QUERY,
+                    CLIENT_ORDER_STATE_QUERY, USER_OPEN_ORDERS_QUERY, TRIGGER_ORDER_QUERY,
+                    USER_OPEN_TRIGGER_ORDERS_QUERY, FUNDING_PROGRESS_QUERY, SETTLEMENT_PROGRESS_QUERY,
+                    ADL_CANDIDATE_QUERY, RISK_STATE_QUERY, ALGO_ORDER_QUERY, LIQUIDATION_WORK_QUERY,
+                    ORDER_PREFLIGHT_QUERY -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean singleUserLaneQuery(CoreMessageType type) {
+        return switch (type) {
+            case USER_STATE_HASH_QUERY, USER_STATE_QUERY, CLIENT_ORDER_STATE_QUERY,
+                    USER_OPEN_ORDERS_QUERY, USER_OPEN_TRIGGER_ORDERS_QUERY, RISK_STATE_QUERY,
+                    ORDER_PREFLIGHT_QUERY -> true;
+            default -> false;
+        };
     }
 
     private static boolean isCommittedExportQuery(CoreMessage message) {
@@ -2711,12 +2740,9 @@ public final class CoreProbeState implements AutoCloseable {
                 beforeTreasury.roundingResidualBalances(), afterTreasury.roundingResidualBalances());
         long clearing = treasuryDelta(beforeTreasury.clearingPnlBalances(), afterTreasury.clearingPnlBalances());
         boolean treasuryAckAssigned = false;
-        for (int laneId = 0; laneId < matchingAdapter.topology().accountLaneCount(); laneId++) {
-            long bit = 1L << laneId;
-            if ((context.expectedLaneMask() & bit) == 0) continue;
-            var lane = runtimePlaceOrderState.accountLaneById(laneId);
+        for (var lane : runtimePlaceOrderState.accountLaneViews(context.expectedLaneMask())) {
             boolean aggregate = !treasuryAckAssigned;
-            context.acknowledge(new AccountLaneAck(context.coreSequence(), laneId, lane.revision(),
+            context.acknowledge(new AccountLaneAck(context.coreSequence(), lane.laneId(), lane.revision(),
                     lane.localStateHash(), lane.localFundsHash(), aggregate ? fee : 0,
                     aggregate ? insurance : 0, aggregate ? deficit : 0,
                     aggregate ? fundingResidual : 0, aggregate ? roundingResidual : 0,
@@ -3092,11 +3118,17 @@ public final class CoreProbeState implements AutoCloseable {
         long[] revisions = new long[count];
         long[] applied = new long[count];
         long[] committed = new long[count];
+        int[] queueDepths = new int[count];
+        int[] queueCapacities = new int[count];
+        int[] queueHighWaterMarks = new int[count];
         for (int laneId = 0; laneId < count; laneId++) {
             var lane = runtimePlaceOrderState.accountLaneById(laneId);
             revisions[laneId] = lane.revision();
             applied[laneId] = lane.appliedSequence();
             committed[laneId] = lane.committedSequence();
+            queueDepths[laneId] = lane.queueDepth();
+            queueCapacities[laneId] = lane.queueCapacity();
+            queueHighWaterMarks[laneId] = lane.queueHighWaterMark();
         }
         return new CoreLaneMetrics(matchingAdapter.topology().matchingEngineCount(), count,
                 matchingAdapter.dispatchDepth(), matchingAdapter.dispatchCapacity(),
@@ -3104,7 +3136,7 @@ public final class CoreProbeState implements AutoCloseable {
                 matchingCompletions.capacity(), matchingCompletions.highWaterMark(),
                 laneCommandContexts.inFlight(), laneCommandContexts.capacity(),
                 laneCommandContexts.highWaterMark(), committedCoreSequence,
-                revisions, applied, committed);
+                revisions, applied, committed, queueDepths, queueCapacities, queueHighWaterMarks);
     }
 
     public long firstPendingMatchingSequence() {

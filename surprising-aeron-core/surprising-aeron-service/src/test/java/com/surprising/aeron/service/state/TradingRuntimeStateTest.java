@@ -20,7 +20,8 @@ class TradingRuntimeStateTest {
         state.putClientOrder(7, 91, 11);
 
         assertThat(state.user(7).userId()).isEqualTo(7);
-        assertThat(state.balance(7, 3)).isSameAs(balance);
+        assertThat(state.balance(7, 3)).isNotSameAs(balance);
+        assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
         assertThat(state.order(11).symbolId()).isEqualTo(5);
         assertThat(state.reservation(11).reservedUnits()).isEqualTo(200);
         assertThat(state.orderIdByClient(7, 91)).isEqualTo(11);
@@ -225,5 +226,33 @@ class TradingRuntimeStateTest {
 
         assertThat(state.activeLiquidation(7, 5,
                 com.surprising.aeron.protocol.CorePositionSide.NET)).isNull();
+    }
+
+    @Test
+    void routesStateAndReadFencesThroughTheFixedAccountOwner() {
+        TradingRuntimeState state = new TradingRuntimeState(LaneTopology.characterization());
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.startAccountLanes();
+        try {
+            var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
+                    .withCoreSequence(1);
+            long mask = state.applyLaneSequence(1, java.util.List.of(7L), result, 3, 5);
+
+            assertThatThrownBy(() -> state.readFence(7, 1))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("uncommitted");
+            state.commitLaneSequence(1, mask);
+            state.readFence(7, 1);
+
+            AccountLaneView lane = state.accountLane(7);
+            assertThat(lane.ownerThreadName()).startsWith("account-lane-");
+            assertThat(lane.appliedSequence()).isEqualTo(1);
+            assertThat(lane.committedSequence()).isEqualTo(1);
+            assertThat(lane.queueHighWaterMark()).isGreaterThan(0);
+            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
+        } finally {
+            state.close();
+        }
     }
 }
