@@ -45,9 +45,9 @@ Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Acco
 以 expected/ack Lane mask 提交，不生成 `SettlementPlan` 或 event 副本；Treasury 保持 Sequencer owner。全局 Core
 sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
 4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、ACK 位图、全局 commit
-cursor、lane-aware 生命周期和实际 Lane snapshot section 已落地。当前 Lane state 仍由 Cluster owner 同步驱动，固定
-Account Lane owner thread、双向 SPSC queue 和 owner-routed query/read fence 尚未落地，因此不能把 P10-C/P10-D 或完整
-P10 标记为完成。P10-G 的真实 HTTP/JFR 门禁见
+cursor、lane-aware 生命周期和实际 Lane snapshot section 已落地。`AccountLaneWorker[]` 为每个 Lane 创建固定 platform
+owner thread；账户 Map mutation、同一 immutable result 引用 fanout、ACK、owner-routed query/read fence 和 Lane snapshot
+capture/restore 都经过预分配槽位的有界双向 SPSC ring。P10-G 的真实 HTTP/JFR 门禁见
 [P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)，没有对应 artifact 时不得宣称生产认证完成。
 
 ## 协议约束

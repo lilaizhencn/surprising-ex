@@ -1,7 +1,6 @@
 # P10 单物理 Product Core 确定性 Lane 实施规范
 
-> 状态：迁移进行中，尚未完成。协议、共享 matcher pipeline、Lane 状态分片、ACK/快照和容量门禁已落地；固定
-> Account Lane owner thread、Sequencer/Lane 双向 SPSC queue、owner-routed query/read fence 以及 P10-G 三节点容量认证仍未完成。
+> 状态：P10-A 至 P10-F 代码、协议和快照迁移已落地；P10-G 三节点容量认证必须在目标环境生成 artifact 后单独签字。
 >
 > 本文定义 P10 的唯一实施方向。P10 不拆分物理 Product Core，不改变“一条产品线对应一个三节点
 > Aeron Cluster”的部署边界。每个 Product Core 只运行一个共享的 `ExchangeCore`；Matcher Lane 仅指该实例内部
@@ -12,8 +11,9 @@
 Trading State v24 和 sectioned snapshot v14。生产默认 `matchingEngineCount=4`、`accountLaneCount=4`；旧协议、旧 route
 和旧快照均 fail closed。关键落点是 `LaneTopology`、`AccountLaneState[]`、`LaneCommandContextRing`、
 `DeterministicExchangeCoreAdapter`、`CoreProbeState`、`SectionedCoreSnapshotWriter/Parser/Recovery` 和
-`HttpOpenLoopWorkloadMain`。当前 `AccountLaneState[]` 仍由 Cluster owner 同步驱动，不能作为 P10-C/P10-D 的固定
-owner-thread/SPSC 完成证据。P10-G 使用 `qualification=P10`，会拒绝少于 1,000 用户、200 symbol、100k/s、40 分钟或
+`HttpOpenLoopWorkloadMain`。`AccountLaneWorker[]` 为每个 Lane 创建固定 platform owner thread；账户 Map mutation、
+immutable result fanout、ACK、owner-routed query/read fence 和 snapshot capture/restore 使用有界双向 SPSC ring，
+Sequencer 不直接遍历 Lane Map。P10-G 使用 `qualification=P10`，会拒绝少于 1,000 用户、200 symbol、100k/s、40 分钟或
 没有活动 JFR 的运行；输出的 HDR、events JSONL、accounting JSON、资金对账和三节点故障记录必须一起归档。
 
 ## 1. 目标与非目标
@@ -578,7 +578,7 @@ P10 实现前必须为“matcher 提交后结果未知”定义并验证精确�
 
 ## 14. 完成定义
 
-只有以下条件全部满足，P10 才能从“迁移进行中”改为“完成”：
+只有以下条件全部满足，P10 才能从“代码迁移完成、待生产认证”改为“完成”：
 
 - P10-A 至 P10-G 的生产代码和协议/快照版本全部落地；Account Lane 默认启用且生产默认数为 4，不存在兼容 fallback。
 - 一个 ProductLine 仍只有一个物理三节点 Product Core、一个 global Core sequence 和一条 Core Fact 链。
