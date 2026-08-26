@@ -126,7 +126,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             if (restoredHashes.engineHash() != snapshot.engineStateHash()
                     || restoredHashes.bookHash() != snapshot.bookStateHash()) {
                 throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
-                        snapshot.snapshotId(), "restored exchange-core state hash mismatch");
+                        snapshot.snapshotId(), "restored exchange-core state hash mismatch"
+                                + " (expectedEngine=" + snapshot.engineStateHash()
+                                + ", actualEngine=" + restoredHashes.engineHash()
+                                + ", expectedBook=" + snapshot.bookStateHash()
+                                + ", actualBook=" + restoredHashes.bookHash() + ')');
             }
         } catch (RuntimeException exception) {
             stop();
@@ -532,11 +536,22 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private CompletableFuture<StateHashes> currentStateHashesAsync() {
         return api.processReport(new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0)
-                .thenApply(report -> new StateHashes(report.getStateHash(), report.getHashCodes().entrySet().stream()
-                        .filter(entry -> entry.getKey().submodule
-                                == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType.MATCHING_ORDER_BOOKS)
-                        .mapToInt(Map.Entry::getValue)
-                        .reduce(0, (left, right) -> left * 31 + right)));
+                .thenApply(report -> {
+                    int engineHash = 1;
+                    int bookHash = 0;
+                    for (Map.Entry<exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleKey,
+                            Integer> entry : report.getHashCodes().entrySet()) {
+                        engineHash = engineHash * 31 + entry.getKey().submodule.code;
+                        engineHash = engineHash * 31 + entry.getKey().moduleId;
+                        engineHash = engineHash * 31 + entry.getValue();
+                        if (entry.getKey().submodule
+                                == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType
+                                .MATCHING_ORDER_BOOKS) {
+                            bookHash = bookHash * 31 + entry.getValue();
+                        }
+                    }
+                    return new StateHashes(engineHash, bookHash);
+                });
     }
 
     public CompletableFuture<List<CoreBookLevelView>> orderBookLevelsAsync(String requestedSymbol, int depth) {
