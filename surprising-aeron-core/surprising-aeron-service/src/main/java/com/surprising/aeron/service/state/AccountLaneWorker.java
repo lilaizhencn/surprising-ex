@@ -15,12 +15,12 @@ final class AccountLaneWorker implements AutoCloseable {
     private final Slot[] slots;
     private final int mask;
     private final Thread thread;
+    private final AccountLaneMetricsTracker metrics;
     private final AtomicReference<Thread> sequencer = new AtomicReference<>();
     private volatile long consumedSequence;
     private volatile boolean running = true;
     private volatile long offeredSequence;
     private volatile long reclaimedSequence;
-    private int highWaterMark;
 
     AccountLaneWorker(AccountLaneState state, String productLineName) {
         if (state == null || productLineName == null || productLineName.isBlank()) {
@@ -30,6 +30,7 @@ final class AccountLaneWorker implements AutoCloseable {
         this.slots = new Slot[state.queueCapacity()];
         for (int index = 0; index < slots.length; index++) slots[index] = new Slot();
         this.mask = slots.length - 1;
+        this.metrics = new AccountLaneMetricsTracker(slots.length);
         this.thread = Thread.ofPlatform()
                 .name("account-lane-" + productLineName + '-' + state.laneId())
                 .daemon(true)
@@ -38,30 +39,39 @@ final class AccountLaneWorker implements AutoCloseable {
     }
 
     <T> T invoke(Operation<T> operation) {
+        return invoke(AccountLaneOperationType.COMMAND, operation);
+    }
+
+    <T> T invoke(AccountLaneOperationType type, Operation<T> operation) {
         if (operation == null) throw new IllegalArgumentException("account lane operation is required");
         if (Thread.currentThread() == thread) return operation.apply(state);
-        return await(submit(operation));
+        return await(submit(type, operation));
     }
 
     <T> Ticket<T> submit(Operation<T> operation) {
+        return submit(AccountLaneOperationType.COMMAND, operation);
+    }
+
+    <T> Ticket<T> submit(AccountLaneOperationType type, Operation<T> operation) {
+        if (type == null) throw new IllegalArgumentException("account lane operation type is required");
         if (operation == null) throw new IllegalArgumentException("account lane operation is required");
         if (Thread.currentThread() == thread) {
             throw new IllegalStateException("account lane owner cannot enqueue its own work");
         }
         bindSequencer();
         if (!running) throw new IllegalStateException("account lane worker is closed");
-        offeredSequence = Math.incrementExact(offeredSequence);
-        long sequence = offeredSequence;
-        while (sequence - reclaimedSequence > slots.length) {
-            ensureRunning();
-            Thread.onSpinWait();
+        long sequence = Math.incrementExact(offeredSequence);
+        if (sequence - reclaimedSequence > slots.length) {
+            metrics.rejected();
+            throw new IllegalStateException("account lane queue is full");
         }
+        offeredSequence = sequence;
         Slot slot = slots[(int) sequence & mask];
         slot.operation = operation;
         slot.result = null;
         slot.failure = null;
         int depth = (int) (sequence - consumedSequence);
-        highWaterMark = Math.max(highWaterMark, depth);
+        metrics.submitted(sequence, type, depth);
         slot.requestSequence = sequence;
         LockSupport.unpark(thread);
         return new Ticket<>(this, slot, sequence);
@@ -99,7 +109,9 @@ final class AccountLaneWorker implements AutoCloseable {
     }
 
     int queueDepth() {
-        return Math.toIntExact(offeredSequence - consumedSequence);
+        long depth = offeredSequence - consumedSequence;
+        if (Thread.currentThread() == thread && depth > 0) depth--;
+        return Math.toIntExact(depth);
     }
 
     int queueCapacity() {
@@ -107,7 +119,17 @@ final class AccountLaneWorker implements AutoCloseable {
     }
 
     int highWaterMark() {
-        return highWaterMark;
+        return metrics.queueHighWaterMark();
+    }
+
+    AccountLaneMetricsSnapshot metricsSnapshot() {
+        return metrics.snapshot(queueDepth(), queueCapacity(), oldestPendingSequence());
+    }
+
+    long oldestPendingSequence() {
+        long next = Math.incrementExact(consumedSequence);
+        if (Thread.currentThread() == thread) next = Math.incrementExact(next);
+        return next > offeredSequence ? 0 : next;
     }
 
     String ownerThreadName() {
@@ -121,6 +143,7 @@ final class AccountLaneWorker implements AutoCloseable {
     @Override
     public void close() {
         if (Thread.currentThread() == thread) throw new IllegalStateException("account lane cannot close itself");
+        bindSequencer();
         if (offeredSequence != reclaimedSequence) {
             throw new IllegalStateException("account lane cannot close with unreclaimed responses");
         }
@@ -151,6 +174,7 @@ final class AccountLaneWorker implements AutoCloseable {
             } catch (Throwable failure) {
                 slot.failure = failure;
             }
+            metrics.completed(nextSequence);
             slot.responseSequence = nextSequence;
             consumedSequence = nextSequence;
             nextSequence = Math.incrementExact(nextSequence);
@@ -164,6 +188,11 @@ final class AccountLaneWorker implements AutoCloseable {
         if (bound == null) {
             if (!sequencer.compareAndSet(null, current)) bound = sequencer.get();
             else bound = current;
+        }
+        if (bound != current && !bound.isAlive()
+                && offeredSequence == reclaimedSequence
+                && sequencer.compareAndSet(bound, current)) {
+            bound = current;
         }
         if (bound != current) throw new IllegalStateException("account lane queue has multiple sequencer writers");
     }

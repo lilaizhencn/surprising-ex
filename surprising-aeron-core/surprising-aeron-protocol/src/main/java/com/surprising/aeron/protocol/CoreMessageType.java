@@ -69,6 +69,7 @@ public enum CoreMessageType {
     RISK_SCAN_CONTROL_QUERY(124, WireMessageKind.QUERY),
     ORDER_BOOK_BOOTSTRAP_QUERY(125, WireMessageKind.QUERY),
     PENDING_TRANSFER_QUERY(126, WireMessageKind.QUERY),
+    LANE_METRICS_QUERY(127, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -91,6 +92,7 @@ public enum CoreMessageType {
     RISK_SCAN_CONTROL_RESULT(219, WireMessageKind.RESPONSE),
     ORDER_BOOK_BOOTSTRAP_RESULT(220, WireMessageKind.RESPONSE),
     PENDING_TRANSFER_RESULT(221, WireMessageKind.RESPONSE),
+    LANE_METRICS_RESULT(222, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

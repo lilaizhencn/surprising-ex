@@ -18,7 +18,15 @@ public record CoreLaneMetrics(
         long[] accountLaneCommittedSequences,
         int[] accountLaneQueueDepths,
         int[] accountLaneQueueCapacities,
-        int[] accountLaneQueueHighWaterMarks) {
+        int[] accountLaneQueueHighWaterMarks,
+        long[] accountLaneRejectedSubmissions,
+        long[] accountLaneOldestPendingSequences,
+        long[] accountLaneCompletedOperations,
+        long[] accountLaneLatencySamples,
+        long[] accountLaneTotalLatencyNanos,
+        long[] accountLaneMaxLatencyNanos) {
+
+    public static final int OPERATION_TYPE_COUNT = 4;
 
     public CoreLaneMetrics {
         if (matchingEngineCount <= 0 || accountLaneCount <= 0 || matcherDispatchDepth < 0
@@ -29,20 +37,31 @@ public record CoreLaneMetrics(
                 || committedCoreSequence < 0 || accountLaneRevisions == null
                 || accountLaneAppliedSequences == null || accountLaneCommittedSequences == null
                 || accountLaneQueueDepths == null || accountLaneQueueCapacities == null
-                || accountLaneQueueHighWaterMarks == null
+                || accountLaneQueueHighWaterMarks == null || accountLaneRejectedSubmissions == null
+                || accountLaneOldestPendingSequences == null || accountLaneCompletedOperations == null
+                || accountLaneLatencySamples == null
+                || accountLaneTotalLatencyNanos == null || accountLaneMaxLatencyNanos == null
                 || accountLaneRevisions.length != accountLaneCount
                 || accountLaneAppliedSequences.length != accountLaneCount
                 || accountLaneCommittedSequences.length != accountLaneCount
                 || accountLaneQueueDepths.length != accountLaneCount
                 || accountLaneQueueCapacities.length != accountLaneCount
-                || accountLaneQueueHighWaterMarks.length != accountLaneCount) {
+                || accountLaneQueueHighWaterMarks.length != accountLaneCount
+                || accountLaneRejectedSubmissions.length != accountLaneCount
+                || accountLaneOldestPendingSequences.length != accountLaneCount
+                || accountLaneCompletedOperations.length != accountLaneCount * OPERATION_TYPE_COUNT
+                || accountLaneLatencySamples.length != accountLaneCompletedOperations.length
+                || accountLaneTotalLatencyNanos.length != accountLaneCompletedOperations.length
+                || accountLaneMaxLatencyNanos.length != accountLaneCompletedOperations.length) {
             throw new IllegalArgumentException("invalid Core lane metrics");
         }
         for (int laneId = 0; laneId < accountLaneCount; laneId++) {
             if (accountLaneQueueDepths[laneId] < 0 || accountLaneQueueCapacities[laneId] <= 0
                     || accountLaneQueueDepths[laneId] > accountLaneQueueCapacities[laneId]
                     || accountLaneQueueHighWaterMarks[laneId] < accountLaneQueueDepths[laneId]
-                    || accountLaneQueueHighWaterMarks[laneId] > accountLaneQueueCapacities[laneId]) {
+                    || accountLaneQueueHighWaterMarks[laneId] > accountLaneQueueCapacities[laneId]
+                    || accountLaneRejectedSubmissions[laneId] < 0
+                    || accountLaneOldestPendingSequences[laneId] < 0) {
                 throw new IllegalArgumentException("invalid Account Lane queue metrics");
             }
         }
@@ -52,6 +71,12 @@ public record CoreLaneMetrics(
         accountLaneQueueDepths = accountLaneQueueDepths.clone();
         accountLaneQueueCapacities = accountLaneQueueCapacities.clone();
         accountLaneQueueHighWaterMarks = accountLaneQueueHighWaterMarks.clone();
+        accountLaneRejectedSubmissions = accountLaneRejectedSubmissions.clone();
+        accountLaneOldestPendingSequences = accountLaneOldestPendingSequences.clone();
+        accountLaneCompletedOperations = accountLaneCompletedOperations.clone();
+        accountLaneLatencySamples = accountLaneLatencySamples.clone();
+        accountLaneTotalLatencyNanos = accountLaneTotalLatencyNanos.clone();
+        accountLaneMaxLatencyNanos = accountLaneMaxLatencyNanos.clone();
     }
 
     @Override
@@ -71,4 +96,22 @@ public record CoreLaneMetrics(
 
     @Override
     public int[] accountLaneQueueHighWaterMarks() { return accountLaneQueueHighWaterMarks.clone(); }
+
+    @Override
+    public long[] accountLaneRejectedSubmissions() { return accountLaneRejectedSubmissions.clone(); }
+
+    @Override
+    public long[] accountLaneOldestPendingSequences() { return accountLaneOldestPendingSequences.clone(); }
+
+    @Override
+    public long[] accountLaneCompletedOperations() { return accountLaneCompletedOperations.clone(); }
+
+    @Override
+    public long[] accountLaneLatencySamples() { return accountLaneLatencySamples.clone(); }
+
+    @Override
+    public long[] accountLaneTotalLatencyNanos() { return accountLaneTotalLatencyNanos.clone(); }
+
+    @Override
+    public long[] accountLaneMaxLatencyNanos() { return accountLaneMaxLatencyNanos.clone(); }
 }

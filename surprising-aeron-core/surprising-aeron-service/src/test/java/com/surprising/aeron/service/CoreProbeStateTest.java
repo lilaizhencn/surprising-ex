@@ -55,6 +55,23 @@ class CoreProbeStateTest {
             assertThat(metrics.commandContextDepth()).isZero();
             assertThat(metrics.accountLaneQueueCapacities()).containsOnly(4_096);
             assertThat(metrics.accountLaneQueueHighWaterMarks()).containsOnly(1);
+            assertThat(metrics.accountLaneRejectedSubmissions()).containsOnly(0);
+            assertThat(metrics.accountLaneCompletedOperations()).hasSize(16);
+        }
+    }
+
+    @Test
+    void exposesLaneMetricsThroughTheCommittedCoreQuerySurface() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            CoreResponse response = state.apply(query(CoreMessageType.LANE_METRICS_QUERY, 0, new byte[0]));
+
+            assertThat(response.status()).isEqualTo(ResponseStatus.OK);
+            var metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(response.data());
+            assertThat(metrics.accountLaneCount()).isEqualTo(4);
+            assertThat(metrics.accountLaneQueueCapacities()).containsOnly(4_096);
+            assertThat(metrics.accountLaneQueueDepths()).containsOnly(0);
+            assertThat(metrics.accountLaneOldestPendingSequences()).containsOnly(0);
+            assertThat(metrics.accountLaneCompletedOperations()).hasSize(16);
         }
     }
 

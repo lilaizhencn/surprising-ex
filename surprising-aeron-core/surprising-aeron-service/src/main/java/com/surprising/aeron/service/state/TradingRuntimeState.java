@@ -86,7 +86,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (laneId < 0 || laneId >= accountLanes.length) throw new IllegalArgumentException("invalid laneId");
         AccountLaneWorker worker = worker(laneId);
-        return onLane(laneId, lane -> laneView(laneId, lane, worker));
+        return onLane(laneId, AccountLaneOperationType.QUERY,
+                lane -> laneView(laneId, lane, worker));
+    }
+
+    public AccountLaneMetricsSnapshot accountLaneMetricsById(int laneId) {
+        assertOwner();
+        if (laneId < 0 || laneId >= accountLanes.length) throw new IllegalArgumentException("invalid laneId");
+        AccountLaneWorker worker = worker(laneId);
+        return worker == null
+                ? AccountLaneMetricsSnapshot.empty(accountLanes[laneId].queueCapacity())
+                : onLane(laneId, AccountLaneOperationType.QUERY, lane -> worker.metricsSnapshot());
     }
 
     public void startAccountLanes() {
@@ -105,7 +115,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void readFence(long userId, long committedCoreSequence) {
         assertOwner();
-        onLane(topology.accountLaneId(userId), lane -> {
+        onLane(topology.accountLaneId(userId), AccountLaneOperationType.QUERY, lane -> {
             lane.readFence(committedCoreSequence);
             return null;
         });
@@ -115,7 +125,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             final int currentLaneId = laneId;
-            onLane(currentLaneId, lane -> {
+            onLane(currentLaneId, AccountLaneOperationType.QUERY, lane -> {
                 lane.readFence(committedCoreSequence);
                 return null;
             });
@@ -139,8 +149,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private <T> T onLane(int laneId, AccountLaneWorker.Operation<T> operation) {
+        return onLane(laneId, AccountLaneOperationType.COMMAND, operation);
+    }
+
+    private <T> T onLane(int laneId, AccountLaneOperationType type,
+                         AccountLaneWorker.Operation<T> operation) {
         AccountLaneWorker worker = worker(laneId);
-        return worker == null ? operation.apply(accountLanes[laneId]) : worker.invoke(operation);
+        return worker == null ? operation.apply(accountLanes[laneId]) : worker.invoke(type, operation);
     }
 
     private static void applyLaneUsers(AccountLaneState lane, java.util.List<Long> users, long coreSequence,
@@ -312,7 +327,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (worker == null) {
                 applyLaneUsers(accountLanes[laneId], users, coreSequence, stateContribution, fundsContribution);
             } else {
-                tickets[laneId] = worker.submit(lane -> {
+                tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, lane -> {
                     if (matchingResult.nativeCommand().coreSequence() != coreSequence) {
                         throw new IllegalStateException("immutable matcher result sequence changed during fanout");
                     }
@@ -339,7 +354,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             int currentLaneId = laneId;
             AccountLaneWorker worker = worker(laneId);
             if (worker == null) views[laneId] = accountLaneById(laneId);
-            else tickets[laneId] = worker.submit(lane -> laneView(currentLaneId, lane, worker));
+            else tickets[laneId] = worker.submit(AccountLaneOperationType.QUERY,
+                    lane -> laneView(currentLaneId, lane, worker));
         }
         java.util.List<AccountLaneView> selected = new java.util.ArrayList<>(Long.bitCount(laneMask));
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
@@ -361,7 +377,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if ((laneMask & (1L << laneId)) == 0) continue;
             AccountLaneWorker worker = worker(laneId);
             if (worker == null) accountLanes[laneId].committed(coreSequence);
-            else tickets[laneId] = worker.submit(lane -> {
+            else tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, lane -> {
                 lane.committed(coreSequence);
                 return null;
             });
