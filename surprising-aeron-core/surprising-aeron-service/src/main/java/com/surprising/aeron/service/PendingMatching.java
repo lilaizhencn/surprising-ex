@@ -7,16 +7,20 @@ import java.util.List;
 import java.util.Objects;
 
 record PendingMatching(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                       List<Long> preMatchingCancellationOrderIds, TradingCoreState beforeState) {
+                       List<Long> preMatchingCancellationOrderIds, TradingCoreState beforeState,
+                       long beforeBusinessStateHash, long beforeFundsStateHash) {
 
-    PendingMatching(long sequence, Operation operation, CoreMessage command, TradingCoreState beforeState) {
-        this(sequence, operation, command, CommandFingerprint.of(command), List.of(), beforeState);
+    PendingMatching(long sequence, Operation operation, CoreMessage command, TradingCoreState beforeState,
+                    long beforeBusinessStateHash, long beforeFundsStateHash) {
+        this(sequence, operation, command, CommandFingerprint.of(command), List.of(), beforeState,
+                beforeBusinessStateHash, beforeFundsStateHash);
     }
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
-                    List<Long> preMatchingCancellationOrderIds, TradingCoreState beforeState) {
+                    List<Long> preMatchingCancellationOrderIds, TradingCoreState beforeState,
+                    long beforeBusinessStateHash, long beforeFundsStateHash) {
         this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                beforeState);
+                beforeState, beforeBusinessStateHash, beforeFundsStateHash);
     }
 
     PendingMatching {
@@ -31,11 +35,12 @@ record PendingMatching(long sequence, Operation operation, CoreMessage command, 
 
     PendingMatching withCommand(CoreMessage nextCommand) {
         return new PendingMatching(sequence, operation, nextCommand, fingerprint,
-                preMatchingCancellationOrderIds, beforeState);
+                preMatchingCancellationOrderIds, beforeState, beforeBusinessStateHash, beforeFundsStateHash);
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
-        return new PendingMatching(sequence, operation, command, fingerprint, orderIds, beforeState);
+        return new PendingMatching(sequence, operation, command, fingerprint, orderIds, beforeState,
+                beforeBusinessStateHash, beforeFundsStateHash);
     }
 
     enum Operation {

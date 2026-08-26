@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class StateMapSupportTest {
@@ -77,6 +78,21 @@ class StateMapSupportTest {
     }
 
     @Test
+    void deltaLineageValidationDoesNotCompareEveryStateValue() {
+        AtomicInteger comparisons = new AtomicInteger();
+        CountingValue original = new CountingValue("before", comparisons);
+        NavigableMap<Long, CountingValue> base = StateMapSupport.freezeSorted(
+                new TreeMap<>(Map.of(1L, original)));
+        NavigableMap<Long, CountingValue> delta = StateMapSupport.delta(base);
+        delta.put(1L, new CountingValue("after", comparisons));
+        comparisons.set(0);
+
+        StateMapSupport.requireDeltaLineage(base, delta, "users");
+
+        assertThat(comparisons).as("delta lineage must be checked before full map equality").hasValue(0);
+    }
+
+    @Test
     void persistentPathCopiesKeepValuesWithoutPeriodicCompaction() {
         NavigableMap<Long, String> base = new TreeMap<>(Map.of(1L, "one"));
         NavigableMap<Long, String> previous = base;
@@ -87,5 +103,18 @@ class StateMapSupportTest {
         }
 
         assertThat(previous.get(301L)).isEqualTo("value-299");
+    }
+
+    private record CountingValue(String value, AtomicInteger comparisons) {
+        @Override
+        public boolean equals(Object other) {
+            comparisons.incrementAndGet();
+            return other instanceof CountingValue that && value.equals(that.value);
+        }
+
+        @Override
+        public int hashCode() {
+            return value.hashCode();
+        }
     }
 }

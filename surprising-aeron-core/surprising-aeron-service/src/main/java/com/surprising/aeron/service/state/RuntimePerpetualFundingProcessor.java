@@ -189,9 +189,15 @@ public final class RuntimePerpetualFundingProcessor {
                                      RuntimeTreasuryDelta treasuryDelta) {
     }
 
-    private static UserPage selectUsers(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {
+    static UserPage selectUsers(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {
         ArrayList<Long> selected = new ArrayList<>();
-        for (Long userId : indexedUserIds) {
+        Iterable<Long> usersAfterCursor = indexedUserIds;
+        if (indexedUserIds instanceof NavigableSet<?> indexedSet) {
+            @SuppressWarnings("unchecked")
+            NavigableSet<Long> userIds = (NavigableSet<Long>) indexedSet;
+            usersAfterCursor = userIds.tailSet(startCursorUserId, false);
+        }
+        for (Long userId : usersAfterCursor) {
             if (userId == null || userId <= startCursorUserId) continue;
             if (selected.size() == limit) {
                 return new UserPage(selected, 0, selected.getLast(), false);
@@ -201,7 +207,7 @@ public final class RuntimePerpetualFundingProcessor {
         return new UserPage(selected, 0, 0, true);
     }
 
-    private record UserPage(ArrayList<Long> userIds, int accountLaneId,
-                            long nextCursorUserId, boolean complete) {
+    record UserPage(ArrayList<Long> userIds, int accountLaneId,
+                    long nextCursorUserId, boolean complete) {
     }
 }

@@ -1357,18 +1357,22 @@ public final class CoreProbeState implements AutoCloseable {
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
                                                CoreMessage command) {
-        return new PendingMatching(sequence, operation, command, snapshotState);
+        return new PendingMatching(sequence, operation, command, snapshotState,
+                currentBusinessStateHash(), rollingFundsStateHash.value());
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations) {
-        return new PendingMatching(sequence, operation, command, preMatchingCancellations, snapshotState);
+        return new PendingMatching(sequence, operation, command, preMatchingCancellations, snapshotState,
+                currentBusinessStateHash(), rollingFundsStateHash.value());
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations,
-                                               TradingCoreState beforeState) {
-        return new PendingMatching(sequence, operation, command, preMatchingCancellations, beforeState);
+                                               TradingCoreState beforeState, long beforeBusinessStateHash,
+                                               long beforeFundsStateHash) {
+        return new PendingMatching(sequence, operation, command, preMatchingCancellations, beforeState,
+                beforeBusinessStateHash, beforeFundsStateHash);
     }
 
     private CoreResponse beginBookQuery(CoreMessage message) {
@@ -1456,6 +1460,10 @@ public final class CoreProbeState implements AutoCloseable {
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
         }
         TradingCoreState before = snapshotState;
+        long beforeBusinessStateHash = deferredPending == null
+                ? currentBusinessStateHash() : deferredPending.beforeBusinessStateHash();
+        long beforeFundsStateHash = deferredPending == null
+                ? rollingFundsStateHash.value() : deferredPending.beforeFundsStateHash();
         long sequence = deferredPending == null
                 ? Math.incrementExact(appliedCommandCount) : deferredPending.sequence();
         List<Long> preMatchingCancellations = List.of();
@@ -1537,7 +1545,8 @@ public final class CoreProbeState implements AutoCloseable {
         long businessStateHash = tradingStateChanged ? currentBusinessStateHash() : cachedBusinessStateHash;
         long requiredExportSequence = 0;
         PendingMatching pending = deferredPending == null
-                ? newPendingMatching(sequence, operation, message, preMatchingCancellations, before)
+                ? newPendingMatching(sequence, operation, message, preMatchingCancellations, before,
+                        beforeBusinessStateHash, beforeFundsStateHash)
                 : deferredPending.withPreMatchingCancellations(preMatchingCancellations);
         if (deferredPending == null) {
             putPendingMatching(pending);
@@ -2496,8 +2505,8 @@ public final class CoreProbeState implements AutoCloseable {
         commandLiquidationBatchResult = null;
         commandRiskScanControl = null;
         resetChangeAccumulators();
-        commandBeforeBusinessStateHash = before.businessStateHash();
-        commandBeforeFundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.compute(before);
+        commandBeforeBusinessStateHash = pending.beforeBusinessStateHash();
+        commandBeforeFundsStateHash = pending.beforeFundsStateHash();
         beginSnapshotProjectionBatch();
         if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
             commandMatcherTransition = new com.surprising.aeron.protocol.CoreMatcherTransition(
@@ -2637,7 +2646,7 @@ public final class CoreProbeState implements AutoCloseable {
         completeSnapshotProjectionBatch();
         materializeChangeAccumulators();
         long laneMask = runtimePlaceOrderState.applyLaneSequence(pending.sequence(), commandChangedUserIds,
-                laneContext.matchingResult(), snapshotState.businessStateHash(), rollingFundsStateHash.value());
+                laneContext.matchingResult(), rollingBusinessStateHash.value(), rollingFundsStateHash.value());
         if (laneMask != laneContext.expectedLaneMask()) {
             throw failMatching(pending, "account lane mask differs from immutable matcher result", null);
         }
@@ -4127,8 +4136,10 @@ public final class CoreProbeState implements AutoCloseable {
         runtime.commitRuntimeTransition(previous, materialized,
                 previousBusinessStateHash, rollingBusinessStateHash.value());
         seedChangeAccumulators();
-        if (!previous.users().equals(materialized.users())) {
-            changedUserIds.addAll(StateMapSupport.changedKeys(previous.users(), materialized.users()));
+        for (Long userId : StateMapSupport.changedKeys(previous.users(), materialized.users())) {
+            if (!java.util.Objects.equals(previous.user(userId), materialized.user(userId))) {
+                changedUserIds.add(userId);
+            }
         }
         changedTreasuryAssets.addAll(treasuryAssetChanges(previous.treasuryState(), materialized.treasuryState()));
         snapshotState = materialized;
