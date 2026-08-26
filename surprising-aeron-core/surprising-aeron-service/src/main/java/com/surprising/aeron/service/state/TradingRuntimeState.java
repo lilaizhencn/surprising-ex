@@ -538,6 +538,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
+    void recordUserSettlementChanges(long userId, int assetId, long positionKey) {
+        assertOwner();
+        if (userId <= 0 || assetId < 0 || positionKey <= 0) {
+            throw new IllegalArgumentException("invalid user settlement changes");
+        }
+        changedUsers.add(userId);
+        changedBalance(userId, assetId);
+        changedPositions.add(positionKey);
+    }
+
     public java.util.List<AccountLaneView> accountLaneViews(long laneMask) {
         assertOwner();
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;

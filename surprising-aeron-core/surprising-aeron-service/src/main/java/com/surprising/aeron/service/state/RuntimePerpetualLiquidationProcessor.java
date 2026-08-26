@@ -120,6 +120,7 @@ public final class RuntimePerpetualLiquidationProcessor {
             runtime.advanceUserRevision(liquidation.userId());
             return null;
         });
+        runtime.recordUserSettlementChanges(liquidation.userId(), settleAssetId, positionKey);
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         treasuryDelta.addInsurance(settleAssetId, insuranceDelta);
         treasuryDelta.apply(runtime.treasury());
