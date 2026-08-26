@@ -164,9 +164,19 @@ public final class AccountLaneState {
 
     void readFence(long coreSequence) {
         assertOwner();
+        requireReadFence(coreSequence);
+        advanceReadFence(coreSequence);
+    }
+
+    void requireReadFence(long coreSequence) {
+        assertOwner();
         if (coreSequence < committedSequence || appliedSequence != committedSequence) {
             throw new IllegalStateException("account lane read fence crossed uncommitted work");
         }
+    }
+
+    void advanceReadFence(long coreSequence) {
+        assertOwner();
         appliedSequence = coreSequence;
         committedSequence = coreSequence;
     }
@@ -195,10 +205,7 @@ public final class AccountLaneState {
 
     AccountLaneSnapshot snapshot(long fenceSequence, TradingCoreState laneState) {
         assertOwner();
-        if (!pendingReservationSequences.isEmpty()) {
-            throw new IllegalStateException("pending reservation cannot cross snapshot fence");
-        }
-        if (fenceSequence < committedSequence) throw new IllegalStateException("account lane fence moved backwards");
+        requireSnapshot(fenceSequence);
         appliedSequence = fenceSequence;
         committedSequence = fenceSequence;
         localStateHash = laneState.businessStateHash();
@@ -208,6 +215,16 @@ public final class AccountLaneState {
         users.sort(Long::compare);
         return new AccountLaneSnapshot(laneId, revision, appliedSequence, committedSequence,
                 localStateHash, localFundsHash, users, laneState);
+    }
+
+    void requireSnapshot(long fenceSequence) {
+        assertOwner();
+        if (!pendingReservationSequences.isEmpty()) {
+            throw new IllegalStateException("pending reservation cannot cross snapshot fence");
+        }
+        if (fenceSequence < committedSequence || appliedSequence != committedSequence) {
+            throw new IllegalStateException("account lane snapshot crossed an incomplete commit");
+        }
     }
 
     void restore(AccountLaneSnapshot snapshot) {

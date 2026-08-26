@@ -257,6 +257,94 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void crossLaneReadFenceDoesNotPartiallyAdvanceBeforeEveryLaneIsReady() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        long userInLastLane = userForLane(topology, topology.accountLaneCount() - 1);
+        state.putUser(new UserRuntime(userInLastLane));
+        state.startAccountLanes();
+        try {
+            var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
+                    .withCoreSequence(1);
+            state.applyLaneSequence(1, java.util.List.of(userInLastLane), result, 3, 5);
+
+            assertThatThrownBy(() -> state.readFenceAll(1))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("uncommitted");
+            assertThat(state.accountLaneById(0).committedSequence()).isZero();
+        } finally {
+            state.close();
+        }
+    }
+
+    @Test
+    void applyAndCommitFailuresReclaimEverySubmittedLaneTicket() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        long laneZeroUser = userForLane(topology, 0);
+        long laneOneUser = userForLane(topology, 1);
+        state.putUser(new UserRuntime(laneZeroUser));
+        state.putUser(new UserRuntime(laneOneUser));
+        state.startAccountLanes();
+        try {
+            var sequenceTwo = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
+                    .withCoreSequence(2);
+            var sequenceOne = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
+                    .withCoreSequence(1);
+            state.applyLaneSequence(2, java.util.List.of(laneZeroUser), sequenceTwo, 3, 5);
+            long laneOneMask = state.applyLaneSequence(
+                    1, java.util.List.of(laneOneUser), sequenceOne, 3, 5);
+
+            assertThatThrownBy(() -> state.applyLaneSequence(1,
+                    java.util.List.of(laneZeroUser, laneOneUser), sequenceOne, 7, 11))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("out of order");
+            assertThat(state.executeUserSettlement(laneOneUser, () -> "apply-reclaimed"))
+                    .isEqualTo("apply-reclaimed");
+
+            long bothLanes = topology.accountLaneMask(laneZeroUser) | laneOneMask;
+            assertThatThrownBy(() -> state.commitLaneSequence(2, bothLanes))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("out of order");
+            assertThat(state.executeUserSettlement(laneOneUser, () -> "commit-reclaimed"))
+                    .isEqualTo("commit-reclaimed");
+        } finally {
+            state.close();
+        }
+    }
+
+    @Test
+    void invalidSnapshotSetDoesNotPartiallyRestoreEarlierLanes() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingCoreState global = RuntimeStateMaterializer.materialize(state, identities);
+        java.util.List<AccountLaneSnapshot> snapshots = state.accountLaneSnapshots(1, global);
+        long laneZeroUser = userForLane(topology, 0);
+        state.putUser(new UserRuntime(laneZeroUser));
+        var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
+                .withCoreSequence(2);
+        long mask = state.applyLaneSequence(2, java.util.List.of(laneZeroUser), result, 3, 5);
+        state.commitLaneSequence(2, mask);
+        AccountLaneView beforeRestore = state.accountLaneById(0);
+
+        java.util.List<AccountLaneSnapshot> invalid = new java.util.ArrayList<>(snapshots);
+        AccountLaneSnapshot corrupted = snapshots.get(1);
+        invalid.set(1, new AccountLaneSnapshot(corrupted.laneId(), corrupted.revision(),
+                corrupted.appliedSequence(), corrupted.committedSequence(),
+                corrupted.localStateHash() ^ 1L, corrupted.localFundsHash(),
+                corrupted.userIds(), corrupted.state()));
+
+        assertThatThrownBy(() -> state.restoreAccountLaneSnapshots(invalid, 1, global))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("hash mismatch");
+        AccountLaneView afterFailure = state.accountLaneById(0);
+        assertThat(afterFailure.appliedSequence()).isEqualTo(beforeRestore.appliedSequence());
+        assertThat(afterFailure.committedSequence()).isEqualTo(beforeRestore.committedSequence());
+        assertThat(afterFailure.localStateHash()).isEqualTo(beforeRestore.localStateHash());
+    }
+
+    @Test
     void lifecycleFailureReclaimsEverySubmittedOwnerTicket() {
         TradingRuntimeState state = new TradingRuntimeState();
         state.startAccountLanes();
@@ -271,5 +359,12 @@ class TradingRuntimeStateTest {
         } finally {
             state.close();
         }
+    }
+
+    private static long userForLane(LaneTopology topology, int laneId) {
+        for (long userId = 1; userId < 10_000; userId++) {
+            if (topology.accountLaneId(userId) == laneId) return userId;
+        }
+        throw new IllegalStateException("unable to find user for Account Lane");
     }
 }

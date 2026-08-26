@@ -128,7 +128,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             final int currentLaneId = laneId;
             onLane(currentLaneId, AccountLaneOperationType.QUERY, lane -> {
-                lane.readFence(committedCoreSequence);
+                lane.requireReadFence(committedCoreSequence);
+                return null;
+            });
+        }
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            final int currentLaneId = laneId;
+            onLane(currentLaneId, AccountLaneOperationType.QUERY, lane -> {
+                lane.advanceReadFence(committedCoreSequence);
                 return null;
             });
         }
@@ -406,32 +413,44 @@ public final class TradingRuntimeState implements AutoCloseable {
         long mask = 0;
         @SuppressWarnings("unchecked")
         AccountLaneWorker.Ticket<Void>[] tickets = new AccountLaneWorker.Ticket[accountLanes.length];
+        Throwable firstFailure = null;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             java.util.List<Long> users = routedUsers[laneId];
             if (users == null) continue;
             mask |= 1L << laneId;
             AccountLaneWorker worker = worker(laneId);
-            if (worker == null) {
-                applyLaneUsers(accountLanes[laneId], users, coreSequence, stateContribution, fundsContribution);
-            } else {
-                tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, lane -> {
-                    if (matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                        throw new IllegalStateException("immutable matcher result sequence changed during fanout");
-                    }
-                    applyLaneUsers(lane, users, coreSequence, stateContribution, fundsContribution);
-                    return null;
-                });
+            try {
+                if (worker == null) {
+                    applyLaneUsers(accountLanes[laneId], users, coreSequence, stateContribution, fundsContribution);
+                } else {
+                    tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, lane -> {
+                        if (matchingResult.nativeCommand().coreSequence() != coreSequence) {
+                            throw new IllegalStateException("immutable matcher result sequence changed during fanout");
+                        }
+                        applyLaneUsers(lane, users, coreSequence, stateContribution, fundsContribution);
+                        return null;
+                    });
+                }
+            } catch (Throwable failure) {
+                firstFailure = failure;
+                break;
             }
         }
         for (int laneId = 0; laneId < tickets.length; laneId++) {
-            if (tickets[laneId] != null) worker(laneId).await(tickets[laneId]);
+            if (tickets[laneId] == null) continue;
+            try {
+                worker(laneId).await(tickets[laneId]);
+            } catch (Throwable failure) {
+                if (firstFailure == null) firstFailure = failure;
+            }
         }
+        throwAccountLaneFailure(firstFailure, "account lane apply failed");
         return mask;
     }
 
-    public AccountLaneAck[] applyMatcherSettlement(long coreSequence, long expectedLaneMask,
-                                                   long takerOrderId, CoreMatchingResult matchingResult,
-                                                   RuntimeIdentityRegistry identities) {
+    public RuntimeTreasuryDelta[] applyMatcherSettlement(long coreSequence, long expectedLaneMask,
+                                                         long takerOrderId, CoreMatchingResult matchingResult,
+                                                         RuntimeIdentityRegistry identities) {
         assertOwner();
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
         if (coreSequence <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
@@ -454,25 +473,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         @SuppressWarnings("unchecked")
-        AccountLaneWorker.Ticket<AccountLaneAck>[] tickets = new AccountLaneWorker.Ticket[accountLanes.length];
-        AccountLaneAck[] acknowledgements = new AccountLaneAck[accountLanes.length];
+        AccountLaneWorker.Ticket<RuntimeTreasuryDelta>[] tickets = new AccountLaneWorker.Ticket[accountLanes.length];
+        RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
         Throwable firstFailure = null;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((expectedLaneMask & (1L << laneId)) == 0) continue;
-            int currentLaneId = laneId;
-            AccountLaneWorker.Operation<AccountLaneAck> operation = lane -> inLaneCommandScope(lane, ignored -> {
-                RuntimeTreasuryDelta delta = productLine.isDerivative()
+            AccountLaneWorker.Operation<RuntimeTreasuryDelta> operation = lane -> inLaneCommandScope(lane, ignored ->
+                    productLine.isDerivative()
                         ? RuntimePerpetualMatchProcessor.applyLane(takerOrderId, matchingResult.matcherEvents(),
                         this, identities, instrument, settleAssetId)
                         : RuntimeSpotMatchProcessor.applyLane(takerOrderId, matchingResult.matcherEvents(),
-                        this, instrument, baseAssetId, quoteAssetId);
-                applyMatchingLaneSequence(lane, coreSequence, taker.userId(), matchingResult);
-                return new AccountLaneAck(coreSequence, currentLaneId, lane.revision(), lane.localStateHash(),
-                        lane.localFundsHash(), matchingResult, delta);
-            });
+                        this, instrument, baseAssetId, quoteAssetId));
             AccountLaneWorker worker = worker(laneId);
             try {
-                if (worker == null) acknowledgements[laneId] = operation.apply(accountLanes[laneId]);
+                if (worker == null) deltas[laneId] = operation.apply(accountLanes[laneId]);
                 else tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, operation);
             } catch (Throwable failure) {
                 firstFailure = failure;
@@ -482,17 +496,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int laneId = 0; laneId < tickets.length; laneId++) {
             if (tickets[laneId] == null) continue;
             try {
-                acknowledgements[laneId] = worker(laneId).await(tickets[laneId]);
+                deltas[laneId] = worker(laneId).await(tickets[laneId]);
             } catch (Throwable failure) {
                 if (firstFailure == null) firstFailure = failure;
             }
         }
-        if (firstFailure instanceof RuntimeException exception) throw exception;
-        if (firstFailure instanceof Error error) throw error;
-        if (firstFailure != null) throw new IllegalStateException("account lane settlement failed", firstFailure);
+        throwAccountLaneFailure(firstFailure, "account lane settlement failed");
         recordMatcherSettlementChanges(takerOrderId, matchingResult, identities,
                 instrument, baseAssetId, quoteAssetId, settleAssetId);
-        return acknowledgements;
+        return deltas;
     }
 
     private void recordMatcherSettlementChanges(long takerOrderId, CoreMatchingResult matchingResult,
@@ -526,31 +538,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private void applyMatchingLaneSequence(AccountLaneState lane, long coreSequence,
-                                           long takerUserId, CoreMatchingResult matchingResult) {
-        long contribution = matchingResult.matcherPrefix().after();
-        if (topology.accountLaneId(takerUserId) == lane.laneId()) {
-            lane.applied(coreSequence, takerUserId, contribution, contribution);
-        }
-        java.util.List<exchange.core2.core.common.MatcherResult.MatcherEvent> events = matchingResult.matcherEvents();
-        for (int index = 0; index < events.size(); index++) {
-            var event = events.get(index);
-            if (event.eventType() != exchange.core2.core.common.MatcherEventType.TRADE
-                    || topology.accountLaneId(event.matchedOrderUid()) != lane.laneId()
-                    || event.matchedOrderUid() == takerUserId) continue;
-            boolean duplicate = false;
-            for (int previous = 0; previous < index; previous++) {
-                var prior = events.get(previous);
-                if (prior.eventType() == exchange.core2.core.common.MatcherEventType.TRADE
-                        && prior.matchedOrderUid() == event.matchedOrderUid()) {
-                    duplicate = true;
-                    break;
-                }
-            }
-            if (!duplicate) lane.applied(coreSequence, event.matchedOrderUid(), contribution, contribution);
-        }
-    }
-
     public java.util.List<AccountLaneView> accountLaneViews(long laneMask) {
         assertOwner();
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
@@ -567,11 +554,62 @@ public final class TradingRuntimeState implements AutoCloseable {
                     lane -> laneView(currentLaneId, lane, worker));
         }
         java.util.List<AccountLaneView> selected = new java.util.ArrayList<>(Long.bitCount(laneMask));
+        Throwable firstFailure = null;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if (tickets[laneId] != null) views[laneId] = worker(laneId).await(tickets[laneId]);
+            if (tickets[laneId] != null) {
+                try {
+                    views[laneId] = worker(laneId).await(tickets[laneId]);
+                } catch (Throwable failure) {
+                    if (firstFailure == null) firstFailure = failure;
+                }
+            }
             if (views[laneId] != null) selected.add(views[laneId]);
         }
+        throwAccountLaneFailure(firstFailure, "account lane view failed");
         return java.util.List.copyOf(selected);
+    }
+
+    public AccountLaneAck[] accountLaneAcks(long coreSequence, long laneMask,
+                                            CoreMatchingResult matchingResult,
+                                            RuntimeTreasuryDelta[] treasuryDeltas) {
+        assertOwner();
+        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
+        if (coreSequence <= 0 || (laneMask & ~validMask) != 0 || matchingResult == null
+                || matchingResult.nativeCommand().coreSequence() != coreSequence
+                || treasuryDeltas != null && treasuryDeltas.length != accountLanes.length) {
+            throw new IllegalArgumentException("invalid account lane ACK barrier");
+        }
+        @SuppressWarnings("unchecked")
+        AccountLaneWorker.Ticket<AccountLaneAck>[] tickets = new AccountLaneWorker.Ticket[accountLanes.length];
+        AccountLaneAck[] acknowledgements = new AccountLaneAck[accountLanes.length];
+        Throwable firstFailure = null;
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((laneMask & (1L << laneId)) == 0) continue;
+            int currentLaneId = laneId;
+            RuntimeTreasuryDelta delta = treasuryDeltas == null || treasuryDeltas[laneId] == null
+                    ? new RuntimeTreasuryDelta() : treasuryDeltas[laneId];
+            AccountLaneWorker.Operation<AccountLaneAck> operation = lane -> new AccountLaneAck(
+                    coreSequence, currentLaneId, lane.revision(), lane.localStateHash(),
+                    lane.localFundsHash(), matchingResult, delta);
+            AccountLaneWorker laneWorker = worker(laneId);
+            try {
+                if (laneWorker == null) acknowledgements[laneId] = operation.apply(accountLanes[laneId]);
+                else tickets[laneId] = laneWorker.submit(AccountLaneOperationType.SETTLEMENT, operation);
+            } catch (Throwable failure) {
+                firstFailure = failure;
+                break;
+            }
+        }
+        for (int laneId = 0; laneId < tickets.length; laneId++) {
+            if (tickets[laneId] == null) continue;
+            try {
+                acknowledgements[laneId] = worker(laneId).await(tickets[laneId]);
+            } catch (Throwable failure) {
+                if (firstFailure == null) firstFailure = failure;
+            }
+        }
+        throwAccountLaneFailure(firstFailure, "account lane ACK failed");
+        return acknowledgements;
     }
 
     public void commitLaneSequence(long coreSequence, long laneMask) {
@@ -582,18 +620,30 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         @SuppressWarnings("unchecked")
         AccountLaneWorker.Ticket<Void>[] tickets = new AccountLaneWorker.Ticket[accountLanes.length];
+        Throwable firstFailure = null;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((laneMask & (1L << laneId)) == 0) continue;
             AccountLaneWorker worker = worker(laneId);
-            if (worker == null) accountLanes[laneId].committed(coreSequence);
-            else tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, lane -> {
-                lane.committed(coreSequence);
-                return null;
-            });
+            try {
+                if (worker == null) accountLanes[laneId].committed(coreSequence);
+                else tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, lane -> {
+                    lane.committed(coreSequence);
+                    return null;
+                });
+            } catch (Throwable failure) {
+                firstFailure = failure;
+                break;
+            }
         }
         for (int laneId = 0; laneId < tickets.length; laneId++) {
-            if (tickets[laneId] != null) worker(laneId).await(tickets[laneId]);
+            if (tickets[laneId] == null) continue;
+            try {
+                worker(laneId).await(tickets[laneId]);
+            } catch (Throwable failure) {
+                if (firstFailure == null) firstFailure = failure;
+            }
         }
+        throwAccountLaneFailure(firstFailure, "account lane commit failed");
     }
 
     public java.util.List<AccountLaneSnapshot> accountLaneSnapshots(
@@ -602,11 +652,27 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (globalState == null || globalState.productLine() != productLine) {
             throw new IllegalArgumentException("global snapshot state is required");
         }
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            onLane(laneId, lane -> {
+                lane.requireSnapshot(fenceSequence);
+                return null;
+            });
+        }
         java.util.List<AccountLaneSnapshot> snapshots = new java.util.ArrayList<>(accountLanes.length);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             int currentLaneId = laneId;
             snapshots.add(onLane(currentLaneId, lane -> lane.snapshot(fenceSequence,
                     laneSnapshotState(globalState, currentLaneId, lane.revision()))));
+        }
+        for (AccountLaneSnapshot snapshot : snapshots) {
+            AccountLaneView view = accountLaneById(snapshot.laneId());
+            if (view.revision() != snapshot.revision()
+                    || view.appliedSequence() != snapshot.appliedSequence()
+                    || view.committedSequence() != snapshot.committedSequence()
+                    || view.localStateHash() != snapshot.localStateHash()
+                    || view.localFundsHash() != snapshot.localFundsHash()) {
+                throw new IllegalStateException("account lane changed during snapshot capture");
+            }
         }
         return java.util.List.copyOf(snapshots);
     }
@@ -635,11 +701,17 @@ public final class TradingRuntimeState implements AutoCloseable {
                     laneSnapshotState(globalState, laneId, snapshot.state().revision()))) {
                 throw new IllegalArgumentException("account lane payload differs from global state");
             }
-            onLane(laneId, lane -> {
+            if (snapshot.state().businessStateHash() != snapshot.localStateHash()
+                    || RollingFundsStateHash.compute(snapshot.state()) != snapshot.localFundsHash()) {
+                throw new IllegalArgumentException("account lane state hash mismatch");
+            }
+            restored[laneId] = true;
+        }
+        for (AccountLaneSnapshot snapshot : snapshots) {
+            onLane(snapshot.laneId(), lane -> {
                 lane.restore(snapshot);
                 return null;
             });
-            restored[laneId] = true;
         }
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> {
@@ -1986,5 +2058,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     private static boolean active(LiquidationRuntime liquidation) {
         return liquidation.status() != CoreLiquidationState.Status.COMPLETED
                 && liquidation.status() != CoreLiquidationState.Status.CANCELED;
+    }
+
+    private static void throwAccountLaneFailure(Throwable failure, String message) {
+        if (failure instanceof RuntimeException exception) throw exception;
+        if (failure instanceof Error error) throw error;
+        if (failure != null) throw new IllegalStateException(message, failure);
     }
 }

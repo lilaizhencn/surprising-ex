@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.state.AccountLaneView;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
 
 final class LaneCommandContextRing {
@@ -9,12 +10,13 @@ final class LaneCommandContextRing {
     private int inFlight;
     private int highWaterMark;
 
-    LaneCommandContextRing(int capacity) {
-        if (capacity <= 0 || (capacity & (capacity - 1)) != 0) {
+    LaneCommandContextRing(int capacity, int laneCount) {
+        if (capacity <= 0 || (capacity & (capacity - 1)) != 0
+                || laneCount <= 0 || laneCount > Long.SIZE) {
             throw new IllegalArgumentException("lane command context capacity must be a power of two");
         }
         contexts = new Context[capacity];
-        for (int index = 0; index < capacity; index++) contexts[index] = new Context();
+        for (int index = 0; index < capacity; index++) contexts[index] = new Context(laneCount);
         mask = capacity - 1;
     }
 
@@ -60,7 +62,17 @@ final class LaneCommandContextRing {
         private long expectedLaneMask;
         private long ackLaneMask;
         private CoreMatchingResult matchingResult;
-        private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta(
+                RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
+        private final long[] laneRevisions;
+        private final long[] localStateHashes;
+        private final long[] localFundsHashes;
+
+        private Context(int laneCount) {
+            laneRevisions = new long[laneCount];
+            localStateHashes = new long[laneCount];
+            localFundsHashes = new long[laneCount];
+        }
 
         long coreSequence() { return coreSequence; }
         long expectedLaneMask() { return expectedLaneMask; }
@@ -80,7 +92,7 @@ final class LaneCommandContextRing {
 
         void acknowledge(AccountLaneAck ack) {
             if (ack == null || ack.coreSequence() != coreSequence || matchingResult == null
-                    || ack.matchingResult() != matchingResult) {
+                    || ack.matchingResult() != matchingResult || ack.laneId() >= laneRevisions.length) {
                 throw new IllegalStateException("invalid account lane ACK");
             }
             long laneBit = 1L << ack.laneId();
@@ -88,7 +100,23 @@ final class LaneCommandContextRing {
                 throw new IllegalStateException("duplicate or unexpected account lane ACK");
             }
             ackLaneMask |= laneBit;
+            laneRevisions[ack.laneId()] = ack.laneRevision();
+            localStateHashes[ack.laneId()] = ack.localStateHash();
+            localFundsHashes[ack.laneId()] = ack.localFundsHash();
             treasuryDelta.merge(ack.treasuryDelta());
+        }
+
+        void validate(AccountLaneView view) {
+            if (view == null || view.laneId() < 0 || view.laneId() >= laneRevisions.length) {
+                throw new IllegalStateException("invalid account lane ACK view");
+            }
+            long laneBit = 1L << view.laneId();
+            if ((ackLaneMask & laneBit) == 0
+                    || laneRevisions[view.laneId()] != view.revision()
+                    || localStateHashes[view.laneId()] != view.localStateHash()
+                    || localFundsHashes[view.laneId()] != view.localFundsHash()) {
+                throw new IllegalStateException("account lane ACK revision or hash mismatch");
+            }
         }
 
         boolean complete() {
@@ -101,6 +129,9 @@ final class LaneCommandContextRing {
             ackLaneMask = 0;
             matchingResult = null;
             treasuryDelta.clear();
+            java.util.Arrays.fill(laneRevisions, 0);
+            java.util.Arrays.fill(localStateHashes, 0);
+            java.util.Arrays.fill(localFundsHashes, 0);
         }
     }
 }

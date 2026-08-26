@@ -1,16 +1,32 @@
 package com.surprising.aeron.service.state;
 
 public final class RuntimeTreasuryDelta {
-    private static final int CAPACITY = 4;
+    public static final int SINGLE_COMMAND_CAPACITY = 4;
+    public static final int ORDER_BATCH_CAPACITY = 40;
 
-    private final int[] assetIds = new int[CAPACITY];
-    private final long[] feeUnits = new long[CAPACITY];
-    private final long[] insuranceUnits = new long[CAPACITY];
-    private final long[] deficitUnits = new long[CAPACITY];
-    private final long[] fundingResidualUnits = new long[CAPACITY];
-    private final long[] roundingResidualUnits = new long[CAPACITY];
-    private final long[] clearingUnits = new long[CAPACITY];
+    private final int[] assetIds;
+    private final long[] feeUnits;
+    private final long[] insuranceUnits;
+    private final long[] deficitUnits;
+    private final long[] fundingResidualUnits;
+    private final long[] roundingResidualUnits;
+    private final long[] clearingUnits;
     private int size;
+
+    public RuntimeTreasuryDelta() {
+        this(SINGLE_COMMAND_CAPACITY);
+    }
+
+    public RuntimeTreasuryDelta(int capacity) {
+        if (capacity <= 0) throw new IllegalArgumentException("treasury delta capacity must be positive");
+        assetIds = new int[capacity];
+        feeUnits = new long[capacity];
+        insuranceUnits = new long[capacity];
+        deficitUnits = new long[capacity];
+        fundingResidualUnits = new long[capacity];
+        roundingResidualUnits = new long[capacity];
+        clearingUnits = new long[capacity];
+    }
 
     public int size() {
         return size;
@@ -125,7 +141,9 @@ public final class RuntimeTreasuryDelta {
         if (assetId < 0) throw new IllegalArgumentException("assetId must be non-negative");
         int existing = indexOf(assetId);
         if (existing >= 0) return existing;
-        if (size == CAPACITY) throw new IllegalStateException("account lane treasury contribution capacity exceeded");
+        if (size == assetIds.length) {
+            throw new IllegalStateException("account lane treasury contribution capacity exceeded");
+        }
         assetIds[size] = assetId;
         return size++;
     }

@@ -65,9 +65,7 @@ import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualLiquidationProcessor;
-import com.surprising.aeron.service.state.RuntimePerpetualMatchProcessor;
 import com.surprising.aeron.service.state.RuntimePerpetualRiskProcessor;
-import com.surprising.aeron.service.state.RuntimeSpotMatchProcessor;
 import com.surprising.aeron.service.state.RuntimeSettlementProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
@@ -267,7 +265,9 @@ public final class CoreProbeState implements AutoCloseable {
         this.matchingAdapter = runtime.matcherForConstruction();
         this.matchingCompletions = new MatchingCompletionQueue(
                 matchingAdapter.topology().matchingCompletionCapacity());
-        this.laneCommandContexts = new LaneCommandContextRing(matchingAdapter.topology().matcherWindowSize());
+        this.laneCommandContexts = new LaneCommandContextRing(
+                matchingAdapter.topology().matcherWindowSize(),
+                matchingAdapter.topology().accountLaneCount());
         this.matcherSnapshotCapture = matcherSnapshotCapture == null
                 ? matchingAdapter::snapshotAsync
                 : matcherSnapshotCapture;
@@ -1173,6 +1173,7 @@ public final class CoreProbeState implements AutoCloseable {
             throw failMatching(pending, "matcher continuation returned " + matchingResult.resultCode(), null);
         }
         batch.lastMatchingResult = matchingResult;
+        batch.retainMatchingResult(matchingResult);
         if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
             try {
                 batch.advanceMatcher(matchingResult);
@@ -1212,7 +1213,9 @@ public final class CoreProbeState implements AutoCloseable {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 applyPreMatchingCancellations(pending, matchingResult);
                 if (matchingResult.accepted()) {
-                    applyMatchesRuntime(command.orderId(), matchingResult.matcherEvents());
+                    batch.mergeTreasuryDeltas(runtimePlaceOrderState.applyMatcherSettlement(
+                            pending.sequence(), expectedLaneMask(pending, matchingResult), command.orderId(),
+                            matchingResult, runtimePlaceOrderIdentities));
                 } else {
                     rejectPlaceOrderRuntime(pending.command().header().userId(), command.orderId());
                 }
@@ -1236,7 +1239,9 @@ public final class CoreProbeState implements AutoCloseable {
                     requireOrderIdentityAvailable(pending.command().header().userId(), replacement);
                     reservePlaceOrderRuntime(pending.command().header().userId(), replacement,
                             pending.command().header().commandId(), pending.sequence());
-                    applyMatchesRuntime(replacement.orderId(), matchingResult.matcherEvents());
+                    batch.mergeTreasuryDeltas(runtimePlaceOrderState.applyMatcherSettlement(
+                            pending.sequence(), expectedLaneMask(pending, matchingResult), replacement.orderId(),
+                            matchingResult, runtimePlaceOrderIdentities));
                 }
                 return executionViews(replacement.orderId(), pending.command().header().userId(),
                         matchingResult.matcherEvents());
@@ -1258,8 +1263,6 @@ public final class CoreProbeState implements AutoCloseable {
     private CoreResponse finishOrderBatch(OrderBatchPending batch, PendingMatching pending,
                                           long clusterTimestamp, long clusterPosition) {
         runtimePlaceOrderState.completePendingReservations(batch.sequence);
-        projectSnapshotNow();
-        materializeChangeAccumulators();
         commandChangedUserIds = List.copyOf(batch.changedUserIds);
         commandChangedOrderIds = List.copyOf(batch.changedOrderIds);
         LaneCommandContextRing.Context laneContext = laneCommandContexts.required(batch.sequence);
@@ -1272,6 +1275,8 @@ public final class CoreProbeState implements AutoCloseable {
                 .withCoreSequence(batch.sequence)
                 : batch.lastMatchingResult;
         laneContext.result(finalMatchingResult, expectedLaneMask, validAccountLaneMask());
+        projectSnapshotNow();
+        materializeChangeAccumulators();
         if (snapshotState != batch.beforeState) {
             stampOrderChangesRuntime(batch.beforeState, clusterTimestamp, clusterPosition, commandChangedOrderIds);
         }
@@ -1283,14 +1288,25 @@ public final class CoreProbeState implements AutoCloseable {
         }).toList());
         byte[] responseData = TradingOrderBatchCodec.encodeResult(result);
         commandExecutions = result.items().stream().flatMap(item -> item.executions().stream()).toList();
-        CoreCommandDelta delta = commandDelta(batch.beforeState, snapshotState, true);
-        validateFundsConservation(pending.command(), batch.beforeState, snapshotState, delta);
         long laneMask = runtimePlaceOrderState.applyLaneSequence(batch.sequence, commandChangedUserIds,
                 laneContext.matchingResult(), snapshotState.businessStateHash(), rollingFundsStateHash.value());
         if (laneMask != laneContext.expectedLaneMask()) {
             throw failMatching(pending, "order batch account lane mask mismatch", null);
         }
-        acknowledgeAccountLanes(laneContext, batch.beforeState, snapshotState);
+        AccountLaneAck[] acknowledgements = runtimePlaceOrderState.accountLaneAcks(
+                batch.sequence, laneContext.expectedLaneMask(), laneContext.matchingResult(),
+                batch.laneTreasuryDeltas);
+        for (AccountLaneAck acknowledgement : acknowledgements) {
+            if (acknowledgement != null) laneContext.acknowledge(acknowledgement);
+        }
+        requireCompleteAccountLaneAcks(laneContext);
+        laneContext.treasuryDelta().apply(runtimePlaceOrderState.treasury());
+        runtimePlaceOrderState.setMetadata(productLine,
+                Math.incrementExact(runtimePlaceOrderState.revision()));
+        refreshSnapshotProjection();
+        materializeChangeAccumulators();
+        CoreCommandDelta delta = commandDelta(batch.beforeState, snapshotState, true);
+        validateFundsConservation(pending.command(), batch.beforeState, snapshotState, delta);
         commitMatchingSequence(batch.sequence);
         runtimePlaceOrderState.commitLaneSequence(batch.sequence, laneContext.expectedLaneMask());
         long businessStateHash = snapshotState == batch.beforeState
@@ -2490,6 +2506,7 @@ public final class CoreProbeState implements AutoCloseable {
         }
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
+        com.surprising.aeron.service.state.RuntimeTreasuryDelta[] laneTreasuryDeltas = null;
         try {
             switch (pending.operation()) {
                 case PLACE -> {
@@ -2500,7 +2517,8 @@ public final class CoreProbeState implements AutoCloseable {
                             matchingResult.matcherEvents());
                     applyPreMatchingCancellations(pending, matchingResult);
                     if (matchingResult.accepted()) {
-                        applyMatchesOnAccountLanes(command.orderId(), sequence, matchingResult, laneContext);
+                        laneTreasuryDeltas = applyMatchesOnAccountLanes(
+                                command.orderId(), sequence, matchingResult, laneContext);
                     } else {
                         rejectPlaceOrderRuntime(pending.command().header().userId(), command.orderId());
                     }
@@ -2533,7 +2551,8 @@ public final class CoreProbeState implements AutoCloseable {
                         requireOrderIdentityAvailable(pending.command().header().userId(), command);
                         reservePlaceOrderRuntime(pending.command().header().userId(), command,
                                 pending.command().header().commandId(), pending.sequence());
-                        applyMatchesOnAccountLanes(command.orderId(), sequence, matchingResult, laneContext);
+                        laneTreasuryDeltas = applyMatchesOnAccountLanes(
+                                command.orderId(), sequence, matchingResult, laneContext);
                         commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
                                 matchingResult.matcherEvents());
                     }
@@ -2550,7 +2569,8 @@ public final class CoreProbeState implements AutoCloseable {
                             matchingResult.matcherEvents());
                     applyPreMatchingCancellations(pending, matchingResult);
                     if (matchingResult.accepted()) {
-                        applyMatchesOnAccountLanes(command.orderId(), sequence, matchingResult, laneContext);
+                        laneTreasuryDeltas = applyMatchesOnAccountLanes(
+                                command.orderId(), sequence, matchingResult, laneContext);
                     } else {
                         rejectPlaceOrderRuntime(trigger.userId(), command.orderId());
                     }
@@ -2620,7 +2640,21 @@ public final class CoreProbeState implements AutoCloseable {
         if (laneMask != laneContext.expectedLaneMask()) {
             throw failMatching(pending, "account lane mask differs from immutable matcher result", null);
         }
-        if (!laneContext.complete()) acknowledgeAccountLanes(laneContext, before, snapshotState);
+        if (laneTreasuryDeltas == null) {
+            acknowledgeAccountLanes(laneContext, before, snapshotState);
+        } else {
+            AccountLaneAck[] acknowledgements = runtimePlaceOrderState.accountLaneAcks(
+                    sequence, laneContext.expectedLaneMask(), matchingResult, laneTreasuryDeltas);
+            for (AccountLaneAck acknowledgement : acknowledgements) {
+                if (acknowledgement != null) laneContext.acknowledge(acknowledgement);
+            }
+            requireCompleteAccountLaneAcks(laneContext);
+            laneContext.treasuryDelta().apply(runtimePlaceOrderState.treasury());
+            runtimePlaceOrderState.setMetadata(productLine,
+                    Math.incrementExact(runtimePlaceOrderState.revision()));
+            refreshSnapshotProjection();
+            materializeChangeAccumulators();
+        }
         if (commandOrderViews.isEmpty() && !commandChangedOrderIds.isEmpty()) {
             commandOrderViews = commandChangedOrderIds.stream()
                     .map(this::runtimeOrder)
@@ -2735,24 +2769,20 @@ public final class CoreProbeState implements AutoCloseable {
         if (before == null || after == null) throw new IllegalArgumentException("treasury ACK states are required");
         var beforeTreasury = before.treasuryState();
         var afterTreasury = after.treasuryState();
-        long fee = treasuryDelta(beforeTreasury.feeBalances(), afterTreasury.feeBalances());
-        long insurance = Math.addExact(
-                treasuryDelta(beforeTreasury.insuranceBalances(), afterTreasury.insuranceBalances()),
-                treasuryDelta(beforeTreasury.liquidationFeeBalances(), afterTreasury.liquidationFeeBalances()));
-        long deficit = treasuryDelta(beforeTreasury.insuranceDeficits(), afterTreasury.insuranceDeficits());
-        long fundingResidual = treasuryDelta(
-                beforeTreasury.fundingResidualBalances(), afterTreasury.fundingResidualBalances());
-        long roundingResidual = treasuryDelta(
-                beforeTreasury.roundingResidualBalances(), afterTreasury.roundingResidualBalances());
-        long clearing = treasuryDelta(beforeTreasury.clearingPnlBalances(), afterTreasury.clearingPnlBalances());
         com.surprising.aeron.service.state.RuntimeTreasuryDelta delta = new com.surprising.aeron.service.state.RuntimeTreasuryDelta();
-        int syntheticAssetId = 0;
-        delta.addFee(syntheticAssetId, fee);
-        delta.addInsurance(syntheticAssetId, insurance);
-        delta.addDeficit(syntheticAssetId, deficit);
-        delta.addFundingResidual(syntheticAssetId, fundingResidual);
-        delta.addRoundingResidual(syntheticAssetId, roundingResidual);
-        delta.addClearing(syntheticAssetId, clearing);
+        addTreasuryDifference(delta, beforeTreasury.feeBalances(), afterTreasury.feeBalances(), TreasuryLedger.FEE);
+        addTreasuryDifference(delta, beforeTreasury.insuranceBalances(), afterTreasury.insuranceBalances(),
+                TreasuryLedger.INSURANCE);
+        addTreasuryDifference(delta, beforeTreasury.liquidationFeeBalances(),
+                afterTreasury.liquidationFeeBalances(), TreasuryLedger.INSURANCE);
+        addTreasuryDifference(delta, beforeTreasury.insuranceDeficits(), afterTreasury.insuranceDeficits(),
+                TreasuryLedger.DEFICIT);
+        addTreasuryDifference(delta, beforeTreasury.fundingResidualBalances(),
+                afterTreasury.fundingResidualBalances(), TreasuryLedger.FUNDING_RESIDUAL);
+        addTreasuryDifference(delta, beforeTreasury.roundingResidualBalances(),
+                afterTreasury.roundingResidualBalances(), TreasuryLedger.ROUNDING_RESIDUAL);
+        addTreasuryDifference(delta, beforeTreasury.clearingPnlBalances(), afterTreasury.clearingPnlBalances(),
+                TreasuryLedger.CLEARING);
         boolean treasuryAckAssigned = false;
         for (var lane : runtimePlaceOrderState.accountLaneViews(context.expectedLaneMask())) {
             boolean aggregate = !treasuryAckAssigned;
@@ -2761,21 +2791,65 @@ public final class CoreProbeState implements AutoCloseable {
                     aggregate ? delta : new com.surprising.aeron.service.state.RuntimeTreasuryDelta()));
             treasuryAckAssigned = true;
         }
-        if (!context.complete()) throw new IllegalStateException("account lane ACK barrier is incomplete");
+        requireCompleteAccountLaneAcks(context);
         var aggregate = context.treasuryDelta();
-        if (aggregate.size() != 1 || aggregate.feeUnits(0) != fee || aggregate.insuranceUnits(0) != insurance
-                || aggregate.deficitUnits(0) != deficit || aggregate.fundingResidualUnits(0) != fundingResidual
-                || aggregate.roundingResidualUnits(0) != roundingResidual || aggregate.clearingUnits(0) != clearing) {
+        if (!sameTreasuryDelta(aggregate, delta)) {
             throw new IllegalStateException("account lane Treasury ACK aggregation mismatch");
         }
     }
 
-    private static long treasuryDelta(Map<String, Long> before, Map<String, Long> after) {
-        long beforeTotal = 0;
-        for (long units : before.values()) beforeTotal = Math.addExact(beforeTotal, units);
-        long afterTotal = 0;
-        for (long units : after.values()) afterTotal = Math.addExact(afterTotal, units);
-        return Math.subtractExact(afterTotal, beforeTotal);
+    private void requireCompleteAccountLaneAcks(LaneCommandContextRing.Context context) {
+        if (!context.complete()) throw new IllegalStateException("account lane ACK barrier is incomplete");
+        for (var lane : runtimePlaceOrderState.accountLaneViews(context.expectedLaneMask())) {
+            context.validate(lane);
+        }
+    }
+
+    private void addTreasuryDifference(
+            com.surprising.aeron.service.state.RuntimeTreasuryDelta delta,
+            Map<String, Long> before,
+            Map<String, Long> after,
+            TreasuryLedger ledger) {
+        java.util.TreeSet<String> assets = new java.util.TreeSet<>(before.keySet());
+        assets.addAll(after.keySet());
+        for (String asset : assets) {
+            long units = Math.subtractExact(after.getOrDefault(asset, 0L), before.getOrDefault(asset, 0L));
+            if (units == 0) continue;
+            int assetId = runtimePlaceOrderIdentities.assetId(asset);
+            switch (ledger) {
+                case FEE -> delta.addFee(assetId, units);
+                case INSURANCE -> delta.addInsurance(assetId, units);
+                case DEFICIT -> delta.addDeficit(assetId, units);
+                case FUNDING_RESIDUAL -> delta.addFundingResidual(assetId, units);
+                case ROUNDING_RESIDUAL -> delta.addRoundingResidual(assetId, units);
+                case CLEARING -> delta.addClearing(assetId, units);
+            }
+        }
+    }
+
+    private static boolean sameTreasuryDelta(
+            com.surprising.aeron.service.state.RuntimeTreasuryDelta left,
+            com.surprising.aeron.service.state.RuntimeTreasuryDelta right) {
+        if (left.size() != right.size()) return false;
+        for (int index = 0; index < left.size(); index++) {
+            if (left.assetId(index) != right.assetId(index)
+                    || left.feeUnits(index) != right.feeUnits(index)
+                    || left.insuranceUnits(index) != right.insuranceUnits(index)
+                    || left.deficitUnits(index) != right.deficitUnits(index)
+                    || left.fundingResidualUnits(index) != right.fundingResidualUnits(index)
+                    || left.roundingResidualUnits(index) != right.roundingResidualUnits(index)
+                    || left.clearingUnits(index) != right.clearingUnits(index)) return false;
+        }
+        return true;
+    }
+
+    private enum TreasuryLedger {
+        FEE,
+        INSURANCE,
+        DEFICIT,
+        FUNDING_RESIDUAL,
+        ROUNDING_RESIDUAL,
+        CLEARING
     }
 
     private void applyLiquidationBatch(
@@ -4248,38 +4322,14 @@ public final class CoreProbeState implements AutoCloseable {
                 runtimePlaceOrderIdentities, productLine, userId, trigger);
     }
 
-    private void applyMatchesRuntime(long takerOrderId,
-                                     List<MatcherEvent> matches) {
-        var taker = runtimePlaceOrderState.order(takerOrderId);
-        if (taker == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "taker order is missing");
-        var instrument = runtimePlaceOrderState.instrument(runtimePlaceOrderIdentities.symbol(taker.symbolId()));
-        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        if (productLine.isDerivative()) {
-            RuntimePerpetualMatchProcessor.applyRuntime(takerOrderId, matches,
-                    runtimePlaceOrderState, runtimePlaceOrderIdentities);
-        } else {
-            RuntimeSpotMatchProcessor.applyRuntime(takerOrderId, matches,
-                    runtimePlaceOrderState, runtimePlaceOrderIdentities);
-        }
-        refreshSnapshotProjection();
-    }
-
-    private void applyMatchesOnAccountLanes(
+    private com.surprising.aeron.service.state.RuntimeTreasuryDelta[] applyMatchesOnAccountLanes(
             long takerOrderId,
             long coreSequence,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
             LaneCommandContextRing.Context laneContext) {
-        AccountLaneAck[] acknowledgements = runtimePlaceOrderState.applyMatcherSettlement(
+        return runtimePlaceOrderState.applyMatcherSettlement(
                 coreSequence, laneContext.expectedLaneMask(), takerOrderId,
                 matchingResult, runtimePlaceOrderIdentities);
-        for (AccountLaneAck acknowledgement : acknowledgements) {
-            if (acknowledgement != null) laneContext.acknowledge(acknowledgement);
-        }
-        if (!laneContext.complete()) throw new IllegalStateException("account lane ACK barrier is incomplete");
-        laneContext.treasuryDelta().apply(runtimePlaceOrderState.treasury());
-        runtimePlaceOrderState.setMetadata(productLine,
-                Math.incrementExact(runtimePlaceOrderState.revision()));
-        refreshSnapshotProjection();
     }
 
     private void requireOrderIdentityAvailable(long userId, PlaceOrderCommand command) {
@@ -5059,6 +5109,9 @@ public final class CoreProbeState implements AutoCloseable {
         private final List<CoreOrderBatchResult.Item> results = new ArrayList<>();
         private final java.util.LinkedHashSet<Long> changedUserIds = new java.util.LinkedHashSet<>();
         private final java.util.LinkedHashSet<Long> changedOrderIds = new java.util.LinkedHashSet<>();
+        private final List<com.surprising.aeron.service.matching.CoreMatchingResult> matchingResults =
+                new ArrayList<>();
+        private com.surprising.aeron.service.state.RuntimeTreasuryDelta[] laneTreasuryDeltas;
         private int nextIndex;
         private long sequence;
         private TradingCoreState currentBefore;
@@ -5094,6 +5147,31 @@ public final class CoreProbeState implements AutoCloseable {
                     matcherTransition.routeVersion(), nextShard,
                     matcherTransition.sequenceBefore(), nextSequence,
                     matcherTransition.prefixBefore(), nextPrefix);
+        }
+
+        private void retainMatchingResult(
+                com.surprising.aeron.service.matching.CoreMatchingResult result) {
+            if (result == null || result.nativeCommand().coreSequence() != sequence) {
+                throw new IllegalArgumentException("invalid order batch matcher result");
+            }
+            matchingResults.add(result);
+        }
+
+        private void mergeTreasuryDeltas(
+                com.surprising.aeron.service.state.RuntimeTreasuryDelta[] deltas) {
+            if (deltas == null) throw new IllegalArgumentException("order batch Treasury deltas are required");
+            if (laneTreasuryDeltas == null) {
+                laneTreasuryDeltas = new com.surprising.aeron.service.state.RuntimeTreasuryDelta[deltas.length];
+                for (int laneId = 0; laneId < deltas.length; laneId++) {
+                    laneTreasuryDeltas[laneId] = new com.surprising.aeron.service.state.RuntimeTreasuryDelta(
+                            com.surprising.aeron.service.state.RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
+                }
+            } else if (laneTreasuryDeltas.length != deltas.length) {
+                throw new IllegalStateException("order batch Account Lane topology changed");
+            }
+            for (int laneId = 0; laneId < deltas.length; laneId++) {
+                if (deltas[laneId] != null) laneTreasuryDeltas[laneId].merge(deltas[laneId]);
+            }
         }
 
         private List<Long> changedOrderIdsFor(

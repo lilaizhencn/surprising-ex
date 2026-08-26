@@ -13,7 +13,7 @@ public record AccountLaneAck(
         RuntimeTreasuryDelta treasuryDelta) {
 
     public AccountLaneAck {
-        if (coreSequence <= 0 || laneId < 0 || laneId >= Long.SIZE || laneRevision < 0
+        if (coreSequence <= 0 || laneId < 0 || laneId >= Long.SIZE || laneRevision <= 0
                 || localStateHash == 0 || localFundsHash == 0
                 || matchingResult == null || treasuryDelta == null) {
             throw new IllegalArgumentException("invalid account lane ACK");
