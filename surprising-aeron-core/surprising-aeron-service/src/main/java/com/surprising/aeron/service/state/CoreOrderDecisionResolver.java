@@ -89,7 +89,7 @@ public final class CoreOrderDecisionResolver {
         }
         long age = Math.subtractExact(clusterTimestamp, mark.generatedAtEpochMillis());
         if (age < 0 || age > MARKET_MAX_MARK_AGE_MILLIS) {
-            throw new CoreStateRejectedException("MARK_PRICE_STALE", "mark price is outside the Core freshness bound");
+            throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price is outside the Core freshness bound");
         }
     }
 

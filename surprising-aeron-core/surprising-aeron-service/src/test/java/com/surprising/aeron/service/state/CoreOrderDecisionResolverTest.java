@@ -8,6 +8,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
@@ -54,7 +55,13 @@ class CoreOrderDecisionResolverTest {
 
         assertThatThrownBy(() -> CoreOrderDecisionResolver.resolve(runtime, identities, 1001, intent, 6_001))
                 .isInstanceOf(CoreStateRejectedException.class)
-                .hasMessageContaining("freshness");
+                .hasMessageContaining("freshness")
+                .satisfies(exception -> {
+                    CoreStateRejectedException rejection = (CoreStateRejectedException) exception;
+                    assertThat(rejection.code()).isEqualTo("STALE_MARK_PRICE");
+                    assertThat(CoreResultCode.fromRejectionCode(rejection.code()))
+                            .isEqualTo(CoreResultCode.STALE_MARK_PRICE);
+                });
     }
 
     @Test
