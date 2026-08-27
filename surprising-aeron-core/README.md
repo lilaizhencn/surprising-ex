@@ -45,9 +45,9 @@ Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Acco
 以 expected/ack Lane mask 提交，不生成 `SettlementPlan` 或 event 副本；Treasury 保持 Sequencer owner。全局 Core
 sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
 1 个 risk engine、4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、ACK 位图、全局 commit
-cursor 和实际 Lane snapshot section 已落地。`AccountLaneWorker[]` 为每个 Lane 创建固定 platform owner thread；账户 Map
-mutation、owner-routed query/read fence 和 Lane snapshot capture/restore 经过预分配槽位的有界双向 SPSC ring。当前
-P10-D/E 已把订单批次合并为每 Lane 一次 apply/commit，并在 ACK barrier 前捕获 Lane 原生 per-asset Treasury delta。
+cursor 和实际 Lane snapshot section 已落地。Account Lane 作为账户隔离、路由、局部 hash 和恢复校验边界，由 Product Core
+owner 直接按确定性 Lane 顺序执行；不再创建 Lane worker、SPSC ring 或逐命令同步等待。当前 P10-D/E 已把订单批次合并为
+每 Lane 一次 apply/commit，并在提交前捕获 Lane 原生 per-asset Treasury delta。
 P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣称生产认证完成。
 
 ## 协议约束
@@ -138,10 +138,12 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 
 - `TradingRuntimeState` 是六条产品线生产热路径的唯一 mutation authority。只有 Product Core owner thread 可以原地写入 Runtime State；
   外围服务、异步 matcher callback、PostgreSQL、Kafka 和 query projection 均不得直接写入。
-- immutable `TradingCoreState` 是由 Runtime changed-key 增量生成的 Snapshot State，只用于 Cluster snapshot、Core Fact 增量、恢复、
-  business/funds hash 和对账；它不再承担在线查询，也不允许反向覆盖 Runtime。
+- immutable `TradingCoreState` 是由 Runtime changed-key 增量生成的持久化 commit view，用于命令原子回滚、恢复、business/funds hash
+  和对账；它不承担在线查询，也不允许反向覆盖 Runtime。实际 Cluster snapshot section 的压缩与字节编码在独立 encoder 执行。
 - `TradingCoreRuntime` 持有 owner-thread Runtime 与 identity registry；生产命令通过 Runtime processors 原地裁决，再按 changed-key
-  增量生成 immutable Snapshot State。全量 materialization 只用于快照和恢复，不在普通命令或查询上遍历全局用户、余额、预留和持仓。
+  增量提交 immutable commit view。Core Fact 先以不可变 typed event 进入 replicated outbox，Audit Exporter 拉取批次或 snapshot
+  fence 捕获 outbox 时才编码；普通命令不执行 Core Fact 字节序列化。全量 materialization 只用于快照和恢复，不在普通命令或查询上
+  遍历全局用户、余额、预留和持仓。
 - `USER_STATE`、`ORDER_STATE`、client-order、活动订单、Treasury、风险、ADL、清算工作和生命周期进度查询都读取 Runtime 或其 ID 索引；
 - 产品线划转的扣款、入账和完成都在 owner thread 内执行纯内存命令；源 Runtime 使用有界 pending 索引支持前向恢复，
   不执行数据库、Kafka、HTTP、锁等待或 Future 等待。

@@ -226,10 +226,12 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 和资金对账证据。
 
 Product Core 的热状态与不可变状态投影通过 `RuntimeMutationDelta` 分界。命令在 Account Lane 内完成原地
-裁决后，每个 lane 只并行捕获一次本命令涉及的用户、余额、订单、冻结、仓位和风险值；随后唯一的
-`RuntimeStateMaterializer` 路径把该不可变 delta 投影为 `Snapshot State`，供资金守恒、滚动 hash、Core Fact、
-索引和快照 fence 使用。Cluster snapshot 的 section 编码在独立 snapshot encoder 线程执行，交易 owner 只在
-确定性 fence 捕获不可变 image，不执行压缩或字节序列化。等待 matcher 的临时冻结不会投影或更新已提交 hash，失败仍按命令前状态回滚；
+裁决后，owner 按涉及的 lane 各捕获一次本命令涉及的用户、余额、订单、冻结、仓位和风险值；随后唯一的
+`RuntimeStateMaterializer` 把该不可变 delta 提交为持久化 commit view，供命令原子回滚、资金守恒和滚动 hash 使用；
+它不是外围查询或 Cluster snapshot 字节投影。Cluster snapshot 的 section 编码在独立 snapshot encoder 线程执行，
+交易 owner 只在确定性 fence 捕获不可变 image，不执行压缩或字节序列化。Core Fact 在 replicated outbox 中先保存
+不可变 typed event 和精确长度，只有 Audit Exporter 拉取批次或 snapshot fence 捕获 outbox 时才执行协议编码。
+等待 matcher 的临时冻结不会更新已提交 hash，失败仍按命令前状态回滚；
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
 
@@ -243,7 +245,8 @@ Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP
 
 线性永续 Product Core 的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
 不启动 wallet、PostgreSQL、Kafka、Valkey 或 Aeron Cluster；JMH worker 固定为一个 owner thread，Account Lane
-在 Core 内部并行。默认覆盖限价挂单、吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复。
+作为确定性账户分区由同一个 Product Core owner 直接执行，不再为短操作跨线程排队和同步等待。默认覆盖限价挂单、
+吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复。
 `productionMixedWorkload` 额外把多币对做市、触发单、资金费、风险扫描、强平、保险基金和 ADL 放入同一条
 确定性 owner command stream，模拟生产中同时到达、由 Product Core 串行裁决的混合负载：
 
@@ -265,7 +268,7 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpet
 java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
   '.*productionMixedWorkload.*' -p activeUsers=1000,10000 -p symbols=4 -p hftBatchSize=20 \
   -p accountLanes=4 -wi 4 -w 2s -i 3 -r 4s -f 1 \
-  -jvmArgsAppend '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dsurprising.aeron.matching-engines=4 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.account-lane-wait-strategy=BUSY_SPIN'
+  -jvmArgsAppend '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dsurprising.aeron.matching-engines=4 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN'
 ```
 
 主指标 `ops/s` 是完整混合 invocation/秒，不是业务 TPS。辅助指标 `terminalBusinessOperations` 按 batch item
@@ -275,20 +278,17 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpet
 中的批量响应逐项解码、资金总量、触发单、资金费、风险扫描、强平、保险基金和 ADL 终态校验均不进入
 计时区间。Core 生成并编码完整响应仍在计时区间，只有基准客户端的重复反序列化校验被移到 teardown。
 2026-08-27 使用 GraalVM JDK 25.0.1、4 matcher / 1 risk engine、4 Account Lane、4 symbol、96 轮 HFT、
-batch 20、显式 matcher/Lane `BUSY_SPIN` 的最终本机运行中，不带 JFR 时 1,000 用户三轮业务操作吞吐为
-`6896.138`、`8741.622`、`9620.962 ops/s`，平均 `8419.574 ops/s`；10,000 用户为 `5877.522`、
-`6657.330`、`6931.778 ops/s`，平均 `6488.877 ops/s`。带 JFR 时两组平均值分别为 `6702.581` 和
-`6327.645 ops/s`。每轮接受与终态业务操作相等、两个未完成指标为零，teardown 的期初/期末资金守恒校验通过。
-本次结果没有达到 10k/s 或 100k/s，不能作为生产容量认证。10k JFR 计时区内 owner thread 共 463 个采样，
-其中 119 个经过 `AccountLaneWorker.await`、51 个经过 `ByteArrayOutputStream.write`、37 个经过
-`projectSnapshotNow`；同时 matcher/risk 与 Account Lane 线程的大多数样本处于自旋。下一阶段必须消除逐命令
-Lane 往返，并把不可变 Snapshot 投影与 Core Fact 编码从交易命令同步路径移到确定性、有界的独立消费阶段，
-再在隔离 CPU 的生产同型机器上执行三节点 HTTP P10 门禁。
+batch 20、2 轮预热和 3 轮各 3 秒计量的本机运行中，1,000 用户终态业务操作平均 `19362.406 ops/s`，
+10,000 用户平均 `20133.100 ops/s`；带 JFR 的 10,000 用户单轮为 `17600.742 ops/s`。每轮接受与终态业务操作
+相等、两个未完成指标为零，teardown 的期初/期末资金守恒校验通过。85 秒完整 JFR 中
+`AccountLaneWorker.await`、`CoreExportCodec.encodeEvent`、`CoreStateQueryCodec.encodeUserState` 和
+`encodeOrderState` 均为零；增量 commit view 的 `materializeTransition` 占 154 个执行栈样本。这是命令回滚和
+资金守恒边界，不能在没有事务 journal 的情况下异步化。本机结果已越过 10k/s 功能目标，但样本仍不足以替代
+隔离 CPU 的生产同型机器三节点 HTTP P10 长稳门禁，也不代表 100k/s 已达成。
 
 matcher 等待策略通过启动参数 `surprising.aeron.matcher-wait-strategy=BUSY_SPIN|YIELDING|BLOCKING` 切换；
-Account Lane 通过 `surprising.aeron.account-lane-wait-strategy=BUSY_SPIN|BALANCED|PARK` 切换，`BALANCED` 还可用
-`surprising.aeron.account-lane-idle-spins` 和 `surprising.aeron.account-lane-await-spins` 调整自旋预算。
-这些参数只影响线程等待和 CPU/尾延迟权衡，不进入资金状态或 snapshot hash；修改后重启单产品线 Core 生效。
+它只影响 matcher 线程等待和 CPU/尾延迟权衡，不进入资金状态或 snapshot hash，修改后重启单产品线 Core 生效。
+Account Lane 已不创建独立等待线程，因此不存在 Lane busy-spin 配置。
 
 快速确认 JMH 打包与场景可执行时可缩短迭代；该命令只用于 smoke，不作为容量结论：
 
@@ -307,7 +307,7 @@ Trial setup 中预装并生成快照，每次 invocation 从同一快照恢复�
 其输出不能作为容量或延迟基线。
 JMH 结果只代表单个 LINEAR_PERPETUAL Product Core 的本地内存基准。它不包含 Aeron ingress/replication、
 HTTP/WebSocket、Kafka、数据库、Cluster 故障切换和端到端资金对账，这些外围链路仍需独立门禁；多个 lane
-只并行 Core 内部账户工作，不会把唯一 owner 状态机变成多写者。
+是账户隔离、路由、局部 hash 和恢复校验边界，不会把唯一 owner 状态机变成多写者，也不会产生逐命令跨线程往返。
 
 ```bash
 createdb surprising_exchange
