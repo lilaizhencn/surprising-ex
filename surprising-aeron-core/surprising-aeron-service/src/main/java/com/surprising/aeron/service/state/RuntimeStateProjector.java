@@ -18,6 +18,7 @@ public final class RuntimeStateProjector {
         if (source == null || identities == null) throw new IllegalArgumentException("source and identities are required");
         TradingRuntimeState runtime = new TradingRuntimeState(topology);
         runtime.replaceAuxiliaryState(source);
+        source.instruments().keySet().forEach(identities::symbolId);
         source.users().forEach((userId, user) -> {
             runtime.putUser(new UserRuntime(user.productLine(), userId, user.revision(), user.positionMode()));
             user.balances().forEach((asset, balance) -> runtime.putBalance(new BalanceRuntime(

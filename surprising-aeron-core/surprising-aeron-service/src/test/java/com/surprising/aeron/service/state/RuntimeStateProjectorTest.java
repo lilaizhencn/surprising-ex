@@ -25,6 +25,20 @@ import org.junit.jupiter.api.Test;
 class RuntimeStateProjectorTest {
 
     @Test
+    void preparesUnusedInstrumentIdentityForFirstOrderAfterSnapshotRestore() {
+        TradingCoreState source = new TradingCoreReducer().upsertInstrument(
+                TradingCoreState.empty(ProductLine.SPOT),
+                new UpsertInstrumentCommand("NEW-SPOT-USDT", 1, ContractType.SPOT.ordinal(),
+                        "NEW", "USDT", "USDT", 1, 1, 1,
+                        100_000, 50_000, 0, 0, 0, -1, 0));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+
+        RuntimeStateProjector.project(source, identities);
+
+        assertThat(identities.findSymbolId("NEW-SPOT-USDT")).isNotNull();
+    }
+
+    @Test
     void materializesOneRuntimeCommandAsADeltaWithoutTraversingGlobalState() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
