@@ -6,11 +6,28 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class StateMapSupportTest {
+
+    @Test
+    void emptyDeferredDeltaReusesTheFrozenBaseWithoutLoadingValues() {
+        NavigableMap<Long, String> base = StateMapSupport.freezeSorted(
+                new TreeMap<>(Map.of(1L, "one")));
+        AtomicInteger loads = new AtomicInteger();
+
+        NavigableMap<Long, String> result = StateMapSupport.deferredDelta(
+                base, Set.of(), Set.of(), ignored -> {
+                    loads.incrementAndGet();
+                    return "unexpected";
+                });
+
+        assertThat(result).isSameAs(base);
+        assertThat(loads).hasValue(0);
+    }
 
     @Test
     void deltaMapSharesBaseAndKeepsDeterministicOrder() {

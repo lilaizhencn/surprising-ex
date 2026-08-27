@@ -50,6 +50,7 @@ public final class StateMapSupport {
                 || !changedKeys.containsAll(presentKeys)) {
             throw new IllegalArgumentException("invalid deferred state delta");
         }
+        if (changedKeys.isEmpty()) return freezeSorted(values);
         NavigableMap<K, V> base = raw(values);
         if (base == null) base = new TreeMap<>(values);
         Map<K, V> cache = new ConcurrentHashMap<>();
