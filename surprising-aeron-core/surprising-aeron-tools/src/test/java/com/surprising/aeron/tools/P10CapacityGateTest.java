@@ -1,5 +1,6 @@
 package com.surprising.aeron.tools;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.URI;
@@ -31,6 +32,26 @@ class P10CapacityGateTest {
         assertThatThrownBy(() -> P10CapacityGate.requireResult(summary))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("qualification failed");
+    }
+
+    @Test
+    void rejectsACompletedRunThatDidNotSustainOneHundredThousandTerminalOperations() {
+        HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload.Summary(
+                100_000, 100_000, 0, 0, 64, Map.of(),
+                1_000_000_000L, 99_999, 99_999);
+
+        assertThatThrownBy(() -> P10CapacityGate.requireResult(summary))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("qualification failed");
+    }
+
+    @Test
+    void acceptsACompleteRunAtTheMeasuredTerminalRateBoundary() {
+        HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload.Summary(
+                100_000, 100_000, 0, 0, 64, Map.of(),
+                1_000_000_000L, 100_000, 100_000);
+
+        assertThatCode(() -> P10CapacityGate.requireResult(summary)).doesNotThrowAnyException();
     }
 
     private static long[] users(int count) {

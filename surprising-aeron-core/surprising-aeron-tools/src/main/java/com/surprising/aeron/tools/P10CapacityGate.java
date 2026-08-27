@@ -36,7 +36,8 @@ final class P10CapacityGate {
                 || summary.classifications().getOrDefault(HttpOutcome.TRANSPORT_ERROR, 0L) != 0
                 || summary.classifications().getOrDefault(HttpOutcome.SERVER_5XX, 0L) != 0
                 || summary.classifications().getOrDefault(HttpOutcome.ORACLE_MISMATCH, 0L) != 0
-                || summary.classifications().getOrDefault(HttpOutcome.RATE_LIMITED_429, 0L) != 0) {
+                || summary.classifications().getOrDefault(HttpOutcome.RATE_LIMITED_429, 0L) != 0
+                || summary.terminalRatePerSecond() < MIN_RATE_PER_SECOND) {
             throw new IllegalStateException("P10 capacity qualification failed: " + summary);
         }
     }

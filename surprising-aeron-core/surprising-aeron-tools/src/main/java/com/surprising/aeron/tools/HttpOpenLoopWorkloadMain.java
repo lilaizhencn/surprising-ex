@@ -23,9 +23,12 @@ public final class HttpOpenLoopWorkloadMain {
                 Boolean.parseBoolean(properties.getProperty("requireJfr", "true")));
         HttpOpenLoopWorkload.Summary summary = new HttpOpenLoopWorkload(config).run();
         if (p10) P10CapacityGate.requireResult(summary);
-        System.out.printf("httpOpenLoop=PASS qualification=%s scheduled=%d completed=%d outstanding=%d deliberately_aborted=%d maxInFlight=%d%n",
+        System.out.printf("httpOpenLoop=PASS qualification=%s scheduled=%d completed=%d outstanding=%d "
+                        + "deliberately_aborted=%d maxInFlight=%d terminalWithinMeasurement=%d "
+                        + "terminalRatePerSecond=%d%n",
                 p10 ? "P10" : "NONE",
                 summary.scheduled(), summary.completed(), summary.outstanding(), summary.deliberatelyAborted(),
-                summary.maxObservedInFlight());
+                summary.maxObservedInFlight(), summary.terminalWithinMeasurement(),
+                summary.terminalRatePerSecond());
     }
 }

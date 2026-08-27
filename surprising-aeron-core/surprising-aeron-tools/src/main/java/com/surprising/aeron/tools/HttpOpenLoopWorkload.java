@@ -74,7 +74,18 @@ final class HttpOpenLoopWorkload {
                 if (cancelled.get()) break;
                 dispatch(intent, false);
             }
-            scheduleNew(opened);
+            HttpWorkloadMeasurementEvent measurement = new HttpWorkloadMeasurementEvent();
+            measurement.runId = config.runId();
+            measurement.offeredRatePerSecond = config.ratePerSecond();
+            measurement.begin();
+            try {
+                scheduleNew(opened);
+            } finally {
+                measurement.scheduled = opened.scheduledCount();
+                measurement.completed = opened.completedCount();
+                measurement.end();
+                measurement.commit();
+            }
             awaitDrain();
             opened.flush();
             Summary summary = summary(opened);
@@ -387,9 +398,23 @@ final class HttpOpenLoopWorkload {
             throw new IllegalStateException("accounting invariant violated scheduled=" + scheduled + " completed="
                     + completed + " outstanding=" + outstanding + " deliberately_aborted=" + aborted);
         }
+        List<StableIdentityLedger.Snapshot> snapshots = current.snapshots();
+        long measurementStart = snapshots.stream().mapToLong(StableIdentityLedger.Snapshot::intendedNanos)
+                .min().orElse(0L);
+        long measurementNanos = config.duration().toNanos();
+        long measurementEnd = measurementStart == 0L
+                ? 0L : Math.addExact(measurementStart, measurementNanos);
+        long terminalWithinMeasurement = measurementStart == 0L ? 0L : snapshots.stream()
+                .filter(snapshot -> snapshot.terminal() && !snapshot.aborted())
+                .filter(snapshot -> snapshot.finalNanos() >= measurementStart
+                        && snapshot.finalNanos() < measurementEnd)
+                .count();
+        long terminalRatePerSecond = Math.floorDiv(
+                Math.multiplyExact(terminalWithinMeasurement, 1_000_000_000L), measurementNanos);
         synchronized (metricsLock) {
             return new Summary(scheduled, completed, outstanding, aborted, maxObservedInFlight.get(),
-                    Map.copyOf(classifications));
+                    Map.copyOf(classifications), measurementNanos, terminalWithinMeasurement,
+                    terminalRatePerSecond);
         }
     }
 
@@ -405,6 +430,9 @@ final class HttpOpenLoopWorkload {
                     + ",\"scheduled\":" + summary.scheduled() + ",\"completed\":" + summary.completed()
                     + ",\"outstanding\":" + summary.outstanding() + ",\"deliberately_aborted\":"
                     + summary.deliberatelyAborted() + ",\"maxObservedInFlight\":" + summary.maxObservedInFlight()
+                    + ",\"measurementNanos\":" + summary.measurementNanos()
+                    + ",\"terminalWithinMeasurement\":" + summary.terminalWithinMeasurement()
+                    + ",\"terminalRatePerSecond\":" + summary.terminalRatePerSecond()
                     + ",\"accounting\":\"PASS\",\"classifications\":"
                     + classificationsJson(summary.classifications()) + "}\n";
             Files.writeString(config.outputDirectory().resolve("accounting.json"), json, StandardCharsets.UTF_8);
@@ -569,7 +597,14 @@ final class HttpOpenLoopWorkload {
     }
 
     record Summary(long scheduled, long completed, long outstanding, long deliberatelyAborted,
-                   int maxObservedInFlight, Map<HttpOutcome, Long> classifications) {
+                   int maxObservedInFlight, Map<HttpOutcome, Long> classifications,
+                   long measurementNanos, long terminalWithinMeasurement, long terminalRatePerSecond) {
+
+        Summary(long scheduled, long completed, long outstanding, long deliberatelyAborted,
+                int maxObservedInFlight, Map<HttpOutcome, Long> classifications) {
+            this(scheduled, completed, outstanding, deliberatelyAborted, maxObservedInFlight,
+                    classifications, 1_000_000_000L, completed, completed);
+        }
     }
 
     private record Response(int status, String body, HttpOutcome outcome) {
