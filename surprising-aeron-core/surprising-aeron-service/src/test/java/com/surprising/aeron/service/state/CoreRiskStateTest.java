@@ -115,6 +115,31 @@ class CoreRiskStateTest {
     }
 
     @Test
+    void runtimeMarkPriceOnlySchedulesHeavyRiskWork() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument(ContractType.LINEAR_PERPETUAL, 1));
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
+        state = withPosition(state, new CorePositionState("BTC-USDT", "USDT", 1,
+                10, 100, 1_000, 0, 100));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        long revisionBefore = runtime.revision();
+
+        RuntimePerpetualRiskProcessor.applyMarkPriceRuntime(
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1, 1_700_000_000_000L),
+                state.users().keySet(), runtime, identities);
+
+        assertThat(runtime.revision()).isEqualTo(revisionBefore + 1);
+        assertThat(runtime.riskScan(identities.symbolId("BTC-USDT")).riskComplete()).isFalse();
+        long positionKey = identities.preparedPositionKey(7, "BTC-USDT");
+        assertThat(runtime.riskSnapshot(positionKey)).isNull();
+
+        RuntimePerpetualRiskProcessor.applyContinuationRuntime(64, state.users().keySet(), runtime, identities);
+
+        assertThat(runtime.riskSnapshot(positionKey)).isNotNull();
+    }
+
+    @Test
     void markPriceBeyondHighestRiskBracketStillProducesLiquidationSnapshot() {
         UpsertInstrumentCommand command = new UpsertInstrumentCommand("BTC-USDT", 1,
                 ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,

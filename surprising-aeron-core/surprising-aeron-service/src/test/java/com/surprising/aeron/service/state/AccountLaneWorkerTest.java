@@ -166,6 +166,25 @@ class AccountLaneWorkerTest {
         }
     }
 
+    @Test
+    void parkModeUnparksTheSequencerWhenTheLaneCompletes() throws InterruptedException {
+        AccountLaneWorker worker = new AccountLaneWorker(new AccountLaneState(0, 4), "test",
+                AccountLaneWorker.WaitMode.PARK, 0, 0);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            AccountLaneWorker.Ticket<String> ticket = worker.submit(state -> await(entered, release));
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            Thread releaser = Thread.ofPlatform().start(release::countDown);
+
+            assertThat(worker.await(ticket)).isEqualTo(worker.ownerThreadName());
+            releaser.join();
+        } finally {
+            release.countDown();
+            worker.close();
+        }
+    }
+
     private static String await(CountDownLatch entered, CountDownLatch release) {
         entered.countDown();
         try {

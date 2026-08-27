@@ -26,6 +26,7 @@ public final class AccountLaneState {
             = new LongObjectHashMap<>();
     final LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
     final LongObjectHashMap<LongObjectHashMap<Long>> clientOrderIndex = new LongObjectHashMap<>();
+    final LongObjectHashMap<LongHashSet> clientKeysByOrderId = new LongObjectHashMap<>();
     final Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
     final LongObjectHashMap<TreeSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
     final Map<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();

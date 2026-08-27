@@ -21,6 +21,9 @@ public final class RuntimePerpetualRiskProcessor {
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         applyMarkPriceRuntime(command, indexedUserIds, runtime, identities);
+        if (runtime.riskScanControl().enabled()) {
+            applyContinuationRuntime(runtime.riskScanControl().scanBatchSize(), indexedUserIds, runtime, identities);
+        }
         return runtime;
     }
 
@@ -32,6 +35,9 @@ public final class RuntimePerpetualRiskProcessor {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
         applyMarkPriceRuntime(command, indexedUserIds, runtime, identities);
+        if (runtime.riskScanControl().enabled()) {
+            applyContinuationRuntime(runtime.riskScanControl().scanBatchSize(), indexedUserIds, runtime, identities);
+        }
     }
 
     public static void applyMarkPriceRuntime(ApplyMarkPriceCommand command, Iterable<Long> indexedUserIds,
@@ -56,12 +62,7 @@ public final class RuntimePerpetualRiskProcessor {
         runtime.putRiskScan(new RiskScanRuntime(symbolId, command.priceSequence(), scanStart, lastUserId, disabled,
                 0, 0, "-", 0, 0, 0, 0, 0,
                 true, 0, 0, 0, 0, 0, 0, 0, 0));
-        if (!disabled) {
-            continueScan(runtime, instrument, command.priceSequence(),
-                    runtime.riskScanControl().scanBatchSize(), indexedUserIds, identities);
-        }
-        runtime.setMetadata(runtime.productLine(), disabled
-                ? Math.incrementExact(runtime.revision()) : Math.addExact(runtime.revision(), 2));
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
     }
 
     public static TradingRuntimeState simulateContinuation(TradingCoreState before, int maxWork,

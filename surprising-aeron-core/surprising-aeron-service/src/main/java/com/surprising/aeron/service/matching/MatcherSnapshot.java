@@ -116,7 +116,8 @@ public record MatcherSnapshot(
     public static long matcherConfigHash(LaneTopology topology) {
         return hashText("matching=" + topology.matchingEngineCount()
                 + ";risk=" + topology.riskEngineCount()
-                + ";wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED;eventsPooling=true"
+                + ";wait=RUNTIME_CONFIGURED"
+                + ";riskMode=MATCHING_ONLY;margin=DISABLED;eventsPooling=true"
                 + ";matcherWindow=" + topology.matcherWindowSize()
                 + ";completionCapacity=" + topology.matchingCompletionCapacity()
                 + ";accountLanes=" + topology.accountLaneCount()

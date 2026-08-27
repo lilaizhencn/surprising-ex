@@ -3994,11 +3994,10 @@ public final class CoreProbeState implements AutoCloseable {
                 RuntimePerpetualRiskProcessor.applyMarkPriceRuntime(command,
                         positionUserIndex.users(command.symbol()), runtimePlaceOrderState,
                         runtimePlaceOrderIdentities);
-                refreshSnapshotProjection();
                 initializeTriggerScan(command);
+                refreshSnapshotProjection();
                 logRiskScan("mark-price", command.symbol(), runtimePlaceOrderState.riskScanControl().scanBatchSize(),
                         pendingBefore, startedAt);
-                evaluateMarkPriceTriggers(command, message.header().commandId(), message.header().submittedAtEpochMillis());
             }
             case APPLY_FUNDING -> {
                 var command = TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe());
@@ -4185,17 +4184,13 @@ public final class CoreProbeState implements AutoCloseable {
                 .filter(java.util.Objects::nonNull);
     }
 
-    private void evaluateMarkPriceTriggers(com.surprising.aeron.protocol.ApplyMarkPriceCommand command,
-                                           UUID commandId, long submittedAtEpochMillis) {
-        evaluatePendingTriggerScan(command.symbol());
-    }
-
     private void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
         Integer symbolId = runtimePlaceOrderIdentities.findSymbolId(command.symbol());
         RiskScanRuntime scan = symbolId == null ? null : runtimePlaceOrderState.riskScan(symbolId);
         if (scan == null || scan.priceSequence() != command.priceSequence()) return;
         long upperId = triggerOrderIndex.maxPendingId(command.symbol());
-        replaceRiskScan(scan.withTriggerProgress(upperId == 0, TriggerOrderIndex.PHASE_GREATER_OR_EQUAL,
+        RuntimeCommandProcessor.replaceRiskScan(runtimePlaceOrderState,
+                scan.withTriggerProgress(upperId == 0, TriggerOrderIndex.PHASE_GREATER_OR_EQUAL,
                 Long.MAX_VALUE, Long.MAX_VALUE, upperId, command.markPriceTicks(),
                 command.generatedAtEpochMillis()).withTriggerOcoProgress(0, 0));
     }

@@ -11,7 +11,6 @@ import com.surprising.aeron.service.state.LaneTopology;
 import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
 import exchange.core2.core.common.CoreSymbolSpecification;
-import exchange.core2.core.common.CoreWaitStrategy;
 import exchange.core2.core.common.L2MarketData;
 import exchange.core2.core.common.OrderAction;
 import exchange.core2.core.common.OrderType;
@@ -662,7 +661,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                 Integer.getInteger("surprising.aeron.matcher-group-size", 256)))
                         .maxGroupDurationNs(Math.max(1,
                                 Integer.getInteger("surprising.aeron.matcher-group-nanos", 10_000)))
-                        .waitStrategy(CoreWaitStrategy.BUSY_SPIN).build())
+                        .waitStrategy(MatcherRuntimeConfiguration.waitStrategy()).build())
                 .initStateCfg(initialState)
                 .serializationCfg(SerializationConfiguration.builder()
                         .enableJournaling(false)

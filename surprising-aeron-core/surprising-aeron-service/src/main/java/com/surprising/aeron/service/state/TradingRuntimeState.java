@@ -22,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class TradingRuntimeState implements AutoCloseable {
 
     public static final int MAX_PENDING_TRANSFERS = 131_072;
+    private static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
 
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     private long revision;
@@ -376,12 +377,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         PendingReservationCompletion completion = onLane(userId, accountLane -> {
             ReservationRuntime reservation = accountLane.reservations.get(orderId);
             accountLane.completePendingReservation(orderId, coreSequence);
-            LongHashSet clientKeys = new LongHashSet();
-            LongObjectHashMap<Long> clients = accountLane.clientOrderIndex.get(userId);
-            if (clients != null) clients.forEachKeyValue((clientKey, indexedOrderId) -> {
-                if (indexedOrderId == orderId) clientKeys.add(clientKey);
-            });
-            return new PendingReservationCompletion(reservation, clientKeys);
+            return new PendingReservationCompletion(reservation, clientKeysForOrder(accountLane, orderId));
         });
         changedOrders.add(orderId);
         changedReservations.add(orderId);
@@ -412,13 +408,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (topology.accountLaneId(ref.userId()) != laneId) continue;
                 ReservationRuntime reservation = lane.reservations.get(ref.orderId());
                 lane.completePendingReservation(ref.orderId(), coreSequence);
-                LongHashSet clientKeys = new LongHashSet();
-                LongObjectHashMap<Long> clients = lane.clientOrderIndex.get(ref.userId());
-                if (clients != null) clients.forEachKeyValue((clientKey, indexedOrderId) -> {
-                    if (indexedOrderId == ref.orderId()) clientKeys.add(clientKey);
-                });
                 completions.add(new PendingReservationBatchCompletion(
-                        ref.orderId(), ref.userId(), reservation, clientKeys));
+                        ref.orderId(), ref.userId(), reservation, clientKeysForOrder(lane, ref.orderId())));
             }
             return List.copyOf(completions);
         });
@@ -1577,7 +1568,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         LongHashSet clientKeys = onLane(userId, lane -> {
             LongHashSet keys = new LongHashSet();
             LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
-            if (userClientOrders != null) userClientOrders.forEachKey(keys::add);
+            if (userClientOrders != null) userClientOrders.forEachKeyValue((clientKey, orderId) -> {
+                keys.add(clientKey);
+                removeClientOrderReverse(lane, orderId, clientKey);
+            });
             lane.users.remove(userId);
             lane.removeUser(userId);
             lane.balances.remove(userId);
@@ -1955,12 +1949,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void putClientOrder(long userId, long clientKey, long orderId) {
         assertOwner();
         onLane(userId, lane -> {
-            LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
-            if (userClientOrders == null) {
-                userClientOrders = new LongObjectHashMap<>();
-                lane.clientOrderIndex.put(userId, userClientOrders);
-            }
-            userClientOrders.put(clientKey, orderId);
+            putClientOrderIndex(lane, userId, clientKey, orderId);
             return null;
         });
         changedClientOrders.add(clientKey);
@@ -1971,11 +1960,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void removeClientOrder(long userId, long clientKey) {
         assertOwner();
         onLane(userId, lane -> {
-            LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
-            if (userClientOrders != null) {
-                userClientOrders.remove(clientKey);
-                if (userClientOrders.isEmpty()) lane.clientOrderIndex.remove(userId);
-            }
+            removeClientOrderIndex(lane, userId, clientKey);
             return null;
         });
         changedClientOrders.add(clientKey);
@@ -2027,8 +2012,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (prune.clientKey() != 0) {
                     LongObjectHashMap<Long> clients = lane.clientOrderIndex.get(prune.userId());
                     if (clients != null && Long.valueOf(prune.orderId()).equals(clients.get(prune.clientKey()))) {
-                        clients.remove(prune.clientKey());
-                        if (clients.isEmpty()) lane.clientOrderIndex.remove(prune.userId());
+                        removeClientOrderIndex(lane, prune.userId(), prune.clientKey());
                         clientRemoved = true;
                     }
                 }
@@ -2381,24 +2365,42 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void clearChangedKeys() {
         assertOwner();
-        changedUsers.clear();
-        changedBalances.clear();
-        changedOrders.clear();
-        changedReservations.clear();
-        changedPositions.clear();
-        changedLiquidations.clear();
-        changedMarkPrices.clear();
-        changedRiskSnapshots.clear();
-        changedRiskScans.clear();
-        changedClientOrders.clear();
-        changedClientOrdersByUser.clear();
+        clearChanged(changedUsers);
+        clearChanged(changedBalances);
+        clearChanged(changedOrders);
+        clearChanged(changedReservations);
+        clearChanged(changedPositions);
+        clearChanged(changedLiquidations);
+        clearChanged(changedMarkPrices);
+        clearChanged(changedRiskSnapshots);
+        clearChanged(changedRiskScans);
+        clearChanged(changedClientOrders);
+        clearChanged(changedClientOrdersByUser);
         changedInstruments.clear();
         changedLeverages.clear();
-        changedAlgoOrders.clear();
+        clearChanged(changedAlgoOrders);
         changedCancelAllAfterTimers.clear();
-        changedTriggerOrders.clear();
-        changedFeePolicies.clear();
+        clearChanged(changedTriggerOrders);
+        clearChanged(changedFeePolicies);
         treasury.clearChangedKeys();
+    }
+
+    private static void clearChanged(LongHashSet values) {
+        boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
+        values.clear();
+        if (compact) values.compact();
+    }
+
+    private static void clearChanged(IntHashSet values) {
+        boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
+        values.clear();
+        if (compact) values.compact();
+    }
+
+    private static <T> void clearChanged(LongObjectHashMap<T> values) {
+        boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
+        values.clear();
+        if (compact) values.compact();
     }
 
     TradingRuntimeSnapshot snapshot(long revision) {
@@ -2514,11 +2516,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.orders.put(orderId, order);
             lane.reservations.put(orderId, reservation);
             addUserEntity(lane.reservationIdsByUser, userId, orderId);
-            if (clientKey != 0 && userClientOrders == null) {
-                userClientOrders = new LongObjectHashMap<>();
-                lane.clientOrderIndex.put(userId, userClientOrders);
-            }
-            if (clientKey != 0) userClientOrders.put(clientKey, orderId);
+            if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, orderId);
             return new ReservedOrder(order, reservation);
         });
         publishedOrders.put(orderId, reserved.order());
@@ -2602,6 +2600,45 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (entities == null) return;
         entities.remove(entityId);
         if (entities.isEmpty()) index.remove(userId);
+    }
+
+    private static void putClientOrderIndex(AccountLaneState lane, long userId, long clientKey, long orderId) {
+        LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
+        if (userClientOrders == null) {
+            userClientOrders = new LongObjectHashMap<>();
+            lane.clientOrderIndex.put(userId, userClientOrders);
+        }
+        Long previousOrderId = userClientOrders.put(clientKey, orderId);
+        if (previousOrderId != null && previousOrderId != orderId) {
+            removeClientOrderReverse(lane, previousOrderId, clientKey);
+        }
+        LongHashSet keys = lane.clientKeysByOrderId.get(orderId);
+        if (keys == null) {
+            keys = new LongHashSet();
+            lane.clientKeysByOrderId.put(orderId, keys);
+        }
+        keys.add(clientKey);
+    }
+
+    private static Long removeClientOrderIndex(AccountLaneState lane, long userId, long clientKey) {
+        LongObjectHashMap<Long> userClientOrders = lane.clientOrderIndex.get(userId);
+        if (userClientOrders == null) return null;
+        Long orderId = userClientOrders.remove(clientKey);
+        if (userClientOrders.isEmpty()) lane.clientOrderIndex.remove(userId);
+        if (orderId != null) removeClientOrderReverse(lane, orderId, clientKey);
+        return orderId;
+    }
+
+    private static void removeClientOrderReverse(AccountLaneState lane, long orderId, long clientKey) {
+        LongHashSet keys = lane.clientKeysByOrderId.get(orderId);
+        if (keys == null) return;
+        keys.remove(clientKey);
+        if (keys.isEmpty()) lane.clientKeysByOrderId.remove(orderId);
+    }
+
+    private static LongHashSet clientKeysForOrder(AccountLaneState lane, long orderId) {
+        LongHashSet keys = lane.clientKeysByOrderId.get(orderId);
+        return keys == null ? new LongHashSet() : new LongHashSet(keys);
     }
 
     private void changedClientOrder(long userId, long clientKey) {

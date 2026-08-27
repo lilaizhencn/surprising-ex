@@ -868,7 +868,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void markPriceCommandExecutesOnlyCrossingTriggerCandidatesInsideCore() {
+    void markPriceCommandSchedulesCrossingTriggerCandidatesForContinuation() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         applySpotInstrument(state);
         state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
@@ -889,6 +889,12 @@ class CoreProbeStateTest {
                 TradingCommandCodec.encodeApplyMarkPrice(mark)));
 
         assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(state.tradingState().triggerOrders().get(504L).status())
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING);
+        CoreMessage continuation = tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(), 4,
+                TradingCommandCodec.encodeContinueRiskScan(
+                        new com.surprising.aeron.protocol.ContinueRiskScanCommand(64)));
+        assertThat(applyAndDrain(state, continuation).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(state.tradingState().triggerOrders().get(504L).status())
                 .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED);
         assertThat(state.tradingState().triggerOrders().get(504L).triggerSequence()).isEqualTo(7);
@@ -921,9 +927,9 @@ class CoreProbeStateTest {
         assertThat(state.tradingState().triggerOrders().get(1L).status())
                 .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING);
         assertThat(state.tradingState().triggerOrders().get(2L).status())
-                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.CANCELED);
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING);
         assertThat(state.tradingState().triggerOrders().get(3L).status())
-                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.CANCELED);
+                .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING);
         assertThat(state.tradingState().triggerOrders().get(4L).status())
                 .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING);
 
@@ -975,7 +981,7 @@ class CoreProbeStateTest {
                 .isEqualTo(ResponseStatus.APPLIED);
         assertThat(state.tradingState().triggerOrders().values().stream()
                 .filter(value -> value.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED)
-                .count()).isEqualTo(2);
+                .count()).isZero();
 
         long sourceSequence = 401;
         while (!state.tradingState().riskState().scan().complete()) {

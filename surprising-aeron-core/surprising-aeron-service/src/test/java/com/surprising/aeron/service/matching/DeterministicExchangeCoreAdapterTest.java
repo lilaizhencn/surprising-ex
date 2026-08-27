@@ -28,6 +28,18 @@ import org.junit.jupiter.api.Test;
 class DeterministicExchangeCoreAdapterTest {
 
     @Test
+    void acceptsOnlyProductionWaitStrategies() {
+        assertThat(MatcherRuntimeConfiguration.waitStrategy("busy_spin"))
+                .isEqualTo(exchange.core2.core.common.CoreWaitStrategy.BUSY_SPIN);
+        assertThat(MatcherRuntimeConfiguration.waitStrategy("yielding"))
+                .isEqualTo(exchange.core2.core.common.CoreWaitStrategy.YIELDING);
+        assertThat(MatcherRuntimeConfiguration.waitStrategy("blocking"))
+                .isEqualTo(exchange.core2.core.common.CoreWaitStrategy.BLOCKING);
+        assertThatThrownBy(() -> MatcherRuntimeConfiguration.waitStrategy("second_step_no_wait"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void cancelBatchStopsAtFirstFailureAndReturnsSuccessfulPrefix() {
         List<CoreOrderState> orders = List.of(order(1), order(2), order(3));
         List<Long> submissions = new ArrayList<>();

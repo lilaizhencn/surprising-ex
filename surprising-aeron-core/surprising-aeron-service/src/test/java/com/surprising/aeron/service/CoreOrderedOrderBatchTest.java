@@ -221,7 +221,7 @@ class CoreOrderedOrderBatchTest {
     void processesMaximumBatchesInInputOrder() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
-            applyBalance(state, 1001, 100_000);
+            applyBalance(state, 1001, Math.multiplyExact(PlaceOrderBatchCommand.MAX_ORDERS, 1_000L));
             UUID commandId = UUID.randomUUID();
             List<PlaceOrderCommand> orders = new ArrayList<>();
             for (int index = 0; index < PlaceOrderBatchCommand.MAX_ORDERS; index++) {

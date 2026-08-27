@@ -125,6 +125,37 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void reservationCompletionUsesTheOrderToClientReverseIndex() {
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        state.markPendingReservation(7, 11, 4);
+        state.clearChangedKeys();
+
+        state.completePendingReservation(7, 11, 4);
+
+        assertThat(state.changedClientOrders().contains(91)).isTrue();
+        assertThat(state.changedClientOrdersByUser().get(7).contains(91)).isTrue();
+    }
+
+    @Test
+    void removingAClientOrderAlsoRemovesItsReverseIndexEntry() {
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        state.markPendingReservation(7, 11, 4);
+        state.removeClientOrder(7, 91);
+        state.clearChangedKeys();
+
+        state.completePendingReservation(7, 11, 4);
+
+        assertThat(state.changedClientOrders().isEmpty()).isTrue();
+        assertThat(state.changedClientOrdersByUser().isEmpty()).isTrue();
+    }
+
+    @Test
     void rejectsDuplicateOrderAndClientWithoutChangingFunds() {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));

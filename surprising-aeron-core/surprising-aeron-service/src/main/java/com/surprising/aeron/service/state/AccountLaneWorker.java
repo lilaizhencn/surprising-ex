@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
@@ -11,13 +12,31 @@ final class AccountLaneWorker implements AutoCloseable {
     }
 
     private static final long EMPTY_SEQUENCE = Long.MIN_VALUE;
-    private static final int ACTIVE_IDLE_SPINS = Math.max(0,
-            Integer.getInteger("surprising.aeron.account-lane-idle-spins", 100_000));
+    enum WaitMode {
+        BUSY_SPIN,
+        BALANCED,
+        PARK;
+
+        private static WaitMode configured() {
+            String configured = System.getProperty(
+                    "surprising.aeron.account-lane-wait-strategy", "BALANCED");
+            try {
+                return valueOf(configured.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException(
+                        "account lane wait strategy must be BUSY_SPIN, BALANCED or PARK", exception);
+            }
+        }
+    }
+
     private final AccountLaneState state;
     private final Slot[] slots;
     private final int mask;
     private final Thread thread;
     private final AccountLaneMetricsTracker metrics;
+    private final WaitMode waitMode;
+    private final int activeIdleSpins;
+    private final int activeAwaitSpins;
     private final AtomicReference<Thread> sequencer = new AtomicReference<>();
     private volatile long consumedSequence;
     private volatile boolean running = true;
@@ -25,10 +44,23 @@ final class AccountLaneWorker implements AutoCloseable {
     private volatile long reclaimedSequence;
 
     AccountLaneWorker(AccountLaneState state, String productLineName) {
+        this(state, productLineName, WaitMode.configured(),
+                Math.max(0, Integer.getInteger("surprising.aeron.account-lane-idle-spins", 100_000)),
+                Math.max(0, Integer.getInteger("surprising.aeron.account-lane-await-spins", 10_000)));
+    }
+
+    AccountLaneWorker(AccountLaneState state, String productLineName, WaitMode waitMode,
+                      int activeIdleSpins, int activeAwaitSpins) {
         if (state == null || productLineName == null || productLineName.isBlank()) {
             throw new IllegalArgumentException("account lane worker state is required");
         }
+        if (waitMode == null || activeIdleSpins < 0 || activeAwaitSpins < 0) {
+            throw new IllegalArgumentException("account lane wait configuration is invalid");
+        }
         this.state = state;
+        this.waitMode = waitMode;
+        this.activeIdleSpins = activeIdleSpins;
+        this.activeAwaitSpins = activeAwaitSpins;
         this.slots = new Slot[state.queueCapacity()];
         for (int index = 0; index < slots.length; index++) slots[index] = new Slot();
         this.mask = slots.length - 1;
@@ -90,9 +122,16 @@ final class AccountLaneWorker implements AutoCloseable {
             throw new IllegalStateException("account lane responses must be reclaimed in sequence: expected="
                     + expectedSequence + ", actual=" + sequence);
         }
+        int idleSpins = 0;
         while (slot.responseSequence != sequence) {
             ensureRunning();
-            Thread.onSpinWait();
+            if (waitMode == WaitMode.BUSY_SPIN
+                    || waitMode == WaitMode.BALANCED && idleSpins < activeAwaitSpins) {
+                idleSpins++;
+                Thread.onSpinWait();
+            } else {
+                LockSupport.park();
+            }
         }
         Object result = slot.result;
         Throwable failure = slot.failure;
@@ -169,7 +208,8 @@ final class AccountLaneWorker implements AutoCloseable {
         while (running || nextSequence <= offeredSequence) {
             Slot slot = slots[(int) nextSequence & mask];
             if (slot.requestSequence != nextSequence) {
-                if (idleSpins < ACTIVE_IDLE_SPINS) {
+                if (waitMode == WaitMode.BUSY_SPIN
+                        || waitMode == WaitMode.BALANCED && idleSpins < activeIdleSpins) {
                     idleSpins++;
                     Thread.onSpinWait();
                 } else {
@@ -187,6 +227,8 @@ final class AccountLaneWorker implements AutoCloseable {
             metrics.completed(nextSequence);
             slot.responseSequence = nextSequence;
             consumedSequence = nextSequence;
+            Thread boundSequencer = sequencer.get();
+            if (boundSequencer != null) LockSupport.unpark(boundSequencer);
             nextSequence = Math.incrementExact(nextSequence);
         }
         state.releaseOwner();
