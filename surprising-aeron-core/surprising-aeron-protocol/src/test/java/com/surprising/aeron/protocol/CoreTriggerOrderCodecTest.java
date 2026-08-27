@@ -14,9 +14,11 @@ class CoreTriggerOrderCodecTest {
                 "tp-501", "oco-1", "BTC-USDT", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "trace", 0, 0, 1_000, 1_000, 1,
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "追踪", 0, 0, 1_000, 1_000, 1,
                 7, -25, 40);
         assertThat(CoreTriggerOrderCodec.decodeState(CoreTriggerOrderCodec.encodeState(state))).isEqualTo(state);
+        assertThat(CoreTriggerOrderCodec.encodedStateLength(state))
+                .isEqualTo(CoreTriggerOrderCodec.encodeState(state).length);
         assertThat(CoreTriggerOrderCodec.decodeList(CoreTriggerOrderCodec.encodeList(List.of(state))))
                 .containsExactly(state);
         CoreTriggerOrderQuery query = new CoreTriggerOrderQuery(0, "btc-usdt", 501, 10);

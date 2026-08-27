@@ -54,7 +54,10 @@ class CoreProbeStateTest {
 
             assertThat(state.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
 
-            var event = state.exportState().pending().stream()
+            assertThat(state.exportState().encodedPendingCount()).isZero();
+            var pending = state.exportState().pending();
+            assertThat(state.exportState().encodedPendingCount()).isEqualTo(pending.size());
+            var event = pending.stream()
                     .map(message -> CoreExportCodec.decodeEvent(message.payloadUnsafe()))
                     .filter(value -> value.commandId().equals(commandId))
                     .findFirst().orElseThrow();
@@ -80,7 +83,7 @@ class CoreProbeStateTest {
             assertThat(metrics.matcherDispatchDepth()).isZero();
             assertThat(metrics.commandContextDepth()).isZero();
             assertThat(metrics.accountLaneQueueCapacities()).containsOnly(4_096);
-            assertThat(metrics.accountLaneQueueHighWaterMarks()).containsOnly(1);
+            assertThat(metrics.accountLaneQueueHighWaterMarks()).containsOnly(0);
             assertThat(metrics.accountLaneRejectedSubmissions()).containsOnly(0);
             assertThat(metrics.accountLaneCompletedOperations()).hasSize(16);
         }
@@ -1301,7 +1304,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void cancelSettlementUsesOneBoundedOwnerLaneCommand() {
+    void cancelSettlementDoesNotSubmitCrossThreadLaneCommands() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
             assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
@@ -1320,7 +1323,7 @@ class CoreProbeStateTest {
 
             long matcherApplyOwnerMutationAndCommitOperations =
                     accountLaneSettlementOperations(state.laneMetrics()) - settlementsBefore;
-            assertThat(matcherApplyOwnerMutationAndCommitOperations).isEqualTo(3);
+            assertThat(matcherApplyOwnerMutationAndCommitOperations).isZero();
             assertThat(state.tradingState().order(902).status().name()).isEqualTo("CANCELED");
             assertThat(state.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
         }

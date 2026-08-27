@@ -38,6 +38,42 @@ public final class CoreTriggerOrderCodec {
         return writer.bytes();
     }
 
+    public static int encodedStateLength(CoreTriggerOrderStateView state) {
+        if (state == null) throw new IllegalArgumentException("trigger state is required");
+        long length = Integer.BYTES + Long.BYTES + Integer.BYTES + Long.BYTES;
+        length = Math.addExact(length, textLength(state.clientTriggerOrderId())
+                + textLength(state.ocoGroupId()) + textLength(state.symbol()));
+        length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 6L);
+        length = Math.addExact(length, Integer.BYTES * 2L + Long.BYTES * 2L);
+        length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 3L);
+        length = Math.addExact(length, textLength(state.rejectReason()) + textLength(state.traceId()));
+        length = Math.addExact(length, Long.BYTES * 8L);
+        return Math.toIntExact(length);
+    }
+
+    private static int textLength(String value) {
+        if (value == null) throw new IllegalArgumentException("trigger text is required");
+        int bytes = utf8Length(value);
+        if (bytes > MAX_TEXT_BYTES) throw new IllegalArgumentException("trigger text too long");
+        return Math.addExact(Integer.BYTES, bytes);
+    }
+
+    private static int utf8Length(String value) {
+        int length = 0;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current < 0x80) length++;
+            else if (current < 0x800) length += 2;
+            else if (Character.isHighSurrogate(current) && index + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(index + 1))) {
+                length += 4;
+                index++;
+            } else if (Character.isSurrogate(current)) length++;
+            else length += 3;
+        }
+        return length;
+    }
+
     public static CoreTriggerOrderStateView decodeState(byte[] encoded) {
         Reader reader = new Reader(encoded); int version = reader.stateVersion();
         CoreTriggerOrderStateView result = new CoreTriggerOrderStateView(

@@ -23,11 +23,15 @@ class CoreStateQueryCodecTest {
         CoreOrderStateView order = new CoreOrderStateView(71, ProductLine.SPOT, 7, "BTC-USDT", 3,
                 CoreOrderSide.BUY, 60_000, 2, 0, 2, false, CoreMarginMode.ISOLATED,
                 CorePositionSide.LONG, CoreOrderType.LIMIT, CoreTimeInForce.GTX, true,
-                "client-71", UUID.fromString("00000000-0000-0000-0000-000000000071"),
+                "客户-71", UUID.fromString("00000000-0000-0000-0000-000000000071"),
                 -10, 20, 1_000, 1_001, 99, "OPEN", 1);
 
         assertThat(CoreStateQueryCodec.decodeUserState(CoreStateQueryCodec.encodeUserState(user))).isEqualTo(user);
         assertThat(CoreStateQueryCodec.decodeOrderState(CoreStateQueryCodec.encodeOrderState(order))).isEqualTo(order);
+        assertThat(CoreStateQueryCodec.encodedUserStateLength(user))
+                .isEqualTo(CoreStateQueryCodec.encodeUserState(user).length);
+        assertThat(CoreStateQueryCodec.encodedOrderStateLength(order))
+                .isEqualTo(CoreStateQueryCodec.encodeOrderState(order).length);
         assertThat(CoreStateQueryCodec.decodeClientOrderStateQuery(
                 CoreStateQueryCodec.encodeClientOrderStateQuery("client-71"))).isEqualTo("client-71");
     }

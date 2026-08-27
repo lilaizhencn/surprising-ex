@@ -143,6 +143,29 @@ public final class CoreStateQueryCodec {
         return writer.toByteArray();
     }
 
+    public static int encodedUserStateLength(CoreUserStateView state) {
+        if (state == null) throw new IllegalArgumentException("user state is required");
+        long length = Integer.BYTES * 4L + Long.BYTES * 2L;
+        for (CoreBalanceView balance : state.balances()) {
+            length = Math.addExact(length, textLength(balance.asset()) + Long.BYTES * 2L);
+        }
+        length = Math.addExact(length, Integer.BYTES);
+        for (CoreReservationView reservation : state.reservations()) {
+            length = Math.addExact(length, Long.BYTES + textLength(reservation.symbol())
+                    + Long.BYTES + Integer.BYTES + textLength(reservation.asset()) + Long.BYTES * 4L);
+        }
+        length = Math.addExact(length, Integer.BYTES);
+        for (CorePositionView position : state.positions()) {
+            length = Math.addExact(length, textLength(position.symbol()) + textLength(position.marginAsset())
+                    + Integer.BYTES * 2L + Long.BYTES * 6L);
+        }
+        length = Math.addExact(length, Integer.BYTES);
+        for (CoreLeverageView leverage : state.leverages()) {
+            length = Math.addExact(length, textLength(leverage.symbol()) + Integer.BYTES + Long.BYTES);
+        }
+        return Math.toIntExact(length);
+    }
+
     public static CoreUserStateView decodeUserState(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version(VERSION);
@@ -188,6 +211,53 @@ public final class CoreStateQueryCodec {
         Writer writer = new Writer();
         writeOrderState(writer, state);
         return writer.toByteArray();
+    }
+
+    public static int encodedOrderStateLength(CoreOrderStateView state) {
+        if (state == null) throw new IllegalArgumentException("order state is required");
+        long length = Integer.BYTES + Long.BYTES + Integer.BYTES + Long.BYTES;
+        length = Math.addExact(length, textLength(state.symbol()));
+        length = Math.addExact(length, Long.BYTES + Integer.BYTES + Long.BYTES * 4L);
+        length = Math.addExact(length, Byte.BYTES + Integer.BYTES * 4L + Byte.BYTES);
+        length = Math.addExact(length, optionalTextLength(state.clientOrderId()));
+        length = Math.addExact(length, Long.BYTES * 2L);
+        length = Math.addExact(length, Long.BYTES * 6L);
+        length = Math.addExact(length, textLength(state.status()) + Long.BYTES);
+        return Math.toIntExact(length);
+    }
+
+    private static int textLength(String value) {
+        if (value == null) throw new IllegalArgumentException("query text is required");
+        int bytes = utf8Length(value);
+        if (bytes == 0 || bytes > MAX_TEXT_BYTES) {
+            throw new IllegalArgumentException("invalid query text length");
+        }
+        return Math.addExact(Integer.BYTES, bytes);
+    }
+
+    private static int optionalTextLength(String value) {
+        if (value == null) throw new IllegalArgumentException("optional query text is required");
+        int bytes = utf8Length(value);
+        if (bytes > MAX_TEXT_BYTES) {
+            throw new IllegalArgumentException("invalid optional query text length");
+        }
+        return Math.addExact(Integer.BYTES, bytes);
+    }
+
+    private static int utf8Length(String value) {
+        int length = 0;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current < 0x80) length++;
+            else if (current < 0x800) length += 2;
+            else if (Character.isHighSurrogate(current) && index + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(index + 1))) {
+                length += 4;
+                index++;
+            } else if (Character.isSurrogate(current)) length++;
+            else length += 3;
+        }
+        return length;
     }
 
     private static void writeOrderState(Writer writer, CoreOrderStateView state) {

@@ -51,31 +51,7 @@ public final class CoreExportCodec {
         for (CoreUserStateView user : event.changedUsers()) users.add(CoreStateQueryCodec.encodeUserState(user));
         List<byte[]> orders = new ArrayList<>(event.changedOrders().size());
         for (CoreOrderStateView order : event.changedOrders()) orders.add(CoreStateQueryCodec.encodeOrderState(order));
-        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 7L + payload.length;
-        for (byte[] user : users) length = Math.addExact(length, Integer.BYTES + user.length);
-        for (byte[] order : orders) length = Math.addExact(length, Integer.BYTES + order.length);
-        length = Math.addExact(length, Math.multiplyExact(event.executions().size(), Long.BYTES * 6L));
-        for (CoreFundingPaymentView payment : event.fundingPayments()) {
-            length = Math.addExact(length, fundingPaymentLength(payment));
-        }
-        for (CoreLiquidationView liquidation : event.changedLiquidations()) {
-            length = Math.addExact(length, liquidationLength(liquidation));
-        }
-        for (CoreTreasuryAssetView treasury : event.changedTreasuryAssets()) {
-            length = Math.addExact(length, treasuryLength(treasury));
-        }
-        for (CoreTriggerOrderStateView trigger : event.changedTriggerOrders()) {
-            byte[] encoded = CoreTriggerOrderCodec.encodeState(trigger);
-            length = Math.addExact(length, Integer.BYTES + encoded.length);
-        }
-        length = Math.addExact(length, Long.BYTES * 11L + Integer.BYTES * 3L);
-        for (CoreFundsPostingView posting : event.fundsPostings()) {
-            length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 2L + utf8(posting.asset()).length);
-        }
-        if (payload.length > MAX_COMMAND_PAYLOAD || length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
-            throw new IllegalArgumentException("export event payload is too large");
-        }
-        ByteBuffer output = littleEndian(Math.toIntExact(length));
+        ByteBuffer output = littleEndian(encodedEventLength(event));
         output.putInt(EVENT_V9_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
@@ -121,6 +97,39 @@ public final class CoreExportCodec {
                     .putInt(posting.subledger().wireCode()).putLong(posting.units());
         });
         return output.array();
+    }
+
+    public static int encodedEventLength(CoreExportEvent event) {
+        if (event == null) throw new IllegalArgumentException("export event is required");
+        byte[] payload = event.commandPayloadUnsafe();
+        long length = Integer.BYTES + EVENT_FIXED_LENGTH + Integer.BYTES * 7L + payload.length;
+        for (CoreUserStateView user : event.changedUsers()) {
+            length = Math.addExact(length, Integer.BYTES + CoreStateQueryCodec.encodedUserStateLength(user));
+        }
+        for (CoreOrderStateView order : event.changedOrders()) {
+            length = Math.addExact(length, Integer.BYTES + CoreStateQueryCodec.encodedOrderStateLength(order));
+        }
+        length = Math.addExact(length, Math.multiplyExact(event.executions().size(), Long.BYTES * 6L));
+        for (CoreFundingPaymentView payment : event.fundingPayments()) {
+            length = Math.addExact(length, fundingPaymentLength(payment));
+        }
+        for (CoreLiquidationView liquidation : event.changedLiquidations()) {
+            length = Math.addExact(length, liquidationLength(liquidation));
+        }
+        for (CoreTreasuryAssetView treasury : event.changedTreasuryAssets()) {
+            length = Math.addExact(length, treasuryLength(treasury));
+        }
+        for (CoreTriggerOrderStateView trigger : event.changedTriggerOrders()) {
+            length = Math.addExact(length, Integer.BYTES + CoreTriggerOrderCodec.encodedStateLength(trigger));
+        }
+        length = Math.addExact(length, Long.BYTES * 11L + Integer.BYTES * 3L);
+        for (CoreFundsPostingView posting : event.fundsPostings()) {
+            length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 2L + utf8Length(posting.asset()));
+        }
+        if (payload.length > MAX_COMMAND_PAYLOAD || length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
+            throw new IllegalArgumentException("export event payload is too large");
+        }
+        return Math.toIntExact(length);
     }
 
     public static CoreExportEvent decodeEvent(byte[] encoded) {
@@ -216,8 +225,8 @@ public final class CoreExportCodec {
 
     private static int liquidationLength(CoreLiquidationView liquidation) {
         return Long.BYTES * 10 + Integer.BYTES * 5
-                + utf8(liquidation.symbol()).length + utf8(liquidation.asset()).length
-                + utf8(liquidation.status()).length;
+                + utf8Length(liquidation.symbol()) + utf8Length(liquidation.asset())
+                + utf8Length(liquidation.status());
     }
 
     private static void putLiquidation(ByteBuffer output, CoreLiquidationView liquidation) {
@@ -267,7 +276,7 @@ public final class CoreExportCodec {
     }
 
     private static int treasuryLength(CoreTreasuryAssetView treasury) {
-        return Integer.BYTES + Long.BYTES * 7 + utf8(treasury.asset()).length;
+        return Integer.BYTES + Long.BYTES * 7 + utf8Length(treasury.asset());
     }
 
     private static void putTreasury(ByteBuffer output, CoreTreasuryAssetView treasury) {
@@ -287,7 +296,7 @@ public final class CoreExportCodec {
 
     private static int fundingPaymentLength(CoreFundingPaymentView payment) {
         return Integer.BYTES * 4 + Long.BYTES * 6
-                + utf8(payment.symbol()).length + utf8(payment.asset()).length;
+                + utf8Length(payment.symbol()) + utf8Length(payment.asset());
     }
 
     private static void putFundingPayment(ByteBuffer output, CoreFundingPaymentView payment) {
@@ -334,6 +343,22 @@ public final class CoreExportCodec {
 
     private static byte[] utf8(String value) {
         return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static int utf8Length(String value) {
+        int length = 0;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current < 0x80) length++;
+            else if (current < 0x800) length += 2;
+            else if (Character.isHighSurrogate(current) && index + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(index + 1))) {
+                length += 4;
+                index++;
+            } else if (Character.isSurrogate(current)) length++;
+            else length += 3;
+        }
+        return length;
     }
 
     private static void putItems(ByteBuffer output, List<byte[]> items) {

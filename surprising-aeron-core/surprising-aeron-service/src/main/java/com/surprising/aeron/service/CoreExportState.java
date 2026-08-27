@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreExportStatus;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
+import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMatcherTransition;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -51,7 +52,7 @@ final class CoreExportState {
                     || decoded.exportSequence() != expectedSequence) {
                 throw new IllegalArgumentException("non-contiguous export state");
             }
-            PendingExport restored = pendingExport(event, terminalOrderIds(decoded));
+            PendingExport restored = pendingExport(event, decoded, terminalOrderIds(decoded));
             this.pending.add(restored);
             pendingBytes = Math.addExact(pendingBytes, restored.encodedLength());
             pendingDigest ^= restored.digest();
@@ -93,18 +94,18 @@ final class CoreExportState {
                 beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
                 matcherTransition.routeVersion(), topologyHash, laneRevisionHash, appliedCommandCount,
                 matcherTransition, clusterPosition, fundsDelta.views());
-        CoreMessage message;
+        int eventBytes;
         try {
-            message = CoreMessage.owned(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));
+            eventBytes = Math.addExact(CoreProtocol.HEADER_LENGTH, CoreExportCodec.encodedEventLength(event));
         } catch (IllegalArgumentException exception) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export fact exceeds event limit");
         }
-        int eventBytes = encodedLength(message);
         if (pendingBytes + eventBytes > MAX_PENDING_BYTES) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached byte limit");
         }
-        PendingExport appended = new PendingExport(message, terminalOrderIds(event), eventBytes,
-                eventDigest(message));
+        CoreMessageHeader header = command.header().exportEvent(sequence);
+        PendingExport appended = new PendingExport(header, event, null, terminalOrderIds(event), eventBytes,
+                eventDigest(header, event));
         pending.add(appended);
         pendingBytes = Math.addExact(pendingBytes, eventBytes);
         pendingDigest ^= appended.digest();
@@ -199,6 +200,14 @@ final class CoreExportState {
         return pendingDigest;
     }
 
+    int encodedPendingCount() {
+        int count = 0;
+        for (PendingExport event : pending) {
+            if (event.encoded()) count++;
+        }
+        return count;
+    }
+
     Snapshot snapshot() {
         return new Snapshot(acknowledgedSequence, nextSequence, pending(), pendingDigest);
     }
@@ -222,9 +231,8 @@ final class CoreExportState {
         return Math.addExact(CoreProtocol.HEADER_LENGTH, message.payloadLength());
     }
 
-    private static long eventDigest(CoreMessage message) {
+    private static long eventDigest(CoreMessageHeader header, CoreExportEvent event) {
         long hash = 0xcbf29ce484222325L;
-        var header = message.header();
         hash = digestLong(hash, header.schemaVersion());
         hash = digestLong(hash, header.kind().wireCode());
         hash = digestLong(hash, header.messageType().wireCode());
@@ -237,11 +245,50 @@ final class CoreExportState {
         hash = digestLong(hash, header.userId());
         hash = digestLong(hash, header.submittedAtEpochMillis());
         hash = digestLong(hash, header.correlationId());
-        for (byte value : message.payloadUnsafe()) {
+        hash = digestLong(hash, event.appliedCommandCount());
+        hash = digestLong(hash, event.businessStateHash());
+        hash = digestLong(hash, event.commandType().wireCode());
+        hash = digestLong(hash, event.commandStatus().wireCode());
+        hash = digestLong(hash, event.resultCode().wireCode());
+        hash = digestLong(hash, event.beforeBusinessStateHash());
+        hash = digestLong(hash, event.beforeFundsStateHash());
+        hash = digestLong(hash, event.fundsStateHash());
+        hash = digestLong(hash, event.topologyHash());
+        hash = digestLong(hash, event.laneRevisionHash());
+        hash = digestLong(hash, event.committedCoreSequence());
+        hash = digestLong(hash, event.matcherTransition().matcherShardId());
+        hash = digestLong(hash, event.matcherTransition().sequenceBefore());
+        hash = digestLong(hash, event.matcherTransition().sequenceAfter());
+        hash = digestLong(hash, event.matcherTransition().prefixBefore());
+        hash = digestLong(hash, event.matcherTransition().prefixAfter());
+        hash = digestLong(hash, event.clusterPosition());
+        hash = digestLong(hash, event.changedUsers().size());
+        hash = digestLong(hash, event.changedOrders().size());
+        hash = digestLong(hash, event.executions().size());
+        hash = digestLong(hash, event.fundingPayments().size());
+        hash = digestLong(hash, event.changedLiquidations().size());
+        hash = digestLong(hash, event.changedTreasuryAssets().size());
+        hash = digestLong(hash, event.changedTriggerOrders().size());
+        hash = digestLong(hash, event.fundsPostings().size());
+        hash = digestValues(hash, event.changedUsers());
+        hash = digestValues(hash, event.changedOrders());
+        hash = digestValues(hash, event.executions());
+        hash = digestValues(hash, event.fundingPayments());
+        hash = digestValues(hash, event.changedLiquidations());
+        hash = digestValues(hash, event.changedTreasuryAssets());
+        hash = digestValues(hash, event.changedTriggerOrders());
+        hash = digestValues(hash, event.fundsPostings());
+        for (byte value : event.commandPayloadUnsafe()) {
             hash ^= Byte.toUnsignedInt(value);
             hash *= 0x100000001b3L;
         }
         return hash;
+    }
+
+    private static long digestValues(long hash, List<?> values) {
+        long result = hash;
+        for (Object value : values) result = digestLong(result, value.hashCode());
+        return result;
     }
 
     private static long digestLong(long hash, long value) {
@@ -261,17 +308,50 @@ final class CoreExportState {
         return List.copyOf(terminal);
     }
 
-    private static PendingExport pendingExport(CoreMessage message, List<Long> terminalOrderIds) {
-        return new PendingExport(message, terminalOrderIds, encodedLength(message), eventDigest(message));
+    private static PendingExport pendingExport(CoreMessage message, CoreExportEvent event,
+                                               List<Long> terminalOrderIds) {
+        return new PendingExport(message.header(), event, message, terminalOrderIds,
+                encodedLength(message), eventDigest(message.header(), event));
     }
 
-    private record PendingExport(CoreMessage message, List<Long> terminalOrderIds,
-                                 int encodedLength, long digest) {
-        private PendingExport {
-            terminalOrderIds = List.copyOf(terminalOrderIds);
+    private static final class PendingExport {
+        private final CoreMessageHeader header;
+        private final CoreExportEvent event;
+        private CoreMessage encoded;
+        private final List<Long> terminalOrderIds;
+        private final int encodedLength;
+        private final long digest;
+
+        private PendingExport(CoreMessageHeader header, CoreExportEvent event, CoreMessage encoded,
+                              List<Long> terminalOrderIds, int encodedLength, long digest) {
+            if (header == null || event == null || terminalOrderIds == null) {
+                throw new IllegalArgumentException("invalid pending export");
+            }
+            this.header = header;
+            this.event = event;
+            this.encoded = encoded;
+            this.terminalOrderIds = List.copyOf(terminalOrderIds);
+            this.encodedLength = encodedLength;
+            this.digest = digest;
             if (encodedLength < CoreProtocol.HEADER_LENGTH) {
                 throw new IllegalArgumentException("invalid pending export length");
             }
         }
+
+        private CoreMessage message() {
+            if (encoded == null) {
+                CoreMessage materialized = CoreMessage.owned(header, CoreExportCodec.encodeEvent(event));
+                if (CoreExportState.encodedLength(materialized) != encodedLength) {
+                    throw new IllegalStateException("lazy Core Fact length differs from admission length");
+                }
+                encoded = materialized;
+            }
+            return encoded;
+        }
+
+        private List<Long> terminalOrderIds() { return terminalOrderIds; }
+        private int encodedLength() { return encodedLength; }
+        private long digest() { return digest; }
+        private boolean encoded() { return encoded != null; }
     }
 }

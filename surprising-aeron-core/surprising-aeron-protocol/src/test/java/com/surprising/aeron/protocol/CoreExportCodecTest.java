@@ -21,6 +21,7 @@ class CoreExportCodecTest {
 
         byte[] encoded = CoreExportCodec.encodeEvent(event);
 
+        assertThat(CoreExportCodec.encodedEventLength(event)).isEqualTo(encoded.length);
         assertThat(ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt())
                 .isEqualTo(0xC0E7_0009);
         assertThat(encoded).hasSize(196);
@@ -64,6 +65,7 @@ class CoreExportCodecTest {
                 WireMessageKind.EXPORT_EVENT, CoreMessageType.CORE_EVENT, commandId, ProductLine.SPOT,
                 CoreRoute.DEFAULT, CommandSource.GATEWAY, 1, 7, 17, 19, 23), CoreExportCodec.encodeEvent(event));
 
+        assertThat(CoreExportCodec.encodedEventLength(event)).isEqualTo(message.payloadLength());
         CoreExportEvent restored = CoreExportCodec.decodeEvent(message.payload());
         List<CoreMessage> batch = CoreExportCodec.decodeBatch(CoreExportCodec.encodeBatch(List.of(message)));
         CoreExportStatus status = new CoreExportStatus(6, 8, 1, 256, 1_000_000, 64L * 1024 * 1024);
