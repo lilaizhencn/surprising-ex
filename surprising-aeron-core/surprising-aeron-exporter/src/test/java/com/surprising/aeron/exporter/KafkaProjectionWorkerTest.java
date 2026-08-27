@@ -53,7 +53,7 @@ class KafkaProjectionWorkerTest {
     @Test
     void successCommitsOffsetOnlyAfterTransactionReturns() throws Exception {
         JdbcDataSource dataSource = dataSource("worker_success");
-        TrackingConsumer consumer = consumer(dataSource);
+        TrackingConsumer consumer = consumer(dataSource, 1);
         consumer.addRecord(record(41, event(1, List.of(user(18)))));
         var worker = new KafkaProjectionWorker(ProductLine.SPOT, consumer,
                 new JdbcCoreEventProjector(dataSource));
@@ -65,8 +65,28 @@ class KafkaProjectionWorkerTest {
         assertProjectionState(dataSource, 1, 1, 1);
     }
 
+    @Test
+    void projectsOneKafkaPollInOneDatabaseTransactionAndOffsetCommit() throws Exception {
+        JdbcDataSource dataSource = dataSource("worker_batch");
+        TrackingConsumer consumer = consumer(dataSource, 2);
+        consumer.addRecord(record(41, event(1, List.of(user(18)))));
+        consumer.addRecord(record(42, event(2, List.of(user(19)))));
+        var worker = new KafkaProjectionWorker(ProductLine.SPOT, consumer,
+                new JdbcCoreEventProjector(dataSource));
+
+        assertThat(worker.pollOnce(Duration.ZERO)).isEqualTo(2);
+        assertThat(consumer.commitCalls).isEqualTo(1);
+        assertThat(consumer.projectionVisibleAtCommit).isTrue();
+        assertThat(consumer.committed(java.util.Set.of(PARTITION)).get(PARTITION).offset()).isEqualTo(43);
+        assertProjectionState(dataSource, 2, 2, 2);
+    }
+
     private static TrackingConsumer consumer(JdbcDataSource dataSource) {
-        TrackingConsumer consumer = new TrackingConsumer(dataSource);
+        return consumer(dataSource, 0);
+    }
+
+    private static TrackingConsumer consumer(JdbcDataSource dataSource, int expectedProjected) {
+        TrackingConsumer consumer = new TrackingConsumer(dataSource, expectedProjected);
         consumer.assign(List.of(PARTITION));
         consumer.updateBeginningOffsets(Map.of(PARTITION, 0L));
         return consumer;
@@ -144,17 +164,19 @@ class KafkaProjectionWorkerTest {
         private final JdbcDataSource dataSource;
         private int commitCalls;
         private boolean projectionVisibleAtCommit;
+        private final int expectedProjected;
 
-        private TrackingConsumer(JdbcDataSource dataSource) {
+        private TrackingConsumer(JdbcDataSource dataSource, int expectedProjected) {
             super("earliest");
             this.dataSource = dataSource;
+            this.expectedProjected = expectedProjected;
         }
 
         @Override
         public synchronized void commitSync(Map<TopicPartition, OffsetAndMetadata> offsets) {
             commitCalls++;
             try {
-                assertProjectionState(dataSource, 1, 1, 1);
+                assertProjectionState(dataSource, expectedProjected, expectedProjected, expectedProjected);
                 projectionVisibleAtCommit = true;
             } catch (Exception exception) {
                 throw new AssertionError("projection transaction was not visible before offset commit", exception);

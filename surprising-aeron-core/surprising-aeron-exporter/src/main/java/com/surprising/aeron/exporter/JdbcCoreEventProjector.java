@@ -13,7 +13,9 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import javax.sql.DataSource;
 
@@ -150,34 +152,49 @@ public final class JdbcCoreEventProjector {
     }
 
     public boolean project(ProductLine productLine, CoreMessage message) throws SQLException {
-        CoreExportEvent event = CoreExportCodec.decodeEvent(message.payload());
-        if (message.header().productLine() != productLine
-                || message.header().sourceSequence() != event.exportSequence()) {
-            throw new IllegalArgumentException("export event identity mismatch");
-        }
+        return projectBatch(productLine, List.of(message)) != 0;
+    }
+
+    public int projectBatch(ProductLine productLine, List<CoreMessage> messages) throws SQLException {
+        Objects.requireNonNull(productLine, "productLine");
+        List<ProjectableEvent> events = decodeEvents(productLine, messages);
+        if (events.isEmpty()) return 0;
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                long lastExportSequence = lockWatermark(connection, productLine);
-                byte[] rawMessage = CoreMessageCodec.encode(message);
-                if (event.exportSequence() <= lastExportSequence) {
-                    if (isIdenticalEvent(connection, productLine, event, rawMessage)) {
-                        connection.commit();
-                        return false;
+                long initialWatermark = lockWatermark(connection, productLine);
+                long currentWatermark = initialWatermark;
+                CoreExportEvent previousInserted = null;
+                int inserted = 0;
+                for (ProjectableEvent projectable : events) {
+                    CoreExportEvent event = projectable.event();
+                    if (event.exportSequence() <= currentWatermark) {
+                        if (isIdenticalEvent(connection, productLine, event, projectable.rawMessage())) {
+                            continue;
+                        }
+                        throw sequenceFailure(productLine, currentWatermark, event.exportSequence(),
+                                event.exportSequence() == currentWatermark
+                                        ? "conflicting duplicate" : "reordered event");
                     }
-                    throw sequenceFailure(productLine, lastExportSequence, event.exportSequence(),
-                            event.exportSequence() == lastExportSequence
-                                    ? "conflicting duplicate" : "reordered event");
+                    if (event.exportSequence() != Math.incrementExact(currentWatermark)) {
+                        throw sequenceFailure(productLine, currentWatermark, event.exportSequence(), "sequence gap");
+                    }
+                    if (previousInserted == null) {
+                        verifyContinuity(connection, productLine, currentWatermark, event);
+                    } else {
+                        verifyContinuity(previousInserted, event, productLine);
+                    }
+                    insertEvent(connection, productLine, projectable.message(), event);
+                    insertFacts(connection, productLine, projectable.message(), event);
+                    currentWatermark = event.exportSequence();
+                    previousInserted = event;
+                    inserted++;
                 }
-                if (event.exportSequence() != Math.incrementExact(lastExportSequence)) {
-                    throw sequenceFailure(productLine, lastExportSequence, event.exportSequence(), "sequence gap");
+                if (currentWatermark != initialWatermark) {
+                    updateWatermark(connection, productLine, initialWatermark, currentWatermark);
                 }
-                verifyContinuity(connection, productLine, lastExportSequence, event);
-                insertEvent(connection, productLine, message, event);
-                insertFacts(connection, productLine, message, event);
-                updateWatermark(connection, productLine, lastExportSequence, event.exportSequence());
                 connection.commit();
-                return true;
+                return inserted;
             } catch (SQLException | RuntimeException exception) {
                 try {
                     connection.rollback();
@@ -189,6 +206,21 @@ public final class JdbcCoreEventProjector {
                 connection.setAutoCommit(true);
             }
         }
+    }
+
+    private static List<ProjectableEvent> decodeEvents(ProductLine productLine, List<CoreMessage> messages) {
+        Objects.requireNonNull(messages, "messages");
+        List<ProjectableEvent> events = new ArrayList<>(messages.size());
+        for (CoreMessage message : messages) {
+            if (message == null) throw new IllegalArgumentException("export event is required");
+            CoreExportEvent event = CoreExportCodec.decodeEvent(message.payload());
+            if (message.header().productLine() != productLine
+                    || message.header().sourceSequence() != event.exportSequence()) {
+                throw new IllegalArgumentException("export event identity mismatch");
+            }
+            events.add(new ProjectableEvent(message, event, CoreMessageCodec.encode(message)));
+        }
+        return List.copyOf(events);
     }
 
     private static long lockWatermark(Connection connection, ProductLine productLine) throws SQLException {
@@ -250,6 +282,22 @@ public final class JdbcCoreEventProjector {
                             + "/" + event.exportSequence(), "23000");
                 }
             }
+        }
+    }
+
+    private static void verifyContinuity(
+            CoreExportEvent previous,
+            CoreExportEvent current,
+            ProductLine productLine) throws SQLException {
+        var matcher = current.matcherTransition();
+        boolean matcherContinuous = matcher.sequenceBefore() == previous.matcherTransition().sequenceAfter()
+                && matcher.prefixBefore() == previous.matcherTransition().prefixAfter();
+        if (current.beforeBusinessStateHash() != previous.businessStateHash()
+                || current.beforeFundsStateHash() != previous.fundsStateHash()
+                || current.clusterPosition() < previous.clusterPosition()
+                || !matcherContinuous) {
+            throw new SQLException("Core fact continuity mismatch for " + productLine
+                    + "/" + current.exportSequence(), "23000");
         }
     }
 
@@ -617,5 +665,11 @@ public final class JdbcCoreEventProjector {
             throws SQLException {
         if (clientOrderId.isEmpty()) statement.setNull(index, java.sql.Types.VARCHAR);
         else statement.setString(index, clientOrderId);
+    }
+
+    private record ProjectableEvent(CoreMessage message, CoreExportEvent event, byte[] rawMessage) {
+        private ProjectableEvent {
+            rawMessage = rawMessage.clone();
+        }
     }
 }
