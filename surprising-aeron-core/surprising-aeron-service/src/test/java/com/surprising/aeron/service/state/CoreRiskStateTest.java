@@ -304,12 +304,9 @@ class CoreRiskStateTest {
         try {
             RuntimePerpetualRiskProcessor.applyMarkPrice(
                     state, command, state.users().keySet(), runtime, identities);
-            long riskOperations = 0;
             for (int laneId = 0; laneId < runtime.topology().accountLaneCount(); laneId++) {
-                riskOperations += runtime.accountLaneMetricsById(laneId)
-                        .completedOperations()[AccountLaneOperationType.RISK.ordinal()];
+                assertThat(runtime.accountLaneById(laneId).queueDepth()).isZero();
             }
-            assertThat(riskOperations).as("risk scan must batch each user's reads on its owner lane").isPositive();
             assertThat(RuntimeStateMaterializer.materializeTransition(runtime, identities, state))
                     .isEqualTo(first);
             RuntimeStateParityChecker.assertMatches(first, identities, runtime);

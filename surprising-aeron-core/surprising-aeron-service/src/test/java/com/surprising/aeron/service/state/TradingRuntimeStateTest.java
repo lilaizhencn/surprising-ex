@@ -260,7 +260,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void routesStateAndReadFencesThroughTheFixedAccountOwner() {
+    void routesStateAndReadFencesWithoutCrossThreadLaneWaits() {
         TradingRuntimeState state = new TradingRuntimeState(LaneTopology.characterization());
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
@@ -270,18 +270,14 @@ class TradingRuntimeStateTest {
                     .withCoreSequence(1);
             var apply = state.applyAndCommitLaneSequence(1, java.util.List.of(7L), result, 3, 5, null);
             assertThat(apply.acknowledgements()).filteredOn(java.util.Objects::nonNull).hasSize(1);
-            long settlementOperations = state.accountLaneMetricsById(state.topology().accountLaneId(7))
-                    .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()];
-            assertThat(settlementOperations)
-                    .as("lane apply, acknowledgement and commit must share one owner-lane operation")
-                    .isEqualTo(1);
             state.readFence(7, 1);
 
             AccountLaneView lane = state.accountLane(7);
-            assertThat(lane.ownerThreadName()).startsWith("account-lane-");
+            assertThat(lane.ownerThreadName()).isEqualTo(Thread.currentThread().getName());
             assertThat(lane.appliedSequence()).isEqualTo(1);
             assertThat(lane.committedSequence()).isEqualTo(1);
-            assertThat(lane.queueHighWaterMark()).isGreaterThan(0);
+            assertThat(lane.queueDepth()).isZero();
+            assertThat(lane.queueHighWaterMark()).isZero();
             assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
         } finally {
             state.close();
