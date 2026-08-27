@@ -70,6 +70,14 @@ final class LinearPerpetualBenchmarkSupport {
             return operations();
         }
 
+        default long acceptedCoreMessages() {
+            return acceptedOperations();
+        }
+
+        default long terminalCoreMessages() {
+            return terminalOperations();
+        }
+
         default long maxBacklog() {
             return 0;
         }
@@ -196,9 +204,10 @@ final class LinearPerpetualBenchmarkSupport {
             public long run() {
                 CoreResponse response = harness.execute(mark);
                 while (!harness.state.tradingState().riskState().scan().complete()) {
+                    int maxUsers = harness.state.tradingState().riskState().scanControl().scanBatchSize();
                     response = harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN,
                             CommandSource.OPERATIONS, 0,
-                            TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(256))));
+                            TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(maxUsers))));
                 }
                 if (harness.executionWork().actions().isEmpty()) {
                     throw new IllegalStateException("risk scan produced no liquidation work");
@@ -228,8 +237,9 @@ final class LinearPerpetualBenchmarkSupport {
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand(SYMBOL, 1, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS))));
         while (!harness.state.tradingState().riskState().scan().complete()) {
+            int maxUsers = harness.state.tradingState().riskState().scanControl().scanBatchSize();
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(256))));
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(maxUsers))));
         }
         CoreLiquidationActionView action = harness.executionWork().actions().getFirst();
         var batchAction = new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
@@ -422,6 +432,8 @@ final class LinearPerpetualBenchmarkSupport {
         private long executedMessages;
         private long acceptedMessages;
         private long terminalMessages;
+        private long acceptedCoreMessages;
+        private long terminalCoreMessages;
         private int maxMatchingBacklog;
         private final List<PendingCommand> submittedMatching = new ArrayList<>();
         private boolean deferBatchResponseValidation;
@@ -487,6 +499,7 @@ final class LinearPerpetualBenchmarkSupport {
             int operationWeight = operationWeight(command);
             executedMessages = Math.addExact(executedMessages, operationWeight);
             acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
+            acceptedCoreMessages = Math.incrementExact(acceptedCoreMessages);
             CoreResponse response = state.apply(command);
             long sequence = state.matchingSequence(command.header().commandId());
             if (sequence == 0 && state.pendingMatchingCount() != 0) {
@@ -500,6 +513,7 @@ final class LinearPerpetualBenchmarkSupport {
             } else {
                 validateTerminal(command, response, operationWeight);
                 terminalMessages = Math.addExact(terminalMessages, operationWeight);
+                terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
                 recordExport(response);
             }
             return pending;
@@ -527,6 +541,7 @@ final class LinearPerpetualBenchmarkSupport {
                 } while (!matchingCompleted);
                 validateTerminal(pending.command, pending.response, pending.operationWeight);
                 terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
+                terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
                 recordExport(pending.response);
             }
             submittedMatching.clear();
@@ -607,6 +622,8 @@ final class LinearPerpetualBenchmarkSupport {
             CoreResponse response = state.apply(query);
             acceptedMessages++;
             terminalMessages++;
+            acceptedCoreMessages++;
+            terminalCoreMessages++;
             if (response.status() != ResponseStatus.OK) {
                 throw new IllegalStateException("liquidation work query failed: " + response.resultCode());
             }
@@ -633,6 +650,14 @@ final class LinearPerpetualBenchmarkSupport {
 
         long terminalMessages() {
             return terminalMessages;
+        }
+
+        long acceptedCoreMessages() {
+            return acceptedCoreMessages;
+        }
+
+        long terminalCoreMessages() {
+            return terminalCoreMessages;
         }
 
         int maxMatchingBacklog() {

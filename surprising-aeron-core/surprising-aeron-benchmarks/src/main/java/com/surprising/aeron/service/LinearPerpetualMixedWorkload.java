@@ -208,6 +208,8 @@ final class LinearPerpetualMixedWorkload {
             private long operations;
             private long acceptedOperations;
             private long terminalOperations;
+            private long acceptedCoreMessages;
+            private long terminalCoreMessages;
             private long maxBacklog;
             private long laneOperations;
             private long[] laneOperationsByType = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
@@ -224,6 +226,8 @@ final class LinearPerpetualMixedWorkload {
                 long batchBefore = harness.executedMessages();
                 long acceptedBefore = harness.acceptedMessages();
                 long terminalBefore = harness.terminalMessages();
+                long acceptedCoreBefore = harness.acceptedCoreMessages();
+                long terminalCoreBefore = harness.terminalCoreMessages();
                 long[] laneOperationsBefore = completedLaneOperations(harness.state());
                 for (int round = 0; round < hftRounds; round++) {
                     executeHftBurstsPipelined(harness, template, hftBatchSize);
@@ -252,6 +256,10 @@ final class LinearPerpetualMixedWorkload {
                 operations = Math.subtractExact(harness.executedMessages(), batchBefore);
                 acceptedOperations = Math.subtractExact(harness.acceptedMessages(), acceptedBefore);
                 terminalOperations = Math.subtractExact(harness.terminalMessages(), terminalBefore);
+                acceptedCoreMessages = Math.subtractExact(
+                        harness.acceptedCoreMessages(), acceptedCoreBefore);
+                terminalCoreMessages = Math.subtractExact(
+                        harness.terminalCoreMessages(), terminalCoreBefore);
                 maxBacklog = harness.maxMatchingBacklog();
                 long[] laneOperationsAfter = completedLaneOperations(harness.state());
                 laneOperations = 0;
@@ -324,6 +332,16 @@ final class LinearPerpetualMixedWorkload {
             }
 
             @Override
+            public long acceptedCoreMessages() {
+                return acceptedCoreMessages;
+            }
+
+            @Override
+            public long terminalCoreMessages() {
+                return terminalCoreMessages;
+            }
+
+            @Override
             public long maxBacklog() {
                 return maxBacklog;
             }
@@ -344,7 +362,9 @@ final class LinearPerpetualMixedWorkload {
                 TradingCoreState state = harness.state().tradingState();
                 long closingFunds = totalFunds(state);
                 if (operations <= 0 || acceptedOperations != terminalOperations
-                        || terminalOperations != operations || closingFunds != template.openingFunds()) {
+                        || terminalOperations != operations || acceptedCoreMessages != terminalCoreMessages
+                        || acceptedCoreMessages <= 0 || acceptedCoreMessages > acceptedOperations
+                        || closingFunds != template.openingFunds()) {
                     throw new IllegalStateException("mixed workload violated command or funds invariant: operations="
                             + operations + ", openingFunds=" + template.openingFunds()
                             + ", closingFunds=" + closingFunds + ", treasury=" + state.treasuryState());

@@ -68,6 +68,8 @@ class LinearPerpetualBenchmarkSupportTest {
                 assertThat(scenario.run()).isNotZero();
                 assertThat(scenario.operations()).isGreaterThan(100);
                 assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+                assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
+                assertThat(scenario.acceptedOperations()).isGreaterThan(scenario.acceptedCoreMessages());
                 assertThat(scenario.maxBacklog()).isGreaterThan(1);
                 scenario.verify();
             }

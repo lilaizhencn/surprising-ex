@@ -72,11 +72,26 @@ public class LinearPerpetualCoreBenchmark {
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.SECONDS)
     public long productionMixedWorkload(ProductionMixedState state, MixedWorkloadCounters counters) {
-        long result = state.scenario.run();
-        counters.acceptedCommands += state.scenario.acceptedOperations();
-        counters.terminalCommands += state.scenario.terminalOperations();
-        counters.unfinishedCommands += Math.subtractExact(
+        LinearPerpetualWorkloadEvent measurement = new LinearPerpetualWorkloadEvent();
+        measurement.activeUsers = state.activeUsers;
+        measurement.symbols = state.symbols;
+        measurement.hftRounds = state.hftRounds;
+        measurement.hftBatchSize = state.hftBatchSize;
+        measurement.begin();
+        long result;
+        try {
+            result = state.scenario.run();
+        } finally {
+            measurement.commit();
+        }
+        counters.acceptedBusinessOperations += state.scenario.acceptedOperations();
+        counters.terminalBusinessOperations += state.scenario.terminalOperations();
+        counters.unfinishedBusinessOperations += Math.subtractExact(
                 state.scenario.acceptedOperations(), state.scenario.terminalOperations());
+        counters.acceptedCoreMessages += state.scenario.acceptedCoreMessages();
+        counters.terminalCoreMessages += state.scenario.terminalCoreMessages();
+        counters.unfinishedCoreMessages += Math.subtractExact(
+                state.scenario.acceptedCoreMessages(), state.scenario.terminalCoreMessages());
         counters.laneOperations += state.scenario.laneOperations();
         counters.laneCommandOperations += state.scenario.laneOperations(0);
         counters.laneSettlementOperations += state.scenario.laneOperations(1);
@@ -254,9 +269,12 @@ public class LinearPerpetualCoreBenchmark {
     @AuxCounters(AuxCounters.Type.OPERATIONS)
     @State(Scope.Thread)
     public static class MixedWorkloadCounters {
-        public long acceptedCommands;
-        public long terminalCommands;
-        public long unfinishedCommands;
+        public long acceptedBusinessOperations;
+        public long terminalBusinessOperations;
+        public long unfinishedBusinessOperations;
+        public long acceptedCoreMessages;
+        public long terminalCoreMessages;
+        public long unfinishedCoreMessages;
         public long laneOperations;
         public long laneCommandOperations;
         public long laneSettlementOperations;
@@ -265,9 +283,12 @@ public class LinearPerpetualCoreBenchmark {
 
         @Setup(Level.Iteration)
         public void reset() {
-            acceptedCommands = 0;
-            terminalCommands = 0;
-            unfinishedCommands = 0;
+            acceptedBusinessOperations = 0;
+            terminalBusinessOperations = 0;
+            unfinishedBusinessOperations = 0;
+            acceptedCoreMessages = 0;
+            terminalCoreMessages = 0;
+            unfinishedCoreMessages = 0;
             laneOperations = 0;
             laneCommandOperations = 0;
             laneSettlementOperations = 0;
