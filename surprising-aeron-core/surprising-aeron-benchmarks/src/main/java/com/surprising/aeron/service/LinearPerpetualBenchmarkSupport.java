@@ -97,10 +97,10 @@ final class LinearPerpetualBenchmarkSupport {
         void close();
     }
 
-    record SnapshotTemplate(byte[] bytes, long businessStateHash, int accountLanes) {
+    record SnapshotTemplate(byte[] bytes, long businessStateHash, int accountLanes, ProductLine productLine) {
         SnapshotTemplate {
             bytes = bytes.clone();
-            if (businessStateHash == 0 || accountLanes < 2) {
+            if (businessStateHash == 0 || accountLanes < 2 || productLine == null) {
                 throw new IllegalArgumentException("invalid benchmark snapshot template");
             }
         }
@@ -446,8 +446,12 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         static Harness create(int accountLanes) {
+            return create(accountLanes, ProductLine.LINEAR_PERPETUAL);
+        }
+
+        static Harness create(int accountLanes, ProductLine productLine) {
             configureAccountLanes(accountLanes);
-            Harness harness = new Harness(new CoreProbeState(ProductLine.LINEAR_PERPETUAL), new Sequences());
+            Harness harness = new Harness(new CoreProbeState(productLine), new Sequences());
             if (harness.state.laneTopology().accountLaneCount() != accountLanes) {
                 harness.close();
                 throw new IllegalStateException("Core did not start with requested account lane count");
@@ -461,15 +465,19 @@ final class LinearPerpetualBenchmarkSupport {
 
         static Harness restore(SnapshotTemplate template, boolean deferBatchResponseValidation) {
             configureAccountLanes(template.accountLanes());
-            CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, template.bytes());
+            CoreProbeState restored = CoreProbeState.fromSnapshot(template.productLine(), template.bytes());
             Harness harness = new Harness(restored, Sequences.after(restored.appliedCommandCount()));
             harness.deferBatchResponseValidation = deferBatchResponseValidation;
             return harness;
         }
 
         void adjust(long userId, long units) {
+            adjust(userId, SETTLE_ASSET, units);
+        }
+
+        void adjust(long userId, String asset, long units) {
             execute(command(CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, userId,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(SETTLE_ASSET, units))));
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units))));
         }
 
         long nextOrderId() {
@@ -480,7 +488,7 @@ final class LinearPerpetualBenchmarkSupport {
             long sourceSequence = sequences.next(source);
             long correlationId = sequences.clusterPosition++;
             return new CoreMessage(CoreMessageHeader.command(type,
-                    new UUID(source.ordinal() + 1L, sourceSequence), ProductLine.LINEAR_PERPETUAL,
+                    new UUID(source.ordinal() + 1L, sourceSequence), productLine(),
                     source, sourceId(source), sourceSequence, userId, benchmarkTimestamp(correlationId),
                     correlationId), payload);
         }
@@ -613,10 +621,10 @@ final class LinearPerpetualBenchmarkSupport {
 
         CoreLiquidationWorkView executionWork() {
             CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
-                    new UUID(99, sequences.clusterPosition++), ProductLine.LINEAR_PERPETUAL,
+                    new UUID(99, sequences.clusterPosition++), productLine(),
                     CommandSource.OPERATIONS, sourceId(CommandSource.OPERATIONS), 0, 0,
                     benchmarkTimestamp(sequences.clusterPosition), sequences.clusterPosition),
-                    CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL,
+                    CoreLiquidationWorkCodec.encodeQuery(productLine(),
                             CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1_000, 1_048_576));
             executedMessages++;
             CoreResponse response = state.apply(query);
@@ -633,7 +641,12 @@ final class LinearPerpetualBenchmarkSupport {
         SnapshotTemplate snapshotTemplate(int accountLanes) {
             acknowledgeExports();
             byte[] snapshot = state.snapshot();
-            return new SnapshotTemplate(snapshot, state.tradingState().businessStateHash(), accountLanes);
+            return new SnapshotTemplate(snapshot, state.tradingState().businessStateHash(), accountLanes,
+                    productLine());
+        }
+
+        private ProductLine productLine() {
+            return state.tradingState().productLine();
         }
 
         CoreProbeState state() {

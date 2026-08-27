@@ -248,7 +248,7 @@ Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP
 
 要求 JDK 25。Topic 创建和三节点部署入口仍在整理；PostgreSQL 首发初始化统一使用根目录 `init.sql`：
 
-线性永续 Product Core 的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
+现货和线性永续 Product Core 的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
 不启动 wallet、PostgreSQL、Kafka、Valkey 或 Aeron Cluster；JMH worker 固定为一个 owner thread，Account Lane
 作为确定性账户分区由同一个 Product Core owner 直接执行，不再为短操作跨线程排队和同步等待。默认覆盖限价挂单、
 吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复。
@@ -257,7 +257,7 @@ Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP
 
 ```bash
 mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean package
-java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar \
   'LinearPerpetualCoreBenchmark.*' -p accountLanes=4 -prof gc
 ```
 
@@ -270,10 +270,10 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpet
 可只选择该场景并把 `terminalBusinessOperations` 作为实际完成的业务操作吞吐读取：
 
 ```bash
-java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar \
   '.*productionMixedWorkload.*' -p activeUsers=1000,10000 -p symbols=4 -p hftBatchSize=20 \
   -p accountLanes=4 -wi 4 -w 2s -i 3 -r 4s -f 1 \
-  -jvmArgsAppend '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dsurprising.aeron.matching-engines=4 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN'
+  -jvmArgsAppend '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dsurprising.aeron.matching-engines=4 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN'
 ```
 
 主指标 `ops/s` 是完整混合 invocation/秒，不是业务 TPS。辅助指标 `terminalBusinessOperations` 按 batch item
@@ -295,6 +295,33 @@ owner 栈中没有 `CoreExportCodec`，`RuntimeStateMaterializer.materializeTran
 资金原子性。只有先定义可独立结算的 shard key、禁止跨 shard 全仓与共享资金池，或把跨 shard 操作纳入确定性
 协调协议后，才能把分片作为容量方案。该本机结果也不能替代隔离 CPU 的生产同型机器三节点 HTTP P10 长稳门禁。
 
+现货使用独立的 `SpotCoreBenchmark.productionMixedWorkload`。场景在 4 个 symbol 和 4 个 Account Lane 上预装
+1,000/10,000 个异构用户余额及 0..3 笔静态挂单；计时区间循环执行批量挂单/撤单、双向 IOC 成交、部分成交后
+撤余单和 Audit Export ACK。teardown 逐币种核对用户可用/冻结余额与 treasury，要求 accepted=terminal、
+unfinished=0、所有保留的终态 reservation remaining=0，并对当前状态再做一次配对快照恢复和 business hash 校验。
+正式命令如下：
+
+```bash
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar \
+  '.*SpotCoreBenchmark.productionMixedWorkload.*' \
+  -p accountLanes=4 -p activeUsers=1000,10000 -p symbols=4 -p hftRounds=24 -p hftBatchSize=20 \
+  -wi 2 -w 2s -i 3 -r 3s -f 1 \
+  -jvmArgsAppend '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms4g -Xmx4g -Dsurprising.aeron.matching-engines=4 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN'
+```
+
+2026-08-27 本机 GraalVM JDK 25.0.1 正式运行中，1,000 用户的终态业务吞吐平均为
+`16917.758 ops/s`，10,000 用户为 `13446.509 ops/s`，下降 20.52%；对应 Core message 吞吐分别为
+`1622.595 msg/s` 和 `1289.665 msg/s`。10,000 用户带 JFR 的 8 秒计量为 `14288.982 ops/s`。
+三组均 accepted=terminal、unfinished=0，逐资产资金守恒与快照恢复校验通过，因此当前现货本机热路径能越过
+10k/s，但没有达到 100k/s。计量窗口的 393 个 owner 样本中，matcher completion 等待栈 47 个，
+`RollingBusinessStateHash` 42 个，`projectSnapshotNow` 31 个，现货结算本身只有 6 个；整段 JFR 的
+74,191 个执行样本中约 86.35% 落在 exchange-core/disruptor busy-spin。优先级应是减少逐批 projection/hash
+工作并降低 matcher 等待/线程竞争，而不是重写现货资金结算。
+
+该场景还复现并修复了一个恢复缺陷：只有 instrument、没有活动订单/风险引用的现货 symbol，在快照恢复后没有
+重建 runtime symbol identity，首笔批量订单会在冻结资金前 fail-fast。`RuntimeStateProjector` 现在从权威
+instrument map 预备全部 symbol identity，聚焦红测和完整现货场景均已覆盖。
+
 matcher 等待策略通过启动参数 `surprising.aeron.matcher-wait-strategy=BUSY_SPIN|YIELDING|BLOCKING` 切换；
 它只影响 matcher 线程等待和 CPU/尾延迟权衡，不进入资金状态或 snapshot hash，修改后重启单产品线 Core 生效。
 Account Lane 已不创建独立等待线程，因此不存在 Lane busy-spin 配置。
@@ -309,7 +336,7 @@ projector 异常或 fence hash 不一致都
 快速确认 JMH 打包与场景可执行时可缩短迭代；该命令只用于 smoke，不作为容量结论：
 
 ```bash
-java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar \
   'LinearPerpetualCoreBenchmark.*' -p accountLanes=4 -wi 0 -i 1 -r 100ms -f 1
 ```
 
@@ -321,7 +348,7 @@ Trial setup 中预装并生成快照，每次 invocation 从同一快照恢复�
 独立持仓用户，并由一张足额安全对手单完成建仓，因此 `riskUsers` 是真实扫描用户数而不是名义数量。
 正式采样应使用 HotSpot 兼容的 JDK 25；OpenJ9 可用于 smoke，但 JMH 会禁用 compiler hints，
 其输出不能作为容量或延迟基线。
-JMH 结果只代表单个 LINEAR_PERPETUAL Product Core 的本地内存基准。它不包含 Aeron ingress/replication、
+JMH 结果只代表单个 SPOT 或 LINEAR_PERPETUAL Product Core 的本地内存基准。它不包含 Aeron ingress/replication、
 HTTP/WebSocket、Kafka、数据库、Cluster 故障切换和端到端资金对账，这些外围链路仍需独立门禁；多个 lane
 是账户隔离、路由、局部 hash 和恢复校验边界，不会把唯一 owner 状态机变成多写者，也不会产生逐命令跨线程往返。
 

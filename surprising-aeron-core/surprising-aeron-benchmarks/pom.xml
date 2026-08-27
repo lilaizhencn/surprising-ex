@@ -74,7 +74,7 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
-                            <finalName>linear-perpetual-benchmarks</finalName>
+                            <finalName>product-core-benchmarks</finalName>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <filters>
                                 <filter>
