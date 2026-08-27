@@ -72,6 +72,10 @@ public final class RuntimeIdentityRegistry {
 
     public String symbol(int symbolId) {
         assertOwner();
+        return preparedSymbol(symbolId);
+    }
+
+    String preparedSymbol(int symbolId) {
         String symbol = symbols.get(symbolId);
         if (symbol == null) throw new IllegalArgumentException("unknown runtime symbol id: " + symbolId);
         return symbol;
@@ -88,6 +92,36 @@ public final class RuntimeIdentityRegistry {
         clientKeys.put(identity, key);
         clients.put(key, identity);
         return key;
+    }
+
+    public PreparedClientKey prepareClientKey(long userId, String clientOrderId) {
+        assertOwner();
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        if (clientOrderId == null || clientOrderId.isBlank()) return new PreparedClientKey(0, false);
+        ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
+        Long existing = clientKeys.get(identity);
+        if (existing != null) return new PreparedClientKey(existing, false);
+        long key = nextClientKey++;
+        clientKeys.put(identity, key);
+        clients.put(key, identity);
+        return new PreparedClientKey(key, true);
+    }
+
+    public void rollbackPreparedClientKey(
+            long userId, String clientOrderId, PreparedClientKey prepared) {
+        assertOwner();
+        if (userId <= 0 || clientOrderId == null || prepared == null || !prepared.allocated()) {
+            throw new IllegalArgumentException("invalid prepared client key rollback");
+        }
+        ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
+        if (prepared.key() == 0 || prepared.key() != nextClientKey - 1
+                || !Long.valueOf(prepared.key()).equals(clientKeys.get(identity))
+                || !identity.equals(clients.get(prepared.key()))) {
+            throw new IllegalStateException("prepared client key is no longer rollback-safe");
+        }
+        clientKeys.remove(identity);
+        clients.remove(prepared.key());
+        nextClientKey = prepared.key();
     }
 
     public Long findClientKey(long userId, String clientOrderId) {
@@ -203,6 +237,14 @@ public final class RuntimeIdentityRegistry {
         public int compareTo(ClientIdentity other) {
             int result = Long.compare(userId, other.userId);
             return result != 0 ? result : clientOrderId.compareTo(other.clientOrderId);
+        }
+    }
+
+    public record PreparedClientKey(long key, boolean allocated) {
+        public PreparedClientKey {
+            if (key < 0 || (key == 0 && allocated)) {
+                throw new IllegalArgumentException("invalid prepared client key");
+            }
         }
     }
 

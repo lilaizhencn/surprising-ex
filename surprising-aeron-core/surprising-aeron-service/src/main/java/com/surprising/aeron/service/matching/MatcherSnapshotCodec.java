@@ -157,7 +157,7 @@ public final class MatcherSnapshotCodec {
                 if (userId <= 0 || !users.add(userId)) throw new ProtocolException("invalid matcher user registry");
             }
             int moduleCount = readCount(input, "module");
-            if (moduleCount != topology.matchingEngineCount() + 1) {
+            if (moduleCount != topology.matchingEngineCount() * 2) {
                 throw new ProtocolException("invalid matcher module count");
             }
             List<SerializedModule> modules = new ArrayList<>(moduleCount);

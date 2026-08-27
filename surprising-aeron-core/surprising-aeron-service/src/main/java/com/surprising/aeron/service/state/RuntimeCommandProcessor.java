@@ -315,15 +315,27 @@ public final class RuntimeCommandProcessor {
             throw new IllegalArgumentException("invalid runtime place order");
         }
         runtime.assertOwner();
+        long clientKey = identities.clientKey(userId, command.clientOrderId());
+        int symbolId = identities.symbolId(command.symbol());
+        int assetId = identities.assetId(command.reservationAsset());
+        placeOrderPrepared(runtime, userId, command, commandId, requiredReservation,
+                clientKey, symbolId, assetId);
+    }
+
+    public static void placeOrderPrepared(
+            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder command, UUID commandId,
+            long requiredReservation, long clientKey, int symbolId, int assetId) {
+        if (runtime == null || command == null || commandId == null || userId <= 0
+                || requiredReservation <= 0 || clientKey < 0 || symbolId < 0 || assetId < 0) {
+            throw new IllegalArgumentException("invalid prepared runtime place order");
+        }
+        runtime.assertOwner();
         if (runtime.order(command.orderId()) != null) {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "orderId already exists");
         }
-        long clientKey = identities.clientKey(userId, command.clientOrderId());
         if (clientKey != 0 && runtime.orderIdByClient(userId, clientKey) != null) {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
-        int symbolId = identities.symbolId(command.symbol());
-        int assetId = identities.assetId(command.reservationAsset());
         UserRuntime user = runtime.user(userId);
         BalanceRuntime balance = runtime.balance(userId, assetId);
         if (user == null || balance == null || balance.availableUnits() < requiredReservation) {
@@ -422,31 +434,49 @@ public final class RuntimeCommandProcessor {
         return changed;
     }
 
+    public static boolean stampOrderChangesByLane(
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, TradingCoreState commandBefore,
+            long timestamp, long clusterPosition, Iterable<Long> changedOrderIds,
+            Iterable<Long> changedUserIds) {
+        if (runtime == null || identities == null || commandBefore == null || changedOrderIds == null
+                || changedUserIds == null || timestamp < 0 || clusterPosition < 0) {
+            throw new IllegalArgumentException("invalid lane-batched runtime order commit metadata");
+        }
+        runtime.assertOwner();
+        ArrayList<Long> candidates = new ArrayList<>();
+        java.util.HashMap<Long, OrderRuntime> previousOrders = new java.util.HashMap<>();
+        for (Long orderId : changedOrderIds) {
+            if (orderId == null) continue;
+            candidates.add(orderId);
+            CoreOrderState previous = commandBefore.order(orderId);
+            if (previous != null) {
+                previousOrders.put(orderId, RuntimeStateProjector.toRuntimeOrder(previous, identities));
+            }
+        }
+        Object[] results = runtime.executeOwnerSettlements(changedUserIds, ignored -> {
+            boolean changed = false;
+            for (long orderId : candidates) {
+                OrderRuntime order = runtime.order(orderId);
+                if (order != null && !order.equals(previousOrders.get(orderId))) {
+                    runtime.replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
+                    changed = true;
+                }
+            }
+            return changed;
+        });
+        for (Object result : results) {
+            if (Boolean.TRUE.equals(result)) return true;
+        }
+        return false;
+    }
+
     public static void pruneTerminalState(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                           TerminalPruneBatch batch) {
         if (runtime == null || identities == null || batch == null || batch.isEmpty()) {
             throw new IllegalArgumentException("invalid runtime terminal prune");
         }
         runtime.assertOwner();
-        for (long orderId : batch.orderIds()) {
-            OrderRuntime order = runtime.order(orderId);
-            if (order == null || !order.status().terminal()) {
-                throw new IllegalStateException("order is not terminal: " + orderId);
-            }
-            ReservationRuntime reservation = runtime.reservation(orderId);
-            if (reservation != null) {
-                if (reservation.reservedUnits() != 0) {
-                    throw new IllegalStateException("terminal order retains funded reservation: " + orderId);
-                }
-                runtime.removeReservation(orderId, order.userId());
-            }
-            runtime.removeOrder(orderId);
-            long clientKey = identities.clientKey(order.userId(), order.clientOrderId());
-            if (clientKey != 0 && Long.valueOf(orderId).equals(
-                    runtime.orderIdByClient(order.userId(), clientKey))) {
-                runtime.removeClientOrder(order.userId(), clientKey);
-            }
-        }
+        runtime.pruneTerminalOrders(identities, batch.orderIds());
         for (long algoOrderId : batch.algoOrderIds()) {
             CoreAlgoOrderState algo = runtime.algoOrder(algoOrderId);
             if (algo == null || !algo.terminal()) {

@@ -127,6 +127,8 @@ public final class RuntimePerpetualRiskProcessor {
             throw new IllegalStateException("runtime risk scan input is missing");
         }
         RiskScanRuntime progress = initial;
+        int settleAssetId = identities.assetId(changedInstrument.settleAsset());
+        int changedSymbolId = identities.symbolId(changedInstrument.symbol());
         int remaining = maxWork;
         while (remaining > 0 && !progress.riskComplete()) {
             UserRuntime user = progress.riskUserId() == 0
@@ -141,8 +143,11 @@ public final class RuntimePerpetualRiskProcessor {
                 progress = progress.withRiskProgress(false, user.userId(), 0, "-", 0,
                         0, 0, 0, 0, progress.lastUserId());
             }
-            UserPage page = processUser(runtime, progress, user, changedInstrument, changedMark,
-                    remaining, identities);
+            RiskScanRuntime currentProgress = progress;
+            int currentRemaining = remaining;
+            UserPage page = runtime.executeUserRisk(user.userId(),
+                    () -> processUser(runtime, currentProgress, user, changedInstrument, changedMark,
+                            settleAssetId, changedSymbolId, currentRemaining, identities));
             progress = page.scan();
             remaining -= Math.max(1, page.workUnits());
             if (page.complete()) {
@@ -169,7 +174,8 @@ public final class RuntimePerpetualRiskProcessor {
     private static UserPage processUser(TradingRuntimeState runtime,
                                         RiskScanRuntime scan, UserRuntime user,
                                         CoreInstrumentState changedInstrument, MarkPriceRuntime changedMark,
-                                        int maxWork, RuntimeIdentityRegistry identities) {
+                                        int settleAssetId, int changedSymbolId, int maxWork,
+                                        RuntimeIdentityRegistry identities) {
         int phase = scan.riskPhase();
         String positionCursor = scan.riskPositionCursor();
         long reservationCursor = scan.riskReservationCursor();
@@ -191,16 +197,16 @@ public final class RuntimePerpetualRiskProcessor {
                 work++;
                 if (position.signedQuantitySteps() == 0) continue;
                 if (position.marginMode() == CoreMarginMode.ISOLATED) {
-                    if (position.assetId() == identities.assetId(changedInstrument.settleAsset())) {
+                    if (position.assetId() == settleAssetId) {
                         isolatedMargin = Math.addExact(isolatedMargin, position.positionMarginUnits());
                     }
-                    if (position.symbolId() == identities.symbolId(changedInstrument.symbol())) {
+                    if (position.symbolId() == changedSymbolId) {
                         updateIsolated(runtime, user.userId(), entry.key(), position, changedInstrument,
                                 changedMark, identities);
                     }
                     continue;
                 }
-                if (position.assetId() != identities.assetId(changedInstrument.settleAsset())) continue;
+                if (position.assetId() != settleAssetId) continue;
                 PositionRisk risk = risk(runtime, position, identities);
                 if (risk == null) continue;
                 unrealized = Math.addExact(unrealized, risk.unrealized());
@@ -223,7 +229,7 @@ public final class RuntimePerpetualRiskProcessor {
                 work++;
                 OrderRuntime order = runtime.order(reservation.orderId());
                 if (order != null && order.marginMode() == CoreMarginMode.ISOLATED
-                        && reservation.assetId() == identities.assetId(changedInstrument.settleAsset())) {
+                        && reservation.assetId() == settleAssetId) {
                     isolatedReservation = Math.addExact(isolatedReservation, reservation.reservedUnits());
                 }
                 continue;
@@ -237,11 +243,10 @@ public final class RuntimePerpetualRiskProcessor {
             PositionRuntime position = entry.position();
             work++;
             if (position.signedQuantitySteps() == 0 || position.marginMode() != CoreMarginMode.CROSS
-                    || position.assetId() != identities.assetId(changedInstrument.settleAsset())) continue;
+                    || position.assetId() != settleAssetId) continue;
             PositionRisk positionRisk = risk(runtime, position, identities);
             if (positionRisk == null) continue;
-            int assetId = identities.assetId(changedInstrument.settleAsset());
-            BalanceRuntime balance = runtime.balance(user.userId(), assetId);
+            BalanceRuntime balance = runtime.balance(user.userId(), settleAssetId);
             long total = balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
             long wallet = Math.subtractExact(Math.subtractExact(total, isolatedMargin), isolatedReservation);
             if (wallet < 0) throw new IllegalStateException("isolated margin exceeds wallet balance");
@@ -274,7 +279,7 @@ public final class RuntimePerpetualRiskProcessor {
                                               long ratio, RuntimeIdentityRegistry identities) {
         CoreRiskStatus status = CoreRiskPolicy.status(ratio);
         int symbolId = position.symbolId();
-        runtime.putRiskSnapshot(identities.positionKey(userId, positionKey), new RiskSnapshotRuntime(userId,
+        runtime.putRiskSnapshot(identities.preparedPositionKey(userId, positionKey), new RiskSnapshotRuntime(userId,
                 symbolId, position.positionSide(), priceSequence, equity, unrealized, maintenance, ratio, status));
         LiquidationRuntime active = runtime.activeLiquidation(userId, symbolId, position.positionSide());
         if (status != CoreRiskStatus.LIQUIDATION) {
@@ -305,7 +310,7 @@ public final class RuntimePerpetualRiskProcessor {
 
     private static PositionRisk risk(TradingRuntimeState runtime, PositionRuntime position,
                                      RuntimeIdentityRegistry identities) {
-        CoreInstrumentState instrument = runtime.instrument(identities.symbol(position.symbolId()));
+        CoreInstrumentState instrument = runtime.instrument(identities.preparedSymbol(position.symbolId()));
         MarkPriceRuntime mark = runtime.markPrice(position.symbolId());
         if (instrument == null || mark == null) return null;
         return new PositionRisk(instrument, mark.priceSequence(),
@@ -367,7 +372,7 @@ public final class RuntimePerpetualRiskProcessor {
         runtime.positionKeysForUser(userId).forEach(positionId -> {
             PositionRuntime position = runtime.position(positionId);
             if (position == null) return;
-            String symbol = identities.symbol(position.symbolId());
+            String symbol = identities.preparedSymbol(position.symbolId());
             String key = position.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
                     ? symbol : symbol + ':' + position.positionSide().name();
             if (!"-".equals(cursor) && key.compareTo(cursor) <= 0) return;

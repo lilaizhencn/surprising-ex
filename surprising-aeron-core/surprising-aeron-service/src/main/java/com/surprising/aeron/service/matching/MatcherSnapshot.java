@@ -72,7 +72,7 @@ public record MatcherSnapshot(
             throw new IllegalArgumentException("matcher registry hash mismatch");
         }
         boolean[] matching = new boolean[topology.matchingEngineCount()];
-        boolean risk = false;
+        boolean[] risk = new boolean[topology.matchingEngineCount()];
         long maximumModuleSequence = Long.MIN_VALUE;
         for (SerializedModule module : modules) {
             if (module.snapshotId() != snapshotId || module.sequence() < 0 || module.sequence() > matcherSequence
@@ -86,15 +86,19 @@ public record MatcherSnapshot(
                 }
                 matching[module.instanceId()] = true;
             } else if (module.type() == SerializedModuleType.RISK_ENGINE) {
-                if (risk || module.instanceId() != 0) throw new IllegalArgumentException("duplicate risk module");
-                risk = true;
+                if (module.instanceId() >= risk.length || risk[module.instanceId()]) {
+                    throw new IllegalArgumentException("duplicate or out-of-range risk module");
+                }
+                risk[module.instanceId()] = true;
             } else {
                 throw new IllegalArgumentException("unsupported matcher module");
             }
         }
         boolean completeMatching = true;
         for (boolean present : matching) completeMatching &= present;
-        if (!completeMatching || !risk || modules.size() != topology.matchingEngineCount() + 1
+        boolean completeRisk = true;
+        for (boolean present : risk) completeRisk &= present;
+        if (!completeMatching || !completeRisk || modules.size() != topology.matchingEngineCount() * 2
                 || maximumModuleSequence != matcherSequence) {
             throw new IllegalArgumentException("incomplete matcher snapshot modules");
         }
@@ -108,7 +112,8 @@ public record MatcherSnapshot(
 
     public static long matcherConfigHash(LaneTopology topology) {
         return hashText("matching=" + topology.matchingEngineCount()
-                + ";risk=1;wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED;eventsPooling=true"
+                + ";risk=" + topology.matchingEngineCount()
+                + ";wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED;eventsPooling=true"
                 + ";matcherWindow=" + topology.matcherWindowSize()
                 + ";completionCapacity=" + topology.matchingCompletionCapacity()
                 + ";accountLanes=" + topology.accountLaneCount()

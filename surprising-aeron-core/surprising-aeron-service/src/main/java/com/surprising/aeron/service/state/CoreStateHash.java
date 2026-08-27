@@ -29,6 +29,18 @@ final class CoreStateHash {
 
     static long mix(long hash, String value) {
         long result = mix(hash, value.length());
+        boolean ascii = true;
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (character > 0x7f) {
+                ascii = false;
+                break;
+            }
+            result ^= character;
+            result *= PRIME;
+        }
+        if (ascii) return result;
+        result = mix(hash, value.length());
         for (byte item : value.getBytes(StandardCharsets.UTF_8)) {
             result ^= Byte.toUnsignedInt(item);
             result *= PRIME;

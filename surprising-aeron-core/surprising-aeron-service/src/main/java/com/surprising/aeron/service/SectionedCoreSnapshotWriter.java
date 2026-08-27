@@ -12,7 +12,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import com.surprising.aeron.service.state.AccountLaneSnapshot;
 import java.util.zip.CRC32C;
@@ -29,6 +29,17 @@ final class SectionedCoreSnapshotWriter {
             long coreSequence,
             long clusterTimestamp,
             long clusterPosition) {
+        return encode(capture(state, matcherSnapshot, snapshotId, coreSequence,
+                clusterTimestamp, clusterPosition));
+    }
+
+    static CoreSnapshotImage capture(
+            CoreProbeState state,
+            MatcherSnapshot matcherSnapshot,
+            long snapshotId,
+            long coreSequence,
+            long clusterTimestamp,
+            long clusterPosition) {
         if (!state.pendingMatching().isEmpty()) {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
@@ -38,18 +49,28 @@ final class SectionedCoreSnapshotWriter {
                 || coreSequence != state.appliedCommandCount() || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new IllegalStateException("snapshot fence and matcher manifest do not match");
         }
+        return new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(), state.probeValue(),
+                state.sourceSequenceDigest(), snapshotId, coreSequence, clusterTimestamp, clusterPosition,
+                matcherSnapshot, snapshotState, state.lastSourceSequences(), state.commandResults(),
+                state.exportState().snapshot(), state.feePolicies(), state.pendingTransfers(),
+                state.terminalRetention().copy(), state.accountLaneSnapshots(coreSequence, snapshotState));
+    }
+
+    static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image) {
+        MatcherSnapshot matcherSnapshot = image.matcherSnapshot();
+        var snapshotState = image.tradingState();
+        matcherSnapshot.verifyCoreState(snapshotState, image.appliedCommandCount());
         ArrayList<byte[]> payloads = new ArrayList<>();
-        payloads.add(header(state, snapshotState, matcherSnapshot, snapshotId, coreSequence,
-                clusterTimestamp, clusterPosition));
-        payloads.add(sources(state));
-        payloads.add(results(state));
-        payloads.add(outbox(state.exportState()));
+        payloads.add(header(image));
+        payloads.add(sources(image.sourceSequences()));
+        payloads.add(results(image.commandResults()));
+        payloads.add(outbox(image.exportState()));
         payloads.add(MatcherSnapshotCodec.encode(matcherSnapshot));
         payloads.add(TradingStateSnapshotCodec.encode(snapshotState));
-        payloads.add(CoreFeePolicySnapshotCodec.encode(state.feePolicies()));
-        payloads.add(CoreTransferSnapshotCodec.encode(state.pendingTransfers()));
-        payloads.add(state.terminalRetention().encode());
-        for (AccountLaneSnapshot lane : state.accountLaneSnapshots(coreSequence, snapshotState)) {
+        payloads.add(CoreFeePolicySnapshotCodec.encode(image.feePolicies()));
+        payloads.add(CoreTransferSnapshotCodec.encode(image.pendingTransfers()));
+        payloads.add(image.terminalRetention().encode());
+        for (AccountLaneSnapshot lane : image.accountLanes()) {
             payloads.add(accountLane(lane));
         }
         int sectionCount = Math.addExact(payloads.size(), 1);
@@ -93,17 +114,12 @@ final class SectionedCoreSnapshotWriter {
         return new SectionedCoreSnapshotCodec.SectionedSnapshot(chunks, Math.toIntExact(totalLength));
     }
 
-    private static byte[] header(
-            CoreProbeState state,
-            com.surprising.aeron.service.state.TradingCoreState snapshotState,
-            MatcherSnapshot matcherSnapshot,
-            long snapshotId,
-            long coreSequence,
-            long clusterTimestamp,
-            long clusterPosition) {
+    private static byte[] header(CoreSnapshotImage image) {
+        var matcherSnapshot = image.matcherSnapshot();
+        var snapshotState = image.tradingState();
         ByteBuffer buffer = ByteBuffer.allocate(SectionedCoreSnapshotCodec.HEADER_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN)
-                .put((byte) ProductLineWireCode.encode(state.productLine()))
+                .put((byte) ProductLineWireCode.encode(image.productLine()))
                 .put((byte) 0)
                 .putInt(MatcherSnapshot.ROUTE_VERSION)
                 .putInt(matcherSnapshot.matchingEngineCount())
@@ -115,12 +131,12 @@ final class SectionedCoreSnapshotWriter {
                 .putInt(matcherSnapshot.topology().accountLaneQueueCapacity())
                 .putLong(matcherSnapshot.topologyHash())
                 .putLong(matcherSnapshot.symbolRouteHash())
-                .putLong(state.appliedCommandCount())
-                .putLong(state.probeValue())
-                .putLong(snapshotId)
-                .putLong(coreSequence)
-                .putLong(clusterTimestamp)
-                .putLong(clusterPosition)
+                .putLong(image.appliedCommandCount())
+                .putLong(image.probeValue())
+                .putLong(image.snapshotId())
+                .putLong(image.coreSequence())
+                .putLong(image.clusterTimestamp())
+                .putLong(image.clusterPosition())
                 .putLong(matcherSnapshot.matcherSequence())
                 .putLong(snapshotState.businessStateHash())
                 .putLong(com.surprising.aeron.service.state.RollingFundsStateHash.compute(snapshotState))
@@ -130,11 +146,11 @@ final class SectionedCoreSnapshotWriter {
                 .putLong(matcherSnapshot.userRegistryHash())
                 .putLong(matcherSnapshot.instrumentRegistryHash())
                 .putLong(matcherSnapshot.activeOrderHash())
-                .putLong(state.sourceSequenceDigest())
-                .putLong(state.exportState().acknowledgedSequence())
-                .putLong(state.exportState().nextSequence())
-                .putInt(state.exportState().pendingCount())
-                .putLong(state.exportState().pendingDigest())
+                .putLong(image.sourceSequenceDigest())
+                .putLong(image.exportState().acknowledgedSequence())
+                .putLong(image.exportState().nextSequence())
+                .putInt(image.exportState().pendingCount())
+                .putLong(image.exportState().pendingDigest())
                 .putLong(matcherSnapshot.matcherConfigHash());
         putFixedAscii(buffer, matcherSnapshot.forkGitSha(), SectionedCoreSnapshotCodec.FORK_GIT_SHA_LENGTH);
         putFixedAscii(buffer, matcherSnapshot.artifactSha256(), SectionedCoreSnapshotCodec.ARTIFACT_SHA256_LENGTH);
@@ -160,12 +176,12 @@ final class SectionedCoreSnapshotWriter {
         buffer.put(encoded);
     }
 
-    private static byte[] sources(CoreProbeState state) {
-        int count = state.lastSourceSequences().size();
+    private static byte[] sources(Map<CoreProbeState.SourceKey, Long> sourceSequences) {
+        int count = sourceSequences.size();
         int length = Math.toIntExact(Integer.BYTES + Math.multiplyExact(
                 (long) count, SectionedCoreSnapshotCodec.SOURCE_SEQUENCE_LENGTH));
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).putInt(count);
-        state.lastSourceSequences().forEach((sourceKey, sequence) -> {
+        sourceSequences.forEach((sourceKey, sequence) -> {
             buffer.putInt(sourceKey.source().wireCode());
             buffer.putInt(0);
             buffer.putLong(sourceKey.sourceId());
@@ -174,19 +190,19 @@ final class SectionedCoreSnapshotWriter {
         return buffer.array();
     }
 
-    private static byte[] results(CoreProbeState state) {
+    private static byte[] results(Map<UUID, CoreProbeState.StoredResult> commandResults) {
         long length = Integer.BYTES;
-        for (CoreProbeState.StoredResult result : state.commandResults().values()) {
+        for (CoreProbeState.StoredResult result : commandResults.values()) {
             length = Math.addExact(length, Math.addExact(Integer.BYTES, resultEntryLength(result)));
         }
         requireSectionLength(Math.toIntExact(length));
         ByteBuffer buffer = ByteBuffer.allocate(Math.toIntExact(length)).order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(state.commandResults().size());
-        state.commandResults().forEach((commandId, result) -> putResult(buffer, commandId, result));
+                .putInt(commandResults.size());
+        commandResults.forEach((commandId, result) -> putResult(buffer, commandId, result));
         return buffer.array();
     }
 
-    private static byte[] outbox(CoreExportState exportState) {
+    private static byte[] outbox(CoreExportState.Snapshot exportState) {
         long length = SectionedCoreSnapshotCodec.OUTBOX_FIXED_LENGTH;
         for (CoreMessage event : exportState.pendingEvents()) {
             length = Math.addExact(length, Math.addExact(Integer.BYTES, CoreMessageCodec.encodedLength(event)));

@@ -636,7 +636,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
                         .build())
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
-                        .matchingEnginesNum(topology.matchingEngineCount()).riskEnginesNum(1)
+                        .matchingEnginesNum(topology.matchingEngineCount())
+                        .riskEnginesNum(topology.matchingEngineCount())
+                        .msgsInGroupLimit(Math.max(1,
+                                Integer.getInteger("surprising.aeron.matcher-group-size", 256)))
+                        .maxGroupDurationNs(Math.max(1,
+                                Integer.getInteger("surprising.aeron.matcher-group-nanos", 10_000)))
                         .waitStrategy(CoreWaitStrategy.BUSY_SPIN).build())
                 .initStateCfg(initialState)
                 .serializationCfg(SerializationConfiguration.builder()

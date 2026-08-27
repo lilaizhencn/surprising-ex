@@ -237,12 +237,13 @@ class TradingRuntimeStateTest {
         try {
             var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
-            long mask = state.applyLaneSequence(1, java.util.List.of(7L), result, 3, 5);
-
-            assertThatThrownBy(() -> state.readFence(7, 1))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("uncommitted");
-            state.commitLaneSequence(1, mask);
+            var apply = state.applyAndCommitLaneSequence(1, java.util.List.of(7L), result, 3, 5, null);
+            assertThat(apply.acknowledgements()).filteredOn(java.util.Objects::nonNull).hasSize(1);
+            long settlementOperations = state.accountLaneMetricsById(state.topology().accountLaneId(7))
+                    .completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()];
+            assertThat(settlementOperations)
+                    .as("lane apply, acknowledgement and commit must share one owner-lane operation")
+                    .isEqualTo(1);
             state.readFence(7, 1);
 
             AccountLaneView lane = state.accountLane(7);
@@ -266,12 +267,9 @@ class TradingRuntimeStateTest {
         try {
             var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
-            state.applyLaneSequence(1, java.util.List.of(userInLastLane), result, 3, 5);
-
-            assertThatThrownBy(() -> state.readFenceAll(1))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("uncommitted");
-            assertThat(state.accountLaneById(0).committedSequence()).isZero();
+            state.applyAndCommitLaneSequence(1, java.util.List.of(userInLastLane), result, 3, 5, null);
+            state.readFenceAll(1);
+            assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
         } finally {
             state.close();
         }
@@ -291,23 +289,15 @@ class TradingRuntimeStateTest {
                     .withCoreSequence(2);
             var sequenceOne = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
-            state.applyLaneSequence(2, java.util.List.of(laneZeroUser), sequenceTwo, 3, 5);
-            long laneOneMask = state.applyLaneSequence(
-                    1, java.util.List.of(laneOneUser), sequenceOne, 3, 5);
+            state.applyAndCommitLaneSequence(2, java.util.List.of(laneZeroUser), sequenceTwo, 3, 5, null);
+            state.applyAndCommitLaneSequence(1, java.util.List.of(laneOneUser), sequenceOne, 3, 5, null);
 
-            assertThatThrownBy(() -> state.applyLaneSequence(1,
-                    java.util.List.of(laneZeroUser, laneOneUser), sequenceOne, 7, 11))
+            assertThatThrownBy(() -> state.applyAndCommitLaneSequence(1,
+                    java.util.List.of(laneZeroUser, laneOneUser), sequenceOne, 7, 11, null))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("out of order");
             assertThat(state.executeUserSettlement(laneOneUser, () -> "apply-reclaimed"))
                     .isEqualTo("apply-reclaimed");
-
-            long bothLanes = topology.accountLaneMask(laneZeroUser) | laneOneMask;
-            assertThatThrownBy(() -> state.commitLaneSequence(2, bothLanes))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("out of order");
-            assertThat(state.executeUserSettlement(laneOneUser, () -> "commit-reclaimed"))
-                    .isEqualTo("commit-reclaimed");
         } finally {
             state.close();
         }
@@ -324,8 +314,7 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneZeroUser));
         var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                 .withCoreSequence(2);
-        long mask = state.applyLaneSequence(2, java.util.List.of(laneZeroUser), result, 3, 5);
-        state.commitLaneSequence(2, mask);
+        state.applyAndCommitLaneSequence(2, java.util.List.of(laneZeroUser), result, 3, 5, null);
         AccountLaneView beforeRestore = state.accountLaneById(0);
 
         java.util.List<AccountLaneSnapshot> invalid = new java.util.ArrayList<>(snapshots);

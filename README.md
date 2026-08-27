@@ -243,24 +243,33 @@ Product Core 的热状态与不可变状态投影通过 `RuntimeMutationDelta` �
 ```bash
 mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean package
 java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
-  'LinearPerpetualCoreBenchmark.*' -p accountLanes=4,8 -prof gc
+  'LinearPerpetualCoreBenchmark.*' -p accountLanes=4 -prof gc
 ```
 
-混合场景默认同时运行 4 个 symbol，测试 1,000/10,000 个真实持仓用户和 2/4/8 个 Account Lane。所有活跃用户
+混合场景默认同时运行 4 个 symbol，测试 1,000/10,000 个真实持仓用户和 4 个 Account Lane。所有活跃用户
 都有 1..4 档不等的仓位；为避免把不现实的全量密集挂单预装成本当作生产吞吐，最多 128 个用户持有 0..3 笔
-未成交单，共 192 笔静态挂单，其余用户为零挂单。每个 symbol 每轮执行 8 组做市高频挂单、部分成交和撤单，
-并执行触发单、正负资金费、标记价和完整风险扫描；最后一个 symbol 还完成强平、保险基金覆盖和 ADL。
-可只选择该场景并把 `coreCommands` 作为实际 Product Core 消息吞吐读取：
+未成交单，共 192 笔静态挂单，其余用户为零挂单。每个 symbol 每轮默认用协议上限 20 笔的批次执行做市
+高频挂单、部分成交和撤单，并在前 4 轮各穿插一个 symbol 的触发单、资金费分片和风险扫描分片；资金费与
+风险扫描每条命令最多处理 64 个用户，未完成工作通过确定性 cursor 留给后续调度轮次，最后一个 symbol 同轮
+完成强平、保险基金覆盖和 ADL。完整清空 10k 用户资金费与风险扫描是独立容量维度，不连续占满交易窗口。
+可只选择该场景并把 `terminalCommands` 作为实际完成的外部订单操作/命令吞吐读取：
 
 ```bash
 java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
-  '.*productionMixedWorkload.*' -p activeUsers=1000,10000 -p symbols=4 \
-  -p accountLanes=2,4,8 -wi 2 -w 1s -i 3 -r 1s -f 1 -prof gc
+  '.*productionMixedWorkload.*' -p activeUsers=1000,10000 -p symbols=4 -p hftBatchSize=20 \
+  -p accountLanes=4 -wi 4 -w 2s -i 3 -r 4s -f 1 \
+  -jvmArgsAppend '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dsurprising.aeron.matching-engines=2 -Dsurprising.aeron.account-lane-idle-spins=10000'
 ```
 
-主指标 `ops/s` 是完整混合业务批次/秒；辅助指标 `coreCommands` 才是该批次内实际执行的 Core command/query/
-ack 消息/秒。Trial setup 会通过正常命令建仓、挂单并生成快照，invocation setup 从快照恢复；两者以及 teardown
-中的资金总量、触发单、资金费、风险扫描、强平、保险基金和 ADL 终态校验均不进入计时区间。
+主指标 `ops/s` 是完整混合业务批次/秒；辅助指标 `terminalCommands` 是已经产生终态响应的外部订单操作与
+Core command/query/ack 消息/秒，`acceptedCommands` 必须与它相等且 `unfinishedCommands` 必须为零。Trial setup
+会通过正常命令建仓、挂单并生成快照，invocation setup 从快照恢复；两者以及 teardown
+中的批量响应逐项解码、资金总量、触发单、资金费、风险扫描、强平、保险基金和 ADL 终态校验均不进入
+计时区间。Core 生成并编码完整响应仍在计时区间，只有基准客户端的重复反序列化校验被移到 teardown。
+在关闭其它持续占用 CPU 的进程后，GraalVM JDK 25.0.1、4 Account Lane、2 matching engine、10,000
+活跃用户、4 symbol、96 轮 HFT 的一次正式运行得到 `terminalCommands`：`12050.002`、`12157.112`、
+`12843.714 ops/s`，平均 `12350.276 ops/s`；三轮 `acceptedCommands` 均与其相等，
+`unfinishedCommands` 均为零。容量采样应在隔离 CPU 的机器上运行，避免桌面或远程控制进程抢占忙等线程。
 
 快速确认 JMH 打包与场景可执行时可缩短迭代；该命令只用于 smoke，不作为容量结论：
 

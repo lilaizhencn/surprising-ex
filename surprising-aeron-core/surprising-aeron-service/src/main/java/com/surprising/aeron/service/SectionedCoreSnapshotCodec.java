@@ -59,6 +59,21 @@ final class SectionedCoreSnapshotCodec {
                 clusterTimestamp, clusterPosition);
     }
 
+    static CoreSnapshotImage capture(
+            CoreProbeState state,
+            MatcherSnapshot matcherSnapshot,
+            long snapshotId,
+            long coreSequence,
+            long clusterTimestamp,
+            long clusterPosition) {
+        return SectionedCoreSnapshotWriter.capture(state, matcherSnapshot, snapshotId, coreSequence,
+                clusterTimestamp, clusterPosition);
+    }
+
+    static SectionedSnapshot encode(CoreSnapshotImage image) {
+        return SectionedCoreSnapshotWriter.encode(image);
+    }
+
     static CoreProbeState decode(byte[] snapshot, ProductLine expectedProductLine) {
         return recovery(snapshot).decode(expectedProductLine);
     }

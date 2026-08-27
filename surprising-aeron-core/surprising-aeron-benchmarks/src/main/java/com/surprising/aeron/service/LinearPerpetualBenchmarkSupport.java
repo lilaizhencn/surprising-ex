@@ -25,6 +25,7 @@ import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.LaneTopology;
@@ -59,6 +60,26 @@ final class LinearPerpetualBenchmarkSupport {
 
         default long operations() {
             return 1;
+        }
+
+        default long acceptedOperations() {
+            return operations();
+        }
+
+        default long terminalOperations() {
+            return operations();
+        }
+
+        default long maxBacklog() {
+            return 0;
+        }
+
+        default long laneOperations() {
+            return 0;
+        }
+
+        default long laneOperations(int operationType) {
+            return 0;
         }
 
         default void verify() {
@@ -399,6 +420,13 @@ final class LinearPerpetualBenchmarkSupport {
         private int commandsSinceExportAck;
         private long lastRequiredExportSequence;
         private long executedMessages;
+        private long acceptedMessages;
+        private long terminalMessages;
+        private int maxMatchingBacklog;
+        private final List<PendingCommand> submittedMatching = new ArrayList<>();
+        private boolean deferBatchResponseValidation;
+        private CoreResponse deferredBatchResponse;
+        private int deferredBatchOperationWeight;
 
         private Harness(CoreProbeState state, Sequences sequences) {
             this.state = state;
@@ -416,9 +444,15 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         static Harness restore(SnapshotTemplate template) {
+            return restore(template, false);
+        }
+
+        static Harness restore(SnapshotTemplate template, boolean deferBatchResponseValidation) {
             configureAccountLanes(template.accountLanes());
             CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, template.bytes());
-            return new Harness(restored, Sequences.after(restored.appliedCommandCount()));
+            Harness harness = new Harness(restored, Sequences.after(restored.appliedCommandCount()));
+            harness.deferBatchResponseValidation = deferBatchResponseValidation;
+            return harness;
         }
 
         void adjust(long userId, long units) {
@@ -440,24 +474,66 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         CoreResponse execute(CoreMessage command) {
-            executedMessages++;
+            PendingCommand submitted = submitCommand(command);
+            drainSubmitted();
+            return submitted.response;
+        }
+
+        void submit(CoreMessage command) {
+            submitCommand(command);
+        }
+
+        private PendingCommand submitCommand(CoreMessage command) {
+            int operationWeight = operationWeight(command);
+            executedMessages = Math.addExact(executedMessages, operationWeight);
+            acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
             CoreResponse response = state.apply(command);
             long sequence = state.matchingSequence(command.header().commandId());
             if (sequence == 0 && state.pendingMatchingCount() != 0) {
                 sequence = state.firstPendingMatchingSequence();
             }
+            PendingCommand pending = new PendingCommand(command, sequence, operationWeight, response);
             if (response.resultCode() == CoreResultCode.MATCHING_PENDING || sequence != 0) {
-                CoreMatchingResult matching = null;
-                long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
-                while (matching == null && System.nanoTime() < deadline) {
-                    matching = state.takeMatchingResult(sequence);
-                    if (matching == null) Thread.onSpinWait();
-                }
-                if (matching == null) throw new IllegalStateException("matching timed out for " + command.header().messageType());
-                response = state.completeMatching(sequence, matching,
-                        command.header().submittedAtEpochMillis(), command.header().correlationId());
-                if (response == null) throw new IllegalStateException("matching completion was lost");
+                if (sequence == 0) throw new IllegalStateException("matching sequence was not registered");
+                submittedMatching.add(pending);
+                maxMatchingBacklog = Math.max(maxMatchingBacklog, submittedMatching.size());
+            } else {
+                validateTerminal(command, response, operationWeight);
+                terminalMessages = Math.addExact(terminalMessages, operationWeight);
+                recordExport(response);
             }
+            return pending;
+        }
+
+        void drainSubmitted() {
+            for (PendingCommand pending : submittedMatching) {
+                long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
+                boolean matchingCompleted = false;
+                do {
+                    CoreMatchingResult matching = null;
+                    while (matching == null && System.nanoTime() < deadline) {
+                        matching = state.takeMatchingResult(pending.sequence);
+                        if (matching == null) Thread.onSpinWait();
+                    }
+                    if (matching == null) {
+                        throw new IllegalStateException("matching timed out for "
+                                + pending.command.header().messageType());
+                    }
+                    pending.response = state.completeMatching(pending.sequence, matching,
+                            pending.command.header().submittedAtEpochMillis(),
+                            pending.command.header().correlationId());
+                    matchingCompleted = pending.response != null
+                            && pending.response.resultCode() != CoreResultCode.MATCHING_PENDING;
+                } while (!matchingCompleted);
+                validateTerminal(pending.command, pending.response, pending.operationWeight);
+                terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
+                recordExport(pending.response);
+            }
+            submittedMatching.clear();
+            if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExports();
+        }
+
+        private void validateTerminal(CoreMessage command, CoreResponse response, int operationWeight) {
             if (response.status() != ResponseStatus.APPLIED && response.status() != ResponseStatus.OK) {
                 throw new IllegalStateException("benchmark command rejected type=" + command.header().messageType()
                         + " userId=" + command.header().userId()
@@ -467,12 +543,48 @@ final class LinearPerpetualBenchmarkSupport {
                         + " orders=" + state.tradingState().orders().size()
                         + " export=" + state.exportState().status());
             }
+            if (command.header().messageType() == CoreMessageType.PLACE_ORDER_BATCH
+                    || command.header().messageType() == CoreMessageType.CANCEL_ORDER_BATCH
+                    || command.header().messageType() == CoreMessageType.AMEND_ORDER_BATCH) {
+                if (deferBatchResponseValidation) {
+                    deferredBatchResponse = response;
+                    deferredBatchOperationWeight = operationWeight;
+                } else validateBatchResponse(response, operationWeight);
+            }
+        }
+
+        void verifyDeferredBatchResponse() {
+            if (!deferBatchResponseValidation || deferredBatchResponse == null) {
+                return;
+            }
+            validateBatchResponse(deferredBatchResponse, deferredBatchOperationWeight);
+        }
+
+        private static void validateBatchResponse(CoreResponse response, int operationWeight) {
+            var result = TradingOrderBatchCodec.decodeResult(response.data());
+            if (result.items().size() != operationWeight
+                    || result.items().stream().anyMatch(item -> item.status() != ResponseStatus.APPLIED)) {
+                throw new IllegalStateException("benchmark order batch did not complete every item: " + result);
+            }
+        }
+
+        private static int operationWeight(CoreMessage command) {
+            return switch (command.header().messageType()) {
+                case PLACE_ORDER_BATCH -> TradingOrderBatchCodec.decodePlaceOrderBatch(
+                        command.payloadUnsafe()).orders().size();
+                case CANCEL_ORDER_BATCH -> TradingOrderBatchCodec.decodeCancelOrderBatch(
+                        command.payloadUnsafe()).orders().size();
+                case AMEND_ORDER_BATCH -> TradingOrderBatchCodec.decodeAmendOrderBatch(
+                        command.payloadUnsafe()).orders().size();
+                default -> 1;
+            };
+        }
+
+        private void recordExport(CoreResponse response) {
             if (response.requiredExportSequence() > 0) {
                 lastRequiredExportSequence = response.requiredExportSequence();
                 commandsSinceExportAck++;
-                if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExports();
             }
-            return response;
         }
 
         void acknowledgeExports() {
@@ -493,6 +605,8 @@ final class LinearPerpetualBenchmarkSupport {
                             CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1_000, 1_048_576));
             executedMessages++;
             CoreResponse response = state.apply(query);
+            acceptedMessages++;
+            terminalMessages++;
             if (response.status() != ResponseStatus.OK) {
                 throw new IllegalStateException("liquidation work query failed: " + response.resultCode());
             }
@@ -513,6 +627,18 @@ final class LinearPerpetualBenchmarkSupport {
             return executedMessages;
         }
 
+        long acceptedMessages() {
+            return acceptedMessages;
+        }
+
+        long terminalMessages() {
+            return terminalMessages;
+        }
+
+        int maxMatchingBacklog() {
+            return maxMatchingBacklog;
+        }
+
         @Override
         public void close() {
             state.close();
@@ -524,6 +650,20 @@ final class LinearPerpetualBenchmarkSupport {
                 case KAFKA_INPUT_BRIDGE -> 89;
                 default -> 7;
             };
+        }
+
+        private static final class PendingCommand {
+            private final CoreMessage command;
+            private final long sequence;
+            private final int operationWeight;
+            private CoreResponse response;
+
+            private PendingCommand(CoreMessage command, long sequence, int operationWeight, CoreResponse response) {
+                this.command = command;
+                this.sequence = sequence;
+                this.operationWeight = operationWeight;
+                this.response = response;
+            }
         }
     }
 

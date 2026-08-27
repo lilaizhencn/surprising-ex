@@ -199,6 +199,25 @@ final class CoreExportState {
         return pendingDigest;
     }
 
+    Snapshot snapshot() {
+        return new Snapshot(acknowledgedSequence, nextSequence, pending(), pendingDigest);
+    }
+
+    record Snapshot(long acknowledgedSequence, long nextSequence, List<CoreMessage> pendingEvents,
+                    long pendingDigest) {
+        Snapshot {
+            pendingEvents = List.copyOf(pendingEvents);
+            if (acknowledgedSequence < 0 || nextSequence <= acknowledgedSequence
+                    || nextSequence - acknowledgedSequence - 1 != pendingEvents.size()) {
+                throw new IllegalArgumentException("invalid export snapshot");
+            }
+        }
+
+        int pendingCount() {
+            return pendingEvents.size();
+        }
+    }
+
     private static int encodedLength(CoreMessage message) {
         return Math.addExact(CoreProtocol.HEADER_LENGTH, message.payloadLength());
     }

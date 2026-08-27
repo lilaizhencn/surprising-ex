@@ -16,22 +16,62 @@ public final class RuntimeOrderAdmission {
 
     public static long requiredReservation(
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId,
-            ResolvedPlaceOrder order, long openInterestSteps, ActiveOrderIndex activeOrders) {
+            ResolvedPlaceOrder order, long openInterestSteps, AdmissionOrderIndex activeOrders) {
         return requiredReservation(runtime, identities, userId, order, openInterestSteps, activeOrders, 0);
     }
 
     public static long requiredReservation(
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId,
-            ResolvedPlaceOrder order, long openInterestSteps, ActiveOrderIndex activeOrders,
+            ResolvedPlaceOrder order, long openInterestSteps, AdmissionOrderIndex activeOrders,
             long excludedOrderId) {
         if (runtime == null || identities == null || order == null || activeOrders == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission input");
         }
+        AdmissionIdentity identity = admissionIdentity(runtime, identities, userId, order);
+        String excludedSymbol = null;
+        if (excludedOrderId != 0) {
+            OrderRuntime excluded = runtime.order(excludedOrderId);
+            if (excluded != null) excludedSymbol = identities.symbol(excluded.symbolId());
+        }
+        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
+                excludedOrderId, identity, excludedSymbol);
+    }
+
+    public static AdmissionIdentity admissionIdentity(
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+            long userId, ResolvedPlaceOrder order) {
+        if (runtime == null || identities == null || order == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid runtime order admission identity");
+        }
+        String positionIdentity = order.positionSide() == CorePositionSide.NET
+                ? OrderReservation.normalizeSymbol(order.symbol())
+                : OrderReservation.normalizeSymbol(order.symbol()) + ':' + order.positionSide().name();
+        Integer symbolId = identities.findSymbolId(order.symbol());
+        boolean lifecycleSettled = symbolId != null
+                && runtime.treasury().lifecycleSettlement(symbolId) != 0;
+        return new AdmissionIdentity(identities.findClientKey(userId, order.clientOrderId()),
+                symbolId, identities.findPositionKey(userId, positionIdentity), lifecycleSettled);
+    }
+
+    public static long requiredReservationPrepared(
+            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, AdmissionIdentity identity) {
+        if (runtime == null || order == null || activeOrders == null || identity == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid prepared runtime order admission input");
+        }
+        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
+                0, identity, null);
+    }
+
+    private static long requiredReservation(
+            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
+            AdmissionIdentity identity, String excludedSymbol) {
         if (runtime.order(order.orderId()) != null && order.orderId() != excludedOrderId) {
             throw rejected("DUPLICATE_ORDER_ID", "orderId already exists");
         }
-        Long clientKey = identities.findClientKey(userId, order.clientOrderId());
-        Long clientOrderId = clientKey == null ? null : runtime.orderIdByClient(userId, clientKey);
+        Long clientOrderId = identity.clientKey() == null
+                ? null : runtime.orderIdByClient(userId, identity.clientKey());
         if (clientOrderId != null && clientOrderId != excludedOrderId) {
             throw rejected("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
@@ -40,17 +80,16 @@ public final class RuntimeOrderAdmission {
                 || !instrument.equals(order.instrument())) {
             throw rejected("INSTRUMENT_ORDER_MISMATCH", "order instrument differs from Runtime");
         }
-        Integer symbolId = identities.findSymbolId(order.symbol());
-        if (symbolId != null && runtime.treasury().lifecycleSettlement(symbolId) != 0) {
+        if (identity.lifecycleSettled()) {
             throw rejected("INSTRUMENT_SETTLED", "instrument is already settled");
         }
         validateReservation(runtime.productLine().isDerivative(), instrument, order);
         UserRuntime user = runtime.user(userId);
         CorePositionMode positionMode = user == null ? CorePositionMode.ONE_WAY : user.positionMode();
-        PositionRuntime position = position(runtime, identities, userId, order.symbol(), order.positionSide());
+        PositionRuntime position = identity.positionKey() == null ? null : runtime.position(identity.positionKey());
         OrderRuntime excluded = excludedOrderId == 0 ? null : runtime.order(excludedOrderId);
         if (excludedOrderId != 0 && (excluded == null || excluded.userId() != userId
-                || !identities.symbol(excluded.symbolId()).equals(order.symbol()))) {
+                || !order.symbol().equals(excludedSymbol))) {
             throw rejected("ORDER_NOT_FOUND", "excluded replacement order is invalid");
         }
         validatePositionIdentity(positionMode, position, order, activeOrders, userId, excluded);
@@ -86,7 +125,7 @@ public final class RuntimeOrderAdmission {
 
     private static void validatePositionIdentity(
             CorePositionMode mode, PositionRuntime position, ResolvedPlaceOrder order,
-            ActiveOrderIndex activeOrders, long userId, OrderRuntime excluded) {
+            AdmissionOrderIndex activeOrders, long userId, OrderRuntime excluded) {
         if ((mode == CorePositionMode.ONE_WAY && order.positionSide().hedgeSide())
                 || (mode == CorePositionMode.HEDGE && !order.positionSide().hedgeSide())) {
             throw rejected("POSITION_MODE_MISMATCH", "position side differs from user position mode");
@@ -120,7 +159,7 @@ public final class RuntimeOrderAdmission {
 
     private static void validateReduceOnly(
             boolean derivative, PositionRuntime position, ResolvedPlaceOrder order,
-            ActiveOrderIndex activeOrders, long userId, OrderRuntime excluded) {
+            AdmissionOrderIndex activeOrders, long userId, OrderRuntime excluded) {
         if (!order.reduceOnly()) return;
         if (!derivative) throw rejected("REDUCE_ONLY_UNSUPPORTED", "spot order cannot be reduce-only");
         if (position == null || position.signedQuantitySteps() == 0
@@ -141,7 +180,7 @@ public final class RuntimeOrderAdmission {
 
     private static void validateRiskLimits(
             TradingRuntimeState runtime, CoreInstrumentState instrument, PositionRuntime position,
-            ResolvedPlaceOrder order, ActiveOrderIndex activeOrders, long userId, long openInterestSteps,
+            ResolvedPlaceOrder order, AdmissionOrderIndex activeOrders, long userId, long openInterestSteps,
             OrderRuntime excluded) {
         if (!runtime.productLine().isDerivative() || order.reduceOnly()) return;
         long current = position == null ? 0 : position.signedQuantitySteps();
@@ -228,15 +267,6 @@ public final class RuntimeOrderAdmission {
                 signedFill > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL, priceTicks, openSteps, rate);
     }
 
-    private static PositionRuntime position(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId,
-            String symbol, CorePositionSide side) {
-        String key = side == CorePositionSide.NET ? OrderReservation.normalizeSymbol(symbol)
-                : OrderReservation.normalizeSymbol(symbol) + ':' + side.name();
-        Long positionKey = identities.findPositionKey(userId, key);
-        return positionKey == null ? null : runtime.position(positionKey);
-    }
-
     private static long initialMarginRateFromLeverage(long leveragePpm) {
         BigInteger numerator = BigInteger.valueOf(PPM).multiply(BigInteger.valueOf(PPM));
         BigInteger[] quotient = numerator.divideAndRemainder(BigInteger.valueOf(leveragePpm));
@@ -245,5 +275,18 @@ public final class RuntimeOrderAdmission {
 
     private static CoreStateRejectedException rejected(String code, String message) {
         return new CoreStateRejectedException(code, message);
+    }
+
+    public interface AdmissionOrderIndex {
+        long pendingQuantity(long userId, String symbol, CorePositionSide positionSide, CoreOrderSide side);
+
+        long reduceOnlyQuantity(long userId, String symbol, CoreOrderSide side);
+
+        int marginModeCount(long userId, String symbol, CorePositionSide positionSide,
+                            CoreMarginMode marginMode);
+    }
+
+    public record AdmissionIdentity(
+            Long clientKey, Integer symbolId, Long positionKey, boolean lifecycleSettled) {
     }
 }

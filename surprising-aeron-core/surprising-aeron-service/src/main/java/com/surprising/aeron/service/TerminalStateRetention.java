@@ -32,6 +32,9 @@ final class TerminalStateRetention {
     private final LinkedHashMap<EntityKey, RetainedEntity> tombstones;
     private final Map<ClientIdentity, EntityKey> tombstonesByClient;
     private final LinkedHashMap<UUID, CommandFingerprint> fundsCommands;
+    private long candidateDigest;
+    private long tombstoneDigest;
+    private long fundsCommandDigest;
 
     TerminalStateRetention() {
         this(new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
@@ -40,9 +43,20 @@ final class TerminalStateRetention {
     private TerminalStateRetention(LinkedHashMap<EntityKey, RetainedEntity> candidates,
                                    LinkedHashMap<EntityKey, RetainedEntity> tombstones,
                                    LinkedHashMap<UUID, CommandFingerprint> fundsCommands) {
+        this(candidates, tombstones, fundsCommands,
+                entityDigest(candidates), entityDigest(tombstones), fundsCommandDigest(fundsCommands));
+    }
+
+    private TerminalStateRetention(LinkedHashMap<EntityKey, RetainedEntity> candidates,
+                                   LinkedHashMap<EntityKey, RetainedEntity> tombstones,
+                                   LinkedHashMap<UUID, CommandFingerprint> fundsCommands,
+                                   long candidateDigest, long tombstoneDigest, long fundsCommandDigest) {
         this.candidates = candidates;
         this.tombstones = tombstones;
         this.fundsCommands = fundsCommands;
+        this.candidateDigest = candidateDigest;
+        this.tombstoneDigest = tombstoneDigest;
+        this.fundsCommandDigest = fundsCommandDigest;
         this.tombstonesByClient = new HashMap<>();
         tombstones.values().forEach(this::indexTombstone);
     }
@@ -94,6 +108,7 @@ final class TerminalStateRetention {
         while (tombstones.size() > MAX_TOMBSTONES) {
             EntityKey key = tombstones.keySet().iterator().next();
             RetainedEntity removed = tombstones.remove(key);
+            if (removed != null) tombstoneDigest ^= entryDigest(removed);
             if (removed != null && !removed.clientId().isEmpty()) {
                 tombstonesByClient.remove(new ClientIdentity(removed.key().type(), removed.userId(),
                         removed.clientId()));
@@ -137,21 +152,17 @@ final class TerminalStateRetention {
         if (previous != null && !previous.equals(fingerprint)) {
             throw new IllegalStateException("funds command fingerprint conflict");
         }
+        if (previous == null) fundsCommandDigest ^= entryDigest(commandId, fingerprint);
     }
 
     long digest() {
         long hash = 0xcbf29ce484222325L;
-        for (RetainedEntity value : candidates.values()) hash = mix(hash, value);
-        hash ^= 0x9e3779b97f4a7c15L;
-        for (RetainedEntity value : tombstones.values()) hash = mix(hash, value);
-        hash ^= 0x517cc1b727220a95L;
-        for (Map.Entry<UUID, CommandFingerprint> entry : fundsCommands.entrySet()) {
-            hash ^= entry.getKey().getMostSignificantBits(); hash *= 0x100000001b3L;
-            hash ^= entry.getKey().getLeastSignificantBits(); hash *= 0x100000001b3L;
-            for (byte value : entry.getValue().bytes()) {
-                hash ^= Byte.toUnsignedInt(value); hash *= 0x100000001b3L;
-            }
-        }
+        hash = mix(hash, candidates.size());
+        hash = mix(hash, candidateDigest);
+        hash = mix(hash, tombstones.size());
+        hash = mix(hash, tombstoneDigest);
+        hash = mix(hash, fundsCommands.size());
+        hash = mix(hash, fundsCommandDigest);
         return hash;
     }
 
@@ -173,6 +184,11 @@ final class TerminalStateRetention {
         } catch (IOException exception) {
             throw new IllegalStateException("failed to encode terminal retention", exception);
         }
+    }
+
+    TerminalStateRetention copy() {
+        return new TerminalStateRetention(new LinkedHashMap<>(candidates), new LinkedHashMap<>(tombstones),
+                new LinkedHashMap<>(fundsCommands), candidateDigest, tombstoneDigest, fundsCommandDigest);
     }
 
     static TerminalStateRetention decode(byte[] encoded) {
@@ -206,32 +222,40 @@ final class TerminalStateRetention {
         if (order == null) return;
         EntityKey key = new EntityKey(EntityType.ORDER, order.orderId());
         if (order.status().terminal()) retain(key, order.userId(), order.clientOrderId(), exportSequence);
-        else candidates.remove(key);
+        else removeCandidate(key);
     }
 
     private void observeAlgo(CoreAlgoOrderState algo, long exportSequence) {
         if (algo == null) return;
         EntityKey key = new EntityKey(EntityType.ALGO, algo.algoOrderId());
         if (algo.terminal()) retain(key, algo.userId(), algo.clientAlgoOrderId(), exportSequence);
-        else candidates.remove(key);
+        else removeCandidate(key);
     }
 
     private void observeTrigger(CoreTriggerOrderState trigger, long exportSequence) {
         if (trigger == null) return;
         EntityKey key = new EntityKey(EntityType.TRIGGER, trigger.triggerOrderId());
         if (!trigger.status().open()) retain(key, trigger.userId(), trigger.clientTriggerOrderId(), exportSequence);
-        else candidates.remove(key);
+        else removeCandidate(key);
     }
 
     private void observeLiquidation(CoreLiquidationState liquidation, long exportSequence) {
         if (liquidation == null) return;
         EntityKey key = new EntityKey(EntityType.LIQUIDATION, liquidation.liquidationId());
         if (liquidation.terminal()) retain(key, liquidation.userId(), "", exportSequence);
-        else candidates.remove(key);
+        else removeCandidate(key);
     }
 
     private void retain(EntityKey key, long userId, String clientId, long exportSequence) {
-        candidates.put(key, new RetainedEntity(key, userId, normalizeClientId(clientId), exportSequence));
+        RetainedEntity retained = new RetainedEntity(key, userId, normalizeClientId(clientId), exportSequence);
+        RetainedEntity previous = candidates.put(key, retained);
+        if (previous != null) candidateDigest ^= entryDigest(previous);
+        candidateDigest ^= entryDigest(retained);
+    }
+
+    private void removeCandidate(EntityKey key) {
+        RetainedEntity removed = candidates.remove(key);
+        if (removed != null) candidateDigest ^= entryDigest(removed);
     }
 
     private boolean isStillPrunable(TradingCoreState state, RetainedEntity candidate) {
@@ -265,7 +289,10 @@ final class TerminalStateRetention {
             if (candidate == null || candidate.exportSequence() > acknowledgedSequence) {
                 throw new IllegalStateException("terminal entity was not eligible for pruning: " + key);
             }
-            tombstones.put(key, candidate);
+            candidateDigest ^= entryDigest(candidate);
+            RetainedEntity previous = tombstones.put(key, candidate);
+            if (previous != null) tombstoneDigest ^= entryDigest(previous);
+            tombstoneDigest ^= entryDigest(candidate);
             indexTombstone(candidate);
         }
     }
@@ -330,7 +357,8 @@ final class TerminalStateRetention {
         return normalized;
     }
 
-    private static long mix(long hash, RetainedEntity value) {
+    private static long entryDigest(RetainedEntity value) {
+        long hash = 0xcbf29ce484222325L;
         hash ^= value.key().type().ordinal(); hash *= 0x100000001b3L;
         hash ^= value.key().id(); hash *= 0x100000001b3L;
         hash ^= value.userId(); hash *= 0x100000001b3L;
@@ -339,6 +367,33 @@ final class TerminalStateRetention {
             hash ^= Byte.toUnsignedInt(character); hash *= 0x100000001b3L;
         }
         return hash;
+    }
+
+    private static long entryDigest(UUID commandId, CommandFingerprint fingerprint) {
+        long hash = 0xcbf29ce484222325L;
+        hash = mix(hash, commandId.getMostSignificantBits());
+        hash = mix(hash, commandId.getLeastSignificantBits());
+        for (byte value : fingerprint.bytes()) hash = mix(hash, Byte.toUnsignedInt(value));
+        return hash;
+    }
+
+    private static long entityDigest(Map<EntityKey, RetainedEntity> values) {
+        long digest = 0;
+        for (RetainedEntity value : values.values()) digest ^= entryDigest(value);
+        return digest;
+    }
+
+    private static long fundsCommandDigest(Map<UUID, CommandFingerprint> values) {
+        long digest = 0;
+        for (Map.Entry<UUID, CommandFingerprint> entry : values.entrySet()) {
+            digest ^= entryDigest(entry.getKey(), entry.getValue());
+        }
+        return digest;
+    }
+
+    private static long mix(long hash, long value) {
+        hash ^= value;
+        return hash * 0x100000001b3L;
     }
 
     private void indexTombstone(RetainedEntity value) {

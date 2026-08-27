@@ -228,7 +228,7 @@ class DeterministicExchangeCoreAdapterTest {
         assertThat(decoded.matcherPrefixDigest()).isEqualTo(beforeSnapshot.matcherPrefix().after());
         assertThat(decoded.symbols()).containsExactlyEntriesOf(snapshot.symbols());
         assertThat(decoded.users()).containsExactlyElementsOf(snapshot.users());
-        assertThat(decoded.modules()).hasSize(decoded.matchingEngineCount() + 1);
+        assertThat(decoded.modules()).hasSize(decoded.matchingEngineCount() * 2);
         assertThat(decoded.modules().stream()
                 .filter(module -> module.type().name().equals("MATCHING_ENGINE_ROUTER"))
                 .map(module -> module.instanceId()).sorted().toList())

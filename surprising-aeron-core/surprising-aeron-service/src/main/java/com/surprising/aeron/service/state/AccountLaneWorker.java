@@ -11,6 +11,8 @@ final class AccountLaneWorker implements AutoCloseable {
     }
 
     private static final long EMPTY_SEQUENCE = Long.MIN_VALUE;
+    private static final int ACTIVE_IDLE_SPINS = Math.max(0,
+            Integer.getInteger("surprising.aeron.account-lane-idle-spins", 100_000));
     private final AccountLaneState state;
     private final Slot[] slots;
     private final int mask;
@@ -163,12 +165,20 @@ final class AccountLaneWorker implements AutoCloseable {
     private void run() {
         state.bindOwner();
         long nextSequence = 1;
+        int idleSpins = 0;
         while (running || nextSequence <= offeredSequence) {
             Slot slot = slots[(int) nextSequence & mask];
             if (slot.requestSequence != nextSequence) {
-                LockSupport.park();
+                if (idleSpins < ACTIVE_IDLE_SPINS) {
+                    idleSpins++;
+                    Thread.onSpinWait();
+                } else {
+                    LockSupport.park();
+                    idleSpins = 0;
+                }
                 continue;
             }
+            idleSpins = 0;
             try {
                 slot.result = slot.operation.apply(state);
             } catch (Throwable failure) {

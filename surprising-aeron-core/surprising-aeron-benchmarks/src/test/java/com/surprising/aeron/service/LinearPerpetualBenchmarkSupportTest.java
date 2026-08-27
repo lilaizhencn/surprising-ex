@@ -67,6 +67,22 @@ class LinearPerpetualBenchmarkSupportTest {
             try (var scenario = LinearPerpetualMixedWorkload.scenario(template)) {
                 assertThat(scenario.run()).isNotZero();
                 assertThat(scenario.operations()).isGreaterThan(100);
+                assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+                assertThat(scenario.maxBacklog()).isGreaterThan(1);
+                scenario.verify();
+            }
+        }).doesNotThrowAnyException();
+    }
+
+    @Test
+    void productionWorkloadInterleavesBoundedHeavyWorkWithTrading() {
+        var template = LinearPerpetualMixedWorkload.template(4, 512, 4);
+
+        assertThatCode(() -> {
+            try (var scenario = LinearPerpetualMixedWorkload.productionScenario(template, 4, 20)) {
+                assertThat(scenario.run()).isNotZero();
+                assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+                assertThat(scenario.maxBacklog()).isGreaterThan(1);
                 scenario.verify();
             }
         }).doesNotThrowAnyException();

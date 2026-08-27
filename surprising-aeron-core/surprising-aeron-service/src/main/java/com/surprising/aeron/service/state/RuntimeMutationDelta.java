@@ -193,6 +193,11 @@ public final class RuntimeMutationDelta {
                       Map<RuntimeClientKey, Long> clientOrders) {
     }
 
+    static LaneValues emptyLaneValues() {
+        return new LaneValues(0, Map.of(), Map.of(), Map.of(), Set.of(), Map.of(), Map.of(), Map.of(),
+                Map.of(), Map.of(), Map.of(), Map.of());
+    }
+
     static LaneValues captureLane(AccountLaneState lane, CaptureRequest request) {
         TreeMap<Long, UserValue> users = new TreeMap<>();
         for (long userId : request.userIds()) {

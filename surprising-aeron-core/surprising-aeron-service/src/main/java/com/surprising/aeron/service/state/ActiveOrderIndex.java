@@ -13,7 +13,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-public final class ActiveOrderIndex {
+public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
 
     public static final int MAX_PAGE_SIZE = 1_024;
 

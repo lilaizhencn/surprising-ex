@@ -241,6 +241,38 @@ public final class RollingBusinessStateHash {
             return TradingCoreState.hashOrder(CoreStateHash.start(), order);
         }
         long hash = CoreStateHash.mix(CoreStateHash.start(), value.getClass().getName());
+        if (value instanceof Long number) return CoreStateHash.mix(hash, number.longValue());
+        if (value instanceof Integer number) return CoreStateHash.mix(hash, number.longValue());
+        if (value instanceof String text) return CoreStateHash.mix(hash, text);
+        if (value instanceof Enum<?> enumeration) return CoreStateHash.mix(hash, enumeration.ordinal());
+        if (value instanceof AssetBalance balance) {
+            hash = CoreStateHash.mix(hash, balance.asset());
+            hash = CoreStateHash.mix(hash, balance.availableUnits());
+            return CoreStateHash.mix(hash, balance.lockedUnits());
+        }
+        if (value instanceof OrderReservation reservation) {
+            hash = CoreStateHash.mix(hash, reservation.orderId());
+            hash = CoreStateHash.mix(hash, reservation.symbol());
+            hash = CoreStateHash.mix(hash, reservation.instrumentVersion());
+            hash = CoreStateHash.mix(hash, reservation.kind().ordinal());
+            hash = CoreStateHash.mix(hash, reservation.asset());
+            hash = CoreStateHash.mix(hash, reservation.reservedUnits());
+            hash = CoreStateHash.mix(hash, reservation.releasedUnits());
+            hash = CoreStateHash.mix(hash, reservation.consumedUnits());
+            return CoreStateHash.mix(hash, reservation.orderQuantitySteps());
+        }
+        if (value instanceof CorePositionState position) {
+            hash = CoreStateHash.mix(hash, position.symbol());
+            hash = CoreStateHash.mix(hash, position.marginAsset());
+            hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
+            hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
+            hash = CoreStateHash.mix(hash, position.instrumentVersion());
+            hash = CoreStateHash.mix(hash, position.signedQuantitySteps());
+            hash = CoreStateHash.mix(hash, position.entryPriceTicks());
+            hash = CoreStateHash.mix(hash, position.entryValueTicks());
+            hash = CoreStateHash.mix(hash, position.realizedPnlUnits());
+            return CoreStateHash.mix(hash, position.positionMarginUnits());
+        }
         return CoreStateHash.mix(hash, value.toString());
     }
 

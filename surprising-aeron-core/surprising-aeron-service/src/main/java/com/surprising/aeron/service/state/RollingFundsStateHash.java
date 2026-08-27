@@ -124,7 +124,14 @@ public final class RollingFundsStateHash {
 
     private static long entryHash(Object key, Object value) {
         long hash = CoreStateHash.mix(CoreStateHash.start(), HASH_TAG);
-        hash = CoreStateHash.mix(hash, String.valueOf(key));
+        hash = stable(hash, key);
+        return stable(hash, value);
+    }
+
+    private static long stable(long hash, Object value) {
+        if (value instanceof Long number) return CoreStateHash.mix(hash, number.longValue());
+        if (value instanceof Integer number) return CoreStateHash.mix(hash, number.longValue());
+        if (value instanceof String text) return CoreStateHash.mix(hash, text);
         return CoreStateHash.mix(hash, String.valueOf(value));
     }
 

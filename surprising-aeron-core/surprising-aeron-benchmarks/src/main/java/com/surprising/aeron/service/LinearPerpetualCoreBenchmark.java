@@ -73,7 +73,15 @@ public class LinearPerpetualCoreBenchmark {
     @OutputTimeUnit(TimeUnit.SECONDS)
     public long productionMixedWorkload(ProductionMixedState state, MixedWorkloadCounters counters) {
         long result = state.scenario.run();
-        counters.coreCommands += state.scenario.operations();
+        counters.acceptedCommands += state.scenario.acceptedOperations();
+        counters.terminalCommands += state.scenario.terminalOperations();
+        counters.unfinishedCommands += Math.subtractExact(
+                state.scenario.acceptedOperations(), state.scenario.terminalOperations());
+        counters.laneOperations += state.scenario.laneOperations();
+        counters.laneCommandOperations += state.scenario.laneOperations(0);
+        counters.laneSettlementOperations += state.scenario.laneOperations(1);
+        counters.laneQueryOperations += state.scenario.laneOperations(2);
+        counters.laneRiskOperations += state.scenario.laneOperations(3);
         return result;
     }
 
@@ -206,6 +214,12 @@ public class LinearPerpetualCoreBenchmark {
         @Param("4")
         public int symbols;
 
+        @Param("96")
+        public int hftRounds;
+
+        @Param("20")
+        public int hftBatchSize;
+
         private LinearPerpetualMixedWorkload.Template template;
 
         @Setup(Level.Trial)
@@ -216,18 +230,32 @@ public class LinearPerpetualCoreBenchmark {
 
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
-            return LinearPerpetualMixedWorkload.scenario(template);
+            return LinearPerpetualMixedWorkload.productionScenario(template, hftRounds, hftBatchSize);
         }
     }
 
     @AuxCounters(AuxCounters.Type.OPERATIONS)
     @State(Scope.Thread)
     public static class MixedWorkloadCounters {
-        public long coreCommands;
+        public long acceptedCommands;
+        public long terminalCommands;
+        public long unfinishedCommands;
+        public long laneOperations;
+        public long laneCommandOperations;
+        public long laneSettlementOperations;
+        public long laneQueryOperations;
+        public long laneRiskOperations;
 
         @Setup(Level.Iteration)
         public void reset() {
-            coreCommands = 0;
+            acceptedCommands = 0;
+            terminalCommands = 0;
+            unfinishedCommands = 0;
+            laneOperations = 0;
+            laneCommandOperations = 0;
+            laneSettlementOperations = 0;
+            laneQueryOperations = 0;
+            laneRiskOperations = 0;
         }
     }
 }

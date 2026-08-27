@@ -641,6 +641,38 @@ class CoreProbeStateTest {
     }
 
     @Test
+    void frozenSnapshotEncodingDoesNotBlockTheTradingOwnerStream() {
+        AtomicReference<CoreSnapshotImage> frozenImage = new AtomicReference<>();
+        CompletableFuture<SectionedCoreSnapshotCodec.SectionedSnapshot> encoded = new CompletableFuture<>();
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT, null, image -> {
+            frozenImage.set(image);
+            return encoded;
+        })) {
+            assertThat(state.apply(command(UUID.randomUUID(), 1, 3)).status()).isEqualTo(ResponseStatus.APPLIED);
+            long frozenSequence = state.appliedCommandCount();
+            state.beginSnapshot(811, Long.MAX_VALUE);
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (frozenImage.get() == null && System.nanoTime() < deadline) {
+                assertThat(state.pollSnapshotSections(1_000, 1, System.nanoTime())).isNull();
+                Thread.onSpinWait();
+            }
+            assertThat(frozenImage.get()).isNotNull();
+
+            assertThat(state.apply(command(UUID.randomUUID(), 2, 5)).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.appliedCommandCount()).isEqualTo(frozenSequence + 1);
+            encoded.complete(SectionedCoreSnapshotCodec.encode(frozenImage.get()));
+            byte[] snapshot = state.pollSnapshot(1_000, 1, System.nanoTime());
+            assertThat(snapshot).isNotNull();
+
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot)) {
+                assertThat(restored.appliedCommandCount()).isEqualTo(frozenSequence);
+                assertThat(restored.probeValue()).isEqualTo(3);
+            }
+            assertThat(state.probeValue()).isEqualTo(8);
+        }
+    }
+
+    @Test
     void interruptedSnapshotFencePublishesNothingAndAllowsExplicitRetry() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             state.beginSnapshot(901, Long.MAX_VALUE);
@@ -899,7 +931,7 @@ class CoreProbeStateTest {
         while (!state.tradingState().riskState().scan().complete()) {
             CoreMessage continuation = tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(),
                     sourceSequence++, TradingCommandCodec.encodeContinueRiskScan(
-                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(500)));
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(64)));
             CoreResponse continuationResponse = applyAndDrain(state, continuation);
             assertThat(continuationResponse.status())
                     .withFailMessage("continuation seq=%s result=%s scan=%s", sourceSequence,
@@ -949,7 +981,7 @@ class CoreProbeStateTest {
         while (!state.tradingState().riskState().scan().complete()) {
             var continuation = tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(), sourceSequence++,
                     TradingCommandCodec.encodeContinueRiskScan(
-                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(500)));
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(64)));
             assertThat(applyAndDrain(state, continuation).status()).isEqualTo(ResponseStatus.APPLIED);
         }
         assertThat(state.tradingState().triggerOrders().values().stream()
