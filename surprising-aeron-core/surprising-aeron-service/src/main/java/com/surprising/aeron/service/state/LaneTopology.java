@@ -6,6 +6,7 @@ import java.util.TreeMap;
 public record LaneTopology(
         int routeVersion,
         int matchingEngineCount,
+        int riskEngineCount,
         int matcherShardMask,
         int accountLaneCount,
         long accountLaneSeed,
@@ -13,8 +14,9 @@ public record LaneTopology(
         int matchingCompletionCapacity,
         int accountLaneQueueCapacity) {
 
-    public static final int ROUTE_VERSION = 2;
+    public static final int ROUTE_VERSION = 3;
     public static final int DEFAULT_MATCHING_ENGINE_COUNT = 4;
+    public static final int DEFAULT_RISK_ENGINE_COUNT = 1;
     public static final int DEFAULT_ACCOUNT_LANE_COUNT = 4;
     public static final long DEFAULT_ACCOUNT_LANE_SEED = 0x6a09e667f3bcc909L;
     public static final int DEFAULT_MATCHER_WINDOW_SIZE = 4_096;
@@ -22,6 +24,7 @@ public record LaneTopology(
 
     public LaneTopology {
         requirePowerOfTwo(matchingEngineCount, 1, 64, "matchingEngineCount");
+        requirePowerOfTwo(riskEngineCount, 1, 64, "riskEngineCount");
         requirePowerOfTwo(accountLaneCount, 1, Long.SIZE, "accountLaneCount");
         requirePowerOfTwo(matcherWindowSize, 1, 1 << 20, "matcherWindowSize");
         requirePowerOfTwo(matchingCompletionCapacity, 1, 1 << 20, "matchingCompletionCapacity");
@@ -36,12 +39,13 @@ public record LaneTopology(
     }
 
     public static LaneTopology characterization() {
-        return new LaneTopology(ROUTE_VERSION, 1, 0, 1, DEFAULT_ACCOUNT_LANE_SEED,
+        return new LaneTopology(ROUTE_VERSION, 1, 1, 0, 1, DEFAULT_ACCOUNT_LANE_SEED,
                 DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
     }
 
     public static LaneTopology configured(boolean allowCharacterization) {
         int matching = Integer.getInteger("surprising.aeron.matching-engines", DEFAULT_MATCHING_ENGINE_COUNT);
+        int risk = Integer.getInteger("surprising.aeron.risk-engines", DEFAULT_RISK_ENGINE_COUNT);
         int accounts = Integer.getInteger("surprising.aeron.account-lanes", DEFAULT_ACCOUNT_LANE_COUNT);
         long seed = Long.getLong("surprising.aeron.account-lane-seed", DEFAULT_ACCOUNT_LANE_SEED);
         int window = Integer.getInteger("surprising.aeron.matcher-window-size", DEFAULT_MATCHER_WINDOW_SIZE);
@@ -50,7 +54,7 @@ public record LaneTopology(
         if (!allowCharacterization && accounts == 1) {
             throw new IllegalArgumentException("accountLaneCount=1 is characterization-only");
         }
-        return new LaneTopology(ROUTE_VERSION, matching, matching - 1, accounts, seed,
+        return new LaneTopology(ROUTE_VERSION, matching, risk, matching - 1, accounts, seed,
                 window, completion, laneQueue);
     }
 
@@ -72,6 +76,7 @@ public record LaneTopology(
         long hash = offset();
         hash = mix(hash, routeVersion);
         hash = mix(hash, matchingEngineCount);
+        hash = mix(hash, riskEngineCount);
         hash = mix(hash, matcherShardMask);
         hash = mix(hash, accountLaneCount);
         hash = mix(hash, accountLaneSeed);

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.AmendOrderBatchCommand;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.CancelOrderBatchCommand;
@@ -18,6 +19,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreTimeInForce;
@@ -306,6 +308,48 @@ class CoreOrderedOrderBatchTest {
                             java.util.stream.Collectors.summingLong(
                                     com.surprising.aeron.protocol.CoreFundsPostingView::units))))
                     .allSatisfy((asset, units) -> assertThat(units).as(asset).isZero());
+        }
+    }
+
+    @Test
+    void perpetualBatchAdmissionIncludesEarlierItemsAndConservesReservedFunds() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
+                    ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                    1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0,
+                    10_000_000, 1_500, 0, 1_500,
+                    List.of(new CoreRiskLimitBracket(1, 0, 1_500,
+                            10_000_000, 100_000, 50_000)));
+            assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.UPSERT_INSTRUMENT,
+                    UUID.randomUUID(), 1, TradingCommandCodec.encodeUpsertInstrument(instrument))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.APPLY_MARK_PRICE,
+                    UUID.randomUUID(), 2, TradingCommandCodec.encodeApplyMarkPrice(
+                            new ApplyMarkPriceCommand("BTC-USDT", 1, 1_000, 1, 1_000)))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.ADJUST_BALANCE,
+                    UUID.randomUUID(), 3, TradingCommandCodec.encodeBalanceAdjustment(
+                            new BalanceAdjustmentCommand("USDT", 1_000_000)))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            PlaceOrderCommand first = new PlaceOrderCommand(10_601, "BTC-USDT", 1,
+                    CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "risk-first");
+            PlaceOrderCommand exceedsBatchLimit = new PlaceOrderCommand(10_602, "BTC-USDT", 1,
+                    CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "risk-second");
+            CoreMessage batch = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
+                    UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(
+                            new PlaceOrderBatchCommand(List.of(first, exceedsBatchLimit))));
+
+            CoreOrderBatchResult result = TradingOrderBatchCodec.decodeResult(drainBatch(state, batch).data());
+
+            assertThat(result.items()).extracting(CoreOrderBatchResult.Item::status)
+                    .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
+            assertThat(result.items().get(1).resultCode())
+                    .isEqualTo(CoreResultCode.POSITION_NOTIONAL_LIMIT_EXCEEDED);
+            var balance = state.tradingState().user(1001).balances().get("USDT");
+            assertThat(Math.addExact(balance.availableUnits(), balance.lockedUnits())).isEqualTo(1_000_000);
+            assertThat(state.tradingState().user(1001).reservations()).containsOnlyKeys(10_601L);
         }
     }
 

@@ -79,7 +79,7 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(14);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(15);
             assertThat(buffer.getInt(8)).isEqualTo(14);
             buffer.position(ENVELOPE_LENGTH);
             int[] sectionIds = new int[14];
@@ -285,7 +285,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(14);
+            assertThat(manifest.schemaVersion()).isEqualTo(15);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
@@ -317,28 +317,28 @@ class CoreStateSnapshotCodecTest {
         Map<String, byte[]> mismatches = new LinkedHashMap<>();
         mismatches.put("product line", mutateHeaderProductLine(snapshot));
         mismatches.put("route", mutateHeaderInt(snapshot, 2));
-        mismatches.put("topology", mutateHeaderLong(snapshot, 38));
-        mismatches.put("symbol route", mutateHeaderLong(snapshot, 46));
-        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 54));
-        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 70));
-        mismatches.put("core sequence", mutateHeaderLong(snapshot, 78));
-        mismatches.put("matcher sequence", mutateHeaderLong(snapshot, 102));
-        mismatches.put("business state hash", mutateHeaderLong(snapshot, 110));
-        mismatches.put("funds hash", mutateHeaderLong(snapshot, 118));
-        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 126));
-        mismatches.put("book state hash", mutateHeaderInt(snapshot, 130));
-        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 134));
-        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 142));
-        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 150));
-        mismatches.put("active order hash", mutateHeaderLong(snapshot, 158));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 166));
-        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 174));
-        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 182));
-        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 190));
-        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 194));
-        mismatches.put("matcher config", mutateHeaderLong(snapshot, 202));
-        mismatches.put("fork identity", mutateHeaderByte(snapshot, 210));
-        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 250));
+        mismatches.put("topology", mutateHeaderLong(snapshot, 42));
+        mismatches.put("symbol route", mutateHeaderLong(snapshot, 50));
+        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 58));
+        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 74));
+        mismatches.put("core sequence", mutateHeaderLong(snapshot, 82));
+        mismatches.put("matcher sequence", mutateHeaderLong(snapshot, 106));
+        mismatches.put("business state hash", mutateHeaderLong(snapshot, 114));
+        mismatches.put("funds hash", mutateHeaderLong(snapshot, 122));
+        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 130));
+        mismatches.put("book state hash", mutateHeaderInt(snapshot, 134));
+        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 138));
+        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 146));
+        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 154));
+        mismatches.put("active order hash", mutateHeaderLong(snapshot, 162));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 170));
+        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 178));
+        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 186));
+        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 194));
+        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 198));
+        mismatches.put("matcher config", mutateHeaderLong(snapshot, 206));
+        mismatches.put("fork identity", mutateHeaderByte(snapshot, 214));
+        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 254));
 
         mismatches.forEach((field, mutated) -> {
             Throwable failure = catchThrowable(() -> CoreStateSnapshotCodec.decode(mutated, ProductLine.SPOT));

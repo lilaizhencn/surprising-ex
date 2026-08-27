@@ -1,7 +1,7 @@
 package com.surprising.aeron.protocol;
 
 public enum CoreRoute {
-    DEFAULT(0, 2);
+    DEFAULT(0, 3);
 
     private final int shardCode;
     private final int version;

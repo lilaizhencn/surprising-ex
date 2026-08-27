@@ -123,6 +123,7 @@ final class SectionedCoreSnapshotWriter {
                 .put((byte) 0)
                 .putInt(MatcherSnapshot.ROUTE_VERSION)
                 .putInt(matcherSnapshot.matchingEngineCount())
+                .putInt(matcherSnapshot.riskEngineCount())
                 .putInt(matcherSnapshot.matcherShardMask())
                 .putInt(matcherSnapshot.accountLaneCount())
                 .putLong(matcherSnapshot.accountLaneSeed())

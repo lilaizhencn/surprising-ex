@@ -9,11 +9,12 @@ import org.junit.jupiter.api.Test;
 class LaneTopologyTest {
 
     @Test
-    void productionDefaultsUseRouteTwoAndFourFixedMatcherAndAccountLanes() {
+    void productionDefaultsUseVersionedMatcherRiskAndAccountLanes() {
         LaneTopology topology = LaneTopology.productionDefault();
 
-        assertThat(topology.routeVersion()).isEqualTo(2);
+        assertThat(topology.routeVersion()).isEqualTo(3);
         assertThat(topology.matchingEngineCount()).isEqualTo(4);
+        assertThat(topology.riskEngineCount()).isEqualTo(1);
         assertThat(topology.matcherShardMask()).isEqualTo(3);
         assertThat(topology.accountLaneCount()).isEqualTo(4);
         assertThat(topology.topologyHash()).isNotZero();
@@ -35,13 +36,13 @@ class LaneTopologyTest {
 
     @Test
     void rejectsNonPowerOfTwoOrOldRouteTopology() {
-        assertThatThrownBy(() -> new LaneTopology(1, 4, 3, 4,
+        assertThatThrownBy(() -> new LaneTopology(1, 4, 1, 3, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LaneTopology(2, 3, 2, 4,
+        assertThatThrownBy(() -> new LaneTopology(3, 3, 1, 2, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LaneTopology(2, 4, 3, 3,
+        assertThatThrownBy(() -> new LaneTopology(3, 4, 1, 3, 3,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
     }

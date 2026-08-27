@@ -9,13 +9,13 @@ matcher 恢复导入 Aeron 配对 snapshot 中全部原生 `ME[0..N)/RE0`，通�
 
 部署基线不按 margin mode 或热点 symbol 分 Core：CROSS 和 ISOLATED 都由同一个 ProductLine Core 裁决；
 CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保留 `coreShardId=default`，当前协议固定
-`routeVersion=2`；symbol 只进入同一共享 ExchangeCore 的原生 matcher shard，不启用物理热点 Core 或跨 Core 全仓余额共享。
+`routeVersion=3`；symbol 只进入同一共享 ExchangeCore 的原生 matcher shard，不启用物理热点 Core 或跨 Core 全仓余额共享。
 
 ## 模块
 
 | 模块 | 职责 |
 | --- | --- |
-| `surprising-aeron-protocol` | schema v4 固定小端二进制 command/envelope、六线 wire code、route v2 和端口布局。 |
+| `surprising-aeron-protocol` | schema v4 固定小端二进制 command/envelope、六线 wire code、route v3 和端口布局。 |
 | `surprising-aeron-service` | `ClusteredService`、有界幂等状态、Snapshot 和节点启动器。 |
 | `surprising-aeron-client` | Leader 自动发现、切换处理和“超时即结果未知”同步客户端。 |
 | `surprising-aeron-exporter` | P5 可靠 Exporter 的最小 sink 边界。 |
@@ -36,26 +36,25 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 
 ## 实现状态与版本切换说明
 
-当前写格式为 command/envelope schema v4、export event marker v9、trading snapshot v24、matcher snapshot v3 和
-sectioned snapshot v14；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
+当前写格式为 command/envelope schema v4、export event marker v9、trading snapshot v24、matcher snapshot v4 和
+sectioned snapshot v15；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
 
 P10 的目标不是物理 Core shard；每个三节点 Product Core 仍只运行一个共享的 Adapter/ExchangeCore，按 symbol 的
 Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Account Lane 是默认必须实施的运行时边界，
 生产默认 `accountLaneCount=4`；Sequencer 扫描一次 userId 后把同一不可变 matcher result 引用扇出到受影响 Lane，
 以 expected/ack Lane mask 提交，不生成 `SettlementPlan` 或 event 副本；Treasury 保持 Sequencer owner。全局 Core
 sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
-4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、ACK 位图、全局 commit
+1 个 risk engine、4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、ACK 位图、全局 commit
 cursor 和实际 Lane snapshot section 已落地。`AccountLaneWorker[]` 为每个 Lane 创建固定 platform owner thread；账户 Map
 mutation、owner-routed query/read fence 和 Lane snapshot capture/restore 经过预分配槽位的有界双向 SPSC ring。当前
-P10-D/E 缺陷闭环尚未完成：撮合结算仍由 Sequencer 同步编排多个 Lane 访问，ACK/Treasury 尚未全部改为 Lane 原生
-per-asset delta 后再过 barrier 提交。P10-G 的真实 HTTP/JFR 门禁见
-[P10 单物理 Product Core 确定性 Lane 实施规范](../docs/P10-DETERMINISTIC-LANES.md)，没有对应 artifact 时不得宣称生产认证完成。
+P10-D/E 已把订单批次合并为每 Lane 一次 apply/commit，并在 ACK barrier 前捕获 Lane 原生 per-asset Treasury delta。
+P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣称生产认证完成。
 
 ## 协议约束
 
 - Cluster Log 权威消息禁止 Java serialization 和无版本 JSON。
 - schema v4 header 包含 `commandId`、`productLine`、`source`、`sourceId`、`sourceSequence`、`userId`、
-  外部提交时间、`correlationId` 和 route v2；旧 envelope/route 不再接受。
+  外部提交时间、`correlationId` 和 route v3；旧 envelope/route 不再接受。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
 - exchange-core 0.5.16-emporia 是唯一可执行订单簿（sole executable order book），独占价格树/FIFO；`GTX` 使用原生
@@ -171,17 +170,18 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 - 每个 command 产生不可变、按 `(asset, ownerKind, ownerId, subledger)` 排序的 `FundsDelta` 和 Core Fact；before/after state hash、
   funds hash、Core/book prefix 和 Aeron position 必须共同标识同一裁决。Audit Exporter 从 replicated outbox 发布 Kafka history，
   History Projector 再幂等写入 PostgreSQL；投影结果不是 current state。
-- 当前写格式为 command/envelope v4、export event marker v9、trading snapshot v24、sectioned snapshot v14。
+- 当前写格式为 command/envelope v4、export event marker v9、trading snapshot v24、matcher snapshot v4、
+  sectioned snapshot v15。
   decoder、snapshot loader 和 startup 对旧主版本 fresh fail-old：旧版本一律拒绝并 fail closed，只能从 fresh compatible
   Product Core state 启动，不保留旧 codec reader、迁移读取路径或隐式降级。
 
 ### P10：确定性 Lane 与容量门禁
 
-P10-A 至 P10-C 和 P10-F 的主体写路径、协议和快照已切换到 route v2；P10-D/E 的 Lane-local settlement 与
-Lane 原生 Treasury ACK 仍是上线前门禁。P10-G 由 `HttpOpenLoopWorkloadMain` 的
+P10-A 至 P10-F 的写路径、协议、快照、Lane-local settlement 和 Lane 原生 Treasury delta 已切换到 route v3。
+P10-G 由 `HttpOpenLoopWorkloadMain` 的
 `qualification=P10` 门禁强制检查 1,000 用户、至少 200 symbol、100k/s、40 分钟和活动 JFR；输出目录保存
 coordinated-omission-corrected HDR、逐请求事件和 accounting JSON。真实三节点/Provider 环境未生成完整 artifact 前，
-只能描述为“迁移进行中”，不能描述为“P10 迁移完成”或“P10 生产认证完成”。
+只能描述为“P10 实现完成、生产认证未完成”，不能描述为“P10 生产认证完成”。
 
 运维可通过 `ClusterProbeMain -Dsurprising.aeron.probe-mode=metrics` 查询 Core 内部 Lane 指标并输出 Prometheus
 text format。该查询走 committed Core query surface，不读取 PostgreSQL；采样与计数由独立
@@ -212,8 +212,8 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   service 的 Maven `validate` 同时校验 provenance 与整包 hash。
   matcher 内部启用事件链池化，池对象只在 exchange-core 内复用；对外 `MatcherResult` 为不可变值，普通交易热路径不执行全局状态报告。
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
-- `Trading snapshot v24` 是唯一外层交易快照写格式；matcher snapshot v3 保存全部
-  `MATCHING_ENGINE_ROUTER/[0..N)` 和唯一 `RISK_ENGINE/0`。`sectioned snapshot v14` 按相同 Core/book prefix 拆分载荷，
+- `Trading snapshot v24` 是唯一外层交易快照写格式；matcher snapshot v4 保存全部
+  `MATCHING_ENGINE_ROUTER/[0..N)` 和 `RISK_ENGINE/[0..R)`。`sectioned snapshot v15` 按相同 Core/book prefix 拆分载荷，
   并保存按 laneId 升序的实际 Account Lane state section；三个 Member 必须运行完全相同的 topology、fork、配置和 schema。
 - capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内等待全部 native shard module 和 callback；
   pending matching 存在时拒绝发布。当前不存在第二个 ExchangeCore 或 `SymbolMatchingLanes` 运行时。
@@ -224,7 +224,7 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   registry、完整 engine/book hash，再以 O(活动订单数) 一次报告逐字段核对 OPEN 订单；全部通过后才替换内存状态。
 - snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；不允许 clean-start 降级、订单回放、
   隐藏 FIFO、matcher journal 或跨 Member 部分恢复。
-- 只接受 v24/v14 的 fresh compatible state；command schema v4、export marker v9、trading snapshot v24、sectioned snapshot v14 之前的输入在 decode/startup 立即
+- 只接受 v24/v15 的 fresh compatible state；command schema v4、export marker v9、trading snapshot v24、sectioned snapshot v15 之前的输入在 decode/startup 立即
   拒绝并 fail closed。没有旧 reader、迁移读取路径或使用 PostgreSQL 投影、clean-start、逐单回放修复不一致状态的例外。
 - `UPDATE_RISK_SCAN_CONTROL` 使用乐观版本检查，`RISK_SCAN_CONTROL_QUERY` 返回当前版本、启停、续跑间隔、
   批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v24` 恢复。

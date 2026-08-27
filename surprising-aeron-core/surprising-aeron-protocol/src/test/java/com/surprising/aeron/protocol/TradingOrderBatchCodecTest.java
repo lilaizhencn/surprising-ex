@@ -48,11 +48,14 @@ class TradingOrderBatchCodecTest {
         assertThatThrownBy(() -> new AmendOrderBatchCommand(List.of()))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        assertThatThrownBy(() -> new PlaceOrderBatchCommand(repeatedPlaces(21)))
+        assertThatThrownBy(() -> new PlaceOrderBatchCommand(
+                repeatedPlaces(PlaceOrderBatchCommand.MAX_ORDERS + 1)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CancelOrderBatchCommand(repeatedCancels(51)))
+        assertThatThrownBy(() -> new CancelOrderBatchCommand(
+                repeatedCancels(CancelOrderBatchCommand.MAX_ORDERS + 1)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new AmendOrderBatchCommand(repeatedAmends(21)))
+        assertThatThrownBy(() -> new AmendOrderBatchCommand(
+                repeatedAmends(AmendOrderBatchCommand.MAX_ORDERS + 1)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

@@ -497,10 +497,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (routedUsers[laneId] == null) routedUsers[laneId] = new java.util.ArrayList<>();
             routedUsers[laneId].add(userId);
         }
+        RuntimeMutationDelta.CaptureRequest captureRequest = mutationCaptureRequest();
         long mask = 0;
         @SuppressWarnings("unchecked")
-        AccountLaneWorker.Ticket<AccountLaneAck>[] tickets = new AccountLaneWorker.Ticket[accountLanes.length];
+        AccountLaneWorker.Ticket<LaneCommit>[] tickets = new AccountLaneWorker.Ticket[accountLanes.length];
         AccountLaneAck[] acknowledgements = new AccountLaneAck[accountLanes.length];
+        RuntimeMutationDelta.LaneValues[] laneValues = new RuntimeMutationDelta.LaneValues[accountLanes.length];
         Throwable firstFailure = null;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             java.util.List<Long> users = routedUsers[laneId];
@@ -509,19 +511,25 @@ public final class TradingRuntimeState implements AutoCloseable {
             int currentLaneId = laneId;
             RuntimeTreasuryDelta treasuryDelta = treasuryDeltas == null || treasuryDeltas[laneId] == null
                     ? new RuntimeTreasuryDelta() : treasuryDeltas[laneId];
-            AccountLaneWorker.Operation<AccountLaneAck> operation = lane -> {
+            AccountLaneWorker.Operation<LaneCommit> operation = lane -> {
                 if (matchingResult.nativeCommand().coreSequence() != coreSequence) {
                     throw new IllegalStateException("immutable matcher result sequence changed during fanout");
                 }
                 applyLaneUsers(lane, users, coreSequence, stateContribution, fundsContribution);
                 lane.committed(coreSequence);
-                return new AccountLaneAck(coreSequence, currentLaneId, lane.revision(), lane.localStateHash(),
-                        lane.localFundsHash(), matchingResult, treasuryDelta);
+                AccountLaneAck acknowledgement = new AccountLaneAck(coreSequence, currentLaneId, lane.revision(),
+                        lane.localStateHash(), lane.localFundsHash(), matchingResult, treasuryDelta);
+                return new LaneCommit(acknowledgement, RuntimeMutationDelta.captureLane(lane, captureRequest));
             };
             AccountLaneWorker worker = worker(laneId);
             try {
-                if (worker == null) acknowledgements[laneId] = operation.apply(accountLanes[laneId]);
-                else tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, operation);
+                if (worker == null) {
+                    LaneCommit committed = operation.apply(accountLanes[laneId]);
+                    acknowledgements[laneId] = committed.acknowledgement();
+                    laneValues[laneId] = committed.laneValues();
+                } else {
+                    tickets[laneId] = worker.submit(AccountLaneOperationType.SETTLEMENT, operation);
+                }
             } catch (Throwable failure) {
                 firstFailure = failure;
                 break;
@@ -530,21 +538,39 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int laneId = 0; laneId < tickets.length; laneId++) {
             if (tickets[laneId] == null) continue;
             try {
-                acknowledgements[laneId] = worker(laneId).await(tickets[laneId]);
+                LaneCommit committed = worker(laneId).await(tickets[laneId]);
+                acknowledgements[laneId] = committed.acknowledgement();
+                laneValues[laneId] = committed.laneValues();
             } catch (Throwable failure) {
                 if (firstFailure == null) firstFailure = failure;
             }
         }
         throwAccountLaneFailure(firstFailure, "account lane apply failed");
-        return new AccountLaneApplyResult(mask, acknowledgements);
+        return new AccountLaneApplyResult(mask, acknowledgements, captureRequest, laneValues);
     }
 
-    public record AccountLaneApplyResult(long laneMask, AccountLaneAck[] acknowledgements) {
-        public AccountLaneApplyResult {
-            acknowledgements = acknowledgements.clone();
+    private record LaneCommit(AccountLaneAck acknowledgement, RuntimeMutationDelta.LaneValues laneValues) {
+    }
+
+    public static final class AccountLaneApplyResult {
+        private final long laneMask;
+        private final AccountLaneAck[] acknowledgements;
+        private final RuntimeMutationDelta.CaptureRequest captureRequest;
+        private final RuntimeMutationDelta.LaneValues[] laneValues;
+
+        private AccountLaneApplyResult(long laneMask, AccountLaneAck[] acknowledgements,
+                                       RuntimeMutationDelta.CaptureRequest captureRequest,
+                                       RuntimeMutationDelta.LaneValues[] laneValues) {
+            this.laneMask = laneMask;
+            this.acknowledgements = acknowledgements.clone();
+            this.captureRequest = captureRequest;
+            this.laneValues = laneValues.clone();
         }
 
-        @Override
+        public long laneMask() {
+            return laneMask;
+        }
+
         public AccountLaneAck[] acknowledgements() {
             return acknowledgements.clone();
         }
@@ -627,6 +653,169 @@ public final class TradingRuntimeState implements AutoCloseable {
         recordMatcherSettlementChanges(takerOrderId, matchingResult, identities,
                 instrument, baseAssetId, quoteAssetId, settleAssetId);
         return deltas;
+    }
+
+    public RuntimeTreasuryDelta[] applyNoTradeMatcherSettlements(
+            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
+            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (coreSequence <= 0 || userId <= 0 || takerOrderIds == null || matchingResults == null
+                || takerOrderIds.isEmpty() || takerOrderIds.size() != matchingResults.size()
+                || identities == null) {
+            throw new IllegalArgumentException("invalid no-trade matcher settlement batch");
+        }
+        java.util.List<NoTradeSettlement> settlements = new java.util.ArrayList<>(takerOrderIds.size());
+        for (int index = 0; index < takerOrderIds.size(); index++) {
+            long takerOrderId = takerOrderIds.get(index);
+            CoreMatchingResult matchingResult = matchingResults.get(index);
+            if (matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence
+                    || matchingResult.matcherEvents().stream()
+                    .anyMatch(event -> event.eventType() == exchange.core2.core.common.MatcherEventType.TRADE)) {
+                throw new IllegalArgumentException("invalid no-trade matcher settlement result");
+            }
+            OrderRuntime taker = order(takerOrderId);
+            if (taker == null || taker.userId() != userId) {
+                throw new IllegalStateException("no-trade taker order is missing");
+            }
+            CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
+            if (instrument == null) throw new IllegalStateException("match instrument is missing");
+            int baseAssetId = identities.assetId(instrument.baseAsset());
+            int quoteAssetId = identities.assetId(instrument.quoteAsset());
+            int settleAssetId = identities.assetId(instrument.settleAsset());
+            if (productLine.isDerivative()) {
+                RuntimePerpetualMatchProcessor.validateAndPrepare(
+                        takerOrderId, matchingResult.matcherEvents(), this, identities);
+            } else {
+                RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), this);
+            }
+            settlements.add(new NoTradeSettlement(takerOrderId, matchingResult, instrument,
+                    baseAssetId, quoteAssetId, settleAssetId));
+        }
+        int laneId = topology.accountLaneId(userId);
+        RuntimeTreasuryDelta aggregate = executeUserSettlement(userId, () -> {
+            RuntimeTreasuryDelta combined = new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
+            for (NoTradeSettlement settlement : settlements) {
+                RuntimeTreasuryDelta delta;
+                if (productLine.isDerivative()) {
+                    delta = RuntimePerpetualMatchProcessor.applyLane(settlement.takerOrderId(),
+                            settlement.matchingResult().matcherEvents(), this, identities,
+                            settlement.instrument(), settlement.settleAssetId());
+                } else {
+                    delta = RuntimeSpotMatchProcessor.applyLane(settlement.takerOrderId(),
+                            settlement.matchingResult().matcherEvents(), this, settlement.instrument(),
+                            settlement.baseAssetId(), settlement.quoteAssetId());
+                }
+                combined.merge(delta);
+            }
+            return combined;
+        });
+        RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
+        deltas[laneId] = aggregate;
+        for (NoTradeSettlement settlement : settlements) {
+            recordMatcherSettlementChanges(settlement.takerOrderId(), settlement.matchingResult(), identities,
+                    settlement.instrument(), settlement.baseAssetId(), settlement.quoteAssetId(),
+                    settlement.settleAssetId());
+        }
+        return deltas;
+    }
+
+    public RuntimeTreasuryDelta[] applyPerpetualMatcherSettlements(
+            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
+            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (!productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
+                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.isEmpty()
+                || takerOrderIds.size() != expectedLaneMasks.size()
+                || takerOrderIds.size() != matchingResults.size() || identities == null) {
+            throw new IllegalArgumentException("invalid perpetual matcher settlement batch");
+        }
+        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
+        long selectedLaneMask = 0;
+        List<PerpetualMatcherSettlement> settlements = new ArrayList<>(takerOrderIds.size());
+        List<List<exchange.core2.core.common.MatcherResult.MatcherEvent>> matcherEvents =
+                new ArrayList<>(takerOrderIds.size());
+        for (int index = 0; index < takerOrderIds.size(); index++) {
+            long takerOrderId = takerOrderIds.get(index);
+            long expectedLaneMask = expectedLaneMasks.get(index);
+            CoreMatchingResult matchingResult = matchingResults.get(index);
+            if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
+                    || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
+                throw new IllegalArgumentException("invalid perpetual matcher settlement item");
+            }
+            OrderRuntime taker = order(takerOrderId);
+            if (taker == null) throw new IllegalStateException("taker order is missing");
+            CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
+            if (instrument == null) throw new IllegalStateException("match instrument is missing");
+            settlements.add(new PerpetualMatcherSettlement(takerOrderId, expectedLaneMask, matchingResult,
+                    instrument, identities.assetId(instrument.baseAsset()),
+                    identities.assetId(instrument.quoteAsset()), identities.assetId(instrument.settleAsset())));
+            matcherEvents.add(matchingResult.matcherEvents());
+            selectedLaneMask |= expectedLaneMask;
+        }
+        RuntimePerpetualMatchProcessor.validateAndPrepareBatch(
+                takerOrderIds, matcherEvents, this, identities);
+
+        @SuppressWarnings("unchecked")
+        AccountLaneWorker.Ticket<RuntimeTreasuryDelta>[] tickets =
+                new AccountLaneWorker.Ticket[accountLanes.length];
+        RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
+        Throwable firstFailure = null;
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((selectedLaneMask & (1L << laneId)) == 0) continue;
+            int currentLaneId = laneId;
+            AccountLaneWorker.Operation<RuntimeTreasuryDelta> operation = lane -> inLaneCommandScope(lane, ignored -> {
+                RuntimeTreasuryDelta combined = new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
+                for (PerpetualMatcherSettlement settlement : settlements) {
+                    if ((settlement.expectedLaneMask() & (1L << currentLaneId)) == 0) continue;
+                    combined.merge(RuntimePerpetualMatchProcessor.applyLane(
+                            settlement.takerOrderId(), settlement.matchingResult().matcherEvents(), this, identities,
+                            settlement.instrument(), settlement.settleAssetId()));
+                }
+                return combined;
+            });
+            AccountLaneWorker laneWorker = worker(laneId);
+            try {
+                if (laneWorker == null) deltas[laneId] = operation.apply(accountLanes[laneId]);
+                else tickets[laneId] = laneWorker.submit(AccountLaneOperationType.SETTLEMENT, operation);
+            } catch (Throwable failure) {
+                firstFailure = failure;
+                break;
+            }
+        }
+        for (int laneId = 0; laneId < tickets.length; laneId++) {
+            if (tickets[laneId] == null) continue;
+            try {
+                deltas[laneId] = worker(laneId).await(tickets[laneId]);
+            } catch (Throwable failure) {
+                if (firstFailure == null) firstFailure = failure;
+            }
+        }
+        throwAccountLaneFailure(firstFailure, "account lane settlement batch failed");
+        for (PerpetualMatcherSettlement settlement : settlements) {
+            recordMatcherSettlementChanges(settlement.takerOrderId(), settlement.matchingResult(), identities,
+                    settlement.instrument(), settlement.baseAssetId(), settlement.quoteAssetId(),
+                    settlement.settleAssetId());
+        }
+        return deltas;
+    }
+
+    private record NoTradeSettlement(
+            long takerOrderId,
+            CoreMatchingResult matchingResult,
+            CoreInstrumentState instrument,
+            int baseAssetId,
+            int quoteAssetId,
+            int settleAssetId) {
+    }
+
+    private record PerpetualMatcherSettlement(
+            long takerOrderId,
+            long expectedLaneMask,
+            CoreMatchingResult matchingResult,
+            CoreInstrumentState instrument,
+            int baseAssetId,
+            int quoteAssetId,
+            int settleAssetId) {
     }
 
     private void recordMatcherSettlementChanges(long takerOrderId, CoreMatchingResult matchingResult,
@@ -1973,6 +2162,23 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public RuntimeMutationDelta captureMutationDelta() {
         assertOwner();
+        RuntimeMutationDelta.CaptureRequest request = mutationCaptureRequest();
+        return captureMutationDelta(request, captureLaneMutationValues(request));
+    }
+
+    public RuntimeMutationDelta captureMutationDelta(AccountLaneApplyResult laneApply) {
+        assertOwner();
+        if (laneApply == null) throw new IllegalArgumentException("lane apply is required");
+        long requiredLaneMask = mutationLaneMask(laneApply.captureRequest);
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((requiredLaneMask & 1L << laneId) != 0 && laneApply.laneValues[laneId] == null) {
+                throw new IllegalStateException("lane apply does not contain the required mutation values");
+            }
+        }
+        return captureMutationDelta(laneApply.captureRequest, laneApply.laneValues);
+    }
+
+    private RuntimeMutationDelta.CaptureRequest mutationCaptureRequest() {
         long[] userIds = changedUsers.toArray();
         TreeMap<Long, int[]> balanceAssetIds = new TreeMap<>();
         changedBalances.forEachKeyValue((userId, assetIds) ->
@@ -1987,12 +2193,24 @@ public final class TradingRuntimeState implements AutoCloseable {
         long[] riskSnapshotKeys = changedRiskSnapshots.toArray();
         long[] algoOrderIds = changedAlgoOrders.toArray();
         long[] triggerOrderIds = changedTriggerOrders.toArray();
-        RuntimeMutationDelta.CaptureRequest request = new RuntimeMutationDelta.CaptureRequest(
+        return new RuntimeMutationDelta.CaptureRequest(
                 userIds, Collections.unmodifiableMap(balanceAssetIds), orderIds, reservationIds, positionKeys,
                 liquidationIds, riskSnapshotKeys, Collections.unmodifiableSet(new TreeSet<>(changedLeverages)),
                 algoOrderIds, triggerOrderIds, Collections.unmodifiableMap(clientKeysByUser));
-        RuntimeMutationDelta.LaneValues[] laneValues = captureLaneMutationValues(request);
+    }
 
+    private RuntimeMutationDelta captureMutationDelta(RuntimeMutationDelta.CaptureRequest request,
+                                                       RuntimeMutationDelta.LaneValues[] laneValues) {
+        long[] userIds = request.userIds();
+        Map<Long, int[]> balanceAssetIds = request.balanceAssetIds();
+        Map<Long, long[]> clientKeysByUser = request.clientKeysByUser();
+        long[] orderIds = request.orderIds();
+        long[] reservationIds = request.reservationIds();
+        long[] positionKeys = request.positionKeys();
+        long[] liquidationIds = request.liquidationIds();
+        long[] riskSnapshotKeys = request.riskSnapshotKeys();
+        long[] algoOrderIds = request.algoOrderIds();
+        long[] triggerOrderIds = request.triggerOrderIds();
         int pendingReservations = totalPendingReservations;
         TreeMap<Long, RuntimeMutationDelta.UserValue> users = new TreeMap<>();
         TreeMap<Long, OrderRuntime> orders = new TreeMap<>();
@@ -2006,6 +2224,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         TreeMap<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
         TreeMap<RuntimeMutationDelta.RuntimeClientKey, Long> clientOrders = new TreeMap<>();
         for (RuntimeMutationDelta.LaneValues lane : laneValues) {
+            if (lane == null) continue;
             users.putAll(lane.users());
             orders.putAll(lane.orders());
             reservations.putAll(lane.reservations());

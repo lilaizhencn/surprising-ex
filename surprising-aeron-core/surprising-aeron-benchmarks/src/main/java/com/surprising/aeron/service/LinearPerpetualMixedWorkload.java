@@ -213,9 +213,14 @@ final class LinearPerpetualMixedWorkload {
             private long[] laneOperationsByType = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
             private long liquidationId;
             private boolean lossLifecycleExecuted;
+            private long runSequence;
+            private final long[] fundingSettlementIds = initialFundingSettlementIds(template.symbols().size());
+            private final long[] fundingCursors = new long[template.symbols().size()];
+            private final long[] markPriceSequences = initialMarkPriceSequences(template.symbols().size());
 
             @Override
             public long run() {
+                runSequence = Math.incrementExact(runSequence);
                 long batchBefore = harness.executedMessages();
                 long acceptedBefore = harness.acceptedMessages();
                 long terminalBefore = harness.terminalMessages();
@@ -226,17 +231,21 @@ final class LinearPerpetualMixedWorkload {
                         for (int index = 0; index < template.symbols().size(); index++) {
                             executeTriggerLifecycle(harness, template, index);
                         }
-                        executeLossLifecycle(harness, template);
-                        lossLifecycleExecuted = true;
+                        if (!lossLifecycleExecuted) {
+                            executeLossLifecycle(harness, template);
+                            lossLifecycleExecuted = true;
+                        }
                     }
                     if (!completeHeavyCycles && round < template.symbols().size()) {
-                        exerciseLifecycle(harness, template, round, false);
+                        exerciseLifecycleBounded(harness, template, round, fundingSettlementIds,
+                                fundingCursors, markPriceSequences);
                     }
                 }
                 if (completeHeavyCycles) {
                     for (int index = 0; index < template.symbols().size(); index++) {
                         executeTriggerLifecycle(harness, template, index);
-                        exerciseLifecycle(harness, template, index, true);
+                        exerciseLifecycle(harness, template, index, true,
+                                fundingSettlementIds[index], markPriceSequences);
                     }
                 }
                 if (!lossLifecycleExecuted) executeLossLifecycle(harness, template);
@@ -349,16 +358,18 @@ final class LinearPerpetualMixedWorkload {
                 for (int index = 0; index < template.symbols().size(); index++) {
                     String symbol = template.symbols().get(index);
                     var progress = state.treasuryState().fundingProgress(symbol);
-                    boolean fundingAdvanced = state.treasuryState().fundingSettlement(symbol) == 10_000L + index
+                    long expectedSettlementId = fundingSettlementIds[index];
+                    boolean fundingAdvanced = state.treasuryState().fundingSettlement(symbol)
+                            == expectedSettlementId
                             || !completeHeavyCycles && progress != null
-                            && progress.settlementId() == 10_000L + index;
+                            && progress.settlementId() == expectedSettlementId;
                     if (!fundingAdvanced) {
                         throw new IllegalStateException("funding settlement missing for " + symbol);
                     }
                 }
                 long triggered = state.triggerOrders().values().stream()
                         .filter(trigger -> trigger.status() == CoreTriggerOrderStatus.TRIGGERED).count();
-                if (triggered != template.symbols().size()) {
+                if (triggered < Math.multiplyExact(runSequence, template.symbols().size())) {
                     throw new IllegalStateException("trigger workload did not complete");
                 }
                 state.users().values().forEach(user -> user.balances().values().forEach(
@@ -462,7 +473,8 @@ final class LinearPerpetualMixedWorkload {
     }
 
     private static void exerciseLifecycle(Harness harness, Template template, int index,
-                                          boolean completeHeavyCycles) {
+                                          boolean completeHeavyCycles, long settlementId,
+                                          long[] markPriceSequences) {
         String symbol = template.symbols().get(index);
         long fundingRate = (index & 1) == 0 ? 100_000 : -100_000;
         long fundingCursor = 0;
@@ -471,14 +483,14 @@ final class LinearPerpetualMixedWorkload {
             var fundingResponse = harness.execute(harness.command(
                     CoreMessageType.APPLY_FUNDING, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            10_000L + index, symbol, 1, fundingRate, fundingCursor, HEAVY_WORK_BATCH_SIZE))));
+                            settlementId, symbol, 1, fundingRate, fundingCursor, HEAVY_WORK_BATCH_SIZE))));
             var fundingProgress = CoreFundingProgressCodec.decode(fundingResponse.data());
             fundingCursor = fundingProgress.nextCursorUserId();
             fundingComplete = fundingProgress.complete();
         } while (completeHeavyCycles && !fundingComplete);
         boolean liquidationSymbol = index == template.symbols().size() - 1;
         long markPrice = liquidationSymbol ? LIQUIDATION_MARK : SAFE_MARK;
-        long priceSequence = liquidationSymbol ? 3 : 2;
+        long priceSequence = nextMarkPriceSequence(harness, symbol, index, markPriceSequences);
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand(symbol, 1, markPrice, priceSequence, BASE_EPOCH_MILLIS + 2))));
@@ -489,26 +501,85 @@ final class LinearPerpetualMixedWorkload {
         }
     }
 
+    private static void exerciseLifecycleBounded(Harness harness, Template template, int index,
+                                                 long[] settlementIds, long[] fundingCursors,
+                                                 long[] markPriceSequences) {
+        String symbol = template.symbols().get(index);
+        long fundingRate = (index & 1) == 0 ? 100_000 : -100_000;
+        if (harness.state().tradingState().treasuryState().fundingSettlement(symbol)
+                == settlementIds[index]) {
+            settlementIds[index] = Math.addExact(settlementIds[index], template.symbols().size());
+        }
+        var fundingResponse = harness.execute(harness.command(
+                CoreMessageType.APPLY_FUNDING, CommandSource.OPERATIONS, 0,
+                TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
+                        settlementIds[index], symbol, 1, fundingRate,
+                        fundingCursors[index], HEAVY_WORK_BATCH_SIZE))));
+        var fundingProgress = CoreFundingProgressCodec.decode(fundingResponse.data());
+        fundingCursors[index] = fundingProgress.nextCursorUserId();
+        if (fundingProgress.complete()) fundingCursors[index] = 0;
+
+        var scan = harness.state().tradingState().riskState().scans().get(symbol);
+        if (scan != null && !scan.complete()) {
+            harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
+                    TradingCommandCodec.encodeContinueRiskScan(
+                            new ContinueRiskScanCommand(HEAVY_WORK_BATCH_SIZE))));
+            return;
+        }
+        boolean liquidationSymbol = index == template.symbols().size() - 1;
+        long markPrice = liquidationSymbol ? LIQUIDATION_MARK : SAFE_MARK;
+        long priceSequence = nextMarkPriceSequence(harness, symbol, index, markPriceSequences);
+        harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
+                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
+                        symbol, 1, markPrice, priceSequence,
+                        Math.addExact(BASE_EPOCH_MILLIS, priceSequence)))));
+    }
+
     private static void executeTriggerLifecycle(Harness harness, Template template, int index) {
         String symbol = template.symbols().get(index);
         long taker = template.hftTakers().get(index);
         long triggerId = harness.nextOrderId();
         boolean liquidationSymbol = index == template.symbols().size() - 1;
+        var mark = harness.state().tradingState().riskState().markPrices().get(symbol);
         CoreTriggerOrderType triggerType = liquidationSymbol
                 ? CoreTriggerOrderType.STOP_LOSS : CoreTriggerOrderType.TAKE_PROFIT;
         CoreTriggerCondition triggerCondition = liquidationSymbol
                 ? CoreTriggerCondition.LESS_OR_EQUAL : CoreTriggerCondition.GREATER_OR_EQUAL;
         CoreTriggerOrderStateView trigger = new CoreTriggerOrderStateView(triggerId,
                 ProductLine.LINEAR_PERPETUAL, taker, "mixed-trigger-" + triggerId, "", symbol,
-                CoreOrderSide.SELL, triggerType, triggerCondition, ENTRY_PRICE,
-                0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 110, 1,
+                CoreOrderSide.SELL, triggerType, triggerCondition, mark.markPriceTicks(),
+                0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                 0, 0, 0, "", "mixed-trace-" + triggerId, 0, 0, 0, 0, 1, 1, 0, 0);
         harness.execute(harness.command(CoreMessageType.PLACE_TRIGGER_ORDER, CommandSource.GATEWAY, taker,
                 CoreTriggerOrderCodec.encodeState(trigger)));
         harness.execute(harness.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, CommandSource.OPERATIONS, 0,
-                CoreTriggerOrderCodec.encodeExecute(triggerId, liquidationSymbol ? 2 : 1,
-                        liquidationSymbol ? LIQUIDATION_MARK : ENTRY_PRICE, BASE_EPOCH_MILLIS + 1)));
+                CoreTriggerOrderCodec.encodeExecute(triggerId, mark.priceSequence(),
+                        mark.markPriceTicks(), Math.addExact(BASE_EPOCH_MILLIS, mark.priceSequence()))));
+    }
+
+    private static long[] initialFundingSettlementIds(int symbolCount) {
+        long[] settlementIds = new long[symbolCount];
+        for (int index = 0; index < symbolCount; index++) settlementIds[index] = 10_000L + index;
+        return settlementIds;
+    }
+
+    private static long[] initialMarkPriceSequences(int symbolCount) {
+        long[] priceSequences = new long[symbolCount];
+        for (int index = 0; index < symbolCount; index++) {
+            priceSequences[index] = index == symbolCount - 1 ? 2 : 1;
+        }
+        return priceSequences;
+    }
+
+    private static long nextMarkPriceSequence(Harness harness, String symbol, int index,
+                                              long[] markPriceSequences) {
+        var current = harness.state().tradingState().riskState().markPrices().get(symbol);
+        if (current == null) throw new IllegalStateException("mixed workload mark price is missing: " + symbol);
+        long observed = Math.max(markPriceSequences[index], current.priceSequence());
+        long next = Math.incrementExact(observed);
+        markPriceSequences[index] = next;
+        return next;
     }
 
     private static CoreLiquidationState liquidation(Harness harness, long liquidationId) {

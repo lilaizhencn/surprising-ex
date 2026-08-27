@@ -145,6 +145,26 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return placeUnlanedAsync(userId, command);
     }
 
+    public CompletableFuture<Void> prepareOrderRoutesAsync(long userId, Iterable<String> symbols) {
+        if (userId <= 0 || symbols == null) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher route preparation"));
+        }
+        List<CompletableFuture<Integer>> symbolFutures = new ArrayList<>();
+        for (String symbol : symbols) {
+            if (symbol == null || symbol.isBlank()) {
+                return CompletableFuture.failedFuture(
+                        new IllegalArgumentException("invalid matcher route preparation symbol"));
+            }
+            symbolFutures.add(ensureSymbolAsync(symbol));
+        }
+        CompletableFuture<?>[] futures = new CompletableFuture<?>[symbolFutures.size() + 1];
+        futures[0] = ensureUserAsync(userId);
+        for (int index = 0; index < symbolFutures.size(); index++) {
+            futures[index + 1] = symbolFutures.get(index);
+        }
+        return CompletableFuture.allOf(futures);
+    }
+
     public CompletableFuture<CoreMatchingResult> executeWithEvidence(
             long coreSequence,
             java.util.UUID commandId,
@@ -637,7 +657,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .build())
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
                         .matchingEnginesNum(topology.matchingEngineCount())
-                        .riskEnginesNum(topology.matchingEngineCount())
+                        .riskEnginesNum(topology.riskEngineCount())
                         .msgsInGroupLimit(Math.max(1,
                                 Integer.getInteger("surprising.aeron.matcher-group-size", 256)))
                         .maxGroupDurationNs(Math.max(1,

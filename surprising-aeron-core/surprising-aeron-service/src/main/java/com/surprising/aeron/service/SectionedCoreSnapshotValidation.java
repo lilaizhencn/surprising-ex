@@ -27,7 +27,7 @@ final class SectionedCoreSnapshotValidation {
         LaneTopology topology;
         try {
             topology = new LaneTopology(routeVersion, header.getInt(), header.getInt(), header.getInt(),
-                    header.getLong(), header.getInt(), header.getInt(), header.getInt());
+                    header.getInt(), header.getLong(), header.getInt(), header.getInt(), header.getInt());
         } catch (IllegalArgumentException exception) {
             throw new ProtocolException("snapshot route mismatch: " + exception.getMessage());
         }

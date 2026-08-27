@@ -81,8 +81,12 @@ class LinearPerpetualBenchmarkSupportTest {
         assertThatCode(() -> {
             try (var scenario = LinearPerpetualMixedWorkload.productionScenario(template, 4, 20)) {
                 assertThat(scenario.run()).isNotZero();
+                assertThat(scenario.run()).isNotZero();
                 assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
                 assertThat(scenario.maxBacklog()).isGreaterThan(1);
+                assertThat(scenario.laneOperations(1))
+                        .as("one perpetual place batch must not cross the account lane once per item")
+                        .isLessThan(scenario.acceptedOperations() / 2);
                 scenario.verify();
             }
         }).doesNotThrowAnyException();

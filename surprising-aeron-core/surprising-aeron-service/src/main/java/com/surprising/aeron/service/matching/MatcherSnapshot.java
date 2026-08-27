@@ -44,7 +44,8 @@ public record MatcherSnapshot(
             "d4ab72853924edc32069ab7158e7bcc5d374ecc1bcd594df04128ab459732b86";
     public static final long MATCHER_CONFIG_HASH = matcherConfigHash(new LaneTopology(
             ROUTE_VERSION, LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT,
-            LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT - 1, LaneTopology.DEFAULT_ACCOUNT_LANE_COUNT,
+            LaneTopology.DEFAULT_RISK_ENGINE_COUNT, LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT - 1,
+            LaneTopology.DEFAULT_ACCOUNT_LANE_COUNT,
             LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE,
             LaneTopology.DEFAULT_QUEUE_CAPACITY, LaneTopology.DEFAULT_QUEUE_CAPACITY));
 
@@ -72,7 +73,7 @@ public record MatcherSnapshot(
             throw new IllegalArgumentException("matcher registry hash mismatch");
         }
         boolean[] matching = new boolean[topology.matchingEngineCount()];
-        boolean[] risk = new boolean[topology.matchingEngineCount()];
+        boolean[] risk = new boolean[topology.riskEngineCount()];
         long maximumModuleSequence = Long.MIN_VALUE;
         for (SerializedModule module : modules) {
             if (module.snapshotId() != snapshotId || module.sequence() < 0 || module.sequence() > matcherSequence
@@ -98,13 +99,15 @@ public record MatcherSnapshot(
         for (boolean present : matching) completeMatching &= present;
         boolean completeRisk = true;
         for (boolean present : risk) completeRisk &= present;
-        if (!completeMatching || !completeRisk || modules.size() != topology.matchingEngineCount() * 2
+        if (!completeMatching || !completeRisk
+                || modules.size() != topology.matchingEngineCount() + topology.riskEngineCount()
                 || maximumModuleSequence != matcherSequence) {
             throw new IllegalArgumentException("incomplete matcher snapshot modules");
         }
     }
 
     public int matchingEngineCount() { return topology.matchingEngineCount(); }
+    public int riskEngineCount() { return topology.riskEngineCount(); }
     public int matcherShardMask() { return topology.matcherShardMask(); }
     public int accountLaneCount() { return topology.accountLaneCount(); }
     public long accountLaneSeed() { return topology.accountLaneSeed(); }
@@ -112,7 +115,7 @@ public record MatcherSnapshot(
 
     public static long matcherConfigHash(LaneTopology topology) {
         return hashText("matching=" + topology.matchingEngineCount()
-                + ";risk=" + topology.matchingEngineCount()
+                + ";risk=" + topology.riskEngineCount()
                 + ";wait=BUSY_SPIN;riskMode=MATCHING_ONLY;margin=DISABLED;eventsPooling=true"
                 + ";matcherWindow=" + topology.matcherWindowSize()
                 + ";completionCapacity=" + topology.matchingCompletionCapacity()

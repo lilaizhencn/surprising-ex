@@ -25,7 +25,7 @@ import java.util.zip.CRC32C;
 public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
-    private static final int VERSION = 3;
+    private static final int VERSION = 4;
     private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
@@ -43,6 +43,7 @@ public final class MatcherSnapshotCodec {
                 writeText(output, snapshot.coreShardId());
                 output.writeInt(snapshot.routeVersion());
                 output.writeInt(snapshot.topology().matchingEngineCount());
+                output.writeInt(snapshot.topology().riskEngineCount());
                 output.writeInt(snapshot.topology().matcherShardMask());
                 output.writeInt(snapshot.topology().accountLaneCount());
                 output.writeLong(snapshot.topology().accountLaneSeed());
@@ -121,7 +122,7 @@ public final class MatcherSnapshotCodec {
             String coreShardId = readText(input);
             int routeVersion = input.readInt();
             LaneTopology topology = new LaneTopology(routeVersion, input.readInt(), input.readInt(), input.readInt(),
-                    input.readLong(), input.readInt(), input.readInt(), input.readInt());
+                    input.readInt(), input.readLong(), input.readInt(), input.readInt(), input.readInt());
             if (input.readLong() != topology.topologyHash()) {
                 throw new ProtocolException("matcher topology hash mismatch");
             }
@@ -157,7 +158,7 @@ public final class MatcherSnapshotCodec {
                 if (userId <= 0 || !users.add(userId)) throw new ProtocolException("invalid matcher user registry");
             }
             int moduleCount = readCount(input, "module");
-            if (moduleCount != topology.matchingEngineCount() * 2) {
+            if (moduleCount != topology.matchingEngineCount() + topology.riskEngineCount()) {
                 throw new ProtocolException("invalid matcher module count");
             }
             List<SerializedModule> modules = new ArrayList<>(moduleCount);

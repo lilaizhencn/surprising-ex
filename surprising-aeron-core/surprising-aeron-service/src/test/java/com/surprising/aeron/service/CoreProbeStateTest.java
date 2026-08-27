@@ -1208,12 +1208,12 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(14);
+        assertThat(manifest.schemaVersion()).isEqualTo(15);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();
         assertThat(manifest.coreShardId()).isEqualTo("default");
-        assertThat(manifest.routeVersion()).isEqualTo(2);
+        assertThat(manifest.routeVersion()).isEqualTo(3);
         assertThat(manifest.forkGitSha()).isEqualTo(
                 com.surprising.aeron.service.matching.MatcherSnapshot.FORK_GIT_SHA);
         assertThat(manifest.artifactSha256()).isEqualTo(
