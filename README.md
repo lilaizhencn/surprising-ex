@@ -23,12 +23,12 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P7 | fatal / readiness campaign：致命故障和就绪性验证，不是 P0-P5 行为改动。 |
 | P8 | three-node recovery certification：三节点恢复认证，不是 P0-P5 行为改动。 |
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
-| P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个共享 ExchangeCore，以原生 symbol matcher shard 和默认启用的 user Account Lane 扩展；同一不可变 matcher result 引用按 userId 扇出，以 expected/ack Lane mask 提交，Treasury 保持 Sequencer owner，不包含物理 Core shard。实施规范见 [`docs/P10-DETERMINISTIC-LANES.md`](docs/P10-DETERMINISTIC-LANES.md)。 |
+| P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个共享 ExchangeCore，以原生 symbol matcher shard 和默认启用的 user Account Lane 扩展；同一不可变 matcher result 引用按 userId 扇出，以 expected/ack Lane mask 提交，Treasury 保持 Sequencer owner，不包含物理 Core shard。实施边界以本 README 和 Aeron 模块 README 为准。 |
 
-当前实现状态：P0-P5 与 P10-A 至 P10-C、P10-F 的主体迁移已完成；每个 Account Lane 使用固定 platform owner thread，
-账户状态 mutation、query/read fence 和 snapshot capture/restore 都经过有界双向 SPSC ring。P10-D/E 正在做缺陷闭环：
-当前 immutable result 已按 expected Lane mask 扇出并有 ACK/commit fence，但撮合结算仍存在 Sequencer 编排的同步逐访问
-Lane 往返，Treasury ACK 仍需替换为 Lane 原生 per-asset delta；在该门禁完成前不得宣称 P10-A 至 P10-F 全部完成。
+当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成；每个 Account Lane 使用固定 platform owner thread，
+账户状态 mutation、query/read fence 和 snapshot capture/restore 都经过有界双向 SPSC ring。订单批次先完成确定性风险准入，
+再以每 Lane 一次 apply/commit 捕获账户 mutation 与原生 per-asset Treasury delta；Sequencer 只合并 ACK、Treasury delta
+和全局 sequence，不再为同批每笔订单逐次往返 Lane。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、
 至少 200 symbol、100k/s offered rate、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
@@ -40,7 +40,7 @@ exchange-core 产出的不可变 `MatcherResult`、event list 和 market data，
 显式审计边界。`TradingRuntimeState` 是 P3 唯一交易裁决权威；`TradingCoreState` 仅在每个事实边界按 changed-key
 生成一次不可变投影，承担 Cluster snapshot、Core Fact、恢复、状态 hash 和对账。P4 使用六个穷尽且隔离的
 `SettlementKernel`。P5 以确定性 `FundsDelta`、Treasury 子账本、状态/资金 hash 和 replicated outbox 形成连续事实链。
-P10 使用 `routeVersion=2`、默认 4 个 native matcher shard 和 4 个 Account Lane；pending reservation 在 commit 前不进入
+P10 使用 `routeVersion=3`、默认 4 个 native matcher shard、1 个 risk engine 和 4 个 Account Lane；pending reservation 在 commit 前不进入
 query、Snapshot State 或 Core Fact，immutable matcher result 以 expected/ACK mask 提交，Core Fact 仍严格按全局 sequence 发布。
 
 ### 分支安全与验证契约
@@ -60,7 +60,7 @@ query、Snapshot State 或 Core Fact，immutable matcher result 以 expected/ACK
   不是单进程。该 Core 管理本产品线全部 symbol、账户、订单元数据、持仓、风险和生命周期。
 - CROSS 与 ISOLATED 都在同一个 Core 内。CROSS 只共享本产品线 Core 内的权益；ISOLATED 绑定 position identity，
   保证金划拨仍由同一 Core 原子完成。产品线之间不共享 live available balance。
-- 当前不为热点币对单独部署 Core。协议固定 `coreShardId=default`、`routeVersion=2`；symbol 只路由到同一共享
+- 当前不为热点币对单独部署 Core。协议固定 `coreShardId=default`、`routeVersion=3`；symbol 只路由到同一共享
   ExchangeCore 的原生 `MatchingEngineRouter` shard，user 只路由到静态 Account Lane。matcher/Lane 数和 seed 只能在
   fresh compatible state 启动前配置，运行中不 rebalance，也不产生第二条 Core Fact 链。
 - exchange-core 已是唯一可执行盘口和 FIFO/价格树权威；Core 只保留订单元数据、资金、持仓、风险状态和
@@ -93,8 +93,9 @@ query、Snapshot State 或 Core Fact，immutable matcher result 以 expected/ACK
   continuation 合并为一次 `EXECUTE_LIQUIDATION_BATCH`，按 `productLine + canonical payload` 生成稳定 `commandId`。
   Core 共享最多 1,024 笔撤单预算并持久化 cursor；provider 正常周期不逐 action 往返、不单独续跑 Risk Scan，也不维护
   Redis 队列或 PostgreSQL 强平事务。
-- Core Exporter 以连续 Export Sequence 向 Kafka at-least-once 发布并幂等写 PostgreSQL；只有完整批次
-  成功后才向 Aeron 提交 ACK，不新增数据库 outbox 或应用 WAL。
+- Core Exporter 以连续 Export Sequence 向 Kafka at-least-once 发布；只有完整 Kafka 批次成功后才向 Aeron 提交 ACK。
+  独立 History Projector 批量消费 Kafka，在一个 PostgreSQL 事务内写业务投影和 offset；任何一条失败都会回滚整批，
+  不新增数据库 outbox 或应用 WAL。
 - Matching Provider 只做 Market Data Projection：启动从 Aeron 强查询恢复 L2 和 watermark，随后消费
   单分区连续 Core Event 发布公共深度与成交；历史成交和 24h 查询读取 PG 投影。
 - 四条业务线必须隔离部署和验证；压测前当前变体必须达到 `functional-gate=PASS`、`funds-diff=0`。
@@ -116,7 +117,7 @@ flowchart LR
     Core --> Matcher[exchange-core<br/>唯一可执行盘口与 FIFO]
     Core --> Exporter[Core Exporter<br/>序列化 Export ACK]
     Exporter --> Kafka[Kafka<br/>公共事件 / WebSocket / 行情]
-    Exporter --> Projection[PostgreSQL 异步投影 / 对账]
+    Kafka --> Projection[History Projector<br/>PostgreSQL 异步投影 / 对账]
     Market[Price / Market Data Provider] --> Core
     Maker[Maker Provider<br/>被动 GTX 报价] --> Trading
     Gateway --> Kafka
@@ -226,9 +227,14 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 Product Core 的热状态与不可变状态投影通过 `RuntimeMutationDelta` 分界。命令在 Account Lane 内完成原地
 裁决后，每个 lane 只并行捕获一次本命令涉及的用户、余额、订单、冻结、仓位和风险值；随后唯一的
 `RuntimeStateMaterializer` 路径把该不可变 delta 投影为 `Snapshot State`，供资金守恒、滚动 hash、Core Fact、
-索引和快照 fence 使用。等待 matcher 的临时冻结不会投影或更新已提交 hash，失败仍按命令前状态回滚；
+索引和快照 fence 使用。Cluster snapshot 的 section 编码在独立 snapshot encoder 线程执行，交易 owner 只在
+确定性 fence 捕获不可变 image，不执行压缩或字节序列化。等待 matcher 的临时冻结不会投影或更新已提交 hash，失败仍按命令前状态回滚；
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
+
+Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP 线程不阻塞等待 Core；History Projector
+按 Kafka poll 批次提交 PostgreSQL，WebSocket fanout 也按 poll 批量解码、分组和发布。数据库、Kafka 或慢订阅者
+只会形成各自有界 backlog，不会在 Product Core 交易 owner 上执行。
 
 ## 构建与本地验证
 
@@ -266,10 +272,12 @@ Core command/query/ack 消息/秒，`acceptedCommands` 必须与它相等且 `un
 会通过正常命令建仓、挂单并生成快照，invocation setup 从快照恢复；两者以及 teardown
 中的批量响应逐项解码、资金总量、触发单、资金费、风险扫描、强平、保险基金和 ADL 终态校验均不进入
 计时区间。Core 生成并编码完整响应仍在计时区间，只有基准客户端的重复反序列化校验被移到 teardown。
-在关闭其它持续占用 CPU 的进程后，GraalVM JDK 25.0.1、4 Account Lane、2 matching engine、10,000
-活跃用户、4 symbol、96 轮 HFT 的一次正式运行得到 `terminalCommands`：`12050.002`、`12157.112`、
-`12843.714 ops/s`，平均 `12350.276 ops/s`；三轮 `acceptedCommands` 均与其相等，
-`unfinishedCommands` 均为零。容量采样应在隔离 CPU 的机器上运行，避免桌面或远程控制进程抢占忙等线程。
+在关闭其它持续占用 CPU 的进程后，GraalVM JDK 25.0.1、默认 4 matcher / 1 risk engine、4 Account Lane、
+4 symbol、96 轮 HFT 的最终运行中，1,000 用户三轮 `terminalCommands` 为 `10991.185`、`11295.619`、
+`12711.729 ops/s`，平均 `11666.178 ops/s`；10,000 用户为 `10892.224`、`11817.097`、
+`12730.530 ops/s`，平均 `11813.284 ops/s`。每轮 `acceptedCommands` 与 `terminalCommands` 相等，
+`unfinishedCommands` 为零。该结果超过单 Core 10k/s 当前门槛，但没有达到 100k/s；容量采样应在隔离 CPU 的
+生产同型机器上运行，避免桌面进程抢占 busy-spin matcher/Lane 线程。
 
 快速确认 JMH 打包与场景可执行时可缩短迭代；该命令只用于 smoke，不作为容量结论：
 
@@ -429,9 +437,10 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   `d4ab72853924edc32069ab7158e7bcc5d374ecc1bcd594df04128ab459732b86`；fork 构建拒绝 dirty
   worktree，从已认证提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 provenance；
   Aeron service 的 Maven `validate` 阶段同时校验 provenance 与整包 hash。
-- 当前唯一写格式为 command/envelope schema v4、Core Export marker v9、`TradingState v24`、sectioned snapshot v14
-  和 matcher snapshot v3；所有旧主版本立即 fail closed，没有 legacy reader。sectioned snapshot 按 laneId 升序保存
-  4 个实际 Account Lane state section，matcher section 保存 `matchingEngineCount` 个原生 matcher module 加一个 risk module。
+- 当前唯一写格式为 command/envelope schema v4、Core Export marker v9、`TradingState v24`、sectioned snapshot v15
+  和 matcher snapshot v4；所有旧主版本立即 fail closed，没有 legacy reader。sectioned snapshot 按 laneId 升序保存
+  4 个实际 Account Lane state section，matcher section 保存 `matchingEngineCount` 个原生 matcher module 和
+  `riskEngineCount` 个 risk module。
   恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，不允许 clean-start、活动订单回放或第二本 FIFO。
 - capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内完成；存在 pending matching 时精确拒绝快照。恢复在开放流量前执行
   CRC32C、产品线/路由、snapshot ID、Core/matcher sequence、Cluster position、source/outbox digest、
