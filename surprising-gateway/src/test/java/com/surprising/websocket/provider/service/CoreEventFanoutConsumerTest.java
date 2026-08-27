@@ -1,6 +1,7 @@
 package com.surprising.websocket.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -47,18 +48,18 @@ class CoreEventFanoutConsumerTest {
         CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties);
         ConsumerRecord<String, byte[]> record = record(ProductLine.LINEAR_PERPETUAL, 7, true);
 
-        consumer.onCoreEvent(record);
-        consumer.onCoreEvent(record);
+        consumer.onCoreEvents(List.of(record));
+        consumer.onCoreEvents(List.of(record));
 
         ArgumentCaptor<SubscriptionTopic> topics = ArgumentCaptor.forClass(SubscriptionTopic.class);
-        verify(registry, times(16)).publish(topics.capture(), any(), any(Instant.class));
+        verify(registry, times(12)).publishTimedBatch(topics.capture(), any());
         assertThat(topics.getAllValues()).allMatch(topic -> topic.productLine() == ProductLine.LINEAR_PERPETUAL);
         assertThat(topics.getAllValues().stream().filter(topic -> topic.channel() == WsChannel.ORDERS)).hasSize(4);
         assertThat(topics.getAllValues().stream()
-                .filter(topic -> topic.channel() == WsChannel.EXECUTION_REPORTS)).hasSize(8);
+                .filter(topic -> topic.channel() == WsChannel.EXECUTION_REPORTS)).hasSize(4);
         assertThat(topics.getAllValues().stream().filter(topic -> topic.channel() == WsChannel.POSITIONS)).hasSize(4);
-        assertThat(topics.getAllValues().stream().filter(topic -> topic.userId() == 101L)).hasSize(8);
-        assertThat(topics.getAllValues().stream().filter(topic -> topic.userId() == 202L)).hasSize(8);
+        assertThat(topics.getAllValues().stream().filter(topic -> topic.userId() == 101L)).hasSize(6);
+        assertThat(topics.getAllValues().stream().filter(topic -> topic.userId() == 202L)).hasSize(6);
     }
 
     @Test
@@ -69,13 +70,13 @@ class CoreEventFanoutConsumerTest {
         ConsumerRecord<String, byte[]> wrongKey = new ConsumerRecord<>(valid.topic(), 0, 0,
                 "LINEAR_PERPETUAL:1", valid.value());
 
-        assertThatThrownBy(() -> consumer.onCoreEvent(wrongKey))
+        assertThatThrownBy(() -> consumer.onCoreEvents(List.of(wrongKey)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("key mismatch");
 
-        consumer.onCoreEvent(valid);
+        consumer.onCoreEvents(List.of(valid));
         ArgumentCaptor<SubscriptionTopic> topics = ArgumentCaptor.forClass(SubscriptionTopic.class);
-        verify(registry, times(6)).publish(topics.capture(), any(), any(Instant.class));
+        verify(registry, times(4)).publishTimedBatch(topics.capture(), any());
         assertThat(topics.getAllValues()).noneMatch(topic -> topic.channel() == WsChannel.POSITIONS);
     }
 
@@ -86,20 +87,22 @@ class CoreEventFanoutConsumerTest {
         WebSocketProperties properties = properties(ProductLine.LINEAR_PERPETUAL);
         ConsumerRecord<String, byte[]> replay = record(ProductLine.LINEAR_PERPETUAL, 7, true, 27);
 
-        new CoreEventFanoutConsumer(firstRegistry, properties).onCoreEvent(replay);
-        new CoreEventFanoutConsumer(restartedRegistry, properties).onCoreEvent(replay);
+        new CoreEventFanoutConsumer(firstRegistry, properties).onCoreEvents(List.of(replay));
+        new CoreEventFanoutConsumer(restartedRegistry, properties).onCoreEvents(List.of(replay));
 
-        ArgumentCaptor<Object> firstPayload = ArgumentCaptor.forClass(Object.class);
-        ArgumentCaptor<Object> replayedPayload = ArgumentCaptor.forClass(Object.class);
-        verify(firstRegistry, times(8)).publish(any(SubscriptionTopic.class), firstPayload.capture(),
-                any(Instant.class));
-        verify(restartedRegistry, times(8)).publish(any(SubscriptionTopic.class), replayedPayload.capture(),
-                any(Instant.class));
+        ArgumentCaptor<List> firstPayload = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List> replayedPayload = ArgumentCaptor.forClass(List.class);
+        verify(firstRegistry, times(6)).publishTimedBatch(any(SubscriptionTopic.class), firstPayload.capture());
+        verify(restartedRegistry, times(6)).publishTimedBatch(any(SubscriptionTopic.class), replayedPayload.capture());
         ObjectMapper objectMapper = new ObjectMapper();
         List<String> firstJson = firstPayload.getAllValues().stream()
+                .flatMap(List::stream)
+                .map(value -> ((SubscriptionRegistry.TimedPayload) value).payload())
                 .map(objectMapper::writeValueAsString)
                 .toList();
         List<String> replayedJson = replayedPayload.getAllValues().stream()
+                .flatMap(List::stream)
+                .map(value -> ((SubscriptionRegistry.TimedPayload) value).payload())
                 .map(objectMapper::writeValueAsString)
                 .toList();
         assertThat(firstJson).allMatch(payload -> payload.contains("\"eventId\""));
@@ -112,13 +115,28 @@ class CoreEventFanoutConsumerTest {
         WebSocketProperties properties = properties(ProductLine.SPOT);
         CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties);
 
-        consumer.onCoreEvent(record(ProductLine.SPOT, 1, false, 12));
-        assertThatThrownBy(() -> consumer.onCoreEvent(record(ProductLine.SPOT, 2, false, 14)))
+        consumer.onCoreEvents(List.of(record(ProductLine.SPOT, 1, false, 12)));
+        assertThatThrownBy(() -> consumer.onCoreEvents(List.of(record(ProductLine.SPOT, 2, false, 14))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Kafka Core event offsets");
 
         new CoreEventFanoutConsumer(mock(SubscriptionRegistry.class), properties)
-                .onCoreEvent(record(ProductLine.SPOT, 2, false, 14));
+                .onCoreEvents(List.of(record(ProductLine.SPOT, 2, false, 14)));
+    }
+
+    @Test
+    void retriesTheSameKafkaBatchWhenFanoutFailsBeforeOffsetCommit() {
+        SubscriptionRegistry registry = mock(SubscriptionRegistry.class);
+        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties(ProductLine.SPOT));
+        ConsumerRecord<String, byte[]> record = record(ProductLine.SPOT, 1, false, 12);
+        doThrow(new IllegalStateException("queue unavailable"))
+                .doNothing()
+                .when(registry).publishTimedBatch(any(SubscriptionTopic.class), any());
+
+        assertThatThrownBy(() -> consumer.onCoreEvents(List.of(record)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("queue unavailable");
+        assertThatCode(() -> consumer.onCoreEvents(List.of(record))).doesNotThrowAnyException();
     }
 
     @Test

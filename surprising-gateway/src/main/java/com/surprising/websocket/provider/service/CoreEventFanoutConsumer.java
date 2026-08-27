@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -58,15 +59,25 @@ public class CoreEventFanoutConsumer {
             topics = "#{__listener.coreEventsTopic()}",
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketCoreEventsKafkaListenerContainerFactory")
-    public synchronized void onCoreEvent(ConsumerRecord<String, byte[]> record) {
-        CoreEvent coreEvent = decodeAndValidate(record);
-        validateKafkaOffset(record);
-        fanout(coreEvent);
-        if (record.offset() >= 0L) {
-            lastProcessedKafkaOffset = record.offset();
-            lastProcessedKafkaKey = record.key();
-            lastProcessedKafkaValue = record.value().clone();
+    public void onCoreEvents(List<ConsumerRecord<String, byte[]>> records) {
+        FanoutBatch batch = new FanoutBatch();
+        long processedOffset = lastProcessedKafkaOffset;
+        String processedKey = lastProcessedKafkaKey;
+        byte[] processedValue = lastProcessedKafkaValue;
+        for (ConsumerRecord<String, byte[]> record : records) {
+            CoreEvent coreEvent = decodeAndValidate(record);
+            validateKafkaOffset(record, processedOffset, processedKey, processedValue);
+            fanout(coreEvent, batch);
+            if (record.offset() >= 0L) {
+                processedOffset = record.offset();
+                processedKey = record.key();
+                processedValue = record.value().clone();
+            }
         }
+        batch.publish(registry);
+        lastProcessedKafkaOffset = processedOffset;
+        lastProcessedKafkaKey = processedKey;
+        lastProcessedKafkaValue = processedValue;
     }
 
     private CoreEvent decodeAndValidate(ConsumerRecord<String, byte[]> record) {
@@ -92,25 +103,26 @@ public class CoreEventFanoutConsumer {
         return new CoreEvent(productLine, message, event);
     }
 
-    private void validateKafkaOffset(ConsumerRecord<String, byte[]> record) {
+    private static void validateKafkaOffset(ConsumerRecord<String, byte[]> record, long processedOffset,
+                                            String processedKey, byte[] processedValue) {
         long offset = record.offset();
-        if (offset < 0L || lastProcessedKafkaOffset < 0L) {
+        if (offset < 0L || processedOffset < 0L) {
             return;
         }
-        if (offset == lastProcessedKafkaOffset) {
-            if (!Objects.equals(record.key(), lastProcessedKafkaKey)
-                    || !Arrays.equals(record.value(), lastProcessedKafkaValue)) {
+        if (offset == processedOffset) {
+            if (!Objects.equals(record.key(), processedKey)
+                    || !Arrays.equals(record.value(), processedValue)) {
                 throw new IllegalStateException("Kafka Core event replay identity mismatch at offset=" + offset);
             }
             return;
         }
-        if (offset != lastProcessedKafkaOffset + 1L) {
+        if (offset != processedOffset + 1L) {
             throw new IllegalStateException("non-contiguous Kafka Core event offsets: expected="
-                    + (lastProcessedKafkaOffset + 1L) + " actual=" + offset);
+                    + (processedOffset + 1L) + " actual=" + offset);
         }
     }
 
-    private void fanout(CoreEvent coreEvent) {
+    private void fanout(CoreEvent coreEvent, FanoutBatch batch) {
         CoreMessage message = coreEvent.message();
         CoreExportEvent event = coreEvent.event();
         ProductLine productLine = coreEvent.productLine();
@@ -120,17 +132,17 @@ public class CoreEventFanoutConsumer {
             CoreOrderStateView order = event.changedOrders().get(index);
             requireProductLine(order.productLine(), productLine);
             orders.put(order.orderId(), order);
-            registry.publish(topic(WsChannel.ORDERS, order.symbol(), order.userId()),
+            batch.add(topic(WsChannel.ORDERS, order.symbol(), order.userId()),
                     new CoreOrderWebSocketEvent(eventId(productLine, event.exportSequence(),
                             CoreWebSocketEventId.EventKind.ORDER, order.userId() + "/" + order.orderId(), index),
                             event.exportSequence(), order), eventTime);
-            publishOrderReport(event, order, index, eventTime);
+            publishOrderReport(event, order, index, eventTime, batch);
         }
-        publishExecutions(event, orders, eventTime);
+        publishExecutions(event, orders, eventTime, batch);
         for (int index = 0; index < event.changedTriggerOrders().size(); index++) {
             var trigger = event.changedTriggerOrders().get(index);
             TriggerOrderResponse response = triggerResponse(trigger);
-            registry.publish(topic(WsChannel.TRIGGER_ORDERS, trigger.symbol(), trigger.userId()),
+            batch.add(topic(WsChannel.TRIGGER_ORDERS, trigger.symbol(), trigger.userId()),
                     new CoreTriggerOrderWebSocketEvent(eventId(productLine, event.exportSequence(),
                             CoreWebSocketEventId.EventKind.TRIGGER_ORDER,
                             trigger.userId() + "/" + trigger.triggerOrderId(), index),
@@ -138,7 +150,7 @@ public class CoreEventFanoutConsumer {
                                     1_000_000L), index), productLine, response, eventTime, trigger.traceId())), eventTime);
         }
         if (productLine != ProductLine.SPOT) {
-            publishPositions(event, orders, productLine, eventTime);
+            publishPositions(event, orders, productLine, eventTime, batch);
         }
     }
 
@@ -148,26 +160,27 @@ public class CoreEventFanoutConsumer {
         return CoreWebSocketEventId.of(productLine, exportSequence, eventKind, discriminator, itemIndex);
     }
 
-    private void publishExecutions(CoreExportEvent event, Map<Long, CoreOrderStateView> orders, Instant eventTime) {
+    private void publishExecutions(CoreExportEvent event, Map<Long, CoreOrderStateView> orders,
+                                   Instant eventTime, FanoutBatch batch) {
         for (int index = 0; index < event.executions().size(); index++) {
             CoreExecutionView execution = event.executions().get(index);
             CoreOrderStateView taker = requireOrder(orders, execution.takerOrderId());
             CoreOrderStateView maker = requireOrder(orders, execution.makerOrderId());
             long executionSequence = Math.addExact(
                     Math.multiplyExact(event.exportSequence(), EXECUTION_SEQUENCE_MULTIPLIER), index);
-            publishTradeReport(event, execution, taker, maker, executionSequence, "TAKER", index, eventTime);
-            publishTradeReport(event, execution, maker, taker, executionSequence, "MAKER", index, eventTime);
+            publishTradeReport(event, execution, taker, maker, executionSequence, "TAKER", index, eventTime, batch);
+            publishTradeReport(event, execution, maker, taker, executionSequence, "MAKER", index, eventTime, batch);
         }
     }
 
     private void publishPositions(CoreExportEvent event, Map<Long, CoreOrderStateView> orders,
-                                  ProductLine productLine, Instant eventTime) {
+                                  ProductLine productLine, Instant eventTime, FanoutBatch batch) {
         Map<Long, CoreUserStateView> users = new HashMap<>();
         for (CoreUserStateView user : event.changedUsers()) {
             requireProductLine(user.productLine(), productLine);
             users.put(user.userId(), user);
             for (int index = 0; index < user.positions().size(); index++) {
-                publishPosition(event.exportSequence(), user, index, user.positions().get(index), eventTime);
+                publishPosition(event.exportSequence(), user, index, user.positions().get(index), eventTime, batch);
             }
         }
         Set<UserSymbol> activePositions = new HashSet<>();
@@ -180,16 +193,16 @@ public class CoreEventFanoutConsumer {
             if (user != null && activePositions.add(key)) {
                 publishPosition(event.exportSequence(), user, index,
                         new CorePositionView(order.symbol(), "", order.marginMode(), order.positionSide(),
-                                order.instrumentVersion(), 0, 0, 0, 0, 0), eventTime);
+                                order.instrumentVersion(), 0, 0, 0, 0, 0), eventTime, batch);
             }
         }
     }
 
     private void publishPosition(long exportSequence, CoreUserStateView user, int itemIndex,
-                                 CorePositionView position, Instant eventTime) {
+                                 CorePositionView position, Instant eventTime, FanoutBatch batch) {
         String eventId = eventId(user.productLine(), exportSequence, CoreWebSocketEventId.EventKind.POSITION,
                 user.userId() + "/" + position.symbol() + "/" + position.positionSide().name(), itemIndex);
-        registry.publish(topic(WsChannel.POSITIONS, position.symbol(), user.userId()),
+        batch.add(topic(WsChannel.POSITIONS, position.symbol(), user.userId()),
                 new CorePositionWebSocketEvent(eventId, exportSequence, user.productLine(), user.userId(), user.revision(),
                         position.symbol(), position.instrumentVersion(), position.marginMode().name(),
                         position.positionSide().name(), position.signedQuantitySteps(), position.entryPriceTicks(),
@@ -198,11 +211,11 @@ public class CoreEventFanoutConsumer {
     }
 
     private void publishOrderReport(CoreExportEvent event, CoreOrderStateView order, int itemIndex,
-                                    Instant eventTime) {
+                                    Instant eventTime, FanoutBatch batch) {
         String eventId = eventId(properties.getKafka().getProductLine(), event.exportSequence(),
                 CoreWebSocketEventId.EventKind.EXECUTION_REPORT,
                 order.userId() + "/" + order.orderId() + "/ORDER", itemIndex);
-        registry.publish(topic(WsChannel.EXECUTION_REPORTS, order.symbol(), order.userId()),
+        batch.add(topic(WsChannel.EXECUTION_REPORTS, order.symbol(), order.userId()),
                 new CoreExecutionWebSocketEvent(eventId,
                         new ExecutionReportEvent("CORE_ORDER", order.userId(), order.symbol(), order.orderId(), null,
                                 null, null, null, order.instrumentVersion(), null, event.commandType().name(),
@@ -215,11 +228,11 @@ public class CoreEventFanoutConsumer {
     private void publishTradeReport(CoreExportEvent event, CoreExecutionView execution,
                                     CoreOrderStateView order, CoreOrderStateView counterparty,
                                     long executionSequence, String liquidityRole, int itemIndex,
-                                    Instant eventTime) {
+                                    Instant eventTime, FanoutBatch batch) {
         String eventId = eventId(properties.getKafka().getProductLine(), event.exportSequence(),
                 CoreWebSocketEventId.EventKind.EXECUTION_REPORT,
                 order.userId() + "/" + order.orderId() + "/" + liquidityRole, itemIndex);
-        registry.publish(topic(WsChannel.EXECUTION_REPORTS, order.symbol(), order.userId()),
+        batch.add(topic(WsChannel.EXECUTION_REPORTS, order.symbol(), order.userId()),
                 new CoreExecutionWebSocketEvent(eventId,
                         new ExecutionReportEvent("TRADE", order.userId(), order.symbol(), order.orderId(), null,
                                 executionSequence, counterparty.orderId(), counterparty.userId(), order.instrumentVersion(),
@@ -298,6 +311,19 @@ public class CoreEventFanoutConsumer {
     }
 
     public record CoreExecutionWebSocketEvent(String eventId, ExecutionReportEvent report) {
+    }
+
+    private static final class FanoutBatch {
+        private final Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> events = new HashMap<>();
+
+        private void add(SubscriptionTopic topic, Object payload, Instant eventTime) {
+            events.computeIfAbsent(topic, ignored -> new java.util.ArrayList<>())
+                    .add(new SubscriptionRegistry.TimedPayload(payload, eventTime));
+        }
+
+        private void publish(SubscriptionRegistry registry) {
+            events.forEach(registry::publishTimedBatch);
+        }
     }
 
     public record CoreTriggerOrderWebSocketEvent(String eventId, TriggerOrderUpdatedEvent event) {

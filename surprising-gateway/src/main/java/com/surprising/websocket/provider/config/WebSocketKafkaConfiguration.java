@@ -78,7 +78,8 @@ public class WebSocketKafkaConfiguration {
         ConcurrentKafkaListenerContainerFactory<String, byte[]> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(webSocketCoreEventsConsumerFactory);
         factory.setConcurrency(1);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
         factory.setCommonErrorHandler(webSocketCoreEventsErrorHandler);
         return factory;
     }
