@@ -179,9 +179,12 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 
 P10-A 至 P10-F 的写路径、协议、快照、Lane-local settlement 和 Lane 原生 Treasury delta 已切换到 route v3。
 P10-G 由 `HttpOpenLoopWorkloadMain` 的
-`qualification=P10` 门禁强制检查 1,000 用户、至少 200 symbol、100k/s、40 分钟和活动 JFR；输出目录保存
+`qualification=P10` 门禁强制检查 1,000 用户、至少 200 symbol、100k/s offered rate、40 分钟和活动 JFR，
+并要求计量窗口内实际终态吞吐不低于 100k/s；输出目录保存
 coordinated-omission-corrected HDR、逐请求事件和 accounting JSON。真实三节点/Provider 环境未生成完整 artifact 前，
 只能描述为“P10 实现完成、生产认证未完成”，不能描述为“P10 生产认证完成”。
+JFR 中的 `com.surprising.HttpWorkloadMeasurement` 事件精确标记开放环计量窗口，drain 发生在窗口结束后，不能用
+事后排空掩盖计量窗口内吞吐不足。
 
 运维可通过 `ClusterProbeMain -Dsurprising.aeron.probe-mode=metrics` 查询 Core 内部 Lane 指标并输出 Prometheus
 text format。该查询走 committed Core query surface，不读取 PostgreSQL；采样与计数由独立
@@ -228,3 +231,7 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   拒绝并 fail closed。没有旧 reader、迁移读取路径或使用 PostgreSQL 投影、clean-start、逐单回放修复不一致状态的例外。
 - `UPDATE_RISK_SCAN_CONTROL` 使用乐观版本检查，`RISK_SCAN_CONTROL_QUERY` 返回当前版本、启停、续跑间隔、
   批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v24` 恢复。
+- `APPLY_MARK_PRICE` 只提交新价格和初始化 risk/trigger cursor；用户风险、强平计划和触发单扫描只能由有界
+  `CONTINUE_RISK_SCAN` 推进，不能在标记价命令中隐式执行首批扫描。
+- matcher 等待策略可在启动时配置为 `BUSY_SPIN`、`YIELDING` 或 `BLOCKING`；Account Lane 可配置为
+  `BUSY_SPIN`、`BALANCED` 或 `PARK`。等待策略是运行时性能参数，不进入业务状态或 snapshot hash。

@@ -29,8 +29,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 账户状态 mutation、query/read fence 和 snapshot capture/restore 都经过有界双向 SPSC ring。订单批次先完成确定性风险准入，
 再以每 Lane 一次 apply/commit 捕获账户 mutation 与原生 per-asset Treasury delta；Sequencer 只合并 ACK、Treasury delta
 和全局 sequence，不再为同批每笔订单逐次往返 Lane。
-P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、
-至少 200 symbol、100k/s offered rate、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
+P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、
+计量窗口内至少 100k/s 实际终态吞吐、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
 但不在正式下单前额外往返 Core。`DeterministicExchangeCoreAdapter` 向一个共享 ExchangeCore 的原生 matcher shard
 提交有界 pipeline，直接持有
@@ -166,7 +166,8 @@ sequenceDiagram
 
 永续 Runtime 迁移当前已完成下单、撤单、成交、资金费、强平、ADL 和风险扫描的原生计算。
 风险快照包含 mark price、cross/isolated 结果、分页 scan cursor、liquidation plan 和
-`nextLiquidationId`。连续 mark/continuation 由 owner thread 在持久 Runtime 原地增量提交，
+`nextLiquidationId`。标记价命令只更新价格并初始化持久化 risk/trigger cursor，不扫描用户、不执行触发单；
+后续 `CONTINUE_RISK_SCAN` 才按版本化批次上限推进风险与触发单工作。连续 mark/continuation 由 owner thread 在持久 Runtime 原地增量提交，
 active liquidation 使用 primitive 分层索引精确定位；生产路径不再通过 immutable reducer 候选结果
 反向覆盖 Runtime。不可变 Core 视图只由 Runtime changed-key 生成，用于事实、hash、快照、恢复和对账，
 Runtime/materialization 等价检查仅留在测试源码。
@@ -258,26 +259,36 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpet
 高频挂单、部分成交和撤单，并在前 4 轮各穿插一个 symbol 的触发单、资金费分片和风险扫描分片；资金费与
 风险扫描每条命令最多处理 64 个用户，未完成工作通过确定性 cursor 留给后续调度轮次，最后一个 symbol 同轮
 完成强平、保险基金覆盖和 ADL。完整清空 10k 用户资金费与风险扫描是独立容量维度，不连续占满交易窗口。
-可只选择该场景并把 `terminalCommands` 作为实际完成的外部订单操作/命令吞吐读取：
+可只选择该场景并把 `terminalBusinessOperations` 作为实际完成的业务操作吞吐读取：
 
 ```bash
 java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpetual-benchmarks.jar \
   '.*productionMixedWorkload.*' -p activeUsers=1000,10000 -p symbols=4 -p hftBatchSize=20 \
   -p accountLanes=4 -wi 4 -w 2s -i 3 -r 4s -f 1 \
-  -jvmArgsAppend '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dsurprising.aeron.matching-engines=2 -Dsurprising.aeron.account-lane-idle-spins=10000'
+  -jvmArgsAppend '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dsurprising.aeron.matching-engines=4 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.account-lane-wait-strategy=BUSY_SPIN'
 ```
 
-主指标 `ops/s` 是完整混合业务批次/秒；辅助指标 `terminalCommands` 是已经产生终态响应的外部订单操作与
-Core command/query/ack 消息/秒，`acceptedCommands` 必须与它相等且 `unfinishedCommands` 必须为零。Trial setup
+主指标 `ops/s` 是完整混合 invocation/秒，不是业务 TPS。辅助指标 `terminalBusinessOperations` 按 batch item
+计数，是已经产生终态响应的真实业务操作/秒；`terminalCoreMessages` 是未按 batch 展开的 Core command/query/ack
+消息/秒。`acceptedBusinessOperations`、`terminalBusinessOperations` 必须相等，两个 `unfinished*` 指标都必须为零。Trial setup
 会通过正常命令建仓、挂单并生成快照，invocation setup 从快照恢复；两者以及 teardown
 中的批量响应逐项解码、资金总量、触发单、资金费、风险扫描、强平、保险基金和 ADL 终态校验均不进入
 计时区间。Core 生成并编码完整响应仍在计时区间，只有基准客户端的重复反序列化校验被移到 teardown。
-在关闭其它持续占用 CPU 的进程后，GraalVM JDK 25.0.1、默认 4 matcher / 1 risk engine、4 Account Lane、
-4 symbol、96 轮 HFT 的最终运行中，1,000 用户三轮 `terminalCommands` 为 `10991.185`、`11295.619`、
-`12711.729 ops/s`，平均 `11666.178 ops/s`；10,000 用户为 `10892.224`、`11817.097`、
-`12730.530 ops/s`，平均 `11813.284 ops/s`。每轮 `acceptedCommands` 与 `terminalCommands` 相等，
-`unfinishedCommands` 为零。该结果超过单 Core 10k/s 当前门槛，但没有达到 100k/s；容量采样应在隔离 CPU 的
-生产同型机器上运行，避免桌面进程抢占 busy-spin matcher/Lane 线程。
+2026-08-27 使用 GraalVM JDK 25.0.1、4 matcher / 1 risk engine、4 Account Lane、4 symbol、96 轮 HFT、
+batch 20、显式 matcher/Lane `BUSY_SPIN` 的最终本机运行中，不带 JFR 时 1,000 用户三轮业务操作吞吐为
+`6896.138`、`8741.622`、`9620.962 ops/s`，平均 `8419.574 ops/s`；10,000 用户为 `5877.522`、
+`6657.330`、`6931.778 ops/s`，平均 `6488.877 ops/s`。带 JFR 时两组平均值分别为 `6702.581` 和
+`6327.645 ops/s`。每轮接受与终态业务操作相等、两个未完成指标为零，teardown 的期初/期末资金守恒校验通过。
+本次结果没有达到 10k/s 或 100k/s，不能作为生产容量认证。10k JFR 计时区内 owner thread 共 463 个采样，
+其中 119 个经过 `AccountLaneWorker.await`、51 个经过 `ByteArrayOutputStream.write`、37 个经过
+`projectSnapshotNow`；同时 matcher/risk 与 Account Lane 线程的大多数样本处于自旋。下一阶段必须消除逐命令
+Lane 往返，并把不可变 Snapshot 投影与 Core Fact 编码从交易命令同步路径移到确定性、有界的独立消费阶段，
+再在隔离 CPU 的生产同型机器上执行三节点 HTTP P10 门禁。
+
+matcher 等待策略通过启动参数 `surprising.aeron.matcher-wait-strategy=BUSY_SPIN|YIELDING|BLOCKING` 切换；
+Account Lane 通过 `surprising.aeron.account-lane-wait-strategy=BUSY_SPIN|BALANCED|PARK` 切换，`BALANCED` 还可用
+`surprising.aeron.account-lane-idle-spins` 和 `surprising.aeron.account-lane-await-spins` 调整自旋预算。
+这些参数只影响线程等待和 CPU/尾延迟权衡，不进入资金状态或 snapshot hash；修改后重启单产品线 Core 生效。
 
 快速确认 JMH 打包与场景可执行时可缩短迭代；该命令只用于 smoke，不作为容量结论：
 
