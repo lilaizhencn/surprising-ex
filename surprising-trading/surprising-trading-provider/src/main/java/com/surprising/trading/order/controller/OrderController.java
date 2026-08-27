@@ -37,6 +37,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 
 @RestController
 public class OrderController {
@@ -54,9 +57,10 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH)
-    public ResponseEntity<OrderCommandReceipt> place(@Valid @RequestBody PlaceOrderRequest request) {
+    public CompletionStage<ResponseEntity<OrderCommandReceipt>> place(@Valid @RequestBody PlaceOrderRequest request) {
         try {
-            return commandResponse(orderService.placeCommand(request));
+            return mapAsyncFailure(
+                    orderService.placeCommandAsync(request).thenApply(this::commandResponse), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -65,9 +69,11 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch")
-    public ResponseEntity<OrderCommandReceipt> placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request) {
+    public CompletionStage<ResponseEntity<OrderCommandReceipt>> placeBatch(
+            @Valid @RequestBody BatchPlaceOrderRequest request) {
         try {
-            return commandResponse(orderService.placeBatchCommand(request));
+            return mapAsyncFailure(
+                    orderService.placeBatchCommandAsync(request).thenApply(this::commandResponse), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -85,9 +91,10 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/amend")
-    public ResponseEntity<OrderCommandReceipt> amend(@Valid @RequestBody AmendOrderRequest request) {
+    public CompletionStage<ResponseEntity<OrderCommandReceipt>> amend(@Valid @RequestBody AmendOrderRequest request) {
         try {
-            return commandResponse(orderService.amendCommand(request));
+            return mapAsyncFailure(
+                    orderService.amendCommandAsync(request).thenApply(this::commandResponse), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -96,9 +103,11 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-amend")
-    public ResponseEntity<OrderCommandReceipt> amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request) {
+    public CompletionStage<ResponseEntity<OrderCommandReceipt>> amendBatch(
+            @Valid @RequestBody BatchAmendOrdersRequest request) {
         try {
-            return commandResponse(orderService.amendBatchCommand(request));
+            return mapAsyncFailure(
+                    orderService.amendBatchCommandAsync(request).thenApply(this::commandResponse), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -116,9 +125,10 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel")
-    public ResponseEntity<OrderCommandReceipt> cancel(@RequestBody CancelOrderRequest request) {
+    public CompletionStage<ResponseEntity<OrderCommandReceipt>> cancel(@RequestBody CancelOrderRequest request) {
         try {
-            return commandResponse(orderService.cancelCommand(request));
+            return mapAsyncFailure(
+                    orderService.cancelCommandAsync(request).thenApply(this::commandResponse), HttpStatus.NOT_FOUND);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -127,12 +137,39 @@ public class OrderController {
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-cancel")
-    public ResponseEntity<OrderCommandReceipt> cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request) {
+    public CompletionStage<ResponseEntity<OrderCommandReceipt>> cancelBatch(
+            @Valid @RequestBody BatchCancelOrdersRequest request) {
         try {
-            return commandResponse(orderService.cancelBatchCommand(request));
+            return mapAsyncFailure(
+                    orderService.cancelBatchCommandAsync(request).thenApply(this::commandResponse), HttpStatus.NOT_FOUND);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
+    }
+
+    private static <T> CompletionStage<T> mapAsyncFailure(
+            CompletionStage<T> stage, HttpStatus illegalStateStatus) {
+        CompletableFuture<T> mapped = new CompletableFuture<>();
+        stage.whenComplete((value, failure) -> {
+            if (failure == null) {
+                mapped.complete(value);
+                return;
+            }
+            Throwable cause = failure;
+            while (cause instanceof CompletionException && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+            if (cause instanceof IllegalArgumentException) {
+                mapped.completeExceptionally(
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, cause.getMessage(), cause));
+            } else if (cause instanceof IllegalStateException) {
+                mapped.completeExceptionally(
+                        new ResponseStatusException(illegalStateStatus, cause.getMessage(), cause));
+            } else {
+                mapped.completeExceptionally(cause);
+            }
+        });
+        return mapped;
     }
 
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel-open")

@@ -23,6 +23,7 @@ import com.surprising.trading.trigger.config.TriggerProperties;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 
@@ -42,11 +43,27 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
         }
         return response;
     }
+    public CompletionStage<CoreResponse> commandAsync(CoreMessageType type, UUID id, long userId, byte[] payload) {
+        return clients.commandAsync(type, id, userId, payload).thenApply(response -> {
+            if (response.commandStatus() != ResponseStatus.APPLIED) {
+                throw new IllegalStateException(response.resultCode().name() + ": Aeron trigger command rejected");
+            }
+            return response;
+        });
+    }
     public CoreTriggerOrderStateView place(UUID id, long userId, CoreTriggerOrderStateView view) {
         CoreResponse response = command(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,
                 CoreTriggerOrderCodec.encodeState(view));
         return CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("Aeron trigger placement returned no state"));
+    }
+    public CompletionStage<CoreTriggerOrderStateView> placeAsync(
+            UUID id, long userId, CoreTriggerOrderStateView view) {
+        return commandAsync(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,
+                        CoreTriggerOrderCodec.encodeState(view))
+                .thenApply(response -> CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst()
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Aeron trigger placement returned no state")));
     }
     public List<CoreTriggerOrderStateView> openOrders(long userId, String symbol, long before, int limit) {
         return openOrders(userId, symbol, before, limit, null);
@@ -85,7 +102,21 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
         if (response.status() == ResponseStatus.REJECTED && response.resultCode() == CoreResultCode.ENTITY_NOT_FOUND) return null;
         requireOk(response); return CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst().orElse(null);
     }
+    public CompletionStage<CoreTriggerOrderStateView> getAsync(long userId, long triggerOrderId) {
+        return clients.queryAsync(CoreMessageType.TRIGGER_ORDER_QUERY, UUID.randomUUID(), userId,
+                        CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerOrderId, "", 0, 1)))
+                .thenApply(response -> {
+                    if (response.status() == ResponseStatus.REJECTED
+                            && response.resultCode() == CoreResultCode.ENTITY_NOT_FOUND) return null;
+                    requireOk(response);
+                    return CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst().orElse(null);
+                });
+    }
     public void cancel(long userId, long id) { command(CoreMessageType.CANCEL_TRIGGER_ORDER, stable("TRIGGER_CANCEL:" + userId + ':' + id), userId, CoreTriggerOrderCodec.encodeId(id)); }
+    public CompletionStage<CoreResponse> cancelAsync(long userId, long id) {
+        return commandAsync(CoreMessageType.CANCEL_TRIGGER_ORDER, stable("TRIGGER_CANCEL:" + userId + ':' + id),
+                userId, CoreTriggerOrderCodec.encodeId(id));
+    }
     public void claim(long id, long sequence, long price, long at) { command(CoreMessageType.CLAIM_TRIGGER_ORDER, stable("TRIGGER_CLAIM:" + id + ':' + sequence), 0, CoreTriggerOrderCodec.encodeClaim(id, sequence, price, at)); }
     public void execute(long id, long sequence, long price, long at) { command(CoreMessageType.EXECUTE_TRIGGER_ORDER, stable("TRIGGER_EXECUTE:" + id + ':' + sequence), 0, CoreTriggerOrderCodec.encodeExecute(id, sequence, price, at)); }
     public void complete(long id, boolean success, long placedOrderId, String reason, long at) { command(CoreMessageType.COMPLETE_TRIGGER_ORDER, stable("TRIGGER_COMPLETE:" + id + ':' + placedOrderId), 0, CoreTriggerOrderCodec.encodeComplete(id, success, placedOrderId, reason, at)); }

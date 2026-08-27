@@ -35,6 +35,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +59,19 @@ public class TriggerOrderService {
     }
 
     public TriggerOrderResponse place(PlaceTriggerOrderRequest request) {
+        PreparedTriggerOrder prepared = prepareTriggerOrder(request);
+        CoreTriggerOrderStateView persisted = aeronGateway.place(
+                prepared.commandId(), prepared.view().userId(), prepared.view());
+        return TriggerOrderAeronGateway.response(persisted);
+    }
+
+    public CompletionStage<TriggerOrderResponse> placeAsync(PlaceTriggerOrderRequest request) {
+        PreparedTriggerOrder prepared = prepareTriggerOrder(request);
+        return aeronGateway.placeAsync(prepared.commandId(), prepared.view().userId(), prepared.view())
+                .thenApply(TriggerOrderAeronGateway::response);
+    }
+
+    private PreparedTriggerOrder prepareTriggerOrder(PlaceTriggerOrderRequest request) {
         PlaceTriggerOrderRequest normalized = normalize(request);
         ProductLine productLine = currentProductLine();
         long triggerOrderId = StableOrderIdentity.triggerOrderId(productLine, normalized.userId(),
@@ -64,40 +79,21 @@ public class TriggerOrderService {
         UUID commandId = StableOrderIdentity.triggerCommandId(productLine, normalized.userId(),
                 normalized.clientTriggerOrderId());
         CoreTriggerOrderStateView view = new CoreTriggerOrderStateView(
-                triggerOrderId,
-                productLine,
-                normalized.userId(),
-                normalized.clientTriggerOrderId(),
-                emptyToNull(normalized.ocoGroupId()),
-                normalized.symbol(),
+                triggerOrderId, productLine, normalized.userId(), normalized.clientTriggerOrderId(),
+                emptyToNull(normalized.ocoGroupId()), normalized.symbol(),
                 CoreOrderSide.valueOf(normalized.side().name()),
                 CoreTriggerOrderType.valueOf(normalized.triggerType().name()),
                 CoreTriggerCondition.valueOf(triggerCondition(normalized.side(), normalized.triggerType()).name()),
-                normalized.triggerPriceTicks(),
-                normalized.activationPriceTicks() == null ? 0 : normalized.activationPriceTicks(),
-                normalized.callbackRatePpm() == null ? 0 : normalized.callbackRatePpm(),
-                0,
-                0,
-                0,
+                normalized.triggerPriceTicks(), normalized.activationPriceTicks() == null ? 0 : normalized.activationPriceTicks(),
+                normalized.callbackRatePpm() == null ? 0 : normalized.callbackRatePpm(), 0, 0, 0,
                 CoreOrderType.valueOf(normalized.orderType().name()),
-                CoreTimeInForce.valueOf(normalized.timeInForce().name()),
-                normalized.priceTicks(),
+                CoreTimeInForce.valueOf(normalized.timeInForce().name()), normalized.priceTicks(),
                 normalized.quantitySteps(),
                 com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalized.marginMode().name()),
                 com.surprising.aeron.protocol.CorePositionSide.valueOf(normalized.positionSide().name()),
-                CoreTriggerOrderStatus.PENDING,
-                0,
-                0,
-                0,
-                "",
-                commandId.toString(),
-                normalized.expiresAt() == null ? 0 : normalized.expiresAt().toEpochMilli(),
-                0,
-                0,
-                0,
-                1);
-        CoreTriggerOrderStateView persisted = aeronGateway.place(commandId, normalized.userId(), view);
-        return TriggerOrderAeronGateway.response(persisted);
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", commandId.toString(),
+                normalized.expiresAt() == null ? 0 : normalized.expiresAt().toEpochMilli(), 0, 0, 0, 1);
+        return new PreparedTriggerOrder(commandId, view);
     }
 
     public TriggerOrderBatchResponse placeBatch(BatchPlaceTriggerOrderRequest request) {
@@ -115,6 +111,24 @@ public class TriggerOrderService {
             }
         }
         return triggerBatchResponse(results);
+    }
+
+    public CompletionStage<TriggerOrderBatchResponse> placeBatchAsync(BatchPlaceTriggerOrderRequest request) {
+        List<PlaceTriggerOrderRequest> orders = request == null ? List.of() : request.orders();
+        requireBatchSize(orders.size(), 20, "orders");
+        if (request != null && Boolean.TRUE.equals(request.atomic())) {
+            return CompletableFuture.completedFuture(placeAtomicBatch(orders));
+        }
+        List<CompletableFuture<TriggerOrderBatchItemResponse>> futures = new ArrayList<>(orders.size());
+        for (int index = 0; index < orders.size(); index++) {
+            int itemIndex = index;
+            futures.add(placeAsync(orders.get(index)).handle((response, failure) -> failure == null
+                    ? new TriggerOrderBatchItemResponse(itemIndex, true, "completed", response)
+                    : new TriggerOrderBatchItemResponse(itemIndex, false, failureMessage(failure), null))
+                    .toCompletableFuture());
+        }
+        return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+                .thenApply(ignored -> triggerBatchResponse(futures.stream().map(CompletableFuture::join).toList()));
     }
 
     private TriggerOrderBatchResponse placeAtomicBatch(List<PlaceTriggerOrderRequest> orders) {
@@ -166,6 +180,33 @@ public class TriggerOrderService {
             current = aeronGateway.get(request.userId(), request.triggerOrderId());
         }
         return TriggerOrderAeronGateway.response(current);
+    }
+
+    public CompletionStage<TriggerOrderResponse> cancelAsync(CancelTriggerOrderRequest request) {
+        if (request == null || request.userId() <= 0 || request.triggerOrderId() <= 0) {
+            throw new IllegalArgumentException("userId and triggerOrderId must be positive");
+        }
+        return aeronGateway.getAsync(request.userId(), request.triggerOrderId()).thenCompose(current -> {
+            if (current == null || current.productLine() != currentProductLine()) {
+                return CompletableFuture.failedFuture(
+                        new IllegalStateException("trigger order not found: " + request.triggerOrderId()));
+            }
+            if (current.status() != CoreTriggerOrderStatus.PENDING) {
+                return CompletableFuture.completedFuture(TriggerOrderAeronGateway.response(current));
+            }
+            return aeronGateway.cancelAsync(request.userId(), request.triggerOrderId())
+                    .thenCompose(ignored -> aeronGateway.getAsync(request.userId(), request.triggerOrderId()))
+                    .thenApply(TriggerOrderAeronGateway::response);
+        });
+    }
+
+    private static String failureMessage(Throwable failure) {
+        Throwable current = failure;
+        while (current.getCause() != null) current = current.getCause();
+        return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
+    }
+
+    private record PreparedTriggerOrder(UUID commandId, CoreTriggerOrderStateView view) {
     }
 
     public TriggerOrderBatchResponse cancelBatch(BatchCancelTriggerOrdersRequest request) {

@@ -45,6 +45,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletionStage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -90,6 +91,12 @@ public class OrderService {
         return aeronOrders.receipt(execution);
     }
 
+    public CompletionStage<OrderCommandReceipt> placeCommandAsync(PlaceOrderRequest request) {
+        requireAeron();
+        PreparedAeronOrder prepared = prepareAeronOrder(normalize(request));
+        return aeronOrders.placeCommandAsync(prepared.request(), prepared.validation()).thenApply(aeronOrders::receipt);
+    }
+
     private OrderResponse placeAeron(PlaceOrderRequest request) {
         requireAeron();
         PlaceOrderRequest normalized = normalize(request);
@@ -128,6 +135,21 @@ public class OrderService {
         return aeronOrders.receipt(aeronOrders.placeBatchCommand(request.batchKey(), normalized, validations));
     }
 
+    public CompletionStage<OrderCommandReceipt> placeBatchCommandAsync(BatchPlaceOrderRequest request) {
+        if (request == null) throw new IllegalArgumentException("place batch request is required");
+        List<PlaceOrderRequest> normalized = new ArrayList<>();
+        List<ValidationResult> validations = new ArrayList<>();
+        requireBatchSize(request.orders().size(), 20, "orders");
+        for (PlaceOrderRequest order : request.orders()) {
+            PreparedAeronOrder prepared = prepareAeronOrder(normalize(order));
+            normalized.add(prepared.request());
+            validations.add(prepared.validation());
+        }
+        requireAeron();
+        return aeronOrders.placeBatchCommandAsync(request.batchKey(), normalized, validations)
+                .thenApply(aeronOrders::receipt);
+    }
+
     public TestOrderResponse test(PlaceOrderRequest request) {
         return testLocal(request);
     }
@@ -152,6 +174,11 @@ public class OrderService {
         return aeronOrders.receipt(aeronOrders.replaceCommand(normalizeAmend(request)));
     }
 
+    public CompletionStage<OrderCommandReceipt> amendCommandAsync(AmendOrderRequest request) {
+        requireAeron();
+        return aeronOrders.replaceCommandAsync(normalizeAmend(request)).thenApply(aeronOrders::receipt);
+    }
+
     private AmendOrderResponse amendAeron(AmendOrderRequest request) {
         requireAeron();
         AmendOrderRequest normalized = normalizeAmend(request);
@@ -170,6 +197,14 @@ public class OrderService {
         List<AmendOrderRequest> normalized = request.orders().stream().map(this::normalizeAmend).toList();
         requireAeron();
         return aeronOrders.receipt(aeronOrders.amendBatchCommand(request.batchKey(), normalized));
+    }
+
+    public CompletionStage<OrderCommandReceipt> amendBatchCommandAsync(BatchAmendOrdersRequest request) {
+        if (request == null) throw new IllegalArgumentException("amend batch request is required");
+        requireBatchSize(request.orders().size(), 20, "orders");
+        List<AmendOrderRequest> normalized = request.orders().stream().map(this::normalizeAmend).toList();
+        requireAeron();
+        return aeronOrders.amendBatchCommandAsync(request.batchKey(), normalized).thenApply(aeronOrders::receipt);
     }
 
     public OrderResponse closePosition(ClosePositionRequest request) {
@@ -238,6 +273,14 @@ public class OrderService {
         return aeronOrders.receipt(aeronOrders.cancelCommand(request.userId(), request.orderId()));
     }
 
+    public CompletionStage<OrderCommandReceipt> cancelCommandAsync(CancelOrderRequest request) {
+        if (request == null || request.userId() <= 0 || request.orderId() <= 0) {
+            throw new IllegalArgumentException("userId and orderId must be positive");
+        }
+        requireAeron();
+        return aeronOrders.cancelCommandAsync(request.userId(), request.orderId()).thenApply(aeronOrders::receipt);
+    }
+
     public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
         return terminalBatchResult(cancelBatchCommand(request), OrderBatchResponse.class);
     }
@@ -250,6 +293,15 @@ public class OrderService {
         request.orders().forEach(this::validateCancelRequest);
         requireAeron();
         return aeronOrders.receipt(aeronOrders.cancelBatchCommand(request.batchKey(), request.orders()));
+    }
+
+    public CompletionStage<OrderCommandReceipt> cancelBatchCommandAsync(BatchCancelOrdersRequest request) {
+        if (request == null) throw new IllegalArgumentException("cancel batch request is required");
+        requireBatchSize(request.orders().size(), 50, "orders");
+        request.orders().forEach(this::validateCancelRequest);
+        requireAeron();
+        return aeronOrders.cancelBatchCommandAsync(request.batchKey(), request.orders())
+                .thenApply(aeronOrders::receipt);
     }
 
     public OrderCommandReceipt commandResult(java.util.UUID commandId) {

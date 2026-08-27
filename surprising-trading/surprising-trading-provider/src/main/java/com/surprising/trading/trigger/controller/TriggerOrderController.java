@@ -18,6 +18,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 
 /**
  * 用户管理止盈止损触发单的 REST 门面。
@@ -35,9 +38,9 @@ public class TriggerOrderController {
     }
 
     @PostMapping(TradingApiPaths.TRIGGER_ORDER_BASE_PATH)
-    public TriggerOrderResponse place(@RequestBody PlaceTriggerOrderRequest request) {
+    public CompletionStage<TriggerOrderResponse> place(@RequestBody PlaceTriggerOrderRequest request) {
         try {
-            return triggerOrderService.place(request);
+            return mapAsyncFailure(triggerOrderService.placeAsync(request), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -46,9 +49,9 @@ public class TriggerOrderController {
     }
 
     @PostMapping(TradingApiPaths.TRIGGER_ORDER_BASE_PATH + "/batch")
-    public TriggerOrderBatchResponse placeBatch(@RequestBody BatchPlaceTriggerOrderRequest request) {
+    public CompletionStage<TriggerOrderBatchResponse> placeBatch(@RequestBody BatchPlaceTriggerOrderRequest request) {
         try {
-            return triggerOrderService.placeBatch(request);
+            return mapAsyncFailure(triggerOrderService.placeBatchAsync(request), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -57,14 +60,39 @@ public class TriggerOrderController {
     }
 
     @PostMapping(TradingApiPaths.TRIGGER_ORDER_BASE_PATH + "/cancel")
-    public TriggerOrderResponse cancel(@RequestBody CancelTriggerOrderRequest request) {
+    public CompletionStage<TriggerOrderResponse> cancel(@RequestBody CancelTriggerOrderRequest request) {
         try {
-            return triggerOrderService.cancel(request);
+            return mapAsyncFailure(triggerOrderService.cancelAsync(request), HttpStatus.NOT_FOUND);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
+    }
+
+    private static <T> CompletionStage<T> mapAsyncFailure(
+            CompletionStage<T> stage, HttpStatus illegalStateStatus) {
+        CompletableFuture<T> mapped = new CompletableFuture<>();
+        stage.whenComplete((value, failure) -> {
+            if (failure == null) {
+                mapped.complete(value);
+                return;
+            }
+            Throwable cause = failure;
+            while (cause instanceof CompletionException && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+            if (cause instanceof IllegalArgumentException) {
+                mapped.completeExceptionally(
+                        new ResponseStatusException(HttpStatus.BAD_REQUEST, cause.getMessage(), cause));
+            } else if (cause instanceof IllegalStateException) {
+                mapped.completeExceptionally(
+                        new ResponseStatusException(illegalStateStatus, cause.getMessage(), cause));
+            } else {
+                mapped.completeExceptionally(cause);
+            }
+        });
+        return mapped;
     }
 
     @PostMapping(TradingApiPaths.TRIGGER_ORDER_BASE_PATH + "/batch-cancel")

@@ -42,6 +42,7 @@ import com.surprising.trading.order.model.ValidationResult;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -117,6 +118,22 @@ public class AeronOrderCommandService {
                 CommandKind.AMEND);
     }
 
+    public CompletionStage<CommandExecution> replaceCommandAsync(
+            com.surprising.trading.api.model.AmendOrderRequest request) {
+        String clientOrderId = requireClientKey(request.newClientOrderId(), "newClientOrderId");
+        String clientRequestId = requireClientKey(request.clientRequestId(), "clientRequestId");
+        ProductLine productLine = configuredProductLine();
+        long replacementOrderId = StableOrderIdentity.replacementOrderId(productLine, request.userId(), clientOrderId);
+        AmendOrderCommand command = new AmendOrderCommand(request.orderId(), replacementOrderId,
+                clientOrderId, request.priceTicks(), request.quantitySteps(),
+                request.timeInForce() == null ? null : timeInForce(request.timeInForce()), request.postOnly());
+        UUID commandId = StableOrderIdentity.replacementCommandId(productLine, request.userId(), clientRequestId);
+        List<Long> orderIds = List.of(request.orderId(), replacementOrderId);
+        return aeron.commandOutcomeAsync(CoreMessageType.AMEND_ORDER, commandId, request.userId(),
+                        TradingCommandCodec.encodeAmendOrder(command))
+                .thenApply(outcome -> new CommandExecution(commandId, orderIds, outcome, CommandKind.AMEND));
+    }
+
     private PlaceOrderCommand buildPlaceCommand(
             long orderId,
             com.surprising.trading.api.model.PlaceOrderRequest request,
@@ -151,6 +168,14 @@ public class AeronOrderCommandService {
         return new CommandExecution(commandId, List.of(orderId), outcome, CommandKind.CANCEL);
     }
 
+    public CompletionStage<CommandExecution> cancelCommandAsync(long userId, long orderId) {
+        UUID commandId = StableOrderIdentity.commandId(configuredProductLine(), userId, "cancel:" + orderId);
+        return aeron.commandOutcomeAsync(CoreMessageType.CANCEL_ORDER, commandId, userId,
+                        TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)))
+                .thenApply(outcome -> new CommandExecution(
+                        commandId, List.of(orderId), outcome, CommandKind.CANCEL));
+    }
+
     public CommandExecution placeCommand(
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation) {
@@ -162,6 +187,19 @@ public class AeronOrderCommandService {
         CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodePlaceOrder(command));
         return new CommandExecution(commandId, List.of(orderId), outcome, CommandKind.PLACE);
+    }
+
+    public CompletionStage<CommandExecution> placeCommandAsync(
+            com.surprising.trading.api.model.PlaceOrderRequest request,
+            ValidationResult validation) {
+        String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
+        ProductLine productLine = configuredProductLine();
+        long orderId = StableOrderIdentity.orderId(productLine, request.userId(), clientOrderId);
+        PlaceOrderCommand command = buildPlaceCommand(orderId, request, validation);
+        UUID commandId = StableOrderIdentity.commandId(productLine, request.userId(), clientOrderId);
+        return aeron.commandOutcomeAsync(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
+                        TradingCommandCodec.encodePlaceOrder(command))
+                .thenApply(outcome -> new CommandExecution(commandId, List.of(orderId), outcome, CommandKind.PLACE));
     }
 
     public CommandExecution placeBatchCommand(String batchKey,
@@ -189,6 +227,33 @@ public class AeronOrderCommandService {
         return new CommandExecution(commandId, prospectiveIds, outcome, CommandKind.PLACE_BATCH);
     }
 
+    public CompletionStage<CommandExecution> placeBatchCommandAsync(
+            String batchKey, List<com.surprising.trading.api.model.PlaceOrderRequest> requests,
+            List<ValidationResult> validations) {
+        requireBatchKey(batchKey);
+        requireBatchSize(requests, com.surprising.aeron.protocol.PlaceOrderBatchCommand.MAX_ORDERS, "orders");
+        if (validations == null || validations.size() != requests.size()) {
+            throw new IllegalArgumentException("batch validation count must match orders");
+        }
+        ProductLine productLine = configuredProductLine();
+        long userId = requireSingleUser(requests);
+        List<PlaceOrderCommand> commands = new java.util.ArrayList<>(requests.size());
+        List<Long> prospectiveIds = new java.util.ArrayList<>(requests.size());
+        for (int index = 0; index < requests.size(); index++) {
+            var request = requests.get(index);
+            long orderId = StableOrderIdentity.orderId(productLine, userId,
+                    requireClientKey(request.clientOrderId(), "clientOrderId"));
+            prospectiveIds.add(orderId);
+            commands.add(buildPlaceCommand(orderId, request, validations.get(index)));
+        }
+        UUID commandId = batchCommandId(productLine, userId, "place", batchKey);
+        byte[] payload = TradingOrderBatchCodec.encodePlaceOrderBatch(
+                new com.surprising.aeron.protocol.PlaceOrderBatchCommand(commands));
+        return aeron.commandOutcomeAsync(CoreMessageType.PLACE_ORDER_BATCH, commandId, userId, payload)
+                .thenApply(outcome -> new CommandExecution(
+                        commandId, prospectiveIds, outcome, CommandKind.PLACE_BATCH));
+    }
+
     public CommandExecution amendBatchCommand(String batchKey,
                                                List<com.surprising.trading.api.model.AmendOrderRequest> requests) {
         requireBatchKey(batchKey);
@@ -211,6 +276,30 @@ public class AeronOrderCommandService {
         return new CommandExecution(commandId, prospectiveIds, outcome, CommandKind.AMEND_BATCH);
     }
 
+    public CompletionStage<CommandExecution> amendBatchCommandAsync(
+            String batchKey, List<com.surprising.trading.api.model.AmendOrderRequest> requests) {
+        requireBatchKey(batchKey);
+        requireBatchSize(requests, com.surprising.aeron.protocol.AmendOrderBatchCommand.MAX_ORDERS, "orders");
+        ProductLine productLine = configuredProductLine();
+        long userId = requireSingleUser(requests);
+        List<AmendOrderCommand> commands = new java.util.ArrayList<>(requests.size());
+        List<Long> prospectiveIds = new java.util.ArrayList<>(requests.size());
+        for (var request : requests) {
+            long replacementOrderId = StableOrderIdentity.replacementOrderId(productLine, userId,
+                    requireClientKey(request.newClientOrderId(), "newClientOrderId"));
+            prospectiveIds.add(replacementOrderId);
+            commands.add(new AmendOrderCommand(request.orderId(), replacementOrderId, request.newClientOrderId(),
+                    request.priceTicks(), request.quantitySteps(),
+                    request.timeInForce() == null ? null : timeInForce(request.timeInForce()), request.postOnly()));
+        }
+        UUID commandId = batchCommandId(productLine, userId, "amend", batchKey);
+        byte[] payload = TradingOrderBatchCodec.encodeAmendOrderBatch(
+                new com.surprising.aeron.protocol.AmendOrderBatchCommand(commands));
+        return aeron.commandOutcomeAsync(CoreMessageType.AMEND_ORDER_BATCH, commandId, userId, payload)
+                .thenApply(outcome -> new CommandExecution(
+                        commandId, prospectiveIds, outcome, CommandKind.AMEND_BATCH));
+    }
+
     public CommandExecution cancelBatchCommand(String batchKey,
                                                 List<com.surprising.trading.api.model.CancelOrderRequest> requests) {
         requireBatchKey(batchKey);
@@ -224,6 +313,24 @@ public class AeronOrderCommandService {
         CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.CANCEL_ORDER_BATCH, commandId, userId,
                 TradingOrderBatchCodec.encodeCancelOrderBatch(new com.surprising.aeron.protocol.CancelOrderBatchCommand(commands)));
         return new CommandExecution(commandId, prospectiveIds, outcome, CommandKind.CANCEL_BATCH);
+    }
+
+    public CompletionStage<CommandExecution> cancelBatchCommandAsync(
+            String batchKey, List<com.surprising.trading.api.model.CancelOrderRequest> requests) {
+        requireBatchKey(batchKey);
+        requireBatchSize(requests, com.surprising.aeron.protocol.CancelOrderBatchCommand.MAX_ORDERS, "orders");
+        ProductLine productLine = configuredProductLine();
+        long userId = requireSingleUser(requests);
+        List<com.surprising.aeron.protocol.CancelOrderCommand> commands = requests.stream()
+                .map(request -> new com.surprising.aeron.protocol.CancelOrderCommand(request.orderId())).toList();
+        List<Long> prospectiveIds = requests.stream()
+                .map(com.surprising.trading.api.model.CancelOrderRequest::orderId).toList();
+        UUID commandId = batchCommandId(productLine, userId, "cancel", batchKey);
+        byte[] payload = TradingOrderBatchCodec.encodeCancelOrderBatch(
+                new com.surprising.aeron.protocol.CancelOrderBatchCommand(commands));
+        return aeron.commandOutcomeAsync(CoreMessageType.CANCEL_ORDER_BATCH, commandId, userId, payload)
+                .thenApply(outcome -> new CommandExecution(
+                        commandId, prospectiveIds, outcome, CommandKind.CANCEL_BATCH));
     }
 
     public OrderCommandReceipt receipt(CommandExecution execution) {

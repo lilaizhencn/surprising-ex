@@ -17,6 +17,7 @@ import com.surprising.trading.order.service.CancelAllAfterService;
 import com.surprising.trading.order.service.OrderService;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -52,38 +53,55 @@ class OrderControllerTest {
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-1", "BTC-USDT", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);
 
-        when(orderService.placeCommand(any())).thenReturn(receipt("TERMINAL", "NONE"));
-        assertThat(controller.place(request).getStatusCode()).isEqualTo(HttpStatus.OK);
+        when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("TERMINAL", "NONE"));
+        assertThat(controller.place(request).toCompletableFuture().join().getStatusCode()).isEqualTo(HttpStatus.OK);
 
-        when(orderService.placeCommand(any())).thenReturn(receipt("TERMINAL", "IDEMPOTENCY_CONFLICT"));
-        assertThat(controller.place(request).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(controller.place(request).getBody().code()).isEqualTo("IDEMPOTENCY_CONFLICT");
+        when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("TERMINAL", "IDEMPOTENCY_CONFLICT"));
+        assertThat(controller.place(request).toCompletableFuture().join().getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(controller.place(request).toCompletableFuture().join().getBody().code())
+                .isEqualTo("IDEMPOTENCY_CONFLICT");
 
-        when(orderService.placeCommand(any())).thenReturn(receipt("NOT_ACCEPTED", "CLIENT_BACKPRESSURED"));
-        ResponseEntity<OrderCommandReceipt> backpressure = controller.place(request);
+        when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("NOT_ACCEPTED", "CLIENT_BACKPRESSURED"));
+        ResponseEntity<OrderCommandReceipt> backpressure = controller.place(request).toCompletableFuture().join();
         assertThat(backpressure.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(backpressure.getBody().commandResultUrl()).isNull();
 
-        when(orderService.placeCommand(any())).thenReturn(receipt("RESULT_UNKNOWN", "RESULT_UNKNOWN"));
-        ResponseEntity<OrderCommandReceipt> unknown = controller.place(request);
+        when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("RESULT_UNKNOWN", "RESULT_UNKNOWN"));
+        ResponseEntity<OrderCommandReceipt> unknown = controller.place(request).toCompletableFuture().join();
         assertThat(unknown.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(unknown.getBody().commandResultUrl()).isNotBlank();
 
-        when(orderService.placeCommand(any())).thenReturn(receipt("NOT_ACCEPTED", "NOT_CONNECTED"));
-        assertThat(controller.place(request).getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("NOT_ACCEPTED", "NOT_CONNECTED"));
+        assertThat(controller.place(request).toCompletableFuture().join().getStatusCode())
+                .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    @Test
+    void mapsAsynchronousPlacementStateFailureToConflict() {
+        OrderService orderService = mock(OrderService.class);
+        when(orderService.placeCommandAsync(any()))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("core rejected order")));
+        OrderController controller = new OrderController(orderService, mock(AlgoOrderService.class),
+                mock(CancelAllAfterService.class));
+
+        assertThatThrownBy(() -> controller.place(new PlaceOrderRequest(
+                1001L, "client-async-failure", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT,
+                TimeInForce.GTC, 60_000L, 1L, false, false)).toCompletableFuture().join())
+                .satisfies(throwable -> assertThat(responseStatus(throwable).getStatusCode())
+                        .isEqualTo(HttpStatus.CONFLICT));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"ADMIN_ACTION", "CLOSED", "MAX_POSITION_EXCEEDED", "UNKNOWN"})
     void mapsEveryRawAdmissionFailureTo503(String code) {
         OrderService orderService = mock(OrderService.class);
-        when(orderService.placeCommand(any())).thenReturn(receipt("NOT_ACCEPTED", code));
+        when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("NOT_ACCEPTED", code));
         OrderController controller = new OrderController(orderService, mock(AlgoOrderService.class),
                 mock(CancelAllAfterService.class));
 
         ResponseEntity<OrderCommandReceipt> response = controller.place(new PlaceOrderRequest(
                 1001L, "client-1", "BTC-USDT", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
-                60_000L, 1L, false, false));
+                60_000L, 1L, false, false)).toCompletableFuture().join();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(response.getBody().code()).isEqualTo(code);
@@ -120,8 +138,8 @@ class OrderControllerTest {
         UUID commandId = UUID.fromString("33333333-3333-3333-3333-333333333333");
         OrderCommandReceipt pending = receipt("MATCHING_PENDING", "MATCHING_PENDING", commandId);
 
-        when(orderService.placeCommand(any())).thenReturn(pending);
-        ResponseEntity<OrderCommandReceipt> initial = controller.place(request);
+        when(orderService.placeCommandAsync(any())).thenReturn(CompletableFuture.completedFuture(pending));
+        ResponseEntity<OrderCommandReceipt> initial = controller.place(request).toCompletableFuture().join();
 
         when(orderService.commandResult(commandId)).thenReturn(pending);
         ResponseEntity<OrderCommandReceipt> queried = controller.commandResult(commandId);
@@ -138,6 +156,19 @@ class OrderControllerTest {
 
     private static OrderCommandReceipt receipt(String outcome, String code) {
         return receipt(outcome, code, UUID.fromString("22222222-2222-2222-2222-222222222222"));
+    }
+
+    private static CompletableFuture<OrderCommandReceipt> completedReceipt(String outcome, String code) {
+        return CompletableFuture.completedFuture(receipt(outcome, code));
+    }
+
+    private static ResponseStatusException responseStatus(Throwable throwable) {
+        Throwable current = throwable;
+        while (!(current instanceof ResponseStatusException) && current.getCause() != null) {
+            current = current.getCause();
+        }
+        assertThat(current).isInstanceOf(ResponseStatusException.class);
+        return (ResponseStatusException) current;
     }
 
     private static OrderCommandReceipt receipt(String outcome, String code, UUID commandId) {

@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -43,6 +44,11 @@ public class OrderAeronGateway implements AutoCloseable {
 
     public CoreCommandOutcome commandOutcome(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
         return clients.commandOutcome(type, commandId, userId, payload);
+    }
+
+    public CompletableFuture<CoreCommandOutcome> commandOutcomeAsync(
+            CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+        return clients.commandOutcomeAsync(type, commandId, userId, payload);
     }
 
     public CoreResponse commandResult(UUID commandId) {
