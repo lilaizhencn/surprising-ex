@@ -27,7 +27,7 @@ class SpotMixedWorkloadTest {
                 assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
                 assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
                 assertThat(scenario.acceptedOperations()).isGreaterThan(scenario.acceptedCoreMessages());
-                assertThat(scenario.maxBacklog()).isGreaterThan(0);
+                assertThat(scenario.maxBacklog()).isGreaterThanOrEqualTo(4);
                 scenario.verify();
             }
         }).doesNotThrowAnyException();

@@ -297,7 +297,9 @@ owner 栈中没有 `CoreExportCodec`，`RuntimeStateMaterializer.materializeTran
 
 现货使用独立的 `SpotCoreBenchmark.productionMixedWorkload`。场景在 4 个 symbol 和 4 个 Account Lane 上预装
 1,000/10,000 个异构用户余额及 0..3 笔静态挂单；计时区间循环执行批量挂单/撤单、双向 IOC 成交、部分成交后
-撤余单和 Audit Export ACK。teardown 逐币种核对用户可用/冻结余额与 treasury，要求 accepted=terminal、
+撤余单和 Audit Export ACK。每个依赖阶段先提交 4 个相互独立的 symbol，再按 Core sequence 确定性完成 matcher，
+不会在 symbol 之间逐笔同步等待；JMH observable 使用 Core 的缓存 rolling state hash，不在计量区间额外遍历全量用户。
+teardown 逐币种核对用户可用/冻结余额与 treasury，要求 accepted=terminal、
 unfinished=0、所有保留的终态 reservation remaining=0，并对当前状态再做一次配对快照恢复和 business hash 校验。
 正式命令如下：
 
@@ -309,14 +311,18 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-
   -jvmArgsAppend '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms4g -Xmx4g -Dsurprising.aeron.matching-engines=4 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN'
 ```
 
-2026-08-27 本机 GraalVM JDK 25.0.1 正式运行中，1,000 用户的终态业务吞吐平均为
-`16917.758 ops/s`，10,000 用户为 `13446.509 ops/s`，下降 20.52%；对应 Core message 吞吐分别为
-`1622.595 msg/s` 和 `1289.665 msg/s`。10,000 用户带 JFR 的 8 秒计量为 `14288.982 ops/s`。
-三组均 accepted=terminal、unfinished=0，逐资产资金守恒与快照恢复校验通过，因此当前现货本机热路径能越过
-10k/s，但没有达到 100k/s。计量窗口的 393 个 owner 样本中，matcher completion 等待栈 47 个，
-`RollingBusinessStateHash` 42 个，`projectSnapshotNow` 31 个，现货结算本身只有 6 个；整段 JFR 的
-74,191 个执行样本中约 86.35% 落在 exchange-core/disruptor busy-spin。优先级应是减少逐批 projection/hash
-工作并降低 matcher 等待/线程竞争，而不是重写现货资金结算。
+2026-08-27 本机 GraalVM JDK 25.0.1 优化后正式运行中，1,000 用户的终态业务吞吐平均为
+`16814.776 ops/s`，10,000 用户为 `19344.692 ops/s`；对应 Core message 吞吐分别为
+`1612.718 msg/s` 和 `1855.365 msg/s`。与相同正式参数的优化前 10,000 用户结果 `13446.509 ops/s`
+相比提升 43.86%；同一轮短 A/B 从 `7996.295 ops/s` 提升到 `9899.442 ops/s`，提升 23.80%。
+10,000 用户带 JFR 的 8 秒计量为 `15355.472 ops/s`。三组均 accepted=terminal、unfinished=0，逐资产
+资金守恒与快照恢复校验通过，因此当前现货本机热路径稳定越过 10k/s，但没有达到 100k/s。
+
+修复后的 JFR top-25 已不再出现全量 `RollingBusinessStateHash.compute` 和 `projectSnapshotNow`；
+`drainMatchingCompletions` 只占 0.13%。生产 owner 的空 `RuntimeMutationDelta` 也直接复用原不可变 map，
+不再为未变化的状态域分配 `LazyDeltaMap`、`TreeSet` 和并发缓存。整段记录仍约 87% 落在
+exchange-core/disruptor busy-spin，这是 matcher 等待策略的 CPU/尾延迟取舍，不再是计量 owner 的 projection
+瓶颈；可以按部署 CPU 隔离情况切换为 `YIELDING` 或 `BLOCKING`。
 
 该场景还复现并修复了一个恢复缺陷：只有 instrument、没有活动订单/风险引用的现货 symbol，在快照恢复后没有
 重建 runtime symbol identity，首笔批量订单会在冻结资金前 fail-fast。`RuntimeStateProjector` 现在从权威

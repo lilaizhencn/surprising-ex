@@ -165,7 +165,7 @@ final class SpotMixedWorkload {
                     laneOperationsByType[type] = laneAfter[type] - laneBefore[type];
                     laneOperations += laneOperationsByType[type];
                 }
-                return harness.state().tradingState().businessStateHash();
+                return harness.state().stateHash();
             }
 
             @Override
@@ -255,33 +255,64 @@ final class SpotMixedWorkload {
 
     private static void executeTwoSidedBurst(Harness harness, Template template, int batchSize,
                                               Set<Long> lifecycleOrders) {
+        List<List<Long>> quotedOrderIds = new ArrayList<>(template.symbols().size());
         for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
             String symbol = template.symbols().get(symbolIndex);
             long maker = template.makers().get(symbolIndex);
-            long taker = template.takers().get(symbolIndex);
             List<Long> quotedIds = placeBatch(harness, maker, symbol, CoreOrderSide.SELL,
                     102, 2, CoreTimeInForce.GTC, batchSize);
+            quotedOrderIds.add(quotedIds);
             lifecycleOrders.addAll(quotedIds);
-            cancelBatch(harness, maker, quotedIds);
+        }
+        harness.drainSubmitted();
+        for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
+            cancelBatch(harness, template.makers().get(symbolIndex), quotedOrderIds.get(symbolIndex));
+        }
+        harness.drainSubmitted();
 
+        long[] partialSellIds = new long[template.symbols().size()];
+        for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
+            String symbol = template.symbols().get(symbolIndex);
+            long maker = template.makers().get(symbolIndex);
             long partialSellId = harness.nextOrderId();
+            partialSellIds[symbolIndex] = partialSellId;
             lifecycleOrders.add(partialSellId);
             harness.submit(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, maker,
                     order(partialSellId, symbol, CoreOrderSide.SELL, 101, batchSize * 2L, CoreTimeInForce.GTC)));
-            harness.drainSubmitted();
-            lifecycleOrders.addAll(placeBatch(harness, taker, symbol, CoreOrderSide.BUY,
+        }
+        harness.drainSubmitted();
+        for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
+            lifecycleOrders.addAll(placeBatch(harness, template.takers().get(symbolIndex),
+                    template.symbols().get(symbolIndex), CoreOrderSide.BUY,
                     101, 1, CoreTimeInForce.IOC, batchSize));
-            cancel(harness, maker, partialSellId);
+        }
+        harness.drainSubmitted();
+        for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
+            cancel(harness, template.makers().get(symbolIndex), partialSellIds[symbolIndex]);
+        }
+        harness.drainSubmitted();
 
+        long[] partialBuyIds = new long[template.symbols().size()];
+        for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
+            String symbol = template.symbols().get(symbolIndex);
+            long maker = template.makers().get(symbolIndex);
             long partialBuyId = harness.nextOrderId();
+            partialBuyIds[symbolIndex] = partialBuyId;
             lifecycleOrders.add(partialBuyId);
             harness.submit(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, maker,
                     order(partialBuyId, symbol, CoreOrderSide.BUY, 99, batchSize * 2L, CoreTimeInForce.GTC)));
-            harness.drainSubmitted();
-            lifecycleOrders.addAll(placeBatch(harness, taker, symbol, CoreOrderSide.SELL,
-                    99, 1, CoreTimeInForce.IOC, batchSize));
-            cancel(harness, maker, partialBuyId);
         }
+        harness.drainSubmitted();
+        for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
+            lifecycleOrders.addAll(placeBatch(harness, template.takers().get(symbolIndex),
+                    template.symbols().get(symbolIndex), CoreOrderSide.SELL,
+                    99, 1, CoreTimeInForce.IOC, batchSize));
+        }
+        harness.drainSubmitted();
+        for (int symbolIndex = 0; symbolIndex < template.symbols().size(); symbolIndex++) {
+            cancel(harness, template.makers().get(symbolIndex), partialBuyIds[symbolIndex]);
+        }
+        harness.drainSubmitted();
     }
 
     private static List<Long> placeBatch(Harness harness, long userId, String symbol, CoreOrderSide side,
@@ -295,7 +326,6 @@ final class SpotMixedWorkload {
         }
         harness.submit(harness.command(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY, userId,
                 TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
-        harness.drainSubmitted();
         return List.copyOf(orderIds);
     }
 
@@ -303,13 +333,11 @@ final class SpotMixedWorkload {
         List<CancelOrderCommand> cancels = orderIds.stream().map(CancelOrderCommand::new).toList();
         harness.submit(harness.command(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY, userId,
                 TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(cancels))));
-        harness.drainSubmitted();
     }
 
     private static void cancel(Harness harness, long userId, long orderId) {
         harness.submit(harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY, userId,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId))));
-        harness.drainSubmitted();
     }
 
     private static long[] completedLaneOperations(CoreProbeState state) {
