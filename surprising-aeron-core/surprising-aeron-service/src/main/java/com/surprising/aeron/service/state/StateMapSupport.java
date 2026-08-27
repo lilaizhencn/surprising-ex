@@ -42,8 +42,15 @@ public final class StateMapSupport {
         return new DeltaMap<>(PersistentTreeMap.from(base), null, base);
     }
 
+    static <K extends Comparable<? super K>, V> NavigableMap<K, V> lazyDelta(
+            Map<K, V> values, RuntimeCommitEntry.Changes<K, V> changes) {
+        NavigableMap<K, V> base = raw(values);
+        if (base == null) base = new TreeMap<>(values);
+        return new LazyDeltaMap<>(base, changes);
+    }
+
     static boolean isDelta(Map<?, ?> values) {
-        if (values instanceof DeltaMap<?, ?>) return true;
+        if (values instanceof DeltaMap<?, ?> || values instanceof LazyDeltaMap<?, ?>) return true;
         return values instanceof FrozenMap<?, ?> frozen && isDelta(frozen.raw());
     }
 
@@ -59,6 +66,7 @@ public final class StateMapSupport {
 
     static <K> Set<K> changedKeys(Map<K, ?> values) {
         if (values instanceof DeltaMap<?, ?> delta) return (Set<K>) delta.changedKeys();
+        if (values instanceof LazyDeltaMap<?, ?> delta) return (Set<K>) delta.changedKeys();
         if (values instanceof FrozenMap<?, ?> frozen) return changedKeys((Map<K, ?>) frozen.raw());
         return Set.of();
     }
@@ -71,12 +79,20 @@ public final class StateMapSupport {
         if (before == after) return Set.of();
         NavigableMap<K, ?> rawBefore = (NavigableMap<K, ?>) rawUntyped(before);
         NavigableMap<K, ?> current = (NavigableMap<K, ?>) rawUntyped(after);
-        if (rawBefore != null && current instanceof DeltaMap<?, ?>) {
+        if (rawBefore != null && (current instanceof DeltaMap<?, ?> || current instanceof LazyDeltaMap<?, ?>)) {
             Set<K> changed = new TreeSet<>(rawBefore.comparator());
-            while (current instanceof DeltaMap<?, ?> delta) {
-                changed.addAll((Set<K>) delta.changedKeys());
-                if (delta.base() == rawBefore) return Collections.unmodifiableSet(changed);
-                current = (NavigableMap<K, ?>) delta.base();
+            while (current instanceof DeltaMap<?, ?> || current instanceof LazyDeltaMap<?, ?>) {
+                NavigableMap<K, ?> base;
+                if (current instanceof DeltaMap<?, ?> delta) {
+                    changed.addAll((Set<K>) delta.changedKeys());
+                    base = (NavigableMap<K, ?>) delta.base();
+                } else {
+                    LazyDeltaMap<?, ?> delta = (LazyDeltaMap<?, ?>) current;
+                    changed.addAll((Set<K>) delta.changedKeys());
+                    base = (NavigableMap<K, ?>) delta.base();
+                }
+                if (base == rawBefore) return Collections.unmodifiableSet(changed);
+                current = base;
             }
         }
         Set<K> changed = new TreeSet<>(rawBefore == null ? null : rawBefore.comparator());
@@ -90,16 +106,19 @@ public final class StateMapSupport {
         if (before == after) return true;
         NavigableMap<?, ?> rawBefore = rawUntyped(before);
         NavigableMap<?, ?> rawAfter = rawUntyped(after);
-        return rawAfter instanceof DeltaMap<?, ?> delta && delta.base() == rawBefore;
+        if (rawAfter instanceof DeltaMap<?, ?> delta) return delta.base() == rawBefore;
+        return rawAfter instanceof LazyDeltaMap<?, ?> lazy && lazy.base() == rawBefore;
     }
 
     static boolean isDeltaDescendantOf(Map<?, ?> before, Map<?, ?> after) {
         if (before == after) return true;
         NavigableMap<?, ?> rawBefore = rawUntyped(before);
         NavigableMap<?, ?> current = rawUntyped(after);
-        while (current instanceof DeltaMap<?, ?> delta) {
-            if (delta.base() == rawBefore) return true;
-            current = delta.base();
+        while (current instanceof DeltaMap<?, ?> || current instanceof LazyDeltaMap<?, ?>) {
+            NavigableMap<?, ?> base = current instanceof DeltaMap<?, ?> delta
+                    ? delta.base() : ((LazyDeltaMap<?, ?>) current).base();
+            if (base == rawBefore) return true;
+            current = base;
         }
         return false;
     }
@@ -224,6 +243,147 @@ public final class StateMapSupport {
 
         @Override
         public K lastKey() { return delegate.lastKey(); }
+    }
+
+    private static final class LazyDeltaMap<K extends Comparable<? super K>, V>
+            extends AbstractMap<K, V> implements NavigableMap<K, V> {
+        private final NavigableMap<K, V> base;
+        private final Set<K> changedKeys;
+        private final Map<K, V> afterValues;
+        private final int size;
+        private volatile NavigableMap<K, V> materialized;
+
+        private LazyDeltaMap(NavigableMap<K, V> base, RuntimeCommitEntry.Changes<K, V> changes) {
+            this.base = base;
+            changedKeys = changes.keys();
+            afterValues = changes.afterValues();
+            int nextSize = base.size();
+            for (K key : changedKeys) {
+                boolean existed = base.containsKey(key);
+                boolean exists = afterValues.containsKey(key);
+                if (existed && !exists) nextSize--;
+                else if (!existed && exists) nextSize++;
+            }
+            size = nextSize;
+        }
+
+        private NavigableMap<K, V> base() {
+            return base;
+        }
+
+        private Set<K> changedKeys() {
+            return changedKeys;
+        }
+
+        private NavigableMap<K, V> materialized() {
+            NavigableMap<K, V> current = materialized;
+            if (current != null) return current;
+            TreeMap<K, V> next = new TreeMap<>(base.comparator());
+            next.putAll(base);
+            for (K key : changedKeys) {
+                V value = afterValues.get(key);
+                if (value == null) next.remove(key); else next.put(key, value);
+            }
+            current = Collections.unmodifiableNavigableMap(next);
+            materialized = current;
+            return current;
+        }
+
+        @Override
+        public V get(Object key) {
+            return changedKeys.contains(key) ? afterValues.get(key) : base.get(key);
+        }
+
+        @Override
+        public boolean containsKey(Object key) {
+            return changedKeys.contains(key) ? afterValues.containsKey(key) : base.containsKey(key);
+        }
+
+        @Override
+        public int size() {
+            return size;
+        }
+
+        @Override
+        public Set<Entry<K, V>> entrySet() { return materialized().entrySet(); }
+
+        @Override
+        public Comparator<? super K> comparator() { return base.comparator(); }
+
+        @Override
+        public Entry<K, V> lowerEntry(K key) { return materialized().lowerEntry(key); }
+
+        @Override
+        public K lowerKey(K key) { return materialized().lowerKey(key); }
+
+        @Override
+        public Entry<K, V> floorEntry(K key) { return materialized().floorEntry(key); }
+
+        @Override
+        public K floorKey(K key) { return materialized().floorKey(key); }
+
+        @Override
+        public Entry<K, V> ceilingEntry(K key) { return materialized().ceilingEntry(key); }
+
+        @Override
+        public K ceilingKey(K key) { return materialized().ceilingKey(key); }
+
+        @Override
+        public Entry<K, V> higherEntry(K key) { return materialized().higherEntry(key); }
+
+        @Override
+        public K higherKey(K key) { return materialized().higherKey(key); }
+
+        @Override
+        public Entry<K, V> firstEntry() { return materialized().firstEntry(); }
+
+        @Override
+        public Entry<K, V> lastEntry() { return materialized().lastEntry(); }
+
+        @Override
+        public Entry<K, V> pollFirstEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public Entry<K, V> pollLastEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public NavigableMap<K, V> descendingMap() { return materialized().descendingMap(); }
+
+        @Override
+        public NavigableSet<K> navigableKeySet() { return materialized().navigableKeySet(); }
+
+        @Override
+        public NavigableSet<K> descendingKeySet() { return materialized().descendingKeySet(); }
+
+        @Override
+        public NavigableMap<K, V> subMap(K fromKey, boolean fromInclusive, K toKey, boolean toInclusive) {
+            return materialized().subMap(fromKey, fromInclusive, toKey, toInclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> headMap(K toKey, boolean inclusive) {
+            return materialized().headMap(toKey, inclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> tailMap(K fromKey, boolean inclusive) {
+            return materialized().tailMap(fromKey, inclusive);
+        }
+
+        @Override
+        public SortedMap<K, V> subMap(K fromKey, K toKey) { return materialized().subMap(fromKey, toKey); }
+
+        @Override
+        public SortedMap<K, V> headMap(K toKey) { return materialized().headMap(toKey); }
+
+        @Override
+        public SortedMap<K, V> tailMap(K fromKey) { return materialized().tailMap(fromKey); }
+
+        @Override
+        public K firstKey() { return materialized().firstKey(); }
+
+        @Override
+        public K lastKey() { return materialized().lastKey(); }
     }
 
     private static final class DeltaMap<K, V> extends AbstractMap<K, V> implements NavigableMap<K, V> {

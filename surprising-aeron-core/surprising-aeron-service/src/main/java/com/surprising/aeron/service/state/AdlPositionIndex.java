@@ -33,6 +33,15 @@ public final class AdlPositionIndex {
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<Long, CoreUserState> changes) {
+        for (Long userId : changes.keys()) {
+            CoreUserState previous = changes.before(userId);
+            CoreUserState current = changes.after(userId);
+            if (previous != null) previous.positions().values().forEach(position -> remove(userId, position));
+            if (current != null) current.positions().values().forEach(position -> add(userId, position));
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         keysByAsset.clear();
         state.users().values().forEach(user -> user.positions().values()

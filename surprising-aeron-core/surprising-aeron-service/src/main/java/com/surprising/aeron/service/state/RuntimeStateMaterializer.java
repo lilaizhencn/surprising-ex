@@ -312,14 +312,14 @@ public final class RuntimeStateMaterializer {
                 riskState, treasuryState, leverages, algoOrders, timers, clients, triggers);
     }
 
-    private static OrderReservation reservation(ReservationRuntime value, RuntimeIdentityRegistry identities) {
+    static OrderReservation reservation(ReservationRuntime value, RuntimeIdentityRegistry identities) {
         return new OrderReservation(value.orderId(), identities.symbol(value.symbolId()), value.instrumentVersion(),
                 value.kind(), identities.asset(value.assetId()), value.totalReservedUnits(), value.releasedUnits(),
                 value.consumedUnits(), value.orderQuantitySteps());
     }
 
-    private static CorePositionState position(long positionKey, PositionRuntime value,
-                                              RuntimeIdentityRegistry identities) {
+    static CorePositionState position(long positionKey, PositionRuntime value,
+                                      RuntimeIdentityRegistry identities) {
         String identity = identities.positionKey(value.userId(), positionKey);
         CorePositionState result = new CorePositionState(identities.symbol(value.symbolId()),
                 identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
@@ -342,15 +342,15 @@ public final class RuntimeStateMaterializer {
                 value.updatedAtEpochMillis(), value.clusterPosition(), value.status(), value.revision());
     }
 
-    private static CoreRiskSnapshot riskSnapshot(RiskSnapshotRuntime value,
-                                                 RuntimeIdentityRegistry identities) {
+    static CoreRiskSnapshot riskSnapshot(RiskSnapshotRuntime value,
+                                         RuntimeIdentityRegistry identities) {
         return new CoreRiskSnapshot(value.userId(), identities.symbol(value.symbolId()), value.positionSide(),
                 value.priceSequence(), value.equityUnits(), value.unrealizedPnlUnits(),
                 value.maintenanceMarginUnits(), value.marginRatioPpm(), value.status());
     }
 
-    private static CoreLiquidationState liquidation(LiquidationRuntime value,
-                                                    RuntimeIdentityRegistry identities) {
+    static CoreLiquidationState liquidation(LiquidationRuntime value,
+                                            RuntimeIdentityRegistry identities) {
         return new CoreLiquidationState(value.liquidationId(), value.userId(),
                 identities.symbol(value.symbolId()), value.marginMode(), value.positionSide(),
                 value.instrumentVersion(), value.triggerPriceSequence(), value.signedQuantitySteps(),
@@ -359,8 +359,8 @@ public final class RuntimeStateMaterializer {
                 value.nextCancelOrderId());
     }
 
-    private static CoreRiskState.RiskScan riskScan(RiskScanRuntime value,
-                                                   RuntimeIdentityRegistry identities) {
+    static CoreRiskState.RiskScan riskScan(RiskScanRuntime value,
+                                           RuntimeIdentityRegistry identities) {
         return new CoreRiskState.RiskScan(identities.symbol(value.symbolId()), value.accountLaneId(),
                 value.priceSequence(),
                 value.scanStartPriceSequence(), value.lastUserId(), value.riskComplete(), value.riskUserId(),
@@ -381,9 +381,9 @@ public final class RuntimeStateMaterializer {
         }
     }
 
-    private static CoreTreasuryState treasuryTransition(RuntimeMutationDelta.TreasuryValues changes,
-                                                        RuntimeIdentityRegistry identities,
-                                                        CoreTreasuryState previous) {
+    static CoreTreasuryState treasuryTransition(RuntimeMutationDelta.TreasuryValues changes,
+                                                RuntimeIdentityRegistry identities,
+                                                CoreTreasuryState previous) {
         Map<String, Long> fees = StateMapSupport.delta(previous.feeBalances());
         Map<String, Long> insurance = StateMapSupport.delta(previous.insuranceBalances());
         Map<String, Long> deficits = StateMapSupport.delta(previous.insuranceDeficits());

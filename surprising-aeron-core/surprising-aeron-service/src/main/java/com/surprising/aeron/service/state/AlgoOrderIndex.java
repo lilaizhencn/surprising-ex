@@ -75,6 +75,15 @@ public final class AlgoOrderIndex {
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<Long, CoreAlgoOrderState> changes) {
+        for (Long id : changes.keys()) {
+            CoreAlgoOrderState previous = changes.before(id);
+            CoreAlgoOrderState current = changes.after(id);
+            if (previous != null) remove(previous);
+            if (current != null) add(current);
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         idsByUser.clear();
         idsBySymbol.clear();

@@ -94,6 +94,39 @@ public final class RollingBusinessStateHash {
         }
     }
 
+    public void update(RuntimeCommitEntry entry) {
+        if (entry == null || entry.productLine().ordinal() != productLine) {
+            throw new IllegalArgumentException("invalid business hash commit");
+        }
+        revision = entry.revision();
+        updateUsers(entry.users());
+        updateChanges(orders, entry.orders(), order -> !order.status().terminal());
+        updateChanges(instruments, entry.instruments());
+        updateChanges(leverages, entry.leverages());
+        updateChanges(algoOrders, entry.algoOrders(), algo -> !algo.terminal());
+        updateChanges(timers, entry.timers());
+        updateChanges(triggers, entry.triggers(), trigger -> trigger.status().open());
+        updateChanges(markPrices, entry.markPrices());
+        updateChanges(riskSnapshots, entry.riskSnapshots());
+        updateChanges(liquidations, entry.liquidations(), liquidation -> !liquidation.terminal());
+        updateChanges(riskScans, entry.riskScans());
+        nextLiquidationId = entry.afterNextLiquidationId();
+        riskScanControlHash = stable(entry.afterRiskScanControl());
+        CoreTreasuryState before = entry.beforeTreasury();
+        CoreTreasuryState after = entry.afterTreasury();
+        updateMap(feeBalances, before.feeBalances(), after.feeBalances());
+        updateMap(insuranceBalances, before.insuranceBalances(), after.insuranceBalances());
+        updateMap(insuranceDeficits, before.insuranceDeficits(), after.insuranceDeficits());
+        updateMap(liquidationFeeBalances, before.liquidationFeeBalances(), after.liquidationFeeBalances());
+        updateMap(fundingResidualBalances, before.fundingResidualBalances(), after.fundingResidualBalances());
+        updateMap(roundingResidualBalances, before.roundingResidualBalances(), after.roundingResidualBalances());
+        updateMap(clearingPnlBalances, before.clearingPnlBalances(), after.clearingPnlBalances());
+        updateMap(fundingSettlements, before.fundingSettlements(), after.fundingSettlements());
+        updateMap(lifecycleSettlements, before.lifecycleSettlements(), after.lifecycleSettlements());
+        updateMap(fundingProgress, before.fundingProgress(), after.fundingProgress());
+        updateMap(lifecycleProgress, before.lifecycleProgress(), after.lifecycleProgress());
+    }
+
     public void restore(TradingCoreState state) {
         revision = state.revision();
         nextLiquidationId = state.riskState().nextLiquidationId();
@@ -194,6 +227,39 @@ public final class RollingBusinessStateHash {
                 userHashes.put(userId, nextHash);
                 users.add(entryHash(userId, nextHash.value()));
             }
+        }
+    }
+
+    private void updateUsers(RuntimeCommitEntry.Changes<Long, CoreUserState> changes) {
+        for (Long userId : changes.keys()) {
+            UserHash previousHash = userHashes.remove(userId);
+            CoreUserState previous = changes.before(userId);
+            if (previous != null) {
+                if (previousHash == null) previousHash = UserHash.create(previous);
+                users.remove(entryHash(userId, previousHash.value()));
+            }
+            CoreUserState next = changes.after(userId);
+            if (next != null) {
+                UserHash nextHash = previousHash == null
+                        ? UserHash.create(next) : previousHash.update(previous, next);
+                userHashes.put(userId, nextHash);
+                users.add(entryHash(userId, nextHash.value()));
+            }
+        }
+    }
+
+    private static <K extends Comparable<? super K>, V> void updateChanges(
+            Aggregate target, RuntimeCommitEntry.Changes<K, V> changes) {
+        updateChanges(target, changes, ignored -> true);
+    }
+
+    private static <K extends Comparable<? super K>, V> void updateChanges(
+            Aggregate target, RuntimeCommitEntry.Changes<K, V> changes, Predicate<V> included) {
+        for (K key : changes.keys()) {
+            V previous = changes.before(key);
+            if (previous != null && included.test(previous)) target.remove(entryHash(key, previous));
+            V next = changes.after(key);
+            if (next != null && included.test(next)) target.add(entryHash(key, next));
         }
     }
 

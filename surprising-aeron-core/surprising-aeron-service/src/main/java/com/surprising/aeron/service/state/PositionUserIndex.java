@@ -42,6 +42,15 @@ public final class PositionUserIndex {
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<Long, CoreUserState> changes) {
+        for (Long userId : changes.keys()) {
+            CoreUserState previous = changes.before(userId);
+            CoreUserState current = changes.after(userId);
+            if (previous != null) previous.positions().values().forEach(position -> remove(position.symbol(), userId));
+            if (current != null) current.positions().values().forEach(position -> add(position.symbol(), userId));
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         usersBySymbol.clear();
         state.users().values().forEach(user -> user.positions().values()

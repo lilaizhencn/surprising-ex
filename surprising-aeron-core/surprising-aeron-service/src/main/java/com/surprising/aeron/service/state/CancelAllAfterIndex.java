@@ -61,6 +61,15 @@ public final class CancelAllAfterIndex {
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<CoreCancelAllAfterKey, CoreCancelAllAfterState> changes) {
+        for (CoreCancelAllAfterKey key : changes.keys()) {
+            CoreCancelAllAfterState previous = changes.before(key);
+            CoreCancelAllAfterState current = changes.after(key);
+            if (previous != null) remove(previous);
+            if (current != null) add(current);
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         idsByUser.clear();
         allDue.clear();

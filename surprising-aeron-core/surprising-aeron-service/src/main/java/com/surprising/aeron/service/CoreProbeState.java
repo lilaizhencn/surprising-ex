@@ -180,6 +180,9 @@ public final class CoreProbeState implements AutoCloseable {
     private final TerminalStateRetention terminalRetention;
     private final com.surprising.aeron.service.state.RollingBusinessStateHash rollingBusinessStateHash;
     private final com.surprising.aeron.service.state.RollingFundsStateHash rollingFundsStateHash;
+    private final com.surprising.aeron.service.state.RuntimeCommitLedger runtimeCommitLedger;
+    private final com.surprising.aeron.service.state.RuntimeProjectionJournal runtimeProjectionJournal;
+    private long adoptedProjectionSequence;
     private long appliedCommandCount;
     private long committedCoreSequence;
     private long probeValue;
@@ -315,6 +318,9 @@ public final class CoreProbeState implements AutoCloseable {
         this.riskSnapshotIndex = runtime.riskSnapshotsForConstruction();
         this.runtimePlaceOrderIdentities = runtime.identitiesForConstruction();
         this.runtimePlaceOrderState = runtime.runtimeStateForConstruction();
+        this.runtimeCommitLedger = new com.surprising.aeron.service.state.RuntimeCommitLedger(snapshotState);
+        this.runtimeProjectionJournal = new com.surprising.aeron.service.state.RuntimeProjectionJournal(
+                productLine, snapshotState, rollingBusinessStateHash.value(), rollingFundsStateHash.value());
         this.cachedFeePolicyHash = 0;
         this.cachedTransferHash = 0;
     }
@@ -862,8 +868,7 @@ public final class CoreProbeState implements AutoCloseable {
         try {
             commandDelta = commandDelta(beforeTradingState, snapshotState, exportCommand);
         } catch (IllegalStateException exception) {
-            restoreCommandState(beforeTradingState);
-            return rejected(CoreResultCode.INVALID_COMMAND);
+            throw new IllegalStateException("command delta failed after typed state commit", exception);
         }
         if (status == ResponseStatus.APPLIED) {
             validateFundsConservation(message, beforeTradingState, snapshotState, commandDelta);
@@ -1851,11 +1856,7 @@ public final class CoreProbeState implements AutoCloseable {
         try {
             commandDelta = commandDelta(before, snapshotState, true);
         } catch (RuntimeException exception) {
-            if (tradingStateChanged) {
-                restoreCommandState(before);
-            }
-            return deferredPending == null ? rejected(CoreResultCode.INVALID_COMMAND)
-                    : recordRejectedDeferredMatching(deferredPending, CoreResultCode.INVALID_COMMAND);
+            throw new IllegalStateException("matching delta failed after typed state commit", exception);
         }
         long businessStateHash = tradingStateChanged ? currentBusinessStateHash() : cachedBusinessStateHash;
         long requiredExportSequence = 0;
@@ -3764,6 +3765,19 @@ public final class CoreProbeState implements AutoCloseable {
             if (laneCommandContexts.inFlight() != 0 || matchingCompletions.depth() != 0) {
                 throw new IllegalStateException("snapshot fence contains unfinished lane or matcher work");
             }
+            if (fence.projectionSequence < 0) {
+                fence.projectionSequence = runtimeProjectionJournal.publishedSequence();
+                runtimeProjectionJournal.requestProjection(fence.projectionSequence);
+            }
+            if (runtimeProjectionJournal.projectedSequence() < fence.projectionSequence) return null;
+            var projection = runtimeProjectionJournal.await(
+                    fence.projectionSequence, fence.deadlineNanos, true);
+            if (projection.businessStateHash() != rollingBusinessStateHash.value()
+                    || projection.fundsStateHash() != rollingFundsStateHash.value()) {
+                throw new IllegalStateException("snapshot projection fence hash mismatch");
+            }
+            snapshotState = projection.state();
+            adoptedProjectionSequence = projection.sequence();
             if (fence.matcherSnapshot == null) {
                 fence.coreSequence = appliedCommandCount;
                 CompletableFuture<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
@@ -3838,6 +3852,7 @@ public final class CoreProbeState implements AutoCloseable {
         private final long snapshotId;
         private long deadlineNanos;
         private long coreSequence = -1;
+        private long projectionSequence = -1;
         private CompletableFuture<MatcherSnapshot> matcherSnapshot;
         private CompletableFuture<SectionedCoreSnapshotCodec.SectionedSnapshot> encodedSnapshot;
 
@@ -4508,26 +4523,42 @@ public final class CoreProbeState implements AutoCloseable {
 
     private void projectSnapshotNow(
             com.surprising.aeron.service.state.TradingRuntimeState.AccountLaneApplyResult laneApply) {
+        adoptProjectedSnapshotState();
         TradingCoreState previous = snapshotState;
         com.surprising.aeron.service.state.RuntimeMutationDelta mutation =
                 laneApply == null
                         ? runtimePlaceOrderState.captureMutationDelta()
                         : runtimePlaceOrderState.captureMutationDelta(laneApply);
-        TradingCoreState materialized = RuntimeStateMaterializer.materializeTransition(
-                mutation, runtimePlaceOrderIdentities, previous);
+        long projectionSequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
+        com.surprising.aeron.service.state.RuntimeCommitEntry commit = runtimeCommitLedger.capture(
+                projectionSequence, mutation, runtimePlaceOrderIdentities);
+        TradingCoreState materialized = commit.transitionView(previous);
         long previousBusinessStateHash = rollingBusinessStateHash.value();
-        rollingBusinessStateHash.update(previous, materialized);
-        rollingFundsStateHash.update(previous, materialized);
-        runtime.commitRuntimeTransition(previous, materialized,
+        rollingBusinessStateHash.update(commit);
+        rollingFundsStateHash.update(commit);
+        runtime.commitRuntimeTransition(commit,
                 previousBusinessStateHash, rollingBusinessStateHash.value());
+        runtimeCommitLedger.commit(commit);
         seedChangeAccumulators();
-        for (Long userId : StateMapSupport.changedKeys(previous.users(), materialized.users())) {
-            if (!java.util.Objects.equals(previous.user(userId), materialized.user(userId))) {
+        for (Long userId : commit.users().keys()) {
+            if (!java.util.Objects.equals(commit.users().before(userId), commit.users().after(userId))) {
                 changedUserIds.add(userId);
             }
         }
-        changedTreasuryAssets.addAll(treasuryAssetChanges(previous.treasuryState(), materialized.treasuryState()));
+        changedTreasuryAssets.addAll(treasuryAssetChanges(commit.beforeTreasury(), commit.afterTreasury()));
         snapshotState = materialized;
+        runtimeProjectionJournal.publish(commit, rollingBusinessStateHash.value(), rollingFundsStateHash.value());
+    }
+
+    private void adoptProjectedSnapshotState() {
+        var transition = runtimeProjectionJournal.transitionViewToPublished(adoptedProjectionSequence);
+        if (transition == null) return;
+        if (transition.businessStateHash() != rollingBusinessStateHash.value()
+                || transition.fundsStateHash() != rollingFundsStateHash.value()) {
+            throw new IllegalStateException("current typed projection hash mismatch");
+        }
+        snapshotState = transition.state();
+        adoptedProjectionSequence = transition.projectedSequence();
     }
 
     private static java.util.Set<String> treasuryAssetChanges(
@@ -5038,6 +5069,7 @@ public final class CoreProbeState implements AutoCloseable {
         pendingLifecycleScopes.clear();
         pendingOrderBatches.clear();
         deferredMatching.clear();
+        runtimeProjectionJournal.close();
         runtime.close();
     }
 

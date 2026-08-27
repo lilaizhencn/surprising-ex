@@ -46,6 +46,31 @@ public final class RollingFundsStateHash {
         updateMap(clearingPnl, previous.clearingPnlBalances(), current.clearingPnlBalances());
     }
 
+    public void update(RuntimeCommitEntry entry) {
+        if (entry == null || entry.productLine().ordinal() != productLine) {
+            throw new IllegalArgumentException("invalid funds hash commit");
+        }
+        for (Long userId : entry.users().keys()) {
+            Long previousHash = userHashes.remove(userId);
+            if (previousHash != null) users.remove(entryHash(userId, previousHash));
+            CoreUserState current = entry.users().after(userId);
+            if (current != null) {
+                long currentHash = hashUser(current);
+                userHashes.put(userId, currentHash);
+                users.add(entryHash(userId, currentHash));
+            }
+        }
+        CoreTreasuryState previous = entry.beforeTreasury();
+        CoreTreasuryState current = entry.afterTreasury();
+        updateMap(fees, previous.feeBalances(), current.feeBalances());
+        updateMap(insurance, previous.insuranceBalances(), current.insuranceBalances());
+        updateMap(deficits, previous.insuranceDeficits(), current.insuranceDeficits());
+        updateMap(liquidationFees, previous.liquidationFeeBalances(), current.liquidationFeeBalances());
+        updateMap(fundingResiduals, previous.fundingResidualBalances(), current.fundingResidualBalances());
+        updateMap(roundingResiduals, previous.roundingResidualBalances(), current.roundingResidualBalances());
+        updateMap(clearingPnl, previous.clearingPnlBalances(), current.clearingPnlBalances());
+    }
+
     public void restore(TradingCoreState state) {
         rebuild(state);
     }

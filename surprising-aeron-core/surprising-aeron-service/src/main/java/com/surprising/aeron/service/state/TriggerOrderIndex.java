@@ -287,6 +287,21 @@ public final class TriggerOrderIndex {
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<Long, CoreTriggerOrderState> changes) {
+        for (Long id : changes.keys()) {
+            CoreTriggerOrderState previous = changes.before(id);
+            CoreTriggerOrderState current = changes.after(id);
+            if (previous != null) remove(previous, id);
+            if (previous != null && !previous.clientTriggerOrderId().isEmpty()) {
+                idsByClient.remove(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
+            }
+            if (current != null) add(current);
+            if (current != null && !current.clientTriggerOrderId().isEmpty()) {
+                idsByClient.put(new ClientTriggerKey(current.userId(), current.clientTriggerOrderId()), id);
+            }
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         idsBySymbol.clear();
         idsBySymbolStatus.clear();

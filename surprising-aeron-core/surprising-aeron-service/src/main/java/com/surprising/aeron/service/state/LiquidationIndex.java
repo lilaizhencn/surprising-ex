@@ -39,6 +39,15 @@ public final class LiquidationIndex {
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<Long, CoreLiquidationState> changes) {
+        for (Long id : changes.keys()) {
+            CoreLiquidationState previous = changes.before(id);
+            CoreLiquidationState current = changes.after(id);
+            if (isActive(previous)) remove(previous);
+            if (isActive(current)) add(current);
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         activeIds.clear();
         allActiveIds.clear();

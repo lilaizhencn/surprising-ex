@@ -155,6 +155,15 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<Long, CoreOrderState> changes) {
+        for (Long orderId : changes.keys()) {
+            CoreOrderState previous = changes.before(orderId);
+            CoreOrderState current = changes.after(orderId);
+            if (isActive(previous)) remove(previous);
+            if (isActive(current)) add(current);
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         idsByUser.clear();
         idsBySymbol.clear();

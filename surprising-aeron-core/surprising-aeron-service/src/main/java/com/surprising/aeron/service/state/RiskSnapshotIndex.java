@@ -39,6 +39,15 @@ public final class RiskSnapshotIndex {
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<String, CoreRiskSnapshot> changes) {
+        for (String key : changes.keys()) {
+            CoreRiskSnapshot previous = changes.before(key);
+            CoreRiskSnapshot current = changes.after(key);
+            if (previous != null) remove(previous.userId(), key);
+            if (current != null) add(current.userId(), key);
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         keysByUser.clear();
         allKeys.clear();

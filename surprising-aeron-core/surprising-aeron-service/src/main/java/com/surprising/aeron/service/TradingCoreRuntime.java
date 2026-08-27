@@ -12,6 +12,7 @@ import com.surprising.aeron.service.state.PositionUserIndex;
 import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.RuntimeCommitEntry;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -240,26 +241,23 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return riskSnapshots;
     }
 
-    void commitRuntimeTransition(TradingCoreState before, TradingCoreState materializedAfter,
+    void commitRuntimeTransition(RuntimeCommitEntry entry,
                                  long beforeBusinessStateHash, long afterBusinessStateHash) {
         assertOwner();
-        if (before == null || materializedAfter == null
-                || before.productLine() != productLine || materializedAfter.productLine() != productLine
-                || before.revision() != committedRevision
-                || beforeBusinessStateHash != committedBusinessStateHash
-                || materializedAfter.revision() < before.revision()) {
-            throw new IllegalStateException("runtime transition is out of order");
+        if (entry == null || entry.productLine() != productLine || entry.revision() < committedRevision
+                || beforeBusinessStateHash != committedBusinessStateHash) {
+            throw new IllegalStateException("typed runtime transition is out of order");
         }
-        positionUsers.update(before, materializedAfter);
-        openInterest.update(before, materializedAfter);
-        triggers.update(before, materializedAfter);
-        algos.update(before, materializedAfter);
-        liquidations.update(before, materializedAfter);
-        timers.update(before, materializedAfter);
-        activeOrders.update(before, materializedAfter);
-        adlPositions.update(before, materializedAfter);
-        riskSnapshots.update(before, materializedAfter);
-        committedRevision = materializedAfter.revision();
+        positionUsers.update(entry.users());
+        openInterest.update(entry.users());
+        triggers.update(entry.triggers());
+        algos.update(entry.algoOrders());
+        liquidations.update(entry.liquidations());
+        timers.update(entry.timers());
+        activeOrders.update(entry.orders());
+        adlPositions.update(entry.users());
+        riskSnapshots.update(entry.riskSnapshots());
+        committedRevision = entry.revision();
         committedBusinessStateHash = afterBusinessStateHash;
         runtimeState.clearChangedKeys();
     }

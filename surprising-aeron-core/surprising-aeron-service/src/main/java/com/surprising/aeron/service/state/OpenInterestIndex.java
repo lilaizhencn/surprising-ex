@@ -36,6 +36,15 @@ public final class OpenInterestIndex {
         }
     }
 
+    public void update(RuntimeCommitEntry.Changes<Long, CoreUserState> changes) {
+        for (Long userId : changes.keys()) {
+            CoreUserState previous = changes.before(userId);
+            CoreUserState current = changes.after(userId);
+            if (previous != null) previous.positions().values().forEach(this::remove);
+            if (current != null) current.positions().values().forEach(this::add);
+        }
+    }
+
     public void rebuild(TradingCoreState state) {
         totals.clear();
         state.users().values().forEach(user -> user.positions().values().forEach(this::add));

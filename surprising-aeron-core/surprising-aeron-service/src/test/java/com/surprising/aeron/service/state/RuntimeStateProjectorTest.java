@@ -68,6 +68,86 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
+    void typedCommitProjectsOffOwnerAndPreservesRollingHashes() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState before = reducer.adjustBalance(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                7, new BalanceAdjustmentCommand("USDT", 1_000));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        RuntimeCommitLedger ledger = new RuntimeCommitLedger(before);
+        RollingBusinessStateHash businessHash = RollingBusinessStateHash.create(before);
+        RollingFundsStateHash fundsHash = RollingFundsStateHash.create(before);
+
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
+                new BalanceAdjustmentCommand("USDT", 250));
+        RuntimeMutationDelta mutation = runtime.captureMutationDelta();
+        RuntimeCommitEntry commit = ledger.capture(1, mutation, identities);
+        ledger.commit(commit);
+        TradingCoreState expected = RuntimeStateMaterializer.materializeTransition(mutation, identities, before);
+        businessHash.update(commit);
+        fundsHash.update(commit);
+
+        try (RuntimeProjectionJournal journal = new RuntimeProjectionJournal(
+                ProductLine.LINEAR_PERPETUAL, before, before.businessStateHash(),
+                RollingFundsStateHash.compute(before))) {
+            journal.publish(commit, businessHash.value(), fundsHash.value());
+            RuntimeProjectionJournal.ProjectionVersion projected = journal.await(
+                    1, System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5), true);
+
+            assertThat(commit.transitionView(before)).isEqualTo(expected);
+            assertThat(projected.state()).isEqualTo(expected);
+            assertThat(projected.businessStateHash()).isEqualTo(expected.businessStateHash());
+            assertThat(projected.fundsStateHash()).isEqualTo(RollingFundsStateHash.compute(expected));
+        }
+    }
+
+    @Test
+    void coalescesContiguousTypedCommitsWithoutChangingTheFinalState() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState before = reducer.adjustBalance(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                7, new BalanceAdjustmentCommand("USDT", 1_000));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        RuntimeCommitLedger ledger = new RuntimeCommitLedger(before);
+        RollingBusinessStateHash businessHash = RollingBusinessStateHash.create(before);
+        RollingFundsStateHash fundsHash = RollingFundsStateHash.create(before);
+
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
+                new BalanceAdjustmentCommand("USDT", 250));
+        RuntimeMutationDelta firstMutation = runtime.captureMutationDelta();
+        RuntimeCommitEntry first = ledger.capture(1, firstMutation, identities);
+        ledger.commit(first);
+        runtime.clearChangedKeys();
+        TradingCoreState firstState = RuntimeStateMaterializer.materializeTransition(
+                firstMutation, identities, before);
+        businessHash.update(first);
+        fundsHash.update(first);
+
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
+                new BalanceAdjustmentCommand("USDT", -100));
+        RuntimeMutationDelta secondMutation = runtime.captureMutationDelta();
+        RuntimeCommitEntry second = ledger.capture(2, secondMutation, identities);
+        ledger.commit(second);
+        TradingCoreState expected = RuntimeStateMaterializer.materializeTransition(
+                secondMutation, identities, firstState);
+        businessHash.update(second);
+        fundsHash.update(second);
+
+        RuntimeCommitEntry merged = RuntimeCommitEntry.coalesce(List.of(first, second));
+        assertThat(merged.project(before)).isEqualTo(expected);
+        try (RuntimeProjectionJournal journal = new RuntimeProjectionJournal(
+                ProductLine.LINEAR_PERPETUAL, before, before.businessStateHash(),
+                RollingFundsStateHash.compute(before))) {
+            journal.publish(first, RollingBusinessStateHash.create(firstState).value(),
+                    RollingFundsStateHash.compute(firstState));
+            journal.publish(second, businessHash.value(), fundsHash.value());
+            RuntimeProjectionJournal.ProjectionVersion projected = journal.await(
+                    2, System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5), true);
+            assertThat(projected.state()).isEqualTo(expected);
+        }
+    }
+
+    @Test
     void keepsRuntimeInParityAcrossIncrementalPlaceAndStampTransitions() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
