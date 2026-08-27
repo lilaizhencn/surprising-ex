@@ -14,6 +14,8 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 @SuppressWarnings("unchecked")
 public final class StateMapSupport {
@@ -42,16 +44,27 @@ public final class StateMapSupport {
         return new DeltaMap<>(PersistentTreeMap.from(base), null, base);
     }
 
-    static <K extends Comparable<? super K>, V> NavigableMap<K, V> lazyDelta(
-            Map<K, V> values, RuntimeCommitEntry.Changes<K, V> changes) {
+    static <K extends Comparable<? super K>, V> NavigableMap<K, V> deferredDelta(
+            Map<K, V> values, Set<K> changedKeys, Set<K> presentKeys, Function<K, V> loader) {
+        if (changedKeys == null || presentKeys == null || loader == null
+                || !changedKeys.containsAll(presentKeys)) {
+            throw new IllegalArgumentException("invalid deferred state delta");
+        }
         NavigableMap<K, V> base = raw(values);
         if (base == null) base = new TreeMap<>(values);
-        return new LazyDeltaMap<>(base, changes);
+        Map<K, V> cache = new ConcurrentHashMap<>();
+        return new LazyDeltaMap<>(base, changedKeys, presentKeys,
+                key -> cache.computeIfAbsent(key, loader), true);
     }
 
     static boolean isDelta(Map<?, ?> values) {
         if (values instanceof DeltaMap<?, ?> || values instanceof LazyDeltaMap<?, ?>) return true;
         return values instanceof FrozenMap<?, ?> frozen && isDelta(frozen.raw());
+    }
+
+    static boolean isDeferred(Map<?, ?> values) {
+        if (values instanceof LazyDeltaMap<?, ?> lazy) return lazy.deferred();
+        return values instanceof FrozenMap<?, ?> frozen && isDeferred(frozen.raw());
     }
 
     public static void requireDeltaLineage(Map<?, ?> before, Map<?, ?> after, String name) {
@@ -249,18 +262,23 @@ public final class StateMapSupport {
             extends AbstractMap<K, V> implements NavigableMap<K, V> {
         private final NavigableMap<K, V> base;
         private final Set<K> changedKeys;
-        private final Map<K, V> afterValues;
+        private final Set<K> presentKeys;
+        private final Function<K, V> loader;
+        private final boolean deferred;
         private final int size;
         private volatile NavigableMap<K, V> materialized;
 
-        private LazyDeltaMap(NavigableMap<K, V> base, RuntimeCommitEntry.Changes<K, V> changes) {
+        private LazyDeltaMap(NavigableMap<K, V> base, Set<K> changedKeys, Set<K> presentKeys,
+                             Function<K, V> loader, boolean deferred) {
             this.base = base;
-            changedKeys = changes.keys();
-            afterValues = changes.afterValues();
+            this.changedKeys = Collections.unmodifiableSet(new TreeSet<>(changedKeys));
+            this.presentKeys = Collections.unmodifiableSet(new TreeSet<>(presentKeys));
+            this.loader = loader;
+            this.deferred = deferred;
             int nextSize = base.size();
-            for (K key : changedKeys) {
+            for (K key : this.changedKeys) {
                 boolean existed = base.containsKey(key);
-                boolean exists = afterValues.containsKey(key);
+                boolean exists = this.presentKeys.contains(key);
                 if (existed && !exists) nextSize--;
                 else if (!existed && exists) nextSize++;
             }
@@ -275,13 +293,17 @@ public final class StateMapSupport {
             return changedKeys;
         }
 
+        private boolean deferred() {
+            return deferred;
+        }
+
         private NavigableMap<K, V> materialized() {
             NavigableMap<K, V> current = materialized;
             if (current != null) return current;
             TreeMap<K, V> next = new TreeMap<>(base.comparator());
             next.putAll(base);
             for (K key : changedKeys) {
-                V value = afterValues.get(key);
+                V value = presentKeys.contains(key) ? loader.apply(key) : null;
                 if (value == null) next.remove(key); else next.put(key, value);
             }
             current = Collections.unmodifiableNavigableMap(next);
@@ -291,12 +313,14 @@ public final class StateMapSupport {
 
         @Override
         public V get(Object key) {
-            return changedKeys.contains(key) ? afterValues.get(key) : base.get(key);
+            return changedKeys.contains(key)
+                    ? (presentKeys.contains(key) ? loader.apply((K) key) : null)
+                    : base.get(key);
         }
 
         @Override
         public boolean containsKey(Object key) {
-            return changedKeys.contains(key) ? afterValues.containsKey(key) : base.containsKey(key);
+            return changedKeys.contains(key) ? presentKeys.contains(key) : base.containsKey(key);
         }
 
         @Override

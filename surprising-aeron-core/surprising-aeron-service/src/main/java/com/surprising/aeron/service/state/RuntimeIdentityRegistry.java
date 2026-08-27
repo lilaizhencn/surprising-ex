@@ -1,20 +1,20 @@
 package com.surprising.aeron.service.state;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class RuntimeIdentityRegistry {
 
-    private final Map<String, Integer> assetIds = new HashMap<>();
-    private final Map<Integer, String> assets = new HashMap<>();
-    private final Map<String, Integer> symbolIds = new HashMap<>();
-    private final Map<Integer, String> symbols = new HashMap<>();
-    private final Map<ClientIdentity, Long> clientKeys = new HashMap<>();
-    private final Map<Long, ClientIdentity> clients = new HashMap<>();
-    private final Map<PositionIdentity, Long> positionKeys = new HashMap<>();
-    private final Map<Long, PositionIdentity> positions = new HashMap<>();
+    private final Map<String, Integer> assetIds = new ConcurrentHashMap<>();
+    private final Map<Integer, String> assets = new ConcurrentHashMap<>();
+    private final Map<String, Integer> symbolIds = new ConcurrentHashMap<>();
+    private final Map<Integer, String> symbols = new ConcurrentHashMap<>();
+    private final Map<ClientIdentity, Long> clientKeys = new ConcurrentHashMap<>();
+    private final Map<Long, ClientIdentity> clients = new ConcurrentHashMap<>();
+    private final Map<PositionIdentity, Long> positionKeys = new ConcurrentHashMap<>();
+    private final Map<Long, PositionIdentity> positions = new ConcurrentHashMap<>();
     private int nextAssetId;
     private int nextSymbolId;
     private long nextClientKey = 1;
@@ -48,7 +48,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String asset(int assetId) {
-        assertOwner();
         String asset = assets.get(assetId);
         if (asset == null) throw new IllegalArgumentException("unknown runtime asset id: " + assetId);
         return asset;
@@ -71,7 +70,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String symbol(int symbolId) {
-        assertOwner();
         return preparedSymbol(symbolId);
     }
 
@@ -132,7 +130,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String clientOrderId(long userId, long clientKey) {
-        assertOwner();
         if (clientKey == 0) return "";
         ClientIdentity identity = clients.get(clientKey);
         if (identity == null || identity.userId() != userId) {
@@ -168,7 +165,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String positionKey(long userId, long positionKey) {
-        assertOwner();
         PositionIdentity identity = positions.get(positionKey);
         if (identity == null || identity.userId() != userId) {
             throw new IllegalArgumentException("unknown runtime position key: " + userId + '/' + positionKey);
@@ -177,7 +173,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     PositionIdentity positionIdentity(long positionKey) {
-        assertOwner();
         PositionIdentity identity = positions.get(positionKey);
         if (identity == null) {
             throw new IllegalArgumentException("unknown runtime position key: " + positionKey);

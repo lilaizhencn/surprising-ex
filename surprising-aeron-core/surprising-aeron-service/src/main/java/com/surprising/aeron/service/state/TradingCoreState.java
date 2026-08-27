@@ -32,24 +32,30 @@ public record TradingCoreState(
         boolean ordersDelta = StateMapSupport.isDelta(orders);
         Map<Long, CoreUserState> sortedUsers = StateMapSupport.freezeSorted(users);
         Map<Long, CoreOrderState> sortedOrders = StateMapSupport.freezeSorted(orders);
-        if (!usersDelta) {
-            sortedUsers.forEach((userId, user) -> validateUser(productLine, userId, user));
-        } else {
-            for (Object key : StateMapSupport.changedKeys(users)) {
-                CoreUserState user = sortedUsers.get(key);
-                if (user != null) validateUser(productLine, (Long) key, user);
+        if (!StateMapSupport.isDeferred(users)) {
+            if (!usersDelta) {
+                sortedUsers.forEach((userId, user) -> validateUser(productLine, userId, user));
+            } else {
+                for (Object key : StateMapSupport.changedKeys(users)) {
+                    CoreUserState user = sortedUsers.get(key);
+                    if (user != null) validateUser(productLine, (Long) key, user);
+                }
             }
         }
-        if (!ordersDelta) {
-            sortedOrders.forEach((orderId, order) -> validateOrder(productLine, sortedUsers, orderId, order));
-        } else {
-            for (Object key : StateMapSupport.changedKeys(orders)) {
-                CoreOrderState order = sortedOrders.get(key);
-                if (order != null) validateOrder(productLine, sortedUsers, (Long) key, order);
+        if (!StateMapSupport.isDeferred(orders)) {
+            if (!ordersDelta) {
+                sortedOrders.forEach((orderId, order) -> validateOrder(productLine, sortedUsers, orderId, order));
+            } else {
+                for (Object key : StateMapSupport.changedKeys(orders)) {
+                    CoreOrderState order = sortedOrders.get(key);
+                    if (order != null) validateOrder(productLine, sortedUsers, (Long) key, order);
+                }
             }
         }
         Map<ClientOrderKey, Long> derivedIndex;
-        if (clientOrderIndex != null && StateMapSupport.isDelta(clientOrderIndex)) {
+        if (clientOrderIndex != null && StateMapSupport.isDeferred(clientOrderIndex)) {
+            derivedIndex = StateMapSupport.freezeSorted(clientOrderIndex);
+        } else if (clientOrderIndex != null && StateMapSupport.isDelta(clientOrderIndex)) {
             derivedIndex = StateMapSupport.freezeSorted(clientOrderIndex);
             for (Object key : StateMapSupport.changedKeys(clientOrderIndex)) {
                 Long orderId = derivedIndex.get(key);
@@ -75,23 +81,27 @@ public record TradingCoreState(
         leverages = StateMapSupport.freezeSorted(leverages);
         algoOrders = StateMapSupport.freezeSorted(algoOrders);
         Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> sortedTimers = StateMapSupport.freezeSorted(cancelAllAfterTimers);
-        if (!StateMapSupport.isDelta(cancelAllAfterTimers)) {
-            sortedTimers.forEach(TradingCoreState::validateTimer);
-        } else {
-            for (Object key : StateMapSupport.changedKeys(cancelAllAfterTimers)) {
-                CoreCancelAllAfterState timer = sortedTimers.get(key);
-                if (timer != null) validateTimer((CoreCancelAllAfterKey) key, timer);
+        if (!StateMapSupport.isDeferred(cancelAllAfterTimers)) {
+            if (!StateMapSupport.isDelta(cancelAllAfterTimers)) {
+                sortedTimers.forEach(TradingCoreState::validateTimer);
+            } else {
+                for (Object key : StateMapSupport.changedKeys(cancelAllAfterTimers)) {
+                    CoreCancelAllAfterState timer = sortedTimers.get(key);
+                    if (timer != null) validateTimer((CoreCancelAllAfterKey) key, timer);
+                }
             }
         }
         cancelAllAfterTimers = sortedTimers;
         clientOrderIndex = StateMapSupport.freezeSorted(derivedIndex);
         Map<Long, CoreTriggerOrderState> sortedTriggers = StateMapSupport.freezeSorted(triggerOrders);
-        if (!StateMapSupport.isDelta(triggerOrders)) {
-            sortedTriggers.forEach((id, trigger) -> validateTrigger(productLine, sortedUsers, id, trigger));
-        } else {
-            for (Object id : StateMapSupport.changedKeys(triggerOrders)) {
-                CoreTriggerOrderState trigger = sortedTriggers.get(id);
-                if (trigger != null) validateTrigger(productLine, sortedUsers, id, trigger);
+        if (!StateMapSupport.isDeferred(triggerOrders)) {
+            if (!StateMapSupport.isDelta(triggerOrders)) {
+                sortedTriggers.forEach((id, trigger) -> validateTrigger(productLine, sortedUsers, id, trigger));
+            } else {
+                for (Object id : StateMapSupport.changedKeys(triggerOrders)) {
+                    CoreTriggerOrderState trigger = sortedTriggers.get(id);
+                    if (trigger != null) validateTrigger(productLine, sortedUsers, id, trigger);
+                }
             }
         }
         triggerOrders = sortedTriggers;

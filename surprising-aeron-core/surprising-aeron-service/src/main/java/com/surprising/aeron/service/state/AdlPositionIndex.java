@@ -10,9 +10,15 @@ import java.util.TreeSet;
 public final class AdlPositionIndex {
 
     private final Map<String, NavigableSet<PositionKey>> keysByAsset = new TreeMap<>();
+    private final Map<Long, RuntimePositionIndexValue> positions = new TreeMap<>();
+    private final Map<AssetPositionKey, Integer> positionCounts = new TreeMap<>();
 
     public AdlPositionIndex(TradingCoreState state) {
         rebuild(state);
+    }
+
+    public AdlPositionIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        rebuild(state, identities);
     }
 
     public Set<PositionKey> positions(String asset) {
@@ -33,12 +39,17 @@ public final class AdlPositionIndex {
         }
     }
 
-    public void update(RuntimeCommitEntry.Changes<Long, CoreUserState> changes) {
-        for (Long userId : changes.keys()) {
-            CoreUserState previous = changes.before(userId);
-            CoreUserState current = changes.after(userId);
-            if (previous != null) previous.positions().values().forEach(position -> remove(userId, position));
-            if (current != null) current.positions().values().forEach(position -> add(userId, position));
+    public void update(RuntimeCommitEntry entry) {
+        RuntimeMutationDelta.ValueChanges<Long, PositionRuntime> changes = entry.mutation().positions();
+        for (Long positionKey : changes.changedKeys()) {
+            RuntimePositionIndexValue previous = positions.remove(positionKey);
+            if (previous != null) remove(previous);
+            PositionRuntime current = changes.currentValues().get(positionKey);
+            if (current != null) {
+                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(current, entry.identities());
+                positions.put(positionKey, indexed);
+                add(indexed);
+            }
         }
     }
 
@@ -46,6 +57,51 @@ public final class AdlPositionIndex {
         keysByAsset.clear();
         state.users().values().forEach(user -> user.positions().values()
                 .forEach(position -> add(user.userId(), position)));
+    }
+
+    public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        keysByAsset.clear();
+        positions.clear();
+        positionCounts.clear();
+        state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
+            long positionKey = identities.positionKey(user.userId(), key);
+            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
+            positions.put(positionKey, indexed);
+            add(indexed);
+        }));
+    }
+
+    private void add(RuntimePositionIndexValue position) {
+        if (position.signedQuantitySteps() == 0) return;
+        PositionKey key = new PositionKey(position.userId(), position.symbol(), position.positionSide());
+        AssetPositionKey counted = new AssetPositionKey(position.asset(), key);
+        if (positionCounts.merge(counted, 1, Math::addExact) == 1) {
+            keysByAsset.computeIfAbsent(position.asset(), ignored -> new TreeSet<>()).add(key);
+        }
+    }
+
+    private void remove(RuntimePositionIndexValue position) {
+        if (position.signedQuantitySteps() == 0) return;
+        PositionKey key = new PositionKey(position.userId(), position.symbol(), position.positionSide());
+        AssetPositionKey counted = new AssetPositionKey(position.asset(), key);
+        int count = Math.subtractExact(positionCounts.getOrDefault(counted, 0), 1);
+        if (count != 0) {
+            positionCounts.put(counted, count);
+            return;
+        }
+        positionCounts.remove(counted);
+        NavigableSet<PositionKey> values = keysByAsset.get(position.asset());
+        if (values == null) return;
+        values.remove(key);
+        if (values.isEmpty()) keysByAsset.remove(position.asset());
+    }
+
+    private record AssetPositionKey(String asset, PositionKey position) implements Comparable<AssetPositionKey> {
+        @Override
+        public int compareTo(AssetPositionKey other) {
+            int comparison = asset.compareTo(other.asset);
+            return comparison != 0 ? comparison : position.compareTo(other.position);
+        }
     }
 
     private void add(long userId, CorePositionState position) {

@@ -74,14 +74,14 @@ class RuntimeStateProjectorTest {
                 7, new BalanceAdjustmentCommand("USDT", 1_000));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        RuntimeCommitLedger ledger = new RuntimeCommitLedger(before);
-        RollingBusinessStateHash businessHash = RollingBusinessStateHash.create(before);
-        RollingFundsStateHash fundsHash = RollingFundsStateHash.create(before);
+        RuntimeCommitLedger ledger = new RuntimeCommitLedger(before, identities);
+        RollingBusinessStateHash businessHash = RollingBusinessStateHash.create(before, identities);
+        RollingFundsStateHash fundsHash = RollingFundsStateHash.create(before, identities);
 
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
         RuntimeMutationDelta mutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry commit = ledger.capture(1, mutation, identities);
+        RuntimeCommitEntry commit = ledger.capture(1, mutation, identities, before);
         ledger.commit(commit);
         TradingCoreState expected = RuntimeStateMaterializer.materializeTransition(mutation, identities, before);
         businessHash.update(commit);
@@ -102,20 +102,20 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
-    void coalescesContiguousTypedCommitsWithoutChangingTheFinalState() {
+    void projectsContiguousTypedCommitsWithoutChangingTheFinalState() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState before = reducer.adjustBalance(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 7, new BalanceAdjustmentCommand("USDT", 1_000));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        RuntimeCommitLedger ledger = new RuntimeCommitLedger(before);
-        RollingBusinessStateHash businessHash = RollingBusinessStateHash.create(before);
-        RollingFundsStateHash fundsHash = RollingFundsStateHash.create(before);
+        RuntimeCommitLedger ledger = new RuntimeCommitLedger(before, identities);
+        RollingBusinessStateHash businessHash = RollingBusinessStateHash.create(before, identities);
+        RollingFundsStateHash fundsHash = RollingFundsStateHash.create(before, identities);
 
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
         RuntimeMutationDelta firstMutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry first = ledger.capture(1, firstMutation, identities);
+        RuntimeCommitEntry first = ledger.capture(1, firstMutation, identities, before);
         ledger.commit(first);
         runtime.clearChangedKeys();
         TradingCoreState firstState = RuntimeStateMaterializer.materializeTransition(
@@ -126,19 +126,17 @@ class RuntimeStateProjectorTest {
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", -100));
         RuntimeMutationDelta secondMutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry second = ledger.capture(2, secondMutation, identities);
+        RuntimeCommitEntry second = ledger.capture(2, secondMutation, identities, firstState);
         ledger.commit(second);
         TradingCoreState expected = RuntimeStateMaterializer.materializeTransition(
                 secondMutation, identities, firstState);
         businessHash.update(second);
         fundsHash.update(second);
 
-        RuntimeCommitEntry merged = RuntimeCommitEntry.coalesce(List.of(first, second));
-        assertThat(merged.project(before)).isEqualTo(expected);
         try (RuntimeProjectionJournal journal = new RuntimeProjectionJournal(
                 ProductLine.LINEAR_PERPETUAL, before, before.businessStateHash(),
                 RollingFundsStateHash.compute(before))) {
-            journal.publish(first, RollingBusinessStateHash.create(firstState).value(),
+            journal.publish(first, RollingBusinessStateHash.create(firstState, identities).value(),
                     RollingFundsStateHash.compute(firstState));
             journal.publish(second, businessHash.value(), fundsHash.value());
             RuntimeProjectionJournal.ProjectionVersion projected = journal.await(

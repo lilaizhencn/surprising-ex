@@ -27,6 +27,7 @@ public final class TriggerOrderIndex {
     private final Map<TriggerOcoKey, NavigableSet<Long>> idsByOco = new java.util.HashMap<>();
     private final Map<String, NavigableMapByPrice> idsByPrice = new TreeMap<>();
     private final NavigableMap<Long, NavigableSet<Long>> idsByExpiry = new TreeMap<>();
+    private final Map<Long, CoreTriggerOrderState> valuesById = new TreeMap<>();
 
     public TriggerOrderIndex(TradingCoreState state) {
         rebuild(state);
@@ -287,17 +288,22 @@ public final class TriggerOrderIndex {
         }
     }
 
-    public void update(RuntimeCommitEntry.Changes<Long, CoreTriggerOrderState> changes) {
-        for (Long id : changes.keys()) {
-            CoreTriggerOrderState previous = changes.before(id);
-            CoreTriggerOrderState current = changes.after(id);
-            if (previous != null) remove(previous, id);
-            if (previous != null && !previous.clientTriggerOrderId().isEmpty()) {
-                idsByClient.remove(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
+    public void update(RuntimeCommitEntry entry) {
+        RuntimeMutationDelta.ValueChanges<Long, CoreTriggerOrderState> changes = entry.mutation().triggerOrders();
+        for (Long id : changes.changedKeys()) {
+            CoreTriggerOrderState previous = valuesById.remove(id);
+            if (previous != null) {
+                remove(previous, id);
+                if (!previous.clientTriggerOrderId().isEmpty()) {
+                    idsByClient.remove(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
+                }
             }
-            if (current != null) add(current);
-            if (current != null && !current.clientTriggerOrderId().isEmpty()) {
-                idsByClient.put(new ClientTriggerKey(current.userId(), current.clientTriggerOrderId()), id);
+            CoreTriggerOrderState current = changes.currentValues().get(id);
+            if (current != null) {
+                add(current);
+                if (!current.clientTriggerOrderId().isEmpty()) {
+                    idsByClient.put(new ClientTriggerKey(current.userId(), current.clientTriggerOrderId()), id);
+                }
             }
         }
     }
@@ -313,6 +319,7 @@ public final class TriggerOrderIndex {
         idsByOco.clear();
         idsByPrice.clear();
         idsByExpiry.clear();
+        valuesById.clear();
         state.triggerOrders().values().forEach(order -> {
             add(order);
             if (!order.clientTriggerOrderId().isEmpty()) {
@@ -325,6 +332,7 @@ public final class TriggerOrderIndex {
         long userId = order.userId();
         String symbol = order.symbol();
         long id = order.triggerOrderId();
+        valuesById.put(id, order);
         allIds.add(id);
         idsBySymbol.computeIfAbsent(OrderReservation.normalizeSymbol(symbol), ignored -> new TreeSet<>()).add(id);
         idsBySymbolStatus.computeIfAbsent(OrderReservation.normalizeSymbol(symbol), ignored -> new java.util.EnumMap<>(CoreTriggerOrderStatus.class))
@@ -357,6 +365,7 @@ public final class TriggerOrderIndex {
     }
 
     private void remove(CoreTriggerOrderState order, long id) {
+        valuesById.remove(id);
         long userId = order.userId();
         String symbol = order.symbol();
         allIds.remove(id);

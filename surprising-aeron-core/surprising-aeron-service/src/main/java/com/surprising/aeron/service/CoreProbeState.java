@@ -210,6 +210,8 @@ public final class CoreProbeState implements AutoCloseable {
     private final LinkedHashSet<Long> changedLiquidationIds = new LinkedHashSet<>();
     private final LinkedHashSet<Long> changedTriggerOrderIds = new LinkedHashSet<>();
     private final LinkedHashSet<String> changedTreasuryAssets = new LinkedHashSet<>();
+    private com.surprising.aeron.service.state.RuntimeFundsDelta commandFundsDelta =
+            com.surprising.aeron.service.state.RuntimeFundsDelta.empty();
     private List<com.surprising.aeron.protocol.CoreExecutionView> commandExecutions = List.of();
     private List<com.surprising.aeron.protocol.CoreFundingPaymentView> commandFundingPayments = List.of();
     private CoreFundingProgressView commandFundingProgress;
@@ -273,9 +275,6 @@ public final class CoreProbeState implements AutoCloseable {
         this.pendingOrderBatches = new LinkedHashMap<>();
         this.deferredMatching = new LinkedHashMap<>();
         this.snapshotState = snapshotState;
-        this.rollingBusinessStateHash = com.surprising.aeron.service.state.RollingBusinessStateHash.create(snapshotState);
-        this.rollingFundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.create(snapshotState);
-        this.cachedBusinessStateHash = rollingBusinessStateHash.value();
         this.lastSourceSequenceDigest = sourceSequenceDigest(lastSourceSequences);
         this.appliedMatcherSequence = matcherSnapshot == null ? 0 : matcherSnapshot.matcherSequence();
         this.appliedMatcherPrefixDigest = matcherSnapshot == null
@@ -318,7 +317,14 @@ public final class CoreProbeState implements AutoCloseable {
         this.riskSnapshotIndex = runtime.riskSnapshotsForConstruction();
         this.runtimePlaceOrderIdentities = runtime.identitiesForConstruction();
         this.runtimePlaceOrderState = runtime.runtimeStateForConstruction();
-        this.runtimeCommitLedger = new com.surprising.aeron.service.state.RuntimeCommitLedger(snapshotState);
+        this.rollingBusinessStateHash =
+                com.surprising.aeron.service.state.RollingBusinessStateHash.create(
+                        snapshotState, runtimePlaceOrderIdentities);
+        this.rollingFundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.create(
+                snapshotState, runtimePlaceOrderIdentities);
+        this.cachedBusinessStateHash = rollingBusinessStateHash.value();
+        this.runtimeCommitLedger = new com.surprising.aeron.service.state.RuntimeCommitLedger(
+                snapshotState, runtimePlaceOrderIdentities);
         this.runtimeProjectionJournal = new com.surprising.aeron.service.state.RuntimeProjectionJournal(
                 productLine, snapshotState, rollingBusinessStateHash.value(), rollingFundsStateHash.value());
         this.cachedFeePolicyHash = 0;
@@ -866,7 +872,7 @@ public final class CoreProbeState implements AutoCloseable {
         materializeChangeAccumulators();
         boolean tradingStateChanged = status == ResponseStatus.APPLIED && snapshotState != beforeTradingState;
         try {
-            commandDelta = commandDelta(beforeTradingState, snapshotState, exportCommand);
+            commandDelta = commandDelta(beforeTradingState, snapshotState, false);
         } catch (IllegalStateException exception) {
             throw new IllegalStateException("command delta failed after typed state commit", exception);
         }
@@ -1298,7 +1304,7 @@ public final class CoreProbeState implements AutoCloseable {
             }
             case CANCEL -> {
                 CancelOrderCommand command = (CancelOrderCommand) item.command;
-                CoreOrderState order = runtimeOrder(command.orderId());
+                var order = runtimePlaceOrderState.order(command.orderId());
                 orderId = command.orderId();
                 instrumentVersion = order == null ? 0 : order.instrumentVersion();
             }
@@ -1323,9 +1329,10 @@ public final class CoreProbeState implements AutoCloseable {
                         matchingOrder(item.orderId()));
                 case CANCEL -> {
                     CancelOrderCommand command = (CancelOrderCommand) item.command;
-                    CoreOrderState order = runtimeOrder(command.orderId());
+                    var order = runtimePlaceOrderState.order(command.orderId());
                     yield matchingAdapter.cancelAsyncForContinuation(pending.command().header().userId(),
-                            command.orderId(), order == null ? "" : order.symbol());
+                            command.orderId(), order == null
+                                    ? "" : runtimePlaceOrderIdentities.symbol(order.symbolId()));
                 }
                 case AMEND -> {
                     AmendOrderCommand command = (AmendOrderCommand) item.command;
@@ -1557,6 +1564,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private CoreResponse finishOrderBatch(OrderBatchPending batch, PendingMatching pending,
                                           long clusterTimestamp, long clusterPosition) {
+        commandFundsDelta = pending.fundsDelta();
         if (!batch.deferredPerpetualOrderIds.isEmpty()) {
             batch.mergeTreasuryDeltas(runtimePlaceOrderState.applyPerpetualMatcherSettlements(
                     batch.sequence, batch.deferredPerpetualOrderIds,
@@ -1626,7 +1634,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (!sameTreasuryDelta(laneContext.treasuryDelta(), expectedTreasuryDelta)) {
             throw new IllegalStateException("order batch account lane Treasury ACK aggregation mismatch");
         }
-        CoreCommandDelta delta = commandDelta(batch.beforeState, snapshotState, true);
+        CoreCommandDelta delta = commandDelta(batch.beforeState, snapshotState, false);
         validateFundsConservation(pending.command(), batch.beforeState, snapshotState, delta);
         commitMatchingSequence(batch.sequence);
         long businessStateHash = snapshotState == batch.beforeState
@@ -1677,13 +1685,15 @@ public final class CoreProbeState implements AutoCloseable {
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
                                                CoreMessage command) {
         return new PendingMatching(sequence, operation, command, snapshotState,
-                currentBusinessStateHash(), rollingFundsStateHash.value());
+                currentBusinessStateHash(), rollingFundsStateHash.value(),
+                com.surprising.aeron.service.state.RuntimeFundsDelta.empty());
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations) {
         return new PendingMatching(sequence, operation, command, preMatchingCancellations, snapshotState,
-                currentBusinessStateHash(), rollingFundsStateHash.value());
+                currentBusinessStateHash(), rollingFundsStateHash.value(),
+                com.surprising.aeron.service.state.RuntimeFundsDelta.empty());
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
@@ -1691,7 +1701,7 @@ public final class CoreProbeState implements AutoCloseable {
                                                TradingCoreState beforeState, long beforeBusinessStateHash,
                                                long beforeFundsStateHash) {
         return new PendingMatching(sequence, operation, command, preMatchingCancellations, beforeState,
-                beforeBusinessStateHash, beforeFundsStateHash);
+                beforeBusinessStateHash, beforeFundsStateHash, commandFundsDelta);
     }
 
     private CoreResponse beginBookQuery(CoreMessage message) {
@@ -1854,7 +1864,7 @@ public final class CoreProbeState implements AutoCloseable {
         }
         completeSnapshotProjectionBatch();
         try {
-            commandDelta = commandDelta(before, snapshotState, true);
+            commandDelta = commandDelta(before, snapshotState, false);
         } catch (RuntimeException exception) {
             throw new IllegalStateException("matching delta failed after typed state commit", exception);
         }
@@ -2339,15 +2349,15 @@ public final class CoreProbeState implements AutoCloseable {
             case PLACE -> TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe()).symbol();
             case CANCEL -> {
                 var command = TradingCommandCodec.decodeCancelOrder(message.payloadUnsafe());
-                var order = runtimeOrder(command.orderId());
-                yield order == null ? "" : order.symbol();
+                var order = runtimePlaceOrderState.order(command.orderId());
+                yield order == null ? "" : runtimePlaceOrderIdentities.symbol(order.symbolId());
             }
             case REPLACE, AMEND -> {
                 long orderId = operation == PendingMatching.Operation.REPLACE
                         ? TradingCommandCodec.decodeReplaceOrder(message.payloadUnsafe()).originalOrderId()
                         : TradingCommandCodec.decodeAmendOrder(message.payloadUnsafe()).originalOrderId();
-                var order = runtimeOrder(orderId);
-                yield order == null ? "" : order.symbol();
+                var order = runtimePlaceOrderState.order(orderId);
+                yield order == null ? "" : runtimePlaceOrderIdentities.symbol(order.symbolId());
             }
             case TRIGGER -> {
                 long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payloadUnsafe());
@@ -2539,8 +2549,8 @@ public final class CoreProbeState implements AutoCloseable {
                 }
                 case CANCEL -> {
                     var command = TradingCommandCodec.decodeCancelOrder(pending.command().payloadUnsafe());
-                    var order = runtimeOrder(command.orderId());
-                    String symbol = order == null ? "" : order.symbol();
+                    var order = runtimePlaceOrderState.order(command.orderId());
+                    String symbol = order == null ? "" : runtimePlaceOrderIdentities.symbol(order.symbolId());
                     yield () -> matchingAdapter.cancelAsyncForContinuation(userId, command.orderId(), symbol);
                 }
                 case REPLACE, AMEND -> {
@@ -2620,7 +2630,7 @@ public final class CoreProbeState implements AutoCloseable {
             }
             case CANCEL -> {
                 CancelOrderCommand command = TradingCommandCodec.decodeCancelOrder(pending.command().payloadUnsafe());
-                CoreOrderState order = runtimeOrder(command.orderId());
+                var order = runtimePlaceOrderState.order(command.orderId());
                 orderId = command.orderId();
                 instrumentVersion = order == null ? 0 : order.instrumentVersion();
             }
@@ -2831,6 +2841,7 @@ public final class CoreProbeState implements AutoCloseable {
         resetChangeAccumulators();
         commandBeforeBusinessStateHash = pending.beforeBusinessStateHash();
         commandBeforeFundsStateHash = pending.beforeFundsStateHash();
+        commandFundsDelta = pending.fundsDelta();
         beginSnapshotProjectionBatch();
         if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
             commandMatcherTransition = new com.surprising.aeron.protocol.CoreMatcherTransition(
@@ -3014,7 +3025,7 @@ public final class CoreProbeState implements AutoCloseable {
                     .forEach(order -> ordersById.put(order.orderId(), order));
             commandOrderViews = List.copyOf(ordersById.values());
         }
-        commandDelta = commandDelta(before, snapshotState, true);
+        commandDelta = commandDelta(before, snapshotState, false);
         validateFundsConservation(pending.command(), before, snapshotState, commandDelta);
         if (MATCHING_PHASE_METRICS_ENABLED) {
             matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
@@ -3794,6 +3805,9 @@ public final class CoreProbeState implements AutoCloseable {
             if (matcherSnapshot == null || appliedCommandCount != fence.coreSequence || !pendingMatching.isEmpty()) {
                 throw new IllegalStateException("snapshot fence state changed during capture");
             }
+            if (exportState.materializedThroughSequence() < Math.subtractExact(exportState.nextSequence(), 1)) {
+                return null;
+            }
             CoreSnapshotImage image = SectionedCoreSnapshotCodec.capture(this, matcherSnapshot, fence.snapshotId,
                     fence.coreSequence, clusterTimestamp, clusterPosition);
             fence.encodedSnapshot = snapshotEncoder.encode(image);
@@ -4531,7 +4545,8 @@ public final class CoreProbeState implements AutoCloseable {
                         : runtimePlaceOrderState.captureMutationDelta(laneApply);
         long projectionSequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
         com.surprising.aeron.service.state.RuntimeCommitEntry commit = runtimeCommitLedger.capture(
-                projectionSequence, mutation, runtimePlaceOrderIdentities);
+                projectionSequence, mutation, runtimePlaceOrderIdentities, previous);
+        commandFundsDelta = commandFundsDelta.plus(commit.fundsDelta());
         TradingCoreState materialized = commit.transitionView(previous);
         long previousBusinessStateHash = rollingBusinessStateHash.value();
         rollingBusinessStateHash.update(commit);
@@ -4540,12 +4555,10 @@ public final class CoreProbeState implements AutoCloseable {
                 previousBusinessStateHash, rollingBusinessStateHash.value());
         runtimeCommitLedger.commit(commit);
         seedChangeAccumulators();
-        for (Long userId : commit.users().keys()) {
-            if (!java.util.Objects.equals(commit.users().before(userId), commit.users().after(userId))) {
-                changedUserIds.add(userId);
-            }
+        changedUserIds.addAll(commit.changedUserIds());
+        for (Integer assetId : commit.changedTreasuryAssetIds()) {
+            changedTreasuryAssets.add(runtimePlaceOrderIdentities.asset(assetId));
         }
-        changedTreasuryAssets.addAll(treasuryAssetChanges(commit.beforeTreasury(), commit.afterTreasury()));
         snapshotState = materialized;
         runtimeProjectionJournal.publish(commit, rollingBusinessStateHash.value(), rollingFundsStateHash.value());
     }
@@ -4559,23 +4572,6 @@ public final class CoreProbeState implements AutoCloseable {
         }
         snapshotState = transition.state();
         adoptedProjectionSequence = transition.projectedSequence();
-    }
-
-    private static java.util.Set<String> treasuryAssetChanges(
-            com.surprising.aeron.service.state.CoreTreasuryState before,
-            com.surprising.aeron.service.state.CoreTreasuryState after) {
-        java.util.TreeSet<String> assets = new java.util.TreeSet<>();
-        assets.addAll(StateMapSupport.changedKeys(before.feeBalances(), after.feeBalances()));
-        assets.addAll(StateMapSupport.changedKeys(before.insuranceBalances(), after.insuranceBalances()));
-        assets.addAll(StateMapSupport.changedKeys(before.insuranceDeficits(), after.insuranceDeficits()));
-        assets.addAll(StateMapSupport.changedKeys(
-                before.liquidationFeeBalances(), after.liquidationFeeBalances()));
-        assets.addAll(StateMapSupport.changedKeys(
-                before.fundingResidualBalances(), after.fundingResidualBalances()));
-        assets.addAll(StateMapSupport.changedKeys(
-                before.roundingResidualBalances(), after.roundingResidualBalances()));
-        assets.addAll(StateMapSupport.changedKeys(before.clearingPnlBalances(), after.clearingPnlBalances()));
-        return java.util.Collections.unmodifiableSet(assets);
     }
 
     private void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
@@ -4826,10 +4822,11 @@ public final class CoreProbeState implements AutoCloseable {
         cachedLaneStateHashes = null;
         cachedLaneFundsHashes = null;
         snapshotState = state;
-        rollingBusinessStateHash.restore(state);
-        rollingFundsStateHash.restore(state);
         runtimePlaceOrderIdentities = runtime.identitiesForConstruction();
         runtimePlaceOrderState = runtime.runtimeStateForConstruction();
+        rollingBusinessStateHash.restore(state, runtimePlaceOrderIdentities);
+        rollingFundsStateHash.restore(state, runtimePlaceOrderIdentities);
+        runtimeCommitLedger.restore(state, runtimePlaceOrderIdentities);
     }
 
     private static long triggerChildOrderId(long triggerOrderId, TradingRuntimeState state) {
@@ -4872,6 +4869,7 @@ public final class CoreProbeState implements AutoCloseable {
         commandBeforeFundsStateHash = rollingFundsStateHash.value();
         commandMatcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
                 appliedMatcherSequence, appliedMatcherPrefixDigest);
+        commandFundsDelta = com.surprising.aeron.service.state.RuntimeFundsDelta.empty();
         changedUserIds.clear();
         changedOrderIds.clear();
         changedLiquidationIds.clear();
@@ -4883,46 +4881,62 @@ public final class CoreProbeState implements AutoCloseable {
                                 long appliedCount, long businessStateHash, TradingCoreState before,
                                 TradingCoreState after, CoreCommandDelta delta,
                                 com.surprising.aeron.protocol.CoreMatcherTransition matcherTransition) {
-        java.util.Set<Long> changedUsers = delta.userIds() == null
-                ? StateMapSupport.changedKeys(before.users(), after.users())
-                : new java.util.LinkedHashSet<>(delta.userIds());
         boolean externalAdjustment = command.header().messageType() == CoreMessageType.ADJUST_BALANCE
                 || command.header().messageType() == CoreMessageType.TRANSFER_OUT
                 || command.header().messageType() == CoreMessageType.TRANSFER_IN
                 || command.header().messageType() == CoreMessageType.ADJUST_INSURANCE_FUND;
-        com.surprising.aeron.service.state.FundsDelta fundsDelta =
-                com.surprising.aeron.service.state.FundsDelta.between(
-                        before, after, changedUsers,
-                        commandChangedTreasuryAssets == null ? java.util.Set.of()
-                                : new java.util.LinkedHashSet<>(commandChangedTreasuryAssets),
-                        externalAdjustment);
+        com.surprising.aeron.service.state.RuntimeFundsDelta primitiveFunds = commandFundsDelta;
+        List<String> treasuryAssets = commandChangedTreasuryAssets == null
+                ? List.of() : List.copyOf(commandChangedTreasuryAssets);
+        List<CoreOrderStateView> retainedOrderViews = List.copyOf(delta.changedOrders());
         long fundsStateHash = after == snapshotState
                 ? rollingFundsStateHash.value()
                 : com.surprising.aeron.service.state.RollingFundsStateHash.compute(after);
-        return exportState.append(command, status, resultCode, appliedCount, businessStateHash,
-                commandBeforeBusinessStateHash, commandBeforeFundsStateHash, fundsStateHash,
-                matchingAdapter.topology().topologyHash(), laneRevisionHash(),
-                matcherTransition,
-                currentClusterPosition, fundsDelta, delta.changedUsers(), delta.changedOrders(),
-                delta.executions(), delta.fundingPayments(), delta.changedLiquidations(),
-                delta.changedTreasuryAssets(), delta.changedTriggerOrders());
+        long topologyHash = matchingAdapter.topology().topologyHash();
+        long revisionHash = laneRevisionHash();
+        long clusterPosition = currentClusterPosition;
+        long beforeBusinessStateHash = commandBeforeBusinessStateHash;
+        long beforeFundsStateHash = commandBeforeFundsStateHash;
+        RuntimeIdentityRegistry factIdentities = runtimePlaceOrderIdentities;
+        int itemCount = delta.userIds().size() + delta.orderIds().size() + delta.liquidationIds().size()
+                + delta.triggerOrderIds().size() + treasuryAssets.size() + delta.executions().size()
+                + delta.fundingPayments().size() + primitiveFunds.postingCount()
+                + (externalAdjustment ? delta.userIds().size() + treasuryAssets.size() : 0);
+        CoreExportState.Draft draft = new CoreExportState.Draft(command, status, resultCode, appliedCount,
+                businessStateHash, beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
+                topologyHash, revisionHash, matcherTransition, clusterPosition, itemCount,
+                terminalOrderIds(delta), sequence -> {
+            CoreCommandDelta fact = materializeFactDelta(
+                    before, after, delta, retainedOrderViews, treasuryAssets);
+            com.surprising.aeron.service.state.FundsDelta funds =
+                    primitiveFunds.materialize(factIdentities, externalAdjustment);
+            return new com.surprising.aeron.protocol.CoreExportEvent(sequence, appliedCount, businessStateHash,
+                    command.header().commandId(), command.header().messageType(), status, resultCode,
+                    command.header().userId(), command.payloadUnsafe(), fact.changedUsers(), fact.changedOrders(),
+                    fact.executions(), fact.fundingPayments(), fact.changedLiquidations(),
+                    fact.changedTreasuryAssets(), fact.changedTriggerOrders(), beforeBusinessStateHash,
+                    beforeFundsStateHash, fundsStateHash, matcherTransition.routeVersion(), topologyHash,
+                    revisionHash, appliedCount, matcherTransition, clusterPosition, funds.views());
+        });
+        return exportState.append(draft);
+    }
+
+    private List<Long> terminalOrderIds(CoreCommandDelta delta) {
+        java.util.ArrayList<Long> terminal = new java.util.ArrayList<>();
+        for (Long orderId : delta.orderIds()) {
+            var order = runtimePlaceOrderState.order(orderId);
+            if (order != null && order.status().terminal()) terminal.add(orderId);
+        }
+        return List.copyOf(terminal);
     }
 
     private void validateFundsConservation(CoreMessage command, TradingCoreState before,
                                            TradingCoreState after, CoreCommandDelta delta) {
-        java.util.Set<Long> changedUsers = delta.userIds() == null
-                ? StateMapSupport.changedKeys(before.users(), after.users())
-                : new java.util.LinkedHashSet<>(delta.userIds());
-        java.util.Set<String> changedTreasury = commandChangedTreasuryAssets == null
-                ? java.util.Set.of()
-                : commandChangedTreasuryAssets.stream()
-                .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
         boolean externalAdjustment = command.header().messageType() == CoreMessageType.ADJUST_BALANCE
                 || command.header().messageType() == CoreMessageType.TRANSFER_OUT
                 || command.header().messageType() == CoreMessageType.TRANSFER_IN
                 || command.header().messageType() == CoreMessageType.ADJUST_INSURANCE_FUND;
-        com.surprising.aeron.service.state.FundsDelta.between(
-                before, after, changedUsers, changedTreasury, externalAdjustment);
+        commandFundsDelta.requireConserved(externalAdjustment);
     }
 
     private long laneRevisionHash() {
@@ -5069,6 +5083,7 @@ public final class CoreProbeState implements AutoCloseable {
         pendingLifecycleScopes.clear();
         pendingOrderBatches.clear();
         deferredMatching.clear();
+        exportState.close();
         runtimeProjectionJournal.close();
         runtime.close();
     }
@@ -5111,7 +5126,7 @@ public final class CoreProbeState implements AutoCloseable {
                 : List.of();
         List<CoreOrderStateView> changedOrders = includeViews
                 ? changedOrders(before, after, orderIds)
-                : List.of();
+                : commandOrderViews;
         if (includeViews && !commandOrderViews.isEmpty()) {
             java.util.LinkedHashMap<Long, CoreOrderStateView> ordersById = new java.util.LinkedHashMap<>();
             changedOrders.forEach(order -> ordersById.put(order.orderId(), order));
@@ -5131,6 +5146,24 @@ public final class CoreProbeState implements AutoCloseable {
                 userIds, orderIds, liquidationIds, triggerOrderIds,
                 commandExecutions, commandFundingPayments, commandFundingProgress, commandSettlementProgress,
                 changedUsers, changedOrders, changedLiquidations, changedTreasuryAssets, changedTriggerOrders);
+    }
+
+    private static CoreCommandDelta materializeFactDelta(
+            TradingCoreState before, TradingCoreState after, CoreCommandDelta delta,
+            List<CoreOrderStateView> retainedOrderViews, List<String> treasuryAssets) {
+        List<CoreOrderStateView> orders = changedOrders(before, after, delta.orderIds());
+        if (!retainedOrderViews.isEmpty()) {
+            java.util.LinkedHashMap<Long, CoreOrderStateView> byId = new java.util.LinkedHashMap<>();
+            orders.forEach(order -> byId.put(order.orderId(), order));
+            retainedOrderViews.forEach(order -> byId.putIfAbsent(order.orderId(), order));
+            orders = List.copyOf(byId.values());
+        }
+        return new CoreCommandDelta(delta.userIds(), delta.orderIds(), delta.liquidationIds(),
+                delta.triggerOrderIds(), delta.executions(), delta.fundingPayments(), delta.fundingProgress(),
+                delta.settlementProgress(), changedUsers(before, after, delta.userIds()), orders,
+                changedLiquidations(before, after, delta.liquidationIds()),
+                changedTreasuryAssets(before, after, treasuryAssets),
+                changedTriggerOrders(before, after, delta.triggerOrderIds()));
     }
 
     private static List<CoreUserStateView> changedUsers(

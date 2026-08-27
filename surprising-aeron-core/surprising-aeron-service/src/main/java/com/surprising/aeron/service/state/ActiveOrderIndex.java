@@ -19,7 +19,8 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
 
     private final Map<Long, NavigableSet<Long>> idsByUser = new TreeMap<>();
     private final Map<String, NavigableSet<Long>> idsBySymbol = new TreeMap<>();
-    private final NavigableMap<Long, CoreOrderState> ordersById = new TreeMap<>();
+    private final NavigableMap<Long, IndexedOrder> ordersById = new TreeMap<>();
+    private RuntimeIdentityRegistry identities;
     private final Map<PendingKey, Long> pendingQuantity = new HashMap<>();
     private final Map<ReduceKey, Long> reduceOnlyQuantity = new HashMap<>();
     private final Map<MarginKey, Integer> marginModeCounts = new HashMap<>();
@@ -28,12 +29,19 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         rebuild(state);
     }
 
+    public ActiveOrderIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        this.identities = identities;
+        rebuild(state);
+    }
+
     public NavigableSet<Long> ids() {
         return ordersById.descendingKeySet();
     }
 
     public Collection<CoreOrderState> orders() {
-        return Collections.unmodifiableCollection(ordersById.values());
+        ArrayList<CoreOrderState> result = new ArrayList<>(ordersById.size());
+        ordersById.values().forEach(order -> result.add(order.materialize(identities)));
+        return Collections.unmodifiableCollection(result);
     }
 
     public NavigableSet<Long> ids(long userId) {
@@ -155,12 +163,14 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         }
     }
 
-    public void update(RuntimeCommitEntry.Changes<Long, CoreOrderState> changes) {
-        for (Long orderId : changes.keys()) {
-            CoreOrderState previous = changes.before(orderId);
-            CoreOrderState current = changes.after(orderId);
-            if (isActive(previous)) remove(previous);
-            if (isActive(current)) add(current);
+    public void update(RuntimeCommitEntry entry) {
+        if (identities == null) identities = entry.identities();
+        RuntimeMutationDelta.ValueChanges<Long, OrderRuntime> changes = entry.mutation().orders();
+        for (Long orderId : changes.changedKeys()) {
+            IndexedOrder previous = ordersById.get(orderId);
+            if (previous != null) remove(previous);
+            OrderRuntime current = changes.currentValues().get(orderId);
+            if (current != null && current.status() == CoreOrderStatus.OPEN) add(current);
         }
     }
 
@@ -176,11 +186,24 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
                 .forEach(this::add);
     }
 
+    public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        this.identities = identities;
+        rebuild(state);
+    }
+
     private static boolean isActive(CoreOrderState order) {
         return order != null && order.status() == CoreOrderStatus.OPEN;
     }
 
     private void add(CoreOrderState order) {
+        add(IndexedOrder.of(order));
+    }
+
+    private void add(OrderRuntime order) {
+        add(IndexedOrder.of(order, identities));
+    }
+
+    private void add(IndexedOrder order) {
         ordersById.put(order.orderId(), order);
         idsByUser.computeIfAbsent(order.userId(), ignored -> new TreeSet<>()).add(order.orderId());
         idsBySymbol.computeIfAbsent(order.symbol(), ignored -> new TreeSet<>()).add(order.orderId());
@@ -196,6 +219,10 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void remove(CoreOrderState order) {
+        remove(IndexedOrder.of(order));
+    }
+
+    private void remove(IndexedOrder order) {
         ordersById.remove(order.orderId());
         remove(idsByUser, order.userId(), order.orderId());
         remove(idsBySymbol, order.symbol(), order.orderId());
@@ -241,5 +268,28 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private record MarginKey(long userId, String symbol,
                              com.surprising.aeron.protocol.CorePositionSide positionSide,
                              com.surprising.aeron.protocol.CoreMarginMode marginMode) {
+    }
+
+    private record IndexedOrder(long orderId, long userId, String symbol,
+                                com.surprising.aeron.protocol.CoreOrderSide side,
+                                com.surprising.aeron.protocol.CorePositionSide positionSide,
+                                com.surprising.aeron.protocol.CoreMarginMode marginMode,
+                                boolean reduceOnly, long remainingQuantitySteps,
+                                CoreOrderState core, OrderRuntime runtime) {
+        private static IndexedOrder of(CoreOrderState order) {
+            return new IndexedOrder(order.orderId(), order.userId(), order.symbol(), order.side(),
+                    order.positionSide(), order.marginMode(), order.reduceOnly(), order.remainingQuantitySteps(),
+                    order, null);
+        }
+
+        private static IndexedOrder of(OrderRuntime order, RuntimeIdentityRegistry identities) {
+            return new IndexedOrder(order.orderId(), order.userId(), identities.symbol(order.symbolId()),
+                    order.side(), order.positionSide(), order.marginMode(), order.reduceOnly(),
+                    order.remainingQuantitySteps(), null, order);
+        }
+
+        private CoreOrderState materialize(RuntimeIdentityRegistry identities) {
+            return core == null ? RuntimeStateMaterializer.orderSnapshot(runtime, identities) : core;
+        }
     }
 }

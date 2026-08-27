@@ -39,12 +39,14 @@ public final class RiskSnapshotIndex {
         }
     }
 
-    public void update(RuntimeCommitEntry.Changes<String, CoreRiskSnapshot> changes) {
-        for (String key : changes.keys()) {
-            CoreRiskSnapshot previous = changes.before(key);
-            CoreRiskSnapshot current = changes.after(key);
-            if (previous != null) remove(previous.userId(), key);
-            if (current != null) add(current.userId(), key);
+    public void update(RuntimeCommitEntry entry) {
+        RuntimeMutationDelta.ValueChanges<Long, RiskSnapshotRuntime> changes =
+                entry.mutation().riskSnapshots();
+        for (Long positionKey : changes.changedKeys()) {
+            RuntimeIdentityRegistry.PositionIdentity identity = entry.identities().positionIdentity(positionKey);
+            String key = identity.userId() + ":" + identity.positionKey();
+            remove(identity.userId(), key);
+            if (changes.currentValues().containsKey(positionKey)) add(identity.userId(), key);
         }
     }
 

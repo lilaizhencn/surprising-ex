@@ -9,9 +9,15 @@ import java.util.TreeMap;
 public final class OpenInterestIndex {
 
     private final NavigableMap<String, Totals> totals = new TreeMap<>();
+    private final Map<Long, RuntimePositionIndexValue> positions = new TreeMap<>();
+    private RuntimeIdentityRegistry identities;
 
     public OpenInterestIndex(TradingCoreState state) {
         rebuild(state);
+    }
+
+    public OpenInterestIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        rebuild(state, identities);
     }
 
     public NavigableMap<String, Totals> totals() {
@@ -36,18 +42,35 @@ public final class OpenInterestIndex {
         }
     }
 
-    public void update(RuntimeCommitEntry.Changes<Long, CoreUserState> changes) {
-        for (Long userId : changes.keys()) {
-            CoreUserState previous = changes.before(userId);
-            CoreUserState current = changes.after(userId);
-            if (previous != null) previous.positions().values().forEach(this::remove);
-            if (current != null) current.positions().values().forEach(this::add);
+    public void update(RuntimeCommitEntry entry) {
+        RuntimeMutationDelta.ValueChanges<Long, PositionRuntime> changes = entry.mutation().positions();
+        for (Long positionKey : changes.changedKeys()) {
+            RuntimePositionIndexValue previous = positions.remove(positionKey);
+            if (previous != null) remove(previous);
+            PositionRuntime current = changes.currentValues().get(positionKey);
+            if (current != null) {
+                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(current, entry.identities());
+                positions.put(positionKey, indexed);
+                add(indexed);
+            }
         }
     }
 
     public void rebuild(TradingCoreState state) {
         totals.clear();
         state.users().values().forEach(user -> user.positions().values().forEach(this::add));
+    }
+
+    public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        this.identities = identities;
+        totals.clear();
+        positions.clear();
+        state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
+            long positionKey = identities.positionKey(user.userId(), key);
+            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
+            positions.put(positionKey, indexed);
+            add(indexed);
+        }));
     }
 
     private void add(CorePositionState position) {
@@ -69,6 +92,29 @@ public final class OpenInterestIndex {
         Totals next = quantity > 0
                 ? new Totals(Math.subtractExact(current.longQuantity(), quantity), current.shortQuantity())
                 : new Totals(current.longQuantity(), Math.subtractExact(current.shortQuantity(), Math.negateExact(quantity)));
+        if (next.longQuantity() == 0 && next.shortQuantity() == 0) totals.remove(position.symbol());
+        else totals.put(position.symbol(), next);
+    }
+
+    private void add(RuntimePositionIndexValue position) {
+        update(position, true);
+    }
+
+    private void remove(RuntimePositionIndexValue position) {
+        update(position, false);
+    }
+
+    private void update(RuntimePositionIndexValue position, boolean add) {
+        long quantity = position.signedQuantitySteps();
+        if (quantity == 0) return;
+        Totals current = totals.getOrDefault(position.symbol(), Totals.EMPTY);
+        long longDelta = quantity > 0 ? quantity : 0;
+        long shortDelta = quantity < 0 ? Math.negateExact(quantity) : 0;
+        Totals next = add
+                ? new Totals(Math.addExact(current.longQuantity(), longDelta),
+                Math.addExact(current.shortQuantity(), shortDelta))
+                : new Totals(Math.subtractExact(current.longQuantity(), longDelta),
+                Math.subtractExact(current.shortQuantity(), shortDelta));
         if (next.longQuantity() == 0 && next.shortQuantity() == 0) totals.remove(position.symbol());
         else totals.put(position.symbol(), next);
     }

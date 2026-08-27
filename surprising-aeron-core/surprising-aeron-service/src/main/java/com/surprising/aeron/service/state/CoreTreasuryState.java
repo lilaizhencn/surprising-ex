@@ -224,6 +224,7 @@ public record CoreTreasuryState(
 
     private static Map<String, Long> normalized(Map<String, Long> source, boolean signed) {
         if (StateMapSupport.isFrozen(source)) return source;
+        if (StateMapSupport.isDeferred(source)) return StateMapSupport.freezeSorted(source);
         if (StateMapSupport.isDelta(source)) {
             for (Object key : StateMapSupport.changedKeys(source)) {
                 if (source.containsKey(key)) {
@@ -247,6 +248,7 @@ public record CoreTreasuryState(
 
     private static Map<String, Long> markers(Map<String, Long> source) {
         if (StateMapSupport.isFrozen(source)) return source;
+        if (StateMapSupport.isDeferred(source)) return StateMapSupport.freezeSorted(source);
         if (StateMapSupport.isDelta(source)) {
             for (Object key : StateMapSupport.changedKeys(source)) {
                 if (source.containsKey(key)) {
@@ -271,6 +273,7 @@ public record CoreTreasuryState(
 
     private static Map<String, FundingProgress> progresses(Map<String, FundingProgress> source) {
         if (StateMapSupport.isFrozen(source)) return source;
+        if (StateMapSupport.isDeferred(source)) return StateMapSupport.freezeSorted(source);
         if (StateMapSupport.isDelta(source)) {
             for (Object key : StateMapSupport.changedKeys(source)) {
                 if (source.containsKey(key)) validateProgress((String) key, source.get(key));
@@ -290,6 +293,7 @@ public record CoreTreasuryState(
 
     private static Map<String, LifecycleProgress> lifecycleProgresses(Map<String, LifecycleProgress> source) {
         if (StateMapSupport.isFrozen(source)) return source;
+        if (StateMapSupport.isDeferred(source)) return StateMapSupport.freezeSorted(source);
         if (StateMapSupport.isDelta(source)) {
             for (Object key : StateMapSupport.changedKeys(source)) {
                 if (source.containsKey(key)) validateLifecycleProgress((String) key, source.get(key));

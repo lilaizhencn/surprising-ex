@@ -21,6 +21,7 @@ public final class AlgoOrderIndex {
     private final Map<String, NavigableSet<AlgoDueKey>> idsBySymbol = new TreeMap<>();
     private final NavigableSet<AlgoDueKey> allDue = new TreeSet<>(DUE_ORDER);
     private final Map<AlgoClientKey, Long> idsByClient = new java.util.HashMap<>();
+    private final Map<Long, CoreAlgoOrderState> valuesById = new TreeMap<>();
 
     public AlgoOrderIndex(TradingCoreState state) {
         rebuild(state);
@@ -75,11 +76,12 @@ public final class AlgoOrderIndex {
         }
     }
 
-    public void update(RuntimeCommitEntry.Changes<Long, CoreAlgoOrderState> changes) {
-        for (Long id : changes.keys()) {
-            CoreAlgoOrderState previous = changes.before(id);
-            CoreAlgoOrderState current = changes.after(id);
+    public void update(RuntimeCommitEntry entry) {
+        RuntimeMutationDelta.ValueChanges<Long, CoreAlgoOrderState> changes = entry.mutation().algoOrders();
+        for (Long id : changes.changedKeys()) {
+            CoreAlgoOrderState previous = valuesById.remove(id);
             if (previous != null) remove(previous);
+            CoreAlgoOrderState current = changes.currentValues().get(id);
             if (current != null) add(current);
         }
     }
@@ -89,6 +91,7 @@ public final class AlgoOrderIndex {
         idsBySymbol.clear();
         allDue.clear();
         idsByClient.clear();
+        valuesById.clear();
         state.algoOrders().values().forEach(this::add);
     }
 
@@ -107,6 +110,7 @@ public final class AlgoOrderIndex {
     }
 
     private void add(CoreAlgoOrderState value) {
+        valuesById.put(value.algoOrderId(), value);
         AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
         allDue.add(key);
         idsByUser.computeIfAbsent(value.userId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
@@ -117,6 +121,7 @@ public final class AlgoOrderIndex {
     }
 
     private void remove(CoreAlgoOrderState value) {
+        valuesById.remove(value.algoOrderId());
         AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
         allDue.remove(key);
         remove(idsByUser, value.userId(), key);

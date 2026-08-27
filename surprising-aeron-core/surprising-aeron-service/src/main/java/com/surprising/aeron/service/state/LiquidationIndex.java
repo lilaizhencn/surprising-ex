@@ -11,6 +11,7 @@ public final class LiquidationIndex {
 
     private final Map<LiquidationKey, NavigableSet<Long>> activeIds = new TreeMap<>();
     private final NavigableSet<Long> allActiveIds = new TreeSet<>();
+    private final Map<Long, LiquidationKey> keysById = new TreeMap<>();
 
     public LiquidationIndex(TradingCoreState state) {
         rebuild(state);
@@ -39,18 +40,25 @@ public final class LiquidationIndex {
         }
     }
 
-    public void update(RuntimeCommitEntry.Changes<Long, CoreLiquidationState> changes) {
-        for (Long id : changes.keys()) {
-            CoreLiquidationState previous = changes.before(id);
-            CoreLiquidationState current = changes.after(id);
-            if (isActive(previous)) remove(previous);
-            if (isActive(current)) add(current);
+    public void update(RuntimeCommitEntry entry) {
+        RuntimeMutationDelta.ValueChanges<Long, LiquidationRuntime> changes = entry.mutation().liquidations();
+        for (Long id : changes.changedKeys()) {
+            LiquidationKey previous = keysById.remove(id);
+            if (previous != null) remove(id, previous);
+            LiquidationRuntime current = changes.currentValues().get(id);
+            if (isActive(current)) {
+                LiquidationKey key = new LiquidationKey(current.userId(),
+                        entry.identities().symbol(current.symbolId()), current.positionSide());
+                keysById.put(id, key);
+                add(id, key);
+            }
         }
     }
 
     public void rebuild(TradingCoreState state) {
         activeIds.clear();
         allActiveIds.clear();
+        keysById.clear();
         state.riskState().liquidations().values().stream()
                 .filter(LiquidationIndex::isActive)
                 .forEach(this::add);
@@ -61,18 +69,33 @@ public final class LiquidationIndex {
                 && value.status() != CoreLiquidationState.Status.CANCELED;
     }
 
+    private static boolean isActive(LiquidationRuntime value) {
+        return value != null && value.status() != CoreLiquidationState.Status.COMPLETED
+                && value.status() != CoreLiquidationState.Status.CANCELED;
+    }
+
     private void add(CoreLiquidationState value) {
-        allActiveIds.add(value.liquidationId());
-        activeIds.computeIfAbsent(new LiquidationKey(value.userId(), value.symbol(), value.positionSide()),
-                ignored -> new TreeSet<>()).add(value.liquidationId());
+        LiquidationKey key = new LiquidationKey(value.userId(), value.symbol(), value.positionSide());
+        keysById.put(value.liquidationId(), key);
+        add(value.liquidationId(), key);
+    }
+
+    private void add(long liquidationId, LiquidationKey key) {
+        allActiveIds.add(liquidationId);
+        activeIds.computeIfAbsent(key, ignored -> new TreeSet<>()).add(liquidationId);
     }
 
     private void remove(CoreLiquidationState value) {
-        allActiveIds.remove(value.liquidationId());
         LiquidationKey key = new LiquidationKey(value.userId(), value.symbol(), value.positionSide());
+        keysById.remove(value.liquidationId());
+        remove(value.liquidationId(), key);
+    }
+
+    private void remove(long liquidationId, LiquidationKey key) {
+        allActiveIds.remove(liquidationId);
         NavigableSet<Long> ids = activeIds.get(key);
         if (ids == null) return;
-        ids.remove(value.liquidationId());
+        ids.remove(liquidationId);
         if (ids.isEmpty()) activeIds.remove(key);
     }
 

@@ -150,6 +150,7 @@ class CoreMatchingStateTest {
             CoreResponse completed = drainMatching(state, state.apply(order), order);
 
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
+            state.exportState().pending();
             CoreMessage exportQuery = new CoreMessage(CoreMessageHeader.query(
                     CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
                     CommandSource.OPERATIONS, 88, 0, 0, 3, 3), CoreExportCodec.encodeBatchQuery(20));
@@ -550,6 +551,7 @@ class CoreMatchingStateTest {
 
             CoreResponse completed = drainMatching(state, state.apply(buyer), buyer);
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
+            state.exportState().pending();
             CoreMessage exportQuery = new CoreMessage(CoreMessageHeader.query(
                     CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
                     CommandSource.OPERATIONS, 88, 0, 0, 5, 5), CoreExportCodec.encodeBatchQuery(20));

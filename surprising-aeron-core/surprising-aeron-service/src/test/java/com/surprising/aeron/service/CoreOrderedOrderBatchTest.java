@@ -76,6 +76,7 @@ class CoreOrderedOrderBatchTest {
             var laterResult = awaitMatching(state, laterSequence);
             CoreResponse laterResponse = state.completeMatching(laterSequence, laterResult, 2_002, 5);
             assertThat(laterResponse).isNotNull();
+            state.exportState().pending();
 
             var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
                     CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
@@ -164,6 +165,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().order(9_102)).isNull();
             assertThat(state.tradingState().order(9_103)).isNull();
             assertThat(batchResponse.appliedCommandCount()).isEqualTo(batchSequence);
+            state.exportState().pending();
             var eventsBeforeCompletions = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
                     CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
                             ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_001, 5),
@@ -186,6 +188,7 @@ class CoreOrderedOrderBatchTest {
             CoreResponse lastResponse = state.completeMatching(lastSequence, lastMatching, 2_003, 7);
             assertThat(lastResponse).isNotNull();
             assertThat(lastResponse.status()).isEqualTo(ResponseStatus.APPLIED);
+            state.exportState().pending();
 
             var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
                     CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
@@ -254,6 +257,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(conflict.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(conflict.resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
             assertThat(state.tradingState()).isSameAs(stateAfterBatch);
+            state.exportState().pending();
 
             var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
                     CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
@@ -294,6 +298,7 @@ class CoreOrderedOrderBatchTest {
             CoreResponse response = drainBatch(state, takerBatch);
 
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+            state.exportState().pending();
             var event = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
                     CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
                             ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_000, 5),

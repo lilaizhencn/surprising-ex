@@ -34,11 +34,14 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 class CoreProbeStateTest {
 
@@ -54,7 +57,7 @@ class CoreProbeStateTest {
 
             assertThat(state.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
 
-            assertThat(state.exportState().encodedPendingCount()).isZero();
+            assertThat(state.exportState().pendingCount()).isEqualTo(1);
             var pending = state.exportState().pending();
             assertThat(state.exportState().encodedPendingCount()).isEqualTo(pending.size());
             var event = pending.stream()
@@ -67,6 +70,80 @@ class CoreProbeStateTest {
             assertThat(event.fundsPostings()).hasSize(2);
             assertThat(event.fundsPostings().stream()
                     .mapToLong(com.surprising.aeron.protocol.CoreFundsPostingView::units).sum()).isZero();
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    void appendsCoreFactWithoutWaitingForMaterializationAndPublishesOnlyReadyPrefix() throws Exception {
+        CountDownLatch enteredMaterializer = new CountDownLatch(1);
+        CountDownLatch releaseMaterializer = new CountDownLatch(1);
+        try (CoreExportState exportState = new CoreExportState()) {
+            CoreMessage command = command(UUID.randomUUID(), 1, 1);
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    1, 1, 0, 0, 0, 1, 1, transition, 1, 0, List.of(), sequence -> {
+                        enteredMaterializer.countDown();
+                        try {
+                            if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("Core Fact materializer was not released");
+                            }
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("Core Fact materializer interrupted", exception);
+                        }
+                        return new com.surprising.aeron.protocol.CoreExportEvent(
+                                sequence, 1, 1, command.header().commandId(), command.header().messageType(),
+                                ResponseStatus.APPLIED, CoreResultCode.NONE, command.header().userId(),
+                                command.payloadUnsafe(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                                List.of(), List.of(), 0, 0, 0, transition.routeVersion(), 1, 1, 1,
+                                transition, 1, List.of());
+                    }));
+
+            assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(exportState.pendingCount()).isEqualTo(1);
+            assertThat(exportState.batch(1)).isEmpty();
+
+            releaseMaterializer.countDown();
+            assertThat(exportState.pending()).hasSize(1);
+            assertThat(exportState.batch(1)).hasSize(1);
+        } finally {
+            releaseMaterializer.countDown();
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    void acknowledgesPrimitiveTerminalIdsWithoutWaitingForFactMaterialization() throws Exception {
+        CountDownLatch enteredMaterializer = new CountDownLatch(1);
+        CountDownLatch releaseMaterializer = new CountDownLatch(1);
+        try (CoreExportState exportState = new CoreExportState()) {
+            CoreMessage command = command(UUID.randomUUID(), 1, 1);
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    1, 1, 0, 0, 0, 1, 1, transition, 1, 1, List.of(42L), sequence -> {
+                        enteredMaterializer.countDown();
+                        try {
+                            if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("Core Fact materializer was not released");
+                            }
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("Core Fact materializer interrupted", exception);
+                        }
+                        return new com.surprising.aeron.protocol.CoreExportEvent(
+                                sequence, 1, 1, command.header().commandId(), command.header().messageType(),
+                                ResponseStatus.APPLIED, CoreResultCode.NONE, command.header().userId(),
+                                command.payloadUnsafe(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                                List.of(), List.of(), 0, 0, 0, transition.routeVersion(), 1, 1, 1,
+                                transition, 1, List.of());
+                    }));
+
+            assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(exportState.acknowledge(new AckExportCommand(1))).containsExactly(42L);
+            assertThat(exportState.pendingCount()).isZero();
+        } finally {
+            releaseMaterializer.countDown();
         }
     }
 
@@ -372,6 +449,7 @@ class CoreProbeStateTest {
         assertThat(placeResult.orders()).extracting(value -> value.orderId()).containsExactly(91L);
         assertThat(placeResult.orders().getFirst().clusterPosition()).isPositive();
         assertThat(placeResult.executions()).isEmpty();
+        original.exportState().pending();
         var placeEvent = CoreExportCodec.decodeBatchResponse(original.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
                         CoreExportCodec.encodeBatchQuery(10))).data()).events().stream()
                 .map(message -> CoreExportCodec.decodeEvent(message.payload()))
@@ -396,6 +474,7 @@ class CoreProbeStateTest {
         CoreMessage triggerPlace = tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), 3,
                 com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger));
         assertThat(original.apply(triggerPlace).status()).isEqualTo(ResponseStatus.APPLIED);
+        original.exportState().pending();
         var triggerEvent = CoreExportCodec.decodeBatchResponse(original.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
                         CoreExportCodec.encodeBatchQuery(10))).data()).events().stream()
                 .map(message -> CoreExportCodec.decodeEvent(message.payload()))
@@ -1109,6 +1188,7 @@ class CoreProbeStateTest {
         CoreMessage second = command(UUID.randomUUID(), 2, 3);
         state.apply(first);
         state.apply(second);
+        state.exportState().pending();
 
         var batchResult = state.apply(query(CoreMessageType.EXPORT_BATCH_QUERY, 0,
                 CoreExportCodec.encodeBatchQuery(10)));
@@ -1345,13 +1425,19 @@ class CoreProbeStateTest {
     private static void fillExportBacklogCapacity(CoreExportState exportState) {
         byte[] payload = new byte[CoreExportCodec.MAX_COMMAND_PAYLOAD / 2];
         for (long sequence = 1; sequence <= 6; sequence++) {
-            exportState.append(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+            long factSequence = sequence;
+            CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 91, sequence,
-                    0, 1_000, sequence), payload), ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    sequence, 0, 0, 0, 0, 1, 1,
-                    com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), sequence,
-                    new com.surprising.aeron.service.state.FundsDelta(List.of()),
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+                    0, 1_000, sequence), payload);
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    sequence, 0, 0, 0, 0, 1, 1, transition, sequence, 0, List.of(),
+                    exportSequence -> new com.surprising.aeron.protocol.CoreExportEvent(
+                            exportSequence, factSequence, 0, command.header().commandId(),
+                            command.header().messageType(), ResponseStatus.APPLIED, CoreResultCode.NONE,
+                            command.header().userId(), command.payloadUnsafe(), List.of(), List.of(), List.of(),
+                            List.of(), List.of(), List.of(), List.of(), 0, 0, 0, transition.routeVersion(),
+                            1, 1, factSequence, transition, factSequence, List.of())));
         }
         assertThat(exportState.hasCapacityFor()).isFalse();
     }

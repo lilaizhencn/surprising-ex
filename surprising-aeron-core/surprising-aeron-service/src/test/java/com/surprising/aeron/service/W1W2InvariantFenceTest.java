@@ -21,16 +21,16 @@ class W1W2InvariantFenceTest {
                 .contains("reconcileOpenOrdersAsync(activeOrders")
                 .doesNotContain("fromOrders", "rebuildMatcher", "resubmitMatcher", "CoreBookState");
         assertThat(runtime).contains("private void restoreIndexes(TradingCoreState restored)");
-        assertThat(linesContaining(runtime, ".rebuild(restored)"))
+        assertThat(linesContaining(runtime, ".rebuild(restored"))
                 .containsExactly(
-                        "positionUsers.rebuild(restored);",
-                        "openInterest.rebuild(restored);",
+                        "positionUsers.rebuild(restored, identities);",
+                        "openInterest.rebuild(restored, identities);",
                         "triggers.rebuild(restored);",
                         "algos.rebuild(restored);",
                         "liquidations.rebuild(restored);",
                         "timers.rebuild(restored);",
-                        "activeOrders.rebuild(restored);",
-                        "adlPositions.rebuild(restored);",
+                        "activeOrders.rebuild(restored, identities);",
+                        "adlPositions.rebuild(restored, identities);",
                         "riskSnapshots.rebuild(restored);");
         assertThat(probe)
                 .contains("fatalFailure = cause == null")

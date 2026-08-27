@@ -13,6 +13,7 @@ public final class CancelAllAfterIndex {
 
     private final Map<Long, NavigableSet<TimerKey>> idsByUser = new TreeMap<>();
     private final NavigableSet<TimerKey> allDue = new TreeSet<>();
+    private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> valuesByKey = new TreeMap<>();
 
     public CancelAllAfterIndex(TradingCoreState state) {
         rebuild(state);
@@ -61,11 +62,13 @@ public final class CancelAllAfterIndex {
         }
     }
 
-    public void update(RuntimeCommitEntry.Changes<CoreCancelAllAfterKey, CoreCancelAllAfterState> changes) {
-        for (CoreCancelAllAfterKey key : changes.keys()) {
-            CoreCancelAllAfterState previous = changes.before(key);
-            CoreCancelAllAfterState current = changes.after(key);
+    public void update(RuntimeCommitEntry entry) {
+        RuntimeMutationDelta.ValueChanges<CoreCancelAllAfterKey, CoreCancelAllAfterState> changes =
+                entry.mutation().timers();
+        for (CoreCancelAllAfterKey key : changes.changedKeys()) {
+            CoreCancelAllAfterState previous = valuesByKey.remove(key);
             if (previous != null) remove(previous);
+            CoreCancelAllAfterState current = changes.currentValues().get(key);
             if (current != null) add(current);
         }
     }
@@ -73,16 +76,19 @@ public final class CancelAllAfterIndex {
     public void rebuild(TradingCoreState state) {
         idsByUser.clear();
         allDue.clear();
+        valuesByKey.clear();
         state.cancelAllAfterTimers().values().forEach(this::add);
     }
 
     private void add(CoreCancelAllAfterState value) {
+        valuesByKey.put(value.key(), value);
         TimerKey key = new TimerKey(value.triggerAtEpochMillis(), value.userId(), value.symbolScope());
         allDue.add(key);
         idsByUser.computeIfAbsent(value.userId(), ignored -> new TreeSet<>()).add(key);
     }
 
     private void remove(CoreCancelAllAfterState value) {
+        valuesByKey.remove(value.key());
         TimerKey key = new TimerKey(value.triggerAtEpochMillis(), value.userId(), value.symbolScope());
         allDue.remove(key);
         NavigableSet<TimerKey> values = idsByUser.get(value.userId());

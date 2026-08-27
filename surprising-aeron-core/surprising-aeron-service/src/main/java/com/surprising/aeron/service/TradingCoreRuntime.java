@@ -64,18 +64,18 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.committedRevision = initialState.revision();
         this.committedBusinessStateHash = initialState.businessStateHash();
         this.committedCoreSequence = coreSequence;
-        this.activeOrders = new ActiveOrderIndex(initialState);
+        this.activeOrders = new ActiveOrderIndex(initialState, identities);
         this.matcher = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter()
                 : new DeterministicExchangeCoreAdapter(
                         initialState, activeOrders.orders(), coreSequence, matcherSnapshot);
-        this.positionUsers = new PositionUserIndex(initialState);
-        this.openInterest = new OpenInterestIndex(initialState);
+        this.positionUsers = new PositionUserIndex(initialState, identities);
+        this.openInterest = new OpenInterestIndex(initialState, identities);
         this.triggers = new TriggerOrderIndex(initialState);
         this.algos = new AlgoOrderIndex(initialState);
         this.liquidations = new LiquidationIndex(initialState);
         this.timers = new CancelAllAfterIndex(initialState);
-        this.adlPositions = new AdlPositionIndex(initialState);
+        this.adlPositions = new AdlPositionIndex(initialState, identities);
         this.riskSnapshots = new RiskSnapshotIndex(initialState);
         this.matcherReady = CompletableFuture.completedFuture(null);
     }
@@ -248,15 +248,15 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 || beforeBusinessStateHash != committedBusinessStateHash) {
             throw new IllegalStateException("typed runtime transition is out of order");
         }
-        positionUsers.update(entry.users());
-        openInterest.update(entry.users());
-        triggers.update(entry.triggers());
-        algos.update(entry.algoOrders());
-        liquidations.update(entry.liquidations());
-        timers.update(entry.timers());
-        activeOrders.update(entry.orders());
-        adlPositions.update(entry.users());
-        riskSnapshots.update(entry.riskSnapshots());
+        positionUsers.update(entry);
+        openInterest.update(entry);
+        triggers.update(entry);
+        algos.update(entry);
+        liquidations.update(entry);
+        timers.update(entry);
+        activeOrders.update(entry);
+        adlPositions.update(entry);
+        riskSnapshots.update(entry);
         committedRevision = entry.revision();
         committedBusinessStateHash = afterBusinessStateHash;
         runtimeState.clearChangedKeys();
@@ -285,14 +285,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
         runtimeState.clearChangedKeys();
         committedRevision = restored.revision();
         committedBusinessStateHash = restored.businessStateHash();
-        positionUsers.rebuild(restored);
-        openInterest.rebuild(restored);
+        positionUsers.rebuild(restored, identities);
+        openInterest.rebuild(restored, identities);
         triggers.rebuild(restored);
         algos.rebuild(restored);
         liquidations.rebuild(restored);
         timers.rebuild(restored);
-        activeOrders.rebuild(restored);
-        adlPositions.rebuild(restored);
+        activeOrders.rebuild(restored, identities);
+        adlPositions.rebuild(restored, identities);
         riskSnapshots.rebuild(restored);
     }
 

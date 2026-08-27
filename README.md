@@ -227,13 +227,15 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 
 Product Core 的热状态与不可变状态投影通过 `RuntimeMutationDelta` 分界。命令在 Account Lane 内完成原地
 裁决后，owner 只捕获本命令涉及的用户、余额、订单、冻结、仓位和风险 after-image，生成有序
-`RuntimeCommitEntry`。滚动资金/业务 hash 和热索引直接消费 typed entry；持久化 immutable map root 由有界
-`RuntimeProjectionJournal` 在线程外顺序生成，owner 不再调用 `RuntimeStateMaterializer.materializeTransition`。
-owner 使用只读 transition view 完成同命令资金守恒和 Core Fact 构造；如果提交后的校验失败则 fail-fast，不能把
-已经进入 typed journal 的状态伪回滚。Cluster snapshot fence 固定 journal sequence，等待该精确版本并复算业务和
-资金 hash 后才捕获 immutable image；section 编码继续在独立 snapshot encoder 线程执行，交易 owner 不执行压缩或
-字节序列化。Core Fact 在 replicated outbox 中先保存
-不可变 typed event 和精确长度，只有 Audit Exporter 拉取批次或 snapshot fence 捕获 outbox 时才执行协议编码。
+`RuntimeCommitEntry`。entry 不持有命令前后的 `TradingCoreState`；滚动资金/业务 hash、资金守恒和热索引共同消费
+同一份 primitive `RuntimeFundsDelta`/typed after-image。持久化 immutable map root 由有界
+`RuntimeProjectionJournal` 在线程外顺序生成，owner 不再调用 `RuntimeStateMaterializer.materializeTransition`，
+仅保留用于命令回滚和当前 revision 游标的 lazy transition view。如果提交后的校验失败则 fail-fast，不能把已经进入
+typed journal 的状态伪回滚。Cluster snapshot fence 固定 journal sequence，等待该精确版本并复算业务和资金 hash
+后才捕获 immutable image；section 编码继续在独立 snapshot encoder 线程执行，交易 owner 不执行压缩。
+Core Fact outbox 在 owner 上只登记确定性的元数据摘要、容量预留和 terminal order id；完整 Core view、资金 posting
+view、typed event 和协议字节由单线程 `core-fact-materializer` 按 export sequence 构造。Audit Exporter 查询只返回
+已完成的连续前缀，ACK 直接使用 primitive terminal id，不等待 Fact worker；snapshot/outbox 持久化才建立显式 fence。
 等待 matcher 的临时冻结不会更新已提交 hash，失败仍按命令前状态回滚；
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
@@ -280,14 +282,18 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/linear-perpet
 会通过正常命令建仓、挂单并生成快照，invocation setup 从快照恢复；两者以及 teardown
 中的批量响应逐项解码、资金总量、触发单、资金费、风险扫描、强平、保险基金和 ADL 终态校验均不进入
 计时区间。Core 生成并编码完整响应仍在计时区间，只有基准客户端的重复反序列化校验被移到 teardown。
-2026-08-27 typed commit journal 改造后，使用 GraalVM JDK 25.0.1、4 matcher / 1 risk engine、4 Account Lane、
-4 symbol、96 轮 HFT、batch 20、2 轮预热和 3 轮各 3 秒计量的本机运行中，1,000 用户终态业务操作平均
-`17427.070 ops/s`，10,000 用户平均 `17625.735 ops/s`；带 JFR 的 10,000 用户单轮为 `13273.174 ops/s`。
+2026-08-27 primitive commit journal 与异步 Core Fact 改造后，使用 GraalVM JDK 25.0.1、4 matcher / 1 risk
+engine、4 Account Lane、4 symbol、96 轮 HFT、batch 20、2 轮预热和 3 轮各 3 秒计量的本机运行中，BUSY_SPIN
+下 1,000 用户终态业务操作平均 `19149.495 ops/s`，10,000 用户平均 `19477.474 ops/s`；同配置 10,000 用户
+BLOCKING 对照为 `15730.088 ops/s`，带 JFR 的 10,000 用户单轮为 `14716.816 ops/s`。
 每轮接受与终态业务操作相等、两个未完成指标为零，teardown 的期初/期末资金守恒校验通过。最终 JFR 的
-232 个 owner 执行样本中，`RuntimeStateMaterializer.materializeTransition` 为零；typed entry 路径出现 41 个样本，
-其中 `RuntimeCommitLedger` 出现 31 个，二者有重叠，下一阶段应继续把 Core value 转换和 typed fact view 构造
-从 owner 缩减。本机结果越过 10k/s 功能目标，但当前改造没有证明吞吐提升，且样本不足以替代隔离 CPU 的
-生产同型机器三节点 HTTP P10 长稳门禁，也不代表 100k/s 已达成。
+2,729 个执行样本中，7 个 exchange-core busy-spin 线程占 2,191 个，owner 为 274 个，Fact worker 为 235 个；
+owner 栈中没有 `CoreExportCodec`，`RuntimeStateMaterializer.materializeTransition` 为零，lazy `transitionView` 为
+8 个样本。Fact worker 的主要成本是 `TreeMap` 组装和协议写入；owner 分配样本仍占 98.22%，下一阶段应优先
+消除命令响应/回滚游标中的 Core value 转换和集合分配。当前结果越过 10k/s 功能目标但离单 Product Core
+`100k/s` 仍约 5 倍；不能把全仓账户、共享订单簿、保险基金或 ADL 直接拆到多 owner，因为这会破坏同一命令
+资金原子性。只有先定义可独立结算的 shard key、禁止跨 shard 全仓与共享资金池，或把跨 shard 操作纳入确定性
+协调协议后，才能把分片作为容量方案。该本机结果也不能替代隔离 CPU 的生产同型机器三节点 HTTP P10 长稳门禁。
 
 matcher 等待策略通过启动参数 `surprising.aeron.matcher-wait-strategy=BUSY_SPIN|YIELDING|BLOCKING` 切换；
 它只影响 matcher 线程等待和 CPU/尾延迟权衡，不进入资金状态或 snapshot hash，修改后重启单产品线 Core 生效。

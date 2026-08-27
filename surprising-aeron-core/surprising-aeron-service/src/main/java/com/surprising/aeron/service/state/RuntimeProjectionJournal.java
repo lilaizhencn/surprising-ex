@@ -183,9 +183,8 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
                     batch.add(record.entry());
                     lastRecord = record;
                 }
-                RuntimeCommitEntry merged = batch.size() == 1
-                        ? batch.getFirst() : RuntimeCommitEntry.coalesce(batch);
-                TradingCoreState nextState = merged.project(projected.state());
+                TradingCoreState nextState = projected.state();
+                for (RuntimeCommitEntry entry : batch) nextState = entry.project(nextState);
                 projected = new ProjectionVersion(lastSequence, nextState,
                         lastRecord.businessStateHash(), lastRecord.fundsStateHash());
                 for (long sequence = firstSequence; sequence <= lastSequence; sequence++) {
