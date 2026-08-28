@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.util.Arrays;
-
 public enum CoreResultCode {
     NONE(0),
     PRODUCT_LINE_MISMATCH(1),
@@ -74,6 +72,14 @@ public enum CoreResultCode {
     FUNDS_IDEMPOTENCY_RETENTION_FULL(74),
     QUERY_RESPONSE_TOO_LARGE(75);
 
+    private static final CoreResultCode[] BY_WIRE_CODE = new CoreResultCode[76];
+
+    static {
+        for (CoreResultCode value : values()) {
+            BY_WIRE_CODE[value.wireCode] = value;
+        }
+    }
+
     private final int wireCode;
 
     CoreResultCode(int wireCode) {
@@ -85,8 +91,13 @@ public enum CoreResultCode {
     }
 
     public static CoreResultCode fromWireCode(int wireCode) {
-        return Arrays.stream(values()).filter(value -> value.wireCode == wireCode).findFirst()
-                .orElseThrow(() -> new ProtocolException("unsupported result code: " + wireCode));
+        CoreResultCode result = wireCode >= 0 && wireCode < BY_WIRE_CODE.length
+                ? BY_WIRE_CODE[wireCode]
+                : null;
+        if (result == null) {
+            throw new ProtocolException("unsupported result code: " + wireCode);
+        }
+        return result;
     }
 
     public static CoreResultCode fromRejectionCode(String code) {

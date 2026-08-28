@@ -3,6 +3,7 @@ package com.surprising.aeron.protocol;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
@@ -30,9 +31,11 @@ class TradingOrderBatchCodecTest {
         assertThat(TradingOrderBatchCodec.decodeAmendOrderBatch(
                 TradingOrderBatchCodec.encodeAmendOrderBatch(amends))).isEqualTo(amends);
 
+        CoreOrderStateView order = new CoreOrderStateView(701, ProductLine.LINEAR_PERPETUAL, 7,
+                "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, 1, 1, false, "OPEN", 2);
         CoreOrderBatchResult result = new CoreOrderBatchResult(List.of(
                 new CoreOrderBatchResult.Item(0, 701, 0, 0, ResponseStatus.APPLIED,
-                        CoreResultCode.NONE, null, List.of()),
+                        CoreResultCode.NONE, order, List.of()),
                 new CoreOrderBatchResult.Item(1, 701, 0, 0, ResponseStatus.REJECTED,
                         CoreResultCode.DUPLICATE_ORDER_ID, null, List.of())));
         assertThat(TradingOrderBatchCodec.decodeResult(

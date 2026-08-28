@@ -59,20 +59,20 @@ public final class TradingOrderBatchCodec {
         if (result == null) {
             throw new IllegalArgumentException("order batch result is required");
         }
-        List<byte[]> frames = result.items().stream().map(TradingOrderBatchCodec::encodeResultFrame).toList();
         int length = Integer.BYTES * 2;
-        for (byte[] frame : frames) {
-            length = Math.addExact(length, Math.addExact(FRAME_LENGTH_BYTES, frame.length));
+        for (CoreOrderBatchResult.Item item : result.items()) {
+            length = Math.addExact(length,
+                    Math.addExact(FRAME_LENGTH_BYTES, encodedResultFrameLength(item)));
         }
         if (length > MAX_BATCH_RESPONSE_BYTES) {
             throw new IllegalArgumentException("order batch result is too large");
         }
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(PlaceOrderBatchCommand.WIRE_VERSION)
-                .putInt(frames.size());
-        for (int index = 0; index < frames.size(); index++) {
-            byte[] frame = frames.get(index);
-            buffer.putInt(frame.length).put(frame);
+                .putInt(result.items().size());
+        for (CoreOrderBatchResult.Item item : result.items()) {
+            buffer.putInt(encodedResultFrameLength(item));
+            writeResultFrame(buffer, item);
         }
         return buffer.array();
     }
@@ -117,12 +117,13 @@ public final class TradingOrderBatchCodec {
         if (commands == null || commands.isEmpty()) {
             throw new IllegalArgumentException("order batch must not be empty");
         }
-        List<byte[]> items = commands.stream().map(command -> {
+        List<byte[]> items = new ArrayList<>(commands.size());
+        for (T command : commands) {
             if (command == null) throw new IllegalArgumentException("order batch item is required");
             byte[] encoded = encoder.apply(command);
             if (encoded.length == 0) throw new IllegalArgumentException("order batch item is empty");
-            return encoded;
-        }).toList();
+            items.add(encoded);
+        }
         int length = Integer.BYTES * 2;
         for (byte[] item : items) {
             length = Math.addExact(length, Integer.BYTES * 2 + item.length);
@@ -167,27 +168,31 @@ public final class TradingOrderBatchCodec {
         return items;
     }
 
-    private static byte[] encodeResultFrame(CoreOrderBatchResult.Item item) {
-        byte[] order = item.order() == null ? new byte[0]
-                : CoreStateQueryCodec.encodeOpenOrders(new CoreOpenOrdersView(List.of(item.order())));
-        int length = Integer.BYTES + Long.BYTES * 3 + Integer.BYTES * 3 + order.length
+    private static int encodedResultFrameLength(CoreOrderBatchResult.Item item) {
+        int orderLength = item.order() == null ? 0 : CoreStateQueryCodec.encodedOrderStateLength(item.order());
+        return Integer.BYTES + Long.BYTES * 3 + Integer.BYTES * 3 + orderLength
                 + Math.addExact(Integer.BYTES, Math.multiplyExact(item.executions().size(), RESULT_EXECUTION_LENGTH));
-        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
+    }
+
+    private static void writeResultFrame(ByteBuffer buffer, CoreOrderBatchResult.Item item) {
+        byte[] order = item.order() == null ? null : CoreStateQueryCodec.encodeOrderState(item.order());
+        int orderLength = order == null ? 0 : order.length;
+        buffer
                 .putInt(item.index())
                 .putLong(item.orderId())
                 .putLong(item.originalOrderId())
                 .putLong(item.replacementOrderId())
                 .putInt(item.status().wireCode())
                 .putInt(item.resultCode().wireCode())
-                .putInt(order.length)
-                .put(order)
+                .putInt(orderLength);
+        if (order != null) buffer.put(order);
+        buffer
                 .putInt(item.executions().size());
         for (CoreExecutionView execution : item.executions()) {
             buffer.putLong(execution.takerOrderId()).putLong(execution.makerOrderId())
                     .putLong(execution.takerUserId()).putLong(execution.makerUserId())
                     .putLong(execution.priceTicks()).putLong(execution.quantitySteps());
         }
-        return buffer.array();
     }
 
     private static CoreOrderBatchResult.Item decodeResultFrame(byte[] encoded) {
@@ -206,12 +211,7 @@ public final class TradingOrderBatchCodec {
         }
         byte[] orderBytes = new byte[orderLength];
         buffer.get(orderBytes);
-        CoreOrderStateView order = null;
-        if (orderLength > 0) {
-            List<CoreOrderStateView> orders = CoreStateQueryCodec.decodeOpenOrders(orderBytes).orders();
-            if (orders.size() != 1) throw new ProtocolException("result item must contain one order");
-            order = orders.getFirst();
-        }
+        CoreOrderStateView order = orderLength == 0 ? null : CoreStateQueryCodec.decodeOrderState(orderBytes);
         requireRemaining(buffer, Integer.BYTES, "result executions");
         int executionCount = buffer.getInt();
         if (executionCount < 0 || executionCount > 100_000

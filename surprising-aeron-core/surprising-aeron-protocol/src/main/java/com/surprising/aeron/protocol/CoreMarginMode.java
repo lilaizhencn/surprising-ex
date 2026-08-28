@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.util.Arrays;
-
 public enum CoreMarginMode {
     CROSS(0),
     ISOLATED(1);
@@ -17,7 +15,10 @@ public enum CoreMarginMode {
     }
 
     public static CoreMarginMode fromWireCode(int wireCode) {
-        return Arrays.stream(values()).filter(value -> value.wireCode == wireCode).findFirst()
-                .orElseThrow(() -> new ProtocolException("unsupported margin mode: " + wireCode));
+        return switch (wireCode) {
+            case 0 -> CROSS;
+            case 1 -> ISOLATED;
+            default -> throw new ProtocolException("unsupported margin mode: " + wireCode);
+        };
     }
 }

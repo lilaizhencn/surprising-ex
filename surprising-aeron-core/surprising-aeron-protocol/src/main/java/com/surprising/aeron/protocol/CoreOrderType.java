@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.util.Arrays;
-
 public enum CoreOrderType {
     LIMIT(1),
     MARKET(2);
@@ -17,7 +15,10 @@ public enum CoreOrderType {
     }
 
     public static CoreOrderType fromWireCode(int wireCode) {
-        return Arrays.stream(values()).filter(value -> value.wireCode == wireCode).findFirst()
-                .orElseThrow(() -> new ProtocolException("unsupported order type: " + wireCode));
+        return switch (wireCode) {
+            case 1 -> LIMIT;
+            case 2 -> MARKET;
+            default -> throw new ProtocolException("unsupported order type: " + wireCode);
+        };
     }
 }

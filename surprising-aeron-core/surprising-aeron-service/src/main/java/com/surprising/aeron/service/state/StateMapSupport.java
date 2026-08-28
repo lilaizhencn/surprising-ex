@@ -14,7 +14,7 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
 
 @SuppressWarnings("unchecked")
@@ -53,9 +53,9 @@ public final class StateMapSupport {
         if (changedKeys.isEmpty()) return freezeSorted(values);
         NavigableMap<K, V> base = raw(values);
         if (base == null) base = new TreeMap<>(values);
-        Map<K, V> cache = new ConcurrentHashMap<>();
-        return new LazyDeltaMap<>(base, changedKeys, presentKeys,
-                key -> cache.computeIfAbsent(key, loader), true);
+        Set<K> orderedChangedKeys = changedKeys instanceof NavigableSet<?>
+                ? changedKeys : Collections.unmodifiableSet(new TreeSet<>(changedKeys));
+        return new LazyDeltaMap<>(base, orderedChangedKeys, presentKeys, loader, true);
     }
 
     static boolean isDelta(Map<?, ?> values) {
@@ -267,19 +267,27 @@ public final class StateMapSupport {
         private final Function<K, V> loader;
         private final boolean deferred;
         private final int size;
+        private final Object[] changedKeysByIndex;
+        private final boolean[] presentByIndex;
+        private final AtomicReferenceArray<Object> resolvedValues;
         private volatile NavigableMap<K, V> materialized;
 
         private LazyDeltaMap(NavigableMap<K, V> base, Set<K> changedKeys, Set<K> presentKeys,
                              Function<K, V> loader, boolean deferred) {
             this.base = base;
-            this.changedKeys = Collections.unmodifiableSet(new TreeSet<>(changedKeys));
-            this.presentKeys = Collections.unmodifiableSet(new TreeSet<>(presentKeys));
+            this.changedKeys = changedKeys;
+            this.presentKeys = presentKeys;
             this.loader = loader;
             this.deferred = deferred;
+            changedKeysByIndex = changedKeys.toArray();
+            presentByIndex = new boolean[changedKeysByIndex.length];
+            resolvedValues = new AtomicReferenceArray<>(changedKeysByIndex.length);
             int nextSize = base.size();
-            for (K key : this.changedKeys) {
+            for (int index = 0; index < changedKeysByIndex.length; index++) {
+                K key = (K) changedKeysByIndex[index];
                 boolean existed = base.containsKey(key);
                 boolean exists = this.presentKeys.contains(key);
+                presentByIndex[index] = exists;
                 if (existed && !exists) nextSize--;
                 else if (!existed && exists) nextSize++;
             }
@@ -303,8 +311,9 @@ public final class StateMapSupport {
             if (current != null) return current;
             TreeMap<K, V> next = new TreeMap<>(base.comparator());
             next.putAll(base);
-            for (K key : changedKeys) {
-                V value = presentKeys.contains(key) ? loader.apply(key) : null;
+            for (int index = 0; index < changedKeysByIndex.length; index++) {
+                K key = (K) changedKeysByIndex[index];
+                V value = presentByIndex[index] ? resolvedValue(index, key) : null;
                 if (value == null) next.remove(key); else next.put(key, value);
             }
             current = Collections.unmodifiableNavigableMap(next);
@@ -314,14 +323,48 @@ public final class StateMapSupport {
 
         @Override
         public V get(Object key) {
-            return changedKeys.contains(key)
-                    ? (presentKeys.contains(key) ? loader.apply((K) key) : null)
-                    : base.get(key);
+            int index = changedIndex(key);
+            if (index < 0) return base.get(key);
+            return presentByIndex[index] ? resolvedValue(index, (K) key) : null;
         }
 
         @Override
         public boolean containsKey(Object key) {
-            return changedKeys.contains(key) ? presentKeys.contains(key) : base.containsKey(key);
+            int index = changedIndex(key);
+            return index < 0 ? base.containsKey(key) : presentByIndex[index];
+        }
+
+        private V resolvedValue(int index, K key) {
+            Object current = resolvedValues.get(index);
+            if (current != null) return (V) current;
+            synchronized (resolvedValues) {
+                current = resolvedValues.get(index);
+                if (current == null) {
+                    current = java.util.Objects.requireNonNull(loader.apply(key),
+                            "deferred state value is required");
+                    resolvedValues.set(index, current);
+                }
+            }
+            return (V) current;
+        }
+
+        private int changedIndex(Object key) {
+            if (key == null) return -1;
+            K candidate = (K) key;
+            Comparator<? super K> comparator = base.comparator();
+            int low = 0;
+            int high = changedKeysByIndex.length - 1;
+            while (low <= high) {
+                int middle = (low + high) >>> 1;
+                K current = (K) changedKeysByIndex[middle];
+                int comparison = comparator == null
+                        ? ((Comparable<? super K>) current).compareTo(candidate)
+                        : comparator.compare(current, candidate);
+                if (comparison < 0) low = middle + 1;
+                else if (comparison > 0) high = middle - 1;
+                else return middle;
+            }
+            return -1;
         }
 
         @Override

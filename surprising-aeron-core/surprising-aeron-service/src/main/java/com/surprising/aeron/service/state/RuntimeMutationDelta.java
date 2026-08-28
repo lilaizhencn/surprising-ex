@@ -36,7 +36,7 @@ public final class RuntimeMutationDelta {
                          ValueChanges<Long, UserValue> users,
                          ValueChanges<Long, OrderRuntime> orders,
                          ValueChanges<Long, ReservationRuntime> reservations,
-                         Set<Long> pendingReservations,
+                         TreeSet<Long> pendingReservations,
                          ValueChanges<Long, PositionRuntime> positions,
                          ValueChanges<Long, LiquidationRuntime> liquidations,
                          ValueChanges<Long, RiskSnapshotRuntime> riskSnapshots,
@@ -64,7 +64,7 @@ public final class RuntimeMutationDelta {
         this.users = users;
         this.orders = orders;
         this.reservations = reservations;
-        this.pendingReservations = Collections.unmodifiableSet(new TreeSet<>(pendingReservations));
+        this.pendingReservations = Collections.unmodifiableNavigableSet(pendingReservations);
         this.positions = positions;
         this.liquidations = liquidations;
         this.riskSnapshots = riskSnapshots;
@@ -121,23 +121,27 @@ public final class RuntimeMutationDelta {
         }
     }
 
-    record ValueChanges<K, V>(Set<K> changedKeys, Map<K, V> currentValues) {
-        ValueChanges {
+    static final class ValueChanges<K, V> {
+        private final Set<K> changedKeys;
+        private final Map<K, V> currentValues;
+
+        private ValueChanges(TreeSet<K> changedKeys, TreeMap<K, V> currentValues) {
             if (changedKeys == null || currentValues == null || !changedKeys.containsAll(currentValues.keySet())) {
                 throw new IllegalArgumentException("invalid runtime value changes");
             }
-            TreeSet<K> keys = new TreeSet<>(changedKeys);
-            TreeMap<K, V> values = new TreeMap<>(currentValues);
-            if (values.values().stream().anyMatch(java.util.Objects::isNull)) {
-                throw new IllegalArgumentException("runtime values cannot contain null");
+            for (V value : currentValues.values()) {
+                if (value == null) throw new IllegalArgumentException("runtime values cannot contain null");
             }
-            changedKeys = Collections.unmodifiableSet(keys);
-            currentValues = Collections.unmodifiableMap(values);
+            this.changedKeys = Collections.unmodifiableNavigableSet(changedKeys);
+            this.currentValues = Collections.unmodifiableNavigableMap(currentValues);
         }
 
-        static <K, V> ValueChanges<K, V> of(Set<K> changedKeys, Map<K, V> currentValues) {
+        static <K, V> ValueChanges<K, V> of(TreeSet<K> changedKeys, TreeMap<K, V> currentValues) {
             return new ValueChanges<>(changedKeys, currentValues);
         }
+
+        Set<K> changedKeys() { return changedKeys; }
+        Map<K, V> currentValues() { return currentValues; }
     }
 
     record TreasuryValues(ValueChanges<Integer, AssetLedger> assets,

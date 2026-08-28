@@ -4,10 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +31,28 @@ class StateMapSupportTest {
 
         assertThat(result).isSameAs(base);
         assertThat(loads).hasValue(0);
+    }
+
+    @Test
+    void deferredDeltaResolvesOneSharedValueAcrossConcurrentReaders() throws Exception {
+        NavigableMap<Long, Object> base = StateMapSupport.freezeSorted(new TreeMap<>());
+        AtomicInteger loads = new AtomicInteger();
+        Object expected = new Object();
+        NavigableMap<Long, Object> result = StateMapSupport.deferredDelta(
+                base, new TreeSet<>(Set.of(7L)), new TreeSet<>(Set.of(7L)), ignored -> {
+                    loads.incrementAndGet();
+                    return expected;
+                });
+
+        List<CompletableFuture<Object>> readers = new ArrayList<>();
+        for (int index = 0; index < 32; index++) {
+            readers.add(CompletableFuture.supplyAsync(() -> result.get(7L)));
+        }
+        for (CompletableFuture<Object> reader : readers) {
+            assertThat(reader.get(5, TimeUnit.SECONDS)).isSameAs(expected);
+        }
+        assertThat(result.entrySet()).containsExactly(Map.entry(7L, expected));
+        assertThat(loads).hasValue(1);
     }
 
     @Test

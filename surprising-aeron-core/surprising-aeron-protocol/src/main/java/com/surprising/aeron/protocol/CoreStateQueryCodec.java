@@ -1,9 +1,9 @@
 package com.surprising.aeron.protocol;
 
 import com.surprising.product.api.ProductLine;
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -97,7 +97,7 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeUserState(CoreUserStateView state) {
-        Writer writer = new Writer();
+        Writer writer = new Writer(encodedUserStateLength(state));
         writer.intValue(VERSION);
         writer.intValue(ProductLineWireCode.encode(state.productLine()));
         writer.longValue(state.userId());
@@ -208,7 +208,7 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeOrderState(CoreOrderStateView state) {
-        Writer writer = new Writer();
+        Writer writer = new Writer(encodedOrderStateLength(state));
         writeOrderState(writer, state);
         return writer.toByteArray();
     }
@@ -350,11 +350,20 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeOpenOrders(CoreOpenOrdersView view) {
-        Writer writer = new Writer();
+        Writer writer = new Writer(encodedOpenOrdersLength(view));
         writer.intValue(1);
         writer.intValue(view.orders().size());
         view.orders().forEach(order -> writeOrderState(writer, order));
         return writer.toByteArray();
+    }
+
+    public static int encodedOpenOrdersLength(CoreOpenOrdersView view) {
+        if (view == null) throw new IllegalArgumentException("open orders view is required");
+        long length = Integer.BYTES * 2L;
+        for (CoreOrderStateView order : view.orders()) {
+            length = Math.addExact(length, encodedOrderStateLength(order));
+        }
+        return Math.toIntExact(length);
     }
 
     public static CoreOpenOrdersView decodeOpenOrders(byte[] encoded) {
@@ -474,21 +483,34 @@ public final class CoreStateQueryCodec {
     }
 
     private static final class Writer {
-        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private byte[] output;
+        private int offset;
+
+        private Writer() {
+            this(128);
+        }
+
+        private Writer(int capacity) {
+            if (capacity < 0) throw new IllegalArgumentException("writer capacity must not be negative");
+            output = new byte[capacity];
+        }
 
         void byteValue(int value) {
-            output.write(value);
+            ensureCapacity(Byte.BYTES);
+            output[offset++] = (byte) value;
         }
 
         void intValue(int value) {
+            ensureCapacity(Integer.BYTES);
             for (int shift = 0; shift < Integer.SIZE; shift += Byte.SIZE) {
-                output.write(value >>> shift);
+                output[offset++] = (byte) (value >>> shift);
             }
         }
 
         void longValue(long value) {
+            ensureCapacity(Long.BYTES);
             for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
-                output.write((int) (value >>> shift));
+                output[offset++] = (byte) (value >>> shift);
             }
         }
 
@@ -501,7 +523,7 @@ public final class CoreStateQueryCodec {
                 throw new IllegalArgumentException("invalid query text length");
             }
             intValue(bytes.length);
-            output.writeBytes(bytes);
+            bytes(bytes);
         }
 
         void optionalText(String value) {
@@ -510,11 +532,24 @@ public final class CoreStateQueryCodec {
                 throw new IllegalArgumentException("invalid optional query text length");
             }
             intValue(bytes.length);
-            output.writeBytes(bytes);
+            bytes(bytes);
         }
 
         byte[] toByteArray() {
-            return output.toByteArray();
+            return offset == output.length ? output : Arrays.copyOf(output, offset);
+        }
+
+        private void bytes(byte[] value) {
+            ensureCapacity(value.length);
+            System.arraycopy(value, 0, output, offset, value.length);
+            offset += value.length;
+        }
+
+        private void ensureCapacity(int additional) {
+            int required = Math.addExact(offset, additional);
+            if (required <= output.length) return;
+            int doubled = output.length <= Integer.MAX_VALUE / 2 ? output.length * 2 : Integer.MAX_VALUE;
+            output = Arrays.copyOf(output, Math.max(required, doubled));
         }
     }
 

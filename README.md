@@ -247,6 +247,11 @@ sequence ring 保存。owner 不再为每条撮合命令维护 `ConcurrentHashMa
 准入的 open-interest 比例计算和 risk bracket 选择使用精确 long fast path，只有真实 long 乘法溢出才进入
 `BigInteger` fallback；同一命令的杠杆和 matcher evidence 不再重复查询或重复解码。
 
+性能采样必须按 `LinearPerpetualWorkload` JFR 事件的正式 measurement 窗口归因，trial 初始化和快照模板分配不能
+计入交易热链路。热窗口内的 wire enum 解码使用直接分支，不创建 Stream；runtime mutation 直接接管本命令构造的
+有序 change-set，避免重复复制 `TreeMap`/`TreeSet`；lazy state delta 使用按变更键索引的原子值槽，不为每张 delta map
+创建 `ConcurrentHashMap`。批量订单结果在最终响应缓冲区中直接写 frame，状态查询 writer 按精确编码长度预分配。
+
 Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP 线程不阻塞等待 Core；History Projector
 按 Kafka poll 批次提交 PostgreSQL，WebSocket fanout 也按 poll 批量解码、分组和发布。数据库、Kafka 或慢订阅者
 只会形成各自有界 backlog，不会在 Product Core 交易 owner 上执行。

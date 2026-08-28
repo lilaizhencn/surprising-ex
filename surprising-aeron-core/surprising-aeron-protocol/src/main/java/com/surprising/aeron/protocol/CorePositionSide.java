@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.util.Arrays;
-
 public enum CorePositionSide {
     NET(0),
     LONG(1),
@@ -22,7 +20,11 @@ public enum CorePositionSide {
     }
 
     public static CorePositionSide fromWireCode(int wireCode) {
-        return Arrays.stream(values()).filter(value -> value.wireCode == wireCode).findFirst()
-                .orElseThrow(() -> new ProtocolException("unsupported position side: " + wireCode));
+        return switch (wireCode) {
+            case 0 -> NET;
+            case 1 -> LONG;
+            case 2 -> SHORT;
+            default -> throw new ProtocolException("unsupported position side: " + wireCode);
+        };
     }
 }

@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.util.Arrays;
-
 public enum CoreTimeInForce {
     GTC(1),
     IOC(2),
@@ -23,7 +21,12 @@ public enum CoreTimeInForce {
     }
 
     public static CoreTimeInForce fromWireCode(int wireCode) {
-        return Arrays.stream(values()).filter(value -> value.wireCode == wireCode).findFirst()
-                .orElseThrow(() -> new ProtocolException("unsupported time in force: " + wireCode));
+        return switch (wireCode) {
+            case 1 -> GTC;
+            case 2 -> IOC;
+            case 3 -> FOK;
+            case 4 -> GTX;
+            default -> throw new ProtocolException("unsupported time in force: " + wireCode);
+        };
     }
 }

@@ -56,7 +56,9 @@ public record AssetBalance(String asset, long availableUnits, long lockedUnits) 
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("asset is required");
         }
-        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        String trimmed = value.trim();
+        if (validAsset(trimmed)) return trimmed;
+        String normalized = trimmed.toUpperCase(Locale.ROOT);
         if (!validAsset(normalized)) {
             throw new IllegalArgumentException("invalid asset: " + value);
         }

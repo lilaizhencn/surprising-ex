@@ -118,6 +118,8 @@ class CoreStateQueryCodecTest {
         CoreOpenOrdersView view = new CoreOpenOrdersView(List.of(first, second));
         assertThat(CoreStateQueryCodec.decodeOpenOrders(CoreStateQueryCodec.encodeOpenOrders(view)))
                 .isEqualTo(view);
+        assertThat(CoreStateQueryCodec.encodedOpenOrdersLength(view))
+                .isEqualTo(CoreStateQueryCodec.encodeOpenOrders(view).length);
     }
 
     @Test

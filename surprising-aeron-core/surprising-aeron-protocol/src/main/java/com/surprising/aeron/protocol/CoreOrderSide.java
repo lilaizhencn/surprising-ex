@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.util.Arrays;
-
 public enum CoreOrderSide {
     BUY(1),
     SELL(2);
@@ -17,9 +15,10 @@ public enum CoreOrderSide {
     }
 
     public static CoreOrderSide fromWireCode(int wireCode) {
-        return Arrays.stream(values())
-                .filter(value -> value.wireCode == wireCode)
-                .findFirst()
-                .orElseThrow(() -> new ProtocolException("unsupported order side: " + wireCode));
+        return switch (wireCode) {
+            case 1 -> BUY;
+            case 2 -> SELL;
+            default -> throw new ProtocolException("unsupported order side: " + wireCode);
+        };
     }
 }

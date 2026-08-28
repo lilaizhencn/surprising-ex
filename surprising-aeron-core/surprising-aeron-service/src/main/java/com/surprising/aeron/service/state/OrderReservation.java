@@ -75,7 +75,9 @@ public record OrderReservation(
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("symbol is required");
         }
-        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        String trimmed = value.trim();
+        if (validSymbol(trimmed)) return trimmed;
+        String normalized = trimmed.toUpperCase(Locale.ROOT);
         if (!validSymbol(normalized)) {
             throw new IllegalArgumentException("invalid symbol: " + value);
         }
