@@ -122,7 +122,7 @@ final class SectionedCoreSnapshotRecovery {
             case 4, 5, 6, 7, 8 -> 1;
             default -> sectionIndex == sectionCount - 1
                     ? SectionedCoreSnapshotCodec.FOOTER_LENGTH
-                    : Integer.BYTES * 3 + Long.BYTES * 5;
+                    : Integer.BYTES * 2 + Long.BYTES * 5;
         };
         if (sectionLength < minimumLength || sectionLength > SectionedCoreSnapshotCodec.MAX_SECTION_BYTES
                 || sectionIndex == 0 && sectionLength != SectionedCoreSnapshotCodec.HEADER_LENGTH

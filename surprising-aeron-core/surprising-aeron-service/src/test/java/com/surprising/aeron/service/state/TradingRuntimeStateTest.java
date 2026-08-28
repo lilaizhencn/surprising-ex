@@ -10,6 +10,41 @@ import org.junit.jupiter.api.Test;
 class TradingRuntimeStateTest {
 
     @Test
+    void snapshotCaptureDoesNotRebaseLiveAccountLaneHashes() {
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.startAccountLanes();
+        try {
+            AccountLaneView[] before = state.accountLanes();
+
+            state.accountLaneSnapshots(1, TradingCoreState.empty(
+                    com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
+
+            AccountLaneView[] after = state.accountLanes();
+            for (int laneId = 0; laneId < before.length; laneId++) {
+                assertThat(after[laneId].localStateHash())
+                        .as("snapshot must not mutate lane %s state hash", laneId)
+                        .isEqualTo(before[laneId].localStateHash());
+                assertThat(after[laneId].localFundsHash())
+                        .as("snapshot must not mutate lane %s funds hash", laneId)
+                        .isEqualTo(before[laneId].localFundsHash());
+            }
+        } finally {
+            state.close();
+        }
+    }
+
+    @Test
+    void riskSchedulerSelectsTheLeastProgressedSymbolInsteadOfTheLowestSymbolId() {
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putRiskScan(incompleteRiskScan(1, 900));
+        state.putRiskScan(incompleteRiskScan(2, 0));
+
+        assertThat(state.firstRiskIncompleteScan().symbolId())
+                .as("global risk work must rotate to the least-progressed symbol")
+                .isEqualTo(2);
+    }
+
+    @Test
     void keepsHotIndexesFlatAndTracksChangedKeys() {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
@@ -348,12 +383,11 @@ class TradingRuntimeStateTest {
         AccountLaneSnapshot corrupted = snapshots.get(1);
         invalid.set(1, new AccountLaneSnapshot(corrupted.laneId(), corrupted.revision(),
                 corrupted.appliedSequence(), corrupted.committedSequence(),
-                corrupted.localStateHash() ^ 1L, corrupted.localFundsHash(),
-                corrupted.userIds(), corrupted.state()));
+                corrupted.localStateHash(), corrupted.localFundsHash(), java.util.List.of(laneZeroUser)));
 
         assertThatThrownBy(() -> state.restoreAccountLaneSnapshots(invalid, 1, global))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("hash mismatch");
+                .hasMessageContaining("incorrectly routed user");
         AccountLaneView afterFailure = state.accountLaneById(0);
         assertThat(afterFailure.appliedSequence()).isEqualTo(beforeRestore.appliedSequence());
         assertThat(afterFailure.committedSequence()).isEqualTo(beforeRestore.committedSequence());
@@ -377,10 +411,41 @@ class TradingRuntimeStateTest {
         }
     }
 
+    @Test
+    void lifecycleSettlementUsesIndependentLaneOwnersAndRebindsTheCoreOwner() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        java.util.List<Long> users = new java.util.ArrayList<>();
+        for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
+            long userId = userForLane(topology, laneId);
+            users.add(userId);
+            state.putUser(new UserRuntime(userId));
+        }
+        state.startAccountLanes();
+        try {
+            Object[] owners = state.executeLifecycleSettlements(users, Long::longValue,
+                    ignored -> Thread.currentThread().getName());
+
+            for (int laneId = 0; laneId < owners.length; laneId++) {
+                assertThat(owners[laneId]).isEqualTo("core-lifecycle-lane-" + laneId);
+            }
+            assertThat(state.executeUserSettlement(users.getFirst(), () -> "core-owner"))
+                    .isEqualTo("core-owner");
+        } finally {
+            state.close();
+        }
+    }
+
     private static long userForLane(LaneTopology topology, int laneId) {
         for (long userId = 1; userId < 10_000; userId++) {
             if (topology.accountLaneId(userId) == laneId) return userId;
         }
         throw new IllegalStateException("unable to find user for Account Lane");
+    }
+
+    private static RiskScanRuntime incompleteRiskScan(int symbolId, long lastUserId) {
+        return new RiskScanRuntime(symbolId, 1, 1, lastUserId, false,
+                0, 0, "-", 0, 0, 0, 0, 0,
+                true, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 }

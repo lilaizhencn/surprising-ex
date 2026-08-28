@@ -94,11 +94,13 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.NavigableMap;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -159,6 +161,8 @@ public final class CoreProbeState implements AutoCloseable {
     private final MatcherSnapshotCapture matcherSnapshotCapture;
     private final SnapshotEncoder snapshotEncoder;
     private final ExecutorService snapshotEncoderExecutor;
+    private final ExecutorService snapshotAuditExecutor;
+    private final AtomicReference<RuntimeException> snapshotAuditFailure = new AtomicReference<>();
     private final AtomicReference<CompletableFuture<MatcherSnapshot>> inFlightMatcherSnapshot =
             new AtomicReference<>();
     private final PositionUserIndex positionUserIndex;
@@ -307,6 +311,14 @@ public final class CoreProbeState implements AutoCloseable {
             this.snapshotEncoderExecutor = null;
             this.snapshotEncoder = snapshotEncoder;
         }
+        this.snapshotAuditExecutor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(1), task -> {
+                    Thread thread = new Thread(task,
+                            "core-snapshot-audit-" + productLine.name().toLowerCase(java.util.Locale.ROOT));
+                    thread.setDaemon(true);
+                    thread.setPriority(Thread.MIN_PRIORITY);
+                    return thread;
+                }, new ThreadPoolExecutor.AbortPolicy());
         this.positionUserIndex = runtime.positionUsersForConstruction();
         this.openInterestIndex = runtime.openInterestForConstruction();
         this.triggerOrderIndex = runtime.triggersForConstruction();
@@ -3805,7 +3817,8 @@ public final class CoreProbeState implements AutoCloseable {
             if (fence.matcherSnapshot == null) {
                 fence.coreSequence = appliedCommandCount;
                 CompletableFuture<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
-                        fence.snapshotId, fence.coreSequence, snapshotState, activeOrderIndex.orders());
+                        fence.snapshotId, fence.coreSequence, projection.businessStateHash(),
+                        snapshotState, activeOrderIndex.orders());
                 if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
                     throw new SnapshotNotReadyException();
                 }
@@ -3823,6 +3836,15 @@ public final class CoreProbeState implements AutoCloseable {
             }
             CoreSnapshotImage image = SectionedCoreSnapshotCodec.capture(this, matcherSnapshot, fence.snapshotId,
                     fence.coreSequence, clusterTimestamp, clusterPosition);
+            CompletableFuture.runAsync(image::verifyFullState, snapshotAuditExecutor)
+                    .whenComplete((ignored, failure) -> {
+                        if (failure == null) return;
+                        Throwable cause = failure instanceof java.util.concurrent.CompletionException
+                                ? failure.getCause() : failure;
+                        RuntimeException auditFailure = cause instanceof RuntimeException runtimeFailure
+                                ? runtimeFailure : new IllegalStateException("snapshot audit failed", cause);
+                        snapshotAuditFailure.compareAndSet(null, auditFailure);
+                    });
             fence.encodedSnapshot = snapshotEncoder.encode(image);
             if (fence.encodedSnapshot == null) {
                 throw new IllegalStateException("snapshot encoder returned no completion");
@@ -3894,6 +3916,7 @@ public final class CoreProbeState implements AutoCloseable {
         CompletableFuture<MatcherSnapshot> capture(
                 long snapshotId,
                 long coreSequence,
+                long businessStateHash,
                 TradingCoreState state,
                 Iterable<CoreOrderState> activeOrders);
     }
@@ -3916,6 +3939,8 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void assertHealthy() {
+        RuntimeException auditFailure = snapshotAuditFailure.get();
+        if (auditFailure != null) throw auditFailure;
         if (fatalFailure != null) throw fatalFailure;
     }
 
@@ -3949,8 +3974,16 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     TradingCoreState snapshotTradingState() {
-        return com.surprising.aeron.service.state.RuntimeStateMaterializer.materialize(
-                runtimePlaceOrderState, runtimePlaceOrderIdentities);
+        if (snapshotState == null) throw new IllegalStateException("snapshot projection is unavailable");
+        return snapshotState;
+    }
+
+    long snapshotBusinessStateHash() {
+        return rollingBusinessStateHash.value();
+    }
+
+    long snapshotFundsStateHash() {
+        return rollingFundsStateHash.value();
     }
 
     Map<Long, com.surprising.aeron.service.state.CoreFeePolicyState> feePolicies() {
@@ -4076,18 +4109,27 @@ public final class CoreProbeState implements AutoCloseable {
                     throw new CoreStateRejectedException("INVALID_COMMAND",
                             "risk scan continuation exceeds current control");
                 }
-                var activeScan = runtimePlaceOrderState.firstIncompleteRiskScan();
+                var activeRiskScan = runtimePlaceOrderState.firstRiskIncompleteScan();
+                var activeScan = activeRiskScan == null
+                        ? runtimePlaceOrderState.firstIncompleteRiskScan() : activeRiskScan;
                 if (activeScan == null) break;
                 String symbol = runtimePlaceOrderIdentities.symbol(activeScan.symbolId());
                 int pendingBefore = pendingRiskScanCount();
                 long startedAt = System.nanoTime();
                 long beforeRevision = runtimePlaceOrderState.revision();
-                RuntimePerpetualRiskProcessor.applyContinuationRuntime(command.maxUsers(),
-                        positionUserIndex.users(symbol), runtimePlaceOrderState, runtimePlaceOrderIdentities);
+                int completedRiskWork = 0;
+                if (!activeScan.riskComplete()) {
+                    completedRiskWork = RuntimePerpetualRiskProcessor.applyContinuationRuntime(command.maxUsers(),
+                            activeScan.symbolId(), positionUserIndex.users(symbol),
+                            runtimePlaceOrderState, runtimePlaceOrderIdentities);
+                }
                 if (runtimePlaceOrderState.revision() != beforeRevision) {
                     refreshSnapshotProjection();
                 }
-                evaluatePendingTriggerScan(symbol);
+                int remainingWork = command.maxUsers() - completedRiskWork;
+                if (remainingWork > 0 && runtimePlaceOrderState.riskScan(activeScan.symbolId()).riskComplete()) {
+                    evaluatePendingTriggerScan(symbol, remainingWork);
+                }
                 logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
             }
             case UPDATE_RISK_SCAN_CONTROL -> {
@@ -4233,7 +4275,7 @@ public final class CoreProbeState implements AutoCloseable {
                 command.generatedAtEpochMillis()).withTriggerOcoProgress(0, 0));
     }
 
-    private void evaluatePendingTriggerScan(String symbol) {
+    private void evaluatePendingTriggerScan(String symbol, int maxWork) {
         Integer symbolId = runtimePlaceOrderIdentities.findSymbolId(symbol);
         RiskScanRuntime scan = symbolId == null ? null : runtimePlaceOrderState.riskScan(symbolId);
         if (scan == null || scan.triggerComplete()) return;
@@ -4241,7 +4283,7 @@ public final class CoreProbeState implements AutoCloseable {
         long triggeredAt = scan.triggerGeneratedAtEpochMillis();
         UUID commandId = UUID.nameUUIDFromBytes((productLine.name() + ":MARK_PRICE:" + symbol + ":"
                 + scan.priceSequence()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        int remaining = DEFAULT_TRIGGER_SCAN_BATCH_SIZE;
+        int remaining = Math.min(maxWork, DEFAULT_TRIGGER_SCAN_BATCH_SIZE);
         if (scan.triggerOcoOrderId() != 0) {
             var pendingTrigger = runtimePlaceOrderState.triggerOrder(scan.triggerOcoOrderId());
             if (pendingTrigger == null
@@ -5063,6 +5105,7 @@ public final class CoreProbeState implements AutoCloseable {
     public void close() {
         releaseSnapshotFence();
         if (snapshotEncoderExecutor != null) snapshotEncoderExecutor.shutdownNow();
+        snapshotAuditExecutor.shutdownNow();
         inFlightMatcherSnapshot.set(null);
         CompletableFuture<?>[] inFlight = laneCommandContexts.activeMatchingFutures();
         if (inFlight.length != 0) {

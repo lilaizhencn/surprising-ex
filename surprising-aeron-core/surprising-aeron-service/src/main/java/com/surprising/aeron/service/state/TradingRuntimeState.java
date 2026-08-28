@@ -28,6 +28,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private long revision;
     private final LaneTopology topology;
     private final AccountLaneState[] accountLanes;
+    private final java.util.concurrent.ExecutorService[] lifecycleLaneExecutors;
     private boolean accountLanesStarted;
 
     private final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
@@ -79,8 +80,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (topology == null) throw new IllegalArgumentException("lane topology is required");
         this.topology = topology;
         this.accountLanes = new AccountLaneState[topology.accountLaneCount()];
+        this.lifecycleLaneExecutors = new java.util.concurrent.ExecutorService[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
+            int ownerLaneId = laneId;
+            lifecycleLaneExecutors[laneId] = java.util.concurrent.Executors.newSingleThreadExecutor(task -> {
+                Thread thread = new Thread(task, "core-lifecycle-lane-" + ownerLaneId);
+                thread.setDaemon(true);
+                return thread;
+            });
         }
     }
 
@@ -227,6 +235,88 @@ public final class TradingRuntimeState implements AutoCloseable {
         return results;
     }
 
+    public <E> Object[] executeLifecycleSettlements(Iterable<E> values,
+                                                    java.util.function.ToLongFunction<E> ownerUserId,
+                                                    java.util.function.IntFunction<Object> operation) {
+        assertOwner();
+        if (values == null || ownerUserId == null || operation == null) {
+            throw new IllegalArgumentException("invalid lifecycle settlement command");
+        }
+        boolean[] selected = new boolean[accountLanes.length];
+        int selectedCount = 0;
+        for (E value : values) {
+            if (value == null) continue;
+            long userId = ownerUserId.applyAsLong(value);
+            if (userId <= 0) continue;
+            int laneId = topology.accountLaneId(userId);
+            if (!selected[laneId]) {
+                selected[laneId] = true;
+                selectedCount++;
+            }
+        }
+        if (selectedCount < 2 || !accountLanesStarted) {
+            return executeOwnerSettlements(values, ownerUserId, operation);
+        }
+        Object[] results = new Object[accountLanes.length];
+        @SuppressWarnings("unchecked")
+        java.util.concurrent.Future<Object>[] futures = new java.util.concurrent.Future[accountLanes.length];
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if (!selected[laneId]) continue;
+            AccountLaneState lane = accountLanes[laneId];
+            lane.releaseOwner();
+            int currentLaneId = laneId;
+            try {
+                futures[laneId] = lifecycleLaneExecutors[laneId].submit(() -> {
+                    try {
+                        return inLaneCommandScope(lane, ignored -> operation.apply(currentLaneId));
+                    } finally {
+                        lane.releaseOwner();
+                    }
+                });
+            } catch (RuntimeException failure) {
+                lane.bindOwner();
+                awaitAndRebindLifecycleLanes(selected, futures);
+                throw failure;
+            }
+        }
+        RuntimeException failure = null;
+        for (int laneId = 0; laneId < futures.length; laneId++) {
+            java.util.concurrent.Future<Object> future = futures[laneId];
+            if (future == null) continue;
+            try {
+                results[laneId] = future.get();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                failure = new IllegalStateException("lifecycle lane settlement was interrupted", interrupted);
+                break;
+            } catch (java.util.concurrent.ExecutionException execution) {
+                Throwable cause = execution.getCause();
+                failure = cause instanceof RuntimeException runtimeFailure
+                        ? runtimeFailure : new IllegalStateException("lifecycle lane settlement failed", cause);
+                break;
+            }
+        }
+        awaitAndRebindLifecycleLanes(selected, futures);
+        if (failure != null) throw failure;
+        return results;
+    }
+
+    private void awaitAndRebindLifecycleLanes(boolean[] selected,
+                                              java.util.concurrent.Future<Object>[] futures) {
+        for (java.util.concurrent.Future<Object> future : futures) {
+            if (future == null) continue;
+            try {
+                future.get();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (java.util.concurrent.ExecutionException ignored) {
+            }
+        }
+        for (int laneId = 0; laneId < selected.length; laneId++) {
+            if (selected[laneId]) accountLanes[laneId].bindOwner();
+        }
+    }
+
     @FunctionalInterface
     interface LaneOperation<T> {
         T apply(AccountLaneState lane);
@@ -278,6 +368,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     @Override
     public void close() {
         accountLanesStarted = false;
+        for (java.util.concurrent.ExecutorService executor : lifecycleLaneExecutors) executor.shutdownNow();
     }
 
     private record PendingReservationCompletion(ReservationRuntime reservation, LongHashSet clientKeys) {
@@ -750,8 +841,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         java.util.List<AccountLaneSnapshot> snapshots = new java.util.ArrayList<>(accountLanes.length);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             int currentLaneId = laneId;
-            snapshots.add(onLane(currentLaneId, lane -> lane.snapshot(fenceSequence,
-                    laneSnapshotState(globalState, currentLaneId, lane.revision()))));
+            snapshots.add(onLane(currentLaneId, lane -> lane.snapshot(fenceSequence)));
         }
         for (AccountLaneSnapshot snapshot : snapshots) {
             AccountLaneView view = accountLaneById(snapshot.laneId());
@@ -772,6 +862,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (snapshots == null || snapshots.size() != accountLanes.length || globalState == null) {
             throw new IllegalArgumentException("incomplete account lane snapshot set");
         }
+        @SuppressWarnings("unchecked")
+        java.util.TreeSet<Long>[] expectedUsers = new java.util.TreeSet[accountLanes.length];
+        for (int laneId = 0; laneId < expectedUsers.length; laneId++) {
+            expectedUsers[laneId] = new java.util.TreeSet<>();
+        }
+        globalState.users().keySet().forEach(userId ->
+                expectedUsers[topology.accountLaneId(userId)].add(userId));
         boolean[] restored = new boolean[accountLanes.length];
         for (AccountLaneSnapshot snapshot : snapshots) {
             int laneId = snapshot.laneId();
@@ -786,13 +883,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                     throw new IllegalArgumentException("account lane contains an incorrectly routed user");
                 }
             }
-            if (!snapshot.state().equals(
-                    laneSnapshotState(globalState, laneId, snapshot.state().revision()))) {
-                throw new IllegalArgumentException("account lane payload differs from global state");
-            }
-            if (snapshot.state().businessStateHash() != snapshot.localStateHash()
-                    || RollingFundsStateHash.compute(snapshot.state()) != snapshot.localFundsHash()) {
-                throw new IllegalArgumentException("account lane state hash mismatch");
+            if (!expectedUsers[laneId].equals(new java.util.TreeSet<>(snapshot.userIds()))) {
+                throw new IllegalArgumentException("account lane user manifest differs from global state");
             }
             restored[laneId] = true;
         }
@@ -812,49 +904,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 return null;
             });
         }
-    }
-
-    private TradingCoreState laneSnapshotState(TradingCoreState state, int laneId, long laneRevision) {
-        java.util.Map<Long, CoreUserState> users = new java.util.TreeMap<>();
-        state.users().forEach((userId, user) -> {
-            if (topology.accountLaneId(userId) == laneId) users.put(userId, user);
-        });
-        java.util.Map<Long, CoreOrderState> orders = new java.util.TreeMap<>();
-        state.orders().forEach((orderId, order) -> {
-            if (topology.accountLaneId(order.userId()) == laneId) orders.put(orderId, order);
-        });
-        java.util.Map<String, CoreRiskSnapshot> risks = new java.util.TreeMap<>();
-        state.riskState().snapshots().forEach((key, value) -> {
-            if (topology.accountLaneId(value.userId()) == laneId) risks.put(key, value);
-        });
-        java.util.Map<Long, CoreLiquidationState> liquidations = new java.util.TreeMap<>();
-        state.riskState().liquidations().forEach((id, value) -> {
-            if (topology.accountLaneId(value.userId()) == laneId) liquidations.put(id, value);
-        });
-        CoreRiskState riskState = new CoreRiskState(java.util.Map.of(), risks, liquidations,
-                java.util.Map.of(), state.riskState().nextLiquidationId(), state.riskState().scanControl());
-        java.util.Map<CoreLeverageKey, Long> leverages = new java.util.TreeMap<>();
-        state.leverages().forEach((key, value) -> {
-            if (topology.accountLaneId(key.userId()) == laneId) leverages.put(key, value);
-        });
-        java.util.Map<Long, CoreAlgoOrderState> algos = new java.util.TreeMap<>();
-        state.algoOrders().forEach((id, value) -> {
-            if (topology.accountLaneId(value.userId()) == laneId) algos.put(id, value);
-        });
-        java.util.Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = new java.util.TreeMap<>();
-        state.cancelAllAfterTimers().forEach((key, value) -> {
-            if (topology.accountLaneId(key.userId()) == laneId) timers.put(key, value);
-        });
-        java.util.Map<TradingCoreState.ClientOrderKey, Long> clients = new java.util.TreeMap<>();
-        state.clientOrderIndex().forEach((key, value) -> {
-            if (topology.accountLaneId(key.userId()) == laneId) clients.put(key, value);
-        });
-        java.util.Map<Long, CoreTriggerOrderState> triggers = new java.util.TreeMap<>();
-        state.triggerOrders().forEach((id, value) -> {
-            if (topology.accountLaneId(value.userId()) == laneId) triggers.put(id, value);
-        });
-        return new TradingCoreState(productLine, laneRevision, users, orders,
-                java.util.Map.of(), riskState, CoreTreasuryState.empty(), leverages, algos, timers, clients, triggers);
     }
 
     public void bindOwner() {
@@ -1084,13 +1133,22 @@ public final class TradingRuntimeState implements AutoCloseable {
     public RiskScanRuntime firstRiskIncompleteScan() {
         assertOwner();
         RiskScanRuntime[] selected = new RiskScanRuntime[1];
-        riskScans.forEachKeyValue((symbolId, scan) -> {
-            if (!scan.riskComplete()
-                    && (selected[0] == null || symbolId < selected[0].symbolId())) {
-                selected[0] = scan;
-            }
+        riskScans.forEachValue(scan -> {
+            if (!scan.riskComplete() && (selected[0] == null
+                    || compareRiskProgress(scan, selected[0]) < 0)) selected[0] = scan;
         });
         return selected[0];
+    }
+
+    private static int compareRiskProgress(RiskScanRuntime left, RiskScanRuntime right) {
+        int completedUser = Long.compare(left.lastUserId(), right.lastUserId());
+        if (completedUser != 0) return completedUser;
+        int activeUser = Long.compare(left.riskUserId(), right.riskUserId());
+        if (activeUser != 0) return activeUser;
+        int phase = Integer.compare(left.riskPhase(), right.riskPhase());
+        if (phase != 0) return phase;
+        int reservation = Long.compare(left.riskReservationCursor(), right.riskReservationCursor());
+        return reservation != 0 ? reservation : Integer.compare(left.symbolId(), right.symbolId());
     }
 
     public int incompleteRiskScanCount() {

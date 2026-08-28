@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import java.lang.ref.WeakReference;
 import java.util.AbstractMap;
 import java.util.AbstractSet;
 import java.util.ArrayDeque;
@@ -29,6 +30,9 @@ public final class StateMapSupport {
         }
         NavigableMap<K, V> sorted = values instanceof NavigableMap<?, ?> navigable
                 ? (NavigableMap<K, V>) navigable : new TreeMap<>(values);
+        if (sorted instanceof DeltaMap<?, ?> delta) {
+            ((DeltaMap<K, V>) delta).freezeLineage();
+        }
         return new FrozenMap<>(sorted);
     }
 
@@ -39,9 +43,9 @@ public final class StateMapSupport {
         }
         if (base instanceof DeltaMap<?, ?> previous) {
             DeltaMap<K, V> typed = (DeltaMap<K, V>) previous;
-            return new DeltaMap<>(typed.tree, typed, typed);
+            return new DeltaMap<>(typed.tree, typed);
         }
-        return new DeltaMap<>(PersistentTreeMap.from(base), null, base);
+        return new DeltaMap<>(PersistentTreeMap.from(base), base);
     }
 
     static <K extends Comparable<? super K>, V> NavigableMap<K, V> deferredDelta(
@@ -76,6 +80,11 @@ public final class StateMapSupport {
 
     static boolean isFrozen(Map<?, ?> values) {
         return values instanceof FrozenMap<?, ?>;
+    }
+
+    static boolean retainsStrongDeltaBase(Map<?, ?> values) {
+        NavigableMap<?, ?> raw = rawUntyped(values);
+        return raw instanceof DeltaMap<?, ?> delta && delta.retainsStrongBase();
     }
 
     static <K> Set<K> changedKeys(Map<K, ?> values) {
@@ -455,26 +464,40 @@ public final class StateMapSupport {
     }
 
     private static final class DeltaMap<K, V> extends AbstractMap<K, V> implements NavigableMap<K, V> {
-        private final NavigableMap<K, V> base;
-        private final DeltaMap<K, V> parent;
+        private NavigableMap<K, V> base;
+        private WeakReference<NavigableMap<K, V>> lineageBase;
         private final TreeSet<K> changedKeys;
         private PersistentTreeMap<K, V> tree;
+        private boolean frozen;
 
-        private DeltaMap(PersistentTreeMap<K, V> tree,
-                         DeltaMap<K, V> parent,
-                         NavigableMap<K, V> base) {
+        private DeltaMap(PersistentTreeMap<K, V> tree, NavigableMap<K, V> base) {
             this.tree = tree;
-            this.parent = parent;
             this.base = base;
             this.changedKeys = new TreeSet<>(tree.comparator());
         }
 
         private NavigableMap<K, V> base() {
-            return base;
+            NavigableMap<K, V> current = base;
+            if (current != null) return current;
+            current = lineageBase.get();
+            return current == null ? tree : current;
         }
 
-        private DeltaMap<K, V> parent() {
-            return parent;
+        private void freezeLineage() {
+            if (frozen) return;
+            NavigableMap<K, V> lineage = base;
+            while (lineage instanceof DeltaMap<?, ?> delta && !delta.frozen) {
+                DeltaMap<K, V> previous = (DeltaMap<K, V>) delta;
+                changedKeys.addAll(previous.changedKeys);
+                lineage = previous.base;
+            }
+            lineageBase = new WeakReference<>(lineage);
+            base = null;
+            frozen = true;
+        }
+
+        private boolean retainsStrongBase() {
+            return base != null;
         }
 
         private Set<K> changedKeys() {
@@ -494,6 +517,7 @@ public final class StateMapSupport {
         public V put(K key, V value) {
             if (key == null || value == null) throw new NullPointerException("state map does not allow null");
             V previous = tree.get(key);
+            if (java.util.Objects.equals(previous, value)) return previous;
             tree = tree.withPut(key, value, previous != null);
             changedKeys.add(key);
             return previous;
@@ -605,11 +629,20 @@ public final class StateMapSupport {
         private static <K, V> PersistentTreeMap<K, V> from(Map<K, V> source) {
             Comparator<? super K> comparator = source instanceof SortedMap<?, ?> sorted
                     ? ((SortedMap<K, V>) sorted).comparator() : null;
-            PersistentTreeMap<K, V> result = new PersistentTreeMap<>(null, comparator, 0);
-            for (Entry<K, V> entry : source.entrySet()) {
-                result = result.withPut(entry.getKey(), entry.getValue(), false);
-            }
-            return result;
+            Iterator<Entry<K, V>> entries = source.entrySet().iterator();
+            Node<K, V> root = balanced(entries, source.size());
+            if (entries.hasNext()) throw new IllegalStateException("state map size changed during projection");
+            return new PersistentTreeMap<>(root, comparator, source.size());
+        }
+
+        private static <K, V> Node<K, V> balanced(Iterator<Entry<K, V>> entries, int size) {
+            if (size == 0) return null;
+            int leftSize = size >>> 1;
+            Node<K, V> left = balanced(entries, leftSize);
+            if (!entries.hasNext()) throw new IllegalStateException("state map size changed during projection");
+            Entry<K, V> entry = entries.next();
+            Node<K, V> right = balanced(entries, size - leftSize - 1);
+            return new Node<>(entry.getKey(), entry.getValue(), left, right);
         }
 
         private PersistentTreeMap<K, V> withPut(K key, V value, boolean existed) {
@@ -718,9 +751,7 @@ public final class StateMapSupport {
             return values;
         }
 
-        private Entry<K, V> entry(Node<K, V> node) {
-            return node == null ? null : new SimpleImmutableEntry<>(node.key, node.value);
-        }
+        private Entry<K, V> entry(Node<K, V> node) { return node; }
 
         private Node<K, V> seek(K key, boolean lower, boolean inclusive) {
             Node<K, V> current = root;
@@ -803,7 +834,7 @@ public final class StateMapSupport {
                             if (stack.isEmpty()) throw new java.util.NoSuchElementException();
                             Node<K, V> node = stack.pop();
                             pushLeft(node.right, stack);
-                            return new SimpleImmutableEntry<>(node.key, node.value);
+                            return node;
                         }
                     };
                 }
@@ -906,7 +937,7 @@ public final class StateMapSupport {
         @Override
         public SortedMap<K, V> tailMap(K fromKey) { return materialized().tailMap(fromKey); }
 
-        private static final class Node<K, V> {
+        private static final class Node<K, V> implements Entry<K, V> {
             private final K key;
             private final V value;
             private final Node<K, V> left;
@@ -919,6 +950,27 @@ public final class StateMapSupport {
                 this.left = left;
                 this.right = right;
                 this.height = 1 + Math.max(height(left), height(right));
+            }
+
+            @Override
+            public K getKey() { return key; }
+
+            @Override
+            public V getValue() { return value; }
+
+            @Override
+            public V setValue(V value) { throw new UnsupportedOperationException("state map is immutable"); }
+
+            @Override
+            public boolean equals(Object other) {
+                return other instanceof Entry<?, ?> entry
+                        && java.util.Objects.equals(key, entry.getKey())
+                        && java.util.Objects.equals(value, entry.getValue());
+            }
+
+            @Override
+            public int hashCode() {
+                return java.util.Objects.hashCode(key) ^ java.util.Objects.hashCode(value);
             }
 
         }

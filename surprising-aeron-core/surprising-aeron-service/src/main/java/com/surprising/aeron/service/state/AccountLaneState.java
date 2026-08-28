@@ -204,18 +204,16 @@ public final class AccountLaneState {
         return new LongHashSet(userIds);
     }
 
-    AccountLaneSnapshot snapshot(long fenceSequence, TradingCoreState laneState) {
+    AccountLaneSnapshot snapshot(long fenceSequence) {
         assertOwner();
         requireSnapshot(fenceSequence);
         appliedSequence = fenceSequence;
         committedSequence = fenceSequence;
-        localStateHash = laneState.businessStateHash();
-        localFundsHash = RollingFundsStateHash.compute(laneState);
         java.util.List<Long> users = new java.util.ArrayList<>(userIds.size());
         userIds.forEach(users::add);
         users.sort(Long::compare);
         return new AccountLaneSnapshot(laneId, revision, appliedSequence, committedSequence,
-                localStateHash, localFundsHash, users, laneState);
+                localStateHash, localFundsHash, users);
     }
 
     void requireSnapshot(long fenceSequence) {
@@ -235,10 +233,6 @@ public final class AccountLaneState {
         }
         LongHashSet restoredUsers = new LongHashSet();
         snapshot.userIds().forEach(restoredUsers::add);
-        if (snapshot.state().businessStateHash() != snapshot.localStateHash()
-                || RollingFundsStateHash.compute(snapshot.state()) != snapshot.localFundsHash()) {
-            throw new IllegalArgumentException("account lane state hash mismatch");
-        }
         restore(snapshot.revision(), snapshot.appliedSequence(), snapshot.committedSequence(),
                 snapshot.localStateHash(), snapshot.localFundsHash(), restoredUsers);
     }

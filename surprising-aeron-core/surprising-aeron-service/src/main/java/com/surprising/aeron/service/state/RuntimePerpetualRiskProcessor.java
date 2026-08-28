@@ -97,15 +97,29 @@ public final class RuntimePerpetualRiskProcessor {
         if (!runtime.riskScanControl().enabled()) return;
         RiskScanRuntime sourceScan = runtime.firstRiskIncompleteScan();
         if (sourceScan == null) return;
+        applyContinuationRuntime(maxWork, sourceScan.symbolId(), indexedUserIds, runtime, identities);
+    }
+
+    public static int applyContinuationRuntime(int maxWork, int symbolId, Iterable<Long> indexedUserIds,
+                                               TradingRuntimeState runtime,
+                                               RuntimeIdentityRegistry identities) {
+        if (runtime == null || identities == null || indexedUserIds == null) {
+            throw new IllegalArgumentException("invalid perpetual risk continuation apply");
+        }
+        if (maxWork <= 0 || maxWork > 4096) throw new IllegalArgumentException("invalid risk scan batch size");
+        if (!runtime.riskScanControl().enabled()) return 0;
+        RiskScanRuntime sourceScan = runtime.riskScan(symbolId);
+        if (sourceScan == null || sourceScan.riskComplete()) return 0;
         String symbol = identities.symbol(sourceScan.symbolId());
         CoreInstrumentState instrument = runtime.instrument(symbol);
         MarkPriceRuntime mark = runtime.markPrice(sourceScan.symbolId());
         if (instrument == null || mark == null || mark.priceSequence() != sourceScan.priceSequence()) {
             throw new IllegalStateException("risk scan input is missing");
         }
-        continueScan(runtime, instrument, sourceScan.priceSequence(),
+        int completedWork = continueScan(runtime, instrument, sourceScan.priceSequence(),
                 Math.min(maxWork, runtime.riskScanControl().scanBatchSize()), indexedUserIds, identities);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        return completedWork;
     }
 
     public static void syncScanProgress(TradingCoreState source, TradingRuntimeState runtime,
@@ -117,10 +131,10 @@ public final class RuntimePerpetualRiskProcessor {
                 identities.symbolId(symbol), scan)));
     }
 
-    private static TradingRuntimeState continueScan(TradingRuntimeState runtime,
-                                                    CoreInstrumentState changedInstrument, long priceSequence,
-                                                    int maxWork, Iterable<Long> indexedUserIds,
-                                                    RuntimeIdentityRegistry identities) {
+    private static int continueScan(TradingRuntimeState runtime,
+                                    CoreInstrumentState changedInstrument, long priceSequence,
+                                    int maxWork, Iterable<Long> indexedUserIds,
+                                    RuntimeIdentityRegistry identities) {
         int symbolId = identities.symbolId(changedInstrument.symbol());
         RiskScanRuntime initial = runtime.riskScan(symbolId);
         MarkPriceRuntime changedMark = runtime.markPrice(symbolId);
@@ -169,7 +183,7 @@ public final class RuntimePerpetualRiskProcessor {
                     progress.triggerGeneratedAtEpochMillis(), 0, 0);
         }
         runtime.putRiskScan(progress);
-        return runtime;
+        return maxWork - remaining;
     }
 
     private static UserPage processUser(TradingRuntimeState runtime,

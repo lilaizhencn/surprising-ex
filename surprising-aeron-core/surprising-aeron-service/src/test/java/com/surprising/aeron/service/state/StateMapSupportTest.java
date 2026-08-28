@@ -89,6 +89,40 @@ class StateMapSupportTest {
     }
 
     @Test
+    void freezingDeltaMergesNestedChangesAndReleasesTheStrongParent() {
+        NavigableMap<Long, String> base = StateMapSupport.freezeSorted(
+                new TreeMap<>(Map.of(1L, "one", 2L, "two")));
+        NavigableMap<Long, String> first = StateMapSupport.delta(base);
+        first.put(1L, "uno");
+        NavigableMap<Long, String> second = StateMapSupport.delta(first);
+        second.put(3L, "three");
+
+        assertThat(StateMapSupport.retainsStrongDeltaBase(second)).isTrue();
+
+        NavigableMap<Long, String> frozen = StateMapSupport.freezeSorted(second);
+
+        assertThat(StateMapSupport.changedKeys(frozen)).containsExactly(1L, 3L);
+        assertThat(StateMapSupport.isDirectDeltaOf(base, frozen)).isTrue();
+        assertThat(StateMapSupport.retainsStrongDeltaBase(frozen)).isFalse();
+        assertThat(frozen).containsExactly(Map.entry(1L, "uno"), Map.entry(2L, "two"),
+                Map.entry(3L, "three"));
+    }
+
+    @Test
+    void equalValuePutDoesNotCreateAChangedKeyOrAProjectionNode() {
+        NavigableMap<Long, String> base = StateMapSupport.freezeSorted(
+                new TreeMap<>(Map.of(1L, "one", 2L, "two")));
+        NavigableMap<Long, String> delta = StateMapSupport.delta(base);
+
+        assertThat(delta.put(1L, "one")).isEqualTo("one");
+
+        assertThat(StateMapSupport.changedKeys(delta))
+                .as("a no-op update must not enter the typed projection journal")
+                .isEmpty();
+        assertThat(delta).containsExactlyEntriesOf(base);
+    }
+
+    @Test
     void directDeltaLineageRequiresTheImmediateParent() {
         NavigableMap<Long, String> base = StateMapSupport.freezeSorted(
                 new TreeMap<>(Map.of(1L, "one")));

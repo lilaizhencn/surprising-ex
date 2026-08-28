@@ -455,19 +455,20 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public CompletableFuture<MatcherSnapshot> snapshotAsync(
             long snapshotId,
             long coreSequence,
+            long businessStateHash,
             TradingCoreState state,
             Iterable<CoreOrderState> activeOrders) {
-        if (snapshotId <= 0 || coreSequence < 0 || state == null || activeOrders == null) {
+        if (snapshotId <= 0 || coreSequence < 0 || businessStateHash == 0
+                || state == null || activeOrders == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher snapshot request"));
         }
-        long businessStateHash = state.businessStateHash();
         SnapshotOperation operation = snapshotOperations.get(snapshotId);
         if (operation == null) {
             SnapshotOperation candidate = new SnapshotOperation(coreSequence, businessStateHash);
             operation = snapshotOperations.putIfAbsent(snapshotId, candidate);
             if (operation == null) {
                 operation = candidate;
-                startSnapshotOperation(operation, snapshotId, coreSequence, state, activeOrders);
+                startSnapshotOperation(operation, snapshotId, coreSequence, businessStateHash, state, activeOrders);
             }
         }
         if (operation.coreSequence != coreSequence || operation.businessStateHash != businessStateHash) {
@@ -481,6 +482,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             SnapshotOperation operation,
             long snapshotId,
             long coreSequence,
+            long businessStateHash,
             TradingCoreState state,
             Iterable<CoreOrderState> activeOrders) {
         CompletableFuture<MatcherSnapshot> pipeline;
@@ -502,7 +504,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                             .max().orElseThrow();
                                     return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
                                             MatcherSnapshot.ROUTE_VERSION, topology, snapshotId, coreSequence, matcherSequence,
-                                            matcherPrefixDigest.get(), state.businessStateHash(),
+                                            matcherPrefixDigest.get(), businessStateHash,
                                             hashes.engineHash(), hashes.bookHash(),
                                             MatcherSnapshot.symbolRegistryHash(symbols),
                                             topology.symbolRouteHash(symbols),

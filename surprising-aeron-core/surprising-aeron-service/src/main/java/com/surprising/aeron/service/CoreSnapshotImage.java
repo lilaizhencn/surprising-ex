@@ -19,6 +19,8 @@ record CoreSnapshotImage(
         long sourceSequenceDigest,
         long snapshotId,
         long coreSequence,
+        long businessStateHash,
+        long fundsStateHash,
         long clusterTimestamp,
         long clusterPosition,
         MatcherSnapshot matcherSnapshot,
@@ -39,9 +41,19 @@ record CoreSnapshotImage(
         accountLanes = List.copyOf(accountLanes);
         if (productLine == null || appliedCommandCount < 0 || snapshotId <= 0
                 || coreSequence != appliedCommandCount || clusterTimestamp < 0 || clusterPosition < 0
+                || businessStateHash == 0 || fundsStateHash == 0
                 || matcherSnapshot == null || tradingState == null || exportState == null
                 || terminalRetention == null || tradingState.productLine() != productLine) {
             throw new IllegalArgumentException("invalid core snapshot image");
+        }
+    }
+
+    void verifyFullState() {
+        matcherSnapshot.verifyCoreState(tradingState, appliedCommandCount);
+        if (tradingState.businessStateHash() != businessStateHash
+                || com.surprising.aeron.service.state.RollingFundsStateHash.compute(tradingState)
+                != fundsStateHash) {
+            throw new IllegalStateException("snapshot rolling hash differs from immutable state audit");
         }
     }
 }

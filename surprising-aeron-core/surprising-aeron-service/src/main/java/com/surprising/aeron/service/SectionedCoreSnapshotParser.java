@@ -61,7 +61,7 @@ final class SectionedCoreSnapshotParser {
 
     private static AccountLaneSnapshot parseAccountLane(byte[] payload, HeaderManifest manifest) {
         ByteBuffer lane = wrap(payload);
-        if (lane.remaining() < Integer.BYTES * 3 + Long.BYTES * 5) {
+        if (lane.remaining() < Integer.BYTES * 2 + Long.BYTES * 5) {
             throw new ProtocolException("truncated account lane section");
         }
         int laneId = lane.getInt();
@@ -72,7 +72,7 @@ final class SectionedCoreSnapshotParser {
         long localFundsHash = lane.getLong();
         int userCount = readCount(lane, 1_000_000, "account lane user");
         int userBytes = Math.multiplyExact(userCount, Long.BYTES);
-        if (lane.remaining() < Math.addExact(userBytes, Integer.BYTES)) {
+        if (lane.remaining() != userBytes) {
             throw new ProtocolException("invalid account lane user section length");
         }
         List<Long> userIds = new ArrayList<>(userCount);
@@ -83,16 +83,9 @@ final class SectionedCoreSnapshotParser {
             }
             userIds.add(userId);
         }
-        int stateLength = lane.getInt();
-        if (stateLength <= 0 || stateLength != lane.remaining()) {
-            throw new ProtocolException("invalid account lane state payload length");
-        }
-        byte[] statePayload = new byte[stateLength];
-        lane.get(statePayload);
-        TradingCoreState laneState = TradingStateSnapshotCodec.decode(statePayload, manifest.productLine());
         try {
             return new AccountLaneSnapshot(laneId, revision, appliedSequence, committedSequence,
-                    localStateHash, localFundsHash, userIds, laneState);
+                    localStateHash, localFundsHash, userIds);
         } catch (IllegalArgumentException exception) {
             throw new ProtocolException("invalid account lane snapshot: " + exception.getMessage());
         }

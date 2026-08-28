@@ -691,7 +691,8 @@ class CoreProbeStateTest {
                 nestedMatcherStage.thenApply(ignored -> null);
         AtomicInteger captureCount = new AtomicInteger();
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT,
-                (snapshotId, coreSequence, tradingState, activeOrders) -> captureCount.incrementAndGet() == 1
+                (snapshotId, coreSequence, businessStateHash, tradingState, activeOrders) ->
+                        captureCount.incrementAndGet() == 1
                         ? matcherSnapshot
                         : CompletableFuture.failedFuture(new IllegalStateException("fresh capture fixture failure")))) {
             state.beginSnapshot(801, Long.MAX_VALUE);
@@ -1297,7 +1298,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(15);
+        assertThat(manifest.schemaVersion()).isEqualTo(16);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();

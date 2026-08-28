@@ -79,7 +79,7 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(15);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(16);
             assertThat(buffer.getInt(8)).isEqualTo(14);
             buffer.position(ENVELOPE_LENGTH);
             int[] sectionIds = new int[14];
@@ -168,7 +168,8 @@ class CoreStateSnapshotCodecTest {
         TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            matcherSnapshot = adapter.snapshotAsync(47, 0, tradingState, List.of()).join();
+            matcherSnapshot = adapter.snapshotAsync(
+                    47, 0, tradingState.businessStateHash(), tradingState, List.of()).join();
         }
         byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
 
@@ -203,7 +204,8 @@ class CoreStateSnapshotCodecTest {
         TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            matcherSnapshot = adapter.snapshotAsync(47, 0, tradingState, List.of()).join();
+            matcherSnapshot = adapter.snapshotAsync(
+                    47, 0, tradingState.businessStateHash(), tradingState, List.of()).join();
         }
         byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
         UnsafeBuffer encoded = new UnsafeBuffer(legacy);
@@ -220,7 +222,8 @@ class CoreStateSnapshotCodecTest {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(adapter.placeAsync(7, bid()).join().accepted()).isTrue();
             matcherSnapshot = adapter.snapshotAsync(
-                    43, 1, tradingState, new ActiveOrderIndex(tradingState).orders()).join();
+                    43, 1, tradingState.businessStateHash(), tradingState,
+                    new ActiveOrderIndex(tradingState).orders()).join();
         }
         CoreProbeState outboxSource = new CoreProbeState(ProductLine.SPOT);
         CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
@@ -265,10 +268,12 @@ class CoreStateSnapshotCodecTest {
     void pairedManifestExposesFencePositionSequencesHashesAndOutboxMetadata() {
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            matcherSnapshot = adapter.snapshotAsync(73, 1, TradingCoreState.empty(ProductLine.SPOT), List.of()).join();
+            TradingCoreState empty = TradingCoreState.empty(ProductLine.SPOT);
+            matcherSnapshot = adapter.snapshotAsync(
+                    73, 1, empty.businessStateHash(), empty, List.of()).join();
         }
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT,
-                (snapshotId, coreSequence, tradingState, activeOrders) ->
+                (snapshotId, coreSequence, businessStateHash, tradingState, activeOrders) ->
                         java.util.concurrent.CompletableFuture.completedFuture(matcherSnapshot))) {
             CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     UUID.fromString("00000000-0000-0000-0000-000000000073"), ProductLine.SPOT,
@@ -285,7 +290,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(15);
+            assertThat(manifest.schemaVersion()).isEqualTo(16);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
@@ -393,7 +398,8 @@ class CoreStateSnapshotCodecTest {
         TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            matcherSnapshot = adapter.snapshotAsync(47, 0, tradingState, List.of()).join();
+            matcherSnapshot = adapter.snapshotAsync(
+                    47, 0, tradingState.businessStateHash(), tradingState, List.of()).join();
         }
 
         byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);

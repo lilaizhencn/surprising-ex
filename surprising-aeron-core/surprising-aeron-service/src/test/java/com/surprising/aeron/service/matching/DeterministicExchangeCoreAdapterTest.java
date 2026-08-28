@@ -231,7 +231,8 @@ class DeterministicExchangeCoreAdapterTest {
                     1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000100"),
                     100, 1, 1_000, () -> adapter.placeAsync(7, bid(100))).join();
             assertThat(beforeSnapshot.accepted()).isTrue();
-            snapshot = adapter.snapshotAsync(91, 1, state, activeOrders(state)).join();
+            snapshot = adapter.snapshotAsync(
+                    91, 1, state.businessStateHash(), state, activeOrders(state)).join();
         }
 
         byte[] encoded = MatcherSnapshotCodec.encode(snapshot);
@@ -276,7 +277,7 @@ class DeterministicExchangeCoreAdapterTest {
         })) {
             assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
             CompletableFuture<MatcherSnapshot> first =
-                    adapter.snapshotAsync(94, 1, state, activeOrders(state));
+                    adapter.snapshotAsync(94, 1, state.businessStateHash(), state, activeOrders(state));
 
             persistEntered.join();
             assertThat(first.isDone()).isFalse();
@@ -286,7 +287,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(first.isCancelled()).isFalse();
 
             CompletableFuture<MatcherSnapshot> retry =
-                    adapter.snapshotAsync(94, 1, state, activeOrders(state));
+                    adapter.snapshotAsync(94, 1, state.businessStateHash(), state, activeOrders(state));
             assertThat(retry).isNotSameAs(first);
             assertThat(retry.isDone()).isFalse();
             assertThat(persistSubmissions).hasValue(1);
@@ -307,7 +308,8 @@ class DeterministicExchangeCoreAdapterTest {
         MatcherSnapshot snapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
-            snapshot = adapter.snapshotAsync(92, 1, original, activeOrders(original)).join();
+            snapshot = adapter.snapshotAsync(
+                    92, 1, original.businessStateHash(), original, activeOrders(original)).join();
         }
         TradingCoreState divergent = stateWithOpenBid(101);
         MatcherSnapshot divergentManifest = new MatcherSnapshot(
@@ -334,7 +336,7 @@ class DeterministicExchangeCoreAdapterTest {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
             encoded = MatcherSnapshotCodec.encode(adapter.snapshotAsync(
-                    93, 1, state, activeOrders(state)).join());
+                    93, 1, state.businessStateHash(), state, activeOrders(state)).join());
         }
         encoded[encoded.length / 2] ^= 1;
 

@@ -130,9 +130,8 @@ public record MatcherSnapshot(
         long actualBusinessStateHash = state.businessStateHash();
         long actualInstrumentRegistryHash = instrumentRegistryHash(state);
         long actualActiveOrderHash = activeOrderHash(state);
-        if (state.productLine() != productLine || coreSequence != expectedCoreSequence
-                || coreBusinessStateHash != actualBusinessStateHash
-                || instrumentRegistryHash != actualInstrumentRegistryHash
+        verifyCoreManifest(state.productLine(), expectedCoreSequence, actualBusinessStateHash);
+        if (instrumentRegistryHash != actualInstrumentRegistryHash
                 || activeOrderHash != actualActiveOrderHash) {
             throw new IllegalStateException("Core and matcher snapshot manifests do not match"
                     + " (productLine=" + productLine + '/' + state.productLine()
@@ -141,6 +140,18 @@ public record MatcherSnapshot(
                     + ", instrumentRegistryHash=" + instrumentRegistryHash + '/'
                     + actualInstrumentRegistryHash + ", activeOrderHash=" + activeOrderHash + '/'
                     + actualActiveOrderHash + ')');
+        }
+    }
+
+    public void verifyCoreManifest(ProductLine expectedProductLine, long expectedCoreSequence,
+                                   long expectedBusinessStateHash) {
+        if (expectedProductLine != productLine || expectedCoreSequence != coreSequence
+                || expectedBusinessStateHash != coreBusinessStateHash) {
+            throw new IllegalStateException("Core and matcher snapshot manifests do not match"
+                    + " (productLine=" + productLine + '/' + expectedProductLine
+                    + ", coreSequence=" + coreSequence + '/' + expectedCoreSequence
+                    + ", businessStateHash=" + coreBusinessStateHash + '/'
+                    + expectedBusinessStateHash + ')');
         }
     }
 

@@ -85,7 +85,7 @@ public final class RuntimePerpetualFundingProcessor {
                 chunked ? command.maxUsers() : Integer.MAX_VALUE);
         ArrayList<Long> selectedUserIds = userPage.userIds();
 
-        Object[] laneResults = runtime.executeOwnerSettlements(selectedUserIds,
+        Object[] laneResults = runtime.executeLifecycleSettlements(selectedUserIds, Long::longValue,
                 ignored -> applyLane(command, selectedUserIds, runtime, instrument, symbolId,
                         settleAssetId, mark.markPriceTicks()));
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();

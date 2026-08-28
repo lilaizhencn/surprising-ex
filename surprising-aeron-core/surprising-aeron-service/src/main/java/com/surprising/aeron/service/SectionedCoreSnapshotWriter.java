@@ -44,14 +44,17 @@ final class SectionedCoreSnapshotWriter {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
         var snapshotState = state.snapshotTradingState();
-        matcherSnapshot.verifyCoreState(snapshotState, state.appliedCommandCount());
+        long businessStateHash = state.snapshotBusinessStateHash();
+        long fundsStateHash = state.snapshotFundsStateHash();
+        matcherSnapshot.verifyCoreManifest(state.productLine(), state.appliedCommandCount(), businessStateHash);
         if (snapshotId != matcherSnapshot.snapshotId() || coreSequence != matcherSnapshot.coreSequence()
                 || coreSequence != state.appliedCommandCount() || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new IllegalStateException("snapshot fence and matcher manifest do not match");
         }
         return new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(), state.probeValue(),
-                state.sourceSequenceDigest(), snapshotId, coreSequence, clusterTimestamp, clusterPosition,
-                matcherSnapshot, snapshotState, state.lastSourceSequences(), state.commandResults(),
+                state.sourceSequenceDigest(), snapshotId, coreSequence, businessStateHash, fundsStateHash,
+                clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
+                state.lastSourceSequences(), state.commandResults(),
                 state.exportState().snapshot(), state.feePolicies(), state.pendingTransfers(),
                 state.terminalRetention().copy(), state.accountLaneSnapshots(coreSequence, snapshotState));
     }
@@ -59,7 +62,8 @@ final class SectionedCoreSnapshotWriter {
     static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image) {
         MatcherSnapshot matcherSnapshot = image.matcherSnapshot();
         var snapshotState = image.tradingState();
-        matcherSnapshot.verifyCoreState(snapshotState, image.appliedCommandCount());
+        matcherSnapshot.verifyCoreManifest(image.productLine(), image.appliedCommandCount(),
+                image.businessStateHash());
         ArrayList<byte[]> payloads = new ArrayList<>();
         payloads.add(header(image));
         payloads.add(sources(image.sourceSequences()));
@@ -139,8 +143,8 @@ final class SectionedCoreSnapshotWriter {
                 .putLong(image.clusterTimestamp())
                 .putLong(image.clusterPosition())
                 .putLong(matcherSnapshot.matcherSequence())
-                .putLong(snapshotState.businessStateHash())
-                .putLong(com.surprising.aeron.service.state.RollingFundsStateHash.compute(snapshotState))
+                .putLong(image.businessStateHash())
+                .putLong(image.fundsStateHash())
                 .putInt(matcherSnapshot.engineStateHash())
                 .putInt(matcherSnapshot.bookStateHash())
                 .putLong(matcherSnapshot.symbolRegistryHash())
@@ -159,15 +163,13 @@ final class SectionedCoreSnapshotWriter {
     }
 
     private static byte[] accountLane(AccountLaneSnapshot lane) {
-        byte[] state = TradingStateSnapshotCodec.encode(lane.state());
-        int length = Math.addExact(Integer.BYTES * 3 + Long.BYTES * 5,
-                Math.addExact(Math.multiplyExact(lane.userIds().size(), Long.BYTES), state.length));
+        int length = Math.addExact(Integer.BYTES * 2 + Long.BYTES * 5,
+                Math.multiplyExact(lane.userIds().size(), Long.BYTES));
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(lane.laneId()).putLong(lane.revision()).putLong(lane.appliedSequence())
                 .putLong(lane.committedSequence()).putLong(lane.localStateHash())
                 .putLong(lane.localFundsHash()).putInt(lane.userIds().size());
         lane.userIds().forEach(buffer::putLong);
-        buffer.putInt(state.length).put(state);
         return buffer.array();
     }
 
