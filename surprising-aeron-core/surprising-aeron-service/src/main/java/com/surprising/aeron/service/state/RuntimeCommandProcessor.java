@@ -18,7 +18,6 @@ import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.product.api.ProductLine;
-import java.math.BigInteger;
 import java.util.UUID;
 import java.util.ArrayList;
 
@@ -210,7 +209,7 @@ public final class RuntimeCommandProcessor {
         }
         long minimumRate = Math.max(instrument.initialMarginRatePpm(),
                 CoreContractMath.riskBracket(instrument, 0).initialMarginRatePpm());
-        if (initialMarginRateFromLeverage(command.leveragePpm()) < minimumRate) {
+        if (CoreContractMath.initialMarginRateFromLeverage(command.leveragePpm()) < minimumRate) {
             throw new CoreStateRejectedException("LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT",
                     "leverage exceeds instrument maximum");
         }
@@ -889,9 +888,4 @@ public final class RuntimeCommandProcessor {
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
     }
 
-    private static long initialMarginRateFromLeverage(long leveragePpm) {
-        BigInteger numerator = BigInteger.valueOf(1_000_000L).multiply(BigInteger.valueOf(1_000_000L));
-        BigInteger[] quotient = numerator.divideAndRemainder(BigInteger.valueOf(leveragePpm));
-        return (quotient[1].signum() == 0 ? quotient[0] : quotient[0].add(BigInteger.ONE)).longValueExact();
-    }
 }

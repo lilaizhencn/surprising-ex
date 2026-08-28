@@ -6,11 +6,27 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class CoreContractMathTest {
+
+    @Test
+    void optionBuyerZeroMarginDoesNotEvaluateOverflowingPremium() {
+        CoreInstrumentState instrument = CoreInstrumentState.from(ProductLine.OPTION,
+                new UpsertInstrumentCommand("BTC-OPTION", 1, ContractType.VANILLA_OPTION.ordinal(),
+                        "BTC", "USDT", "USDT", 2, 1, 1,
+                        100_000, 50_000, 0, 0, 2_000_000_000_000L,
+                        OptionType.CALL.ordinal(), 100));
+
+        assertThat(CoreContractMath.openingMarginUnits(
+                instrument, CoreOrderSide.BUY, Long.MAX_VALUE, 2, 100_000)).isZero();
+        assertThat(CoreContractMath.openingMarginUnits(
+                instrument, CoreOrderSide.BUY, Long.MAX_VALUE, 2)).isZero();
+    }
 
     @Test
     void maintenanceMarginUsesTheInstrumentRiskBracketForCurrentNotional() {
@@ -33,5 +49,12 @@ class CoreContractMathTest {
         assertThatThrownBy(() -> CoreContractMath.riskBracket(instrument, 10_001))
                 .isInstanceOf(CoreStateRejectedException.class)
                 .hasMessageContaining("exceeds instrument risk brackets");
+    }
+
+    @Test
+    void initialMarginRateUsesExactAllocationFreeCeilingDivision() {
+        assertThat(CoreContractMath.initialMarginRateFromLeverage(20_000_000)).isEqualTo(50_000);
+        assertThat(CoreContractMath.initialMarginRateFromLeverage(3_000_000)).isEqualTo(333_334);
+        assertThat(CoreContractMath.initialMarginRateFromLeverage(Long.MAX_VALUE)).isEqualTo(1);
     }
 }

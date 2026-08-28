@@ -216,7 +216,7 @@ public final class RuntimeOrderAdmission {
         Long configured = runtime.leverage(new CoreLeverageKey(userId, instrument.symbol(), order.marginMode()));
         long leverage = configured == null ? instrument.maxLeveragePpm() : configured;
         if (leverage > bracket.maxLeveragePpm()
-                || initialMarginRateFromLeverage(leverage) < bracket.initialMarginRatePpm()) {
+                || CoreContractMath.initialMarginRateFromLeverage(leverage) < bracket.initialMarginRatePpm()) {
             throw rejected("LEVERAGE_EXCEEDS_RISK_BRACKET", "configured leverage exceeds risk bracket");
         }
     }
@@ -257,20 +257,14 @@ public final class RuntimeOrderAdmission {
     private static long openingMargin(
             CoreInstrumentState instrument, long projectedQuantity, long signedFill, long openSteps,
             long priceTicks, long leveragePpm) {
-        if (openSteps == 0) return 0;
+        if (openSteps == 0 || instrument.contractType().isOption() && signedFill > 0) return 0;
         long projectedNotional = CoreContractMath.notionalUnits(
                 instrument, Math.absExact(projectedQuantity), priceTicks);
         var bracket = CoreContractMath.maintenanceRiskBracket(instrument, projectedNotional);
         long rate = Math.max(Math.max(instrument.initialMarginRatePpm(), bracket.initialMarginRatePpm()),
-                initialMarginRateFromLeverage(leveragePpm));
+                CoreContractMath.initialMarginRateFromLeverage(leveragePpm));
         return CoreContractMath.openingMarginUnits(instrument,
                 signedFill > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL, priceTicks, openSteps, rate);
-    }
-
-    private static long initialMarginRateFromLeverage(long leveragePpm) {
-        BigInteger numerator = BigInteger.valueOf(PPM).multiply(BigInteger.valueOf(PPM));
-        BigInteger[] quotient = numerator.divideAndRemainder(BigInteger.valueOf(leveragePpm));
-        return (quotient[1].signum() == 0 ? quotient[0] : quotient[0].add(BigInteger.ONE)).longValueExact();
     }
 
     private static CoreStateRejectedException rejected(String code, String message) {

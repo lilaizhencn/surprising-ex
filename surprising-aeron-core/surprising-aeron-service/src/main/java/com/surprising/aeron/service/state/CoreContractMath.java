@@ -9,6 +9,7 @@ import java.math.BigInteger;
 final class CoreContractMath {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
+    private static final long LEVERAGE_RATE_NUMERATOR = 1_000_000_000_000L;
 
     private CoreContractMath() {
     }
@@ -18,11 +19,22 @@ final class CoreContractMath {
             CoreOrderSide side,
             long priceTicks,
             long quantitySteps) {
+        if (quantitySteps <= 0 || instrument.contractType().isOption() && side == CoreOrderSide.BUY) {
+            return 0;
+        }
         long initialMarginRatePpm = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
                 ? riskBracket(instrument, notionalUnits(instrument, quantitySteps, priceTicks)).initialMarginRatePpm()
                 : instrument.initialMarginRatePpm();
         return openingMarginUnits(instrument, side, priceTicks, quantitySteps,
                 initialMarginRatePpm);
+    }
+
+    static long initialMarginRateFromLeverage(long leveragePpm) {
+        if (leveragePpm <= 0) {
+            throw new IllegalArgumentException("leverage must be positive");
+        }
+        long quotient = LEVERAGE_RATE_NUMERATOR / leveragePpm;
+        return LEVERAGE_RATE_NUMERATOR % leveragePpm == 0 ? quotient : Math.addExact(quotient, 1);
     }
 
     static long openingMarginUnits(
@@ -35,10 +47,10 @@ final class CoreContractMath {
             return 0;
         }
         if (instrument.contractType().isOption()) {
-            long premium = optionPremiumUnits(instrument, priceTicks, quantitySteps);
             if (side == CoreOrderSide.BUY) {
                 return 0;
             }
+            long premium = optionPremiumUnits(instrument, priceTicks, quantitySteps);
             long risk;
             try {
                 long numerator = Math.multiplyExact(instrument.strikePriceTicks(), quantitySteps);

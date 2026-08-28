@@ -2477,7 +2477,7 @@ public final class TradingCoreReducer {
             long openSteps,
             long priceTicks,
             long leveragePpm) {
-        if (openSteps == 0) return 0;
+        if (openSteps == 0 || instrument.contractType().isOption() && signedFillSteps > 0) return 0;
         long projectedNotional = CoreContractMath.notionalUnits(
                 instrument, Math.absExact(projectedQuantitySteps), priceTicks);
         com.surprising.aeron.protocol.CoreRiskLimitBracket bracket = CoreContractMath.maintenanceRiskBracket(
@@ -2599,10 +2599,7 @@ public final class TradingCoreReducer {
 
     private static long initialMarginRateFromLeverage(long leveragePpm) {
         if (leveragePpm < PPM) throw new IllegalArgumentException("leverage must be at least 1x");
-        java.math.BigInteger numerator = java.math.BigInteger.valueOf(PPM).multiply(java.math.BigInteger.valueOf(PPM));
-        java.math.BigInteger denominator = java.math.BigInteger.valueOf(leveragePpm);
-        java.math.BigInteger[] quotient = numerator.divideAndRemainder(denominator);
-        return (quotient[1].signum() == 0 ? quotient[0] : quotient[0].add(java.math.BigInteger.ONE)).longValueExact();
+        return CoreContractMath.initialMarginRateFromLeverage(leveragePpm);
     }
 
     private static void validateReduceOnlyCapacity(

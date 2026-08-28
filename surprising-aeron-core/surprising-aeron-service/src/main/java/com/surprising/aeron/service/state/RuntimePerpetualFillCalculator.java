@@ -175,16 +175,12 @@ public final class RuntimePerpetualFillCalculator {
                                              long openSteps,
                                              long priceTicks,
                                              long leveragePpm) {
-        if (openSteps == 0) return 0;
+        if (openSteps == 0 || instrument.contractType().isOption() && signedFillSteps > 0) return 0;
         long projectedNotional = CoreContractMath.notionalUnits(
                 instrument, Math.absExact(projectedQuantitySteps), priceTicks);
         long bracketRate = CoreContractMath.maintenanceRiskBracket(
                 instrument, projectedNotional).initialMarginRatePpm();
-        java.math.BigInteger numerator = java.math.BigInteger.valueOf(1_000_000L)
-                .multiply(java.math.BigInteger.valueOf(1_000_000L));
-        java.math.BigInteger[] division = numerator.divideAndRemainder(java.math.BigInteger.valueOf(leveragePpm));
-        long leverageRate = division[1].signum() == 0 ? division[0].longValueExact()
-                : division[0].add(java.math.BigInteger.ONE).longValueExact();
+        long leverageRate = CoreContractMath.initialMarginRateFromLeverage(leveragePpm);
         long effectiveRate = Math.max(Math.max(instrument.initialMarginRatePpm(), bracketRate), leverageRate);
         return CoreContractMath.openingMarginUnits(instrument,
                 signedFillSteps > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL,
