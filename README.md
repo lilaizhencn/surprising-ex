@@ -248,7 +248,7 @@ Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP
 
 要求 JDK 25。Topic 创建和三节点部署入口仍在整理；PostgreSQL 首发初始化统一使用根目录 `init.sql`：
 
-现货和线性永续 Product Core 的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
+六条 Product Core 产品线的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
 不启动 wallet、PostgreSQL、Kafka、Valkey 或 Aeron Cluster；JMH worker 固定为一个 owner thread，Account Lane
 作为确定性账户分区由同一个 Product Core owner 直接执行，不再为短操作跨线程排队和同步等待。默认覆盖限价挂单、
 吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复。
@@ -294,6 +294,32 @@ owner 栈中没有 `CoreExportCodec`，`RuntimeStateMaterializer.materializeTran
 `100k/s` 仍约 5 倍；不能把全仓账户、共享订单簿、保险基金或 ADL 直接拆到多 owner，因为这会破坏同一命令
 资金原子性。只有先定义可独立结算的 shard key、禁止跨 shard 全仓与共享资金池，或把跨 shard 操作纳入确定性
 协调协议后，才能把分片作为容量方案。该本机结果也不能替代隔离 CPU 的生产同型机器三节点 HTTP P10 长稳门禁。
+
+其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
+`LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定
+4 个 Account Lane、4 个 symbol 和 1,000/10,000 个真实持仓用户，混合批量挂单/撤单、双向 IOC、部分成交、
+多 symbol 做市、风险扫描；永续额外执行资金费。每个 trial teardown 都要求 accepted=terminal、unfinished=0，
+逐用户检查非负余额和终态 reservation，并按用户资金、手续费、保险、强平费、资金费残差、舍入残差、清算
+损益及保险缺口精确核对结算资产总量，最后验证 immutable snapshot 恢复后的 business hash 和资金总量相同。
+交割到期结算及期权行权/失效属于生命周期容量，不混入持续交易 TPS；其资金流水、订单释放、持仓终态和分片
+cursor 由 `CoreDeliveryOptionFinancialMatrixTest` 独立验证。
+
+```bash
+java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar \
+  'DerivativeCoreBenchmark.productionMixedWorkload' \
+  -p productLine=LINEAR_PERPETUAL,INVERSE_PERPETUAL,LINEAR_DELIVERY,INVERSE_DELIVERY,OPTION \
+  -p accountLanes=4 -p activeUsers=1000,10000 -p symbols=4 -p hftRounds=8 -p hftBatchSize=20 \
+  -wi 3 -w 1s -i 5 -r 2s -f 1
+```
+
+2026-08-28 OpenJ9 JDK 25 的本机诊断采样使用 1 次 1 秒预热和 1 次 2 秒计量；1,000 用户用 32 轮 HFT，
+10,000 用户用 8 轮 HFT。1,000 用户终态业务吞吐分别为 `9053.336`、`8607.368`、
+`9066.590`、`8613.550`、`9442.274 ops/s`；10,000 用户为 `11365.815`、`11003.816`、
+`11574.263`、`11346.806`、`11389.755 ops/s`。前四条 10k 数据采于通用杠杆计算优化前，期权数据采于优化后；
+全部场景未完成业务/Core 消息均为零，资金守恒与快照恢复通过。期权热路径修复了买方零开仓保证金仍提前计算
+权利金/风险档位的溢出与冗余工作，并把四处 `BigInteger` 杠杆保证金率计算收敛为精确、无分配的 `long`
+向上取整。JMH 明确不支持 OpenJ9，因此这些数字只能用于本机缺陷定位，不能替代 HotSpot JDK 25、隔离 CPU、
+多轮计量和三节点端到端压测的生产容量结论。
 
 现货使用独立的 `SpotCoreBenchmark.productionMixedWorkload`。场景在 4 个 symbol 和 4 个 Account Lane 上预装
 1,000/10,000 个异构用户余额及 0..3 笔静态挂单；计时区间循环执行批量挂单/撤单、双向 IOC 成交、部分成交后
@@ -354,7 +380,7 @@ Trial setup 中预装并生成快照，每次 invocation 从同一快照恢复�
 独立持仓用户，并由一张足额安全对手单完成建仓，因此 `riskUsers` 是真实扫描用户数而不是名义数量。
 正式采样应使用 HotSpot 兼容的 JDK 25；OpenJ9 可用于 smoke，但 JMH 会禁用 compiler hints，
 其输出不能作为容量或延迟基线。
-JMH 结果只代表单个 SPOT 或 LINEAR_PERPETUAL Product Core 的本地内存基准。它不包含 Aeron ingress/replication、
+JMH 结果只代表单个 Product Core 的本地内存基准。它不包含 Aeron ingress/replication、
 HTTP/WebSocket、Kafka、数据库、Cluster 故障切换和端到端资金对账，这些外围链路仍需独立门禁；多个 lane
 是账户隔离、路由、局部 hash 和恢复校验边界，不会把唯一 owner 状态机变成多写者，也不会产生逐命令跨线程往返。
 
