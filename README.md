@@ -268,6 +268,23 @@ Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP
 `productionMixedWorkload` 额外把多币对做市、触发单、资金费、风险扫描、强平、保险基金和 ADL 放入同一条
 确定性 owner command stream，模拟生产中同时到达、由 Product Core 串行裁决的混合负载：
 
+永续正式资格验证统一使用 `surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual.sh`。
+入口会拒绝非 HotSpot JDK 25，默认使用 Oracle GraalVM HotSpot 25、固定 4 GiB heap、ZGC、AlwaysPreTouch、
+禁用显式 GC、Native Memory Tracking、JDK 25 native access、4 个 matcher、4 个 Account Lane，并把 JMH JSON、JFR、GC/safepoint 日志、JVM 参数和
+JDK 版本写入 benchmark `target/qualification/<run-id>/`。`all` 在源码全部完成后依次执行受影响 reactor 测试、
+1k/10k 正式 JMH 和 10k JFR/GC 复采样；也可只执行 `test`、`jmh` 或 `profile`：
+
+```bash
+surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual.sh all
+```
+
+可通过 `SURPRISING_JAVA_HOME`、`QUALIFICATION_HEAP`、`MATCHER_WAIT_STRATEGY`、
+`MATCHING_COMPLETION_SPINS` 和 `PROJECTION_BUSY_SPIN` 显式覆盖环境。completion wait 先做有界自旋再
+阻塞，正式资格入口默认预算为 16,384 次，避免逐命令无限占用 owner，又不把常见的短 matcher 往返变成内核调度。
+ZGC 是资格验证默认值；matcher 默认 `BUSY_SPIN` 以验证隔离 CPU
+上的最低尾延迟，但共享开发机可切换为 `YIELDING` 或 `BLOCKING`，结果必须连同参数文件一起归档，不能混作
+同一性能基线。
+
 ```bash
 mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean package
 java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar \
@@ -322,6 +339,18 @@ Core message 为 `2290.545 msg/s` 和 `2472.651 msg/s`，accepted=terminal、unf
 persistent tree node、命令解码、结果保留和匹配结算集合。20,000 单永续实际路径为 `4030.250 orders/s`，
 `p50=189 us`、`p95=443 us`、`p99=695 us`、`max=16431 us`、`pendingMatching=0`。这些本机数据证明
 projection 阶段已安全移出 owner，但仍不是每产品线 100k/s 的生产认证结果。
+
+2026-08-28 对剩余五类热点继续收敛：matcher completion 改为有界自旋后带超时阻塞，persistent tree
+对 no-op 更新复用原 root 并缩小 node，`PendingMatching` 缓存 typed command，终态保留只拥有一份响应字节，
+永续批量结算复用 primitive validation scratch 并直接累计 treasury delta。最终 HotSpot JDK 25.0.1 + ZGC
+资格运行中，1,000 用户为 `14203.060 terminal business ops/s`，10,000 用户为 `17578.160 ops/s`，对应
+Core message 为 `1368.588 msg/s` 和 `1693.808 msg/s`；accepted=terminal、unfinished=0，465 个 reactor
+测试、资金矩阵与 snapshot recovery 全绿。10,000 用户 JFR 单轮为 `18881.232 ops/s`，persistent node、
+命令解码、结果保留和匹配结算集合均已退出主要热点；新的 owner 瓶颈是余额全量复制及 primitive map
+扩容/遍历。相同 ZGC/NMT 参数下 20,000 单实际永续路径为 `3131.887 orders/s`，`p50=271 us`、
+`p95=526 us`、`p99=837 us`、`max=8019 us`、`pendingMatching=0`。该场景仍只达到单产品线
+100k/s 目标的约 17.6%，下一阶段不应继续调 matcher wait，而应先消除 `copyBalances`/`copyAllBalances`
+和 `LongObjectHashMap` 重建。
 
 其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定
