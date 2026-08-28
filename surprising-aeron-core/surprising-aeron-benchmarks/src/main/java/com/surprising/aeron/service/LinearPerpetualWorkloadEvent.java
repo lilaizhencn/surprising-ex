@@ -16,6 +16,18 @@ final class LinearPerpetualWorkloadEvent extends Event {
     @Label("Symbols")
     int symbols;
 
+    @Label("Listed symbols")
+    int listedSymbols;
+
+    @Label("Maximum positions per user")
+    int maxPositionsPerUser;
+
+    @Label("Maximum open orders per user")
+    int maxOpenOrdersPerUser;
+
+    @Label("Traffic profile")
+    String trafficProfile;
+
     @Label("HFT rounds")
     int hftRounds;
 

@@ -105,6 +105,52 @@ public class LinearPerpetualCoreBenchmark {
         return result;
     }
 
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long scaleMixedWorkload(ScaleMixedState state, MixedWorkloadCounters counters) {
+        LinearPerpetualWorkloadEvent measurement = new LinearPerpetualWorkloadEvent();
+        measurement.activeUsers = state.activeUsers;
+        measurement.symbols = state.activeSymbols;
+        measurement.listedSymbols = state.listedSymbols;
+        measurement.maxPositionsPerUser = state.maxPositionsPerUser;
+        measurement.maxOpenOrdersPerUser = state.maxOpenOrdersPerUser;
+        measurement.trafficProfile = state.trafficProfile;
+        measurement.hftRounds = state.hftRounds;
+        measurement.hftBatchSize = state.hftBatchSize;
+        measurement.begin();
+        long result;
+        try {
+            result = state.scenario.run();
+        } finally {
+            measurement.acceptedBusinessOperations = state.scenario.acceptedOperations();
+            measurement.terminalBusinessOperations = state.scenario.terminalOperations();
+            measurement.acceptedCoreMessages = state.scenario.acceptedCoreMessages();
+            measurement.terminalCoreMessages = state.scenario.terminalCoreMessages();
+            measurement.maxMatchingBacklog = state.scenario.maxBacklog();
+            measurement.commit();
+        }
+        recordCounters(state.scenario, counters);
+        return result;
+    }
+
+    private static void recordCounters(LinearPerpetualBenchmarkSupport.Scenario scenario,
+                                       MixedWorkloadCounters counters) {
+        counters.acceptedBusinessOperations += scenario.acceptedOperations();
+        counters.terminalBusinessOperations += scenario.terminalOperations();
+        counters.unfinishedBusinessOperations += Math.subtractExact(
+                scenario.acceptedOperations(), scenario.terminalOperations());
+        counters.acceptedCoreMessages += scenario.acceptedCoreMessages();
+        counters.terminalCoreMessages += scenario.terminalCoreMessages();
+        counters.unfinishedCoreMessages += Math.subtractExact(
+                scenario.acceptedCoreMessages(), scenario.terminalCoreMessages());
+        counters.laneOperations += scenario.laneOperations();
+        counters.laneCommandOperations += scenario.laneOperations(0);
+        counters.laneSettlementOperations += scenario.laneOperations(1);
+        counters.laneQueryOperations += scenario.laneOperations(2);
+        counters.laneRiskOperations += scenario.laneOperations(3);
+    }
+
     @State(Scope.Thread)
     public abstract static class InvocationState {
         @Param("4")
@@ -268,6 +314,49 @@ public class LinearPerpetualCoreBenchmark {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
             return LinearPerpetualMixedWorkload.productionScenario(template, hftRounds, hftBatchSize);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class ScaleMixedState extends InvocationState {
+        @Param("1000")
+        public int activeUsers;
+
+        @Param("4")
+        public int listedSymbols;
+
+        @Param("4")
+        public int activeSymbols;
+
+        @Param("1")
+        public int maxPositionsPerUser;
+
+        @Param("0")
+        public int maxOpenOrdersPerUser;
+
+        @Param("UNIFORM")
+        public String trafficProfile;
+
+        @Param("1")
+        public int hftRounds;
+
+        @Param("20")
+        public int hftBatchSize;
+
+        private LinearPerpetualMixedWorkload.Template template;
+
+        @Setup(Level.Trial)
+        public void setUpTrial() {
+            LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
+            var config = LinearPerpetualScaleConfig.scale(listedSymbols, activeSymbols,
+                    maxPositionsPerUser, maxOpenOrdersPerUser,
+                    LinearPerpetualTrafficProfile.parse(trafficProfile));
+            template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, config);
+        }
+
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualMixedWorkload.scaleScenario(template, hftRounds, hftBatchSize);
         }
     }
 

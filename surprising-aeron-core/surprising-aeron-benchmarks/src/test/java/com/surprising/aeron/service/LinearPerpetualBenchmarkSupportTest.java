@@ -22,7 +22,7 @@ class LinearPerpetualBenchmarkSupportTest {
     void largeScaleSetupKeepsMarkPriceInsideFreshnessWindow() {
         long firstTimestamp = LinearPerpetualBenchmarkSupport.benchmarkTimestamp(1);
         long lastTimestamp = LinearPerpetualBenchmarkSupport.benchmarkTimestamp(
-                4L * LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE);
+                1_000_000L);
 
         assertThat(lastTimestamp - firstTimestamp).isLessThanOrEqualTo(5_000);
     }
@@ -89,6 +89,44 @@ class LinearPerpetualBenchmarkSupportTest {
                 assertThat(scenario.laneOperations(1))
                         .as("one perpetual place batch must not cross the account lane once per item")
                         .isLessThan(scenario.acceptedOperations() / 2);
+                scenario.verify();
+            }
+        }).doesNotThrowAnyException();
+    }
+
+    @Test
+    void scaleWorkloadRestoresDensePopulationAndPreservesFunds() {
+        var config = LinearPerpetualScaleConfig.scale(32, 32, 5, 10,
+                LinearPerpetualTrafficProfile.UNIFORM);
+        var template = LinearPerpetualMixedWorkload.template(4, 64, config);
+
+        assertThatCode(() -> {
+            try (var scenario = LinearPerpetualMixedWorkload.scaleScenario(template, 1, 4)) {
+                assertThat(scenario.run()).isNotZero();
+                assertThat(scenario.positions()).isGreaterThan(64);
+                assertThat(scenario.activeOrders()).isGreaterThan(64);
+                assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+                scenario.verify();
+                var snapshot = scenario.captureSnapshot();
+                try (var restored = LinearPerpetualBenchmarkSupport.Harness.restore(snapshot)) {
+                    assertThat(restored.state().tradingState().businessStateHash())
+                            .isEqualTo(snapshot.businessStateHash());
+                }
+            }
+        }).doesNotThrowAnyException();
+    }
+
+    @Test
+    void scaleWorkloadSupportsHundredsOfListedMostlyIdleSymbols() {
+        var config = LinearPerpetualScaleConfig.scale(512, 4, 1, 1,
+                LinearPerpetualTrafficProfile.MOSTLY_IDLE);
+
+        assertThatCode(() -> {
+            var template = LinearPerpetualMixedWorkload.template(4, 32, config);
+            assertThat(template.listedSymbols()).hasSize(512);
+            assertThat(template.symbols()).hasSize(4);
+            try (var scenario = LinearPerpetualMixedWorkload.scaleScenario(template, 1, 4)) {
+                assertThat(scenario.run()).isNotZero();
                 scenario.verify();
             }
         }).doesNotThrowAnyException();
