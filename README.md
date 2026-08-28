@@ -362,6 +362,41 @@ NMT 只能作为后续泄漏对照基线，不能单独证明无泄漏。20,000 
 `p50=256 us`、`p95=561 us`、`p99=914 us`、`max=13598 us`、`pendingMatching=0`。当前正式主吞吐是
 单产品线 100k/s 目标的约 `22.9%`；不能再用已撤回的 `17.6%` 评价本轮优化效果。
 
+线性永续的规模矩阵使用独立入口
+`surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual-scale.sh`。它在 4 个 Account Lane、
+4 个 matcher、HotSpot JDK 25、ZGC 下覆盖 1,000/10,000 用户、4/16/64/128/256/512 个挂牌及活跃 symbol，
+并增加 80/20、单热点、绝大多数休眠、标记价风暴以及每用户最多 5 仓位/10 挂单、20 仓位/100 挂单的状态密度。
+`probe` 把每次完整生命周期 sweep 的吞吐、延迟、matcher backlog、未完成风险/资金费分片、快照大小和恢复时间
+写入 `scale-matrix.json`；`jmh`、`gc`、`profile` 分别保存无 profiler 吞吐、分配归因和 JFR/NMT，避免混用采样吞吐。
+每个计量 invocation 都从同一不可变快照恢复，计时区间同时执行做市挂撤单、IOC/部分成交、触发单、标记价、
+风险扫描、资金费、强平、保险基金和 ADL，恢复、最终快照与资金守恒检查不计入交易计时：
+
+```bash
+QUALIFICATION_RUN_ID=linear-perpetual-scale \
+  surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual-scale.sh all
+```
+
+2026-08-28 本机 8 核/16 线程 Intel i9-9880H、16 GiB 内存、8 GiB heap 的诊断矩阵中，19 个受控用例全部
+`fundsInvariant=true` 且 accepted=terminal。10,000 用户均匀流量从 4 到 512 个活跃 symbol 的完整生命周期吞吐依次为
+`877.765`、`2009.666`、`3271.639`、`3773.452`、`4000.392`、`4248.228 terminal business ops/s`；
+512 symbol 的 80/20、单热点、绝大多数休眠和标记价风暴分别为 `4946.575`、`292.288`、`807.906`、
+`2183.767 ops/s`。这些是一次 sweep 内重操作全部触发的终态业务操作吞吐，不可与只覆盖 4 symbol 持续 HFT 的
+`22894.430 ops/s` 直接比较。10,000 用户、512 symbol、最多 5 仓位/10 挂单时快照约 `44.52 MB`、恢复约
+`2.611 s`；10,000 用户、最多 20 仓位/100 挂单的约 50 万活动订单用例在 10 分钟边界仍停留于 snapshot manifest
+的全量 business hash，已归类为容量边界，不纳入通过矩阵，且该极端用例默认必须通过
+`QUALIFICATION_INCLUDE_EXTREME=true` 显式启用。
+
+这轮规模测试修复了五项正确性/复杂度缺陷：risk snapshot mutation 现在把所属用户 Lane 写入 typed commit 的
+changed-user 集合，避免跨 Lane 投影漏项导致 matcher/core 快照 manifest 不一致；`RuntimeStateMaterializer` 在一次
+materialization 中只取得一次 runtime user/balance 视图，消除了按用户重复复制全量余额的 O(users²) 恢复路径；
+benchmark 只在当前命令从零新增 pending 时关联触发单子命令，不再把已终态 batch 绑定到其他命令的全局 pending；
+级联完成的 batch 通过 idempotency result 取得终态；快照模板保存 next cluster position，并用下一命令的逻辑时间
+生成 mark，避免恢复时间倒退或未来 mark 造成伪 `STALE_MARK_PRICE`。短 JFR 显示 ZGC 36 次暂停总计
+`1.32 ms`、最大 `0.376 ms`，DirectBuffer 峰值仅 1 byte；但约 `226.102 MB/s` 的 profiler 分配率以及
+`TreeMap`、persistent tree、rolling business/funds hash 和快照 codec
+仍是主要分配来源。短采样不能证明无泄漏，矩阵也不包含 Aeron Cluster、HTTP、Kafka、WebSocket 或 40 分钟开放环
+长稳，因此只能作为单 Product Core 的规模缺陷与容量诊断，不能标记为 100k/s 生产认证。
+
 其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定
 4 个 Account Lane、4 个 symbol 和 1,000/10,000 个真实持仓用户，混合批量挂单/撤单、双向 IOC、部分成交、
