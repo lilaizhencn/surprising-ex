@@ -126,11 +126,21 @@ public record MatcherSnapshot(
     }
 
     public void verifyCoreState(TradingCoreState state, long expectedCoreSequence) {
-        if (state == null || state.productLine() != productLine || coreSequence != expectedCoreSequence
-                || coreBusinessStateHash != state.businessStateHash()
-                || instrumentRegistryHash != instrumentRegistryHash(state)
-                || activeOrderHash != activeOrderHash(state)) {
-            throw new IllegalStateException("Core and matcher snapshot manifests do not match");
+        if (state == null) throw new IllegalStateException("Core snapshot state is missing");
+        long actualBusinessStateHash = state.businessStateHash();
+        long actualInstrumentRegistryHash = instrumentRegistryHash(state);
+        long actualActiveOrderHash = activeOrderHash(state);
+        if (state.productLine() != productLine || coreSequence != expectedCoreSequence
+                || coreBusinessStateHash != actualBusinessStateHash
+                || instrumentRegistryHash != actualInstrumentRegistryHash
+                || activeOrderHash != actualActiveOrderHash) {
+            throw new IllegalStateException("Core and matcher snapshot manifests do not match"
+                    + " (productLine=" + productLine + '/' + state.productLine()
+                    + ", coreSequence=" + coreSequence + '/' + expectedCoreSequence
+                    + ", businessStateHash=" + coreBusinessStateHash + '/' + actualBusinessStateHash
+                    + ", instrumentRegistryHash=" + instrumentRegistryHash + '/'
+                    + actualInstrumentRegistryHash + ", activeOrderHash=" + activeOrderHash + '/'
+                    + actualActiveOrderHash + ')');
         }
     }
 

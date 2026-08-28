@@ -17,13 +17,15 @@ public final class RuntimeStateMaterializer {
                                         SnapshotTraversalProbe traversalProbe) {
         if (runtime == null || identities == null) throw new IllegalArgumentException("runtime and identities required");
         runtime.assertOwner();
+        var runtimeUsers = runtime.usersForSnapshot();
+        var runtimeBalances = runtime.balancesForSnapshot();
 
         Map<Long, Map<Long, OrderReservation>> reservationsByUser = new HashMap<>();
         if (traversalProbe != null) traversalProbe.reservationTraversalStarted();
         runtime.reservationsForSnapshot().forEachKeyValue((orderId, reservation) -> {
             if (traversalProbe != null) traversalProbe.reservationEntryVisited();
             if (runtime.pendingReservation(orderId, reservation.userId())) return;
-            if (!runtime.usersForSnapshot().containsKey(reservation.userId())) {
+            if (!runtimeUsers.containsKey(reservation.userId())) {
                 throw new IllegalStateException("reservation owner is not registered: " + reservation.userId());
             }
             reservationsByUser.computeIfAbsent(reservation.userId(), ignored -> new TreeMap<>())
@@ -36,7 +38,7 @@ public final class RuntimeStateMaterializer {
         if (traversalProbe != null) traversalProbe.positionTraversalStarted();
         runtime.positionsForSnapshot().forEachKeyValue((positionKey, position) -> {
             if (traversalProbe != null) traversalProbe.positionEntryVisited();
-            if (!runtime.usersForSnapshot().containsKey(position.userId())) {
+            if (!runtimeUsers.containsKey(position.userId())) {
                 throw new IllegalStateException("position owner is not registered: " + position.userId());
             }
             String key = identities.positionKey(position.userId(), positionKey);
@@ -48,10 +50,10 @@ public final class RuntimeStateMaterializer {
         });
 
         Map<Long, CoreUserState> users = new TreeMap<>();
-        runtime.usersForSnapshot().forEachKeyValue((userId, user) -> {
+        runtimeUsers.forEachKeyValue((userId, user) -> {
             Map<String, AssetBalance> balances = new TreeMap<>();
-            var runtimeBalances = runtime.balancesForSnapshot().get(userId);
-            if (runtimeBalances != null) runtimeBalances.forEachKeyValue((assetId, balance) -> {
+            var userBalances = runtimeBalances.get(userId);
+            if (userBalances != null) userBalances.forEachKeyValue((assetId, balance) -> {
                 String asset = identities.asset(assetId);
                 long pending = runtime.pendingReservedUnits(userId, assetId);
                 balances.put(asset, new AssetBalance(asset, Math.addExact(balance.availableUnits(), pending),

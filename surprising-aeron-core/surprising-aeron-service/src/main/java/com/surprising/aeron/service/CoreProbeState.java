@@ -120,6 +120,7 @@ public final class CoreProbeState implements AutoCloseable {
             "surprising.aeron.matching-phase-log-interval", 0);
     private static final int MATCHING_COMPLETION_SPINS = Math.max(0, Integer.getInteger(
             "surprising.aeron.matching-completion-spins", 1_024));
+    private static final long MATCHING_AWAIT_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
     private static final boolean MATCHING_PHASE_METRICS_ENABLED = MATCHING_PHASE_LOG_INTERVAL > 0;
     private static final int STANDALONE_SNAPSHOT_TIMEOUT_SECONDS = Integer.getInteger(
             "surprising.aeron.standalone-snapshot-timeout-seconds", 300);
@@ -2802,14 +2803,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(long sequence) {
-        com.surprising.aeron.service.matching.CoreMatchingResult result = takeMatchingResult(sequence);
-        if (result != null) return result;
-        if (pendingMatching.isEmpty() || pendingMatching.firstSequence() != sequence) return null;
-        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future =
-                laneCommandContexts.required(sequence).matchingFuture();
-        if (future == null) return null;
-        future.join();
-        return takeMatchingResult(sequence);
+        return awaitMatchingResult(sequence, MATCHING_AWAIT_TIMEOUT_NANOS);
     }
 
     com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(

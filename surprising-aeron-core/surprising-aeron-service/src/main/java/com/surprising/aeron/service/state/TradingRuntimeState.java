@@ -1649,6 +1649,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         onLane(snapshot.userId(), lane -> lane.riskSnapshots.put(positionKey, snapshot));
         changedRiskSnapshots.add(positionKey);
+        changedUsers.add(snapshot.userId());
     }
 
     public void putRiskScan(RiskScanRuntime scan) {
@@ -1727,10 +1728,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeRiskSnapshot(long positionKey) {
         assertOwner();
+        RiskSnapshotRuntime previous = riskSnapshot(positionKey);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> lane.riskSnapshots.remove(positionKey));
         }
         changedRiskSnapshots.add(positionKey);
+        if (previous != null) changedUsers.add(previous.userId());
     }
 
     public void removeRiskScan(int symbolId) {

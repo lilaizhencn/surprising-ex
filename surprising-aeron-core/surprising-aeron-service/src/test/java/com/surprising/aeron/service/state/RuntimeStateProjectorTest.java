@@ -82,6 +82,46 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
+    void riskSnapshotMutationCapturesItsAccountLaneWhenAnotherUserChanged() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState instrumentState = reducer.upsertInstrument(
+                TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                new UpsertInstrumentCommand("BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+                        "BTC", "USDT", "USDT", 1, 1, 1,
+                        100_000, 50_000, 0, 0, 0, -1, 0));
+        TradingRuntimeState topologyProbe = new TradingRuntimeState();
+        long firstUser = 1;
+        long secondUser = 2;
+        while (topologyProbe.topology().accountLaneId(firstUser)
+                == topologyProbe.topology().accountLaneId(secondUser)) secondUser++;
+        topologyProbe.close();
+        CorePositionState position = new CorePositionState("BTC-USDT", "USDT", 1, 1, 100, 100, 0, 0);
+        CoreUserState first = new CoreUserState(ProductLine.LINEAR_PERPETUAL, firstUser, 1,
+                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(), Map.of());
+        CoreUserState second = new CoreUserState(ProductLine.LINEAR_PERPETUAL, secondUser, 1,
+                Map.of("USDT", new AssetBalance("USDT", 1_000, 0)), Map.of(),
+                Map.of(position.key(), position));
+        TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
+                Map.of(firstUser, first, secondUser, second), Map.of(), instrumentState.instruments(),
+                CoreRiskState.empty(), CoreTreasuryState.empty());
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, firstUser,
+                new BalanceAdjustmentCommand("USDT", 1));
+        long positionKey = identities.positionKey(secondUser, position.key());
+        runtime.putRiskSnapshot(positionKey, new RiskSnapshotRuntime(secondUser,
+                identities.symbolId("BTC-USDT"), CorePositionSide.NET, 1,
+                1_000, 0, 10, 10_000, CoreRiskStatus.NORMAL));
+
+        TradingCoreState projected = RuntimeStateMaterializer.materializeTransition(
+                runtime.captureMutationDelta(), identities, before);
+
+        assertThat(projected.riskState().snapshots()).containsKey(secondUser + ":BTC-USDT");
+        runtime.close();
+    }
+
+    @Test
     void typedCommitProjectsOffOwnerAndPreservesRollingHashes() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState before = reducer.adjustBalance(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
