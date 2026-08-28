@@ -34,6 +34,9 @@ final class LinearPerpetualWorkloadEvent extends Event {
     @Label("HFT batch size")
     int hftBatchSize;
 
+    @Label("Lifecycle symbols per run")
+    int lifecycleSymbolsPerRun;
+
     @Label("Accepted business operations")
     long acceptedBusinessOperations;
 

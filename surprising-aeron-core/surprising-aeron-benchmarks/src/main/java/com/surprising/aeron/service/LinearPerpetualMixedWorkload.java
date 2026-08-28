@@ -96,7 +96,7 @@ final class LinearPerpetualMixedWorkload {
     }
 
     static Template template(int accountLanes, int activeUsers, int symbolCount) {
-        return template(accountLanes, activeUsers, LinearPerpetualScaleConfig.legacy(symbolCount));
+        return template(accountLanes, activeUsers, LinearPerpetualScaleConfig.production(symbolCount));
     }
 
     static Template template(int accountLanes, int activeUsers, LinearPerpetualScaleConfig scaleConfig) {
@@ -251,6 +251,7 @@ final class LinearPerpetualMixedWorkload {
             private boolean lossLifecycleExecuted;
             private long runSequence;
             private long triggerExecutions;
+            private int lifecycleCursor;
             private final long[] fundingSettlementIds = initialFundingSettlementIds(template.symbols().size());
             private final long[] fundingCursors = new long[template.symbols().size()];
             private final long[] markPriceSequences = initialMarkPriceSequences(template);
@@ -268,8 +269,21 @@ final class LinearPerpetualMixedWorkload {
                 for (int round = 0; round < hftRounds; round++) {
                     int[] tradingSymbols = tradingSymbolIndices(template.scaleConfig(), round);
                     executeHftBurstsPipelined(harness, template, hftBatchSize, tradingSymbols);
+                    int[] lifecycleSymbols = template.scaleConfig().trafficProfile()
+                            == LinearPerpetualTrafficProfile.MARK_PRICE_STORM
+                            ? allIndices(template.symbols().size()) : tradingSymbols;
+                    int[] scheduledLifecycleSymbols = lifecycleSymbols;
+                    if (!completeHeavyCycles && template.scaleConfig().boundedSymbolWork()) {
+                        scheduledLifecycleSymbols = scheduledLifecycleSymbols(lifecycleSymbols,
+                                template.scaleConfig().lifecycleSymbolsPerRun(), lifecycleCursor);
+                        lifecycleCursor = lifecycleSymbols.length == 0 ? 0
+                                : (lifecycleCursor + scheduledLifecycleSymbols.length) % lifecycleSymbols.length;
+                    }
                     if (!completeHeavyCycles && round == 0) {
-                        for (int index : tradingSymbols) {
+                        int[] triggerSymbols = template.scaleConfig().trafficProfile()
+                                == LinearPerpetualTrafficProfile.MARK_PRICE_STORM
+                                ? tradingSymbols : scheduledLifecycleSymbols;
+                        for (int index : triggerSymbols) {
                             executeTriggerLifecycle(harness, template, index);
                             triggerExecutions = Math.incrementExact(triggerExecutions);
                         }
@@ -279,11 +293,8 @@ final class LinearPerpetualMixedWorkload {
                         }
                     }
                     if (!completeHeavyCycles) {
-                        int[] lifecycleSymbols = template.scaleConfig().trafficProfile()
-                                == LinearPerpetualTrafficProfile.MARK_PRICE_STORM
-                                ? allIndices(template.symbols().size()) : tradingSymbols;
                         if (template.scaleConfig().boundedSymbolWork()) {
-                            for (int index : lifecycleSymbols) {
+                            for (int index : scheduledLifecycleSymbols) {
                                 exerciseLifecycleBounded(harness, template, index, fundingSettlementIds,
                                         fundingCursors, markPriceSequences);
                                 fundingTouched[index] = true;
@@ -499,6 +510,16 @@ final class LinearPerpetualMixedWorkload {
                 return harness.snapshotTemplate(template.snapshot().accountLanes());
             }
         };
+    }
+
+    private static int[] scheduledLifecycleSymbols(int[] candidates, int budget, int cursor) {
+        int size = Math.min(candidates.length, budget);
+        if (size == candidates.length) return candidates;
+        int[] selected = new int[size];
+        for (int index = 0; index < size; index++) {
+            selected[index] = candidates[(cursor + index) % candidates.length];
+        }
+        return selected;
     }
 
     private static long[] completedLaneOperations(CoreProbeState state) {

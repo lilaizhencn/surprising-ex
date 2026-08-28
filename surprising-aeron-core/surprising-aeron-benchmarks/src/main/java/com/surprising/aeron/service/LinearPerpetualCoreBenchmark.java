@@ -118,6 +118,7 @@ public class LinearPerpetualCoreBenchmark {
         measurement.trafficProfile = state.trafficProfile;
         measurement.hftRounds = state.hftRounds;
         measurement.hftBatchSize = state.hftBatchSize;
+        measurement.lifecycleSymbolsPerRun = state.lifecycleSymbolsPerRun;
         measurement.begin();
         long result;
         try {
@@ -343,6 +344,9 @@ public class LinearPerpetualCoreBenchmark {
         @Param("20")
         public int hftBatchSize;
 
+        @Param("32")
+        public int lifecycleSymbolsPerRun;
+
         private LinearPerpetualMixedWorkload.Template template;
 
         @Setup(Level.Trial)
@@ -350,7 +354,7 @@ public class LinearPerpetualCoreBenchmark {
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             var config = LinearPerpetualScaleConfig.scale(listedSymbols, activeSymbols,
                     maxPositionsPerUser, maxOpenOrdersPerUser,
-                    LinearPerpetualTrafficProfile.parse(trafficProfile));
+                    LinearPerpetualTrafficProfile.parse(trafficProfile), lifecycleSymbolsPerRun);
             template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, config);
         }
 

@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 MODULE="surprising-aeron-core/surprising-aeron-benchmarks"
 JAR="${REPO_ROOT}/${MODULE}/target/product-core-benchmarks.jar"
 RUN_ID="${QUALIFICATION_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
-ARTIFACT_DIR="${QUALIFICATION_ARTIFACT_DIR:-${REPO_ROOT}/${MODULE}/target/qualification/${RUN_ID}-scale}"
+ARTIFACT_DIR="${QUALIFICATION_ARTIFACT_DIR:-${REPO_ROOT}/target/qualification/${RUN_ID}-scale}"
 MODE="${1:-all}"
 JAVA_HOME_25="${SURPRISING_JAVA_HOME:-/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home}"
 JAVA="${JAVA_HOME_25}/bin/java"
@@ -20,7 +20,9 @@ JMH_MEASUREMENT_ITERATIONS="${SCALE_JMH_MEASUREMENT_ITERATIONS:-3}"
 JMH_MEASUREMENT_SECONDS="${SCALE_JMH_MEASUREMENT_SECONDS:-3}"
 JMH_FORKS="${SCALE_JMH_FORKS:-3}"
 RESUME="${QUALIFICATION_RESUME:-false}"
-INCLUDE_EXTREME="${QUALIFICATION_INCLUDE_EXTREME:-false}"
+LIFECYCLE_SYMBOL_BUDGET="${SCALE_LIFECYCLE_SYMBOL_BUDGET:-32}"
+SOAK_SECONDS="${SCALE_SOAK_SECONDS:-2400}"
+SOAK_SAMPLE_SECONDS="${SCALE_SOAK_SAMPLE_SECONDS:-10}"
 
 JAVA_VERSION="$(${JAVA} -version 2>&1)"
 if [[ "${JAVA_VERSION}" != *'java version "25.'* || "${JAVA_VERSION}" != *'HotSpot'* ]]; then
@@ -58,7 +60,9 @@ write_environment() {
 
 package_benchmark() {
   JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
-    -pl "${MODULE}" -am -DskipTests package | tee "${ARTIFACT_DIR}/maven-package.log"
+    -pl "${MODULE}" -am -DskipTests clean package | tee "${ARTIFACT_DIR}/maven-package.log"
+  jar tf "${JAR}" | grep -qx 'META-INF/BenchmarkList'
+  jar tf "${JAR}" | grep -qx 'META-INF/CompilerHints'
 }
 
 run_probe_case() {
@@ -82,22 +86,22 @@ run_probe_case() {
 
 run_probe_matrix() {
   : > "${ARTIFACT_DIR}/scale-matrix.jsonl"
-  for users in 1000 10000; do
-    for symbols in 4 16 64 128 256 512; do
-      run_probe_case "symbols-u${users}-s${symbols}" \
-        "${users}" "${symbols}" "${symbols}" 1 3 UNIFORM 1 4
-    done
+  for symbols in 256 512; do
+    run_probe_case "symbols-u10000-s${symbols}" \
+      10000 "${symbols}" "${symbols}" 1 3 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
   done
-  run_probe_case density-u1000-s512-p5-o10 1000 512 512 5 10 UNIFORM 1 4
-  run_probe_case density-u1000-s512-p20-o100 1000 512 512 20 100 UNIFORM 1 4
-  run_probe_case density-u10000-s512-p5-o10 10000 512 512 5 10 UNIFORM 1 4
-  if [[ "${INCLUDE_EXTREME}" == "true" ]]; then
-    run_probe_case density-u10000-s512-p20-o100 10000 512 512 20 100 UNIFORM 1 4
-  fi
-  run_probe_case traffic-u10000-s512-pareto 10000 512 512 1 3 PARETO_80_20 5 4
-  run_probe_case traffic-u10000-s512-hot 10000 512 512 1 3 SINGLE_HOT 1 4
-  run_probe_case traffic-u10000-s512-idle 10000 512 4 1 3 MOSTLY_IDLE 1 4
-  run_probe_case traffic-u10000-s512-storm 10000 512 512 1 3 MARK_PRICE_STORM 1 4
+  run_probe_case density-u10000-s512-p5-o10 \
+    10000 512 512 5 10 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case traffic-u10000-s512-pareto \
+    10000 512 512 1 3 PARETO_80_20 5 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case traffic-u10000-s512-hot \
+    10000 512 512 1 3 SINGLE_HOT 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case traffic-u10000-s512-idle \
+    10000 512 256 1 3 MOSTLY_IDLE 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case traffic-u10000-s512-storm \
+    10000 512 512 1 3 MARK_PRICE_STORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case full-sweep-u10000-s512 \
+    10000 512 512 1 3 UNIFORM 1 4 512
   jq -s '.' "${ARTIFACT_DIR}/scale-matrix.jsonl" > "${ARTIFACT_DIR}/scale-matrix.json"
 }
 
@@ -114,12 +118,14 @@ validate_jmh() {
 
 run_jmh_case() {
   local case_id="$1" users="$2" listed="$3" active="$4" positions="$5" orders="$6" profile="$7" rounds="$8"
+  local lifecycle_budget="${9:-${LIFECYCLE_SYMBOL_BUDGET}}"
   local result="${ARTIFACT_DIR}/jmh-${case_id}.json"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
     -p accountLanes=4 -p activeUsers="${users}" -p listedSymbols="${listed}" \
     -p activeSymbols="${active}" -p maxPositionsPerUser="${positions}" \
     -p maxOpenOrdersPerUser="${orders}" -p trafficProfile="${profile}" \
     -p hftRounds="${rounds}" -p hftBatchSize=4 \
+    -p lifecycleSymbolsPerRun="${lifecycle_budget}" \
     -wi "${JMH_WARMUP_ITERATIONS}" -w "${JMH_WARMUP_SECONDS}s" \
     -i "${JMH_MEASUREMENT_ITERATIONS}" -r "${JMH_MEASUREMENT_SECONDS}s" -f "${JMH_FORKS}" \
     -jvmArgsAppend "${JVM_ARGS_STRING}" -rf json -rff "${result}" \
@@ -128,13 +134,13 @@ run_jmh_case() {
 }
 
 run_jmh_matrix() {
-  run_jmh_case uniform-4 10000 4 4 1 3 UNIFORM 1
-  run_jmh_case uniform-128 10000 128 128 1 3 UNIFORM 1
+  run_jmh_case uniform-256 10000 256 256 1 3 UNIFORM 1
   run_jmh_case uniform-512 10000 512 512 1 3 UNIFORM 1
   run_jmh_case pareto-512 10000 512 512 1 3 PARETO_80_20 5
-  run_jmh_case idle-512 10000 512 4 1 3 MOSTLY_IDLE 1
+  run_jmh_case idle-512 10000 512 256 1 3 MOSTLY_IDLE 1
   run_jmh_case storm-512 10000 512 512 1 3 MARK_PRICE_STORM 1
   run_jmh_case density-512 10000 512 512 5 10 UNIFORM 1
+  run_jmh_case full-sweep-512 10000 512 512 1 3 UNIFORM 1 512
   jq -s 'add' "${ARTIFACT_DIR}"/jmh-*.json > "${ARTIFACT_DIR}/scale-jmh.json"
 }
 
@@ -142,7 +148,8 @@ run_gc() {
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
     -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM \
-    -p hftRounds=1 -p hftBatchSize=4 -wi 2 -w 2s -i 3 -r 3s -f 1 -prof gc \
+    -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}" \
+    -wi 2 -w 2s -i 3 -r 3s -f 1 -prof gc \
     -jvmArgsAppend "${JVM_ARGS_STRING}" -rf json -rff "${ARTIFACT_DIR}/scale-gc.json" \
     2>&1 | tee "${ARTIFACT_DIR}/scale-gc.log"
   validate_jmh "${ARTIFACT_DIR}/scale-gc.json"
@@ -155,7 +162,8 @@ run_profile() {
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
     -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM \
-    -p hftRounds=1 -p hftBatchSize=4 -wi 2 -w 2s -i 1 -r 10s -f 1 \
+    -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}" \
+    -wi 2 -w 2s -i 1 -r 10s -f 1 \
     -jvmArgsAppend "${profile_args}" -rf json -rff "${ARTIFACT_DIR}/scale-profile.json" \
     2>&1 | tee "${ARTIFACT_DIR}/scale-profile.log"
   validate_jmh "${ARTIFACT_DIR}/scale-profile.json"
@@ -164,13 +172,39 @@ run_profile() {
   grep -q 'Native Memory Tracking:' "${ARTIFACT_DIR}/scale-profile.log"
 }
 
+run_soak() {
+  local soak_jvm_args=(
+    "${JVM_ARGS[@]}"
+    "-Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/scale-soak-gc.log:time,uptime,level,tags"
+  )
+  "${JAVA}" "${soak_jvm_args[@]}" -cp "${JAR}" \
+    com.surprising.aeron.service.LinearPerpetualScaleSoakMain \
+    10000 512 512 5 10 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}" \
+    "${SOAK_SECONDS}" "${SOAK_SAMPLE_SECONDS}" \
+    2> "${ARTIFACT_DIR}/scale-soak.stderr.log" | tee "${ARTIFACT_DIR}/scale-soak.jsonl"
+  tail -n 1 "${ARTIFACT_DIR}/scale-soak.jsonl" | jq -e \
+    '.type == "summary" and .status == "PASS" and .fundsInvariant == true
+      and .terminalBusinessOperations > 0 and .listedSymbols == 512' \
+    > "${ARTIFACT_DIR}/scale-soak.json"
+  [[ -s "${ARTIFACT_DIR}/scale-soak-gc.log" ]]
+}
+
+run_capacity() {
+  : > "${ARTIFACT_DIR}/scale-matrix.jsonl"
+  run_probe_case density-extreme-u10000-s512-p20-o100 \
+    10000 512 512 20 100 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_jmh_case density-extreme-512 10000 512 512 20 100 UNIFORM 1
+}
+
 write_environment
 case "${MODE}" in
   probe) package_benchmark; run_probe_matrix ;;
   jmh) package_benchmark; run_jmh_matrix ;;
   gc) package_benchmark; run_gc ;;
   profile) package_benchmark; run_profile ;;
-  all) package_benchmark; run_probe_matrix; run_jmh_matrix; run_gc; run_profile ;;
-  *) echo "Usage: $0 [probe|jmh|gc|profile|all]" >&2; exit 2 ;;
+  soak) package_benchmark; run_soak ;;
+  capacity) package_benchmark; run_capacity ;;
+  all) package_benchmark; run_probe_matrix; run_jmh_matrix; run_gc; run_profile; run_soak ;;
+  *) echo "Usage: $0 [probe|jmh|gc|profile|soak|capacity|all]" >&2; exit 2 ;;
 esac
 echo "Scale qualification artifacts: ${ARTIFACT_DIR}"

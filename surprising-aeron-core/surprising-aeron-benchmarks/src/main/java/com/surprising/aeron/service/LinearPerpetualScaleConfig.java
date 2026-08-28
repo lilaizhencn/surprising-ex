@@ -6,6 +6,7 @@ record LinearPerpetualScaleConfig(
         int maxPositionsPerUser,
         int maxOpenOrdersPerUser,
         LinearPerpetualTrafficProfile trafficProfile,
+        int lifecycleSymbolsPerRun,
         boolean boundedSymbolWork) {
 
     static final int MAX_LISTED_SYMBOLS = 512;
@@ -27,6 +28,9 @@ record LinearPerpetualScaleConfig(
             throw new IllegalArgumentException("maxOpenOrdersPerUser must be in [0,100]");
         }
         if (trafficProfile == null) throw new IllegalArgumentException("trafficProfile is required");
+        if (lifecycleSymbolsPerRun < 1 || lifecycleSymbolsPerRun > activeSymbols) {
+            throw new IllegalArgumentException("lifecycleSymbolsPerRun must be in [1,activeSymbols]");
+        }
         if (trafficProfile == LinearPerpetualTrafficProfile.SINGLE_HOT && maxPositionsPerUser != 1) {
             throw new IllegalArgumentException("SINGLE_HOT requires maxPositionsPerUser=1");
         }
@@ -35,15 +39,16 @@ record LinearPerpetualScaleConfig(
         }
     }
 
-    static LinearPerpetualScaleConfig legacy(int symbols) {
+    static LinearPerpetualScaleConfig production(int symbols) {
         return new LinearPerpetualScaleConfig(symbols, symbols, 1, 3,
-                LinearPerpetualTrafficProfile.UNIFORM, false);
+                LinearPerpetualTrafficProfile.UNIFORM, symbols, false);
     }
 
     static LinearPerpetualScaleConfig scale(int listedSymbols, int activeSymbols,
                                              int maxPositionsPerUser, int maxOpenOrdersPerUser,
-                                             LinearPerpetualTrafficProfile trafficProfile) {
+                                             LinearPerpetualTrafficProfile trafficProfile,
+                                             int lifecycleSymbolsPerRun) {
         return new LinearPerpetualScaleConfig(listedSymbols, activeSymbols, maxPositionsPerUser,
-                maxOpenOrdersPerUser, trafficProfile, true);
+                maxOpenOrdersPerUser, trafficProfile, lifecycleSymbolsPerRun, true);
     }
 }

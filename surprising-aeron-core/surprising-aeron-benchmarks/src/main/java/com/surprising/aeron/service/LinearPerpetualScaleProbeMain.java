@@ -15,7 +15,7 @@ public final class LinearPerpetualScaleProbeMain {
         LinearPerpetualBenchmarkSupport.configureAccountLanes(4);
         LinearPerpetualScaleConfig scale = LinearPerpetualScaleConfig.scale(
                 probe.listedSymbols(), probe.activeSymbols(), probe.maxPositionsPerUser(),
-                probe.maxOpenOrdersPerUser(), probe.trafficProfile());
+                probe.maxOpenOrdersPerUser(), probe.trafficProfile(), probe.lifecycleSymbolsPerRun());
 
         long setupStart = System.nanoTime();
         var template = LinearPerpetualMixedWorkload.template(4, probe.activeUsers(), scale);
@@ -66,17 +66,18 @@ public final class LinearPerpetualScaleProbeMain {
     private record ProbeConfig(int activeUsers, int listedSymbols, int activeSymbols,
                                int maxPositionsPerUser, int maxOpenOrdersPerUser,
                                LinearPerpetualTrafficProfile trafficProfile,
-                               int hftRounds, int hftBatchSize, int warmupCycles, int measuredCycles) {
+                               int hftRounds, int hftBatchSize, int lifecycleSymbolsPerRun,
+                               int warmupCycles, int measuredCycles) {
         static ProbeConfig parse(String[] args) {
-            if (args.length != 10) {
+            if (args.length != 11) {
                 throw new IllegalArgumentException("usage: users listed active maxPositions maxOpenOrders "
-                        + "profile hftRounds hftBatchSize warmupCycles measuredCycles");
+                        + "profile hftRounds hftBatchSize lifecycleSymbolsPerRun warmupCycles measuredCycles");
             }
             return new ProbeConfig(Integer.parseInt(args[0]), Integer.parseInt(args[1]),
                     Integer.parseInt(args[2]), Integer.parseInt(args[3]), Integer.parseInt(args[4]),
                     LinearPerpetualTrafficProfile.parse(args[5]), Integer.parseInt(args[6]),
-                    Integer.parseInt(args[7]), positive(args[8], "warmupCycles"),
-                    positive(args[9], "measuredCycles"));
+                    Integer.parseInt(args[7]), positive(args[8], "lifecycleSymbolsPerRun"),
+                    positive(args[9], "warmupCycles"), positive(args[10], "measuredCycles"));
         }
 
         private static int positive(String value, String name) {
@@ -137,6 +138,7 @@ public final class LinearPerpetualScaleProbeMain {
                             "\"activeUsers\":%d,\"listedSymbols\":%d,\"activeSymbols\":%d," +
                             "\"maxPositionsPerUser\":%d,\"maxOpenOrdersPerUser\":%d," +
                             "\"trafficProfile\":\"%s\",\"hftRounds\":%d,\"hftBatchSize\":%d," +
+                            "\"lifecycleSymbolsPerRun\":%d," +
                             "\"setupMillis\":%.3f,\"initialSnapshotBytes\":%d," +
                             "\"measuredSeconds\":%.6f,\"terminalBusinessOperations\":%d," +
                             "\"terminalBusinessOpsPerSec\":%.3f,\"terminalCoreMessages\":%d," +
@@ -150,7 +152,8 @@ public final class LinearPerpetualScaleProbeMain {
                             "\"finalRestoreMillis\":%.3f,\"usedHeapBytes\":%d}",
                     probe.activeUsers(), probe.listedSymbols(), probe.activeSymbols(),
                     probe.maxPositionsPerUser(), probe.maxOpenOrdersPerUser(), probe.trafficProfile(),
-                    probe.hftRounds(), probe.hftBatchSize(), millis(setupNanos), template.snapshot().sizeBytes(),
+                    probe.hftRounds(), probe.hftBatchSize(), probe.lifecycleSymbolsPerRun(),
+                    millis(setupNanos), template.snapshot().sizeBytes(),
                     seconds, terminalOperations, terminalOperations / seconds, terminalCoreMessages,
                     terminalCoreMessages / seconds, micros(percentile(0.50)), micros(percentile(0.95)),
                     micros(percentile(0.99)), micros(latencies[latencies.length - 1]),

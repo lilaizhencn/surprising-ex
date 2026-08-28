@@ -97,7 +97,7 @@ class LinearPerpetualBenchmarkSupportTest {
     @Test
     void scaleWorkloadRestoresDensePopulationAndPreservesFunds() {
         var config = LinearPerpetualScaleConfig.scale(32, 32, 5, 10,
-                LinearPerpetualTrafficProfile.UNIFORM);
+                LinearPerpetualTrafficProfile.UNIFORM, 16);
         var template = LinearPerpetualMixedWorkload.template(4, 64, config);
 
         assertThatCode(() -> {
@@ -119,13 +119,28 @@ class LinearPerpetualBenchmarkSupportTest {
     @Test
     void scaleWorkloadSupportsHundredsOfListedMostlyIdleSymbols() {
         var config = LinearPerpetualScaleConfig.scale(512, 4, 1, 1,
-                LinearPerpetualTrafficProfile.MOSTLY_IDLE);
+                LinearPerpetualTrafficProfile.MOSTLY_IDLE, 4);
 
         assertThatCode(() -> {
             var template = LinearPerpetualMixedWorkload.template(4, 32, config);
             assertThat(template.listedSymbols()).hasSize(512);
             assertThat(template.symbols()).hasSize(4);
             try (var scenario = LinearPerpetualMixedWorkload.scaleScenario(template, 1, 4)) {
+                assertThat(scenario.run()).isNotZero();
+                scenario.verify();
+            }
+        }).doesNotThrowAnyException();
+    }
+
+    @Test
+    void markPriceStormPlacesTriggersOnlyForSymbolsThatReceivedTradingPositions() {
+        var config = LinearPerpetualScaleConfig.scale(64, 64, 1, 3,
+                LinearPerpetualTrafficProfile.MARK_PRICE_STORM, 8);
+
+        assertThatCode(() -> {
+            var template = LinearPerpetualMixedWorkload.template(4, 128, config);
+            try (var scenario = LinearPerpetualMixedWorkload.scaleScenario(template, 1, 4)) {
+                assertThat(scenario.run()).isNotZero();
                 assertThat(scenario.run()).isNotZero();
                 scenario.verify();
             }
