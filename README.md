@@ -270,9 +270,13 @@ Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP
 
 永续正式资格验证统一使用 `surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual.sh`。
 入口会拒绝非 HotSpot JDK 25，默认使用 Oracle GraalVM HotSpot 25、固定 4 GiB heap、ZGC、AlwaysPreTouch、
-禁用显式 GC、Native Memory Tracking、JDK 25 native access、4 个 matcher、4 个 Account Lane，并把 JMH JSON、JFR、GC/safepoint 日志、JVM 参数和
-JDK 版本写入 benchmark `target/qualification/<run-id>/`。`all` 在源码全部完成后依次执行受影响 reactor 测试、
-1k/10k 正式 JMH 和 10k JFR/GC 复采样；也可只执行 `test`、`jmh` 或 `profile`：
+禁用显式 GC、JDK 25 native access、4 个 matcher、4 个 Account Lane，并把 JMH JSON、JFR、GC/safepoint
+日志、JVM 参数和 JDK 版本写入 benchmark `target/qualification/<run-id>/`。正式主吞吐使用无 profiler、无
+Native Memory Tracking 的 `throughput` 模式，默认对 1k/10k 用户分别执行 5 轮各 5 秒预热、5 轮各 5 秒计量
+和 3 个独立 fork；`gc` 仅用于 `-prof gc` 分配归因，`profile` 独立打开 JFR 与 NMT，二者的吞吐不能作为
+主吞吐结论。`e2e` 执行 10,000 个永续实际订单周期。`all` 在源码全部完成后依次执行受影响 reactor 测试和
+这四类相互隔离的验证；`jmh` 保留为 `throughput` 的命令别名。每个 JMH 模式都通过 `jq` 拒绝空结果、
+accepted/terminal 不一致或 unfinished 非零，避免 fork 启动失败却被 JMH 的零退出码误判为通过：
 
 ```bash
 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual.sh all
@@ -342,15 +346,21 @@ projection 阶段已安全移出 owner，但仍不是每产品线 100k/s 的生�
 
 2026-08-28 对剩余五类热点继续收敛：matcher completion 改为有界自旋后带超时阻塞，persistent tree
 对 no-op 更新复用原 root 并缩小 node，`PendingMatching` 缓存 typed command，终态保留只拥有一份响应字节，
-永续批量结算复用 primitive validation scratch 并直接累计 treasury delta。最终 HotSpot JDK 25.0.1 + ZGC
-资格运行中，1,000 用户为 `14203.060 terminal business ops/s`，10,000 用户为 `17578.160 ops/s`，对应
-Core message 为 `1368.588 msg/s` 和 `1693.808 msg/s`；accepted=terminal、unfinished=0，465 个 reactor
-测试、资金矩阵与 snapshot recovery 全绿。10,000 用户 JFR 单轮为 `18881.232 ops/s`，persistent node、
-命令解码、结果保留和匹配结算集合均已退出主要热点；新的 owner 瓶颈是余额全量复制及 primitive map
-扩容/遍历。相同 ZGC/NMT 参数下 20,000 单实际永续路径为 `3131.887 orders/s`，`p50=271 us`、
-`p95=526 us`、`p99=837 us`、`max=8019 us`、`pendingMatching=0`。该场景仍只达到单产品线
-100k/s 目标的约 17.6%，下一阶段不应继续调 matcher wait，而应先消除 `copyBalances`/`copyAllBalances`
-和 `LongObjectHashMap` 重建。
+永续批量结算复用 primitive validation scratch 并直接累计 treasury delta。先前记录的 1,000 用户
+`14203.060 ops/s`、10,000 用户 `17578.160 ops/s` 已撤回：该次主运行错误加载了 `-prof gc`，且只有
+2 轮各 2 秒预热、3 轮各 3 秒计量和单 fork，不能作为正式主吞吐。
+
+修正后的 HotSpot JDK 25.0.1 + ZGC 无 profiler、无 NMT 正式运行使用 5 轮各 5 秒预热、5 轮各 5 秒计量
+和 3 fork；1,000 用户为 `24019.719 terminal business ops/s`，10,000 用户为 `22894.430 ops/s`，对应
+Core message 为 `2314.608 msg/s` 和 `2206.152 msg/s`，accepted=terminal、unfinished=0。独立 `-prof gc`
+归因中，1,000/10,000 用户分别为 `23583.513`/`20334.009 ops/s`、`542.701`/`478.844 MB/s`，折算约
+`23.0`/`23.5 KB` 每个终态业务操作；这些带 profiler 数值只用于分配归因。独立 JFR/NMT 单轮为
+`22307.596 ops/s`，70,120 个执行样本中 exchange-core/disruptor wait 占主导，owner 的首个业务热点仍是
+`TradingRuntimeState.copyBalances` 和 primitive map 遍历/扩容；JFR `DataLoss=0`，ZGC 最长采样暂停
+`0.0663 ms`。进程退出 NMT 显示总 committed `4.595 GB`，其中 Java heap committed `4.295 GB`；单点
+NMT 只能作为后续泄漏对照基线，不能单独证明无泄漏。20,000 单实际永续路径通过，`3249.709 orders/s`、
+`p50=256 us`、`p95=561 us`、`p99=914 us`、`max=13598 us`、`pendingMatching=0`。当前正式主吞吐是
+单产品线 100k/s 目标的约 `22.9%`；不能再用已撤回的 `17.6%` 评价本轮优化效果。
 
 其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定
