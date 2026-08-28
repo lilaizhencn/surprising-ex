@@ -302,15 +302,28 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     public CompletableFuture<CoreMatchingResult> executeAfterCancellations(
-            List<CoreOrderState> orders,
+            List<CancellationOrder> orders,
             Supplier<CompletableFuture<CoreMatchingResult>> submission) {
-        List<CoreOrderState> requested = orders == null ? List.of() : List.copyOf(orders);
+        List<CancellationOrder> requested = orders == null ? List.of() : List.copyOf(orders);
         if (requested.isEmpty()) return submission.get();
-        return cancelBatchOrderedAsync(requested).thenCompose(outcome -> {
-            CoreMatchingResult cancellations = aggregateCancellationResult(requested, outcome);
+        return cancelBatchOrderedAsync(requested,
+                order -> cancelAsync(order.userId(), order.orderId(), order.symbol())).thenCompose(outcome -> {
+            CoreMatchingResult cancellations = aggregateRuntimeCancellationResult(requested, outcome);
             if (!cancellations.accepted()) return CompletableFuture.completedFuture(cancellations);
             return submission.get().thenApply(result -> combineCancellationPrefix(cancellations, result));
         });
+    }
+
+    private static CoreMatchingResult aggregateRuntimeCancellationResult(
+            List<CancellationOrder> requested,
+            CancelBatchOutcome outcome) {
+        List<CoreCancellationResult> cancellations = new ArrayList<>(requested.size());
+        for (int index = 0; index < requested.size(); index++) {
+            CoreMatchingResult result = outcome.results().get(index);
+            cancellations.add(new CoreCancellationResult(requested.get(index).orderId(), result.accepted(),
+                    result.resultCode()));
+        }
+        return aggregateCancellationOutcomes(cancellations, outcome);
     }
 
     private static CoreMatchingResult combineCancellationPrefix(
@@ -343,6 +356,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             cancellations.add(new CoreCancellationResult(requested.get(index).orderId(), result.accepted(),
                     result.resultCode()));
         }
+        return aggregateCancellationOutcomes(cancellations, outcome);
+    }
+
+    private static CoreMatchingResult aggregateCancellationOutcomes(
+            List<CoreCancellationResult> cancellations,
+            CancelBatchOutcome outcome) {
         List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
                 CoreMatchingResult.concatenateEvents(outcome.results());
         long nativeSequence = outcome.results().stream()
@@ -855,9 +874,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
-    static CompletableFuture<CancelBatchOutcome> cancelBatchOrderedAsync(
-            List<CoreOrderState> orders,
-            Function<CoreOrderState, CompletableFuture<CoreMatchingResult>> cancellation) {
+    static <T> CompletableFuture<CancelBatchOutcome> cancelBatchOrderedAsync(
+            List<T> orders,
+            Function<T, CompletableFuture<CoreMatchingResult>> cancellation) {
         List<CoreMatchingResult> results = new ArrayList<>(
                 java.util.Collections.nCopies(orders.size(), notSubmitted()));
         List<CoreMatchingResult> successfulPrefix = new ArrayList<>();
@@ -890,6 +909,14 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private static Throwable unwrap(Throwable failure) {
         return failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
                 ? failure.getCause() : failure;
+    }
+
+    public record CancellationOrder(long orderId, long userId, String symbol) {
+        public CancellationOrder {
+            if (orderId <= 0 || userId <= 0 || symbol == null || symbol.isBlank()) {
+                throw new IllegalArgumentException("invalid cancellation order");
+            }
+        }
     }
 
     private static CoreMatchingResult notSubmitted() {

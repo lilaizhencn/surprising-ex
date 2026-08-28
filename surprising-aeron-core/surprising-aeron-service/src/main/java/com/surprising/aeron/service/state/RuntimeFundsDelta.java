@@ -72,6 +72,25 @@ public final class RuntimeFundsDelta {
         return new FundsDelta(materialized);
     }
 
+    public RuntimeTreasuryDelta treasuryDelta() {
+        RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta(Math.max(
+                RuntimeTreasuryDelta.SINGLE_COMMAND_CAPACITY, unitsByAsset.size()));
+        for (Posting posting : postings) {
+            if (posting.ownerKind() != FundsPosting.OwnerKind.TREASURY) continue;
+            switch (posting.subledger()) {
+                case FEE -> delta.addFee(posting.assetId(), posting.units());
+                case INSURANCE, LIQUIDATION_FEE -> delta.addInsurance(posting.assetId(), posting.units());
+                case DEFICIT -> delta.addDeficit(posting.assetId(), Math.negateExact(posting.units()));
+                case FUNDING_RESIDUAL -> delta.addFundingResidual(posting.assetId(), posting.units());
+                case ROUNDING_RESIDUAL -> delta.addRoundingResidual(posting.assetId(), posting.units());
+                case CLEARING_PNL -> delta.addClearing(posting.assetId(), posting.units());
+                case AVAILABLE, LOCKED, EXTERNAL_ADJUSTMENT -> throw new IllegalStateException(
+                        "invalid Treasury funds subledger: " + posting.subledger());
+            }
+        }
+        return delta;
+    }
+
     List<Posting> postings() {
         return postings;
     }

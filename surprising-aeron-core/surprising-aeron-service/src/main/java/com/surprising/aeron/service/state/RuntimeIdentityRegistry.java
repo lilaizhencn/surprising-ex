@@ -172,7 +172,7 @@ public final class RuntimeIdentityRegistry {
         return identity.positionKey();
     }
 
-    PositionIdentity positionIdentity(long positionKey) {
+    public PositionIdentity positionIdentity(long positionKey) {
         PositionIdentity identity = positions.get(positionKey);
         if (identity == null) {
             throw new IllegalArgumentException("unknown runtime position key: " + positionKey);

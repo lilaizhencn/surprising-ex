@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
+import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -19,16 +20,17 @@ class PendingMatchingTest {
     void preservesCapturedPreCommandHashesAcrossDeferredMatchingUpdates() {
         CoreMessage command = command(11);
         TradingCoreState beforeState = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        RuntimeProjectionPoint beforeProjection = new RuntimeProjectionPoint(0, beforeState);
         RuntimeFundsDelta fundsDelta = RuntimeFundsDelta.empty();
         PendingMatching pending = new PendingMatching(7, PendingMatching.Operation.PLACE, command,
-                List.of(17L), beforeState, 101L, 202L, fundsDelta);
+                List.of(17L), beforeProjection, 101L, 202L, fundsDelta);
 
         PendingMatching updatedCommand = pending.withCommand(command(12));
         PendingMatching updatedCancellations = updatedCommand.withPreMatchingCancellations(List.of(18L, 19L));
 
         assertThat(updatedCancellations.beforeBusinessStateHash()).isEqualTo(101L);
         assertThat(updatedCancellations.beforeFundsStateHash()).isEqualTo(202L);
-        assertThat(updatedCancellations.beforeState()).isSameAs(beforeState);
+        assertThat(updatedCancellations.beforeProjection()).isSameAs(beforeProjection);
         assertThat(updatedCancellations.fundsDelta()).isSameAs(fundsDelta);
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
     }

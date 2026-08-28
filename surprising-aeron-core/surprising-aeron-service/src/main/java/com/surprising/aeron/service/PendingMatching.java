@@ -2,32 +2,32 @@ package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CommandFingerprint;
-import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import java.util.List;
 import java.util.Objects;
 
 record PendingMatching(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                       List<Long> preMatchingCancellationOrderIds, TradingCoreState beforeState,
+                       List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
                        long beforeBusinessStateHash, long beforeFundsStateHash,
                        RuntimeFundsDelta fundsDelta) {
 
-    PendingMatching(long sequence, Operation operation, CoreMessage command, TradingCoreState beforeState,
+    PendingMatching(long sequence, Operation operation, CoreMessage command, RuntimeProjectionPoint beforeProjection,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, CommandFingerprint.of(command), List.of(), beforeState,
+        this(sequence, operation, command, CommandFingerprint.of(command), List.of(), beforeProjection,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta);
     }
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
-                    List<Long> preMatchingCancellationOrderIds, TradingCoreState beforeState,
+                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
         this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                beforeState, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta);
+                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta);
     }
 
     PendingMatching {
         if (sequence <= 0 || operation == null || command == null || fingerprint == null
-                || preMatchingCancellationOrderIds == null || beforeState == null
+                || preMatchingCancellationOrderIds == null || beforeProjection == null
                 || fundsDelta == null
                 || command.header().kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
             throw new IllegalArgumentException("invalid pending matching request");
@@ -38,12 +38,12 @@ record PendingMatching(long sequence, Operation operation, CoreMessage command, 
 
     PendingMatching withCommand(CoreMessage nextCommand) {
         return new PendingMatching(sequence, operation, nextCommand, fingerprint,
-                preMatchingCancellationOrderIds, beforeState, beforeBusinessStateHash, beforeFundsStateHash,
+                preMatchingCancellationOrderIds, beforeProjection, beforeBusinessStateHash, beforeFundsStateHash,
                 fundsDelta);
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
-        return new PendingMatching(sequence, operation, command, fingerprint, orderIds, beforeState,
+        return new PendingMatching(sequence, operation, command, fingerprint, orderIds, beforeProjection,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta);
     }
 

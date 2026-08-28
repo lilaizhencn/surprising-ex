@@ -1927,9 +1927,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         return new LongHashSet(changedReservations);
     }
 
-    LongHashSet changedPositions() {
+    public LongHashSet changedPositions() {
         assertOwner();
         return new LongHashSet(changedPositions);
+    }
+
+    public boolean hasChangedPositions() {
+        assertOwner();
+        return !changedPositions.isEmpty();
     }
 
     LongHashSet changedLiquidations() {

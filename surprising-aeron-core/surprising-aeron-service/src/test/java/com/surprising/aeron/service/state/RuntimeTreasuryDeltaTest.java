@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -102,6 +103,30 @@ class RuntimeTreasuryDeltaTest {
         assertThat(first.assetId(1)).isEqualTo(2);
         assertThat(first.feeUnits(1)).isEqualTo(13);
         assertThat(first.clearingUnits(1)).isEqualTo(-11);
+    }
+
+    @Test
+    void derivesLaneTreasuryAcknowledgementFromPrimitiveFundsPostings() {
+        RuntimeFundsDelta funds = new RuntimeFundsDelta(List.of(
+                new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
+                        FundsPosting.Subledger.FEE, 7),
+                new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
+                        FundsPosting.Subledger.LIQUIDATION_FEE, 11),
+                new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
+                        FundsPosting.Subledger.DEFICIT, -13),
+                new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
+                        FundsPosting.Subledger.FUNDING_RESIDUAL, -17),
+                new RuntimeFundsDelta.Posting(2, FundsPosting.OwnerKind.USER, 9,
+                        FundsPosting.Subledger.AVAILABLE, -19)));
+
+        RuntimeTreasuryDelta treasury = funds.treasuryDelta();
+
+        assertThat(treasury.size()).isOne();
+        assertThat(treasury.assetId(0)).isEqualTo(1);
+        assertThat(treasury.feeUnits(0)).isEqualTo(7);
+        assertThat(treasury.insuranceUnits(0)).isEqualTo(11);
+        assertThat(treasury.deficitUnits(0)).isEqualTo(13);
+        assertThat(treasury.fundingResidualUnits(0)).isEqualTo(-17);
     }
 
     private static TradingCoreState state(CoreTreasuryState treasury, long revision) {

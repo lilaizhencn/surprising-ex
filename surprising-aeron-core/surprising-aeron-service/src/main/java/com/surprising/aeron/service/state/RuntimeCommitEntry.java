@@ -10,6 +10,7 @@ public final class RuntimeCommitEntry {
     private final RuntimeIdentityRegistry identities;
     private final long previousRevision;
     private final RuntimeFundsDelta fundsDelta;
+    private final RuntimeProjectionPoint projectionPoint;
 
     public RuntimeCommitEntry(long sequence, RuntimeMutationDelta mutation,
                               RuntimeIdentityRegistry identities, long previousRevision,
@@ -23,12 +24,14 @@ public final class RuntimeCommitEntry {
         this.identities = identities;
         this.previousRevision = previousRevision;
         this.fundsDelta = fundsDelta;
+        this.projectionPoint = new RuntimeProjectionPoint(sequence, null);
     }
 
     public long sequence() { return sequence; }
     public RuntimeMutationDelta mutation() { return mutation; }
     public RuntimeIdentityRegistry identities() { return identities; }
     public RuntimeFundsDelta fundsDelta() { return fundsDelta; }
+    public RuntimeProjectionPoint projectionPoint() { return projectionPoint; }
     public Set<Long> changedUserIds() { return mutation.users().changedKeys(); }
     public Set<Integer> changedTreasuryAssetIds() { return mutation.treasury().assets().changedKeys(); }
     public ProductLine productLine() { return mutation.productLine(); }
@@ -38,8 +41,8 @@ public final class RuntimeCommitEntry {
         return RuntimeStateMaterializer.materializeTransition(mutation, identities, state);
     }
 
-    public TradingCoreState transitionView(TradingCoreState state) {
-        return RuntimeStateMaterializer.transitionView(mutation, identities, state);
+    void completeProjection(TradingCoreState state) {
+        projectionPoint.complete(state);
     }
 
     public long afterNextLiquidationId() { return mutation.nextLiquidationId(); }

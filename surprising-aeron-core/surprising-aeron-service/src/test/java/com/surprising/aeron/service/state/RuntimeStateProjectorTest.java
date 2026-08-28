@@ -95,7 +95,7 @@ class RuntimeStateProjectorTest {
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
         RuntimeMutationDelta mutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry commit = ledger.capture(1, mutation, identities, before);
+        RuntimeCommitEntry commit = ledger.capture(1, mutation, identities);
         ledger.commit(commit);
         TradingCoreState expected = RuntimeStateMaterializer.materializeTransition(mutation, identities, before);
         businessHash.update(commit);
@@ -108,7 +108,7 @@ class RuntimeStateProjectorTest {
             RuntimeProjectionJournal.ProjectionVersion projected = journal.await(
                     1, System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5), true);
 
-            assertThat(commit.transitionView(before)).isEqualTo(expected);
+            assertThat(journal.await(commit.projectionPoint())).isEqualTo(expected);
             assertThat(projected.state()).isEqualTo(expected);
             assertThat(projected.businessStateHash()).isEqualTo(expected.businessStateHash());
             assertThat(projected.fundsStateHash()).isEqualTo(RollingFundsStateHash.compute(expected));
@@ -129,7 +129,7 @@ class RuntimeStateProjectorTest {
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
         RuntimeMutationDelta firstMutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry first = ledger.capture(1, firstMutation, identities, before);
+        RuntimeCommitEntry first = ledger.capture(1, firstMutation, identities);
         ledger.commit(first);
         runtime.clearChangedKeys();
         TradingCoreState firstState = RuntimeStateMaterializer.materializeTransition(
@@ -140,7 +140,7 @@ class RuntimeStateProjectorTest {
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", -100));
         RuntimeMutationDelta secondMutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry second = ledger.capture(2, secondMutation, identities, firstState);
+        RuntimeCommitEntry second = ledger.capture(2, secondMutation, identities);
         ledger.commit(second);
         TradingCoreState expected = RuntimeStateMaterializer.materializeTransition(
                 secondMutation, identities, firstState);

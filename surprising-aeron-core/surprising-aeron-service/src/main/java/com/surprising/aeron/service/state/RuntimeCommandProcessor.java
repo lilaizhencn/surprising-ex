@@ -469,6 +469,35 @@ public final class RuntimeCommandProcessor {
         return false;
     }
 
+    public static boolean stampChangedOrdersByLane(
+            TradingRuntimeState runtime, long timestamp, long clusterPosition,
+            Iterable<Long> changedOrderIds, Iterable<Long> changedUserIds) {
+        if (runtime == null || changedOrderIds == null || changedUserIds == null
+                || timestamp < 0 || clusterPosition < 0) {
+            throw new IllegalArgumentException("invalid lane-batched runtime order commit metadata");
+        }
+        runtime.assertOwner();
+        ArrayList<Long> candidates = new ArrayList<>();
+        for (Long orderId : changedOrderIds) {
+            if (orderId != null) candidates.add(orderId);
+        }
+        Object[] results = runtime.executeOwnerSettlements(changedUserIds, ignored -> {
+            boolean changed = false;
+            for (long orderId : candidates) {
+                OrderRuntime order = runtime.order(orderId);
+                if (order == null || order.updatedAtEpochMillis() == timestamp
+                        && order.clusterPosition() == clusterPosition) continue;
+                runtime.replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
+                changed = true;
+            }
+            return changed;
+        });
+        for (Object result : results) {
+            if (Boolean.TRUE.equals(result)) return true;
+        }
+        return false;
+    }
+
     public static void pruneTerminalState(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                           TerminalPruneBatch batch) {
         if (runtime == null || identities == null || batch == null || batch.isEmpty()) {

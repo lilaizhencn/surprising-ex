@@ -2,9 +2,7 @@ package com.surprising.aeron.service.state;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 
 public final class RuntimeStateMaterializer {
 
@@ -193,68 +191,6 @@ public final class RuntimeStateMaterializer {
         return materializeTransition(delta, identities, previous, null);
     }
 
-    public static TradingCoreState transitionView(RuntimeMutationDelta delta,
-                                                  RuntimeIdentityRegistry identities,
-                                                  TradingCoreState previous) {
-        if (delta == null || identities == null || previous == null
-                || delta.productLine() != previous.productLine() || delta.revision() < previous.revision()) {
-            throw new IllegalArgumentException("runtime mutation delta is out of order");
-        }
-        Map<Long, CoreUserState> users = StateMapSupport.deferredDelta(previous.users(),
-                delta.users().changedKeys(), delta.users().currentValues().keySet(),
-                userId -> materializeUser(userId, delta, identities, previous.user(userId)));
-        Map<Long, CoreOrderState> orders = StateMapSupport.deferredDelta(previous.orders(),
-                delta.orders().changedKeys(), committedOrderIds(delta),
-                orderId -> orderSnapshot(delta.orders().currentValues().get(orderId), identities));
-
-        TreeMap<String, Integer> markIds = symbolIds(delta.markPrices().changedKeys(), identities);
-        Map<String, CoreMarkPriceState> marks = StateMapSupport.deferredDelta(
-                previous.riskState().markPrices(), markIds.keySet(), presentKeys(markIds, delta.markPrices()),
-                symbol -> {
-                    MarkPriceRuntime value = delta.markPrices().currentValues().get(markIds.get(symbol));
-                    return new CoreMarkPriceState(symbol, value.instrumentVersion(), value.markPriceTicks(),
-                            value.priceSequence(), value.generatedAtEpochMillis());
-                });
-        TreeMap<String, Long> riskKeys = positionIdentities(delta.riskSnapshots().changedKeys(), identities);
-        Map<String, CoreRiskSnapshot> snapshots = StateMapSupport.deferredDelta(
-                previous.riskState().snapshots(), riskKeys.keySet(),
-                presentKeys(riskKeys, delta.riskSnapshots()),
-                key -> riskSnapshot(delta.riskSnapshots().currentValues().get(riskKeys.get(key)), identities));
-        Map<Long, CoreLiquidationState> liquidations = StateMapSupport.deferredDelta(
-                previous.riskState().liquidations(), delta.liquidations().changedKeys(),
-                delta.liquidations().currentValues().keySet(),
-                id -> liquidation(delta.liquidations().currentValues().get(id), identities));
-        TreeMap<String, Integer> scanIds = symbolIds(delta.riskScans().changedKeys(), identities);
-        Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.deferredDelta(
-                previous.riskState().scans(), scanIds.keySet(), presentKeys(scanIds, delta.riskScans()),
-                symbol -> riskScan(delta.riskScans().currentValues().get(scanIds.get(symbol)), identities));
-        CoreRiskState riskState = new CoreRiskState(marks, snapshots, liquidations, scans,
-                delta.nextLiquidationId(), delta.riskScanControl());
-
-        Map<String, CoreInstrumentState> instruments = deferred(previous.instruments(), delta.instruments());
-        Map<CoreLeverageKey, Long> leverages = deferred(previous.leverages(), delta.leverages());
-        Map<Long, CoreAlgoOrderState> algoOrders = deferred(previous.algoOrders(), delta.algoOrders());
-        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = deferred(
-                previous.cancelAllAfterTimers(), delta.timers());
-        Map<Long, CoreTriggerOrderState> triggers = deferred(previous.triggerOrders(), delta.triggerOrders());
-        TreeMap<TradingCoreState.ClientOrderKey, RuntimeMutationDelta.RuntimeClientKey> clientKeys = new TreeMap<>();
-        for (RuntimeMutationDelta.RuntimeClientKey runtimeKey : delta.clientOrders().changedKeys()) {
-            clientKeys.put(new TradingCoreState.ClientOrderKey(runtimeKey.userId(),
-                    identities.clientOrderId(runtimeKey.userId(), runtimeKey.clientKey())), runtimeKey);
-        }
-        Set<TradingCoreState.ClientOrderKey> presentClients = new TreeSet<>();
-        clientKeys.forEach((key, runtimeKey) -> {
-            if (delta.clientOrders().currentValues().containsKey(runtimeKey)) presentClients.add(key);
-        });
-        Map<TradingCoreState.ClientOrderKey, Long> clients = StateMapSupport.deferredDelta(
-                previous.clientOrderIndex(), clientKeys.keySet(), presentClients,
-                key -> delta.clientOrders().currentValues().get(clientKeys.get(key)));
-        return new TradingCoreState(delta.productLine(),
-                Math.subtractExact(delta.revision(), delta.pendingReservationCount()), users, orders, instruments,
-                riskState, deferredTreasury(delta.treasury(), identities, previous.treasuryState()),
-                leverages, algoOrders, timers, clients, triggers);
-    }
-
     private static TradingCoreState materializeTransition(RuntimeMutationDelta delta,
                                                           RuntimeIdentityRegistry identities,
                                                           TradingCoreState previous,
@@ -378,117 +314,6 @@ public final class RuntimeStateMaterializer {
                 ? new CoreUserState(current.productLine(), userId, revision, balances,
                 reservations, positions, current.positionMode())
                 : beforeUser.transition(revision, balances, reservations, positions, current.positionMode());
-    }
-
-    private static Set<Long> committedOrderIds(RuntimeMutationDelta delta) {
-        TreeSet<Long> result = new TreeSet<>(delta.orders().currentValues().keySet());
-        result.removeAll(delta.pendingReservations());
-        return result;
-    }
-
-    private static TreeMap<String, Integer> symbolIds(Set<Integer> ids, RuntimeIdentityRegistry identities) {
-        TreeMap<String, Integer> result = new TreeMap<>();
-        for (Integer id : ids) result.put(identities.symbol(id), id);
-        return result;
-    }
-
-    private static TreeMap<String, Long> positionIdentities(Set<Long> keys,
-                                                            RuntimeIdentityRegistry identities) {
-        TreeMap<String, Long> result = new TreeMap<>();
-        for (Long key : keys) {
-            RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(key);
-            result.put(identity.userId() + ":" + identity.positionKey(), key);
-        }
-        return result;
-    }
-
-    private static <K extends Comparable<? super K>, RK, V> Set<K> presentKeys(
-            Map<K, RK> keys, RuntimeMutationDelta.ValueChanges<RK, V> changes) {
-        TreeSet<K> result = new TreeSet<>();
-        keys.forEach((key, runtimeKey) -> {
-            if (changes.currentValues().containsKey(runtimeKey)) result.add(key);
-        });
-        return result;
-    }
-
-    private static <K extends Comparable<? super K>, V> Map<K, V> deferred(
-            Map<K, V> previous, RuntimeMutationDelta.ValueChanges<K, V> changes) {
-        return StateMapSupport.deferredDelta(previous, changes.changedKeys(), changes.currentValues().keySet(),
-                changes.currentValues()::get);
-    }
-
-    private static CoreTreasuryState deferredTreasury(RuntimeMutationDelta.TreasuryValues changes,
-                                                       RuntimeIdentityRegistry identities,
-                                                       CoreTreasuryState previous) {
-        TreeMap<String, Integer> assets = assetIds(changes.assets().changedKeys(), identities);
-        Map<String, Long> fees = deferredAssetLedger(previous.feeBalances(), assets, changes.assets(),
-                RuntimeMutationDelta.AssetLedger::fee);
-        Map<String, Long> insurance = deferredAssetLedger(previous.insuranceBalances(), assets, changes.assets(),
-                RuntimeMutationDelta.AssetLedger::insurance);
-        Map<String, Long> deficits = deferredAssetLedger(previous.insuranceDeficits(), assets, changes.assets(),
-                RuntimeMutationDelta.AssetLedger::deficit);
-        Map<String, Long> liquidationFees = deferredAssetLedger(previous.liquidationFeeBalances(), assets,
-                changes.assets(), RuntimeMutationDelta.AssetLedger::liquidationFee);
-        Map<String, Long> fundingResiduals = deferredAssetLedger(previous.fundingResidualBalances(), assets,
-                changes.assets(), RuntimeMutationDelta.AssetLedger::fundingResidual);
-        Map<String, Long> roundingResiduals = deferredAssetLedger(previous.roundingResidualBalances(), assets,
-                changes.assets(), RuntimeMutationDelta.AssetLedger::roundingResidual);
-        Map<String, Long> clearingPnl = deferredAssetLedger(previous.clearingPnlBalances(), assets,
-                changes.assets(), RuntimeMutationDelta.AssetLedger::clearingPnl);
-
-        TreeMap<String, Integer> funding = symbolIds(changes.funding().changedKeys(), identities);
-        Set<String> fundingMarkers = presentKeys(funding, changes.funding(),
-                value -> value.settlementId() != 0);
-        Set<String> fundingProgressKeys = presentKeys(funding, changes.funding(),
-                value -> value.progress() != null);
-        Map<String, Long> fundingSettlements = StateMapSupport.deferredDelta(
-                previous.fundingSettlements(), funding.keySet(), fundingMarkers,
-                symbol -> changes.funding().currentValues().get(funding.get(symbol)).settlementId());
-        Map<String, CoreTreasuryState.FundingProgress> fundingProgress = StateMapSupport.deferredDelta(
-                previous.fundingProgress(), funding.keySet(), fundingProgressKeys,
-                symbol -> fundingProgress(changes.funding().currentValues().get(funding.get(symbol)).progress()));
-
-        TreeMap<String, Integer> lifecycle = symbolIds(changes.lifecycle().changedKeys(), identities);
-        Set<String> lifecycleMarkers = presentKeys(lifecycle, changes.lifecycle(),
-                value -> value.settlementId() != 0);
-        Set<String> lifecycleProgressKeys = presentKeys(lifecycle, changes.lifecycle(),
-                value -> value.progress() != null);
-        Map<String, Long> lifecycleSettlements = StateMapSupport.deferredDelta(
-                previous.lifecycleSettlements(), lifecycle.keySet(), lifecycleMarkers,
-                symbol -> changes.lifecycle().currentValues().get(lifecycle.get(symbol)).settlementId());
-        Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = StateMapSupport.deferredDelta(
-                previous.lifecycleProgress(), lifecycle.keySet(), lifecycleProgressKeys,
-                symbol -> lifecycleProgress(changes.lifecycle().currentValues().get(lifecycle.get(symbol)).progress()));
-        return new CoreTreasuryState(fees, insurance, deficits, liquidationFees, fundingResiduals,
-                roundingResiduals, clearingPnl, fundingSettlements, lifecycleSettlements,
-                fundingProgress, lifecycleProgress);
-    }
-
-    private static TreeMap<String, Integer> assetIds(Set<Integer> ids, RuntimeIdentityRegistry identities) {
-        TreeMap<String, Integer> result = new TreeMap<>();
-        for (Integer id : ids) result.put(identities.asset(id), id);
-        return result;
-    }
-
-    private static Map<String, Long> deferredAssetLedger(
-            Map<String, Long> previous,
-            Map<String, Integer> keys,
-            RuntimeMutationDelta.ValueChanges<Integer, RuntimeMutationDelta.AssetLedger> changes,
-            java.util.function.ToLongFunction<RuntimeMutationDelta.AssetLedger> value) {
-        Set<String> present = presentKeys(keys, changes, ledger -> value.applyAsLong(ledger) != 0);
-        return StateMapSupport.deferredDelta(previous, keys.keySet(), present,
-                key -> value.applyAsLong(changes.currentValues().get(keys.get(key))));
-    }
-
-    private static <K extends Comparable<? super K>, RK, V> Set<K> presentKeys(
-            Map<K, RK> keys, RuntimeMutationDelta.ValueChanges<RK, V> changes,
-            java.util.function.Predicate<V> included) {
-        TreeSet<K> result = new TreeSet<>();
-        keys.forEach((key, runtimeKey) -> {
-            V current = changes.currentValues().get(runtimeKey);
-            if (current != null && included.test(current)) result.add(key);
-        });
-        return result;
     }
 
     private static CoreTreasuryState.FundingProgress fundingProgress(

@@ -9,6 +9,7 @@ public final class RuntimeCommitLedger {
     private final ProductLine productLine;
     private final Map<UserAssetKey, RuntimeMutationDelta.BalanceValue> balances = new HashMap<>();
     private final Map<Integer, RuntimeMutationDelta.AssetLedger> treasury = new HashMap<>();
+    private final Map<Long, PositionRuntime> positions = new HashMap<>();
     private long sequence;
     private long revision;
 
@@ -27,6 +28,7 @@ public final class RuntimeCommitLedger {
         revision = initial.revision();
         balances.clear();
         treasury.clear();
+        positions.clear();
         initial.users().forEach((userId, user) -> user.balances().forEach((asset, balance) ->
                 balances.put(new UserAssetKey(userId, identities.assetId(asset)),
                         new RuntimeMutationDelta.BalanceValue(
@@ -50,17 +52,23 @@ public final class RuntimeCommitLedger {
                     state.roundingResidualBalances().getOrDefault(asset, 0L),
                     state.clearingPnlBalances().getOrDefault(asset, 0L)));
         }
+        initial.users().forEach((userId, user) -> user.positions().forEach((positionKey, position) ->
+                positions.put(identities.positionKey(userId, positionKey), new PositionRuntime(userId,
+                        identities.symbolId(position.symbol()), identities.assetId(position.marginAsset()),
+                        position.marginMode(), position.positionSide(), position.instrumentVersion(),
+                        position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
+                        position.realizedPnlUnits(), position.positionMarginUnits()))));
     }
 
     public RuntimeCommitEntry capture(long sequence, RuntimeMutationDelta mutation,
-                                      RuntimeIdentityRegistry identities, TradingCoreState previous) {
+                                      RuntimeIdentityRegistry identities) {
         if (sequence != Math.incrementExact(this.sequence) || mutation == null || identities == null
-                || previous == null || mutation.productLine() != productLine
-                || previous.productLine() != productLine || previous.revision() < revision) {
+                || mutation.productLine() != productLine
+                || Math.subtractExact(mutation.revision(), mutation.pendingReservationCount()) < revision) {
             throw new IllegalArgumentException("invalid runtime commit capture");
         }
         RuntimeFundsDelta fundsDelta = fundsDelta(mutation);
-        return new RuntimeCommitEntry(sequence, mutation, identities, previous.revision(), fundsDelta);
+        return new RuntimeCommitEntry(sequence, mutation, identities, revision, fundsDelta);
     }
 
     public void commit(RuntimeCommitEntry entry) {
@@ -70,6 +78,20 @@ public final class RuntimeCommitLedger {
         }
         sequence = entry.sequence();
         revision = entry.revision();
+        entry.mutation().positions().changedKeys().forEach(positionKey -> {
+            PositionRuntime position = entry.mutation().positions().currentValues().get(positionKey);
+            if (position == null) positions.remove(positionKey); else positions.put(positionKey, position);
+        });
+    }
+
+    public boolean wasOpenPosition(long positionKey) {
+        PositionRuntime position = positions.get(positionKey);
+        return position != null && position.signedQuantitySteps() != 0;
+    }
+
+    public com.surprising.aeron.protocol.CoreMarginMode previousPositionMarginMode(long positionKey) {
+        PositionRuntime position = positions.get(positionKey);
+        return position == null ? null : position.marginMode();
     }
 
     private RuntimeFundsDelta fundsDelta(RuntimeMutationDelta mutation) {

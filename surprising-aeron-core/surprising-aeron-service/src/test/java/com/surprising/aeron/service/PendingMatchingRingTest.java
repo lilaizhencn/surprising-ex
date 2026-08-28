@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
+import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -38,7 +39,8 @@ class PendingMatchingRingTest {
 
     private static PendingMatching pending(long sequence, UUID commandId, long userId) {
         return new PendingMatching(sequence, PendingMatching.Operation.PLACE,
-                command(commandId, userId), TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                command(commandId, userId), new RuntimeProjectionPoint(
+                        0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL)),
                 1, 1, RuntimeFundsDelta.empty());
     }
 

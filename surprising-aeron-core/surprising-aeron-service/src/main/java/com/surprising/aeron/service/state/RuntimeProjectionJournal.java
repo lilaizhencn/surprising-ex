@@ -12,7 +12,6 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
     private static final int MAX_CAPACITY = 1 << 20;
     private static final long IDLE_PARK_NANOS = 50_000L;
     private static final int MAX_PROJECTION_BATCH = 1_024;
-    private static final int MAX_OWNER_REBASE_ENTRIES = 2_048;
 
     private final AtomicReferenceArray<Record> entries;
     private final int mask;
@@ -20,6 +19,7 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
     private final boolean busySpin;
     private final Thread projector;
     private volatile ProjectionVersion projected;
+    private final RuntimeProjectionPoint initialPoint;
     private volatile long publishedSequence;
     private volatile long consumedSequence;
     private volatile long requestedSequence;
@@ -38,6 +38,7 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
         projectionBatchSize = configuredBatchSize(capacity);
         busySpin = Boolean.getBoolean("surprising.aeron.projection-busy-spin");
         projected = new ProjectionVersion(0, initial, businessStateHash, fundsStateHash);
+        initialPoint = new RuntimeProjectionPoint(0, initial);
         projector = Thread.ofPlatform()
                 .daemon(true)
                 .name("core-projection-" + productLine.name().toLowerCase(java.util.Locale.ROOT))
@@ -68,8 +69,49 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
         return publishedSequence;
     }
 
+    public boolean hasCapacityFor(int additionalEntries) {
+        requireHealthy();
+        return additionalEntries > 0
+                && publishedSequence - consumedSequence <= entries.length() - additionalEntries;
+    }
+
     public long projectedSequence() {
         return projected.sequence();
+    }
+
+    public RuntimeProjectionPoint initialPoint() {
+        return initialPoint;
+    }
+
+    public TradingCoreState await(RuntimeProjectionPoint point, long deadlineNanos) {
+        if (point == null || point.sequence() > publishedSequence || deadlineNanos <= 0) {
+            throw new IllegalArgumentException("invalid runtime projection point fence");
+        }
+        TradingCoreState completed = point.state();
+        if (completed != null) return completed;
+        requestProjection(point.sequence());
+        while (!point.projected()) {
+            requireHealthy();
+            if (System.nanoTime() >= deadlineNanos) {
+                throw new IllegalStateException("runtime projection point timed out");
+            }
+            if (busySpin) Thread.onSpinWait(); else LockSupport.parkNanos(this, IDLE_PARK_NANOS);
+        }
+        return point.state();
+    }
+
+    public TradingCoreState await(RuntimeProjectionPoint point) {
+        if (point == null || point.sequence() > publishedSequence) {
+            throw new IllegalArgumentException("invalid runtime projection point fence");
+        }
+        TradingCoreState completed = point.state();
+        if (completed != null) return completed;
+        requestProjection(point.sequence());
+        while (!point.projected()) {
+            requireHealthy();
+            if (busySpin) Thread.onSpinWait(); else LockSupport.parkNanos(this, IDLE_PARK_NANOS);
+        }
+        return point.state();
     }
 
     public long lag() {
@@ -79,35 +121,6 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
     public ProjectionVersion current() {
         requireHealthy();
         return projected;
-    }
-
-    public TransitionVersion transitionViewToPublished(long afterProjectedSequence) {
-        requireHealthy();
-        for (int attempt = 0; attempt < 2; attempt++) {
-            ProjectionVersion base = projected;
-            long targetSequence = publishedSequence;
-            if (base.sequence() <= afterProjectedSequence) return null;
-            if (targetSequence - base.sequence() > MAX_OWNER_REBASE_ENTRIES) return null;
-            TradingCoreState state = base.state();
-            long businessStateHash = base.businessStateHash();
-            long fundsStateHash = base.fundsStateHash();
-            boolean retry = false;
-            for (long sequence = base.sequence() + 1; sequence <= targetSequence; sequence++) {
-                Record record = entries.get((int) (sequence & mask));
-                if (record == null) {
-                    retry = true;
-                    break;
-                }
-                state = record.entry().transitionView(state);
-                businessStateHash = record.businessStateHash();
-                fundsStateHash = record.fundsStateHash();
-            }
-            if (!retry) {
-                return new TransitionVersion(base.sequence(), targetSequence, state,
-                        businessStateHash, fundsStateHash);
-            }
-        }
-        return null;
     }
 
     public ProjectionVersion await(long sequence, long deadlineNanos, boolean verifyHashes) {
@@ -165,6 +178,7 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
                     Record record;
                     while ((record = entries.get(index)) == null) Thread.onSpinWait();
                     TradingCoreState nextState = record.entry().project(projected.state());
+                    record.entry().completeProjection(nextState);
                     projected = new ProjectionVersion(firstSequence, nextState,
                             record.businessStateHash(), record.fundsStateHash());
                     entries.set(index, null);
@@ -184,7 +198,10 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
                     lastRecord = record;
                 }
                 TradingCoreState nextState = projected.state();
-                for (RuntimeCommitEntry entry : batch) nextState = entry.project(nextState);
+                for (RuntimeCommitEntry entry : batch) {
+                    nextState = entry.project(nextState);
+                    entry.completeProjection(nextState);
+                }
                 projected = new ProjectionVersion(lastSequence, nextState,
                         lastRecord.businessStateHash(), lastRecord.fundsStateHash());
                 for (long sequence = firstSequence; sequence <= lastSequence; sequence++) {
@@ -244,12 +261,4 @@ public final class RuntimeProjectionJournal implements AutoCloseable {
         }
     }
 
-    public record TransitionVersion(long projectedSequence, long publishedSequence,
-                                    TradingCoreState state, long businessStateHash, long fundsStateHash) {
-        public TransitionVersion {
-            if (projectedSequence < 0 || publishedSequence < projectedSequence || state == null) {
-                throw new IllegalArgumentException("invalid projection transition version");
-            }
-        }
-    }
 }

@@ -73,6 +73,10 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - JFR 热点判断只统计自定义 workload measurement 事件窗口，排除 JMH trial 初始化和 snapshot template。交易窗口内
   的协议 enum 解码无 Stream，typed mutation 不再重复复制已排序 change-set，lazy delta 用有界原子槽缓存变化值；批量
   订单结果和 open-order 状态按精确长度编码，避免每个 item 的中间 frame 与 grow/copy 缓冲。
+- 单笔交易提交只发布 typed commit 和 `RuntimeProjectionPoint`；不可变 Snapshot map root 由 projector 顺序生成，Core
+  Fact materializer 按 before/after point 构造完整视图。下单、撤单和撮合完成的 owner 路径不执行 lazy transition view，
+  也不等待 projector；普通及批量订单校验直接读取 `OrderRuntime`，matcher 前置撤单只携带最小身份，不构造
+  `CoreOrderState`。显式 Snapshot、批量订单基线、Export ACK 清理、非热状态读取和拒绝回滚才允许建立 fence。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
   通过一个 `EXECUTE_LIQUIDATION_BATCH` 同时提交有序 action 和可选 Risk Scan continuation，订单阶段完成后才推进用户阶段。
   每个批次共享最多 `1024` 笔撤单预算，Core 以 `nextCursorOrderId` 保存独占下一页位置。

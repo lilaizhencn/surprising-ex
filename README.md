@@ -227,15 +227,16 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 
 Product Core 的热状态与不可变状态投影通过 `RuntimeMutationDelta` 分界。命令在 Account Lane 内完成原地
 裁决后，owner 只捕获本命令涉及的用户、余额、订单、冻结、仓位和风险 after-image，生成有序
-`RuntimeCommitEntry`。entry 不持有命令前后的 `TradingCoreState`；滚动资金/业务 hash、资金守恒和热索引共同消费
-同一份 primitive `RuntimeFundsDelta`/typed after-image。持久化 immutable map root 由有界
-`RuntimeProjectionJournal` 在线程外顺序生成，owner 不再调用 `RuntimeStateMaterializer.materializeTransition`，
-仅保留用于命令回滚和当前 revision 游标的 lazy transition view。如果提交后的校验失败则 fail-fast，不能把已经进入
-typed journal 的状态伪回滚。Cluster snapshot fence 固定 journal sequence，等待该精确版本并复算业务和资金 hash
-后才捕获 immutable image；section 编码继续在独立 snapshot encoder 线程执行，交易 owner 不执行压缩。
-Core Fact outbox 在 owner 上只登记确定性的元数据摘要、容量预留和 terminal order id；完整 Core view、资金 posting
-view、typed event 和协议字节由单线程 `core-fact-materializer` 按 export sequence 构造。Audit Exporter 查询只返回
-已完成的连续前缀，ACK 直接使用 primitive terminal id，不等待 Fact worker；snapshot/outbox 持久化才建立显式 fence。
+`RuntimeCommitEntry`。entry 不持有命令前后的 `TradingCoreState`；滚动资金/业务 hash、资金守恒、Lane Treasury ACK
+和热索引共同消费同一份 primitive `RuntimeFundsDelta`/typed after-image。持久化 immutable map root 由有界
+`RuntimeProjectionJournal` 在线程外顺序生成；每个 entry 自带只写一次的 `RuntimeProjectionPoint`，owner 不再构造
+lazy transition view，也不在单笔下单、撤单或撮合完成路径等待 Snapshot projector。只有显式 Snapshot、批量订单基线、
+Export ACK 清理、非热状态读取和拒绝回滚允许建立 projection fence。提交后的校验失败则 fail-fast，不能把已经进入 typed
+journal 的状态伪回滚。Cluster snapshot fence 固定 journal sequence，等待该精确版本并复算业务和资金 hash 后才捕获
+immutable image；section 编码继续在独立 snapshot encoder 线程执行，交易 owner 不执行压缩。
+Core Fact outbox 在 owner 上只登记确定性的元数据摘要、容量预留、primitive posting 和 before/after projection point；
+完整 Core view、资金 posting view、typed event、终态保留观察和协议字节由单线程 `core-fact-materializer` 按 export
+sequence 构造。Audit Exporter 查询只返回已完成的连续前缀；snapshot/outbox 持久化才建立显式 fence。
 等待 matcher 的临时冻结不会更新已提交 hash，失败仍按命令前状态回滚；
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
@@ -306,6 +307,21 @@ owner 栈中没有 `CoreExportCodec`，`RuntimeStateMaterializer.materializeTran
 `100k/s` 仍约 5 倍；不能把全仓账户、共享订单簿、保险基金或 ADL 直接拆到多 owner，因为这会破坏同一命令
 资金原子性。只有先定义可独立结算的 shard key、禁止跨 shard 全仓与共享资金池，或把跨 shard 操作纳入确定性
 协调协议后，才能把分片作为容量方案。该本机结果也不能替代隔离 CPU 的生产同型机器三节点 HTTP P10 长稳门禁。
+
+2026-08-28 继续移除 owner 同步投影后，typed commit 通过 one-shot `RuntimeProjectionPoint` 把不可变
+Snapshot root、终态保留观察和 Core Fact 完整视图移到 projection/fact worker；普通及批量订单校验直接读取
+`OrderRuntime`，matcher 的前置撤单只传递 `(orderId, userId, symbol)`，不再构造 `CoreOrderState`。同一台
+GraalVM HotSpot JDK 25.0.1、4 Account Lane、4 symbol、96 轮 HFT、batch 20、2 轮预热和 3 轮各 3 秒
+计量中，1,000 用户为 `23770.228 terminal business ops/s`，10,000 用户为 `25660.077 ops/s`；对应
+Core message 为 `2290.545 msg/s` 和 `2472.651 msg/s`，accepted=terminal、unfinished=0。分配率分别为
+`459.885 MB/s` 和 `502.399 MB/s`；相对上一阶段 10,000 用户的 `27111.281 ops/s`/`739.170 MB/s`
+基线，本轮吞吐受本机噪声影响为 `-5.35%`，分配率降低 `32.03%`。独立 JFR 单轮为
+`24117.126 terminal business ops/s`；精确 measurement 窗口的 4,125 个 CPU 样本中，owner
+`RuntimeStateMaterializer` 和 `orderSnapshot` 均为 0，46 个 materialization 样本全部位于
+`core-projection-linear_perpetual`。当前主要 CPU 是 exchange-core/disruptor wait，主要 owner 分配转为
+persistent tree node、命令解码、结果保留和匹配结算集合。20,000 单永续实际路径为 `4030.250 orders/s`，
+`p50=189 us`、`p95=443 us`、`p99=695 us`、`max=16431 us`、`pendingMatching=0`。这些本机数据证明
+projection 阶段已安全移出 owner，但仍不是每产品线 100k/s 的生产认证结果。
 
 其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定

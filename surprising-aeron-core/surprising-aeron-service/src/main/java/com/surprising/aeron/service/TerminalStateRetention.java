@@ -61,9 +61,9 @@ final class TerminalStateRetention {
         tombstones.values().forEach(this::indexTombstone);
     }
 
-    void observe(TradingCoreState before, TradingCoreState after, long exportSequence,
+    synchronized void observe(TradingCoreState after, long exportSequence,
                  Iterable<Long> orderIds, Iterable<Long> liquidationIds, Iterable<Long> triggerOrderIds) {
-        if (before == null || after == null || exportSequence <= 0) {
+        if (after == null || exportSequence <= 0) {
             throw new IllegalArgumentException("invalid terminal retention observation");
         }
         sorted(orderIds).forEach(id -> observeOrder(after.orders().get(id), exportSequence));
@@ -74,7 +74,7 @@ final class TerminalStateRetention {
                 observeLiquidation(after.riskState().liquidations().get(id), exportSequence));
     }
 
-    TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {
+    synchronized TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {
         if (state == null || acknowledgedSequence < 0 || limit <= 0) {
             throw new IllegalArgumentException("invalid terminal prune request");
         }
@@ -97,7 +97,7 @@ final class TerminalStateRetention {
         return new TerminalPruneBatch(orders, algos, triggers, liquidations);
     }
 
-    void complete(TerminalPruneBatch batch, long acknowledgedSequence) {
+    synchronized void complete(TerminalPruneBatch batch, long acknowledgedSequence) {
         if (batch == null || acknowledgedSequence < 0) {
             throw new IllegalArgumentException("invalid completed terminal prune");
         }
@@ -116,35 +116,35 @@ final class TerminalStateRetention {
         }
     }
 
-    boolean containsOrder(long orderId, long userId, String clientOrderId) {
+    synchronized boolean containsOrder(long orderId, long userId, String clientOrderId) {
         return contains(EntityType.ORDER, orderId, userId, clientOrderId);
     }
 
-    boolean containsAlgo(long algoOrderId, long userId, String clientAlgoOrderId) {
+    synchronized boolean containsAlgo(long algoOrderId, long userId, String clientAlgoOrderId) {
         return contains(EntityType.ALGO, algoOrderId, userId, clientAlgoOrderId);
     }
 
-    boolean containsTrigger(long triggerOrderId, long userId, String clientTriggerOrderId) {
+    synchronized boolean containsTrigger(long triggerOrderId, long userId, String clientTriggerOrderId) {
         return contains(EntityType.TRIGGER, triggerOrderId, userId, clientTriggerOrderId);
     }
 
-    int candidateCount() {
+    synchronized int candidateCount() {
         return candidates.size();
     }
 
-    int tombstoneCount() {
+    synchronized int tombstoneCount() {
         return tombstones.size();
     }
 
-    CommandFingerprint fundsCommand(UUID commandId) {
+    synchronized CommandFingerprint fundsCommand(UUID commandId) {
         return fundsCommands.get(commandId);
     }
 
-    boolean hasFundsCommandCapacity(UUID commandId) {
+    synchronized boolean hasFundsCommandCapacity(UUID commandId) {
         return fundsCommands.containsKey(commandId) || fundsCommands.size() < MAX_FUNDS_COMMANDS;
     }
 
-    void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
+    synchronized void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
         if (commandId == null || fingerprint == null || !hasFundsCommandCapacity(commandId)) {
             throw new IllegalStateException("funds command retention is full");
         }
@@ -155,7 +155,7 @@ final class TerminalStateRetention {
         if (previous == null) fundsCommandDigest ^= entryDigest(commandId, fingerprint);
     }
 
-    long digest() {
+    synchronized long digest() {
         long hash = 0xcbf29ce484222325L;
         hash = mix(hash, candidates.size());
         hash = mix(hash, candidateDigest);
@@ -166,7 +166,7 @@ final class TerminalStateRetention {
         return hash;
     }
 
-    byte[] encode() {
+    synchronized byte[] encode() {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream output = new DataOutputStream(bytes);
@@ -186,7 +186,7 @@ final class TerminalStateRetention {
         }
     }
 
-    TerminalStateRetention copy() {
+    synchronized TerminalStateRetention copy() {
         return new TerminalStateRetention(new LinkedHashMap<>(candidates), new LinkedHashMap<>(tombstones),
                 new LinkedHashMap<>(fundsCommands), candidateDigest, tombstoneDigest, fundsCommandDigest);
     }
